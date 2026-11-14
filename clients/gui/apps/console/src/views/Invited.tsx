@@ -97,8 +97,8 @@ export function InvitedSession({ id }: { id: string }): JSX.Element {
   if (!invitation) {
     return (
       <div className="page remote-session">
-        <p className="crumbs">
-          <a href={href({ page: "mine" })}>← Mine</a> · <span className="mono">{id}</span>
+        <p className="meta where">
+          <span className="mono">{id}</span>
         </p>
         <Empty title="Not shared with you">
           {seen.current ? removedSentence(seen.current.owner_name ?? seen.current.owner) : "Nobody has invited you into this session."}

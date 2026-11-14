@@ -8,8 +8,11 @@
 // the strip, every header's grammar and the curtain line's written set are functions of
 // the transcript, the level and the time.
 
-import { isBlobRef, isBusy, isRoot, needsYou, rootState } from "@troupe/client";
+import { bytes, counted, isBlobRef, isBusy, isRoot, needsYou, rootState, toolGlyph as glyph, toolOutcome as outcome, toolTarget as target } from "@troupe/client";
 import type { BlobRef, CurtainPhase, Entry, TranscriptState } from "@troupe/client";
+
+// A call's glyph, target and outcome are the client's, so the console's tool lines say the same.
+export { bytes, counted, glyph, outcome, target };
 
 /** How much of a turn is open (`transcript.detail`): the answer alone, its calls too, or nothing collapsed. */
 export type Detail = "quiet" | "tools" | "everything";
@@ -34,11 +37,6 @@ export function seconds(ms: number): string {
 /** A duration from a second up; under one it says nothing a person reads for. */
 export function took(ms: number | undefined): string | null {
   return ms !== undefined && ms >= 1000 ? seconds(ms) : null;
-}
-
-/** A count in words: `1 row`, `2 rows`. */
-export function counted(n: number, one: string, many = `${one}s`): string {
-  return `${n} ${n === 1 ? one : many}`;
 }
 
 /** What is left of a cut body, said: `… 42 more lines`. */
@@ -216,67 +214,7 @@ function stripOf(turn: string, steps: ToolEntry[], level: Detail, now: number): 
 
 // -- a call's header ----------------------------------------------------------------------
 
-/** `✓` done, `✗` failed, `⋯` running. */
-export function glyph(ok: boolean | undefined): string {
-  return ok === undefined ? "⋯" : ok ? "✓" : "✗";
-}
-
-const str = (v: unknown): string | undefined => (typeof v === "string" && v !== "" ? v : undefined);
-const oneLine = (s: string): string => s.replace(/\s+/g, " ").trim();
-
-/** What a call is about, in a few words: the path, the command, the URL, the agent delegated to. */
-export function target(name: string, args: unknown): string {
-  const a = (typeof args === "object" && args !== null && !isBlobRef(args) ? args : {}) as Record<string, unknown>;
-  const said = ((): string | undefined => {
-    switch (name) {
-      case "shell":
-        return str(a["command"]);
-      case "web_fetch":
-        return str(a["url"]);
-      case "todo_write":
-        return Array.isArray(a["items"]) ? counted(a["items"].length, "item") : undefined;
-      case "delegate":
-        return str(a["agent"]) && (a["wait"] === false ? `${str(a["agent"])}, in the background` : str(a["agent"]));
-      case "stop_child":
-        return str(a["child"]);
-      case "finish":
-        return str(a["summary"])?.slice(0, 60);
-      case "ask_user":
-        return str(a["question"]);
-      default:
-        return undefined;
-    }
-  })();
-  if (said) return oneLine(said);
-  for (const key of ["path", "file", "pattern", "query", "url", "agent", "child"]) {
-    const v = str(a[key]);
-    if (v) return oneLine(v);
-  }
-  return Object.keys(a).length > 0 ? JSON.stringify(a).slice(0, 60) : "";
-}
-
 const nonEmpty = (text: string): string[] => text.split("\n").filter((l) => l.trim() !== "");
-
-/**
- * What came back, in a few words: the first line of an error with how many it has, the
- * only line of a short result, or how many lines; nothing for a `finish`, which says
- * itself in the line under it.
- */
-export function outcome(entry: ToolEntry): string | null {
-  const content = entry.content;
-  if (content === undefined) return null;
-  if (isBlobRef(content)) return bytes(content.size);
-  const lines = content.replace(/\s+$/, "").split("\n");
-  if (entry.ok === false) {
-    const first = lines.map((l) => l.trim()).find((l) => l !== "") ?? "";
-    return first.slice(0, 80) + (lines.length > 1 ? ` (${lines.length} lines)` : "");
-  }
-  if (entry.name === "finish") return null;
-  const kept = nonEmpty(content);
-  if (kept.length === 0) return null;
-  if (kept.length === 1 && kept[0]!.length <= 60) return kept[0]!.trim();
-  return counted(kept.length, "line");
-}
 
 /** A call's header in its parts: `✓ read_file lib/p.ex · 120 lines · 2s`. */
 export function toolHead(entry: ToolEntry): { glyph: string; name: string; target: string; notes: string[] } {
@@ -318,12 +256,6 @@ export function numberedSource(content: string): { head: string[]; lines: Array<
   const tail = rest.slice(lines.length).filter((l) => l !== "");
   if (lines.length === 0 || tail.some((l) => !l.startsWith("[truncated:"))) return null;
   return { head, lines, tail };
-}
-
-export function bytes(n: number): string {
-  if (n < 1024) return `${n} bytes`;
-  if (n < 1024 * 1024) return `${Math.round(n / 1024)} KB`;
-  return `${(n / 1024 / 1024).toFixed(1)} MB`;
 }
 
 export type { BlobRef };

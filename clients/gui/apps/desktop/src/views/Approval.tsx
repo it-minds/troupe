@@ -11,7 +11,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { JSX } from "react";
-import { BRIEF_PARTS, ruleScope, visibilityWords } from "@troupe/client";
+import { BRIEF_PARTS, callConsequence as consequence, callEvidence, callHeadline as headline, callScopedLabel as scopedLabel, ruleScope, visibilityWords } from "@troupe/client";
 import type { DelegationGate, Entry, GateAnswer, PublicationGate } from "@troupe/client";
 import { Pill } from "./bits";
 import { Mask } from "./brand";
@@ -34,45 +34,18 @@ const PART_NAMES: Record<string, string> = {
   do_not: "Do not",
 };
 
-/** Four words, phrased as a question, in the reader's language and not the protocol's. */
-function headline(tool: string): string {
-  if (tool === "delegate") return "Hand work to a subagent?";
-  if (tool === "publish_artifact") return "Publish this?";
-  if (/shell|bash|command|exec/i.test(tool)) return "Run a command?";
-  if (/write|edit|patch|apply/i.test(tool)) return "Change a file?";
-  if (/delete|remove|rm/i.test(tool)) return "Delete a file?";
-  if (/fetch|http|web|browse/i.test(tool)) return "Open a web page?";
-  return "Allow this action?";
-}
-
-/** One plain sentence about the consequence. Never a scope name, never an endpoint. */
-function consequence(tool: string): string {
-  if (/shell|bash|command|exec/i.test(tool)) {
-    return "The session wants to run this command. It runs on the platform, not on your computer.";
-  }
-  if (/write|edit|patch|apply/i.test(tool)) return "The session wants to change a file in its workspace.";
-  if (/delete|remove|rm/i.test(tool)) return "The session wants to delete a file from its workspace. This cannot be undone from here.";
-  return `The session wants to use ${tool}.`;
-}
-
-/** The scoped answer is spelled out in full, because it is the one people regret. */
-function scopedLabel(tool: string): string {
-  if (/shell|bash|command|exec/i.test(tool)) return "Allow every command for this session";
-  if (/write|edit|patch|apply/i.test(tool)) return "Allow every file change for this session";
-  return `Allow ${tool} for this session`;
-}
+// The headline, the consequence and the scoped answer's label are the client's words, which
+// the console's relayed approval says too.
 
 /** The evidence, rendered rather than dumped. */
 function Evidence({ entry }: { entry: Approval }): JSX.Element | null {
-  const args = (entry.args ?? {}) as Record<string, unknown>;
-  const command = typeof args["command"] === "string" ? args["command"] : null;
-  const path = typeof args["path"] === "string" ? args["path"] : null;
+  const { command, cwd, path } = callEvidence(entry.args);
 
   if (command) {
     return (
       <div className="evidence">
         <div className="command">{command}</div>
-        {typeof args["cwd"] === "string" && <p className="also">In {args["cwd"]}.</p>}
+        {cwd && <p className="also">In {cwd}.</p>}
       </div>
     );
   }

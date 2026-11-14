@@ -59,6 +59,8 @@ interface Session {
   scratch: FakeScratch;
   pendingApprovalCount: number;
   costMicros: number;
+  /** The `ask_user` calls waiting for an answer. */
+  questions: Set<string>;
 }
 
 interface Client {
@@ -109,6 +111,8 @@ export class FakeWorker {
   readonly tools = new Map<string, RegisteredTool>();
   /** The worker profile, when it forbids a person's own tools on its pods (troupe Decision 862). */
   personalToolsForbiddenBy: string | null = null;
+  /** Methods a test has this pod refuse, and the error it answers each with: what a laptop's rule or a relay says no with. */
+  readonly refusing = new Map<string, { code: number; message: string; data?: unknown }>();
   /** The agents a session here could run: the built-ins, and a bundle's a test adds (troupe Decision 841). */
   readonly agents = new FakeAgents("/home/troupe/.config/troupe", true);
 
@@ -175,6 +179,7 @@ export class FakeWorker {
       scratch: new FakeScratch(),
       pendingApprovalCount: 0,
       costMicros: 0,
+      questions: new Set(),
     };
     this.sessions.set(id, session);
     // `profile` here is the agent the root runs, as a pod writes it (`Troupe.Session`
@@ -215,6 +220,8 @@ export class FakeWorker {
       if (!msg.method) return;
       const params = msg.params ?? {};
       this.calls.push({ method: msg.method, params });
+      const refusal = this.refusing.get(msg.method);
+      if (refusal && client) return reply(ws, msg.id, null, refusal);
 
       if (msg.method === "initialize") {
         const auth = params["auth"] as { token?: string } | undefined;
@@ -405,6 +412,22 @@ export class FakeWorker {
         );
         reply(ws, id, { decision: approval.decision });
         await this.afterApproval(session, callId, approval.decision, approval.tool, approval.args);
+        return;
+      }
+
+      // The agent's `ask_user`, answered: first answer wins, and the turn goes on with it.
+      case "question.answer": {
+        if (!session) return reply(ws, id, null, { code: -32005, message: "not_found" });
+        if (!client.token.scopes.includes("control")) {
+          return reply(ws, id, null, { code: -32004, message: "forbidden", data: { required_scope: "control" } });
+        }
+        const callId = String(params["call_id"] ?? "");
+        if (!session.questions.delete(callId)) return reply(ws, id, null, { code: -32005, message: "not_found" });
+        const answer = String(params["text"] ?? "");
+        session.log.append("question_answered", { call_id: callId, text: answer }, { kind: "user", subject: client.token.sub });
+        reply(ws, id, { accepted: true });
+        this.respond(session, `You answered: ${answer}`);
+        this.setStatus(session, "idle");
         return;
       }
 
@@ -698,6 +721,7 @@ export class FakeWorker {
     session.log.append("llm_request", { model: "fake", message_count: session.log.headSeq, tools: [], profile: session.profile });
 
     if (text.startsWith("approve:")) return this.askApproval(session, text.slice("approve:".length).trim());
+    if (text.startsWith("ask:")) return this.askQuestion(session, text.slice("ask:".length).trim());
     if (text.startsWith("big:")) return this.bigResult(session, text.slice("big:".length).trim());
     if (text.startsWith("show:")) return this.showNotes(session, text.slice("show:".length).trim());
     const quiet = text.startsWith("quiet:");
@@ -730,6 +754,15 @@ export class FakeWorker {
     session.approvals.set(callId, { tool: "shell", args, resolvedBy: null, decision: null });
     session.pendingApprovalCount += 1;
     session.log.append("approval_requested", { call_id: callId, tool: "shell", args, agent_path: ["root"] });
+    this.setStatus(session, "waiting");
+  }
+
+  /** The agent's `ask_user`: `ask: Which branch? | main | develop` asks with those options. */
+  private askQuestion(session: Session, what: string): void {
+    const callId = `call-${session.log.headSeq}`;
+    const [question = "", ...options] = what.split("|").map((p) => p.trim());
+    session.questions.add(callId);
+    session.log.append("question_asked", { call_id: callId, question, options: options.map((label) => ({ label, description: null })), multiple: false });
     this.setStatus(session, "waiting");
   }
 

@@ -105,6 +105,8 @@ export type Entry =
       decision: string | undefined;
       /** Set when another client got there first. */
       resolvedBy: string | undefined;
+      /** Who answered it, the subject `approval_decided`'s actor names; absent where it names nobody. */
+      decidedBy?: string;
       /** Set when it ended unanswered: its call was cancelled, or timed out while it waited. */
       closed: boolean;
       /**
@@ -1310,11 +1312,17 @@ export function fold(state: TranscriptState, e: TroupeEvent, options: FoldOption
     case "approval_decided": {
       const id = str(d.data["call_id"]);
       const answered = answeredOf(d.data);
+      const by = d.actor?.subject;
       return {
         ...next,
         entries: state.entries.map((en) =>
           en.kind === "approval" && en.callId === id
-            ? { ...en, decision: str(d.data["decision"]), ...(answered && (en.delegation || en.publication) ? { answered } : {}) }
+            ? {
+                ...en,
+                decision: str(d.data["decision"]),
+                ...(answered && (en.delegation || en.publication) ? { answered } : {}),
+                ...(typeof by === "string" && by !== "" ? { decidedBy: by } : {}),
+              }
             : en,
         ),
       };

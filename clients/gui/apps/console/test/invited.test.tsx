@@ -51,7 +51,7 @@ describe("Invited to you", () => {
     expect(fake.plane.asked.filter((m) => m === "invites.list").length, "the list was asked again rather than told").toBe(asked);
 
     listed.querySelector<HTMLAnchorElement>("a")!.click();
-    await waitFor(() => document.querySelector('[role="status"]')?.textContent?.startsWith("idle"), "the session attached");
+    await waitFor(() => document.querySelector('[role="status"]')?.textContent?.startsWith("Idle"), "the session attached");
     await sees("on the platform, shared with you by Ada");
     // Everybody present is named.
     await sees(`Shared with ${PEOPLE.carol.subject} (follows)`);

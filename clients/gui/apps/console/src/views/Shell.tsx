@@ -75,7 +75,18 @@ export function Shell(): JSX.Element {
   const current = area(here.page)!;
   const within = here.path ?? [];
   const title = here.team ?? titleWithin(here.page, within) ?? current.label;
-  const crumb = here.team ? `${groupOf(here.page)} / Teams` : within.length ? `${groupOf(here.page)} / ${current.label}` : groupOf(here.page);
+  // A screen within an area is placed by its group and its area, and the area's name is a
+  // way back to it; where the group is the area (Mine), it is said once.
+  const group = groupOf(here.page);
+  const back = here.team ? { label: "Teams", to: { page: here.page } } : within.length ? { label: current.label, to: { page: here.page } } : null;
+  const crumb = back ? (
+    <>
+      {back.label === group ? null : `${group} / `}
+      <a href={href(back.to)}>{back.label}</a>
+    </>
+  ) : (
+    group
+  );
   // The folded map is open on the screen it was opened on, so choosing an area folds it
   // again with nothing to fold it. An effect that folded it on each new screen also ran
   // once the shell first drew, and undid a Menu pressed before that.

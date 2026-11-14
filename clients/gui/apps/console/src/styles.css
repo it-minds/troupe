@@ -1474,3 +1474,76 @@ pre.manifest {
   border-bottom: var(--bw-hairline) solid var(--border-hairline);
   white-space: nowrap;
 }
+
+/* -- a laptop's session, followed and steered --------------------------------- */
+
+/* The transcript as lines: a person's words, the agent's, each call with its glyph, and an
+   answered approval as a calm line naming who answered. What waits on a person is the one
+   thing in pink, the panel and the status line while it waits. */
+.remote-session .status-line.waiting {
+  color: var(--waiting-fg);
+}
+.remote-session .transcript {
+  list-style: none;
+  margin: var(--space-4) 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  max-width: var(--measure-reading);
+}
+.remote-session .transcript li {
+  overflow-wrap: anywhere;
+}
+.remote-session .transcript .tool,
+.remote-session .transcript .decision {
+  font: var(--t-code-small);
+  color: var(--text-secondary);
+}
+.remote-session .transcript .tool.failed,
+.remote-session .transcript .decision.denied {
+  color: var(--denied-fg);
+}
+.remote-session .transcript .decision.allowed {
+  color: var(--allowed-fg);
+}
+.remote-session .approval {
+  margin: var(--space-4) 0;
+  padding: var(--space-3) var(--space-4);
+  border: var(--bw-hairline) solid var(--waiting-bd);
+  border-left-width: var(--bw-marker);
+  background: var(--waiting-bg);
+  max-width: var(--measure-reading);
+}
+.remote-session .approval h3 {
+  margin: 0 0 var(--space-2);
+}
+.remote-session .approval pre {
+  margin: var(--space-2) 0;
+  font: var(--t-code);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.remote-session .approval .also {
+  font: var(--t-note);
+  color: var(--text-secondary);
+}
+.remote-session .answers {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+.remote-session .composer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--space-2);
+  max-width: var(--measure-reading);
+}
+.remote-session .composer label {
+  flex: 1 1 100%;
+}
+.remote-session .composer textarea {
+  width: 100%;
+}
