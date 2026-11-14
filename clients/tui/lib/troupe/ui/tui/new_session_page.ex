@@ -41,14 +41,17 @@ defmodule Troupe.UI.TUI.NewSessionPage do
 
   @doc """
   The screen, its chips pre-set by `opts`: `:where` (`:local` or `:platform`), `:profile`,
-  `:agent`, `:private`, `:team`; `:workspace` is the folder a session here starts in, and
-  `:origin` the plane, where there is one.
+  `:agent` (one the person picked), `:private`, `:team`; `:workspace` is the folder a
+  session here starts in, and `:origin` the plane, where there is one, or else `:plane_why`
+  why there is none. `:local_agent` is the agent a session on this computer starts as when
+  none is picked, the one on screen: it is this computer's, and never sent to the plane,
+  whose profile has a default of its own.
   """
   @spec open(keyword()) :: t()
   def open(opts) do
     origin = Keyword.get(opts, :origin)
     workspace = Keyword.fetch!(opts, :workspace)
-    {profiles, sessions} = plane_rows(origin)
+    {profiles, sessions, plane_error} = plane_rows(origin)
     agents = local_agents(workspace)
 
     %{
@@ -62,6 +65,12 @@ defmodule Troupe.UI.TUI.NewSessionPage do
       where: Keyword.get(opts, :where),
       profile: Keyword.get(opts, :profile),
       agent: Keyword.get(opts, :agent),
+      local_agent: Keyword.get(opts, :local_agent),
+      plane_why: Keyword.get(opts, :plane_why),
+      plane_error: plane_error,
+      # A sentence a key just earned, such as why the agent chip has nothing to pick; the
+      # next key takes it away.
+      said: nil,
       private: Keyword.get(opts, :private, false),
       # The team HQ had selected, which the plane charges and opens the session to.
       team: Keyword.get(opts, :team),
@@ -71,30 +80,27 @@ defmodule Troupe.UI.TUI.NewSessionPage do
       local_agents: agents,
       recents: recents(sessions, workspace),
       last_used: last_used(sessions),
-      daemon_up: Keyword.get_lazy(opts, :daemon_up, &Troupe.Client.Daemon.Link.up?/0),
+      daemon_up: Keyword.get_lazy(opts, :daemon_up, &Client.daemon_up?/0),
       ceiling: %{},
       quip: Enum.random(@quips),
       casting: nil
     }
   end
 
-  defp plane_rows(nil), do: {[], []}
+  # The plane's profiles and sessions, and the error the profile listing answered: an
+  # expired sign-in or a plane that is down is said as itself, not as having no profile.
+  # The sessions only give the recents and the last used, so without them nothing on the
+  # page is untrue; a plane that refuses the one refuses the other alike.
+  defp plane_rows(nil), do: {[], [], nil}
 
   defp plane_rows(origin) do
-    profiles =
-      case Client.profile_rows(origin) do
-        {:ok, rows} -> rows
-        {:error, _} -> []
-      end
-
-    sessions =
-      case Client.plane_session_rows(origin) do
-        {:ok, rows} -> rows
-        {:error, _} -> []
-      end
-
-    {profiles, sessions}
+    {profiles, error} = rows_or_error(Client.profile_rows(origin))
+    {sessions, _error} = rows_or_error(Client.plane_session_rows(origin))
+    {profiles, sessions, error}
   end
+
+  defp rows_or_error({:ok, rows}), do: {rows, nil}
+  defp rows_or_error({:error, reason}), do: {[], reason}
 
   defp local_agents(workspace) do
     case Client.profiles({:local, workspace}) do
@@ -181,17 +187,40 @@ defmodule Troupe.UI.TUI.NewSessionPage do
       where == :platform and profile != nil and
         (room.at_ceiling or Map.has_key?(page.ceiling, name))
 
-    default_agent =
-      if where == :local, do: List.first(page.local_agents, "build"), else: default_of(profile)
+    offered = agents_of(profile)
 
-    named_agent = tokens[:agent] || page.agent
+    default_agent =
+      if where == :local,
+        do: page.local_agent || List.first(page.local_agents, "build"),
+        else: default_of(profile)
+
+    # On the platform an agent counts as picked only where the profile offers it: one
+    # picked here, or a recent's, does not follow the session onto a profile without it.
+    named_agent =
+      tokens[:agent] ||
+        if(where == :local or page.agent in offered, do: page.agent)
+
     cleaned = NewSession.clean(text, names)
     local_down = where == :local and not page.daemon_up
+    no_plane = page.origin == nil and page.where == :platform
+    not_allowed = where == :platform and profile == nil and name != nil and page.profiles != []
 
     why =
       cond do
+        page.said ->
+          {:warn, page.said}
+
         local_down ->
           {:warn, NewSession.local_down()}
+
+        no_plane ->
+          {:warn, NewSession.no_plane(page.plane_why, page.profile)}
+
+        where == :platform and page.plane_error != nil ->
+          {:warn, NewSession.plane_error(page.plane_error)}
+
+        not_allowed ->
+          {:warn, NewSession.not_allowed(name)}
 
         at_ceiling ->
           {:warn, page.ceiling[name] || NewSession.ceiling(name, room.max_sessions || 0)}
@@ -218,9 +247,18 @@ defmodule Troupe.UI.TUI.NewSessionPage do
       full: full,
       at_ceiling: at_ceiling,
       agent: named_agent || default_agent || "its default",
+      # The chip's word: on the platform an agent nobody picked is the profile's default.
+      agent_label:
+        cond do
+          named_agent -> named_agent
+          where == :platform and default_agent != nil -> default_agent <> " (default)"
+          true -> default_agent || "its default"
+        end,
       named_agent: named_agent,
-      # What the create names: on the platform the profile's default too, where it has one.
-      sent_agent: if(where == :platform, do: named_agent || default_agent, else: named_agent),
+      # What the create names. On the platform only an agent the person picked: with none
+      # the plane fills the profile's own default, by the rule the chip shows. On this
+      # computer the one on screen, as `/new` always started.
+      sent_agent: if(where == :platform, do: named_agent, else: named_agent || page.local_agent),
       cleaned: cleaned,
       title: title_of(page, cleaned),
       local_down: local_down,
@@ -244,8 +282,8 @@ defmodule Troupe.UI.TUI.NewSessionPage do
     do:
       row["agents"] |> List.wrap() |> Enum.map(&if(is_map(&1), do: &1["name"], else: to_string(&1)))
 
-  # One the profile offers, which the create sends: a pod left to choose takes its own
-  # default. Where the profile offers none the create names none and the plane says why.
+  # The profile's default, which the chip shows and the plane fills when the create names
+  # none, by the same rule. Where the profile offers none the plane says why.
   defp default_of(row), do: row |> agents_of() |> NewSession.default_agent()
 
   defp title_of(%{title: {title, _pos}}, _cleaned), do: title
@@ -260,47 +298,50 @@ defmodule Troupe.UI.TUI.NewSessionPage do
   """
   @spec key(t(), map()) ::
           {:ok, t()} | :close | {:start, t(), Client.origin(), map()} | {:choose_agent, t()}
-  def key(%{casting: %{failed: failed}} = page, %{code: code})
-      when is_binary(failed) and code in ["esc", "enter"],
-      do: {:ok, %{page | casting: nil}}
+  def key(page, key), do: step(%{page | said: nil}, key)
 
-  def key(%{casting: %{}} = page, %{code: "esc"}), do: {:ok, %{page | casting: nil}}
-  def key(%{casting: %{}} = page, _key), do: {:ok, page}
+  defp step(%{casting: %{failed: failed}} = page, %{code: code})
+       when is_binary(failed) and code in ["esc", "enter"],
+       do: {:ok, %{page | casting: nil}}
 
-  def key(%{open: open} = page, %{code: "esc"}) when open != nil, do: {:ok, %{page | open: nil}}
-  def key(_page, %{code: "esc"}), do: :close
+  defp step(%{casting: %{}} = page, %{code: "esc"}), do: {:ok, %{page | casting: nil}}
+  defp step(%{casting: %{}} = page, _key), do: {:ok, page}
 
-  def key(%{open: open} = page, %{code: code}) when open != nil and code in ["up", "k"],
+  defp step(%{open: open} = page, %{code: "esc"}) when open != nil, do: {:ok, %{page | open: nil}}
+  defp step(_page, %{code: "esc"}), do: :close
+
+  defp step(%{open: open} = page, %{code: code}) when open != nil and code in ["up", "k"],
     do: {:ok, %{page | cursor: max(page.cursor - 1, 0)}}
 
-  def key(%{open: open} = page, %{code: code}) when open != nil and code in ["down", "j"],
+  defp step(%{open: open} = page, %{code: code}) when open != nil and code in ["down", "j"],
     do: {:ok, %{page | cursor: min(page.cursor + 1, max(length(options(page)) - 1, 0))}}
 
-  def key(%{open: open} = page, %{code: "enter"}) when open != nil, do: pick(page)
+  defp step(%{open: open} = page, %{code: "enter"}) when open != nil, do: pick(page)
 
-  def key(page, %{code: "tab"}), do: {:ok, next_field(page, 1)}
-  def key(page, %{code: "backtab"}), do: {:ok, next_field(page, -1)}
+  defp step(page, %{code: "tab"}), do: {:ok, next_field(page, 1)}
+  defp step(page, %{code: "backtab"}), do: {:ok, next_field(page, -1)}
 
-  def key(%{field: :chips} = page, %{code: code}) when code in ["left", "h"],
+  defp step(%{field: :chips} = page, %{code: code}) when code in ["left", "h"],
     do: {:ok, %{page | chip: max(page.chip - 1, 0)}}
 
-  def key(%{field: :chips} = page, %{code: code}) when code in ["right", "l"],
+  defp step(%{field: :chips} = page, %{code: code}) when code in ["right", "l"],
     do: {:ok, %{page | chip: min(page.chip + 1, 2)}}
 
-  def key(%{field: :chips} = page, %{code: "enter"}), do: open_chip(page)
+  defp step(%{field: :chips} = page, %{code: "enter"}), do: open_chip(page)
 
-  def key(%{field: :chips} = page, %{code: <<d>>}) when d in ?1..?3, do: {:ok, like(page, d - ?0)}
+  defp step(%{field: :chips} = page, %{code: <<d>>}) when d in ?1..?3, do: {:ok, like(page, d - ?0)}
 
-  def key(%{field: :message, text: {"", _}} = page, %{code: <<d>>, modifiers: []}) when d in ?1..?3,
-    do: {:ok, like(page, d - ?0)}
+  defp step(%{field: :message, text: {"", _}} = page, %{code: <<d>>, modifiers: []})
+       when d in ?1..?3,
+       do: {:ok, like(page, d - ?0)}
 
-  def key(%{field: field} = page, %{code: "enter", modifiers: mods})
-      when field != :chips and mods != [],
-      do: {:ok, edit(page, field, &Input.insert(&1, "\n"))}
+  defp step(%{field: field} = page, %{code: "enter", modifiers: mods})
+       when field != :chips and mods != [],
+       do: {:ok, edit(page, field, &Input.insert(&1, "\n"))}
 
-  def key(%{field: field} = page, %{code: "enter"}) when field != :chips, do: start(page)
+  defp step(%{field: field} = page, %{code: "enter"}) when field != :chips, do: start(page)
 
-  def key(%{field: field} = page, %{code: code, modifiers: mods} = key) when field != :chips do
+  defp step(%{field: field} = page, %{code: code, modifiers: mods} = key) when field != :chips do
     if String.length(code) == 1 and mods in [[], ["shift"]] do
       {:ok, edit(page, field, &Input.insert(&1, code))}
     else
@@ -311,7 +352,7 @@ defmodule Troupe.UI.TUI.NewSessionPage do
     end
   end
 
-  def key(page, _key), do: {:ok, page}
+  defp step(page, _key), do: {:ok, page}
 
   @doc "Pasted text, into the box being typed in."
   @spec paste(t(), String.t()) :: t()
@@ -342,16 +383,37 @@ defmodule Troupe.UI.TUI.NewSessionPage do
       else: [:where, :profile, :agent]
   end
 
+  # The agent chip with nothing to pick says why instead of opening an empty picker.
   defp open_chip(page) do
     case Enum.at(chips(page), page.chip) do
       :agent ->
-        if resolved(page).where == :local and page.daemon_up,
-          do: {:choose_agent, page},
-          else: {:ok, %{page | open: :agent, cursor: 0}}
+        r = resolved(page)
+
+        cond do
+          r.where == :local and page.daemon_up ->
+            {:choose_agent, page}
+
+          options(%{page | open: :agent}) == [] ->
+            {:ok, %{page | said: NewSession.no_agents(r.where, r.profile_name, page.daemon_up)}}
+
+          true ->
+            {:ok, %{page | open: :agent, cursor: 0}}
+        end
 
       kind ->
         {:ok, %{page | open: kind, cursor: 0}}
     end
+  end
+
+  @doc """
+  The daemon link came up or went down: "On this computer" switches on or off by itself,
+  and coming up, the agents this computer has are read again (`agents`, or `nil` to keep
+  them).
+  """
+  @spec daemon(t(), boolean(), [String.t()] | nil) :: t()
+  def daemon(page, up?, agents \\ nil) do
+    page = %{page | daemon_up: up?}
+    if up? and is_list(agents), do: %{page | local_agents: agents}, else: page
   end
 
   @doc "The options the open picker lists: `{value, label, detail, enabled}`."
@@ -368,7 +430,7 @@ defmodule Troupe.UI.TUI.NewSessionPage do
     here =
       if page.daemon_up,
         do: {:local, "On this computer", "your own checkout and files", true},
-        else: {:local, "On this computer", "APP NOT RUNNING: " <> NewSession.local_down(), false}
+        else: {:local, "On this computer", "DAEMON NOT RUNNING: " <> NewSession.local_down(), false}
 
     platform ++ [here]
   end
@@ -392,7 +454,13 @@ defmodule Troupe.UI.TUI.NewSessionPage do
   end
 
   def options(%{open: :agent} = page) do
-    page |> resolved() |> Map.fetch!(:profile) |> agents_of() |> Enum.map(&{&1, &1, "", true})
+    # This computer's agents are picked in the agent picker, never from a profile's list.
+    r = resolved(page)
+    profile = if r.where == :platform, do: r.profile
+    default = default_of(profile)
+
+    for name <- agents_of(profile),
+        do: {name, name, if(name == default, do: "its default", else: ""), true}
   end
 
   def options(_page), do: []
@@ -461,7 +529,7 @@ defmodule Troupe.UI.TUI.NewSessionPage do
         folder: page.folder,
         profile: r.profile_name,
         agent: r.agent,
-        named_agent: r.named_agent,
+        named_agent: r.sent_agent,
         has_text: r.cleaned != "",
         queued: r.full,
         done: 0,
@@ -476,7 +544,7 @@ defmodule Troupe.UI.TUI.NewSessionPage do
         :local ->
           {:start, page, {:local, page.folder},
            %{
-             profile: r.named_agent,
+             profile: r.sent_agent,
              prompt: r.cleaned,
              title: title,
              worktree: "never",
@@ -664,7 +732,7 @@ defmodule Troupe.UI.TUI.NewSessionPage do
       Span.new(middle_word),
       middle,
       Span.new(" as "),
-      chip.(2, r.agent, nil),
+      chip.(2, r.agent_label, nil),
       Span.new(" · " <> r.who)
     ])
   end

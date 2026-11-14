@@ -109,7 +109,10 @@ defmodule Troupe.Client.Daemon.Link do
   defp unreachable(method),
     do: "the daemon is not reachable: the connection closed during #{method}"
 
-  defp forget_client(state), do: %{state | client: nil, error: :closed}
+  defp forget_client(state) do
+    if state.client, do: Troupe.Client.Events.daemon_link(false)
+    %{state | client: nil, error: :closed}
+  end
 
   @spec up?() :: boolean()
   def up? do
@@ -212,6 +215,7 @@ defmodule Troupe.Client.Daemon.Link do
   @impl true
   def handle_info({:troupe_disconnected, reason}, state) do
     Logger.debug("daemon link: disconnected (#{inspect(reason)})")
+    if state.client, do: Troupe.Client.Events.daemon_link(false)
     {:noreply, %{state | client: nil, error: reason}}
   end
 
@@ -323,6 +327,7 @@ defmodule Troupe.Client.Daemon.Link do
              capabilities: %{"blobs" => true}
            ) do
         {:ok, client} ->
+          Troupe.Client.Events.daemon_link(true)
           {:ok, hand_over(%{state | client: client, error: nil})}
 
         # A daemon whose socket answers and whose protocol does not, a wedged one above

@@ -52,6 +52,17 @@ defmodule Troupe.Client.Events do
     end)
   end
 
+  @doc """
+  Hands `{:troupe_daemon_link, up?}` to everybody listening for the settings: this
+  process's connection to the local daemon came up or went down.
+  """
+  @spec daemon_link(boolean()) :: :ok
+  def daemon_link(up?) do
+    Registry.dispatch(__MODULE__, @settings, fn entries ->
+      for {pid, _} <- entries, do: send(pid, {:troupe_daemon_link, up?})
+    end)
+  end
+
   @doc "Hands an `agents.changed` to everybody listening for the settings."
   @spec agents_changed(map()) :: :ok
   def agents_changed(params) do
