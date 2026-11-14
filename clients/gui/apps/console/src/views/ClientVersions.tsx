@@ -112,7 +112,7 @@ function Behind({ fleet, query, onQuery, team }: { fleet: Record<string, ClientF
             <input aria-label="Filter who is behind" placeholder="filter by a person, a version, a client…" value={query} onChange={(e) => onQuery(e.target.value)} />
           </div>
           {shown.length === 0 ? (
-            <Empty title={`Nobody behind matches "${query.trim()}"`}>Filter by a person's name or address, a version, or a kind of client.</Empty>
+            <Empty title={<>Nobody behind matches <code>"{query.trim()}"</code></>}>Filter by a person's name or address, a version, or a kind of client.</Empty>
           ) : (
             <div className="scroll">
               <table className="behind">
@@ -265,6 +265,7 @@ function Component({
           effects={effects(lines, program, updates)}
           verb="Apply"
           onCancel={() => setPreviewing(false)}
+          cancel="Back to editing"
           onConfirm={async () => {
             const change: ClientPolicyChange = {};
             for (const l of lines) Object.assign(change, { [l.field]: l.to });

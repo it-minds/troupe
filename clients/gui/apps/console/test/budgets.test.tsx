@@ -37,7 +37,7 @@ describe("budgets", () => {
     type(field("In team")!, "core");
     button("Explain")!.click();
     // Dan's own cap is 150 and he has spent 120: tighter than core's ceiling.
-    await waitFor(() => says("This person's own cap is what refuses first: 30.00 left."), "the answer");
+    await waitFor(() => says("This person's own cap is what refuses first: $30.00 left."), "the answer");
     await sees("the team's ceiling");
     await sees("the platform's, or the deployment's");
   });
@@ -49,7 +49,7 @@ describe("budgets", () => {
     type(people, "erin@example.com");
     type(field("Cap, in dollars a month")!, "40");
     button("Preview")!.click();
-    await waitFor(() => says("may spend 40.00 a month across every team"), "the preview");
+    await waitFor(() => says("may spend $40.00 a month across every team"), "the preview");
     (await waitFor(() => go("Apply"), "the confirm")).click();
     await waitFor(() => says("Recorded in the audit as person.budget on erin@example.com"), "the audit's note");
     expect(fake.admin.teams.get("core")!.members.find((m) => m.subject === "erin@example.com")!.budget_micros).toBe(40_000_000);

@@ -31,7 +31,7 @@ import { useState } from "react";
 import type { JSX } from "react";
 import type { GitHubApp, GitHubAppChange, GitHubCheck, GitHubDelivery, GitHubRepositoryTest, IntegrationServer, Integrations as IntegrationsAnswer, PlaneReleases, SigningKey } from "@troupe/client";
 import { describeError, show, useConsole, useLoad } from "../console";
-import { AuditNote, Checks, DetailList, Empty, Field, Fields, GitopsProblem, Loaded, Locked, Preview, Region, Status, changed, useChange, when } from "./bits";
+import { AuditNote, Checks, Empty, Field, Fields, GitopsProblem, Loaded, Locked, Preview, Region, Status, changed, useChange, when } from "./bits";
 import type { DiffLine } from "./bits";
 
 export function Integrations(): JSX.Element {
@@ -359,6 +359,7 @@ function GitHubCard({ app, onApplied }: { app: GitHubApp; onApplied: () => void 
           effects={appWords(app, change)}
           verb="Apply"
           onCancel={() => setPreviewing(false)}
+          cancel="Back to editing"
           onConfirm={async () => {
             await apply("github.put", "app", () => admin.putGithub(change), "The GitHub App is changed.", (a) => (a as GitHubApp).changes);
             setPreviewing(false);
@@ -721,6 +722,34 @@ function Notify({ answer }: { answer: IntegrationsAnswer }): JSX.Element {
   );
 }
 
+/**
+ * What the plane did with a delivery, as a sentence: the runs it fired, the session it sent
+ * back to work, or why it did neither. The plane's record keys each of these by a field
+ * (`fired`, `resumed`, `ignored`, `failed`, `ping`); the reader is told what happened, not
+ * which field said so.
+ */
+export function outcomeWords(outcome: Record<string, unknown>): string {
+  const text = (v: unknown): string => (typeof v === "string" ? v : show(v));
+  const end = (s: string): string => (/[.!?]$/.test(s) ? s : `${s}.`);
+  if (outcome["ping"]) return "GitHub checked that the webhook answers.";
+  if (typeof outcome["resumed"] === "string") return `Sent ${outcome["resumed"]} back to work.`;
+  if (outcome["ignored"] !== undefined) return end(`Nothing done: ${text(outcome["ignored"])}`);
+  if (outcome["failed"] !== undefined) return end(`Failed: ${text(outcome["failed"])}`);
+  if (Array.isArray(outcome["fired"])) {
+    const each = (outcome["fired"] as Array<Record<string, unknown>>).map((f) => {
+      const trigger = text(f["trigger"]);
+      if (f["refused"] !== undefined) return `${trigger} was refused: ${text(f["refused"])}`;
+      if (f["skipped"] !== undefined) return `${trigger}'s run ${text(f["run"])} was skipped: ${text(f["skipped"])}`;
+      return `fired ${trigger}, run ${text(f["run"])}`;
+    });
+    const said = each.join("; ");
+    if (!said) return "Nothing fired.";
+    return end(said.charAt(0).toUpperCase() + said.slice(1));
+  }
+  const rest = Object.values(outcome).map(text).join("; ");
+  return rest ? end(rest.charAt(0).toUpperCase() + rest.slice(1)) : "—";
+}
+
 /** What the App's webhook took lately, and what the plane made of each: a platform admin's. */
 function Deliveries(): JSX.Element | null {
   const { admin, role } = useConsole();
@@ -756,7 +785,7 @@ function Deliveries(): JSX.Element | null {
                         {d.event}
                         {d.action ? `.${d.action}` : ""}
                       </td>
-                      <td>{d.outcome ? <DetailList detail={d.outcome} /> : "—"}</td>
+                      <td>{d.outcome ? outcomeWords(d.outcome) : "—"}</td>
                       <td className="mono">{d.id}</td>
                     </tr>
                   ))}

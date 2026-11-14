@@ -117,7 +117,7 @@ export function Triggers({ team }: { team: string | null }): JSX.Element {
               {known ? (
                 <TeamTriggers team={all.find((t) => t.name === shown)!} key={shown} />
               ) : (
-                <Empty title={`No team called ${team}`}>
+                <Empty title={<>No team called <code>{team}</code></>}>
                   Or not one you administer. <a href={href({ page: "triggers" })}>Triggers</a>
                 </Empty>
               )}
@@ -164,7 +164,7 @@ function TeamTriggers({ team }: { team: AdminTeam }): JSX.Element {
             {done && <AuditNote action={done.action} subject={done.subject} detail={done.detail} />}
             {minted && <KeyOnce name={minted.name} secret={minted.key} url={minted.url} onDone={() => setMinted(null)} />}
             {triggers.length === 0 ? (
-              <Empty title={`${team.name} has no trigger`}>{locked ? "A trigger is a manifest in the repository." : "Make one below."}</Empty>
+              <Empty title={<><code>{team.name}</code> has no trigger</>}>{locked ? "A trigger is a manifest in the repository." : "Make one below."}</Empty>
             ) : (
               <div className="scroll">
                 <table className="triggers">
@@ -530,7 +530,7 @@ export function TriggerPage({ team, name }: { team: string; name: string }): JSX
           const owner = teams.find((x) => x.name === team);
           if (!t || !owner) {
             return (
-              <Empty title={`No trigger called ${name} in ${team}`}>
+              <Empty title={<>No trigger called <code>{name}</code> in <code>{team}</code></>}>
                 Or not one you administer. <a href={href({ page: "triggers", path: [team] })}>{team}'s triggers</a>
               </Empty>
             );
@@ -919,6 +919,7 @@ function TriggerForm({
         effects={triggerWords(team.name, name, creating, changes)}
         verb={creating ? `Create ${name}` : "Apply"}
         onCancel={() => setPreviewing(false)}
+        cancel="Back to editing"
         onConfirm={() => onConfirm(changes, name)}
       />
     );

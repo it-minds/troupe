@@ -748,7 +748,7 @@ function BudgetLine({ name, budget }: { name: string; budget: ProfileDetail["bud
   const used = budget.spent_micros + budget.reserved_micros;
   return (
     <>
-      ${money(budget.budget_micros)} a month
+      {money(budget.budget_micros)} a month
       {budget.set_by && budget.set_by !== name && (
         <>
           , from <a href={href({ page: "profiles", path: [budget.set_by] })}>{budget.set_by}</a>
@@ -756,7 +756,7 @@ function BudgetLine({ name, budget }: { name: string; budget: ProfileDetail["bud
       )}
       <span className="hint">
         {" "}
-        ${money(budget.spent_micros)} spent this month{budget.reserved_micros ? `, $${money(budget.reserved_micros)} held by running sessions` : ""}; ${money(Math.max(budget.budget_micros - used, 0))} left. It turns over on the 1st, in UTC.
+        {money(budget.spent_micros)} spent this month{budget.reserved_micros ? `, ${money(budget.reserved_micros)} held by running sessions` : ""}; {money(Math.max(budget.budget_micros - used, 0))} left. It turns over on the 1st, in UTC.
       </span>
     </>
   );
@@ -1130,6 +1130,7 @@ export function ProfileEditor({
         effects={preview.effects}
         verb={creating ? `Create ${draft.name}` : "Apply"}
         onCancel={() => setPreview(null)}
+        cancel="Back to editing"
         onConfirm={() => onConfirm(draft)}
       />
     );
@@ -1548,7 +1549,7 @@ function effectsOf(policy: { "allowed?": boolean; violations: unknown[] }, mode:
   // What it wrote itself, as the form loaded it: for one that extends another, not what it has in effect.
   const had = detail ? ((detail.written ? (detail.written.budget_micros ?? null) : (detail.profile.budget_micros ?? null)) as number | null) : null;
   if (budget !== had && !Number.isNaN(budget))
-    out.push(budget ? `Its sessions may spend $${money(budget)} a month from now; a session that would go past it is refused, and told it is ${draft.name}'s budget.` : draft.extends ? `It has ${draft.extends}'s monthly budget from now, if ${draft.extends} has one.` : "Its sessions have no monthly budget of their own from now.");
+    out.push(budget ? `Its sessions may spend ${money(budget)} a month from now; a session that would go past it is refused, and told it is ${draft.name}'s budget.` : draft.extends ? `It has ${draft.extends}'s monthly budget from now, if ${draft.extends} has one.` : "Its sessions have no monthly budget of their own from now.");
   const channel = String(draft.spec?.["configBundleChannel"] ?? "stable");
   if (detail && channel !== String(detail.spec?.["configBundleChannel"] ?? detail.bundle?.channel ?? "stable")) out.push(`Its pods follow ${channel} from now, and are told to update.`);
   return out;

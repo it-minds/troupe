@@ -296,7 +296,7 @@ describe("a trigger on a GitHub repository", () => {
     await waitFor(() => says("that issue is on example-org/gadgets, and this trigger works on example-org/widgets"), "the refusal");
     expect(fake.admin.runRows.length).toBe(before);
 
-    button("Back to editing")!.click();
+    button("Cancel")!.click();
     type(await waitFor(() => field("Fix an issue"), "the field again"), "7");
     button("Fix this")!.click();
     (await waitFor(() => button("Fix 7"), "the preview")).click();

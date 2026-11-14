@@ -34,7 +34,9 @@ out on every call what the person administers, from the provider group named for
 admins and the teams a platform admin named them on ([roles-and-permissions.md](roles-and-permissions.md)),
 so a role taken away holds at the next click. Somebody who administers nothing signs in
 too, as a **member**, to **Mine** and nothing else; an administrative role adds the four
-groups below. An address of an area the role lacks opens Mine.
+groups below. An address of an area the role lacks opens where the role starts (Mine for a
+member, the Overview for an administrator), says in one line that the page is for
+administrators, and the address becomes that place's.
 
 A link to any screen or team tab (`/console/#/teams/core/limits`) works signed out too: the
 console lands there once the provider sends the browser back, not on its first screen.

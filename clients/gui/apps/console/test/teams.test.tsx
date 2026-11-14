@@ -107,11 +107,11 @@ describe("a team", () => {
     await sees("90 days", erase);
     await sees("team", erase);
     const idle = limit("Idle before it goes dormant")!;
-    await sees("1200 s", idle);
+    await sees("20 min", idle);
     button("Why?", erase)!.click();
     await waitFor(() => says("deployment", limit("Sessions erased after")!) && says("365 days", limit("Sessions erased after")!), "the ladder");
     await sees("180 days", () => limit("Sessions erased after"));
-    await sees("500.00", () => limit("Budget"));
+    await sees("$500.00", () => limit("Budget"));
   });
 
   it("previews a narrower limit in words, applies it on confirm, and shows what the audit recorded", async () => {
@@ -120,20 +120,20 @@ describe("a team", () => {
     unmount = render(<App />).unmount;
     (await waitFor(() => button("Change core's limits"), "the limits")).click();
     type(await waitFor(() => field("Idle before it goes dormant"), "the form"), "600");
-    await sees("The platform allows at most 1800 s.");
+    await sees("The platform allows at most 30 min.");
     button("Preview")!.click();
 
     await waitFor(() => says("What will happen"), "the preview");
-    await sees("idle_timeout_seconds: 1200 s");
-    await sees("idle_timeout_seconds: 600 s");
-    await sees("A core session idle for 600 seconds goes dormant");
+    await sees("idle_timeout_seconds: 20 min");
+    await sees("idle_timeout_seconds: 10 min");
+    await sees("A core session idle for 10 min goes dormant");
     expect(fake.admin.teams.get("core")!.idle_timeout_seconds).toBe(1200);
 
     button("Apply")!.click();
     await waitFor(() => says("Recorded in the audit as team.update on core"), "the audit's note");
     expect(fake.admin.teams.get("core")!.idle_timeout_seconds).toBe(600);
     expect(fake.admin.audit.at(-1)).toMatchObject({ action: "team.update", subject_id: "core", detail: { idle_timeout_seconds: { from: 1200, to: 600 } } });
-    await waitFor(() => says("600 s", limit("Idle before it goes dormant") ?? document.body), "the limit as it now is");
+    await waitFor(() => says("10 min", limit("Idle before it goes dormant") ?? document.body), "the limit as it now is");
   });
 
   it("says before sending that the plane will refuse a wider limit, and shows the plane's refusal", async () => {

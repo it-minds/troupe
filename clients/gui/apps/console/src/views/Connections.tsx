@@ -11,7 +11,7 @@ import type { JSX } from "react";
 import type { Connections as ConnectionsAnswer } from "@troupe/client";
 import { useConsole, useLoad } from "../console";
 import { href } from "../route";
-import { Empty, Loaded, Region, Status } from "./bits";
+import { Empty, Loaded, Region, SessionState, Status } from "./bits";
 
 export function Connections(): JSX.Element {
   const { admin } = useConsole();
@@ -98,7 +98,7 @@ export function Connections(): JSX.Element {
                         </td>
                         <td>{x.profile}</td>
                         <td className="mono">{x.owner}</td>
-                        <td>{x.state}</td>
+                        <td><SessionState state={x.state} /></td>
                       </tr>
                     ))}
                   </tbody>

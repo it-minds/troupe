@@ -688,6 +688,7 @@ function BundleEditor({
         verb={`Publish to ${channel}`}
         typeToConfirm={preview.losers.length ? channel : null}
         onCancel={() => setChecked(null)}
+        cancel="Back to editing"
         onConfirm={() => onPublish(content)}
       />
     );

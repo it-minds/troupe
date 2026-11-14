@@ -47,7 +47,7 @@ export function Teams(): JSX.Element {
                 </span>
               </div>
               {shown.length === 0 ? (
-                <Empty title={`No team matches "${query.trim()}"`}>Search by a team's name, a group it draws from, or one of its administrators.</Empty>
+                <Empty title={<>No team matches <code>"{query.trim()}"</code></>}>Search by a team's name, a group it draws from, or one of its administrators.</Empty>
               ) : (
                 <div className="scroll">
                   <table>
@@ -302,6 +302,7 @@ function Enable({ teams, pick, onApplied }: { teams: AdminTeam[]; pick: AdminGro
           ]}
           verb="Enable"
           onCancel={() => setPreviewing(false)}
+          cancel="Back to editing"
           onConfirm={async () => {
             await admin.enableTeam(form.group, { name: form.name });
             const detail = await recorded(admin, me.subject, "team.enable", form.name);

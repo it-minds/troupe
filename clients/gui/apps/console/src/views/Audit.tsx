@@ -92,7 +92,7 @@ export function Audit(): JSX.Element {
           return (
             <>
               {shown.length === 0 ? (
-                <Empty title={`Nothing here matches "${query.trim()}"`}>Search by an action, a subject, an actor or a value that moved.</Empty>
+                <Empty title={<>Nothing here matches <code>"{query.trim()}"</code></>}>Search by an action, a subject, an actor or a value that moved.</Empty>
               ) : (
                 <div className="scroll">
                   <table className="audit">

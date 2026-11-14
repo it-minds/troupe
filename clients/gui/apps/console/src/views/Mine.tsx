@@ -268,6 +268,7 @@ function YourOwn({ own, onSaved }: { own: OwnMemory; onSaved: () => void }): JSX
             onSaved();
           }}
           onCancel={() => setPreview(null)}
+          cancel="Back to editing"
         />
       )}
     </article>

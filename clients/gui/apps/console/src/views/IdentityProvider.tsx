@@ -207,6 +207,7 @@ function Provider({ provider, onApplied }: { provider: ProviderState; onApplied:
           }
           verb={previewing === "reset" ? "Put them back" : "Save"}
           onCancel={() => setPreviewing(null)}
+          cancel={previewing === "put" ? "Back to editing" : "Cancel"}
           onConfirm={async () => {
             if (previewing === "reset") {
               await apply("provider.reset", "sign-in", () => admin.providerReset(), "Sign-in is back to the deployment's.", (a) => (a as ProviderState).changes);
