@@ -58,14 +58,16 @@ describe("a team session's settings", () => {
     row.click();
     (await waitFor(() => document.querySelector(".backstage") && button("Settings", backstage()), "the Settings tab")).click();
 
-    await sees("In force in this session on its pod");
+    await sees("In force in this session on the platform");
     const pane = (): HTMLElement => backstage();
-    await sees("the worker profile dev (TROUPE_MODEL)");
+    // The pod names its layer as an operator would; the pane says it in the reader's words.
+    await sees("the profile dev (TROUPE_MODEL)");
+    expect(pane().textContent).not.toMatch(/worker profile|\bpod\b/i);
     await sees("the session's terms");
     await sees("set by your organisation");
     await sees("this project's .troupe/config.yaml");
     await sees("shell(curl)");
-    await sees("the worker profile");
+    await sees("the profile");
     // The owner may steer it, so the pod says what it runs on.
     await sees("http://llm.example.test/v1");
 
@@ -91,7 +93,7 @@ describe("a team session's settings, for someone who may only watch it", () => {
 
     unmount = render(<PodConfig view={view} />).unmount;
     await sees("set by the profile");
-    await sees("the worker profile dev (TROUPE_BASE_URL)");
+    await sees("the profile dev (TROUPE_BASE_URL)");
     const cell = [...document.querySelectorAll("td span.muted")].find((s) => s.textContent === "set by the profile");
     expect(cell?.getAttribute("title")).toBe("Shown to the people who can steer this session");
     expect(document.body.textContent).not.toContain("llm.example.test");
@@ -111,5 +113,40 @@ describe("a session on this computer", () => {
     row.click();
     await waitFor(() => document.querySelector(".backstage") && button("Files", backstage()), "the session's panes");
     expect(button("Settings", backstage())).toBeNull();
+  });
+});
+
+/** The backstage's fact named `term`, or null when it has no such row. */
+function fact(term: string): string | null {
+  const dt = [...document.querySelectorAll(".backstage dt")].find((d) => d.textContent === term);
+  return dt ? (dt.nextElementSibling?.textContent ?? "") : null;
+}
+
+describe("the backstage's configuration row", () => {
+  it("names the bundle a team session's agents came from", async () => {
+    harness.plane.seed("alice@example.com", { id: "team-2", title: "Bundled", profile: "dev" });
+    await harness.signIn({ store: webTokenStore() });
+    localStorage.setItem("troupe.pref.planeUrl", harness.plane.baseUrl);
+    localStorage.setItem("troupe.pref.appearance.chosen.alice@example.com", "yes");
+
+    unmount = render(<App />).unmount;
+    const row = await waitFor(() => [...document.querySelectorAll<HTMLButtonElement>("button.row")].find((b) => b.textContent?.includes("Bundled")), "the team session's row");
+    row.click();
+    await waitFor(() => fact("Configuration"), "the configuration row");
+    expect(fact("Configuration")).toBe("Bundle 3");
+  });
+
+  it("is not there on a session on this computer, which has no bundle", async () => {
+    daemon.seed("/home/alice/sketches");
+    localStorage.setItem("troupe.pref.localOnly", "yes");
+    unmount = render(<App />).unmount;
+    const row = await waitFor(
+      () => [...document.querySelectorAll<HTMLButtonElement>("button.row")].find((b) => b.textContent?.includes("/home/alice/sketches")),
+      "the session's row",
+    );
+    row.click();
+    await waitFor(() => fact("Owner"), "the session's facts");
+    expect(fact("Configuration")).toBeNull();
+    expect(document.querySelector(".backstage")?.textContent).not.toMatch(/\bbundle\b/i);
   });
 });

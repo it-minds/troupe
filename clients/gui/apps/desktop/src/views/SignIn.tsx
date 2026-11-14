@@ -40,6 +40,9 @@ export function newSession(planeUrl: string): AuthSession {
     planeUrl,
     store: tokenStore(),
     fetchImpl: throughTheGate(host?.fetchImpl ?? globalThis.fetch),
+    // A request the shell makes outside the webview carries no origin, so no allowlist
+    // can be what refused it, and the sentence for a silent plane must not say one did.
+    ...(host?.fetchImpl ? { origin: null } : {}),
     ...(host?.signInFlow ? { flow: host.signInFlow } : {}),
   });
 }
@@ -96,7 +99,7 @@ export function SignIn({
 
     (async () => {
       if (returning) {
-        setStatus("finishing your sign-in…");
+        setStatus("Finishing your sign-in…");
         const credential = await auth.completeRedirectSignIn();
         if (credential) return auth;
       }
@@ -153,7 +156,7 @@ export function SignIn({
       setDiscovery(found);
 
       if (auth.preferredFlow === "redirect") {
-        setStatus(`taking you to ${hostOf(found.issuer)}…`);
+        setStatus(`Taking you to ${hostOf(found.issuer)}…`);
         // `select_account` rather than a silent sign-in: on a shared machine the last
         // account is not reliably the one the person means, and being asked is cheap.
         const { url } = await auth.beginRedirectSignIn({ prompt: "select_account", redirectUri: redirectUri() });
@@ -246,7 +249,7 @@ export function SignIn({
         </section>
       )}
 
-      {error && <SignInError message={error} />}
+      {error && <SignInError message={error} onRetry={unreachable && !busy && planeUrl.trim() ? () => void signIn() : null} />}
 
       {/* Only where this host can reach the daemon: a door into a room with nothing in
           it is not a door. A browser served by the plane has none; a desktop shell, or a
@@ -293,13 +296,21 @@ export function SignIn({
  * reasons it gives are both a registration problem that no amount of retrying fixes —
  * so the message says what to register instead of inviting another attempt.
  */
-function SignInError({ message }: { message: string }): JSX.Element {
+function SignInError({ message, onRetry }: { message: string; onRetry: (() => void) | null }): JSX.Element {
   const origin = redirectUri() || "this address";
   const unregistered = /redirect_uri|AADSTS50011|invalid_client|unauthorized_client/i.test(message);
 
   return (
     <section className="banner error copy">
       <p>{message}</p>
+      {/* A plane that did not answer may answer the next time; asking again is the whole retry. */}
+      {onRetry && (
+        <p className="actions">
+          <button type="button" onClick={onRetry}>
+            Try again
+          </button>
+        </p>
+      )}
       {unregistered && (
         <p>
           The identity provider does not know this address. Register <code>{origin}</code> as a{" "}

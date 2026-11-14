@@ -120,7 +120,9 @@ export function Session({
   // otherwise a team session only where there is a team to have one.
   const kind = row?.kind ?? created ?? (auth ? "team" : "local");
   const view = useSessionView(auth, sessionId, { daemon, kind });
-  const [backstage, setBackstage] = useState(true);
+  // On a phone the backstage stacks under the composer and the head keeps only the title
+  // and the status until it is shown, so it starts hidden there; wider, it starts shown.
+  const [backstage, setBackstage] = useState(() => !phoneWidth());
   const [pane, setPane] = useState<Pane>("tasks");
   // What `/memory refresh` or `/memory forget` asked of the memory pane, until it takes it.
   const [memoryAsk, setMemoryAsk] = useState<MemoryAsk | null>(null);
@@ -473,6 +475,15 @@ function useDetail(
   return { level: choice ?? setting, command };
 }
 
+/** Whether the window is as narrow as a phone's, where every track stacks. Asked once, as a screen opens. */
+function phoneWidth(): boolean {
+  try {
+    return globalThis.matchMedia?.("(max-width: 719px)").matches ?? false;
+  } catch {
+    return false;
+  }
+}
+
 /** What was said, for `/copy`: the people's and the agent's words, not the tool traffic. */
 function transcriptText(state: TranscriptState): string {
   return state.entries
@@ -541,7 +552,9 @@ function Header({
   const role = row?.yourRole;
 
   return (
-    <header className="session-head">
+    // `full` while the backstage is shown: at phone width the head is the title and the
+    // status alone until then, and everything else in it comes with the backstage.
+    <header className={`session-head${backstage ? " full" : ""}`}>
       <div className="subject">
         <div className="crumbs">
           <button className="link" onClick={onBack} aria-label="Back to all sessions">
@@ -624,7 +637,7 @@ function Header({
           </button>
         )}
 
-        <button className="tab" onClick={onToggleBackstage} aria-pressed={backstage}>
+        <button className="tab backstage-toggle" onClick={onToggleBackstage} aria-pressed={backstage}>
           {backstage ? "Hide backstage" : "Show backstage"}
         </button>
       </div>
@@ -1333,8 +1346,14 @@ function Backstage({
           {/* A session on this computer with no owner on record is this computer's user's,
               which is the person looking at it. */}
           <dd>{row?.owner === self || (row && onThisComputer(row.kind) && !row.owner) ? "you" : (row?.owner ?? "—")}</dd>
-          <dt>Configuration</dt>
-          <dd>bundle {view.state.bundleVersion ?? "—"}</dd>
+          {/* The bundle is what the platform loaded the session's agents from: a session on
+              this computer has none, so it has no row rather than a dash. */}
+          {view.state.bundleVersion && !(row && onThisComputer(row.kind)) && (
+            <>
+              <dt>Configuration</dt>
+              <dd>Bundle {view.state.bundleVersion}</dd>
+            </>
+          )}
         </dl>
       </section>
     </aside>

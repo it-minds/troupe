@@ -157,7 +157,7 @@ describe("stage 1, done item 2: a plane that does not know this origin says so",
       (e: unknown) => e,
     );
     assert.ok(refused instanceof PlaneUnreachableError, `expected PlaneUnreachableError, got ${refused}`);
-    assert.match(refused.message, /Add https:\/\/gui\.example\.com to TROUPE_CORS_ORIGINS/);
+    assert.match(refused.message, /adds https:\/\/gui\.example\.com to TROUPE_CORS_ORIGINS/);
     assert.ok(refused.message.includes(h.plane.baseUrl));
 
     // Add it. Nothing else changes: same build, same store, same fetch.
