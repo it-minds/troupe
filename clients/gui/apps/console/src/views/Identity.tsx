@@ -431,7 +431,7 @@ function TeamPrincipals({ team }: { team: AdminTeam }): JSX.Element {
                     <th>May use</th>
                     <th>Sponsor</th>
                     <th>Last used</th>
-                    <th aria-label="Actions" />
+                    <th className="row-actions" aria-label="Actions" />
                   </tr>
                 </thead>
                 <tbody>

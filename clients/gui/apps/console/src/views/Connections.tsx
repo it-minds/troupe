@@ -38,34 +38,36 @@ export function Connections(): JSX.Element {
                     {s.people.length === 0 ? (
                       <Empty title="Nobody may use it yet">No team granted these profiles has anybody in it.</Empty>
                     ) : (
-                      <table>
-                        <thead>
-                          <tr>
-                            <th>Person</th>
-                            <th>Their credential</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {s.people.map((p) => (
-                            <tr key={p.subject}>
-                              <td>
-                                {p.display_name ?? p.subject} <span className="mono muted">{p.subject}</span>
-                              </td>
-                              <td>
-                                {p.connected ? (
-                                  <Status kind="running" glyph="●">
-                                    connected
-                                  </Status>
-                                ) : (
-                                  <Status kind="muted" glyph="○">
-                                    not connected
-                                  </Status>
-                                )}
-                              </td>
+                      <div className="scroll">
+                        <table>
+                          <thead>
+                            <tr>
+                              <th>Person</th>
+                              <th>Their credential</th>
                             </tr>
-                          ))}
-                        </tbody>
-                      </table>
+                          </thead>
+                          <tbody>
+                            {s.people.map((p) => (
+                              <tr key={p.subject}>
+                                <td>
+                                  {p.display_name ?? p.subject} <span className="mono muted">{p.subject}</span>
+                                </td>
+                                <td>
+                                  {p.connected ? (
+                                    <Status kind="running" glyph="●">
+                                      connected
+                                    </Status>
+                                  ) : (
+                                    <Status kind="muted" glyph="○">
+                                      not connected
+                                    </Status>
+                                  )}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
                     )}
                   </section>
                 );

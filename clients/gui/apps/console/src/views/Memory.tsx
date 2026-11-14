@@ -224,44 +224,46 @@ function Readers({ doc, readers }: { doc: MemoryDocument; readers: MemoryReaders
               ? `Every one of the ${count(readers.sessions.length, "running session")} that read it ran its last turn under version ${readers.version}.`
               : `${count(readers.behind, "running session")} behind version ${readers.version}: each reads it at its next turn.`}
           </p>
-          <table className="readers">
-            <thead>
-              <tr>
-                <th scope="col">Session</th>
-                <th scope="col">Owner</th>
-                <th scope="col">Profile</th>
-                <th scope="col">Version read</th>
-                <th scope="col">Last turn</th>
-                <th scope="col">
-                  <span className="visually-hidden">Nudge</span>
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {readers.sessions.map((r) => (
-                <tr key={r.session_id} className={r.behind ? "behind" : undefined}>
-                  <td className="mono">
-                    {r.session_id}
-                    {r.where === "machine" ? " (a person's machine)" : ""}
-                  </td>
-                  <td>{r.owner ?? "—"}</td>
-                  <td>{r.profile ?? "—"}</td>
-                  <td>
-                    {r.version === 0 ? "none" : `v${r.version}`}
-                    {r.behind ? " · behind" : ""}
-                  </td>
-                  <td>{r.activated && !r.turn_at ? "activated, no turn yet" : when(r.turn_at)}</td>
-                  <td>
-                    {doc.editable && r.behind && (
-                      <button type="button" onClick={() => nudge(r)}>
-                        Nudge {r.session_id}
-                      </button>
-                    )}
-                  </td>
+          <div className="scroll">
+            <table className="readers">
+              <thead>
+                <tr>
+                  <th scope="col">Session</th>
+                  <th scope="col">Owner</th>
+                  <th scope="col">Profile</th>
+                  <th scope="col">Version read</th>
+                  <th scope="col">Last turn</th>
+                  <th scope="col" className="row-actions">
+                    <span className="visually-hidden">Nudge</span>
+                  </th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {readers.sessions.map((r) => (
+                  <tr key={r.session_id} className={r.behind ? "behind" : undefined}>
+                    <td className="mono">
+                      {r.session_id}
+                      {r.where === "machine" ? " (a person's machine)" : ""}
+                    </td>
+                    <td>{r.owner ?? "—"}</td>
+                    <td>{r.profile ?? "—"}</td>
+                    <td>
+                      {r.version === 0 ? "none" : `v${r.version}`}
+                      {r.behind ? " · behind" : ""}
+                    </td>
+                    <td>{r.activated && !r.turn_at ? "activated, no turn yet" : when(r.turn_at)}</td>
+                    <td className="row-actions">
+                      {doc.editable && r.behind && (
+                        <button type="button" onClick={() => nudge(r)}>
+                          Nudge {r.session_id}
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
           <p className="note">A session on a pod is told at once by a nudge; one on a person's machine hears at its daemon's next poll, within five minutes.</p>
         </>
       )}
@@ -313,18 +315,20 @@ function Blame({ doc }: { doc: MemoryDocument }): JSX.Element {
         {open ? "Hide who wrote each line" : "Who wrote each line"}
       </button>
       {open && (
-        <table className="blame-lines mono" aria-label={`Who wrote each line of ${doc.subject} v${doc.version ?? 0}`}>
-          <tbody>
-            {(doc.lines ?? []).map((l, i) => (
-              <tr key={i}>
-                <th scope="row" title={`saved ${when(l.at)} by ${l.by ?? "nobody named"}`}>
-                  {writtenBy(l)}
-                </th>
-                <td>{l.text}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        <div className="scroll">
+          <table className="blame-lines mono" aria-label={`Who wrote each line of ${doc.subject} v${doc.version ?? 0}`}>
+            <tbody>
+              {(doc.lines ?? []).map((l, i) => (
+                <tr key={i}>
+                  <th scope="row" title={`saved ${when(l.at)} by ${l.by ?? "nobody named"}`}>
+                    {writtenBy(l)}
+                  </th>
+                  <td>{l.text}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
     </div>
   );
@@ -344,18 +348,20 @@ function Entries({ doc }: { doc: MemoryDocument }): JSX.Element {
         {open ? "Hide its entries" : `Its entries, one per topic (${entries.length})`}
       </button>
       {open && (
-        <table className="blame-lines" aria-label={`Entries of ${doc.subject} v${doc.version ?? 0}`}>
-          <tbody>
-            {entries.map((e, i) => (
-              <tr key={i}>
-                <th scope="row">{e.topic}</th>
-                <td className="mono">
-                  v{e.version ?? "?"} {e.agent ?? e.by ?? ""} · used in {count(e.used ?? 0, "session")}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        <div className="scroll">
+          <table className="blame-lines" aria-label={`Entries of ${doc.subject} v${doc.version ?? 0}`}>
+            <tbody>
+              {entries.map((e, i) => (
+                <tr key={i}>
+                  <th scope="row">{e.topic}</th>
+                  <td className="mono">
+                    v{e.version ?? "?"} {e.agent ?? e.by ?? ""} · used in {count(e.used ?? 0, "session")}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
     </div>
   );
@@ -369,28 +375,30 @@ function Entries({ doc }: { doc: MemoryDocument }): JSX.Element {
 function SideBySide({ doc }: { doc: MemoryDocument }): JSX.Element {
   const rows = besideRows(doc.diff);
   return (
-    <table className="side-by-side mono" aria-label={`${doc.subject} v${doc.against ?? 0} beside v${doc.version ?? 0}`}>
-      <thead>
-        <tr>
-          <th scope="col">Version {doc.against ?? 0}</th>
-          <th scope="col">Version {doc.version ?? 0}</th>
-        </tr>
-      </thead>
-      <tbody>
-        {rows.map((r, i) => (
-          <tr key={i}>
-            <td className={r.left === null ? "empty" : r.changed ? "del" : "ctx"}>
-              {r.left !== null && r.changed && <span className="visually-hidden">removed: </span>}
-              {r.left ?? ""}
-            </td>
-            <td className={r.right === null ? "empty" : r.changed ? "add" : "ctx"}>
-              {r.right !== null && r.changed && <span className="visually-hidden">added: </span>}
-              {r.right ?? ""}
-            </td>
+    <div className="scroll">
+      <table className="side-by-side mono" aria-label={`${doc.subject} v${doc.against ?? 0} beside v${doc.version ?? 0}`}>
+        <thead>
+          <tr>
+            <th scope="col">Version {doc.against ?? 0}</th>
+            <th scope="col">Version {doc.version ?? 0}</th>
           </tr>
-        ))}
-      </tbody>
-    </table>
+        </thead>
+        <tbody>
+          {rows.map((r, i) => (
+            <tr key={i}>
+              <td className={r.left === null ? "empty" : r.changed ? "del" : "ctx"}>
+                {r.left !== null && r.changed && <span className="visually-hidden">removed: </span>}
+                {r.left ?? ""}
+              </td>
+              <td className={r.right === null ? "empty" : r.changed ? "add" : "ctx"}>
+                {r.right !== null && r.changed && <span className="visually-hidden">added: </span>}
+                {r.right ?? ""}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
   );
 }
 

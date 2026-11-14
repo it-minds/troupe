@@ -228,7 +228,7 @@ function Machines({ profile }: { profile: AdminProfile }): JSX.Element {
                     <th>State</th>
                     <th>Registered</th>
                     <th>Last enrolled</th>
-                    <th aria-label="Actions" />
+                    <th className="row-actions" aria-label="Actions" />
                   </tr>
                 </thead>
                 <tbody>

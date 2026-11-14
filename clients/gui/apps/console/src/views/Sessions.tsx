@@ -129,7 +129,7 @@ export function Sessions({ query: initial = "" }: { query?: string } = {}): JSX.
                       <th>Pinned</th>
                       <th>On GitHub</th>
                       <th>Last active</th>
-                      <th aria-label="Actions" />
+                      <th className="row-actions" aria-label="Actions" />
                     </tr>
                   </thead>
                   <tbody>
