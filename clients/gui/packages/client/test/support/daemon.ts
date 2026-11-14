@@ -843,9 +843,12 @@ evoked where nothing is set and there was a sign-in. */
     for (const hear of this.presenceHeard.get(sessionId) ?? []) hear(data);
   }
 
-  /** Seed a session, as one started before the client connected. `opts.id` names it. */
+  /**
+   * Seed a session, as one started before the client connected. `opts.id` names it; else it
+   * is `s-l-<n>`, apart from the fake plane's `s-p-<n>`, so a list holding both shows each.
+   */
   seed(workspace: string, opts: Partial<Session> = {}): Session {
-    const id = opts.id ?? `s-${this.nextId++}`;
+    const id = opts.id ?? `s-l-${this.nextId++}`;
     const now = new Date().toISOString();
     const session: Session = {
       id,
@@ -1130,6 +1133,14 @@ evoked where nothing is set and there was a sign-in. */
     });
   }
 
+  /** A created session's prompt, as the daemon sends it: the first user turn, which the fake model answers by repeating it. */
+  private firstTurn(session: Session, text: string, commandId: string): void {
+    const actor = { kind: "user", subject: this.principal.subject };
+    session.log.append("input_accepted", { command_id: commandId, author: this.principal.subject }, actor);
+    session.log.append("user_input", { command_id: commandId, text, source: "user" }, actor);
+    session.log.append("llm_response", { message: { role: "assistant", content: [{ type: "text", text: `You said: ${text}` }] }, stop_reason: "end_turn", model: "fake" });
+  }
+
   /** Make a session say something, so a test can watch it arrive on the right view. */
   say(sessionId: string, text: string): LoggedEvent {
     const session = this.sessions.get(sessionId)!;
@@ -1364,6 +1375,9 @@ evoked where nothing is set and there was a sign-in. */
         } else {
           // What a start finds due, said once in the new session's log (Decisions 827, 835).
           this.suggest(created.id);
+          // The message it was started from is its first turn, answered.
+          const prompt = typeof params["prompt"] === "string" ? params["prompt"].trim() : "";
+          if (prompt) this.firstTurn(created, prompt, String(params["command_id"] ?? `c-first-${created.id}`));
         }
         return reply(ws, id, {
           session_id: created.id,

@@ -157,15 +157,16 @@ describe("the new-session screen", () => {
     expect(row?.agent).toBe("pr-reviewer");
   });
 
-  it("on a profile that offers no agent names none, and leaves the choice to the plane", async () => {
+  it("on a profile that offers no agent names none, and says the plane's reason it cannot start one", async () => {
     const h = await signedIn({ profiles: ["dev"], agents: { dev: [] } });
     const s = await openStart();
     await waitFor(() => sentence(s).includes("with dev as its default"), "no agent named");
     type(ask(s), "Anything");
     (await startButton(s)).click();
-    await waitFor(() => document.querySelector('textarea[aria-label="Message"]'), "the session");
-    const row = [...h.plane.rows.values()].find((r) => r.title === "Anything");
-    expect(row?.agent).toBeNull();
+    // The plane refuses a profile that offers no primary, and keeps no row; had the screen
+    // named an agent, the refusal would have been "no primary agent named …".
+    await sees("Dev offers no agent a session can start as");
+    expect([...h.plane.rows.values()].find((r) => r.title === "Anything")).toBeUndefined();
   });
 
   it("calls a profile scaled to zero idle, not full, and starts on it rather than queueing", async () => {

@@ -51,15 +51,14 @@ if (process.env["GITOPS"]) {
   admin.mode = "gitops";
   admin.gitopsSource = "https://git.example.com/platform/troupe.git";
 }
+// The person's desktop app, beside what the plane has seen of them already, in the records
+// Client versions counts: Mine reads the same ones (`me.clients`), so the two agree.
+admin.seen.push({ subject: as.subject, display_name: as.displayName, component: "desktop", version: "0.25.0-beta", platform: "windows/x86_64", since: "2026-10-20T09:00:00Z", seen_at: new Date().toISOString() });
 const plane = await FakePlane.start({
   idp,
   worker,
   corsOrigins: origins,
   admin,
-  clientsSeen: [
-    { component: "desktop", version: "0.25.0-beta", platform: "windows/x86_64", since: "2026-10-20T09:00:00Z", seen_at: new Date().toISOString(), standing: "current", recommended: "0.25.0-beta" },
-    { component: "tui", version: "0.23.0-beta", platform: "linux/x86_64", since: "2026-10-10T09:00:00Z", seen_at: new Date().toISOString(), standing: "behind", recommended: "0.25.0-beta" },
-  ],
   memory: [{ scope: "organisation", name: null, version: 2, hash: "sha256:fake", updated_at: "2026-10-22T10:00:00Z", text: "We write British English.\nEvery change has a test." }],
   artifacts: [
     artifact("art-fake-weekly", { subject: as.subject, display_name: as.displayName }, {

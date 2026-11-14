@@ -556,6 +556,13 @@ const SETTINGS: Setting[] = [
   { key: "pins_allowed", group: "team_defaults", type: "boolean", fallback: true, summary: "Whether a session may be pinned against eviction.", consequence: "Off here and no team may turn it on, whatever their own setting says." },
   { key: "members_may_control", group: "team_defaults", type: "boolean", fallback: true, summary: "Whether a team's members may drive each other's sessions.", consequence: "Off here and no team may turn it on." },
   {
+    key: "client_release_url",
+    group: "releases",
+    type: "string",
+    summary: "Where people's machines download releases from, each at <url>/v<version>/ as GitHub lays them out: this plane's own /downloads, a mirror, or empty for GitHub's.",
+    consequence: "troupe update and the desktop app install from here, and only what the release key signed. Empty means GitHub, which a closed network cannot reach.",
+  },
+  {
     key: "client_provider",
     group: "client_defaults",
     type: "enum",
@@ -626,6 +633,7 @@ const GROUPS = [
   { key: "administration", title: "Who administers this platform", blurb: "Both of these decide whether anybody can use this console at all." },
   { key: "provisioning", title: "How a change reaches the cluster", blurb: "Both are the deployment's to decide." },
   { key: "team_defaults", title: "What a new team starts with", blurb: "Applied when a group is enabled as a team." },
+  { key: "releases", title: "Where people's machines get releases", blurb: "The plane names it in the version policy it signs. Every release is still checked against the release key." },
   {
     key: "client_defaults",
     title: "What people's own machines talk to",
@@ -3389,8 +3397,23 @@ export class FakeAdmin {
   releases: Array<{ version: string; state: "mirrored" | "mirroring"; files: number }> = [];
   /** Versions whose manifest the release keys did not sign: mirroring one is refused. */
   readonly unsignedReleases = new Set<string>();
-  /** The `client_release_url` setting. */
-  releaseUrl: string | null = null;
+  /** The `client_release_url` setting, as the settings list holds it: empty or unset is GitHub's. */
+  get releaseUrl(): string | null {
+    const url = this.stored.get("client_release_url");
+    return typeof url === "string" && url !== "" ? url : null;
+  }
+
+  set releaseUrl(url: string | null) {
+    if (url === null) this.stored.delete("client_release_url");
+    else this.stored.set("client_release_url", url);
+  }
+
+  /** One person's clients as `me.clients` answers them: the same records Client versions counts, against the policy now. */
+  clientsOf(subject: string): Array<Record<string, unknown>> {
+    return this.seen
+      .filter((s) => s.subject === subject)
+      .map((s) => ({ component: s.component, version: s.version, platform: s.platform, since: s.since, seen_at: s.seen_at, standing: standing(this.policies[s.component]!, s.version), recommended: this.policies[s.component]!.recommended }));
+  }
 
   private signingJson(): { algorithm: string; public_key: string; fingerprint: string; version: number; created_at: string; versions: unknown[] } {
     const versions = Array.from({ length: this.signingVersions }, (_v, i) => this.signingVersions - i).map((version) => ({
