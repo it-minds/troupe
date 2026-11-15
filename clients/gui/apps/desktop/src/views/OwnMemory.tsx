@@ -670,7 +670,7 @@ function LevelView({
                 </div>
                 {forgetting === i && (
                   <div className="forget" role="alertdialog" aria-label="Forget this memory">
-                    <p>Forget “{entry.topic || "this memory"}”? New sessions stop starting with it. Sessions already running keep it until their next turn.</p>
+                    <p>Forget “{entry.topic || "this memory"}”? New sessions stop starting with it. Sessions already running keep it until they sleep.</p>
                     {!mine && <span className="micro scope">{scopeLine}</span>}
                     {!mine && reachLine && <span className="micro reach">{reachLine}</span>}
                     <button

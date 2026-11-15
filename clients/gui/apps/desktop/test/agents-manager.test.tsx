@@ -374,6 +374,47 @@ describe("each window's agent", () => {
     }
   });
 
+  // The palette's agent rows switch by the head's rule, on the platform as on this
+  // computer: the session's own listing offers them (troupe #898).
+  it("on the platform, switches from the palette's /plan as the head does", async () => {
+    const harness = await startHarness();
+    try {
+      window.troupe = { name: "Test shell", version: "0", signInFlow: "device" };
+      localStorage.setItem("troupe.pref.localOnly", "no");
+      localStorage.setItem("troupe.pref.planeUrl", harness.plane.baseUrl);
+      harness.plane.seed("ada@example.com", { title: "Rewrite the placement loop", profile: "dev" });
+      unmount = render(<App />).unmount;
+      (await waitFor(() => button("Sign in"), "the sign-in screen")).click();
+      await waitFor(() => document.querySelector(".usercode"), "the code to enter");
+      harness.idp.approve("ada@example.com", "Ada");
+      await waitFor(() => says("Welcome, Ada."), "the first sign-in's theme");
+      button("Continue")!.click();
+      (await waitFor(() => [...document.querySelectorAll<HTMLButtonElement>("button.row")].find((b) => b.textContent?.includes("Rewrite the placement loop")), "the session")).click();
+      const head = await waitFor(() => document.querySelector<HTMLElement>(".session-head"), "the session");
+      await waitFor(() => head.querySelector('button[aria-label="Agent"]')?.textContent === "Agent build", "the agent switch on build");
+
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "k", ctrlKey: true, bubbles: true, cancelable: true }));
+      const palette = await waitFor(() => document.querySelector<HTMLElement>('[role="dialog"][aria-label="Commands"]'), "the palette");
+      const paletteRow = (name: string): HTMLElement | undefined =>
+        [...palette.querySelectorAll<HTMLElement>(".row")].find((r) => r.querySelector(".name")?.textContent === `/${name}`);
+      await waitFor(() => paletteRow("plan") && paletteRow("build"), "the agents' rows");
+      // Not "only for a session on this computer": the head switches them here.
+      await waitFor(() => paletteRow("plan")!.classList.contains("unavailable") === false, "/plan enabled");
+      expect(paletteRow("build")!.textContent).not.toContain("only for a session on this computer");
+      const input = palette.querySelector<HTMLInputElement>("input")!;
+      type(input, "plan");
+      await waitFor(() => palette.querySelector('.row[aria-selected="true"] .name')?.textContent === "/plan", "/plan selected");
+      input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+      await waitFor(() => harness.worker.calls.some((c) => c.method === "profile.switch" && c.params["profile"] === "plan"), "profile.switch on the pod");
+      await waitFor(() => head.querySelector(".crumbs .profile")?.textContent === "plan", "the head on plan");
+    } finally {
+      delete window.troupe;
+      unmount?.();
+      unmount = null;
+      await harness.stop();
+    }
+  });
+
   it("says why a switch was refused", async () => {
     daemon.seed(REPO);
     // An agent saved and then broken by hand on disk: listed, then refused at the switch.

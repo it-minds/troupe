@@ -112,7 +112,8 @@ describe("the palette's kinds (#565)", () => {
     const build = paletteRow("build")!;
     expect(build.querySelector(".kind")!.textContent).toBe("agent");
     expect(build.querySelector(".badges")!.textContent).toBe("built in · default · worktree");
-    expect(build.textContent).toContain("start a branch on it from the terminal client");
+    // It switches the session to it, as the head's switch does.
+    expect(build.classList.contains("unavailable")).toBe(false);
 
     // One the daemon says cannot run here says why, in the daemon's words.
     const plan = paletteRow("plan")!;

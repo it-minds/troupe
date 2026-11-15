@@ -221,10 +221,11 @@ defmodule Troupe.Client do
   @doc """
   Every command the session offers, built-ins and agents, as the harness lists them
   (`commands.list`, Decision 698): what the palette shows, what Tab completes, and what
-  resolves an alias. Empty when the session's harness did not answer.
+  resolves an alias, each row in the terminal's own words where the table has some for it
+  (`Troupe.Commands.for_client/2`). Empty when the session's harness did not answer.
   """
   @spec command_table(session_id()) :: [command()]
-  def command_table(sid), do: impl(sid).command_table(sid)
+  def command_table(sid), do: Troupe.Commands.for_client(impl(sid).command_table(sid), "tui")
 
   @spec context(session_id()) :: {String.t(), Config.t()}
   def context(sid), do: impl(sid).context(sid)

@@ -2008,6 +2008,18 @@ details.advanced > summary {
   flex-direction: column;
   gap: var(--space-3);
 }
+/* An offer sits where an approval sits and holds the same parts, but nothing waits on it:
+   onboarding, the brief, your servers for a pod. The machine's quiet cyan for its edge,
+   the one raise for its shadow, and none of the reserved colour, which means work has
+   stopped for a person. */
+.approval.offer {
+  border: var(--bw-hairline) solid var(--border-strong);
+  border-top: var(--bw-heavy) solid var(--running-solid);
+  box-shadow: var(--sh-raise);
+}
+.approval.offer > header .mask {
+  color: var(--running-fg);
+}
 /* Said again for the conversation's column, where the onboarding panel also carries the
    start screen's `.start`, whose `flex: 1` would have it grow like the transcript. */
 .conversation > .approval {
@@ -2163,6 +2175,11 @@ details.advanced > summary {
   border-color: transparent;
   font-weight: 800;
   box-shadow: 4px 4px 0 var(--bg-shadow);
+}
+/* An offer's default is the screen's one filled button, in the cyan every other screen
+   fills it with. */
+.approval.offer .answers .allow {
+  background: var(--running-solid);
 }
 .approval .answers .deny {
   font-weight: 600;

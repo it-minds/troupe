@@ -1,6 +1,7 @@
 // The command table the fakes answer `commands.list` with: a slice of the harness's
 // (`Troupe.Commands`), enough for a palette to have sections, aliases, a command that
-// needs an argument, one a pod cannot run, an agent, `/goal` with the `/loop` whose
+// needs an argument, one a pod cannot run, the terminal client's own (`/upload`, `/quit`),
+// one with the terminal's words beside the neutral ones (`/cancel`), an agent, `/goal` with the `/loop` whose
 // summary names the goal too, `/memory`, which opens the desktop app's memory view, and a
 // command a repository's `.troupe/commands/review.md` defines, which the fakes run as
 // `commands.run` does: its prompt, `$ARGUMENTS` replaced, as the session's input.
@@ -30,12 +31,14 @@ export const COMMANDS: CommandEntry[] = [
     name: "cancel",
     aliases: [],
     section: "session",
-    summary: "Stop a branch mid-turn and remove its window",
+    summary: "Stop the agent mid-turn",
+    summaries: { tui: "Stop a branch mid-turn and remove its window" },
     usage: "/cancel [window]",
     args: [arg("window", false, "window")],
     availability: "window",
     source: "builtin",
-    detail: "Stops the agent in the activated window, or in the one named, and removes the window.",
+    detail: "Stops the agent where it is in its turn; the session stays, and the next message starts a new turn.",
+    details: { tui: "Stops the agent in the activated window, or in the one named, and removes the window." },
     example: "/cancel 2",
   },
   {
@@ -78,12 +81,13 @@ export const COMMANDS: CommandEntry[] = [
     name: "sessions",
     aliases: ["resume"],
     section: "navigate",
-    summary: "This directory's sessions, newest first",
+    summary: "Your sessions, newest first",
     usage: "/sessions [n | id]",
     args: [arg("session", false, "text")],
     availability: "always",
     source: "builtin",
-    detail: "Enter switches to one.",
+    detail: "The list of your sessions; this one carries on while you look.",
+    details: { tui: "Enter switches the window to one." },
     example: "/resume 2",
   },
   {
@@ -107,7 +111,7 @@ export const COMMANDS: CommandEntry[] = [
     summary: "Send a local file into the session's own mount",
     usage: "/upload <path>",
     args: [arg("path", true, "file")],
-    availability: "always",
+    availability: "tui",
     source: "builtin",
     detail: "The file is read on this machine and written to session:/<name>.",
     example: "/upload notes.md",
@@ -229,7 +233,7 @@ export const COMMANDS: CommandEntry[] = [
     summary: "Leave the terminal client; the session carries on",
     usage: "/quit",
     args: [],
-    availability: "always",
+    availability: "tui",
     source: "builtin",
     detail: "Sessions live in the daemon, so nothing stops.",
     example: null,

@@ -17,7 +17,8 @@ defmodule Troupe.CLIReferenceTest do
   test "troupe --help lists every built-in slash command the harness's table has, by section" do
     help = CLI.help()
 
-    for entry <- Troupe.Commands.builtins() do
+    # In the terminal's own words, where a row has some for it.
+    for entry <- Troupe.Commands.for_client(Troupe.Commands.builtins(), "tui") do
       assert help =~ entry["usage"], "troupe --help does not list #{entry["usage"]}"
       assert help =~ entry["summary"], "troupe --help does not say what /#{entry["name"]} does"
     end
@@ -33,7 +34,7 @@ defmodule Troupe.CLIReferenceTest do
     page = File.read!(@page)
     assert page == Generate.render(page), "run `mix troupe.cli.reference` in clients/tui"
 
-    for entry <- Troupe.Commands.builtins() do
+    for entry <- Troupe.Commands.for_client(Troupe.Commands.builtins(), "tui") do
       assert page =~ entry["summary"], "the reference does not list /#{entry["name"]}"
     end
 
