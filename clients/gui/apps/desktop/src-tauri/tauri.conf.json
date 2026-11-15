@@ -16,6 +16,7 @@
         "title": "Troupe",
         "width": 1100,
         "height": 760,
+        "center": true,
         "minWidth": 640,
         "minHeight": 480
       }

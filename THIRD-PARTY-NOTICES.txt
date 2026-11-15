@@ -233,9 +233,9 @@ Rust crates: allocator-api2, anyhow, arboard, constant_time_eq, dtoa, dyn-clone,
   serde_core, serde_json, serde_urlencoded, simdutf8, syn, sync_wrapper, tauri,
   tauri-plugin-clipboard-manager, tauri-plugin-dialog, tauri-plugin-fs,
   tauri-plugin-http, tauri-plugin-notification, tauri-plugin-opener,
-  tauri-plugin-single-instance, tauri-plugin-updater, tauri-runtime, tauri-runtime-wry,
-  tauri-utils, tauri-winrt-notification, thiserror, time, time-core, typed-path, typeid,
-  unicode-ident, utf8parse, vte, wasm-streams
+  tauri-plugin-single-instance, tauri-plugin-updater, tauri-plugin-window-state,
+  tauri-runtime, tauri-runtime-wry, tauri-utils, tauri-winrt-notification, thiserror,
+  time, time-core, typed-path, typeid, unicode-ident, utf8parse, vte, wasm-streams
 ----------------------------------------------------------------------------------------
 
 [The terms and conditions of the Apache License, Version 2.0, word for word as in LICENSE.]
@@ -1159,8 +1159,8 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
 npm packages: @tauri-apps/api
 Rust crates: tauri, tauri-plugin-clipboard-manager, tauri-plugin-dialog,
   tauri-plugin-fs, tauri-plugin-http, tauri-plugin-notification, tauri-plugin-opener,
-  tauri-plugin-updater, tauri-runtime, tauri-runtime-wry, tauri-utils,
-  tauri-winrt-notification
+  tauri-plugin-updater, tauri-plugin-window-state, tauri-runtime, tauri-runtime-wry,
+  tauri-utils, tauri-winrt-notification
 ----------------------------------------------------------------------------------------
 
 MIT License
@@ -1215,7 +1215,7 @@ npm packages: @tauri-apps/plugin-clipboard-manager, @tauri-apps/plugin-dialog,
   @tauri-apps/plugin-http, @tauri-apps/plugin-notification, @tauri-apps/plugin-opener
 Rust crates: tauri-plugin-clipboard-manager, tauri-plugin-dialog, tauri-plugin-fs,
   tauri-plugin-http, tauri-plugin-notification, tauri-plugin-opener,
-  tauri-plugin-single-instance, tauri-plugin-updater
+  tauri-plugin-single-instance, tauri-plugin-updater, tauri-plugin-window-state
 ----------------------------------------------------------------------------------------
 
 SPDXVersion: SPDX-2.1
