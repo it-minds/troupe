@@ -145,7 +145,29 @@ defmodule Troupe.RemoteLoginTest do
                  say: fn line -> send(me, {:said, line}) end
                )
 
-      assert Enum.any?(said(), &String.contains?(&1, "discovery document"))
+      # Said in words, with the address, not as the HTTP client's term (#930).
+      assert "could not reach http://127.0.0.1:1 (econnrefused); check the address and your network" in said()
+    end
+
+    test "an address that is not a plane's says so in words" do
+      failed = &Troupe.CLI.Remote.discovery_failed("https://id.example", &1)
+
+      assert failed.({:http, 404, "<html>not here</html>"}) ==
+               "https://id.example is not a Troupe plane: https://id.example/.well-known/troupe " <>
+                 "was not found (HTTP 404); check the address, which is the plane's own and not " <>
+                 "its identity provider's"
+
+      assert failed.({:http, 502, ""}) ==
+               "could not read the plane's discovery document: " <>
+                 "https://id.example/.well-known/troupe answered HTTP 502"
+
+      assert failed.({:malformed_json, "<html>"}) ==
+               "https://id.example is not a Troupe plane: https://id.example/.well-known/troupe is not JSON"
+
+      assert failed.({:discovery_missing, "plane_ws"}) ==
+               "the plane's discovery document at https://id.example/.well-known/troupe has no plane_ws"
+
+      refute failed.(:nxdomain) =~ ":nxdomain"
     end
   end
 
