@@ -1260,16 +1260,22 @@ defmodule Troupe.UI.Setup do
       height: max(rect.height - 2, 1)
     }
 
+  # A plane's run ends on the sign-in, and starts no session here.
+  defp step_word(state, "finish"), do: if(plane?(state), do: "Sign in", else: @words["finish"])
+  defp step_word(_state, step), do: @words[step]
+
   # The row of steps, what the daemon said last, the question and its sentence or two.
   defp head_lines(state, width) do
     steps =
       state
       |> path()
       |> Enum.map(fn step ->
+        word = step_word(state, step)
+
         cond do
-          step == state.step -> Span.new("→ " <> @words[step], style: Theme.style(:accent, [:bold]))
-          done?(state, step) -> Span.new("✓ " <> @words[step], style: Theme.style(:ok))
-          true -> Span.new("· " <> @words[step], style: Theme.style(:muted))
+          step == state.step -> Span.new("→ " <> word, style: Theme.style(:accent, [:bold]))
+          done?(state, step) -> Span.new("✓ " <> word, style: Theme.style(:ok))
+          true -> Span.new("· " <> word, style: Theme.style(:muted))
         end
       end)
       |> Enum.intersperse(Span.new("   "))

@@ -236,6 +236,22 @@ describe("the gallery", () => {
     await sees("version 5 was published since; reload it and try again");
   });
 
+  // The first run's walk (#930): a person nothing has been published for met a "Show
+  // everything" that showed what was already shown, which was nothing.
+  it("with nothing published yet, says how to publish and offers no button that changes nothing", async () => {
+    daemon.artifacts = [];
+    await signedIn();
+    await openGallery();
+    await sees("Nothing here yet");
+    await sees("Publish from any session with /publish.");
+    expect(button("Show everything")).toBeNull();
+    // Narrowed by a search, the button is back, and it widens the list again.
+    type(gallery().querySelector<HTMLInputElement>('input[aria-label="Search artifacts"]')!, "runbook");
+    (await seesButton("Show everything", gallery())).click();
+    await waitFor(() => gallery().querySelector<HTMLInputElement>('input[aria-label="Search artifacts"]')!.value === "", "the search cleared");
+    expect(button("Show everything")).toBeNull();
+  });
+
   it("asks nothing under Local only, and says so", async () => {
     localStorage.setItem("troupe.pref.localOnly", "yes");
     await openGallery();

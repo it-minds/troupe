@@ -406,6 +406,28 @@ describe("each screen", () => {
     expect(onAnswer).toHaveBeenLastCalledWith({ workspace: "/home/ada/repo", approvals: "auto" });
   });
 
+  // The first run's walk (#930): a folder chooser that failed to open left Choose… doing
+  // nothing at all.
+  it("Workspace: a folder chooser that fails says so, and the typed path still goes", async () => {
+    const onAnswer = vi.fn();
+    const picks: Array<() => Promise<string | null>> = [
+      () => Promise.reject(new Error("the dialog plugin is not allowed here.")),
+      () => Promise.resolve("/home/ada/chosen"),
+    ];
+    window.troupe = { name: "Test shell", version: "0", pickDirectory: () => picks.shift()!() };
+    const client = { recentWorkspaces: () => Promise.resolve({ workspaces: [] }) } as unknown as DaemonClient;
+    unmount = render(<Workspace flow={flowAt("workspace")} client={client} {...idle} onAnswer={onAnswer} />).unmount;
+    (await seesButton("Choose…")).click();
+    await sees("The folder chooser did not open: the dialog plugin is not allowed here. Type the path instead.");
+    expect(document.querySelector('[role="alert"]')).not.toBeNull();
+    // Chosen the second time: the sentence goes, and the path is the answer.
+    button("Choose…")!.click();
+    await waitFor(() => (field("Directory") as HTMLInputElement).value === "/home/ada/chosen" || null, "the chosen folder");
+    expect(says("The folder chooser did not open")).toBe(false);
+    button("Continue")!.click();
+    expect(onAnswer).toHaveBeenLastCalledWith({ workspace: "/home/ada/chosen", approvals: "ask" });
+  });
+
   it("Daemon: what is there now pressed, the entry named, and nothing to start without troupe-daemon", async () => {
     const onAnswer = vi.fn();
     const off = render(<Daemon flow={flowAt("daemon")} {...idle} onAnswer={onAnswer} />);

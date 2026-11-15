@@ -42,7 +42,8 @@ import {
 } from "@troupe/client";
 import type { AgentRow, AuthSession, DaemonClient, FleetRow, NewSessionWhere, ProfileOffering, SessionKind } from "@troupe/client";
 import { useProfiles } from "../hooks";
-import { prefs, shell } from "../shell";
+import { prefs } from "../shell";
+import { useChooseFolder } from "./ChooseFolder";
 import { relative } from "./bits";
 import { Mask } from "./brand";
 
@@ -627,20 +628,17 @@ function LocalControls({
   onWatch: (w: boolean) => void;
   onPrivately: (p: boolean) => void;
 }): JSX.Element {
-  const chooser = shell()?.pickDirectory;
+  const choose = useChooseFolder(onPick);
   // Only where the daemon says it can seal one; a link made since cannot change what it
   // said at `initialize`, but a daemon that knows the capability and is linked now can.
   const canSeal = daemon.supportsPrivateSessions || (linked && "private_sessions" in daemon.capabilities);
   return (
     <div className="ns-local">
       <div className="ns-folder">
-        <input value={folder} onChange={(e) => onFolder(e.target.value)} placeholder={chooser ? "Choose one, or type a path" : "/home/you/project"} aria-label="Which directory" spellCheck={false} />
-        {chooser && (
-          <button type="button" onClick={() => void chooser().then((p) => p && onPick(p))}>
-            Choose…
-          </button>
-        )}
+        <input value={folder} onChange={(e) => onFolder(e.target.value)} placeholder={choose.button ? "Choose one, or type a path" : "/home/you/project"} aria-label="Which directory" spellCheck={false} />
+        {choose.button}
       </div>
+      {choose.failed}
       {recent.length > 0 && (
         <div className="chips">
           {recent.map((path) => (

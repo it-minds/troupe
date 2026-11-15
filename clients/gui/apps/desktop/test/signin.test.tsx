@@ -28,6 +28,7 @@ const address = (): HTMLInputElement | null => document.querySelector<HTMLInputE
 
 beforeEach(async () => {
   localStorage.clear();
+  sessionStorage.clear();
   harness = await startHarness();
   // The desktop shell's way in: a code to enter in a browser, never a redirect.
   window.troupe = { name: "Test shell", version: "0", signInFlow: "device" };
@@ -110,6 +111,12 @@ describe("signing in to a plane", () => {
     button("Continue")!.click();
     await waitFor(() => says("Sign in next"), "the plane's finish");
     await sees("Finishing here signs you in to it.");
+    // What the screen says above the step is the plane's way, not this machine's: nothing
+    // is written here, and the last step is the sign-in, not a first session.
+    await sees("Signing in to your organisation's Troupe is next.");
+    expect(says("Everything is written to this computer's own settings")).toBe(false);
+    const steps = [...document.querySelectorAll('[aria-label="Steps"] li')].map((li) => li.textContent);
+    expect(steps).toEqual(["✓ Where", "→ Sign in"]);
     button("Finish and sign in")!.click();
 
     // The sign-in has started by itself, at the address the run recorded: the code is
@@ -119,9 +126,27 @@ describe("signing in to a plane", () => {
     expect(localStorage.getItem("troupe.pref.planeUrl")).toBe(harness.plane.baseUrl);
     harness.idp.approve("ada@example.com", "Ada");
 
-    await waitFor(() => says("Welcome, Ada."), "the first sign-in's theme");
-    button("Continue")!.click();
-    await waitFor(launcher, "the launcher");
+    // The first run opened on the look; the sign-in it ends on does not ask for it again,
+    // and keeps that answer as this person's, so the next sign-in does not either.
+    await waitFor(launcher, "the launcher, with no second theme screen");
+    expect(says("Welcome, Ada.")).toBe(false);
+    await waitFor(() => localStorage.getItem("troupe.pref.appearance.chosen.ada@example.com") === "yes", "the pick kept as Ada's");
+    expect(sessionStorage.getItem("troupe.firstRunLook")).toBeNull();
+  });
+
+  // The browser build signs in by leaving for the provider's page and coming back to a new
+  // one: the first run's pick has to outlast the page that made it.
+  it("after a first run, a sign-in that came back to a new page does not ask for the theme either", async () => {
+    sessionStorage.setItem("troupe.firstRunLook", "yes");
+    localStorage.setItem("troupe.pref.planeUrl", harness.plane.baseUrl);
+    unmount = render(<App />).unmount;
+    (await waitFor(() => button("Sign in"), "the sign-in screen")).click();
+    await approveTheCode();
+    await waitFor(launcher, "the launcher, with no theme screen");
+    expect(says("Welcome, Ada.")).toBe(false);
+    // Spent once the sign-in has taken it, which is just after the launcher is drawn.
+    await waitFor(() => sessionStorage.getItem("troupe.firstRunLook") === null || null, "the pick spent");
+    expect(localStorage.getItem("troupe.pref.appearance.chosen.ada@example.com")).toBe("yes");
   });
 
   // D134: the window said nothing of a sign-in the credential store refused; only the
@@ -168,12 +193,17 @@ describe("signing in to a plane", () => {
     (await waitFor(() => button("Sign in"), "the sign-in screen")).click();
     await approveTheCode();
     await waitFor(() => says("Welcome, Ada."), "the first sign-in's theme");
+    // It names the rail's entry the theme is changed in (#930: it said "Settings", which
+    // is the launcher's way to This computer).
+    await sees("You can change this any time in Appearance.");
+    expect(says("any time in Settings")).toBe(false);
     button("Continue")!.click();
     await waitFor(launcher, "the launcher");
 
     // Into the list, then out.
     button("02")!.click();
     await waitFor(() => nav("Sessions")?.getAttribute("aria-current") === "page", "the list");
+    expect(nav("Appearance")).not.toBeNull();
     button("Sign out")!.click();
     (await waitFor(() => button("Sign in"), "the sign-in screen again")).click();
     await approveTheCode();
