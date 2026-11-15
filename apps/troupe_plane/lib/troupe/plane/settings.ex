@@ -176,26 +176,26 @@ defmodule Troupe.Plane.Settings do
     },
     %Setting{
       key: "default_idle_timeout_seconds",
-      label: "Idle before a session goes dormant",
+      label: "Idle before a session goes to sleep",
       unit: :minutes,
       group: :team_defaults,
       type: :integer,
       app_key: :default_idle_timeout_seconds,
       fallback: 1800,
-      summary: "The longest a team may let its sessions sit idle before going dormant.",
+      summary: "The longest a team may let its sessions sit idle before going to sleep.",
       consequence:
-        "A ceiling as well as a default: a team may set a shorter timeout and not a longer one, and the Teams page quotes this when it refuses. A dormant session costs nothing and wakes with its history.",
+        "A ceiling as well as a default: a team may set a shorter timeout and not a longer one, and the Teams page quotes this when it refuses. A session asleep costs nothing and wakes with its history.",
       effect: :immediate
     },
     %Setting{
       key: "default_cache_eviction_days",
-      label: "A dormant session's cache kept",
+      label: "A sleeping session's cache kept",
       unit: :days,
       group: :team_defaults,
       type: :integer,
       app_key: :default_cache_eviction_days,
       fallback: 7,
-      summary: "The longest a team may keep a dormant session's cache.",
+      summary: "The longest a team may keep a sleeping session's cache.",
       consequence:
         "A ceiling as well as a default. A team may keep a cache for fewer days and not more.",
       effect: :immediate

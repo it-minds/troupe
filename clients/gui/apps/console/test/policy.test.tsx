@@ -54,10 +54,10 @@ describe("the settings", () => {
     await open();
     button("Change", await waitFor(() => row("default_idle_timeout_seconds"), "the setting"))!.click();
     // Asked in minutes, the plane's seconds converted on the way out.
-    type(await waitFor(() => field("Idle before a session goes dormant"), "the field"), "15");
+    type(await waitFor(() => field("Idle before a session goes to sleep"), "the field"), "15");
     button("Preview", row("default_idle_timeout_seconds")!)!.click();
     await waitFor(() => says("What will happen", row("default_idle_timeout_seconds")!), "the preview");
-    await sees("Idle before a session goes dormant: 15 min", () => row("default_idle_timeout_seconds"));
+    await sees("Idle before a session goes to sleep: 15 min", () => row("default_idle_timeout_seconds"));
     button("Apply", row("default_idle_timeout_seconds")!)!.click();
     await waitFor(() => says("Recorded in the audit as setting.put on default_idle_timeout_seconds"), "the audit's note");
     expect(fake.admin.stored.get("default_idle_timeout_seconds")).toBe(900);

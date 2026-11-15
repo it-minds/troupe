@@ -553,7 +553,7 @@ const SETTINGS: Setting[] = [
   { key: "default_budget_micros", group: "team_defaults", type: "integer", summary: "What a new team may spend; 0 is no ceiling.", consequence: "Existing teams keep theirs." },
   { key: "default_budget_period", group: "team_defaults", type: "enum", values: ["monthly", "never"], fallback: "monthly", summary: "Whether a new team's ceiling turns over each month or is a total.", consequence: "Existing teams keep theirs." },
   { key: "default_idle_timeout_seconds", group: "team_defaults", type: "integer", fallback: 1800, summary: "How long a session sits idle before it is put to sleep.", consequence: "No team may set a longer one." },
-  { key: "default_cache_eviction_days", group: "team_defaults", type: "integer", fallback: 7, summary: "How long a dormant session's workspace is kept on a pod's disk.", consequence: "No team may set a longer one." },
+  { key: "default_cache_eviction_days", group: "team_defaults", type: "integer", fallback: 7, summary: "How long a sleeping session's workspace is kept on a pod's disk.", consequence: "No team may set a longer one." },
   { key: "default_erase_after_days", group: "team_defaults", type: "integer", fallback: 365, summary: "How long a session is kept before it is erased.", consequence: "No team may keep sessions longer." },
   { key: "pins_allowed", group: "team_defaults", type: "boolean", fallback: true, summary: "Whether a session may be pinned against eviction.", consequence: "Off here and no team may turn it on, whatever their own setting says." },
   { key: "members_may_control", group: "team_defaults", type: "boolean", fallback: true, summary: "Whether a team's members may drive each other's sessions.", consequence: "Off here and no team may turn it on." },
@@ -653,8 +653,8 @@ const NAMING: Record<string, { label: string; unit: string; choices?: Array<{ va
       { value: "never", label: "never turns over" },
     ],
   },
-  default_idle_timeout_seconds: { label: "Idle before a session goes dormant", unit: "minutes" },
-  default_cache_eviction_days: { label: "A dormant session's cache kept", unit: "days" },
+  default_idle_timeout_seconds: { label: "Idle before a session goes to sleep", unit: "minutes" },
+  default_cache_eviction_days: { label: "A sleeping session's cache kept", unit: "days" },
   default_erase_after_days: { label: "Erase a session after", unit: "days" },
   pins_allowed: { label: "Members may pin a session", unit: "switch" },
   members_may_control: { label: "Members may steer a team session", unit: "switch" },
@@ -3846,7 +3846,7 @@ function limitRefusal(field: string, asked: unknown, ceiling: unknown): string {
   };
   const days = (n: unknown): string => (Number(n) === 1 ? "1 day" : `${String(n)} days`);
   if (field === "idle_timeout_seconds") return `The platform allows at most ${time(Number(ceiling))} idle; ${time(Number(asked))} is more than that.`;
-  if (field === "cache_eviction_days") return `The platform allows at most ${days(ceiling)} for a dormant session's cache; ${days(asked)} is more than that.`;
+  if (field === "cache_eviction_days") return `The platform allows at most ${days(ceiling)} for a sleeping session's cache; ${days(asked)} is more than that.`;
   if (field === "erase_after_days") return `The platform allows at most ${days(ceiling)} before a session is erased; ${days(asked)} is more than that.`;
   if (field === "pins_allowed") return "The platform does not let members pin a session; a team may not turn it on.";
   if (field === "members_may_control") return "The platform does not let members steer a team session; a team may not turn it on.";

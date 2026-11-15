@@ -816,7 +816,7 @@ function limitRefusal(field: string, asked: unknown, ceiling: unknown): string {
     case "idle_timeout_seconds":
       return `The platform allows at most ${duration(Number(ceiling))} idle; ${duration(Number(asked))} is more than that.`;
     case "cache_eviction_days":
-      return `The platform allows at most ${days(ceiling)} for a dormant session's cache; ${days(asked)} is more than that.`;
+      return `The platform allows at most ${days(ceiling)} for a sleeping session's cache; ${days(asked)} is more than that.`;
     case "erase_after_days":
       return `The platform allows at most ${days(ceiling)} before a session is erased; ${days(asked)} is more than that.`;
     case "pins_allowed":
