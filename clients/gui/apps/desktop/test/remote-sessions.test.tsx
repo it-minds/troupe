@@ -48,6 +48,8 @@ const row = (text: string): HTMLButtonElement | undefined =>
 
 describe("a laptop's session, from another computer", () => {
   it("is listed as Remote, an away laptop's says since when, and an online one is steered", async () => {
+    // A laptop whose daemon is from before troupe #932, which answers a call once from here.
+    harness.worker.relayedAllowSession = false;
     harness.plane.relay("ada@example.com", { id: "s-laptop-on", ownerName: "Ada", workspace: "billing", shares: [{ subject: "alice@example.com", role: "control" }] });
     const away = harness.plane.relay("ada@example.com", { id: "s-laptop-away", ownerName: "Ada", workspace: "archive", shares: [{ subject: "alice@example.com", role: "control" }] });
     harness.plane.offline(away.id, "2026-10-18T07:30:00Z");
@@ -84,6 +86,26 @@ describe("a laptop's session, from another computer", () => {
     allow.click();
     const decided = await waitFor(() => harness.worker.calls.find((c) => c.method === "approval.respond"), "the answer at the laptop");
     expect(decided.params["decision"]).toBe("allow");
+  });
+
+  it("a laptop that takes it is answered for the session from here, and shows the folder the call acts in (troupe #932)", async () => {
+    harness.plane.relay("ada@example.com", { id: "s-laptop-wide", ownerName: "Ada", workspace: "billing", shares: [{ subject: "alice@example.com", role: "control" }] });
+    await signedIn();
+
+    unmount = render(<App />).unmount;
+    (await waitFor(() => row("billing"), "the relayed session's row")).click();
+    await sees("On Ada's laptop · Online");
+    const composer = await waitFor(() => document.querySelector<HTMLTextAreaElement>('textarea[aria-label="Message"]'), "the composer");
+    type(composer, "approve: make test");
+    button("Send")!.click();
+
+    const panel = await waitFor(() => document.querySelector<HTMLElement>("section.approval:not(.answered)"), "the approval");
+    await waitFor(() => panel.textContent?.includes("In /workspace."), "the folder the call acts in");
+    const wide = await waitFor(() => panel.querySelector<HTMLButtonElement>("button.scoped"), "the answer for the session");
+    expect(wide.textContent).toBe("Allow every command for this session");
+    wide.click();
+    const decided = await waitFor(() => harness.worker.calls.find((c) => c.method === "approval.respond"), "the answer at the laptop");
+    expect(decided.params["decision"]).toBe("allow_session");
   });
 
   it("says the laptop is offline, and since when, when it is opened while away", async () => {

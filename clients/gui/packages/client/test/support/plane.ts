@@ -262,6 +262,8 @@ interface Relayed {
   workspace: string;
   shares: Array<{ subject: string; role: "observe" | "control" }>;
   offlineSince: string | null;
+  /** Why the laptop is away, while it is: `stopped` or `offline` (troupe #932). */
+  paused?: "stopped" | "offline";
   offeredAt: string;
   /** A private session, offered with its owner's yes (troupe #765). */
   private?: boolean;
@@ -671,6 +673,29 @@ export class FakePlane {
     this.changed();
   }
 
+  /**
+   * The laptop went with views open, as the plane says it (troupe #932): offline since now
+   * and paused for `reason`, and every view open on it is sent `offer_paused` and kept.
+   */
+  pause(id: string, reason: "stopped" | "offline" = "offline"): void {
+    const offer = this.relayed.get(id);
+    if (!offer) throw new Error(`no relayed session ${id}`);
+    offer.offlineSince = new Date().toISOString();
+    offer.paused = reason;
+    this.opts.worker.pauseRelay(id, reason);
+    this.changed();
+  }
+
+  /** The paused laptop is back: online, and each view is sent `offer_resumed` and ends, to be opened again. */
+  resume(id: string): void {
+    const offer = this.relayed.get(id);
+    if (!offer) throw new Error(`no relayed session ${id}`);
+    offer.offlineSince = null;
+    delete offer.paused;
+    this.opts.worker.resumeRelay(id);
+    this.changed();
+  }
+
   /** The laptop's person withdrew it: gone from every list. */
   withdraw(id: string): void {
     this.relayed.delete(id);
@@ -953,6 +978,7 @@ export class FakePlane {
           workspace: o.workspace,
           state: o.offlineSince ? "offline" : "online",
           offline_since: o.offlineSince,
+          paused: o.offlineSince ? (o.paused ?? "offline") : null,
           offered_at: o.offeredAt,
           private: o.private === true,
           your_role: o.owner === subject ? "owner" : role,
@@ -1577,7 +1603,7 @@ export class FakePlane {
             endpoint: this.opts.worker.endpoint,
             role: podRole,
             your_role: offer.owner === subject ? "owner" : role,
-            token: encodeToken({ sub: subject, name, session_id: offer.id, role: podRole, scopes, aud: this.opts.worker.workerId, exp }),
+            token: encodeToken({ sub: subject, name, session_id: offer.id, role: podRole, scopes, aud: this.opts.worker.workerId, exp, relayed: true }),
             expires_at: exp,
           },
         };

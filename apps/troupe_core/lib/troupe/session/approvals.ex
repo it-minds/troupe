@@ -631,16 +631,22 @@ defmodule Troupe.Session.Approvals do
     }
   end
 
-  # The request as it is asked: a delegation's with what the gate shows (Decision 850), a
-  # publication's with what the person aims, and one a per-tool rule asks with that rule
-  # (#658), so the person sees why it asks.
-  defp requested(%{delegation: delegation} = req),
+  # The request as it is asked: a delegation's with what the gate shows, a publication's
+  # with what the person aims, and one a per-tool rule asks with that rule (#658), so the
+  # person sees why it asks; each with the folder the call acts in where the tool said it,
+  # so a person answering from another device sees it as one at the laptop does.
+  defp requested(%{cwd: cwd} = req) when is_binary(cwd),
+    do: req |> asked() |> Map.put("cwd", cwd)
+
+  defp requested(req), do: asked(req)
+
+  defp asked(%{delegation: delegation} = req),
     do: Map.put(describe(req), "delegation", delegation)
 
-  defp requested(%{publication: publication} = req),
+  defp asked(%{publication: publication} = req),
     do: req |> requested_rule() |> Map.put("publication", publication)
 
-  defp requested(req), do: requested_rule(req)
+  defp asked(req), do: requested_rule(req)
 
   defp requested_rule(%{rule: rule} = req) when is_map(rule),
     do: Map.put(describe(req), "rule", rule)

@@ -19,8 +19,16 @@ defmodule Troupe.Protocol.Relay do
 
   **The laptop's rules hold.** A remote prompt is a prompt: the session's enforced layer,
   per-tool rules and approvals apply to it as to one typed at the laptop. An approval
-  answered remotely is `allow` or `deny` for that one call; `allow_session`, which would
-  stop the session asking for that tool, is the laptop's person's to give at the laptop.
+  answered remotely is `allow`, `deny` or `allow_session`: somebody the laptop's person let
+  steer may stop the session asking for that tool for the rest of it, as at the laptop,
+  since the owner's consent to their steering covers answering, and what it allows ends
+  with the session. A call one of the laptop's own rules asks about is asked again
+  whatever was allowed for the session, so nothing of the laptop's rules is loosened.
+
+  **A laptop that is away is paused.** When the laptop's connection goes, its daemon
+  having said why (`relay.pause`) or not, the plane keeps each view open, tells it
+  `offer_paused` with the reason (`paused_reasons/0`), refuses what is sent meanwhile with
+  `paused_refusal/0`, and tells it `offer_resumed` when the laptop is back.
 
   **A private session, with its owner's consent.** A private session is sealed under its
   person's key, and the relay carries what an offered session says through the plane
@@ -94,6 +102,23 @@ defmodule Troupe.Protocol.Relay do
   @doc "What closes a view of a private session once the person's invitation is taken back."
   @spec invitation_taken_back() :: String.t()
   def invitation_taken_back, do: @invitation_taken_back
+
+  @paused_reasons ~w(stopped offline)
+
+  @paused_refusal "The laptop is away: nothing sent now reaches it. Send it again once the " <>
+                    "laptop is back."
+
+  @doc """
+  Why an offer is paused: `stopped`, its daemon said it was stopping; `offline`, its
+  connection went without a word or stopped answering, which is what a laptop asleep or
+  out of reach looks like.
+  """
+  @spec paused_reasons() :: [String.t()]
+  def paused_reasons, do: @paused_reasons
+
+  @doc "What a request sent to a paused offer is refused with."
+  @spec paused_refusal() :: String.t()
+  def paused_refusal, do: @paused_refusal
 
   @doc "The scopes a role carries over the relay."
   @spec scopes(String.t()) :: [:observe | :control]
@@ -170,19 +195,9 @@ defmodule Troupe.Protocol.Relay do
   defp topic(_topic, named), do: named
 
   # Named by the agents of a path on the laptop rather than the session's own, a listing
-  # is about the laptop; and `allow_session` would loosen what the session asks.
+  # is about the laptop.
   defp decision("agents.list", %{"workspace" => _path}) do
     {:error, Error.new(:forbidden, %{field: "workspace", reason: "the session's own agents only"})}
-  end
-
-  defp decision("approval.respond", %{"decision" => "allow_session"}) do
-    {:error,
-     Error.new(:forbidden, %{
-       field: "decision",
-       reason:
-         "allowing a tool for the rest of the session is done at the laptop; " <>
-           "from another device a call is allowed or denied once"
-     })}
   end
 
   defp decision(_method, _params), do: :ok

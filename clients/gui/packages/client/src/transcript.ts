@@ -129,6 +129,11 @@ export type Entry =
        * session" does not stop the next such call asking. Absent where no rule asked.
        */
       rule?: { rule: string; scope: string; source: string | null };
+      /**
+       * The folder the call acts in, as the server said it (troupe #932): the call's own,
+       * else the session's workspace. Absent from a server from before it.
+       */
+      cwd?: string;
     }
   /**
    * A subagent handed a brief: `task` is its first message, the parts under their names,
@@ -334,7 +339,17 @@ export interface TranscriptState {
    * latest version, in the order each name was first written, from `scratch_updated`.
    */
   scratch: ScratchDocument[];
+  /**
+   * A laptop's session steered through the plane, while its laptop is away and once it is
+   * back (troupe #932): `offer_paused` says why it went (`stopped`, its daemon said it was
+   * stopping; `offline`, it went without a word, asleep or out of reach) and since when,
+   * and `offer_resumed` that it is back, which holds until the session next says anything.
+   */
+  laptop?: LaptopPresence;
 }
+
+/** Where a relayed session's laptop is, as the plane said it on the session's stream. */
+export type LaptopPresence = { state: "away"; reason: string; since: string | undefined } | { state: "back" };
 
 /** A phase of the root agent's turn the curtain line counts: what its `agent_state` says it does. */
 export type CurtainPhase = "thinking" | "acting" | "compacting";
@@ -1030,7 +1045,9 @@ export function fold(state: TranscriptState, e: TroupeEvent, options: FoldOption
   if (!isDurable(e)) return foldEphemeral(state, e, now);
 
   const d = e;
-  const next: TranscriptState = { ...state, lastSeq: Math.max(state.lastSeq, d.seq) };
+  // "The laptop is back" is said until the session says something after it.
+  const { laptop, ...rest } = state;
+  const next: TranscriptState = { ...rest, ...(laptop && laptop.state === "away" ? { laptop } : {}), lastSeq: Math.max(state.lastSeq, d.seq) };
   const base = { seq: d.seq, agent: d.agent };
 
   switch (d.type) {
@@ -1400,6 +1417,7 @@ export function fold(state: TranscriptState, e: TroupeEvent, options: FoldOption
       const gate = gateOf(d.data["delegation"]);
       const publication = publicationOf(d.data["publication"]);
       const rule = ruleOf(d.data["rule"]);
+      const cwd = d.data["cwd"];
       return {
         ...next,
         entries: [
@@ -1416,6 +1434,7 @@ export function fold(state: TranscriptState, e: TroupeEvent, options: FoldOption
             ...(gate ? { delegation: gate } : {}),
             ...(publication ? { publication } : {}),
             ...(rule ? { rule } : {}),
+            ...(typeof cwd === "string" && cwd !== "" ? { cwd } : {}),
           },
         ],
       };
@@ -1571,6 +1590,13 @@ function heard(curtain: CurtainState, now: () => number): CurtainState {
 
 function foldEphemeral(state: TranscriptState, e: TroupeEvent, now: () => number): TranscriptState {
   switch (e.type) {
+    // The plane, of a laptop's session it relays: the laptop went, and is back.
+    case "offer_paused": {
+      const since = e.data["since"];
+      return { ...state, laptop: { state: "away", reason: str(e.data["reason"], "offline"), since: typeof since === "string" ? since : undefined } };
+    }
+    case "offer_resumed":
+      return { ...state, laptop: { state: "back" } };
     case "llm_delta": {
       if (!isRoot(e.agent)) return state; // a subagent's stream is not what is on screen
       const d = e.data as LlmDeltaData;

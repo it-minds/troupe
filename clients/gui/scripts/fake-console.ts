@@ -88,6 +88,17 @@ if (offerAfter > 0) {
   setTimeout(() => plane.relay("ada@example.com", { id: "s-laptop-ledger", ownerName: "Ada", workspace: "ledger", shares: [{ subject: as.subject, role: "observe" }] }), offerAfter).unref?.();
 }
 
+// AWAY_AFTER_MS later the first laptop goes away (asleep or offline, as the plane says it on
+// the session's stream), and AWAY_FOR_MS (10000) after that it is back (troupe #932); unset
+// for neither.
+const awayAfter = Number(process.env["AWAY_AFTER_MS"] ?? 0);
+if (awayAfter > 0) {
+  setTimeout(() => {
+    plane.pause("s-laptop-billing", "offline");
+    setTimeout(() => plane.resume("s-laptop-billing"), Number(process.env["AWAY_FOR_MS"] ?? 10_000)).unref?.();
+  }, awayAfter).unref?.();
+}
+
 console.log(`
   identity provider  ${idp.issuer}
   plane              ${plane.baseUrl}

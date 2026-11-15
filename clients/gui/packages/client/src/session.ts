@@ -32,6 +32,12 @@ export type ApprovalDecision = "allow" | "deny" | "allow_session" | "allow_alway
 /** The capability a server names at `initialize` when `approval.respond` takes `allow_always`. */
 export const ALLOW_ALWAYS = "approval_allow_always";
 
+/**
+ * The capability a laptop's daemon names at `initialize` over the plane's relay when it
+ * takes `allow_session` from there (troupe #932); one from before answers a call once.
+ */
+export const RELAYED_ALLOW_SESSION = "relayed_allow_session";
+
 export interface SessionViewHooks {
   /** Every event for this session, durable or ephemeral, in arrival order. */
   onEvent?: (e: TroupeEvent) => void;

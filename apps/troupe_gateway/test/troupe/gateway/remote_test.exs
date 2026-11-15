@@ -267,17 +267,25 @@ defmodule Troupe.Gateway.RemoteTest do
       assert switched["actor"]["via"] == "plane"
     end
 
-    test "a person shared at control answers an approval once, and may not allow for the session", ctx do
+    test "a person shared at control answers an approval once or for the session, seeing the folder it acts in",
+         ctx do
       %{session: session} =
         start_session(ctx,
-          steps: [{:tools, [{"write_file", %{"path" => "a.txt", "content" => "hi"}}]}],
+          steps: [
+            {:tools, [{"write_file", %{"path" => "a.txt", "content" => "hi"}}]},
+            {:tools, [{"write_file", %{"path" => "b.txt", "content" => "hi"}}]}
+          ],
           default: {:text, "done"},
           config: [auto_approve: false]
         )
 
       {:ok, _} = offer(ctx, session.id, [%{"person" => @bea, "role" => "control"}])
       assert_receive {:relay, "relay.offer", _}, 5_000
-      viewer(ctx, "v-bea", session.id, @bea, "control")
+      hello = viewer(ctx, "v-bea", session.id, @bea, "control")
+
+      # The laptop says it honours an answer for the session from here.
+      assert hello["capabilities"]["relayed"] == true
+      assert hello["capabilities"]["relayed_allow_session"] == true
 
       ask(ctx, "v-bea", 1, "subscribe", %{"command_id" => "c-s", "topic" => "session:#{session.id}", "from_seq" => 0})
 
@@ -289,8 +297,10 @@ defmodule Troupe.Gateway.RemoteTest do
 
       requested = await_event("v-bea", "approval_requested")
       call_id = requested["data"]["call_id"]
+      # The call names no folder of its own: the session's workspace is where it acts.
+      assert requested["data"]["cwd"] == Path.expand(ctx.workspace)
 
-      assert %{"error" => %{"code" => -32_004, "data" => %{"field" => "decision"}}} =
+      assert %{"result" => %{"accepted" => true}} =
                ask(ctx, "v-bea", 3, "approval.respond", %{
                  "command_id" => "c-2",
                  "session_id" => session.id,
@@ -298,17 +308,17 @@ defmodule Troupe.Gateway.RemoteTest do
                  "decision" => "allow_session"
                })
 
-      assert %{"result" => %{"accepted" => true}} =
-               ask(ctx, "v-bea", 4, "approval.respond", %{
-                 "command_id" => "c-3",
-                 "session_id" => session.id,
-                 "call_id" => call_id,
-                 "decision" => "allow"
-               })
-
       decided = await_event("v-bea", "approval_decided")
+      assert decided["data"]["decision"] == "allow_session"
       assert decided["actor"]["subject"] == @bea
       assert decided["actor"]["via"] == "plane"
+
+      # The second write of the same tool runs unasked, as it would have at the laptop.
+      await_event("v-bea", "turn_ended")
+
+      log = Log.replay(session.id)
+      assert Enum.count(log, &(&1.type == "approval_requested")) == 1
+      assert Enum.count(log, &(&1.type == "tool_call_completed")) == 2
     end
 
     test "the daemon holds a person to its own record, whatever role the plane relays them at", ctx do
@@ -437,6 +447,24 @@ defmodule Troupe.Gateway.RemoteTest do
         {:ok, got} = Client.call(ctx.ada, "session.get", %{"session_id" => kept.id})
         got["remote"]["state"] == "online"
       end)
+    end
+
+    test "a daemon that stops says so before it hangs up, and leaves the remote views to the plane",
+         ctx do
+      %{session: session} = start_session(ctx, default: {:text, "ok"})
+      {:ok, _} = offer(ctx, session.id, [%{"person" => @bea, "role" => "control"}])
+      assert_receive {:relay, "relay.offer", _}, 5_000
+      viewer(ctx, "v-bea", session.id, @bea, "control")
+
+      :ok = GenServer.stop(Remote, :shutdown)
+
+      assert_receive {:relay_pause, %{"reason" => "stopped"}}, 5_000
+      # The plane pauses the view rather than ending it: the daemon closes none there.
+      refute_received {:relay_close, "v-bea", _}
+
+      # Started again, it dials and offers what it still does.
+      assert_receive {:relay, "relay.sync", %{"offers" => [%{"session_id" => id}]}}, 10_000
+      assert id == session.id
     end
 
     test "the daemon renews its own token on the open socket before it runs out, and when warned", ctx do

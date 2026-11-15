@@ -16,6 +16,7 @@ import { Fragment, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRe
 import type { JSX } from "react";
 import {
   ALLOW_ALWAYS,
+  RELAYED_ALLOW_SESSION,
   configKey,
   isBusy,
   isRoot,
@@ -229,6 +230,9 @@ export function Session({
   // Whether the server writes a lasting rule from an approval (troupe #920): asked of what it
   // said at `initialize`, so the answer appears the day it does.
   const alwaysAllow = Boolean(sessionView?.capabilities[ALLOW_ALWAYS]);
+  // A laptop's session through the plane is answered once, unless its daemon takes an answer
+  // for the rest of the session from there (troupe #932).
+  const onceOnly = kind === "remote" && sessionView?.capabilities[RELAYED_ALLOW_SESSION] !== true;
   // A reply's Retry sends the person's words again, as a new turn.
   const retry = useCallback((text: string) => view.send(text), [view]);
   const publishReply = useMemo(() => (daemon ? (text: string) => setPublishing({ text }) : undefined), [daemon]);
@@ -347,7 +351,7 @@ export function Session({
               others={others}
               onAnswer={(d, a) => view.respond(entry.callId, d, a)}
               onDefinition={here ? onAgents : undefined}
-              onceOnly={kind === "remote"}
+              onceOnly={onceOnly}
               alwaysAllow={alwaysAllow}
               audiences={audiences}
             />
