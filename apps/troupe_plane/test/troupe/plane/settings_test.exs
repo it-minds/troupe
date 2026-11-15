@@ -278,7 +278,7 @@ defmodule Troupe.Plane.SettingsTest do
       assert {:ok, idle} =
                Admin.setting_effective(context.root, "default_idle_timeout_seconds", nil)
 
-      assert idle.label == "Idle before a session goes dormant"
+      assert idle.label == "Idle before a session goes to sleep"
       assert idle.unit == :minutes
 
       assert {:ok, erase} = Admin.setting_effective(context.root, "default_erase_after_days", nil)
