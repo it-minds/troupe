@@ -236,7 +236,9 @@ defmodule Troupe.CommandModeTest do
 
     assert user_state(pid).focus == :command
     assert %{agent: "build", where: :checkout} = user_state(pid).choice
-    assert screen_text(pid, session) =~ "Enter starts build in the checkout · Esc forgets the choice"
+
+    assert screen_text(pid, session) =~
+             "Enter starts build in the checkout · Esc forgets the choice"
 
     type(pid, "plan the release")
     press(pid, "enter")

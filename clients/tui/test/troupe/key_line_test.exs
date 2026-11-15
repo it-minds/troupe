@@ -76,12 +76,18 @@ defmodule Troupe.KeyLineTest do
                {" runs in the session's workspace · no stdin · !! keeps it from the agent ",
                 "cd does not carry over"}
 
-      plain = " Enter starts build in the checkout · Ctrl-N chooses agent and worktree · / commands "
-      assert KeyLine.fit(plain, 78) == {" Enter starts build in the checkout · Ctrl-N chooses agent and worktree ", "/ commands"}
+      plain =
+        " Enter starts build in the checkout · Ctrl-N chooses agent and worktree · / commands "
+
+      assert KeyLine.fit(plain, 78) ==
+               {" Enter starts build in the checkout · Ctrl-N chooses agent and worktree ",
+                "/ commands"}
 
       # A spare key goes before Tab or Ctrl-; Enter and Esc stay longest.
       line = " box — Enter sends · Tab completes · x drops · Ctrl-J new line · Esc back "
-      assert KeyLine.fit(line, 60) == {" Enter sends · Tab completes · Ctrl-J new line · Esc back ", "x drops"}
+
+      assert KeyLine.fit(line, 60) ==
+               {" Enter sends · Tab completes · Ctrl-J new line · Esc back ", "x drops"}
     end
 
     test "a line with no keys to spare is left to the border" do
