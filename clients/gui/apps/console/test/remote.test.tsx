@@ -74,6 +74,23 @@ describe("laptop sessions offered to you", () => {
     await sees("The laptop is offline since");
   });
 
+  // The stream's own events name who said what by name where the actor carries one, so
+  // somebody present nowhere else on the page is still a name, not an email (troupe #931).
+  it("names each person in the transcript as the event's actor names them, the subject where it names nobody", async () => {
+    fake.plane.relay("ada@example.com", { id: "s-laptop-6", ownerName: "Ada", workspace: "billing", shares: [{ subject: PEOPLE.alice.subject, role: "observe" }] });
+    await signedInAs(fake, PEOPLE.alice);
+    visit("#/mine/remote/s-laptop-6");
+    unmount = render(<App />).unmount;
+    await waitFor(() => document.querySelector('[role="status"]')?.textContent?.startsWith("Idle"), "the session attached");
+
+    const log = fake.worker.sessions.get("s-laptop-6")!.log;
+    log.append("user_input", { source: "user", text: "from Bea" }, { kind: "user", subject: "idp|bea", display_name: "Bea Example" });
+    log.append("user_input", { source: "user", text: "from Cy" }, { kind: "user", subject: "cy@example.com" });
+
+    await sees("Bea Example: from Bea", () => document.querySelector('[aria-label="Transcript"]'));
+    await sees("cy@example.com: from Cy", () => document.querySelector('[aria-label="Transcript"]'));
+  });
+
   it("a link from before Mine opens the session where it is now", async () => {
     fake.plane.relay("ada@example.com", { id: "s-laptop-3", ownerName: "Ada", shares: [{ subject: PEOPLE.alice.subject, role: "control" }] });
     await signedInAs(fake, PEOPLE.alice);
@@ -196,17 +213,35 @@ describe("a relayed approval (troupe #899)", () => {
     await waitFor(() => statusLine().startsWith("Waiting for you"), "the status waiting for you");
     expect(approval.textContent).toContain("Run a command?");
     expect(approval.querySelector(".command")?.textContent).toBe("ls -la");
-    expect(approval.textContent).toContain("In billing.");
+    // The folder the laptop said the call acts in, not the offer's name for it (troupe #932).
+    expect(approval.textContent).toContain("In /workspace.");
     expect(approval.textContent).toContain("It runs on the laptop the session is on");
-    // The laptop honours once and deny alone, and the panel says why.
-    expect(approval.textContent).toContain("allowing it for the rest of the session is done at the laptop");
-    expect(button("Allow every", approval)).toBeNull();
+    // The laptop takes an answer for the session from here, in the desktop app's words.
+    expect(approval.textContent).not.toContain("allowing it for the rest of the session is done at the laptop");
+    await waitFor(() => button("Allow once", approval), "allow once");
+    await waitFor(() => button("Deny", approval), "deny");
 
-    button("Allow once", approval)!.click();
-    await sees("Allowed by you: run a command · ls -la", transcript);
+    button("Allow every command for this session", approval)!.click();
+    const decided = await waitFor(() => fake.worker.calls.find((c) => c.method === "approval.respond"), "the answer at the laptop");
+    expect(decided.params["decision"]).toBe("allow_session");
+    await sees("Allowed for this session by you: run a command · ls -la", transcript);
     await sees("✓ shell ls -la", transcript);
     await waitFor(() => statusLine().startsWith("Idle"), "idle again");
     expect(document.querySelector('[aria-label="Approve shell"]')).toBeNull();
+  });
+
+  it("on a laptop from before, answers once, says why, and names the offer's folder", async () => {
+    fake.worker.relayedAllowSession = false;
+    await opened(fake, "s-approve-2", "control");
+    await sees("Nothing yet: the session has not said anything.");
+    // A daemon from before says no folder of the call's own.
+    fake.worker.sessions.get("s-approve-2")!.log.append("approval_requested", { call_id: "call-old", tool: "shell", args: { command: "ls" }, agent_path: ["root"] });
+
+    const approval = await waitFor(() => document.querySelector<HTMLElement>('[aria-label="Approve shell"]'), "the approval");
+    expect(approval.textContent).toContain("In billing.");
+    expect(approval.textContent).toContain("allowing it for the rest of the session is done at the laptop");
+    expect(button("Allow every", approval)).toBeNull();
+    await waitFor(() => button("Allow once", approval), "allow once");
   });
 
   it("a question's options are buttons, and its answer stays as a line", async () => {
@@ -253,5 +288,41 @@ describe("the status line, in words", () => {
     expect(statusWords("failed", "the laptop is offline", emptyTranscript, { steer: true, laptop: true })).toBe("Lost the laptop: the laptop is offline");
     expect(statusWords("connecting", null, emptyTranscript, { steer: true, laptop: true })).toBe("Connecting");
     expect(statusWords("live", null, emptyTranscript, { steer: true, laptop: true })).toBe("Idle");
+  });
+
+  it("says the laptop is away from the plane's word, and that it is back (troupe #932)", () => {
+    const asleep = { ...emptyTranscript, laptop: { state: "away" as const, reason: "offline", since: undefined } };
+    const stopped = { ...emptyTranscript, laptop: { state: "away" as const, reason: "stopped", since: undefined } };
+    const back = { ...emptyTranscript, laptop: { state: "back" as const } };
+    expect(statusWords("live", null, asleep, { steer: true, laptop: true })).toBe("The laptop is asleep or offline; waiting for it");
+    expect(statusWords("live", null, stopped, { steer: true, laptop: true })).toBe("Troupe stopped on the laptop; waiting for it to start again");
+    expect(statusWords("reconnecting", "the laptop is back; attempt 1", back, { steer: true, laptop: true })).toBe("The laptop is back");
+    expect(statusWords("live", null, back, { steer: true, laptop: true })).toBe("The laptop is back · Idle");
+    // This page's own connection lost while the laptop is away keeps the attachment's words.
+    expect(statusWords("reconnecting", "socket error; attempt 1", asleep, { steer: true, laptop: true })).toBe("Lost the laptop: socket error; attempt 1. Trying again");
+  });
+});
+
+describe("a laptop that goes away and comes back (troupe #932)", () => {
+  it("is waited for in words, refuses a prompt meanwhile in words, and is followed again once back", async () => {
+    await opened(fake, "s-away-1", "control");
+
+    fake.plane.pause("s-away-1", "offline");
+    await waitFor(() => statusLine().startsWith("The laptop is asleep or offline; waiting for it"), "the status waiting for the laptop");
+
+    // A prompt sent meanwhile is refused in the plane's words and stays in the box.
+    const prompt = await waitFor(() => document.querySelector<HTMLTextAreaElement>(".composer textarea"), "the prompt");
+    typed(prompt, "are you there?");
+    button("Send")!.click();
+    await sees("The laptop is away: nothing sent now reaches it. Send it again once the laptop is back.");
+    expect(prompt.value).toBe("are you there?");
+
+    fake.plane.resume("s-away-1");
+    await waitFor(() => statusLine().startsWith("The laptop is back"), "the status saying it is back");
+    // Opened again from its cursor, it is steered as before.
+    await waitFor(() => statusLine().startsWith("The laptop is back · Idle"), "attached again");
+    button("Send")!.click();
+    await sees("You said: are you there?", transcript);
+    await waitFor(() => statusLine().startsWith("Idle"), "the status in its own words once the session spoke");
   });
 });

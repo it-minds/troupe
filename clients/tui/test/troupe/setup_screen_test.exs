@@ -179,6 +179,9 @@ defmodule Troupe.SetupScreenTest do
     enter(pid)
     assert answers() == [{"where", %{"choice" => "plane", "plane_url" => "https://plane.example"}}]
     assert screen_text(pid, session) =~ "Sign in next"
+    # The row of steps names the last one for what it is on this path (#930).
+    assert screen_text(pid, session) =~ "→ Sign in"
+    refute screen_text(pid, session) =~ "First session"
 
     press(pid, "enter")
     assert_receive {:done, {:plane, "https://plane.example"}}, 5_000

@@ -41,8 +41,9 @@ export function callScopedLabel(tool: string): string {
 }
 
 /**
- * Why an approval answered from another device has two answers and not three: the
- * laptop's rules are its own person's to loosen, so a call is allowed or denied once.
+ * Why an approval answered from another device has two answers and not three, on a laptop
+ * whose daemon is from before it took an answer for the session from there (it names no
+ * `RELAYED_ALLOW_SESSION`): a call is allowed or denied once.
  */
 export const ONCE_ONLY_SENTENCE = "From another device a call is allowed or denied once: allowing it for the rest of the session is done at the laptop.";
 

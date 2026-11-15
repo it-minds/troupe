@@ -101,6 +101,8 @@ export interface BreakGlassAnswer {
 export interface SessionRow {
   id: string;
   owner: string;
+  /** The owner's name, where the plane has one (troupe #931); absent from an older plane. */
+  owner_name?: string | null;
   profile: string;
   visibility: string;
   /** `erasure_pending`: a private session somebody erased whose key is not destroyed yet (troupe Decision 756). */

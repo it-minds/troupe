@@ -79,7 +79,7 @@ defmodule Troupe.Session.Approvals do
     session_allows: MapSet.new()
   ]
 
-  @type decision :: :allow | :deny | :allow_session
+  @type decision :: :allow | :deny | :allow_session | :allow_always
 
   @typedoc """
   What an answer carries besides its word, string-keyed as the protocol sends it: a
@@ -158,6 +158,41 @@ defmodule Troupe.Session.Approvals do
   @spec pending(String.t()) :: [map()]
   def pending(session_id), do: GenServer.call(Troupe.Registry.approvals(session_id), :pending)
 
+  @doc """
+  Whether the request waiting under `call_id` (asked by a call now, or read back from the
+  log of a session that slept on it) may be answered with a lasting rule, `allow_always`:
+  `{:ok, request}`, for the rule to be written before the answer; `{:error, :none}` where
+  nothing waits; `{:error, {:managed, sentence}}` where the platform allows only its own
+  rules; else `{:error, sentence}`. A delegation's or a publication's answer is about this
+  one call's agent or audience, and a call that must be asked (a rule's `ask`, a tool that
+  always asks) is not loosened by an `allow` of the person's, since the strictest rule
+  holds: writing one would be a rule that changed nothing.
+  """
+  @spec lasting(String.t(), String.t()) ::
+          {:ok, map()} | {:error, :none | {:managed, String.t()} | String.t()}
+  def lasting(session_id, call_id),
+    do: GenServer.call(Troupe.Registry.approvals(session_id), {:lasting, call_id})
+
+  @managed_only "this platform allows only its own permission rules " <>
+                  "(managed_permission_rules_only), so a rule of yours would not apply; allow it once"
+
+  defp lasting(%{delegation: _}),
+    do: {:error, "a delegation is allowed once or for its agent for the session, not always"}
+
+  defp lasting(%{publication: _}),
+    do: {:error, "a publication is aimed at its audience each time, so it is not allowed always"}
+
+  defp lasting(%{rule: %{"rule" => rule}}) when is_binary(rule),
+    do:
+      {:error,
+       "this call asks by the rule ask #{rule}, which an allow of yours does not loosen; " <>
+         "allow it once"}
+
+  defp lasting(%{always: true, tool: tool}),
+    do: {:error, "#{tool} asks a person every time, whatever is allowed; allow it once"}
+
+  defp lasting(_req), do: :ok
+
   # -- server -----------------------------------------------------------------
 
   @impl GenServer
@@ -217,7 +252,7 @@ defmodule Troupe.Session.Approvals do
           })
     }
 
-    if decision == "allow_session" do
+    if decision in ["allow_session", "allow_always"] do
       %{state | session_allows: MapSet.put(state.session_allows, allow_key(data))}
     else
       state
@@ -268,7 +303,7 @@ defmodule Troupe.Session.Approvals do
   defp put_rule(req, rule) when is_map(rule), do: Map.put(req, :rule, rule)
   defp put_rule(req, _none), do: req
 
-  defp managed(:allow_session), do: :allow
+  defp managed(decision) when decision in [:allow_session, :allow_always], do: :allow
   defp managed(decision), do: decision
 
   @impl GenServer
@@ -331,6 +366,43 @@ defmodule Troupe.Session.Approvals do
 
   def handle_call(:auto_approve?, _from, state), do: {:reply, state.auto_approve, state}
 
+  def handle_call({:lasting, call_id}, _from, state) do
+    answer =
+      case asked(state, call_id) do
+        nil ->
+          {:error, :none}
+
+        _req when state.managed_rules_only ->
+          {:error, {:managed, @managed_only}}
+
+        req ->
+          with :ok <- lasting(req), do: {:ok, req}
+      end
+
+    {:reply, answer, state}
+  end
+
+  # A lasting rule the daemon has written for the person (`always`: the rule, its scope and
+  # its file, which the decision carries): checked as a plain `allow` besides, and refused
+  # where `lasting/1` says a rule would change nothing.
+  def handle_call({:decide, call_id, :allow_always, actor, answer}, _from, state) do
+    {always, answer} = Map.pop(answer, "always")
+
+    case asked(state, call_id) do
+      nil ->
+        {:reply, :ok, already_resolved(state, call_id)}
+
+      _req when state.managed_rules_only ->
+        {:reply, {:error, @managed_only}, state}
+
+      req ->
+        case kept_always(req, answer, always) do
+          {:ok, answer} -> {:reply, :ok, answer_request(state, call_id, :allow_always, actor, answer)}
+          {:error, sentence} -> {:reply, {:error, sentence}, state}
+        end
+    end
+  end
+
   # Every answer is checked against the request first, and a wrong one leaves the request
   # waiting for a right one.
   def handle_call({:decide, call_id, decision, actor, answer}, _from, state) do
@@ -347,6 +419,14 @@ defmodule Troupe.Session.Approvals do
           {:error, sentence} ->
             {:reply, {:error, sentence}, state}
         end
+    end
+  end
+
+  # A lasting rule's answer: one a rule can be for, checked as a plain allow, carrying the rule.
+  defp kept_always(req, answer, always) do
+    with :ok <- lasting(req),
+         {:ok, answer} <- check_answer(req, :allow, answer) do
+      {:ok, if(is_map(always), do: Map.put(answer, "always", always), else: answer)}
     end
   end
 
@@ -394,8 +474,11 @@ defmodule Troupe.Session.Approvals do
     decision = if state.managed_rules_only, do: managed(decision), else: decision
     data = req |> describe() |> Map.put("decision", Atom.to_string(decision)) |> Map.merge(answer)
 
+    # A lasting rule is written into a file the session read as it started, so for the rest
+    # of this session the tool is allowed here as `allow_session` allows it; a session
+    # started later reads the rule.
     allows =
-      if decision == :allow_session,
+      if decision in [:allow_session, :allow_always],
         do: MapSet.put(state.session_allows, allow_key(data)),
         else: state.session_allows
 
@@ -631,16 +714,22 @@ defmodule Troupe.Session.Approvals do
     }
   end
 
-  # The request as it is asked: a delegation's with what the gate shows (Decision 850), a
-  # publication's with what the person aims, and one a per-tool rule asks with that rule
-  # (#658), so the person sees why it asks.
-  defp requested(%{delegation: delegation} = req),
+  # The request as it is asked: a delegation's with what the gate shows, a publication's
+  # with what the person aims, and one a per-tool rule asks with that rule (#658), so the
+  # person sees why it asks; each with the folder the call acts in where the tool said it,
+  # so a person answering from another device sees it as one at the laptop does.
+  defp requested(%{cwd: cwd} = req) when is_binary(cwd),
+    do: req |> asked() |> Map.put("cwd", cwd)
+
+  defp requested(req), do: asked(req)
+
+  defp asked(%{delegation: delegation} = req),
     do: Map.put(describe(req), "delegation", delegation)
 
-  defp requested(%{publication: publication} = req),
+  defp asked(%{publication: publication} = req),
     do: req |> requested_rule() |> Map.put("publication", publication)
 
-  defp requested(req), do: requested_rule(req)
+  defp asked(req), do: requested_rule(req)
 
   defp requested_rule(%{rule: rule} = req) when is_map(rule),
     do: Map.put(describe(req), "rule", rule)

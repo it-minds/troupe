@@ -701,6 +701,10 @@ evoked where nothing is set and there was a sign-in. */
    * gate shows under `publication`), by call id, and what each was answered with.
    */
   readonly publications = new Map<string, { sessionId: string; publication: Record<string, unknown>; answer: Record<string, unknown> | null }>();
+  /** A plain tool's approvals (`askTool`), by call id, and the decision each was answered with. */
+  readonly toolApprovals = new Map<string, { sessionId: string; tool: string; decision: string | null }>();
+  /** The platform allows only its own rules (`managed_permission_rules_only`): `allow_always` is refused. */
+  managedRulesOnly = false;
   /** The links made to the person's artifacts. */
   readonly artifactShares: Array<Record<string, unknown>> = [];
   /**
@@ -734,7 +738,9 @@ evoked where nothing is set and there was a sign-in. */
 
   constructor(opts: FakeDaemonOptions = {}) {
     this.token = opts.token ?? "daemon-token";
-    this.capabilities = opts.capabilities ?? { blobs: true, tools: true };
+    // A daemon writes a person's lasting rule from an approval and fetches an artifact into a
+    // session's workspace from its plane (troupe #920).
+    this.capabilities = opts.capabilities ?? { blobs: true, tools: true, approval_allow_always: true, fs_upload_artifact: true };
     this.osUser = opts.osUser ?? "ada";
     this.modelSettings = opts.modelSettings ?? true;
     this.overrides = opts.overrides ?? [];
@@ -909,6 +915,15 @@ evoked where nothing is set and there was a sign-in. */
     this.publications.set(callId, { sessionId, publication: shown, answer: null });
     session.pendingApprovals += 1;
     return session.log.append("approval_requested", { call_id: callId, tool: "publish_artifact", args: { title: shown.title, kind: shown.kind }, agent_path: ["root"], publication: shown });
+  }
+
+  /** Make a session's agent ask before a tool runs: a plain `approval_requested`, answered with `approval.respond`. */
+  askTool(sessionId: string, tool: string, args: Record<string, unknown>): LoggedEvent {
+    const session = this.sessions.get(sessionId)!;
+    const callId = `call-${tool}-${this.toolApprovals.size + 1}`;
+    this.toolApprovals.set(callId, { sessionId, tool, decision: null });
+    session.pendingApprovals += 1;
+    return session.log.append("approval_requested", { call_id: callId, tool, args, agent_path: ["root"] });
   }
 
   /** Make a session ask something — the agent's `ask_user`, or the harness's budget question under a `budget-<n>` id. */
@@ -1147,6 +1162,8 @@ evoked where nothing is set and there was a sign-in. */
     session.log.append("input_accepted", { command_id: commandId, author: this.principal.subject }, actor);
     session.log.append("user_input", { command_id: commandId, text, source: "user" }, actor);
     session.log.append("llm_response", { message: { role: "assistant", content: [{ type: "text", text: `You said: ${text}` }] }, stop_reason: "end_turn", model: "fake" });
+    // How full the window is after the call, as the harness says it (troupe #920).
+    this.ephemeral(session, "context_status", { window_tokens: 200_000, used_tokens: 10 });
   }
 
   /** Make a session say something, so a test can watch it arrive on the right view. */
@@ -1561,6 +1578,8 @@ evoked where nothing is set and there was a sign-in. */
       case "approval.respond": {
         if (!session) return reply(ws, id, null, { code: -32005, message: "not_found" });
         const callId = String(params["call_id"] ?? "");
+        const tool = this.toolApprovals.get(callId);
+        if (tool && tool.sessionId === session.id) return this.answerTool(ws, id, session, callId, tool, params);
         const asked = this.publications.get(callId);
         if (!asked || asked.sessionId !== session.id) return reply(ws, id, null, { code: -32005, message: "not_found", data: { call_id: callId } });
         if (asked.answer) return reply(ws, id, { resolved_by: this.principal.subject });
@@ -1684,6 +1703,23 @@ evoked where nothing is set and there was a sign-in. */
       // A file put into the workspace, at `session:/`: kept, and `fs.read` reads it back.
       case "fs.upload": {
         if (!session) return reply(ws, id, null, { code: -32005, message: "not_found" });
+        // One of the person's artifacts, fetched from the plane by the daemon (troupe #920):
+        // every file of it into the folder `path` names, each recorded as an upload is.
+        if (typeof params["artifact"] === "string") {
+          const found = this.artifacts?.find((a) => a["id"] === params["artifact"]);
+          if (!this.artifacts) return reply(ws, id, null, { code: -32010, message: "unavailable", data: { reason: "this computer's daemon is not signed in to a Troupe plane; troupe login signs it in" } });
+          if (!found) return reply(ws, id, null, { code: -32005, message: "not_found", data: { id: params["artifact"] } });
+          const folder = String(params["path"] ?? "session:/").replace(/^session:\/?/, "").replace(/\/?$/, "/").replace(/^\/$/, "");
+          const wanted = artifactFiles(found).filter((f) => params["file"] === undefined || f.path === params["file"]);
+          const written = wanted.map((f) => {
+            const relative = `${folder}${f.path}`;
+            this.uploads.push({ session: sessionId, path: `session:/${relative}`, content: f.text });
+            this.files.set(relative, f.text);
+            session.log.append("fs_changed", { path: relative, hash: "sha256:fake", size: f.text.length }, { kind: "user", subject: this.principal.subject });
+            return { path: relative, bytes: new TextEncoder().encode(f.text).length };
+          });
+          return reply(ws, id, { artifact: found["id"], title: found["title"], version: Number(params["version"] ?? found["current"] ?? found["version"]), files: written });
+        }
         const path = String(params["path"] ?? "");
         const content = String(params["content"] ?? "");
         this.uploads.push({ session: sessionId, path, content });
@@ -2754,6 +2790,39 @@ evoked where nothing is set and there was a sign-in. */
   /** Every client attached hears an agent file written or taken away, the one that did it too. */
   announceAgent(changed: { name: string; scope: string; path: string; action: string; workspace?: string }): void {
     for (const c of this.clients) notify(c.ws, "agents.changed", changed);
+  }
+
+  /**
+   * A plain tool's approval answered as the daemon answers it (troupe #920): `allow_always`
+   * writes the person's rule for the tool into their `config.yaml` (`everywhere`) or the
+   * workspace's `config.local.yaml` (`workspace`), announced as `config.changed`, and is
+   * refused under `managed_permission_rules_only`; the decision names the rule.
+   */
+  private answerTool(ws: WebSocket, id: unknown, session: Session, callId: string, tool: { tool: string; decision: string | null }, params: Record<string, unknown>): void {
+    if (tool.decision) return reply(ws, id, { resolved_by: this.principal.subject });
+    const decision = String(params["decision"] ?? "deny");
+    const decided: Record<string, unknown> = { call_id: callId, tool: tool.tool, args: {}, agent_path: ["root"], decision };
+    if (decision === "allow_always") {
+      if (this.managedRulesOnly) {
+        return reply(ws, id, null, {
+          code: -32004,
+          message: "forbidden",
+          data: { setting: "managed_permission_rules_only", reason: "this platform allows only its own permission rules (managed_permission_rules_only), so a rule of yours would not apply; allow it once" },
+        });
+      }
+      const scope = String(params["scope"] ?? "everywhere");
+      const path = scope === "workspace" ? `${session.workspace}/.troupe/config.local.yaml` : `/home/${this.osUser}/.config/troupe/config.yaml`;
+      const rule = tool.tool.replace(/^(mcp|client)\.(.+)$/, "mcp($2)");
+      decided["always"] = { rule, scope, path };
+      if (!this.permissions.some((r) => r["rule"] === rule && r["source"] === path)) {
+        this.permissions.push({ action: "allow", rule, tool: rule.split("(")[0], pattern: null, scope: scope === "workspace" ? "local" : "user", source: path, ignored: null });
+      }
+      for (const c of this.clients) notify(c.ws, "config.changed", { scope: scope === "workspace" ? "local" : "user", path, keys: ["permissions.allow"] });
+    }
+    tool.decision = decision;
+    session.pendingApprovals = Math.max(0, session.pendingApprovals - 1);
+    session.log.append("approval_decided", decided, { kind: "user", subject: this.principal.subject });
+    return reply(ws, id, { accepted: true, ...(decided["always"] ? { rule: decided["always"] } : {}) });
   }
 
   /** An ephemeral event on a session, to every subscription to it: written in no log. */

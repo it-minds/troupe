@@ -1032,7 +1032,9 @@ defmodule Troupe.Remote.Worker do
         error: nil,
         scopes: result["scopes"] || [],
         capabilities: result["capabilities"] || %{},
-        max_message: max_message(result["limits"])
+        max_message: max_message(result["limits"]),
+        # Who this connection is, so a line another person sent is drawn with their name.
+        memory: Translate.me(state.memory, get_in(result, ["principal", "subject"]))
     }
 
     publish_status(state)
@@ -1480,8 +1482,13 @@ defmodule Troupe.Remote.Worker do
     )
   end
 
-  # A laptop's session reached through the plane: its daemon says so in `initialize`.
-  defp relayed?(state), do: state.capabilities["relayed"] == true
+  # A laptop's session reached through the plane whose approvals are answered once from
+  # here: its daemon says `relayed` in `initialize`, and one that takes an answer for the
+  # rest of the session from here as well says `relayed_allow_session`, and is answered as
+  # any other session is.
+  defp relayed?(state),
+    do:
+      state.capabilities["relayed"] == true and state.capabilities["relayed_allow_session"] != true
 
   defp publish_note(state, text),
     do: notify(state, state.agent || "session", :notice, %{text: text})

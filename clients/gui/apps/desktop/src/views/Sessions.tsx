@@ -9,10 +9,12 @@
 // work and not a place to go: the question "what is waiting for me" is never "what is
 // waiting for me on the platform". The one list is the whole idea.
 
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import type { JSX } from "react";
 import { claimable, claimRefusal, filterRows } from "@troupe/client";
 import type { FleetRow, SessionKind } from "@troupe/client";
+import { useNarrow } from "../narrow";
+import { NavSheet } from "../sheet";
 import { Cost, RowStatus, statusOf, Sync, Unread, When, Where } from "./bits";
 import { inviteLine, presenceWords } from "./Remote";
 
@@ -49,6 +51,9 @@ export function Sessions({
   const [status, setStatus] = useState("");
   const [profile, setProfile] = useState("");
   const [kind, setKind] = useState<SessionKind | "">("");
+  const narrow = useNarrow();
+  const [filtering, setFiltering] = useState(false);
+  const closeFilters = useCallback(() => setFiltering(false), []);
 
   const shown = useMemo(
     () =>
@@ -67,6 +72,51 @@ export function Sessions({
   const states = [...new Set(rows.map((r) => r.state))];
   const statuses = [...new Set(rows.map((r) => r.status).filter(Boolean))] as string[];
   const kinds = [...new Set(rows.map((r) => r.kind))];
+  // How many of the four are set, for the phone's Filter button.
+  const set = [state, status, profile, kind].filter(Boolean).length;
+
+  // The filters, inline on a wide window and in a sheet from the Filter button on a phone,
+  // where four selects stacked would push the list the person came for below the fold.
+  // Choosing one applies it at once, in either place.
+  const filters = (
+    <>
+      <select value={state} onChange={(e) => setState(e.target.value)} aria-label="State">
+        <option value="">Any state</option>
+        {states.map((s) => (
+          <option key={s} value={s}>
+            {s}
+          </option>
+        ))}
+      </select>
+      <select value={status} onChange={(e) => setStatus(e.target.value)} aria-label="Status">
+        <option value="">Any status</option>
+        {statuses.map((x) => (
+          <option key={x} value={x}>
+            {x}
+          </option>
+        ))}
+      </select>
+      <select value={profile} onChange={(e) => setProfile(e.target.value)} aria-label="Profile">
+        <option value="">Any profile</option>
+        {profiles.map((p) => (
+          <option key={p} value={p}>
+            {p}
+          </option>
+        ))}
+      </select>
+      {kinds.length > 1 && (
+        <select value={kind} onChange={(e) => setKind(e.target.value as SessionKind | "")} aria-label="Where it runs">
+          <option value="">Anywhere</option>
+          <option value="team">On the platform</option>
+          <option value="local">On this computer</option>
+          <option value="private">Private</option>
+          <option value="remote">On a laptop, through the plane</option>
+          <option value="invited">Shared with you</option>
+        </select>
+      )}
+    </>
+  );
+  const count = <span className="count">{loading && rows.length === 0 ? "loading" : `${shown.length} of ${rows.length}`}</span>;
 
   return (
     <>
@@ -84,46 +134,34 @@ export function Sessions({
           value={query}
           onChange={(e) => setQuery(e.target.value)}
         />
-        <select value={state} onChange={(e) => setState(e.target.value)} aria-label="State">
-          <option value="">Any state</option>
-          {states.map((s) => (
-            <option key={s} value={s}>
-              {s}
-            </option>
-          ))}
-        </select>
-        <select value={status} onChange={(e) => setStatus(e.target.value)} aria-label="Status">
-          <option value="">Any status</option>
-          {statuses.map((x) => (
-            <option key={x} value={x}>
-              {x}
-            </option>
-          ))}
-        </select>
-        <select value={profile} onChange={(e) => setProfile(e.target.value)} aria-label="Profile">
-          <option value="">Any profile</option>
-          {profiles.map((p) => (
-            <option key={p} value={p}>
-              {p}
-            </option>
-          ))}
-        </select>
-        {kinds.length > 1 && (
-          <select value={kind} onChange={(e) => setKind(e.target.value as SessionKind | "")} aria-label="Where it runs">
-            <option value="">Anywhere</option>
-            <option value="team">On the platform</option>
-            <option value="local">On this computer</option>
-            <option value="private">Private</option>
-            <option value="remote">On a laptop, through the plane</option>
-            <option value="invited">Shared with you</option>
-          </select>
+        {narrow ? (
+          <button
+            type="button"
+            className="filter-open"
+            aria-haspopup="dialog"
+            aria-expanded={filtering}
+            onClick={() => setFiltering(true)}
+          >
+            {set > 0 ? `Filter · ${set}` : "Filter"}
+          </button>
+        ) : (
+          filters
         )}
         <span className="spacer" />
-        <span className="count">{loading && rows.length === 0 ? "loading" : `${shown.length} of ${rows.length}`}</span>
+        {count}
         <button className="primary" onClick={onStart}>
           Start a session
         </button>
       </div>
+
+      {narrow && filtering && (
+        <NavSheet label="Filters" title="Filter sessions" closeLabel="Done" onClose={closeFilters}>
+          <div className="nav-sheet-body filter-sheet">
+            {filters}
+            {count}
+          </div>
+        </NavSheet>
+      )}
 
       {error && (
         <div className="banner error">

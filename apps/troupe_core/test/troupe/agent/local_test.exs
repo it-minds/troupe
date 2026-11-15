@@ -183,4 +183,26 @@ defmodule Troupe.Agent.LocalTest do
       assert Definitions.load(nil) |> Definitions.fetch!("build") |> Map.get(:source) == :builtin
     end
   end
+
+  describe "why a definition is not a person's to change" do
+    # The sentence a client shows as it is: it names the console's page in the console's
+    # own words, and says the page is an administrator's.
+    test "a bundle's is the profile's, changed by an administrator on the console's page" do
+      bundle = %Definition{name: "build", mode: :primary, prompt: "You build.", source: :bundle}
+
+      assert Local.not_editable(bundle) ==
+               "build comes from the profile's bundle: an administrator changes it on the " <>
+                 "console's Configure → Configuration bundles; ask one if you are not"
+    end
+
+    test "on the platform every agent is the bundle's, said without an operator's words" do
+      own = %Definition{name: "notes", mode: :primary, prompt: "You note.", source: :project}
+      said = Local.not_editable(own, pod: true)
+
+      assert said ==
+               "On the platform the agents come from the profile's bundle and are read-only here."
+
+      refute said =~ ~r/\bpod\b|worker profile/
+    end
+  end
 end

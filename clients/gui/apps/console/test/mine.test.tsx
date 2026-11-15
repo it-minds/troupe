@@ -49,6 +49,11 @@ describe("Mine", () => {
     const sessions = () => document.querySelector('[aria-label="Your sessions"]');
     await sees("Tidy the icons", sessions);
     expect(sessions()!.textContent).not.toContain("Somebody else's");
+    // Its state as every page of the console says one, a glyph and a word, never the
+    // plane's state and status pasted together.
+    const state = sessions()!.querySelector("tbody td .status");
+    expect(state?.textContent).toBe("● active");
+    expect(sessions()!.textContent).not.toContain("active · idle");
 
     const clients = () => document.querySelector('[aria-label="Your clients"]');
     await sees("desktop app 0.25.0-beta on windows/x86_64", clients);

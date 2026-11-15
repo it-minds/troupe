@@ -287,6 +287,29 @@ defmodule Troupe.Plane.AdminTest do
       assert theirs.id in Enum.map(all, & &1.id)
     end
 
+    # The console shows a person by name: an owner and an audit row's actor carry the name
+    # the identity record has beside their subject, and nothing where it has none.
+    test "a session's owner and an audit row's actor by name", context do
+      mine = session!("s-named", context.engineering, "dev")
+
+      assert {:ok, sessions} = Admin.sessions_list(context.lead)
+      refute Map.has_key?(Enum.find(sessions, &(&1.id == mine.id)), :owner_name)
+
+      {:ok, _} = Identity.upsert_user(%{subject: "someone@example.test", display_name: "Some One"})
+      {:ok, _} = Identity.upsert_user(%{subject: "lead@example.test", display_name: "Lea Lead"})
+
+      assert {:ok, sessions} = Admin.sessions_list(context.lead)
+      row = Enum.find(sessions, &(&1.id == mine.id))
+      assert row.owner == "someone@example.test"
+      assert row.owner_name == "Some One"
+
+      {:ok, _} = Admin.team_update(context.lead, "engineering", %{budget_micros: 42})
+      assert {:ok, events} = Admin.audit_list(context.root)
+      update = Enum.find(events, &(&1.action == "team.update"))
+      assert update.actor == "lead@example.test"
+      assert update.actor_name == "Lea Lead"
+    end
+
     test "their own team's spend and no others", context do
       assert {:ok, overview} = Admin.overview(context.lead)
       assert Enum.map(overview.teams, & &1.name) == ["engineering"]

@@ -35,6 +35,23 @@ function ephemeral(type: string, data: Record<string, unknown>, agent = ["root"]
 const foldAll = (events: TroupeEvent[], from: TranscriptState = emptyTranscript) => events.reduce((s, e) => fold(s, e), from);
 
 describe("the transcript fold", () => {
+  // The curtain's divider says when the session began (troupe #929): the time its first
+  // event was written, not a later one's, and none where that event carries none.
+  it("keeps the time the session's first event was written as startedAt", () => {
+    seq = 0;
+    const first = { ...durable("session_created", { profile: "dev" }), ts: "2026-11-15T18:54:03Z" };
+    const later = { ...durable("user_input", { source: "user", text: "hi" }), ts: "2026-11-15T19:10:00Z" };
+    const state = foldAll([first, later]);
+    assert.equal(state.startedAt, Date.parse("2026-11-15T18:54:03Z"));
+
+    // Folding from the middle of the log knows no start yet.
+    assert.equal(foldAll([later]).startedAt, undefined);
+    // A replay whose first event has no time says none.
+    seq = 0;
+    const untimed = { ...durable("session_created", {}), ts: "" };
+    assert.equal(foldAll([untimed]).startedAt, undefined);
+  });
+
   it("turns a turn into user, tool and assistant entries in order", () => {
     seq = 0;
     const state = foldAll([
@@ -164,6 +181,19 @@ describe("the transcript fold", () => {
     assert.deepEqual(lines, ["stopped by its parent", "root/general#1, in the background: stopped by its parent; its end reached its parent"]);
     assert.equal(state.entries.filter((e) => e.kind === "user").length, 0);
     assert.equal(state.agentState["general#1"], "done");
+  });
+
+  // A session sleeps and wakes in the reader's words (DESIGN.md §11): asleep, never dormant,
+  // and never the pod it was placed on.
+  it("says a session went to sleep and woke on the platform", () => {
+    seq = 0;
+    const state = foldAll([
+      durable("session_dormant", { last_seq: 9 }),
+      durable("session_activated", { epoch: 2, pod: "troupe-w-dev-0" }),
+    ]);
+
+    const lines = state.entries.filter((e): e is Extract<Entry, { kind: "system" }> => e.kind === "system").map((e) => e.text);
+    assert.deepEqual(lines, ["session went to sleep", "session woke on the platform"]);
   });
 
   // The child's first message is that brief, from the agent that delegated it: never a

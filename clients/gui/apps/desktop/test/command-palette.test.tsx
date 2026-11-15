@@ -82,14 +82,14 @@ describe("the command palette", () => {
     const sections = [...dialog.querySelectorAll(".section")].map((el) => el.textContent);
     // No Quit: leaving is the terminal client's, and its rows are not listed here.
     expect(sections).toEqual(["Session", "Navigate", "Workspace", "Setup", "Agents", "Custom"]);
-    expect(rowNames()).toContain("/merge");
-    await sees("Land a worktree branch on the checkout");
+    expect(rowNames()).toContain("/watch");
+    await sees("Toggle watch mode: act on AI! and AI? comments");
     await sees("Set, show or clear the session's goal");
 
     // What this app cannot run is greyed with the reason, not hidden.
-    const merge = [...dialog.querySelectorAll<HTMLElement>(".row")].find((r) => r.textContent?.startsWith("/merge"))!;
-    expect(merge.classList.contains("unavailable")).toBe(true);
-    expect(merge.textContent).toContain("terminal client");
+    const watch = [...dialog.querySelectorAll<HTMLElement>(".row")].find((r) => r.textContent?.startsWith("/watch"))!;
+    expect(watch.classList.contains("unavailable")).toBe(true);
+    expect(watch.textContent).toContain("on This computer");
     const goal = [...dialog.querySelectorAll<HTMLElement>(".row")].find((r) => r.textContent?.startsWith("/goal"))!;
     expect(goal.classList.contains("unavailable")).toBe(false);
 
@@ -100,6 +100,40 @@ describe("the command palette", () => {
     await waitFor(() => palette() === null, "the palette to close");
   });
 
+  // A section's header is the screen's eyebrow, in its own colour, not the commands'; a row
+  // is the command and its one line, with no area cell taking the detail's width; the
+  // detail's head names the area instead (troupe #926).
+  it("draws its headers as eyebrows, its rows as a command and a line, and names the area in the detail", async () => {
+    const composer = await openSession();
+    key(composer, "/");
+    const dialog = await waitFor(palette, "the palette");
+    await waitFor(() => rowNames().length === SHOWN, "the list");
+
+    const headers = [...dialog.querySelectorAll(".section")];
+    expect(headers.length).toBeGreaterThan(0);
+    for (const h of headers) expect(h.classList.contains("screen")).toBe(true);
+    expect(css).toMatch(/\.palette \.row \.name \{\s*font: var\(--t-code\);\s*color: var\(--text-primary\);/);
+    expect(css).not.toMatch(/\.palette \.section \{[^}]*color:/);
+
+    for (const row of dialog.querySelectorAll(".row")) {
+      expect([...row.children].map((c) => c.className)).toEqual(["name", "summary"]);
+    }
+    expect(dialog.querySelector(".row .kind")).toBeNull();
+    expect(css).toMatch(/\.palette \.row \{[^}]*grid-template-columns: 12ch minmax\(0, 1fr\);/);
+    // From 1024px the list is the narrower column and the detail the wider.
+    expect(css).toMatch(/\.palette \{\s*width: min\(960px, 100%\);\s*display: grid;\s*grid-template-columns: minmax\(min\(16rem, 40%\), 2fr\) minmax\(0, 3fr\);/);
+
+    const input = dialog.querySelector<HTMLInputElement>("input")!;
+    const head = (): string => [...dialog.querySelectorAll(".detail > .usage, .detail > .area")].map((el) => el.textContent).join("");
+    type(input, "audit");
+    await waitFor(() => selected() === "/audit", "/audit selected");
+    expect(head()).toBe("/audit · repository");
+    expect(dialog.querySelector(".detail")!.classList.contains("kind-repository")).toBe(true);
+    type(input, "goal");
+    await waitFor(() => selected() === "/goal", "/goal selected");
+    expect(head()).toBe("/goal [text | clear] · session");
+  });
+
   it("narrows as you type, by name, alias and summary, and Enter runs the row", async () => {
     await openSession();
     key(window, "k", { ctrlKey: true });
@@ -107,9 +141,9 @@ describe("the command palette", () => {
     await waitFor(() => rowNames().length === SHOWN, "the list");
     const input = dialog.querySelector<HTMLInputElement>("input")!;
 
-    type(input, "mer");
+    type(input, "wat");
     await waitFor(() => rowNames().length === 1, "one row");
-    expect(rowNames()).toEqual(["/merge"]);
+    expect(rowNames()).toEqual(["/watch"]);
 
     // An alias finds its command and the cursor lands on it.
     type(input, "resume");
@@ -117,14 +151,14 @@ describe("the command palette", () => {
     await waitFor(() => selected() === "/sessions", "the cursor on /sessions");
 
     // A word from a summary.
-    type(input, "worktree");
-    await waitFor(() => rowNames().join() === "/merge", "merge by its summary");
+    type(input, "comments");
+    await waitFor(() => rowNames().join() === "/watch", "watch by its summary");
 
     // Enter on a command this app cannot run says why, and the palette stays.
-    type(input, "merge");
-    await waitFor(() => rowNames().join() === "/merge", "merge");
+    type(input, "watch");
+    await waitFor(() => rowNames().join() === "/watch", "watch");
     key(input, "Enter");
-    await waitFor(() => document.querySelector(".palette .notice")?.textContent?.startsWith("branches and worktrees are the terminal client's"), "the reason");
+    await waitFor(() => document.querySelector(".palette .notice")?.textContent?.startsWith("on This computer, under this session's controls"), "the reason");
     expect(palette()).not.toBeNull();
 
     // Enter on /settings leaves for This computer.
@@ -147,7 +181,7 @@ describe("the command palette", () => {
     // and says so, so it stays in the list; the cursor is on the command named exactly.
     await waitFor(() => selected() === "/goal", "the cursor on the goal row, the rest being its argument");
     expect(rowNames()).toContain("/goal");
-    expect(rowNames()).not.toContain("/merge");
+    expect(rowNames()).not.toContain("/watch");
     key(input, "Enter");
     await waitFor(() => daemon.calls.some((c) => c.method === "session.goal.set" && c.params["text"] === "make the suite green"), "the goal to reach the daemon");
     await waitFor(() => says("goal set: make the suite green"), "the palette's notice");
@@ -288,6 +322,39 @@ describe("the palette in this app's words", () => {
     await waitFor(() => selected() === "/sessions", "/sessions");
     expect(paletteRow("sessions")!.textContent).toContain("Your sessions, newest first");
     expect(dialog.querySelector(".palette .detail")!.textContent).not.toMatch(/window|directory/);
+  });
+
+  // A branch's /merge, a window's /dismiss and the agent tree have nothing here to act on,
+  // so the table marks them the terminal client's (troupe #929); a row the table gives this
+  // app a requirement of its own for is judged by that one.
+  it("leaves out the terminal client's branch rows, and judges a row by this app's own availability", async () => {
+    daemon.commands.push({
+      name: "tree",
+      aliases: [],
+      section: "navigate",
+      summary: "Every branch and subagent",
+      usage: "/tree",
+      args: [],
+      availability: "tui",
+      availabilities: { desktop: "local" },
+      source: "builtin",
+      detail: "Each with its state.",
+      example: null,
+    });
+    const composer = await openSession();
+    key(composer, "/");
+    const dialog = await waitFor(palette, "the palette");
+    await waitFor(() => rowNames().includes("/tree"), "the row this app has a requirement of its own for");
+    expect(rowNames()).not.toContain("/merge");
+    const input = dialog.querySelector<HTMLInputElement>("input")!;
+    type(input, "worktree");
+    await waitFor(() => rowNames().length === 0, "no row by /merge's summary either");
+    // On a session on this computer `local` holds, so the row is listed, greyed only for
+    // the runner this app has not got.
+    type(input, "tree");
+    await waitFor(() => selected() === "/tree", "/tree");
+    expect(paletteRow("tree")!.classList.contains("unavailable")).toBe(true);
+    expect(paletteRow("tree")!.textContent).toContain("not in the desktop app yet");
   });
 
   it("switches the session to an agent from its row, and sends what follows the name", async () => {

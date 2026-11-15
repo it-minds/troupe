@@ -25,6 +25,7 @@
 // versions, a Markdown document of theirs to edit and share, and somebody else's Markdown for
 // the dev profile's people.
 
+import { readFileSync } from "node:fs";
 import { exampleAdmin } from "../packages/client/test/support/admin.js";
 import { FakeIdp } from "../packages/client/test/support/idp.js";
 import { FakePlane, artifact } from "../packages/client/test/support/plane.js";
@@ -54,11 +55,14 @@ if (process.env["GITOPS"]) {
 // The person's desktop app, beside what the plane has seen of them already, in the records
 // Client versions counts: Mine reads the same ones (`me.clients`), so the two agree.
 admin.seen.push({ subject: as.subject, display_name: as.displayName, component: "desktop", version: "0.25.0-beta", platform: "windows/x86_64", since: "2026-10-20T09:00:00Z", seen_at: new Date().toISOString() });
+// The plane says the version it runs, this checkout's, as a real one's discovery does.
+const version = (JSON.parse(readFileSync(new URL("../apps/console/package.json", import.meta.url), "utf8")) as { version: string }).version;
 const plane = await FakePlane.start({
   idp,
   worker,
   corsOrigins: origins,
   admin,
+  version,
   memory: [{ scope: "organisation", name: null, version: 2, hash: "sha256:fake", updated_at: "2026-10-22T10:00:00Z", text: "We write British English.\nEvery change has a test." }],
   artifacts: [
     artifact("art-fake-weekly", { subject: as.subject, display_name: as.displayName }, {
@@ -86,6 +90,17 @@ plane.seed(as.subject, { title: "Tidy the icons", profile: "ux" });
 const offerAfter = Number(process.env["OFFER_AFTER_MS"] ?? 15_000);
 if (offerAfter > 0) {
   setTimeout(() => plane.relay("ada@example.com", { id: "s-laptop-ledger", ownerName: "Ada", workspace: "ledger", shares: [{ subject: as.subject, role: "observe" }] }), offerAfter).unref?.();
+}
+
+// AWAY_AFTER_MS later the first laptop goes away (asleep or offline, as the plane says it on
+// the session's stream), and AWAY_FOR_MS (10000) after that it is back (troupe #932); unset
+// for neither.
+const awayAfter = Number(process.env["AWAY_AFTER_MS"] ?? 0);
+if (awayAfter > 0) {
+  setTimeout(() => {
+    plane.pause("s-laptop-billing", "offline");
+    setTimeout(() => plane.resume("s-laptop-billing"), Number(process.env["AWAY_FOR_MS"] ?? 10_000)).unref?.();
+  }, awayAfter).unref?.();
 }
 
 console.log(`

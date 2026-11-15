@@ -169,7 +169,7 @@ defmodule Troupe.Session.PermissionRulesTest do
 
       [completed] = events_of_type(session.id, "tool_call_completed")
       refute completed.data["ok"]
-      assert completed.data["content"] =~ "refused by the rule deny shell(touch), from the worker profile fixing"
+      assert completed.data["content"] =~ "refused by the rule deny shell(touch), from the profile fixing"
       refute File.exists?(Path.join(context.workspace, "ran.txt"))
     end
 

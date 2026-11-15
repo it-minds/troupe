@@ -336,7 +336,10 @@ defmodule Troupe.UI.HQ do
       String.pad_trailing(label(session), 8),
       String.pad_trailing(state_word(session), 10),
       String.pad_trailing(to_string(session.profile || "—"), 10),
-      String.pad_trailing(to_string(session.team || session.owner || ""), 10),
+      String.pad_trailing(
+        to_string(session.team || Map.get(session, :owner_name) || session.owner || ""),
+        10
+      ),
       kept_title(session)
     ]
     |> Enum.join(" ")

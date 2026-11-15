@@ -25,6 +25,11 @@ const STEP_WORDS: Record<SetupStepName, string> = {
   finish: "First session",
 };
 
+/** Whether the run has answered `where` with an organisation's plane rather than this machine. */
+export function planeChosen(flow: SetupFlow | null): boolean {
+  return flow?.answers.where?.["choice"] === "plane";
+}
+
 /** The steps this path takes, with the one in hand marked. Read with the glyphs, not only the colour. */
 export function Progress({ flow }: { flow: SetupFlow }): JSX.Element {
   return (
@@ -43,7 +48,8 @@ export function Progress({ flow }: { flow: SetupFlow }): JSX.Element {
             style={{ fontWeight: current ? 800 : 400 }}
           >
             {s.done ? "✓ " : current ? "→ " : "· "}
-            {STEP_WORDS[s.name]}
+            {/* A plane's run ends on the sign-in, and starts no session here. */}
+            {s.name === "finish" && planeChosen(flow) ? "Sign in" : STEP_WORDS[s.name]}
           </li>
         );
       })}

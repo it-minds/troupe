@@ -112,6 +112,41 @@ defmodule Troupe.Worker.HarnessAuthTest do
       assert {:ok, _} = Client.call(client, "session.get", %{"session_id" => context.session_id})
     end
 
+    # #920: a pod's rules are its worker profile's, so a lasting rule from an approval is not
+    # offered, and asked for anyway is refused with whose they are, before anything is read.
+    test "an owner is not offered Always allow on a pod, and asking is refused", context do
+      assert {:ok, _} = activate(context)
+      {:ok, client} = connect(context, token(context, role: "owner", session_id: context.session_id))
+
+      refute Client.info(client).capabilities["approval_allow_always"]
+
+      assert {:error, refused} =
+               Client.call(client, "approval.respond", %{
+                 "session_id" => context.session_id,
+                 "call_id" => "whatever",
+                 "decision" => "allow_always",
+                 "scope" => "everywhere"
+               })
+
+      assert refused.message == "forbidden"
+      assert refused.data["reason"] =~ "worker profile's"
+    end
+
+    test "an artifact is fetched over the control link for the person who asked, and refused without one",
+         context do
+      assert {:ok, _} = activate(context)
+      {:ok, client} = connect(context, token(context, role: "owner", session_id: context.session_id))
+      :ok = Troupe.Worker.Artifacts.install()
+      on_exit(&Troupe.Artifacts.uninstall/0)
+
+      # No control link in this test: the pod says so rather than pretending.
+      assert {:error, refused} =
+               Client.call(client, "fs.upload", %{"session_id" => context.session_id, "artifact" => "a-1"})
+
+      assert refused.message == "unavailable"
+      assert refused.data["reason"] =~ "could not be reached from this pod"
+    end
+
     test "a collaborator's next command is refused once the plane revokes them", context do
       assert {:ok, _} = activate(context)
 

@@ -437,7 +437,10 @@ defmodule Troupe.FakeRemote do
       memory_roles: Keyword.get(opts, :memory_roles),
       plane_roles: Keyword.get(opts, :plane_roles),
       memory_audit: [],
-      invites: Keyword.get(opts, :invites, [])
+      invites: Keyword.get(opts, :invites, []),
+      # What a pod says it can do at `initialize`, beyond its own: a laptop's relay says
+      # `relayed`, and `relayed_allow_session` where it takes an answer for the session.
+      capabilities: Keyword.get(opts, :capabilities, %{})
     }
 
     owner = self()
@@ -865,7 +868,8 @@ defmodule Troupe.FakeRemote do
       %{
         "server_info" => %{"name" => "fake-remote", "version" => "1.0.0"},
         "protocol_version" => "1",
-        "capabilities" => %{"fs" => true, "something_unknown" => true},
+        "capabilities" =>
+          Map.merge(%{"fs" => true, "something_unknown" => true}, state.capabilities),
         "principal" => state.principal,
         "scopes" => state.scopes
       }}, state}
@@ -1257,7 +1261,7 @@ defmodule Troupe.FakeRemote do
           "models.default",
           "pod-model",
           "profile",
-          "the worker profile fixing (TROUPE_MODEL)",
+          "the profile fixing (TROUPE_MODEL)",
           %{}
         ),
         key.("max_turns", 7, "session", "the session's terms", %{}),
@@ -1266,9 +1270,9 @@ defmodule Troupe.FakeRemote do
           "base_url",
           "http://llm.example.test/v1",
           "profile",
-          "the worker profile fixing (TROUPE_BASE_URL)"
+          "the profile fixing (TROUPE_BASE_URL)"
         ),
-        machinery.("state_dir", "/state", "cli", "the worker pod"),
+        machinery.("state_dir", "/state", "cli", "the platform"),
         key.("compact_at", 0.6, "project", "/state/workspaces/#{sid}/.troupe/config.yaml", %{}),
         key.("managed_permission_rules_only", true, "enforced", "the plane's platform settings", %{
           "enforced" => %{"value" => true, "source" => "the plane's platform settings"}

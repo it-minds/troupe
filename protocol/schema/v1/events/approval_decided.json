@@ -12,6 +12,9 @@
       },
       "type": "array"
     },
+    "always": {
+      "type": "object"
+    },
     "args": {
       "type": "object"
     },

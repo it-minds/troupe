@@ -152,5 +152,8 @@ describe("a team session", () => {
       "Profile | the profile dev's memory | the plane, when the session started | version 1",
       "Repository | /state/workspaces/team-1/AGENTS.md | the repository's root | abcdef01",
     ]);
+    // The pod writes its labels and sources in the reader's words, and the app shows them
+    // as they came: nothing on the way rewrites them, so nothing of an operator's is left.
+    expect(backstage().textContent).not.toMatch(/worker profile|activation/i);
   });
 });

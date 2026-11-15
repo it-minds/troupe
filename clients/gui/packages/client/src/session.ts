@@ -32,6 +32,27 @@ export type ApprovalDecision = "allow" | "deny" | "allow_session" | "allow_alway
 /** The capability a server names at `initialize` when `approval.respond` takes `allow_always`. */
 export const ALLOW_ALWAYS = "approval_allow_always";
 
+/**
+ * The capability a laptop's daemon names at `initialize` over the plane's relay when it
+ * takes `allow_session` from there (troupe #932); one from before answers a call once.
+ */
+export const RELAYED_ALLOW_SESSION = "relayed_allow_session";
+
+/**
+ * The capability a server names at `initialize` when `fs.upload` takes `artifact` in place of
+ * bytes: it fetches the artifact's files from the plane into the session's workspace itself,
+ * a pod over its control link and a daemon with its sign-in (troupe #920).
+ */
+export const UPLOAD_ARTIFACT = "fs_upload_artifact";
+
+/** What `fs.upload` with `artifact` answers: the version it put, and where each file landed. */
+export interface ArtifactAttached {
+  artifact: string;
+  title?: string;
+  version?: number;
+  files: Array<{ path: string; bytes: number }>;
+}
+
 export interface SessionViewHooks {
   /** Every event for this session, durable or ephemeral, in arrival order. */
   onEvent?: (e: TroupeEvent) => void;
@@ -435,6 +456,23 @@ export class SessionView {
    */
   fsUpload(path: string, content: string): Promise<{ path: string; bytes: number }> {
     return this.conn.call<{ path: string; bytes: number }>("fs.upload", { command_id: this.conn.nextCommandId(), session_id: this.sessionId, path, content });
+  }
+
+  /**
+   * `fs.upload` with `artifact`: the server puts one of the person's artifacts into the
+   * workspace under `folder` (`session:/` where none is given), fetching its files from the
+   * plane itself, so they never pass through this client. Only where the server named
+   * `UPLOAD_ARTIFACT` at `initialize`.
+   */
+  fsUploadArtifact(artifact: string, opts: { version?: number; file?: string; folder?: string } = {}): Promise<ArtifactAttached> {
+    return this.conn.call<ArtifactAttached>("fs.upload", {
+      command_id: this.conn.nextCommandId(),
+      session_id: this.sessionId,
+      artifact,
+      ...(opts.version === undefined ? {} : { version: opts.version }),
+      ...(opts.file === undefined ? {} : { file: opts.file }),
+      ...(opts.folder === undefined ? {} : { path: opts.folder }),
+    });
   }
 
   /** What the server this view speaks to said it can do at `initialize`; nothing while unbound. */

@@ -102,7 +102,7 @@ describe("the console's fields", () => {
     visit("#/teams/core/limits");
     found.push(...(await check("limits", async () => {
       (await waitFor(() => button("Change core's limits"), "the limits")).click();
-      await waitFor(() => says("Idle before it goes dormant") && document.querySelector("form.edit"), "the form");
+      await waitFor(() => says("Idle before it falls asleep") && document.querySelector("form.edit"), "the form");
     })));
 
     visit("#/teams/core/danger");

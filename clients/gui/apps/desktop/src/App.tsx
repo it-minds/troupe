@@ -23,7 +23,7 @@ import type { AppMode } from "./mode";
 import { useNotifications } from "./notify";
 import { capabilities, likelyPlaneUrl, prefs } from "./shell";
 import { useSharedPrefs } from "./shared";
-import { hasChosen, markChosen, useAppearance } from "./theme";
+import { firstRunLook, hasChosen, markChosen, useAppearance } from "./theme";
 import { Approvals } from "./views/Approvals";
 import { Artifacts } from "./views/Artifacts";
 import { MemoryScreen } from "./views/OwnMemory";
@@ -40,7 +40,9 @@ import { Opened } from "./views/Invites";
 import { ProfilePage, Profiles } from "./views/Profiles";
 import { newSession, SignIn } from "./views/SignIn";
 import { StartSession } from "./views/StartSession";
-import { Eye, Wordmark } from "./views/brand";
+import { Eye, Mask, Wordmark } from "./views/brand";
+import { useNarrow } from "./narrow";
+import { NavSheet } from "./sheet";
 
 type Where =
   | { screen: "launcher" }
@@ -144,6 +146,38 @@ function workspaceOf(row: { kind: SessionKind; raw: unknown } | undefined): { wo
   return typeof workspace === "string" && workspace ? { workspace } : {};
 }
 
+/** What the phone's top bar calls the screen on show: the rail's word for where it is. */
+function screenTitle(where: Where): string {
+  switch (where.screen) {
+    case "launcher":
+    case "sessions":
+    case "session":
+      return "Sessions";
+    case "new":
+      return "New session";
+    case "approvals":
+      return "Waiting for you";
+    case "artifacts":
+      return "Artifacts";
+    case "memory":
+      return "Memory";
+    case "review":
+      return "Review";
+    case "profiles":
+      return "Profiles";
+    case "local":
+      return "This computer";
+    case "agents":
+      return "Agents";
+    case "connect":
+      return "Tools and skills";
+    case "appearance":
+      return "Appearance";
+    case "setup":
+      return "Setup";
+  }
+}
+
 /** Where a start lands: the launcher, or the list for a person who chose it. */
 function startScreen(): Where {
   return opensOnLauncher() ? { screen: "launcher" } : { screen: "sessions" };
@@ -238,6 +272,10 @@ export function App(): JSX.Element {
   }, [remountsItself, screenKey]);
   const readySinceShown = readySinceSaid && (!remountsItself || hasDraft(typed.current.fields));
   const appearance = useAppearance();
+  // On a phone the rail is a top bar, and its destinations a sheet opened from it.
+  const narrow = useNarrow();
+  const [menu, setMenu] = useState(false);
+  const closeMenu = useCallback(() => setMenu(false), []);
   // Opening a session reads it, which clears its row's `unseen` at the daemon: the row
   // says so now rather than at the next poll. What rows count while nobody reads their
   // session is what a notification says (notify.ts).
@@ -252,6 +290,24 @@ export function App(): JSX.Element {
   // two people on one computer are two first sign-ins, and the second should not
   // inherit an answer the first one gave.
   const [chosen, setChosen] = useState(false);
+  // This window's first run picked the look a moment ago, and the person who finishes it
+  // is the one who signs in next: their first sign-in takes that pick as their answer.
+  // Kept for this window across the browser build's sign-in, which reloads the page.
+  const [lookPicked, setLookPickedState] = useState(firstRunLook.picked);
+  const setLookPicked = useCallback((on: boolean) => {
+    firstRunLook.set(on);
+    setLookPickedState(on);
+  }, []);
+  const firstSignIn = auth !== null && !chosen && !hasChosen(auth.me?.subject);
+  useEffect(() => {
+    // Spent by the first sign-in after the run, whoever had answered before.
+    if (!lookPicked || !auth) return;
+    if (firstSignIn) {
+      markChosen(auth.me?.subject);
+      setChosen(true);
+    }
+    setLookPicked(false);
+  }, [firstSignIn, lookPicked, auth, setLookPicked]);
   const planeUrl = prefs.get("planeUrl", likelyPlaneUrl());
   // A fresh machine in local mode meets the first run's questions (Decision 705); the
   // daemon says whether they are needed, once per connection.
@@ -268,7 +324,8 @@ export function App(): JSX.Element {
     // Whoever signs in next is a different person until proved otherwise, and whether
     // *they* have picked a theme is a question about them.
     setChosen(false);
-  }, [auth, daemon.client]);
+    setLookPicked(false);
+  }, [auth, daemon.client, setLookPicked]);
 
   const setLocalOnly = useCallback((on: boolean) => {
     chooseLocalOnly(on);
@@ -360,7 +417,18 @@ export function App(): JSX.Element {
   };
 
   if (mode === "local" && daemon.client && setup.needed === true) {
-    return <FirstRun client={daemon.client} opened={daemon.opened} appearance={appearance} onDone={setupDone} />;
+    return (
+      <FirstRun
+        client={daemon.client}
+        opened={daemon.opened}
+        appearance={appearance}
+        onDone={(outcome) => {
+          // The first run opened on the look, so the sign-in it ends on does not ask again.
+          setLookPicked(true);
+          setupDone(outcome);
+        }}
+      />
+    );
   }
 
   // A private session another device holds, taken over by this computer's daemon, and the
@@ -368,7 +436,7 @@ export function App(): JSX.Element {
   const thisComputer = daemon.client;
   const claim = thisComputer ? (id: string) => thisComputer.claimSession(id).then(() => refresh()) : undefined;
 
-  if (auth && !chosen && !hasChosen(auth.me?.subject)) {
+  if (auth && firstSignIn && !lookPicked) {
     return (
       <Onboarding
         name={auth.me?.display_name ?? null}
@@ -413,97 +481,142 @@ export function App(): JSX.Element {
     );
   }
 
+  // The rail's destinations and who you are: down the rail's side on a wide window, and in
+  // the sheet the top bar opens on a phone, where pressing one shuts the sheet.
+  const destinations = (
+    <>
+      <nav>
+        <button aria-current={where.screen === "sessions" ? "page" : undefined} onClick={() => setWhere({ screen: "sessions" })}>
+          Sessions <span className="count muted">{snapshot.rows.length}</span>
+        </button>
+        {/* A person's own things, read and changed here rather than in the console: what
+            they and their troupe published for them, and what every session of theirs
+            remembers. Both from the plane the app is signed in to, through this
+            computer's daemon where it is not; neither asks a plane under Local only. */}
+        <button aria-current={where.screen === "artifacts" ? "page" : undefined} onClick={() => setWhere({ screen: "artifacts" })}>
+          Artifacts
+        </button>
+        <button aria-current={where.screen === "memory" ? "page" : undefined} onClick={() => setWhere({ screen: "memory" })}>
+          Memory
+        </button>
+        <button aria-current={where.screen === "approvals" ? "page" : undefined} onClick={() => setWhere({ screen: "approvals" })}>
+          Waiting for you
+          {waiting > 0 && (
+            <span className="pill waiting">
+              <Eye status="waiting" />
+              {waiting}
+            </span>
+          )}
+        </button>
+        {/* Review reads the plane's record of unattended runs. There is none without
+            a plane, so it is not offered, rather than offered and empty. */}
+        {planeAuth && (
+          <button aria-current={where.screen === "review" ? "page" : undefined} onClick={() => setWhere({ screen: "review" })}>
+            Review
+          </button>
+        )}
+        {/* What each profile the person may use gives a session, before they start one: the
+            plane's to say, so offered only while signed in to one, as Review is. */}
+        {planeAuth && (
+          <button aria-current={where.screen === "profiles" ? "page" : undefined} onClick={() => setWhere({ screen: "profiles" })}>
+            Profiles
+          </button>
+        )}
+        <button aria-current={where.screen === "local" ? "page" : undefined} onClick={() => setWhere({ screen: "local" })}>
+          This computer
+          {daemon.status === "connected" && <span className="count muted">{local}</span>}
+        </button>
+        <button aria-current={where.screen === "agents" ? "page" : undefined} onClick={() => setWhere({ screen: "agents" })}>
+          Agents
+        </button>
+        {/* Your own MCP servers and skills, which every session on this computer starts. */}
+        <button aria-current={where.screen === "connect" ? "page" : undefined} onClick={() => setWhere({ screen: "connect" })}>
+          Tools and skills
+        </button>
+        <button aria-current={where.screen === "appearance" ? "page" : undefined} onClick={() => setWhere({ screen: "appearance" })}>
+          Appearance
+        </button>
+        <button aria-current={where.screen === "setup" ? "page" : undefined} onClick={() => setWhere({ screen: "setup" })}>
+          Setup
+        </button>
+      </nav>
+      <span className="spacer" />
+      {planeAuth ? (
+        <div className="me">
+          <div className="name">{planeAuth.me?.display_name ?? planeAuth.me?.subject ?? "Signed in"}</div>
+          <div className="teams muted">{planeAuth.me?.teams.join(", ") || "no team"}</div>
+          <div className="host muted micro" title={`Your sign-in is kept in: ${caps.secrets.replace("-", " ")}`}>
+            {caps.shellName ?? "browser"}
+          </div>
+          <button className="link" onClick={() => void signOut()}>
+            Sign out
+          </button>
+        </div>
+      ) : (
+        // Nobody is signed in, and nobody needs to be: the sessions here belong to
+        // this computer's user, so that is who is named.
+        <div className="me">
+          <div className="name">This computer</div>
+          <div className="teams muted">{daemon.user?.name ?? "the daemon is not connected"}</div>
+          <div className="host muted micro">
+            {refused
+              ? "the platform needs a newer version"
+              : !offline
+                ? "local only"
+                : expired
+                  ? "not signed in to the platform"
+                  : "the platform is not answering"}{" "}
+            ·{" "}
+            {caps.shellName ?? "browser"}
+          </div>
+        </div>
+      )}
+    </>
+  );
+
   return (
-    <div className="app">
-      <div className="rail">
-        <Wordmark size={24} onClick={() => setWhere({ screen: "launcher" })} />
-        <nav>
-          <button aria-current={where.screen === "sessions" ? "page" : undefined} onClick={() => setWhere({ screen: "sessions" })}>
-            Sessions <span className="count muted">{snapshot.rows.length}</span>
+    <div className={narrow ? "app narrow" : "app"}>
+      {narrow ? (
+        <header className="top-bar">
+          <button type="button" className="top-mark" title="Home" onClick={() => setWhere({ screen: "launcher" })}>
+            <Mask size={24} label="Troupe" />
           </button>
-          {/* A person's own things, read and changed here rather than in the console: what
-              they and their troupe published for them, and what every session of theirs
-              remembers. Both from the plane the app is signed in to, through this
-              computer's daemon where it is not; neither asks a plane under Local only. */}
-          <button aria-current={where.screen === "artifacts" ? "page" : undefined} onClick={() => setWhere({ screen: "artifacts" })}>
-            Artifacts
-          </button>
-          <button aria-current={where.screen === "memory" ? "page" : undefined} onClick={() => setWhere({ screen: "memory" })}>
-            Memory
-          </button>
-          <button aria-current={where.screen === "approvals" ? "page" : undefined} onClick={() => setWhere({ screen: "approvals" })}>
-            Waiting for you
+          <span className="top-title">{screenTitle(where)}</span>
+          <button
+            type="button"
+            className="top-menu"
+            aria-haspopup="dialog"
+            aria-expanded={menu}
+            aria-label={waiting > 0 ? `Menu, ${waiting} waiting for you` : "Menu"}
+            onClick={() => setMenu(true)}
+          >
+            <span aria-hidden="true">☰</span>
             {waiting > 0 && (
-              <span className="pill waiting">
+              <span className="pill waiting" aria-hidden="true">
                 <Eye status="waiting" />
                 {waiting}
               </span>
             )}
           </button>
-          {/* Review reads the plane's record of unattended runs. There is none without
-              a plane, so it is not offered, rather than offered and empty. */}
-          {planeAuth && (
-            <button aria-current={where.screen === "review" ? "page" : undefined} onClick={() => setWhere({ screen: "review" })}>
-              Review
-            </button>
-          )}
-          {/* What each profile the person may use gives a session, before they start one: the
-              plane's to say, so offered only while signed in to one, as Review is. */}
-          {planeAuth && (
-            <button aria-current={where.screen === "profiles" ? "page" : undefined} onClick={() => setWhere({ screen: "profiles" })}>
-              Profiles
-            </button>
-          )}
-          <button aria-current={where.screen === "local" ? "page" : undefined} onClick={() => setWhere({ screen: "local" })}>
-            This computer
-            {daemon.status === "connected" && <span className="count muted">{local}</span>}
-          </button>
-          <button aria-current={where.screen === "agents" ? "page" : undefined} onClick={() => setWhere({ screen: "agents" })}>
-            Agents
-          </button>
-          {/* Your own MCP servers and skills, which every session on this computer starts. */}
-          <button aria-current={where.screen === "connect" ? "page" : undefined} onClick={() => setWhere({ screen: "connect" })}>
-            Tools and skills
-          </button>
-          <button aria-current={where.screen === "appearance" ? "page" : undefined} onClick={() => setWhere({ screen: "appearance" })}>
-            Appearance
-          </button>
-          <button aria-current={where.screen === "setup" ? "page" : undefined} onClick={() => setWhere({ screen: "setup" })}>
-            Setup
-          </button>
-        </nav>
-        <span className="spacer" />
-        {planeAuth ? (
-          <div className="me">
-            <div className="name">{planeAuth.me?.display_name ?? planeAuth.me?.subject ?? "Signed in"}</div>
-            <div className="teams muted">{planeAuth.me?.teams.join(", ") || "no team"}</div>
-            <div className="host muted micro" title={`Your sign-in is kept in: ${caps.secrets.replace("-", " ")}`}>
-              {caps.shellName ?? "browser"}
-            </div>
-            <button className="link" onClick={() => void signOut()}>
-              Sign out
-            </button>
+        </header>
+      ) : (
+        <div className="rail">
+          <Wordmark size={24} onClick={() => setWhere({ screen: "launcher" })} />
+          {destinations}
+        </div>
+      )}
+      {narrow && menu && (
+        <NavSheet onClose={closeMenu}>
+          <div
+            className="nav-sheet-body"
+            onClick={(e) => {
+              if (e.target instanceof Element && e.target.closest("button")) closeMenu();
+            }}
+          >
+            {destinations}
           </div>
-        ) : (
-          // Nobody is signed in, and nobody needs to be: the sessions here belong to
-          // this computer's user, so that is who is named.
-          <div className="me">
-            <div className="name">This computer</div>
-            <div className="teams muted">{daemon.user?.name ?? "the daemon is not connected"}</div>
-            <div className="host muted micro">
-              {refused
-                ? "the platform needs a newer version"
-                : !offline
-                  ? "local only"
-                  : expired
-                    ? "not signed in to the platform"
-                    : "the platform is not answering"}{" "}
-              ·{" "}
-              {caps.shellName ?? "browser"}
-            </div>
-          </div>
-        )}
-      </div>
+        </NavSheet>
+      )}
 
       <main ref={main}>
         <UpdateBanner updates={updates} />

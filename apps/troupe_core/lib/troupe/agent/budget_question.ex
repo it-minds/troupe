@@ -281,7 +281,7 @@ defmodule Troupe.Agent.BudgetQuestion do
     if :workspace in scopes,
       do: "",
       else:
-        " On a pod a raise lasts this #{run_word} or this session; the workspace's limits are the team's terms."
+        " On the platform a raise lasts this #{run_word} or this session; the workspace's limits are the team's terms."
   end
 
   # -- the answer -----------------------------------------------------------------
@@ -415,7 +415,7 @@ defmodule Troupe.Agent.BudgetQuestion do
       do: {:ok, :workspace},
       else:
         {:error,
-         "on a pod the workspace's limits are the team's terms and the profile: say +25 or +25 session."}
+         "on the platform the workspace's limits are the team's terms and the profile: say +25 or +25 session."}
   end
 
   defp within_cap(%{cap: nil}, scope, amount), do: {:ok, {:extend, scope, amount}}

@@ -205,6 +205,8 @@ The server's `capabilities`:
 | `watch` | `watch.set` and `watch.get` are served, a saved `AI!` or `AI?` comment starts a branch (`watch_triggered`), and `fs_changed` events arrive |
 | `remote` | this is a worker pod rather than a local daemon |
 | `private_sessions` | this server can seal a session under the caller's own key, so a client may offer to make one |
+| `approval_allow_always` | `approval.respond` takes `allow_always`, which writes the person's own rule for the tool (a daemon's; a pod's rules are its worker profile's, and a relayed connection's the laptop's) |
+| `fs_upload_artifact` | `fs.upload` takes `artifact` in place of `content`, and the server fetches the artifact's files from the plane itself (a daemon and a pod) |
 
 `private_sessions` is computed at every `initialize`, never compiled in, and it is what
 un-gates the client's control. It is true only where both things it needs are true: a
@@ -266,7 +268,7 @@ Persisted, replayable, and totally ordered per session.
 | `seq` | monotonic from 1, no gaps, per session |
 | `prev_hash` | `sha256:` of the previous event's canonical JSON; `null` at `seq` 1 |
 | `ts` | RFC 3339 UTC, microsecond precision |
-| `actor` | who caused it; `{"kind": "system"}` when nobody did; `"via": "plane"` beside a person who did it from another device, through the plane ([Steering from another device](#steering-from-another-device)) |
+| `actor` | who caused it; `{"kind": "system"}` when nobody did; `display_name` beside a person's `subject` where the connection knew their name ([People by name](#people-by-name)); `"via": "plane"` beside a person who did it from another device, through the plane ([Steering from another device](#steering-from-another-device)) |
 | `agent` | agent path from the root, e.g. `["root"]` or `["root", "explore#1"]` |
 | `type` | see the table below |
 | `v` | schema version of `data`, starting at 1 |
@@ -276,6 +278,25 @@ Persisted, replayable, and totally ordered per session.
 insignificant whitespace, numbers in shortest round-trip form. The hash covers the
 event *without* its own `prev_hash` field. This makes the log independently
 verifiable: walk it and recompute.
+
+### People by name
+
+Wherever an event or a row names a person by `subject`, it carries their name beside it,
+so a client shows initials and a name rather than an id or an email. In an event, the
+`actor` has `display_name`: on a pod, the name the plane signed into the connection's
+token from its identity record (`name` beside `sub`); on a laptop, the linked person's, or
+the operating system's user where nobody is linked. `session_created` has `owner_name`
+beside `owner` where the writer knew it (a laptop's linked person; a pod is told no
+owner). The events whose `data` names a person carry `display_name` beside `subject`
+(`session_invited`, `session_uninvited`, `acl_granted`, `acl_revoked`, `session_tainted`,
+`presence`), and `by_name` beside `by`. In the plane's answers, a session row
+(`sessions.list`, `session.get` and every method that answers a session, and
+`admin.sessions.list`) has `owner_name` beside `owner`, an audit row (`admin.audit.list`)
+`actor_name` beside `actor`, and an offer or an invitation `owner_name` and
+`invited_by_name`, all filled from the plane's identity record when it answers. A person
+the writer or the plane has no name for, or whose name is only their subject again, has
+the field left out, and a client shows the subject as it did before there was one; a
+plane or daemon from before this sends none.
 
 ### Ephemeral events
 
@@ -297,7 +318,7 @@ Durable:
 
 | type | `data` |
 | --- | --- |
-| `session_created` | `workspace`, `profile`, `visibility`, `bundle_version`, `kind` (`team`/`local`/`private`), `owner`, `entitlements` (the agent, skill and MCP server names the grant resolved to; absent for no restriction), `agent_rule` (the worker profile's `spec.agents` rule, `allow` and `deny`, which the pod applied to every definition, subagents included; absent where the profile has none), `origin`, `parent` |
+| `session_created` | `workspace`, `profile`, `visibility`, `bundle_version`, `kind` (`team`/`local`/`private`), `owner`, `owner_name`, `entitlements` (the agent, skill and MCP server names the grant resolved to; absent for no restriction), `agent_rule` (the worker profile's `spec.agents` rule, `allow` and `deny`, which the pod applied to every definition, subagents included; absent where the profile has none), `origin`, `parent` |
 | `session_forked` | `parent` (the id, the `seq` forked at and the parent's head hash there), `reason` — a fork's first event; the parent gets nothing |
 | `agent_started` | `profile`, `mode`, `bundle_version` |
 | `agent_restarted` | `replayed_events`, `interrupted`, `incomplete_calls` (the calls the restart closed) |
@@ -336,7 +357,7 @@ Durable:
 | `input_after_done` | `source` — input a done agent did not take (its budget is spent) |
 | `cancelled` | `turn` — what the cancelled turn had cost (see below); `stopped` — the model call the cancel stopped, when one was in flight (see below) |
 | `turn_ended` | `reason` — the agent's turn is over and it waits for input: the model answered without asking for a tool, or a root's request failed and the `llm_error` just before says why. The durable twin of `agent_state` reaching `idle`, for a client that was not listening when it happened; a cancelled turn ends with `cancelled` instead, and a finished agent with `agent_done`. `reason` is there only when the harness ended the turn: `tool_failures`, a tool kept failing and the answer to `tool_failures_ask_started` was `stop`; `agent_failed`, the root agent crashed as often as it may be restarted, `detail` says what it raised, and the session stops after it, to come back dormant (Decision 727). Neither turn is taken up again by a restart. `waiting`, a subagent that ended its turn while a child it started in the background still runs: it rests until that child's end, and its task goes on (Decision 853). `turn` — what the turn cost (see below); absent from an `agent_failed` or a `waiting` one |
-| `approval_requested` | `call_id`, `tool`, `args`, `agent_path` — open until its `approval_decided`, its call's `tool_call_completed` (a cancel, or a tool that timed out waiting, ends the call with no decision), or a `cancelled` on the agent that asked or on one above it. A delegation a person asked to see first (`delegation.ask` in a config file, or `delegation: ask` in the agent's definition; Decision 850) asks with `tool: "delegate"`, the call's arguments as `args`, and `delegation`: what the gate shows — `agent`; `definition` (`name`, `layer`, `path`, `description`; `agents.get` by that name opens it, and the gate never edits one); `brief` (`goal`, `context`, `constraints`, `deliverable`, `do_not`); `tools` (`[{name, permission}]`, what the child will hold); `budget_share`; `depth` (the child's) and `max_depth`; `agents` (`[{name, description}]`, the subagents it could go to instead). `auto_approve` does not answer one. A call a per-tool rule of the configuration asks about (#658, Decision 907) carries `rule`, `{action, rule, tool, pattern, scope, source}` as `config.get`'s `permissions` has it: neither `auto_approve` nor an earlier `allow_session` answers it. A call a `deny` rule refuses asks nothing; its `tool_call_completed` names the rule and where it came from. A `publish_artifact` asks with `publication`, what the person aims: `title`, `kind`, `files` (how many), `visibility` and `owner` as the model proposed them (`null` where it proposed none; a call with no `visibility` is asked whatever a rule or `auto_approve` says, since whom it is for is the person's to choose), `id` (the artifact it republishes) and `note` |
+| `approval_requested` | `call_id`, `tool`, `args`, `agent_path`, and for a tool's call `cwd`, the folder it acts in (the call's own `cwd` against the workspace, else the session's workspace) — open until its `approval_decided`, its call's `tool_call_completed` (a cancel, or a tool that timed out waiting, ends the call with no decision), or a `cancelled` on the agent that asked or on one above it. A delegation a person asked to see first (`delegation.ask` in a config file, or `delegation: ask` in the agent's definition; Decision 850) asks with `tool: "delegate"`, the call's arguments as `args`, and `delegation`: what the gate shows — `agent`; `definition` (`name`, `layer`, `path`, `description`; `agents.get` by that name opens it, and the gate never edits one); `brief` (`goal`, `context`, `constraints`, `deliverable`, `do_not`); `tools` (`[{name, permission}]`, what the child will hold); `budget_share`; `depth` (the child's) and `max_depth`; `agents` (`[{name, description}]`, the subagents it could go to instead). `auto_approve` does not answer one. A call a per-tool rule of the configuration asks about (#658, Decision 907) carries `rule`, `{action, rule, tool, pattern, scope, source}` as `config.get`'s `permissions` has it: neither `auto_approve` nor an earlier `allow_session` answers it. A call a `deny` rule refuses asks nothing; its `tool_call_completed` names the rule and where it came from. A `publish_artifact` asks with `publication`, what the person aims: `title`, `kind`, `files` (how many), `visibility` and `owner` as the model proposed them (`null` where it proposed none; a call with no `visibility` is asked whatever a rule or `auto_approve` says, since whom it is for is the person's to choose), `id` (the artifact it republishes) and `note` |
 | `approval_decided` | `call_id`, `tool`, `args`, `agent_path`, `decision` (who decided is the event's `actor`); for a delegation, `agent` (the subagent it went to, when allowed), `brief` and `edited` (the brief as the person edited it, and which parts), `reason` (the person's word back with a denial); for a publication, `visibility` and `owner` (what it ran with, when allowed) and `edited` (which of the two the person changed from the model's proposal), `reason` with a denial |
 | `approval_resolved` | `call_id`, `resolved_by` |
 | `question_asked` | `call_id`, `agent_path`, `question`, `options` (`[{label, description}]`), `multiple`, `preview` — the agent's `ask_user`; answered with `question.answer`. `preview`, where there is one, is text the question is about, for a client to show as it is beneath it: the prompt a workspace's command would send, when it asks before it is first sent (`commands.run`). Open until its `question_answered`, its call's `tool_call_completed` (a cancel, or a tool that timed out waiting, ends the call with no answer), or a `cancelled` on the agent that asked or on one above it. The budget's and the failure guard's question have no call; each also ends with its `budget_ask_answered` or `tool_failures_ask_answered`, the only word there is when nobody is there to ask, and one a cancel ended is asked again at the next turn with another `question_asked` under the same `call_id` |
@@ -353,7 +374,7 @@ Durable:
 | `fs_changed` | `path`, `hash`, `size` |
 | `file_ready` | `path`, `size`, `hash`, `title`, `local_path` — a file the agent made for the person: `write_file` with `deliverable: true` (Decision 956). `path` is in the session's workspace, as `fs.read` takes it, and `hash` the one that read answers; `local_path`, on a session that runs on the person's machine, is where it already is there. A client offers to save it: the desktop app's **Save…** on the line (the bytes through `fs.read`, then a save dialog), the TUI the path on a laptop and `/save <path> [to]` from a pod; a headless run prints it |
 | `scratch_updated` | `name`, `path`, `kind`, `title`, `size`, `hash`, `version`, `call_id` — a document the `show` tool wrote to the session's scratchpad, or replaced (Decision 870), or the `patch` tool revised in place: a plan, report, comparison, diagram or table the agent shows the person beside the chat instead of printing it there. `path` is where `fs.read` reads it (`scratch:/<name>`), `kind` how to show it (`markdown`, `mermaid`, `json`, `csv` or `text`), `hash` the same `sha256:…` `fs.read` answers, `version` the writes of that name in the session from 1, and `call_id` the `show` or `patch` call that wrote it, so a client puts a card where the call was rather than the call's `content`. `scratch.list` lists the documents |
-| `acl_granted` / `acl_revoked` | `subject`, `role` |
+| `acl_granted` / `acl_revoked` | `subject`, `role`, `display_name` |
 | `session_invited` / `session_uninvited` | `subject`, `role` (invited only), `by`, `display_name`, `by_name` — a person invited into the session by name, to follow it (`observe`) or steer it (`control`), or the invitation taken back (Decision 949): written by the pod holding a pod session when the plane tells it, and by the daemon sealing a private one when its owner invites from there. A private session's daemon reads who it has invited from these, and puts a new key only in the slots of people they name |
 | `mounts_resolved` | `mounts` — the volumes a pod session's working tree was given, as the session started |
 | `published` | `source`, `destination`, `hash`, `bytes`, `direction` — a file the `publish` tool copied to or from a shared volume |
@@ -388,11 +409,22 @@ Under `approvals: deny` the agent answers `stop` itself. A subagent does not ask
 `tool_failures` and hands its parent what it found, labelled partial.
 
 Ephemeral: `llm_delta`, `agent_state` (`state`, `profile`, `agent`, `todos`, `budget`,
-`done_reason`: an agent's state as it changes), `progress`, `presence`, `summary_diff`, and `shell_started` and
+`done_reason`: an agent's state as it changes), `progress`, `presence`, `summary_diff`, `context_status` (below), and `shell_started` and
 `shell_output` while a person's command runs (`shell.run`); `watch_notice` (`message`)
 when watch mode falls back to polling or cannot start, and `watch_changed` (`enabled`,
 `backend`: `native`, `poll` or `off`) on the session whose watch went on or off or
 changed backend, which `watch.get` answers at any time.
+
+`context_status` — `window_tokens`, `used_tokens` — is how full the root agent's context
+window is (Decision 988): ephemeral, on the root, after each of its calls and before the
+first call of a turn on a model it has not said the window of (its first turn, or one
+after the model changed). `window_tokens` is the window compaction plans against where the
+model's is known, declared in a provider's `models:` entry or `models.windows` or reported
+by the provider's model list, and `null` where only `context_window`'s fallback is, so a
+client draws the share unknown rather than of a number nobody said; `used_tokens` is the
+last call's whole prompt, cached or not. It is derived from `llm_response` and the
+configuration, so it is never in the log; a client that attached late has the window from
+the next call.
 
 `budget_warning` — `dimension` (`turns`, `input`, `output`, `wall`, `context`), `used`,
 `limit`, `fraction`, `detail` (`input tokens 4.9M/6.0M (82%)`) — is written once per
@@ -1093,9 +1125,33 @@ dormant. A daemon configured to resume (`resume_on_restart`) resumes the loop to
 {"command_id": "c-4", "session_id": "s-9f", "call_id": "call_3",
  "decision": "allow"}
 ```
-`decision` is `allow`, `deny`, or `allow_session`. **First response wins**; a later
-one receives an `approval_resolved` event naming who resolved it, and has no second
-effect.
+`decision` is `allow`, `deny`, `allow_session`, or `allow_always` where the server named
+`approval_allow_always` at `initialize`. **First response wins**; a later one receives an
+`approval_resolved` event naming who resolved it, and has no second effect.
+
+`allow_always` (Decision 989) writes the person's own per-tool rule for the call's tool,
+the whole tool (`shell`, `write_file`; an MCP tool as `mcp(server.tool)`), into
+`permissions.allow` of the file `scope` names: `everywhere`, the default, is the user's
+`config.yaml`; `workspace` is the workspace's `.troupe/config.local.yaml`, the person's and
+not the repository's. It is the rule a person would write by hand, and every session that
+starts later reads it; this session lets the tool through for the rest of it, as
+`allow_session` does. The call is then allowed, `approval_decided` carries `decision:
+"allow_always"` and `always: {rule, scope, path}`, with the person as its actor, and
+`config.changed` is announced as for `config.set`. The answer is `{"accepted": true,
+"rule": {rule, scope, path}}`. It takes `admin`, as `config.set` does. Refused, with the
+request still waiting: `forbidden` with `setting: "managed_permission_rules_only"` where
+the platform allows only its own rules; `invalid_params` for a delegation or a
+publication, a call a rule's `ask` or the tool itself always asks about (an `allow` of the
+person's would not loosen it), `workspace` in an untrusted workspace (where a project's
+`allow` is held), and any other `scope`. A pod answers `forbidden`, "rules on the platform
+are the worker profile's, which an administrator sets", and does not name the capability;
+over a relayed connection it is `forbidden`, the laptop's configuration being its own person's. A server from before it
+answers `invalid_params` naming `decision`.
+
+```json
+{"command_id": "c-7", "session_id": "s-9f", "call_id": "call_3",
+ "decision": "allow_always", "scope": "everywhere"}
+```
 
 A delegation's request (`approval_requested` with `delegation`, Decision 850) takes three
 more, each optional: `agent`, one of the subagents its `delegation.agents` offers, to send
@@ -1363,6 +1419,28 @@ was started in: git sees the file, another session in that checkout sees it, and
 the session leaves it there. A `path` whose prefix names no mount (`plans:/x`) is
 `forbidden`, with a `reason` naming the ones there are, as every file tool refuses it.
 
+**An artifact in place of bytes** (Decision 990), where the server named
+`fs_upload_artifact` at `initialize`:
+
+```json
+{"command_id": "c-10", "session_id": "s-9f", "artifact": "a-7f3", "version": 2,
+ "path": "session:/plan"}
+```
+→ `{"artifact", "title", "version", "files": [{"path", "bytes"}]}`
+
+The server fetches the artifact's files from the plane itself, as the person on the
+connection, so they never pass through the client: a pod asks over its control link
+(`session.artifact.files`), and the plane reads the artifact as that person and only for
+someone who steers the session; a daemon asks the plane's `artifact.files` with its
+sign-in. `version` is the one its address serves where none is named, `file` narrows it to
+one of the version's files, and `path` is the folder they land in, `session:/` where none
+is named, each at its own path in the artifact. Every file is confined to the workspace
+before any is written, and each is an `fs_changed` of the person's. A version past 2 MB of
+files together is refused with its size (name one `file`). Refused as the plane refuses:
+`not_found` for one the person may not see; `unavailable` for a daemon not signed in to a
+plane ("troupe login signs it in"), a pod whose link is down, and a session under Local
+only. A server from before it reads `content` and refuses the call without it.
+
 #### `scratch.list`
 ```json
 {"session_id": "s-9f"}
@@ -1577,7 +1655,7 @@ same method, read from the file at the switch.
 {"session_id": "s-9f"}
 ```
 → `{"commands": [{"name", "aliases", "section", "summary", "usage", "args", "availability",
-"source", "detail", "example", "summaries"?, "details"?}]}`
+"source", "detail", "example", "summaries"?, "details"?, "availabilities"?}]}`
 
 The slash commands a client may offer for the session — the one table behind every
 client's palette, so `/help` in the terminal and the desktop app show the same list and
@@ -1611,8 +1689,11 @@ own for any of them.
 hide the row: `always`; `window` (acts on a window — the activated one, or one named
 as an argument); `local` (a session on this machine: a pod has no checkout, watcher or
 project brief of the person's to act on); `plane` (needs a plane); `tui` (the terminal
-client's alone, such as `/quit`: any other client leaves the row out). A client runs what
-it can and shows the rest greyed with the reason. Reading the table wakes nothing.
+client's alone, such as `/quit`, `/merge` or `/observer`: any other client leaves the row
+out). A `tui` row whose command needs more there also carries `availabilities`, a map
+from a client's name to its own `availability` (`/merge`'s `{"tui": "local"}`), which
+that client judges instead. A client runs what it can and shows the rest greyed with the
+reason. Reading the table wakes nothing.
 
 `summary` and `detail` are words true in any client. A row that a client runs
 differently enough to need its own also carries `summaries` and `details`, maps from a
@@ -1829,7 +1910,7 @@ description`; or `listed`, its `description` alone in the prompt and counted in 
 with `reason` `requested by description only: listed in the prompt, not joined`. `rule`
 and `applies` are null for every other file.
 `memory_from`, where a plane gave any, says where the memory documents came from: `source`, the plane's URL, or
-`the plane, with the session's activation` on a pod, and `fetched_at`, when this machine
+`the plane, when the session started` on a pod, and `fetched_at`, when this machine
 fetched its copy.
 `searched` is every directory looked in. Read from disk when asked, as the next
 turn reads it, so it says what an edit will do; what a past turn read is its
@@ -1946,10 +2027,10 @@ token as to anyone the session's role lets observe; a session not running there 
 `permissions`, `warnings` and `errors` as above, without the model panel's fields, plus
 `session_id` and `pod`. On a pod (`pod: true`) `layer` has two more values: `profile`, the
 worker profile's settings, which are the pod's environment, its `source` naming the
-profile and the variable (`the worker profile fixing (TROUPE_MODEL)`); and `session`, the
+profile and the variable (`the profile fixing (TROUPE_MODEL)`); and `session`, the
 terms the session was created with (`the session's terms`). What the platform enforces
 (`managed_permission_rules_only`, `managed_mcp_servers_only`) is `enforced`, from `the
-plane's platform settings`; what the pod sets of its own is `cli`, from `the worker pod`;
+plane's platform settings`; what the pod sets of its own is `cli`, from `the platform`;
 the worker profile's rules are in `permissions` with `scope` `profile` and `source` the
 profile that wrote each; and a repository's own files are read as a pod reads them, no key
 marked trusted taken from them. No key has a scope on a pod: none of it is a client's to
@@ -2856,9 +2937,14 @@ alone), `blob.get`, `agents.list` naming the session, `commands.list`, `presence
 `todo.edit`. Anything else is `forbidden` with `data.method` and a reason, as is a request
 naming another session (`data.field`) or the agents of a path; nothing of the laptop is
 reachable: no `fs.*`, `shell.*`, `tools.*`, setting, server, workspace or identity. An
-approval answered over the relay is `allow` or `deny`; `allow_session` is `forbidden` with
-`data.field` of `decision`, because it would loosen what the session asks, which is the
-laptop person's to do at the laptop.
+approval answered over the relay is `allow`, `deny` or `allow_session`, as at the laptop
+(Decision 997): the owner let the person steer, and what `allow_session` allows ends with
+the session; a call one of the laptop's own rules asks about is asked again whatever was
+allowed. A daemon that honours `allow_session` from there says
+`capabilities.relayed_allow_session: true`; one from before refuses it as `forbidden` with
+`data.field` of `decision`, and a client offers it only where the capability is named.
+`approval_requested` carries `cwd`, the folder the call acts in, as it does on every
+connection.
 
 **Checked at both ends.** The plane checks each request against that list, at the role the
 offer holds the person to, before relaying it, and asks again whether the offer still
@@ -2870,8 +2956,26 @@ actor.
 
 **Offline.** A laptop that is not connected is `unavailable` with `data.offline_since` at
 `remote.open` and at `initialize`; nothing is queued for it. A view ends with the
-notification `relay.closed {"reason"}` and the socket closing: `withdrawn`, `the laptop went
-offline`, `no longer shared with you`, `the token expired`.
+notification `relay.closed {"reason"}` and the socket closing: `withdrawn`, `no longer shared
+with you`, `the token expired`, `the laptop is back` (below).
+
+**Paused while the laptop is away.** When the laptop's connection goes with a view open,
+the view stays open and is sent the ephemeral event `offer_paused {"reason", "since"}` on
+the session's topic: `reason` is `stopped` where the daemon said it was stopping, and
+`offline` where the connection went without a word or stopped answering the plane's pings
+(a laptop asleep or out of reach). A request on the view meanwhile is `unavailable` with
+`data.paused` (the reason) and `data.reason`, *The laptop is away: nothing sent now reaches
+it. Send it again once the laptop is back.*; nothing is held for the laptop. When the
+laptop offers the session again the view is sent `offer_resumed {}` and ends with
+`relay.closed {"reason": "the laptop is back"}`, and the client opens it again and
+subscribes from its own cursor. An offer withdrawn while the laptop was away ends the view
+with `withdrawn`.
+
+```json
+{"jsonrpc": "2.0", "method": "event", "params": {"topic": "session:20261024T101500-aB3dE5",
+ "session_id": "20261024T101500-aB3dE5", "event": {"ephemeral": true,
+ "type": "offer_paused", "data": {"reason": "offline", "since": "2026-10-24T10:42:00Z"}}}}
+```
 
 **A person's watch.** What `remote.list` answers is also told as it changes, so a list of
 offered sessions need not ask again on a timer. A client opens `wss://<plane>/v1/relay/watch`
@@ -3065,19 +3169,19 @@ that team.
 | method | role | answers |
 | --- | --- | --- |
 | `admin.overview` | either | fleet health, active sessions, spend per team; for a platform admin, `openbao`: each grant the plane's OpenBao role needs, checked look-only, with the `bao` lines that add one it lacks |
-| `admin.profiles.list` | either | profiles with conditions, pods, load and versions; in gitops mode each carries `gitops` (`source`, `generation`, and a `problem` — `refused`, `missing`, `plane_only`, `unwritten` — with `reasons`), and a refused resource with no profile is listed too |
+| `admin.profiles.list` | either | profiles with conditions, pods, load and versions; a pod carries `gone: true` once its substrate no longer runs it (an ordinal at or above the profile's `replicas`, or a host no longer registered) and it has been quiet past its lease, and the sweep forgets such a row once it has been quiet past the drain deadline (`drain_timeout_seconds`) and holds no active session; in gitops mode each carries `gitops` (`source`, `generation`, and a `problem` — `refused`, `missing`, `plane_only`, `unwritten` — with `reasons`), and a refused resource with no profile is listed too |
 | `admin.profiles.export` | platform | `{profiles, policy, triggers, left_out}`: every profile, the `TroupePolicy` and every `Trigger` as a repository would hold them, each `{name, path, yaml, notes}` (a trigger's also `team`), without what the plane or the cluster writes (`left_out`, of a profile) or keeps (a trigger's key, runs and revisions) |
 | `admin.profile.get` | platform | the CR spec, the policy verdict, published vs reported bundle hash, and `gitops` as in the list; `written` and `spec` as the profile wrote them and `extended_by`, the profiles that extend it; with `effective: true`, `effective`: the chain, the profile in effect and each field with the profile it came from |
 | `admin.profile.put` | platform | creates or updates a `WorkerProfile`, returning the diff that was applied; `extends` names one profile it extends, resolved by the plane into the resource it writes, and a change rewrites every profile below it (`extended_by`); `spec.agents` (`allow`, `deny` lists of names) says which agents exist on it, built-ins included, a name in both lists refused; `managed_by_gitops` in gitops mode |
 | `admin.profile.delete` | platform | removes one; `conflict` while profiles extend it; `managed_by_gitops` in gitops mode, except for a profile the cluster has no resource for, whose row alone it deletes |
-| `admin.pod.drain` | platform | drains a pod, returning what it held |
+| `admin.pod.drain` | platform | drains a pod, returning what it held; the console's preview counts as somewhere its sessions could go only a pod of the profile that is healthy, not draining and not `gone` |
 | `admin.artifacts.list` | either | `{}` → `[{id, title, kind, visibility, owner, owner_team, team, origin, version, bytes, total_bytes, created_at, published_at, may_take_down}]`, newest published first: every artifact for a platform admin, people's `private` ones included, and for a team admin those of the teams they administer (`team:<name>`) and those their teams own (`owner_team`, Decision 964) alone (Decision 953). Never what one holds. Empty while `artifacts_enabled` is off |
 | `admin.artifact.takedown` | either | `{id}` → `{deleted, id}`: every version and byte, its links dead, its owner not asked; a platform admin's for any artifact, a team admin's for their teams' own, another `not_found`. Audited as `artifact.delete` with `by: takedown`. Destructive: over MCP it is confirmed by its `id` |
 | `admin.teams.list` | either | teams, with grants, budgets, volumes and retention |
 | `admin.team.enable` | platform | makes an IdP group a team; a name another team has is `conflict` unless `link` is true, which links the group into that team |
-| `admin.team.update` | either | budget, retention, default visibility, volume, and `github` (`repositories`, `max_pushes`, `max_runs`, `max_attempts`; [github.md](docs/admin/github.md#9-how-far-a-run-may-go)); `allow_unenforced_workers` a platform admin's; keys it does not declare, a team's name and group among them, are left alone; `github` is `managed_by_gitops` in gitops mode, where the `GitHubApp` resource holds it |
+| `admin.team.update` | either | budget, retention, default visibility, volume, and `github` (`repositories`, `max_pushes`, `max_runs`, `max_attempts`; [github.md](docs/admin/github.md#9-how-far-a-run-may-go)); `allow_unenforced_workers` a platform admin's; keys it does not declare, a team's name and group among them, are left alone; `github` is `managed_by_gitops` in gitops mode, where the `GitHubApp` resource holds it; a limit wider than the rungs above the team allow is `forbidden` with `field`, `asked`, `ceiling` and `decided_by` as before, `limit` (the ceiling) and `unit` (`seconds`, `days` or `switch`), and `reason`, the refusal in the reader's words ("The platform allows at most 30 min idle; 2 h is more than that.") |
 | `admin.team.grant` / `admin.team.revoke` | platform | a team's access to a profile |
-| `admin.sessions.list` | either | session *metadata*, never content: with the `repository` it was created with and `github`, what it did there (as `admin.runs.list` has it), and `memory`: for a session running on a pod that has had a turn, `current` where that turn read the memory in force for it and `behind` where it read an older version (Decision 947), absent otherwise; `filter.team` narrows to one team, another team's name `not_found` for a team admin |
+| `admin.sessions.list` | either | session *metadata*, never content: `owner` and, where the plane has a name for them, `owner_name`; with the `repository` it was created with and `github`, what it did there (as `admin.runs.list` has it), and `memory`: for a session running on a pod that has had a turn, `current` where that turn read the memory in force for it and `behind` where it read an older version (Decision 947), absent otherwise; `filter.team` narrows to one team, another team's name `not_found` for a team admin |
 | `admin.session.erase` | either | erases one, for authorised roles |
 | `admin.bundles.list` | either | every version of a channel, each with its `summary` (names of agents, skills and MCP servers) |
 | `admin.bundle.get` | either | one version in full: the document, its `detail` (agents with mode and skills, skills with files and `agents`, MCP servers with the Secret to create), and adoption per profile |
@@ -3085,11 +3189,11 @@ that team.
 | `admin.agent.check` | platform | one agent's definition (`name`, `definition`) checked as a bundle's agent is: `{ok, errors, warnings}`, each `{field, message}` in the words `agents.validate` answers, what the console's agent builder shows at each field (#594) |
 | `admin.bundle.publish` / `admin.bundle.retire` | platform | publish a version — refused as `invalid_params` with `data.errors`, one sentence per problem, when the document is malformed or names an MCP host outside `allowedEgress` — or retire one |
 | `admin.mcp.check` | either | `{host, allowed}`: whether the cluster policy lets a pod reach an MCP server's host |
-| `admin.audit.list` | either | who changed what, with diffs, each change keyed by its path (`spec.llm.model`); a team admin's is the rows about their teams (the team, its triggers, principals and sessions) |
+| `admin.audit.list` | either | who changed what (`actor`, and `actor_name` where the plane has a name for them), with diffs, each change keyed by its path (`spec.llm.model`); a team admin's is the rows about their teams (the team, its triggers, principals and sessions) |
 | `admin.profile.choices` | either | `{provider_types, size_classes}`: every provider type `llm.provider` may name, as the protocol's one list carries it (`{name, label, summary, url, default_url, url_example, key, key_var}`), and every size class `{name, sessions_per_worker, summary}`. What a form offers instead of free text. And `models`, each `{name, why}`: what the plane knows a provider serves, from the profile's own model, the models the organisation gives people's machines, the models sessions have been charged for and the models its bundle's agents name (with `profile`, that profile's; without, the organisation's and every session's). The plane never asks a provider for its list; the console's agent builder picks a model from these (#594) |
 | `admin.profile.agents` | platform | `{profile, channel, agents, skills, builtins, teams, rule, unmatched}`: a profile's agents as its bundle in effect has them, each `{name, mode, description, model, delegate, max_turns, skills, loads, permissions, from, channel, builtin, definition, teams: [{team, may}], offered}`. `skills` on a row is its own frontmatter's; `loads` is the bundle's skills it may load, those its `skills` opens and those whose `agents` names it or says `all`, before a team's grant narrows them, and an agent that loads none has no `skill` tool on the profile's pods; the answer's `skills` is every skill the bundle in effect carries, by name. `offered` is whether the profile's `spec.agents` rule in effect (`rule`) lets it exist there, a subagent it excludes being in no `delegate`; `unmatched` the rule's names that are no agent the profile has today. `delegate` is the bundle's subagents for a primary holding the `delegate` tool, else `null`; `builtin` marks a primary Troupe ships that the profile offers because its bundle has none of that name; `may` is the team's grant resolved for that agent. `channel` is the one the profile follows in effect, `builtins` every agent Troupe ships with its file, to copy from, `teams` the teams granted the profile. The console's profile-first builder (#594) |
 | `admin.provisioning.mode` | either | `direct` or `gitops`: whether the plane writes profiles to the cluster, or reads them and the triggers from resources a repository holds and refuses to write them |
-| `admin.settings.list` | either | every platform setting with its value, where that value came from (`stored`, `deployed`, `unset`), what changing it does and when it takes effect; a secret is reported as set and never returned |
+| `admin.settings.list` | either | every platform setting with its value, where that value came from (`stored`, `deployed`, `unset`), what changing it does and when it takes effect; a secret is reported as set and never returned. Each carries its `key`, `label` (the reader's name for it, which heads a row: "Erase a session after") and `unit`, how a person reads and types it: `days`, `minutes`, `seconds`, `dollars`, `bytes`, `count`, `switch`, `text`, `url` or `choice`, a `choice` with `choices: [{value, label}]` in the order offered. The unit is not the value's: a `dollars` value is millionths of a dollar and a `minutes` one seconds, sent and answered so; a surface converts both ways. A plane from before them answers neither, and a surface shows the key and a text field |
 | `admin.setting.put` | platform | `{key, value}` — parsed against the setting's declared type and refused if it does not fit, or if the deployment owns it |
 | `admin.setting.reset` | platform | `{key}` — drops the stored value, so the setting goes back to what the plane was deployed with |
 | `admin.clients.get` | either | `{clients: {tui, daemon, desktop}, fleet: {tui, daemon, desktop}}`: each policy `{component, recommended, minimum, blocked, updated_by, updated_at}`, which versions of its clients this plane serves; and each component's clients last seen `{current, behind, refused, people: [{subject, display_name, version, platform, since, seen_at, standing}]}`, counted against the policy as it is now (`standing` is `current`, `behind` the recommended version, or `refused` at the next `initialize`). A team admin's `fleet` is their teams' people ([Client versions](#client-versions)) |
@@ -3140,7 +3244,7 @@ that team.
 | `admin.connections.list` | either | who has connected a personal credential to which person-mode server, and whose identity each session carries |
 | `admin.run.review` | either | marks the run behind a session as looked at, by whoever asks |
 | `admin.audit.verify` | platform | checks the audit trail's hash chain: `result` is `ok`, or the first row that does not verify with its `reason` (`altered`, `chain_broken`) |
-| `admin.setting.effective` | either | for a setting decided at more than one rung: the value in force, the rung that decided it, and every rung that had an opinion |
+| `admin.setting.effective` | either | for a setting decided at more than one rung: the value in force, the rung that decided it, and every rung that had an opinion; with the setting's `label`, `unit` and `choices`, as `admin.settings.list` has them |
 | `admin.person.budget` | platform | sets or clears a person's own monthly spend ceiling, in millionths, across every team they are in |
 | `admin.budget.explain` | platform | every spend ceiling that applies to a person, narrowest first: which would bind, what each has left, its period, and the rung that set it |
 | `admin.provider.get` / `admin.provider.check` | either | the identity provider's sign-in settings, each with where it came from (a secret as set or not) and the URLs to register at the provider; or a candidate tested without saving it |
@@ -3259,7 +3363,7 @@ than an admin uses them:
 | `session.erasures` | control | anybody, for their own private sessions | `{device}` → `{erasures: [{session_id, erased_at}]}`: the caller's private sessions whose key is destroyed and whose erasure this `device` has not acknowledged. A daemon asks when a client links it with a plane token. A session whose key is not yet destroyed is tried again first and is not listed until it is (Decision 756) |
 | `session.erased` | control | anybody, for their own erased private sessions | `{session_id, device}` → `{session_id, device, deleting, objects_deleted}`: this device has stopped sealing the session and erased its copy, and the plane deletes every version of every object under `sessions/<session_id>/` and records the device once none is left. `deleting: false` with how many went when that is done within the call; `deleting: true` and no count when it takes longer than the call waits (five seconds), and the plane carries on and records the device when it is done. `unavailable` with `objects_deleted` and `objects_left` where the object store refused or failed some: the device is not recorded, and `session.erasures` names the session to it again, which tries again (Decision 804). `not_found` for a session that is not the caller's, not private or not erased: saying a session is erased does not erase it |
 
-| `remote.list` | observe | anybody | `{}` → `{sessions: [{id, kind: "remote", owner, owner_name, workspace, state, offline_since, offered_at, private, your_role, shares}]}`: laptop sessions offered for steering from another device that are the caller's own or shared with them ([Relayed connections](#relayed-connections)). `state` is `online` while the laptop's connection is up, else `offline` since `offline_since`; `your_role` is `owner`, `control` or `observe`; `shares` only for the owner. `workspace` is the last name of its folder, never a path; nothing a session says is kept. `private` is a private session offered with its owner's consent (Decision 952): somebody it is shared with holds a role only while they also hold an invitation into it, the narrower of the two |
+| `remote.list` | observe | anybody | `{}` → `{sessions: [{id, kind: "remote", owner, owner_name, workspace, state, offline_since, paused, offered_at, private, your_role, shares}]}`: laptop sessions offered for steering from another device that are the caller's own or shared with them ([Relayed connections](#relayed-connections)). `state` is `online` while the laptop's connection is up, else `offline` since `offline_since`, and `paused` then says why, `stopped` (its daemon said it was stopping) or `offline` (it went without a word or stopped answering), `null` while it is online; `your_role` is `owner`, `control` or `observe`; `shares` only for the owner. `workspace` is the last name of its folder, never a path; nothing a session says is kept. `private` is a private session offered with its owner's consent (Decision 952): somebody it is shared with holds a role only while they also hold an invitation into it, the narrower of the two |
 | `remote.open` | observe | the owner, or a person the session is shared with | `{session_id}` → `{session_id, kind: "remote", endpoint, role, your_role, token, expires_at}`: where to attach, and a token for that session alone at the caller's role, audience `troupe-relay`, at most fifteen minutes. Asked again for a fresh one. `not_found` for anybody else; `unavailable` with `offline_since` for a laptop that is away; `forbidden` with `data.team` where a team of the owner's does not allow offering |
 | `remote.grant` | control | anybody | `{device}` → `{grant, device}`: a laptop daemon's own sign-in for steering, asked at its first offer (Decision 928). One per person and device, a new one replacing the last; the plane keeps its hash, and records `remote.grant` in the audit with the device. `forbidden` with `data.team` where a team of the caller's does not allow offering (`teams.remote_offering_allowed`) |
 | `artifact.list` | observe | anybody | `{mine?, shared?, teams?, visibility?}` → `{artifacts, profiles, teams, enabled, publish_organisation, public_links, gallery_url}`: the artifacts the caller may see, newest published first (Decisions 948, 950 and 953): their own, those a link gave them, the organisation's, those of each team they are in (`teams`) and of each profile they are granted (`profiles`); a team admin sees their teams' too, and a platform admin every one but another person's `private` ones. `mine: true` narrows to their own, `shared: true` to those a link gave them, `teams: true` to the teams' own (of the teams they are in or administer; every team's for a platform admin), `visibility` to one. Each is `{id, title, kind, visibility, scope, owner, owner_team, mine, role, origin: {session_id, profile, agent, where}, team, version, current, pinned, bytes, url, created_at, published_at, may_delete, may_edit, may_transfer, public_links, public}`: `scope` is the gallery tab it is under for the caller, `mine`, `private` (their own private one), `organisation`, `team:<name>`, `profile:<name>` or `shared` (a link alone reached it), so a client tabs by it without working out membership; `owner` is the person who published it and `owner_team` the team it belongs to, or `null` (Decision 964): a team's is owned by every member and administrator of that team, whose `role` is `owner` and `mine` true as the person's are when no team owns it, and they see it whatever its visibility; `may_transfer` is whether the caller may move whose it is with `artifact.transfer`; `role` is `owner`, `edit` or `view`; `version` the newest and `current` the one its address serves; `public` whether a public link opens it now. `public_links` beside the list is the administrator's `artifacts_public_links`. With `artifacts_enabled` off, `enabled: false` and none |
@@ -3330,7 +3434,11 @@ token, or a plane token, and which a page that names an `Origin` cannot open: `i
 dropped), `relay.offer {session_id, workspace, share, private}` → `{shares}`, `relay.withdraw
 {session_id}`, and `auth.refresh`; the plane sends `relay.open {viewer, session_id, person,
 role}`, `relay.frame {viewer, data}` (one protocol message, as text) and `relay.close
-{viewer, reason}`, and the daemon sends `relay.frame` and `relay.close` back. `private` (and
+{viewer, reason}`, and the daemon sends `relay.frame` and `relay.close` back, and, as it
+stops, the notification `relay.pause {reason: "stopped"}` before it hangs up, leaving the
+views open on the plane to be paused rather than closing them. The plane pings the
+connection every fifteen seconds and closes one that has answered nothing for three
+pings, as `offline`. `private` (and
 the plane's own row of the session) marks a private session's offer; each `relay.offer` is
 in the audit as `remote.offer` with the device, `private` and how many it is shared with,
 and nothing a frame carries is written anywhere. An invitation into an offered private
@@ -3366,7 +3474,7 @@ until all are gone.
 A session's JSON carries `agent`, the agent it was created as or its pod last reported
 it switched to (`null` where none was named and the profile's default ran; a session that
 waited for a place starts as it), `created_at`, `kind` and, for a private one, the
-`device` that last sealed it, and `bundle_version` — the configuration it was pinned to when it was created,
+`device` that last sealed it, `owner_name` beside `owner` (see [People by name](#people-by-name)), and `bundle_version` — the configuration it was pinned to when it was created,
 which does not move when a newer version is published. A session whose agent
 definitions changed underneath it would be a different session halfway through.
  `sessions.list` takes `kind` (`team` or `private`) alongside its other filters, so one

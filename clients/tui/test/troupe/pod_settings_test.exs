@@ -40,12 +40,12 @@ defmodule Troupe.PodSettingsTest do
       text = screen_text(pid, session)
       assert text =~ ~r/max turns\s+7  · session/
       assert text =~ ~r/compact at\s+0\.6  · project/
-      assert text =~ "deny   shell(curl)  · the worker profile (standard)"
-      assert text =~ "in force in this session on its worker pod; nothing here changes it"
-      assert text =~ "settings in force on the pod"
+      assert text =~ "deny   shell(curl)  · the profile (standard)"
+      assert text =~ "in force in this session on the platform; nothing here changes it"
+      assert text =~ "settings in force on the platform"
 
       to_setting(pid, "models.default")
-      assert screen_text(pid, session) =~ "set by: the worker profile fixing (TROUPE_MODEL)"
+      assert screen_text(pid, session) =~ "set by: the profile fixing (TROUPE_MODEL)"
 
       # From the top again: the page opens on its first setting.
       press(pid, "esc")
@@ -87,7 +87,7 @@ defmodule Troupe.PodSettingsTest do
   describe "troupe config --explain --session" do
     @answer %{
       "keys" => [],
-      "explain" => "configuration in force in session s-1, on a worker pod\n",
+      "explain" => "configuration in force in session s-1, on the platform\n",
       "explain_status" => 0
     }
 
@@ -131,7 +131,7 @@ defmodule Troupe.PodSettingsTest do
       }
 
       assert {text, 1} = SessionConfig.explain("s-1", nil, [], io)
-      assert text =~ "session s-1 is not running, here or on a worker pod"
+      assert text =~ "session s-1 is not running, here or on the platform"
     end
 
     test "a session on a pod, through the plane signed in to" do

@@ -8,7 +8,8 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { App } from "../src/App";
-import { PEOPLE, button, field, freshBrowser, render, says, sees, signedInAs, startFake, type, visit, waitFor } from "./support";
+import { exampleAdmin } from "../../../packages/client/test/support/admin.js";
+import { PEOPLE, button, field, freshBrowser, render, says, sees, seesButton, signedInAs, startFake, type, visit, waitFor } from "./support";
 import type { FakeDeployment } from "./support";
 
 let fake: FakeDeployment;
@@ -142,6 +143,139 @@ describe("client versions", () => {
 
     await sees("Of the clients last seen, 0 are behind it and 3 refused when they next connect.");
     expect(fake.admin.audit.at(-1)).toMatchObject({ action: "clients.put", detail: { affected: { current: 1, behind: 0, refused: 3 } } });
+  });
+
+  // #925: after an upgrade, recommend what this plane runs, for every kind of client at once.
+  describe("recommending this plane's version", () => {
+    const recommend = (): HTMLElement | null => document.querySelector<HTMLElement>('section.recommend[aria-label="Recommend this plane\'s version"]');
+
+    async function onPlane(version: string): Promise<void> {
+      await fake.stop();
+      fake = await startFake(exampleAdmin(), { version });
+    }
+
+    it("is a platform admin's: the button sits above the policies", async () => {
+      await onPlane("0.38.0-beta");
+      await signedInAs(fake, PEOPLE.alice);
+      unmount = render(<App />).unmount;
+      const b = await seesButton("Recommend this plane's version");
+      const first = document.querySelector("section.card");
+      expect(first).not.toBeNull(); // at once: the button is drawn with the cards, in one render
+      expect(b.compareDocumentPosition(first!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    });
+
+    it("is nothing to a team admin, not a disabled button", async () => {
+      await onPlane("0.38.0-beta");
+      await signedInAs(fake, PEOPLE.bob);
+      unmount = render(<App />).unmount;
+      await waitFor(() => card("The terminal"), "the terminal's policy");
+      expect(button("Recommend this plane's version")).toBeNull(); // at once: the cards are drawn, and the button with them or not at all
+      expect(says("this plane's version")).toBe(false); // at once: as above
+    });
+
+    it("previews every component's recommended version before and after, and how many clients each leaves behind", async () => {
+      await onPlane("0.38.0-beta");
+      await signedInAs(fake, PEOPLE.alice);
+      unmount = render(<App />).unmount;
+      (await seesButton("Recommend this plane's version")).click();
+      const preview = await waitFor(() => recommend()?.querySelector<HTMLElement>("section.preview"), "the preview");
+      const rows = [...preview.querySelectorAll(".recommend-row")].map((r) => r.textContent ?? "");
+      expect(rows).toHaveLength(3);
+      expect(rows[0]).toContain("clients/tui");
+      expect(rows[0]).toContain("recommended: 0.16.0-beta");
+      expect(rows[0]).toContain("recommended: 0.38.0-beta");
+      expect(rows[0]).toContain("Of 4 clients last seen: 0 current, 2 behind 0.38.0-beta, 2 refused when they next connect, as now.");
+      expect(rows[1]).toContain("clients/daemon");
+      expect(rows[1]).toContain("recommended: —");
+      expect(rows[1]).toContain("Of 1 client last seen: 0 current, 1 behind 0.38.0-beta.");
+      expect(rows[2]).toContain("clients/desktop");
+      expect(rows[2]).toContain("None has connected since the plane began recording versions.");
+      await sees("The terminal: troupe update installs 0.38.0-beta for people signed in here", preview);
+      await sees("The desktop app: an older desktop app is told 0.38.0-beta is out.", preview);
+      // Nothing is sent until it is confirmed.
+      expect(fake.admin.policies["tui"]!.recommended).toBe("0.16.0-beta");
+    });
+
+    it("applies the three puts in order and shows one audit note of the three changes", async () => {
+      await onPlane("0.38.0-beta");
+      await signedInAs(fake, PEOPLE.alice);
+      unmount = render(<App />).unmount;
+      const recorded = fake.admin.audit.length;
+      (await seesButton("Recommend this plane's version")).click();
+      (await waitFor(() => button("Apply", recommend()!), "the preview")).click();
+
+      await waitFor(() => says("Recorded in the audit as clients.put on tui, daemon, desktop"), "the audit's note");
+      expect(fake.admin.audit.slice(recorded).map((r) => [r.action, r.subject_id])).toEqual([
+        ["clients.put", "tui"],
+        ["clients.put", "daemon"],
+        ["clients.put", "desktop"],
+      ]);
+      for (const c of ["tui", "daemon", "desktop"]) expect(fake.admin.policies[c]!.recommended).toBe("0.38.0-beta");
+      const note = document.querySelector<HTMLElement>(".audit-note")!;
+      expect([...note.querySelectorAll("li")].map((l) => l.textContent)).toEqual([
+        "tui.recommended 0.16.0-beta → 0.38.0-beta",
+        "daemon.recommended — → 0.38.0-beta",
+        "desktop.recommended — → 0.38.0-beta",
+      ]);
+      await sees("The terminal, the daemon and the desktop app now recommend 0.38.0-beta.");
+      // Once applied, the button gives way to the line that says so.
+      await sees("Every client is recommended this plane's version, 0.38.0-beta.");
+      expect(button("Recommend this plane's version")).toBeNull(); // at once: the line replaces it in the same render
+    });
+
+    it("says every client is recommended this plane's version where each already is, in place of the button", async () => {
+      await onPlane("0.38.0-beta");
+      for (const c of ["tui", "daemon", "desktop"]) fake.admin.policies[c] = { ...fake.admin.policies[c]!, recommended: "0.38.0-beta" };
+      await signedInAs(fake, PEOPLE.alice);
+      unmount = render(<App />).unmount;
+      await sees("Every client is recommended this plane's version, 0.38.0-beta.");
+      expect(button("Recommend this plane's version")).toBeNull(); // at once: the line is drawn in its place
+    });
+
+    it("leaves a component the plane would refuse it for as it is, and says why before anything is sent", async () => {
+      await onPlane("0.38.0-beta");
+      fake.admin.policies["daemon"] = { ...fake.admin.policies["daemon"]!, blocked: ["0.38.0-beta"] };
+      await signedInAs(fake, PEOPLE.alice);
+      unmount = render(<App />).unmount;
+      const recorded = fake.admin.audit.length;
+      (await seesButton("Recommend this plane's version")).click();
+      const preview = await waitFor(() => recommend()?.querySelector<HTMLElement>("section.preview"), "the preview");
+      await sees("Left as it is, since the plane refuses it while the daemon's policy blocks 0.38.0-beta.", preview);
+      expect(preview.querySelectorAll(".recommend-row")).toHaveLength(2);
+      button("Apply", preview)!.click();
+      await waitFor(() => says("Recorded in the audit as clients.put on tui, desktop"), "the audit's note");
+      expect(fake.admin.audit.slice(recorded).map((r) => r.subject_id)).toEqual(["tui", "desktop"]);
+      expect(fake.admin.policies["daemon"]!.recommended).toBeNull();
+    });
+
+    it("stops at a put the plane refuses, says which and why, and keeps the ones before it", async () => {
+      await onPlane("0.38.0-beta");
+      await signedInAs(fake, PEOPLE.alice);
+      unmount = render(<App />).unmount;
+      const recorded = fake.admin.audit.length;
+      (await seesButton("Recommend this plane's version")).click();
+      const apply = await waitFor(() => button("Apply", recommend()!), "the preview");
+      // Somebody raises the daemon's minimum past this plane's version meanwhile.
+      fake.admin.policies["daemon"] = { ...fake.admin.policies["daemon"]!, minimum: "0.40.0" };
+      apply.click();
+
+      await sees(
+        "The terminal now recommends 0.38.0-beta; the daemon's recommended version was not changed: minimum: the minimum 0.40.0 is newer than the recommended version 0.38.0-beta",
+        () => recommend(),
+      );
+      expect(fake.admin.audit.slice(recorded).map((r) => r.subject_id)).toEqual(["tui"]);
+      expect(fake.admin.policies["tui"]!.recommended).toBe("0.38.0-beta");
+      expect(fake.admin.policies["desktop"]!.recommended).toBeNull();
+      await waitFor(() => says("Recorded in the audit as clients.put on tui"), "the note of the one that was applied");
+    });
+
+    it("says where the plane's version is not one SemVer reads, with no button", async () => {
+      await onPlane("dev");
+      await signedInAs(fake, PEOPLE.alice);
+      unmount = render(<App />).unmount;
+      await sees("which is not a version as releases are numbered, so it cannot be recommended from here.");
+      expect(button("Recommend this plane's version")).toBeNull(); // at once: the line is drawn in its place
+    });
   });
 
   it("says when there is no policy at all", async () => {

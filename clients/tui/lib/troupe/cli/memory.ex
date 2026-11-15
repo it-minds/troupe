@@ -231,7 +231,7 @@ defmodule Troupe.CLI.Memory do
 
   defp label(%{"scope" => "organisation"}), do: "the organisation's memory"
   defp label(%{"scope" => "team", "name" => name}), do: "the team #{name}'s memory"
-  defp label(%{"scope" => "profile", "name" => name}), do: "the worker profile #{name}'s memory"
+  defp label(%{"scope" => "profile", "name" => name}), do: "the profile #{name}'s memory"
   defp label(%{"scope" => "user"}), do: "your own memory"
   defp label(%{"scope" => scope}), do: "#{scope} memory"
 

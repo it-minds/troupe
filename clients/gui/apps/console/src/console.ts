@@ -175,6 +175,10 @@ export function describeError(e: unknown): string {
       const why = typeof data["reason"] === "string" ? ` ${String(data["reason"])}.` : "";
       return `The plane refused this: it needs a ${role === "platform_admin" ? "platform admin" : "team admin"}.${why}`;
     }
+    // A limit wider than the rungs above allow: the plane words it (`reason`, beside the
+    // ceiling as `limit`), and the console's preview says the same sentence. A plane from
+    // before said only the key and the numbers.
+    if (data["limit"] !== undefined && typeof data["reason"] === "string") return String(data["reason"]);
     if (data["ceiling"] !== undefined && typeof data["field"] === "string") {
       return `${data["field"]}: ${show(data["asked"])} is wider than ${show(data["ceiling"])}, which the ${String(data["decided_by"])} decided. A lower rung may only narrow.`;
     }

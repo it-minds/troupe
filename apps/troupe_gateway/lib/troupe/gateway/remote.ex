@@ -56,6 +56,8 @@ defmodule Troupe.Gateway.Remote do
   a plane that did not hear still relays nothing more. A dropped connection closes every
   view, the plane shows the session offline since the drop and queues nothing; the
   daemon dials again, backing off, and offers again exactly what its record still holds.
+  A daemon that stops says so first (`relay.pause {reason: "stopped"}`), so the plane
+  pauses the remote people's views with that reason rather than one of not knowing.
 
   ## A private session, with its owner's consent
 
@@ -629,9 +631,16 @@ defmodule Troupe.Gateway.Remote do
   def handle_info(_message, state), do: {:noreply, state}
 
   @impl GenServer
+  # Stopping, the daemon says so before it hangs up, and leaves the views to the plane: a
+  # remote person's view is paused there, not ended, until the daemon dials again.
   def terminate(_reason, state) do
-    close_all_viewers(state, "the daemon stopped")
-    if state.link, do: Client.close(state.link)
+    Enum.each(state.viewers, fn {_id, viewer} -> Viewer.close(viewer.pid, "the daemon stopped") end)
+
+    if state.link do
+      Client.notify(state.link, "relay.pause", %{"reason" => "stopped"})
+      Client.close(state.link)
+    end
+
     :ok
   end
 

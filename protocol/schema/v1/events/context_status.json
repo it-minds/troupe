@@ -1,0 +1,22 @@
+{
+  "$id": "https://troupe.dev/schema/v1/events/context_status.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "properties": {
+    "used_tokens": {
+      "type": "integer"
+    },
+    "window_tokens": {
+      "type": [
+        "integer",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "used_tokens",
+    "window_tokens"
+  ],
+  "title": "context_status",
+  "type": "object"
+}

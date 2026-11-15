@@ -73,6 +73,7 @@ defmodule Troupe.UI.TUI.Model do
 
   @type entry ::
           {:user, String.t()}
+          | {:said, %{by: String.t(), text: String.t()}}
           | {:assistant, [line()]}
           | {:reasoning, reasoning()}
           | {:tool, tool_entry()}
@@ -863,7 +864,7 @@ defmodule Troupe.UI.TUI.Model do
   # last, forgets the id. A copy that says something else is drawn as well: a task edit
   # is queued as the edit and taken as the agent's note of it.
   defp draw_input(w, path, %{command_id: id, content: text} = d) when is_binary(id) do
-    w = if w.drawn_inputs[id] == text, do: w, else: push(w, path, {:user, text})
+    w = if w.drawn_inputs[id] == text, do: w, else: push(w, path, said(d, text))
 
     if Map.get(d, :optimistic, false) or Map.get(d, :queued, false),
       do: %{w | drawn_inputs: Map.put(w.drawn_inputs, id, text)},
@@ -871,7 +872,12 @@ defmodule Troupe.UI.TUI.Model do
   end
 
   # A log written before `user_input` carried the id draws each copy it has.
-  defp draw_input(w, path, d), do: push(w, path, {:user, d.content})
+  defp draw_input(w, path, d), do: push(w, path, said(d, d.content))
+
+  # Another person's words carry their name (`by`, from the event's actor); this person's
+  # own are their line as ever.
+  defp said(%{by: by}, text) when is_binary(by) and by != "", do: {:said, %{by: by, text: text}}
+  defp said(_d, text), do: {:user, text}
 
   # An agent that is gone never logs `approval_answered`/`question_answered`, so
   # its request would sit in `pending` forever: unanswerable (Approvals dropped
@@ -1313,6 +1319,9 @@ defmodule Troupe.UI.TUI.Model do
 
   defp push(w, path, {kind, text}) when kind in [:user, :system],
     do: push_entry(w, path, {kind, sanitize(text)})
+
+  defp push(w, path, {:said, %{by: by, text: text}}),
+    do: push_entry(w, path, {:said, %{by: sanitize(by), text: sanitize(text)}})
 
   defp push(w, path, entry), do: push_entry(w, path, entry)
 
@@ -2188,7 +2197,7 @@ defmodule Troupe.UI.TUI.Model do
     |> Enum.map(fn [{_entry, first} | _] = pairs -> {first, Enum.map(pairs, &elem(&1, 0))} end)
   end
 
-  defp opens_turn?({kind, _}) when kind in [:user, :shell], do: true
+  defp opens_turn?({kind, _}) when kind in [:user, :said, :shell], do: true
   defp opens_turn?({:system, "loop iteration" <> _}), do: true
   defp opens_turn?(_entry), do: false
 
@@ -2558,6 +2567,25 @@ defmodule Troupe.UI.TUI.Model do
   defp running_names(agent),
     do: for({:tool, %{status: :running, name: name}} <- agent.transcript, do: name)
 
+  @doc """
+  Two letters for a person: the first of the name's first two words, or the first two of
+  a name of one word; a subject that stands in for a name by its local part, so
+  `bob@example.com` is `BO`. The desktop app draws the same two in its ring.
+  """
+  @spec initials(String.t()) :: String.t()
+  def initials(name) do
+    local = name |> String.replace(~r/@.*$/, "") |> String.replace(~r/^.*[|:]/, "")
+
+    letters =
+      case String.split(local, ~r/[.\s_-]+/, trim: true) do
+        [first, second | _] -> String.first(first) <> String.first(second)
+        [one] -> String.slice(one, 0, 2)
+        [] -> String.slice(name, 0, 2)
+      end
+
+    String.upcase(if letters == "", do: String.slice(name, 0, 2), else: letters)
+  end
+
   defp entry_lines({:user, text}, _expanded?) do
     text
     |> String.split("\n")
@@ -2566,6 +2594,14 @@ defmodule Troupe.UI.TUI.Model do
       {l, 0} -> {:user, [{:user_marker, "> "}, {:user, l}]}
       {l, _} -> {:user, [{:gutter, "  "}, {:user, l}]}
     end)
+  end
+
+  # Another person's words under their initials and their name, `BE · Bob Example`.
+  defp entry_lines({:said, %{by: by, text: text}}, expanded?) do
+    [
+      {:user, [{:user_marker, initials(by)}, {:system, " · "}, {:strong, by}]}
+      | entry_lines({:user, text}, expanded?)
+    ]
   end
 
   defp entry_lines({:assistant, lines}, _expanded?), do: lines
@@ -3217,7 +3253,7 @@ defmodule Troupe.UI.TUI.Model do
         %{"scope" => "enforced"} -> "your organisation"
         %{"scope" => "org"} -> "your organisation's defaults"
         # A pod session's: the worker profile it runs on, named by the source.
-        %{"scope" => "profile"} -> "the worker profile"
+        %{"scope" => "profile"} -> "the profile"
         %{"scope" => scope} when is_binary(scope) -> scope
         _unsaid -> "the configuration"
       end
