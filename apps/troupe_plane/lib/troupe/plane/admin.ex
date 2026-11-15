@@ -1550,10 +1550,53 @@ defmodule Troupe.Plane.Admin do
            asked: refusal.asked,
            ceiling: refusal.ceiling,
            decided_by: refusal.rung,
-           reason: "a lower rung may only narrow"
+           # The ceiling again, with its unit, and the sentence a person reads: the console's
+           # preview words the same sentence from the same ceiling, so the warning before
+           # Apply and the refusal after it say one thing.
+           limit: refusal.ceiling,
+           unit: limit_unit(refusal.field),
+           reason: limit_refusal(refusal.field, refusal.asked, refusal.ceiling)
          })}
     end
   end
+
+  defp limit_unit(:idle_timeout_seconds), do: "seconds"
+  defp limit_unit(field) when field in [:cache_eviction_days, :erase_after_days], do: "days"
+  defp limit_unit(_switch), do: "switch"
+
+  # In the console's words for a limit: a length of time as hours, minutes and seconds
+  # leaving out what is nought, days counted, a permission by what it lets members do.
+  defp limit_refusal(:idle_timeout_seconds, asked, ceiling),
+    do:
+      "The platform allows at most #{duration_words(ceiling)} idle; #{duration_words(asked)} is more than that."
+
+  defp limit_refusal(:cache_eviction_days, asked, ceiling),
+    do:
+      "The platform allows at most #{days_words(ceiling)} for a dormant session's cache; #{days_words(asked)} is more than that."
+
+  defp limit_refusal(:erase_after_days, asked, ceiling),
+    do:
+      "The platform allows at most #{days_words(ceiling)} before a session is erased; #{days_words(asked)} is more than that."
+
+  defp limit_refusal(:pins_allowed, _asked, _ceiling),
+    do: "The platform does not let members pin a session; a team may not turn it on."
+
+  defp limit_refusal(:members_may_control, _asked, _ceiling),
+    do: "The platform does not let members steer a team session; a team may not turn it on."
+
+  defp limit_refusal(field, asked, ceiling),
+    do: "The platform allows at most #{ceiling} for #{field}; #{asked} is more than that."
+
+  defp duration_words(0), do: "0 s"
+
+  defp duration_words(seconds) when is_integer(seconds) do
+    [{div(seconds, 3600), "h"}, {div(rem(seconds, 3600), 60), "min"}, {rem(seconds, 60), "s"}]
+    |> Enum.reject(fn {n, _unit} -> n == 0 end)
+    |> Enum.map_join(" ", fn {n, unit} -> "#{n} #{unit}" end)
+  end
+
+  defp days_words(1), do: "1 day"
+  defp days_words(days), do: "#{days} days"
 
   # A team admin may set everything else about their team and not this one: a flag a team
   # could give itself is not a decision anybody made about that team. Refused rather than
@@ -5167,6 +5210,10 @@ defmodule Troupe.Plane.Admin do
             # reported is unknown; one that reported and then said it was unhealthy is
             # broken, and a console that called both broken cries wolf in a partition.
             last_seen_at: worker.last_heartbeat_at,
+            # A pod its substrate no longer runs and that has gone quiet: removed, and
+            # kept only until the sweep forgets it. Not draining, not broken, and nowhere
+            # a drained pod's sessions could go.
+            gone: Fleet.gone?(worker, profile),
             capacity: worker.capacity,
             active_sessions: worker.active_sessions,
             disk_fraction: Worker.disk_fraction(worker),

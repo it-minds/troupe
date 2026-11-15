@@ -10,7 +10,7 @@ defmodule Troupe.Plane.Fleet do
 
   import Ecto.Query
 
-  alias Troupe.Plane.Fleet.{Profile, Worker}
+  alias Troupe.Plane.Fleet.{Hosts, Profile, Provisioner, Worker}
   alias Troupe.Plane.Memory
   alias Troupe.Plane.Repo
   alias Troupe.Plane.Sessions.Session
@@ -240,6 +240,91 @@ defmodule Troupe.Plane.Fleet do
     )
   end
 
+  @doc """
+  How long a drain lets a pod's running turns finish, which is also how long the plane
+  keeps the row of a pod its substrate no longer runs before it forgets it.
+  """
+  @spec drain_deadline_ms() :: pos_integer()
+  def drain_deadline_ms,
+    do: Application.get_env(:troupe_plane, :drain_timeout_seconds, 300) * 1_000
+
+  @doc """
+  Whether the substrate still has this pod: for a profile the cluster makes, an ordinal
+  below the count the profile's resource asks for, which is what the operator's
+  StatefulSet runs; for a registered host, a host of that name still registered for the
+  profile. A pod of a profile the plane no longer has is had by nobody.
+
+  Not health. A pod that is listed and silent is broken, or starting, and is the
+  administrator's to look at; one that is not listed was removed, and only waits to be
+  forgotten (`forget_gone/0`).
+  """
+  @spec listed?(Worker.t(), Profile.t() | nil) :: boolean()
+  def listed?(%Worker{}, nil), do: false
+
+  def listed?(%Worker{} = worker, %Profile{} = profile) do
+    if Provisioner.for(profile) == Provisioner.SSH do
+      Enum.any?(Hosts.for_profile(profile.name), &(&1.name == worker.pod_name))
+    else
+      is_integer(worker.ordinal) and worker.ordinal < (profile.replicas || 0)
+    end
+  end
+
+  @doc """
+  Whether a pod is gone: its substrate no longer has it and it has not been heard from
+  for longer than its lease. Shown as gone, since when it was last heard, until
+  `forget_gone/0` drops the row; never offered a drain, and never counted as somewhere a
+  drained pod's sessions could go.
+  """
+  @spec gone?(Worker.t(), Profile.t() | nil) :: boolean()
+  def gone?(%Worker{} = worker, profile) do
+    cutoff = DateTime.add(DateTime.utc_now(), -lease_timeout_ms(), :millisecond)
+    DateTime.compare(worker.last_heartbeat_at, cutoff) == :lt and not listed?(worker, profile)
+  end
+
+  @doc """
+  Forget the pods that are gone for good, and say which.
+
+  A row whose pod the substrate no longer has, that has not been heard from for longer
+  than a drain's deadline, and that holds no active session. A scale-down's pods were
+  kept for ever before this, `draining` and unhealthy, and every listing showed them as
+  pods stuck mid-drain. The deadline is the drain's own, so a pod that is still being
+  drained, or one whose sessions the sweep has not yet rescued, is never dropped from
+  under it; and a pod that comes back at the name enrols afresh, as it always could.
+
+  Asked again in the delete, so a pod that enrolled between the read and the write is
+  not the row that goes.
+  """
+  @spec forget_gone() :: [Worker.t()]
+  def forget_gone do
+    cutoff = DateTime.add(DateTime.utc_now(), -drain_deadline_ms(), :millisecond)
+
+    quiet =
+      Repo.all(
+        from(w in Worker,
+          as: :worker,
+          where: w.last_heartbeat_at < ^cutoff,
+          where:
+            not exists(
+              from(s in Session,
+                where: s.worker_id == parent_as(:worker).id and s.state == "active",
+                select: 1
+              )
+            )
+        )
+      )
+
+    profiles = quiet |> Enum.map(& &1.profile) |> Enum.uniq() |> Map.new(&{&1, get_profile(&1)})
+    gone = Enum.reject(quiet, &listed?(&1, profiles[&1.profile]))
+    ids = Enum.map(gone, & &1.id)
+
+    {_count, forgotten} =
+      Repo.delete_all(
+        from(w in Worker, where: w.id in ^ids and w.last_heartbeat_at < ^cutoff, select: w)
+      )
+
+    forgotten || []
+  end
+
   @doc "Stop placing on a pod. Running turns finish; the sessions then go dormant."
   @spec drain(Worker.t(), boolean()) :: {:ok, Worker.t()} | {:error, term()}
   def drain(%Worker{} = worker, draining? \\ true) do
@@ -261,8 +346,9 @@ defmodule Troupe.Plane.Fleet do
   @doc """
   The count has come down to `count`, so the pods above it are gone and retire no more.
 
-  Their rows stay, as a removed pod's always have, and a pod that comes back at one of
-  those ordinals enrols afresh.
+  Their rows stay until the sweep forgets them, once they have been quiet past a drain's
+  deadline (`forget_gone/0`); until then a listing says they are gone. A pod that comes
+  back at one of those ordinals enrols afresh.
   """
   @spec retired(String.t(), non_neg_integer()) :: :ok
   def retired(profile, count) do
