@@ -42,6 +42,7 @@ import { newSession, SignIn } from "./views/SignIn";
 import { StartSession } from "./views/StartSession";
 import { Eye, Mask, Wordmark } from "./views/brand";
 import { useNarrow } from "./narrow";
+import { NavSheet } from "./sheet";
 
 type Where =
   | { screen: "launcher" }
@@ -175,38 +176,6 @@ function screenTitle(where: Where): string {
     case "setup":
       return "Setup";
   }
-}
-
-/**
- * The rail's destinations on a phone: a sheet over the whole window, opened from the top
- * bar's menu button, with the same list, and who you are and Sign out at its foot. A
- * destination pressed, Close, or Escape shuts it, and the focus goes back to the button.
- */
-function NavSheet({ onClose, children }: { onClose: () => void; children: JSX.Element }): JSX.Element {
-  const close = useRef<HTMLButtonElement>(null);
-  useEffect(() => {
-    const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    close.current?.focus();
-    const escape = (e: KeyboardEvent): void => {
-      if (e.key === "Escape") onClose();
-    };
-    document.addEventListener("keydown", escape);
-    return () => {
-      document.removeEventListener("keydown", escape);
-      opener?.focus();
-    };
-  }, [onClose]);
-  return (
-    <div className="nav-sheet" role="dialog" aria-modal="true" aria-label="Menu">
-      <div className="nav-sheet-head">
-        <Wordmark size={24} />
-        <button ref={close} type="button" className="link" onClick={onClose}>
-          Close
-        </button>
-      </div>
-      {children}
-    </div>
-  );
 }
 
 /** Where a start lands: the launcher, or the list for a person who chose it. */

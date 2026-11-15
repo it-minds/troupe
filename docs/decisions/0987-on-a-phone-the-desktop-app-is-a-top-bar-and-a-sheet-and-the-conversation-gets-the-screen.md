@@ -7,10 +7,13 @@ issue: 924
 paths:
   - clients/gui/apps/desktop/src/App.tsx
   - clients/gui/apps/desktop/src/narrow.ts
+  - clients/gui/apps/desktop/src/sheet.tsx
+  - clients/gui/apps/desktop/src/views/Sessions.tsx
   - clients/gui/apps/desktop/src/views/Session.tsx
   - clients/gui/apps/desktop/src/styles.css
   - clients/gui/apps/desktop/index.html
   - clients/gui/apps/desktop/test/phone-layout.test.tsx
+  - clients/gui/apps/desktop/test/phone-filters.test.tsx
   - clients/gui/docs/design/DESIGN.md
 symbols:
   - useNarrow
@@ -43,6 +46,9 @@ breakpoint jumps in the markup".
   and the scratchpad are each a sheet over the whole screen with its Close; opening one
   shuts the other, since one would only hide the other. Beside the conversation, on a wide
   window, both may still be open.
+- **The sessions list (#950).** Its head keeps the search, a Filter button ("Filter · n"
+  while n are set) with the "x of y" count, and Start; the four selects open in the same
+  sheet, applied as chosen, shut by Done or Escape. At 375×812 the first row starts at 46%.
 - **A finger's targets.** Every button (not a link standing in a sentence), select and
   field is 44px tall on a phone, as DESIGN.md §10 asks; the links that stand alone in a
   row's head or foot (Waiting for you, Review) too.
