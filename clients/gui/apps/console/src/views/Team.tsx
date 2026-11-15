@@ -805,14 +805,37 @@ function LimitField({ limit, value, onChange, control }: { limit: Limit; value: 
   return <input {...control} value={value} onChange={(e) => onChange(e.target.value)} inputMode={limit.kind === "text" ? undefined : "decimal"} spellCheck={false} />;
 }
 
+/**
+ * A limit wider than the rungs above the team allow, in the sentence the plane's refusal
+ * carries as its `reason`: computed here from the same ceiling, so the warning before Apply
+ * and the refusal after it say one thing. Never the field's key, never raw seconds.
+ */
+function limitRefusal(field: string, asked: unknown, ceiling: unknown): string {
+  const days = (n: unknown): string => (Number(n) === 1 ? "1 day" : `${String(n)} days`);
+  switch (field) {
+    case "idle_timeout_seconds":
+      return `The platform allows at most ${duration(Number(ceiling))} idle; ${duration(Number(asked))} is more than that.`;
+    case "cache_eviction_days":
+      return `The platform allows at most ${days(ceiling)} for a dormant session's cache; ${days(asked)} is more than that.`;
+    case "erase_after_days":
+      return `The platform allows at most ${days(ceiling)} before a session is erased; ${days(asked)} is more than that.`;
+    case "pins_allowed":
+      return "The platform does not let members pin a session; a team may not turn it on.";
+    case "members_may_control":
+      return "The platform does not let members steer a team session; a team may not turn it on.";
+    default:
+      return `The platform allows at most ${show(ceiling)} for ${limitOf(field).label.toLowerCase()}; ${show(asked)} is more than that.`;
+  }
+}
+
 /** What one changed limit does, in words, and whether the plane will refuse it. */
 function consequence(team: string, line: DiffLine, laddered: LadderValue | undefined): string {
   const to = line.to;
   if (laddered && typeof to === "number" && typeof laddered.ceiling === "number" && to > laddered.ceiling) {
-    return `The plane will refuse ${line.field}: ${to} is wider than ${laddered.ceiling}, which the rungs above the team allow.`;
+    return `The plane will refuse this. ${limitRefusal(line.field, to, laddered.ceiling)}`;
   }
   if (laddered && to === true && laddered.ceiling === false) {
-    return `The plane will refuse ${line.field}: the platform has it off, and a team may not turn it on.`;
+    return `The plane will refuse this. ${limitRefusal(line.field, to, laddered.ceiling)}`;
   }
   switch (line.field) {
     case "budget_micros":

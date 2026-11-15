@@ -143,10 +143,13 @@ describe("a team", () => {
     (await waitFor(() => button("Change core's limits"), "the limits")).click();
     type(await waitFor(() => field("Idle before it goes dormant"), "the form"), "7200");
     button("Preview")!.click();
-    await waitFor(() => says("The plane will refuse idle_timeout_seconds: 7200 is wider than 1800"), "the warning");
+    await waitFor(() => says("The plane will refuse this. The platform allows at most 30 min idle; 2 h is more than that."), "the warning");
     const recorded = fake.admin.audit.length;
     button("Apply")!.click();
-    await waitFor(() => says("idle_timeout_seconds: 7200 is wider than 1800, which the deployment decided. A lower rung may only narrow."), "the refusal");
+    // The plane's refusal says the same sentence, and never the key or raw seconds.
+    await waitFor(() => document.querySelector(".field-error, [role=alert]")?.textContent?.includes("The platform allows at most 30 min idle; 2 h is more than that.") ?? false, "the refusal");
+    expect(document.body.textContent).not.toContain("idle_timeout_seconds: 7200");
+    expect(document.body.textContent).not.toContain("is wider than");
     expect(fake.admin.teams.get("core")!.idle_timeout_seconds).toBe(1200);
     expect(fake.admin.audit).toHaveLength(recorded);
   });

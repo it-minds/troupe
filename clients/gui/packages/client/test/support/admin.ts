@@ -324,6 +324,8 @@ export interface FakePod {
   healthy: boolean;
   draining: boolean;
   last_seen_at: string | null;
+  /** Removed by a scale-down and quiet since, as the plane says it (troupe #883). */
+  gone?: boolean;
   capacity: number;
   active_sessions: number;
   disk_fraction: number | null;
@@ -1099,7 +1101,9 @@ export class FakeAdmin {
               asked,
               ceiling,
               decided_by: this.stored.has(key) ? "platform" : "deployment",
-              reason: "a lower rung may only narrow",
+              limit: ceiling,
+              unit: spec.field === "idle_timeout_seconds" ? "seconds" : spec.field.endsWith("_days") ? "days" : "switch",
+              reason: limitRefusal(spec.field, asked, ceiling),
             });
           }
         }
@@ -3248,7 +3252,9 @@ export class FakeAdmin {
   private principalJson(row: FakePrincipal): Record<string, unknown> {
     const team = this.teams.get(row.team);
     const sponsored = row.sponsor !== null && (team?.members.some((m) => m.subject === row.sponsor) ?? false);
-    const state = row.disabled_at ? "disabled" : sponsored ? "active" : "needs_sponsor";
+    // As `ServicePrincipal.state/1`: one the plane disabled because its sponsor left still
+    // needs a sponsor, and is not somebody's decision to disable.
+    const state = row.disabled_at ? (row.disabled_reason === "sponsor_left" ? "needs_sponsor" : "disabled") : sponsored ? "active" : "needs_sponsor";
     return {
       subject: row.subject,
       name: row.name,
@@ -3260,7 +3266,9 @@ export class FakeAdmin {
       disabled_at: row.disabled_at,
       disabled_reason: row.disabled_reason,
       last_used_at: row.last_used_at,
-      enabled: state === "active",
+      // As `ServicePrincipal.enabled?/1`: whether it may still authenticate, so one held for want
+      // of a sponsor that nobody disabled is still enabled.
+      enabled: row.disabled_at === null,
       state,
     };
   }
@@ -3727,6 +3735,21 @@ export function team(name: string, fields: Partial<FakeTeam> = {}): FakeTeam {
   };
 }
 
+/** A limit's refusal in the plane's words (Admin.limit_refusal/3): a length of time as the console says one, days counted. */
+function limitRefusal(field: string, asked: unknown, ceiling: unknown): string {
+  const time = (seconds: number): string => {
+    const [h, m, s] = [Math.floor(seconds / 3600), Math.floor((seconds % 3600) / 60), seconds % 60];
+    return [h ? `${h} h` : "", m ? `${m} min` : "", s ? `${s} s` : ""].filter(Boolean).join(" ") || "0 s";
+  };
+  const days = (n: unknown): string => (Number(n) === 1 ? "1 day" : `${String(n)} days`);
+  if (field === "idle_timeout_seconds") return `The platform allows at most ${time(Number(ceiling))} idle; ${time(Number(asked))} is more than that.`;
+  if (field === "cache_eviction_days") return `The platform allows at most ${days(ceiling)} for a dormant session's cache; ${days(asked)} is more than that.`;
+  if (field === "erase_after_days") return `The platform allows at most ${days(ceiling)} before a session is erased; ${days(asked)} is more than that.`;
+  if (field === "pins_allowed") return "The platform does not let members pin a session; a team may not turn it on.";
+  if (field === "members_may_control") return "The platform does not let members steer a team session; a team may not turn it on.";
+  return `The platform allows at most ${String(ceiling)} for ${field}; ${String(asked)} is more than that.`;
+}
+
 /** A pod, healthy and reporting unless told otherwise. */
 export function pod(name: string, ordinal: number, fields: Partial<FakePod> = {}): FakePod {
   return {
@@ -3926,7 +3949,8 @@ export function exampleAdmin(): FakeAdmin {
         provisioner: "kubernetes",
         missing_guarantees: [],
         unenforced: false,
-        pods: [pod("troupe-w-ux-0", 0, { active_sessions: 2 })],
+        // ux-1 was retired by a scale-down a month ago: gone until the plane forgets it.
+        pods: [pod("troupe-w-ux-0", 0, { active_sessions: 2 }), pod("troupe-w-ux-1", 1, { gone: true, healthy: false, draining: true, last_seen_at: "2026-09-14T10:02:00Z" })],
         warm_workers: 1,
         conditions: [
           { type: "Ready", status: "True", reason: "Reconciled", message: "14 resources reconciled" },

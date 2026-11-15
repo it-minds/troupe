@@ -132,6 +132,12 @@ export interface AdminPod {
   healthy: boolean;
   draining: boolean;
   last_seen_at: string | null;
+  /**
+   * Removed: its substrate no longer runs it (a scale-down took it) and it has gone quiet.
+   * Kept until the plane's sweep forgets it; not draining, not broken, and nowhere a drained
+   * pod's sessions could go. Absent from a plane before troupe #883.
+   */
+  gone?: boolean;
   capacity: number;
   active_sessions: number;
   disk_fraction: number | null;
