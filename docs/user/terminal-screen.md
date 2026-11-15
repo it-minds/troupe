@@ -294,12 +294,17 @@ session from this screen is the team's. `@profile`, `#agent`, `/local` and `/pla
 taken out before the agent reads it; in this box `@name` naming a profile is not a file
 path, and `/local` is not a command. CALLED is the first line until you edit it.
 
-Enter starts it; Shift or Alt with Enter is a new line, as on the command line (most
-terminals send Ctrl+Enter as Enter). On an empty box `1`-`3` start like a recent session:
-its where, folder, profile and agent. On a full profile Enter queues it: the curtain line
-says *waiting for a free place in code*, the plane is asked again as it says, and the
-session screen opens once it is placed; Esc goes back, and the session waits on by
-itself. `/new --remote PROFILE` and `/new --private` set the chips first; `/new --branch`
+Enter starts it; Ctrl-J is a new line, as on the command line (Shift or Alt with Enter
+too, where the terminal tells them from Enter; Windows Terminal does not). A typed digit
+types: Tab past CALLED reaches the recent sessions, where ↑↓ and Enter, or `1`-`3`, set
+the chips like one (its where, folder, profile and agent), and the line under the
+sentence says *Like <title>: …*. The page scrolls to keep the box's or the picker's cursor
+on screen. On a full profile Enter queues it: the curtain line says *waiting for a free
+place in code*, the plane is asked again as it says, and the session screen opens once it
+is placed. Esc on the casting steps goes back to the form and the start goes on: the form
+says *Starting <title> on <profile>…*, Enter there starts nothing a second time, and if
+you close the screen the curtain line says when it started (`/sessions` lists it) or why
+it did not. `/new --remote PROFILE` and `/new --private` set the chips first; `/new --branch`
 forks at once. HQ's `n` opens the same screen on the platform.
 
 ## Artifacts

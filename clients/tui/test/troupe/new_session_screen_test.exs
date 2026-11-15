@@ -62,10 +62,12 @@ defmodule Troupe.NewSessionScreenTest do
         assert waiting =~ Lines.first(:waiting_for_a_place, seed)
         assert casting =~ Lines.first(:casting, seed)
 
-        for line <- [waiting, casting] do
-          assert line =~ "Esc stops waiting; it starts when a place frees"
-          assert String.length(line) <= 80
-        end
+        # A place frees only for a start the plane has queued; Esc leaves the start going.
+        assert waiting =~ "Esc goes back; it starts when a place frees"
+        assert casting =~ "Esc goes back to the form; the start goes on"
+        refute casting =~ "place frees"
+
+        for line <- [waiting, casting], do: assert(String.length(line) <= 80)
       end
     end
 

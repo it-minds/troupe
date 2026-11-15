@@ -289,8 +289,9 @@ defmodule Troupe.Commands do
             "The profile is the last used with room, else the first with room, and a line " <>
             "says why. @profile, #agent, /local and /platform in the message set those and " <>
             "are taken out of it. Enter starts (a full profile queues, and the wait is " <>
-            "shown); Shift or Alt with Enter is a new line; a digit on an empty box starts " <>
-            "like a recent session. --private and --remote PROFILE set the chips, and " <>
+            "shown; Esc goes back to the form and the start goes on); Ctrl-J is a new " <>
+            "line; Tab reaches the recent sessions, where Enter or 1-3 sets the chips " <>
+            "like one. --private and --remote PROFILE set the chips, and " <>
             "--branch forks the one on screen at once: a session of its own that starts " <>
             "from this conversation as it stands.",
         example: "/new --branch"
