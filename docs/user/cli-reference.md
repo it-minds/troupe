@@ -128,7 +128,7 @@ shell forbids this too ([Decision 813](../decisions/0813-a-person-s-own-command-
 
 | command | what it does | needs |
 | --- | --- | --- |
-| `/sessions [n \| id]`, `/resume` | This directory's sessions, newest first. Enter switches the window to one; /resume 2 or /resume &lt;id&gt; goes straight there. For example `/resume 2`. |  |
+| `/sessions [n \| id]`, `/resume` | Your sessions, newest first. Enter switches the window to one; /resume 2 or /resume &lt;id&gt; goes straight there. For example `/resume 2`. |  |
 | `/back` | Go back to the session you were in before. Returns to the session you left with /new, /resume or HQ; /back again comes back here. One step: /sessions lists the rest. |  |
 | `/hq [plane]`, `/remote` | HQ: a plane's teams, profiles and sessions. This machine's own sessions are listed alongside. Names a plane by URL; without one, the plane this machine is logged in to. For example `/hq https://troupe.example`. |  |
 | `/observer`, `/agents-tree`, `/tree` | The agent tree: every branch and subagent. Each with its state, worktree and tokens; Enter opens the agent's transcript. |  |
