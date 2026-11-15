@@ -223,10 +223,8 @@ export function personColour(subject: string | undefined, self: string | undefin
   return `var(--p${(h % 6) + 1})`;
 }
 
-export function initials(name: string): string {
-  const parts = name.replace(/@.*$/, "").split(/[.\s_-]+/).filter(Boolean);
-  return ((parts[0]?.[0] ?? "") + (parts[1]?.[0] ?? "")).toUpperCase() || name.slice(0, 2).toUpperCase();
-}
+/** Two letters for a person's ring, from their name, or their subject's local part where there is none. */
+export { initials } from "@troupe/client";
 
 /** Loading says what is coming and in what order. No fake percentage. */
 export function Loading({ what }: { what: string }): JSX.Element {

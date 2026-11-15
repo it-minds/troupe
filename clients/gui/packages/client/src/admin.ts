@@ -24,6 +24,8 @@ import type { MemoryEntry } from "./entries.js";
 export interface AdminSessionRow {
   id: string;
   owner: string;
+  /** The owner's name, where the plane has one (troupe #931); absent from an older plane. */
+  owner_name?: string | null;
   profile: string | null;
   state: string;
   visibility: string | null;
@@ -657,6 +659,8 @@ export interface BundlePreview {
 
 export interface AuditRow {
   actor: string;
+  /** The actor's name, where the plane has one (troupe #931); absent from an older plane. */
+  actor_name?: string | null;
   action: string;
   subject_kind: string | null;
   subject_id: string | null;

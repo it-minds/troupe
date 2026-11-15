@@ -40,12 +40,16 @@ const stopped = plane.seed("alice@example.com", { title: "Weekly licence audit",
 plane.fail(stopped.id, "tool_failures");
 plane.seed("alice@example.com", { title: "Rewrite the placement loop", profile: "dev" });
 plane.seed("alice@example.com", { title: "Nightly dependency sweep", profile: "ux", origin: { kind: "trigger", trigger: "nightly" } });
+// The people the identity record names, as SCIM or a sign-in left them (troupe #931).
+plane.names.set("alice@example.com", "Alice Example");
+plane.names.set("bob@example.com", "Bob Example");
 const waiting = plane.seed("bob@example.com", { title: "Migrate the ledger table", profile: "dev" });
 
 // One of them stopped on an approval, so the inbox has something in it.
 const session = worker.sessions.get(waiting.id)!;
-session.log.append("input_accepted", { command_id: "c-seed", author: "bob@example.com" }, { kind: "user", subject: "bob@example.com" });
-session.log.append("user_input", { source: "user", text: "drop the old index" }, { kind: "user", subject: "bob@example.com" });
+const bob = { kind: "user", subject: "bob@example.com", display_name: "Bob Example" };
+session.log.append("input_accepted", { command_id: "c-seed", author: "bob@example.com" }, bob);
+session.log.append("user_input", { source: "user", text: "drop the old index" }, bob);
 session.approvals.set("call-seed", { tool: "shell", args: { command: "psql -c 'drop index ledger_old'" }, resolvedBy: null, decision: null });
 session.pendingApprovalCount = 1;
 session.status = "waiting";
@@ -57,7 +61,7 @@ session.log.append("approval_requested", {
 });
 
 // Nobody is going to click the provider's page, so approve shortly after it is asked for.
-setInterval(() => idp.approve("alice@example.com", "Alice"), 500).unref?.();
+setInterval(() => idp.approve("alice@example.com", "Alice Example"), 500).unref?.();
 
 // A daemon for this computer's half, with a repository whose start asks the onboarding
 // questions and then the brief's (Decision 835): Claude Code's and Cursor's files, nothing

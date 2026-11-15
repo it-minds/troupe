@@ -40,6 +40,7 @@ defmodule Troupe.Plane.Harness do
     Identity,
     Invites,
     Memory,
+    Names,
     Placement,
     ProfileView,
     Remote,
@@ -79,6 +80,9 @@ defmodule Troupe.Plane.Harness do
   # How long a client should wait before asking again. The scaler's interval plus the
   # time a cold worker takes to schedule, bind its volume and fetch its bundle.
   @wait_hint_ms 5_000
+
+  # A session row names its owner by subject, and by name beside it where there is one.
+  @owner_name [{"owner", "owner_name"}]
 
   # How long an archive waits for the pod: what a pod gives one session to seal, upload
   # its workspace and stop (`Troupe.Worker.Session.Manager.go_dormant/2`).
@@ -729,7 +733,7 @@ defmodule Troupe.Plane.Harness do
       |> put_option(:limit, params["limit"])
 
     sessions = Sessions.visible_to(user, options)
-    {:ok, %{"sessions" => Enum.map(sessions, &session_json(&1, user))}}
+    {:ok, %{"sessions" => sessions |> Enum.map(&session_row(&1, user)) |> Names.decorate(@owner_name)}}
   end
 
   # Laptop sessions offered for steering from another device (#58): the caller's own, from
@@ -3741,7 +3745,10 @@ defmodule Troupe.Plane.Harness do
     }
   end
 
-  defp session_json(session, user) do
+  # A session by its owner's name as well as their subject, where the plane knows one.
+  defp session_json(session, user), do: session |> session_row(user) |> Names.decorate(@owner_name)
+
+  defp session_row(session, user) do
     %{
       "id" => session.id,
       "owner" => session.owner_subject,

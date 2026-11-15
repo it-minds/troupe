@@ -29,14 +29,17 @@ defmodule Troupe.Remote.Translate do
   agent the session was started with, when the client knows it, which names the `root`
   window as it names every other: `troupe run build …` prints `spawned /build`, not
   `spawned /root`. `budget` is each budget question not yet answered: whether it is
-  still asked, who asked, and what its `budget_ask_started` said.
+  still asked, who asked, and what its `budget_ask_started` said. `me` is the subject this
+  client is connected as, once `initialize` said it: a line another person sent is drawn
+  with their name, and one of this person's own is not.
   """
   @type memory :: %{
           agents: MapSet.t(),
           unknown: MapSet.t(),
           isolation: atom(),
           profile: String.t() | nil,
-          budget: %{String.t() => {:asked | :ended, String.t(), map()}}
+          budget: %{String.t() => {:asked | :ended, String.t(), map()}},
+          me: String.t() | nil
         }
 
   @spec memory(atom(), String.t() | nil) :: memory()
@@ -46,8 +49,14 @@ defmodule Troupe.Remote.Translate do
       unknown: MapSet.new(),
       isolation: isolation,
       profile: profile,
-      budget: %{}
+      budget: %{},
+      me: nil
     }
+
+  @doc "Records the subject this client is connected as, from `initialize`'s principal."
+  @spec me(memory(), String.t() | nil) :: memory()
+  def me(memory, subject) when is_binary(subject) and subject != "", do: %{memory | me: subject}
+  def me(memory, _subject), do: memory
 
   @doc """
   One durable event as zero or more local events, plus the memory to carry on
@@ -179,6 +188,25 @@ defmodule Troupe.Remote.Translate do
   defp actor_of(%{"actor" => actor}) when is_binary(actor), do: actor
   defp actor_of(_event), do: nil
 
+  # `by`, on a line another person sent: their name where the actor carries one worth
+  # showing, their subject where not. Nothing on this person's own, nor while this client
+  # does not yet know who it is, so a line is never drawn as somebody else's by mistake.
+  defp put_by(data, %{"actor" => %{"kind" => "user", "subject" => subject} = actor}, %{me: me})
+       when is_binary(me) and is_binary(subject) and subject != me do
+    name = actor["display_name"]
+
+    Map.put(
+      data,
+      :by,
+      if(is_binary(name) and String.trim(name) not in ["", subject],
+        do: String.trim(name),
+        else: subject
+      )
+    )
+  end
+
+  defp put_by(data, _event, _memory), do: data
+
   defp data(%{"data" => %{} = data}), do: data
   defp data(_event), do: %{}
 
@@ -284,13 +312,20 @@ defmodule Troupe.Remote.Translate do
       # copies name the send's command id; the window draws it once (Decision 117).
       type when type in ["input.queued", "input_queued", "user_input"] ->
         {[
-           emit.(:input, %{
-             content: text_of(data),
-             source: source_atom(data["source"]),
-             command_id: cid,
-             actor: actor_of(event),
-             queued: type != "user_input"
-           })
+           emit.(
+             :input,
+             put_by(
+               %{
+                 content: text_of(data),
+                 source: source_atom(data["source"]),
+                 command_id: cid,
+                 actor: actor_of(event),
+                 queued: type != "user_input"
+               },
+               event,
+               memory
+             )
+           )
          ], memory}
 
       type when type in ["input.accepted", "input_accepted"] ->

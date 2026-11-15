@@ -11,6 +11,7 @@
 
 import { useState } from "react";
 import type { JSX } from "react";
+import { nameOrSubject } from "@troupe/client";
 import type { AdminSessionRow, SessionErasePreview, SessionErased, SessionGitHub } from "@troupe/client";
 import { recorded, useConsole, useLoad } from "../console";
 import { AuditNote, Empty, Field, Loaded, Preview, Status, bytes, count, sessionState, when } from "./bits";
@@ -94,7 +95,7 @@ export function Sessions({ query: initial = "" }: { query?: string } = {}): JSX.
       )}
       <Loaded load={load} what="the sessions" retry={reload}>
         {(sessions) => {
-          const shown = sessions.filter((s) => !q || [s.id, s.owner, s.profile ?? ""].some((v) => v.toLowerCase().includes(q)));
+          const shown = sessions.filter((s) => !q || [s.id, s.owner, s.owner_name ?? "", s.profile ?? ""].some((v) => v.toLowerCase().includes(q)));
           if (sessions.length === 0) {
             return (
               <Empty title={state || profile ? "No session in this state or on this profile" : "No sessions yet"}>
@@ -162,7 +163,7 @@ function SessionRow({ session: s, busy, onErase }: { session: AdminSessionRow; b
   return (
     <tr>
       <td className="mono">{s.id}</td>
-      <td className="mono">{s.owner}</td>
+      <td title={s.owner} className={s.owner_name ? undefined : "mono"}>{nameOrSubject(s.owner, s.owner_name)}</td>
       <td>{s.profile ?? "—"}</td>
       <td>
         <Status kind={st.kind} glyph={st.glyph}>
@@ -225,7 +226,7 @@ function Erase({ session, onCancel, onConfirm }: { session: AdminSessionRow; onC
         <Preview
           title={`session/${id}`}
           lines={[{ field: "state", from: session.state, to: "erased" }]}
-          effects={eraseWords(effect)}
+          effects={eraseWords(effect, nameOrSubject(effect.owner, session.owner_name))}
           verb={`Erase ${id}`}
           typeToConfirm={effect.confirm || id}
           onCancel={onCancel}
@@ -236,9 +237,9 @@ function Erase({ session, onCancel, onConfirm }: { session: AdminSessionRow; onC
   );
 }
 
-function eraseWords(e: SessionErasePreview): string[] {
+function eraseWords(e: SessionErasePreview, owner: string): string[] {
   return [
-    `Its key is destroyed, every version of it: no backup of object storage, the database or a volume can recover what ${e.owner}'s session said.`,
+    `Its key is destroyed, every version of it: no backup of object storage, the database or a volume can recover what ${owner}'s session said.`,
     `Every object version under it goes: ${bytes(e.object_bytes)} of objects and ${bytes(e.workspace_bytes)} of workspace.`,
     e.survivor_count === 0
       ? "No fork of it survives, because it has none."

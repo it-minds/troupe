@@ -183,6 +183,29 @@ defmodule Troupe.Plane.HarnessTest do
                row
     end
 
+    # A client shows a person by name: the owner's beside the subject where the plane's
+    # identity record has one, and nothing where it has none or only the subject again.
+    test "a row names its owner by name where the plane knows one" do
+      team = team_with_grant("engineering", "dev", name: "engineering")
+      ada = person("ada@example.test", ["engineering"])
+      {:ok, ada} = Identity.upsert_user(%{subject: ada.subject, display_name: "Ada Lovelace"})
+      grace = person("grace@example.test", ["engineering"])
+
+      named = session!("s-named", ada, team, visibility: "team")
+      unnamed = session!("s-unnamed", grace, team, visibility: "team")
+
+      assert {:ok, %{"sessions" => sessions}} = Harness.call("sessions.list", %{}, context(ada))
+      by_id = Map.new(sessions, &{&1["id"], &1})
+
+      assert by_id[named.id]["owner"] == "ada@example.test"
+      assert by_id[named.id]["owner_name"] == "Ada Lovelace"
+      assert by_id[unnamed.id]["owner"] == "grace@example.test"
+      refute Map.has_key?(by_id[unnamed.id], "owner_name")
+
+      assert {:ok, %{"owner_name" => "Ada Lovelace"}} =
+               Harness.call("session.get", %{"session_id" => named.id}, context(grace))
+    end
+
     test "a session nobody may see is not found rather than forbidden" do
       team = team_with_grant("engineering", "dev", name: "engineering")
       owner = person("grace@example.test", ["engineering"])

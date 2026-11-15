@@ -25,6 +25,7 @@ import {
   onThisComputer,
   openApprovals,
   openQuestions,
+  nameOrSubject,
   presentMembers,
   rootState,
   scratchSize,
@@ -612,7 +613,7 @@ function useDetail(
 /** What was said, for `/copy`: the people's and the agent's words, not the tool traffic. */
 function transcriptText(state: TranscriptState): string {
   return state.entries
-    .flatMap((e) => (e.kind === "user" ? [`${e.author ?? "You"}: ${e.text}`] : e.kind === "assistant" ? [`Troupe: ${e.text}`] : []))
+    .flatMap((e) => (e.kind === "user" ? [`${e.authorName ?? e.author ?? "You"}: ${e.text}`] : e.kind === "assistant" ? [`Troupe: ${e.text}`] : []))
     .join("\n\n");
 }
 
@@ -1240,7 +1241,8 @@ const StreamEntry = memo(function StreamEntry({
   switch (entry.kind) {
     case "user": {
       const mine = entry.author === self || entry.author === undefined;
-      const name = mine ? "You" : (entry.author ?? entry.source);
+      // Another person by their name where the event carries one, and their subject where not.
+      const name = mine ? "You" : (entry.authorName ?? entry.author ?? entry.source);
       // A person's words on the right; your own need no name, somebody else's carry theirs.
       const said = [mine ? null : name, entry.source !== "user" ? `via ${entry.source}` : null, entry.via === "plane" ? "from another device" : null].filter(Boolean);
       return (
@@ -1668,7 +1670,7 @@ function Backstage({
           <dt>Owner</dt>
           {/* A session on this computer with no owner on record is this computer's user's,
               which is the person looking at it. */}
-          <dd>{row?.owner === self || (row && onThisComputer(row.kind) && !row.owner) ? "you" : (row?.owner ?? "—")}</dd>
+          <dd>{row?.owner === self || (row && onThisComputer(row.kind) && !row.owner) ? "you" : row?.owner ? nameOrSubject(row.owner, row.ownerName) : "—"}</dd>
           {/* The bundle is what the platform loaded the session's agents from: a session on
               this computer has none, so it has no row rather than a dash. */}
           {view.state.bundleVersion && !(row && onThisComputer(row.kind)) && (

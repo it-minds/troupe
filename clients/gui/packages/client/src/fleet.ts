@@ -12,6 +12,7 @@
 
 import { invitationsFrom } from "./invites.js";
 import type { Invitation } from "./invites.js";
+import { named } from "./people.js";
 import type { PlaneClient, SessionRow, SessionsFilter } from "./plane.js";
 import { watchRemote } from "./remote.js";
 import type { Unseen } from "./types.js";
@@ -164,6 +165,8 @@ export interface FleetRow {
   title: string | null;
   profile: string | null;
   owner: string | null;
+  /** The owner's name, where the source says one (troupe #931); a client shows the subject without it. */
+  ownerName?: string | null;
   state: string;
   /** What the worker or daemon last reported, not what the log says. */
   status: string | null;
@@ -237,6 +240,7 @@ export function rowFromPlane(row: SessionRow, source = "plane"): FleetRow {
     title: row.title ?? null,
     profile: row.profile ?? null,
     owner: row.owner ?? null,
+    ownerName: named(row.owner_name, row.owner) ?? null,
     state: row.state ?? "dormant",
     status: row.status ?? null,
     doneReason: row.done_reason ?? null,
@@ -290,6 +294,7 @@ export function rowFromRemote(row: Record<string, unknown>, source = "remote"): 
     title: typeof row["workspace"] === "string" ? row["workspace"] : null,
     profile: null,
     owner: typeof row["owner"] === "string" ? row["owner"] : null,
+    ownerName: named(row["owner_name"], typeof row["owner"] === "string" ? row["owner"] : null) ?? null,
     // Online is a laptop the plane can reach now; offline is said with since when.
     state: state === "online" ? "active" : "offline",
     status: null,
@@ -389,6 +394,7 @@ export function rowFromInvite(i: Invitation, source = "remote"): FleetRow {
     title: i.title ?? null,
     profile: i.profile ?? null,
     owner: i.owner,
+    ownerName: named(i.owner_name, i.owner) ?? null,
     state: i.state ?? "dormant",
     status: null,
     doneReason: null,

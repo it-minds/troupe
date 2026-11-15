@@ -2534,7 +2534,12 @@ export class FakeAdmin {
         if (typeof filter["kind"] === "string") rows = rows.filter((r) => r.subject_kind === filter["kind"]);
         if (typeof filter["subject_id"] === "string") rows = rows.filter((r) => r.subject_id === filter["subject_id"]);
         const limit = typeof filter["limit"] === "number" ? filter["limit"] : 100;
-        return { result: rows.slice(0, limit) };
+        return {
+          result: rows.slice(0, limit).map((r) => {
+            const name = this.nameOf(r.actor);
+            return name ? { ...r, actor_name: name } : r;
+          }),
+        };
       }
 
       default:
@@ -2826,10 +2831,19 @@ export class FakeAdmin {
   }
 
   /** What the plane's summary of a session says: no team, no cost, never content. */
+  /** A person's name as the plane's identity record has it, where it is more than the subject again. */
+  nameOf(subject: string): string | undefined {
+    const member = [...this.teams.values()].flatMap((t) => t.members).find((m) => m.subject === subject);
+    const name = member?.display_name ?? this.names[subject];
+    return name && name !== subject ? name : undefined;
+  }
+
   private sessionJson(s: FakeSession): Record<string, unknown> {
+    const ownerName = this.nameOf(s.owner);
     return {
       id: s.id,
       owner: s.owner,
+      ...(ownerName ? { owner_name: ownerName } : {}),
       profile: s.profile,
       state: s.state,
       visibility: s.visibility,

@@ -316,6 +316,27 @@ defmodule Troupe.Gateway.LoopbackTest do
       created = event_of(session.id, "session_created")
       assert created.data["owner"] == "ada@example.test"
       assert created.data["kind"] == "local"
+      # A link that gave no name has none to record, and a client shows the subject.
+      refute Map.has_key?(created.data, "owner_name")
+
+      Client.close(client)
+    end
+
+    test "a session created while linked with a name records the owner by name", context do
+      {:ok, client} = connect_ws(context.ws)
+
+      {:ok, _} =
+        Client.call(client, "identity.link", %{
+          "command_id" => "c-link",
+          "subject" => "idp|7f3a",
+          "display_name" => "Ada Lovelace"
+        })
+
+      session = start_session(context)
+
+      created = event_of(session.id, "session_created")
+      assert created.data["owner"] == "idp|7f3a"
+      assert created.data["owner_name"] == "Ada Lovelace"
 
       Client.close(client)
     end

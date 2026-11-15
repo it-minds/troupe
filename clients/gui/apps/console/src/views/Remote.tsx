@@ -447,11 +447,15 @@ export function RemoteSession({ id, pod }: { id: string; pod?: { mode: "read" | 
   };
 
   // People by name where anything here knows one: the person signed in, the laptop's
-  // person as the plane lists the offer, and whoever the session's presence names. The
-  // stream's own events name a subject alone.
+  // person as the plane lists the offer, whoever the session's presence names, and each
+  // event's actor, which carries the name where the connection knew it (troupe #931).
   const names = new Map<string, string>();
   for (const p of state.presence) if (p.subject && p.display_name) names.set(p.subject, p.display_name);
   if (row?.owner_name) names.set(row.owner, row.owner_name);
+  for (const e of state.entries) {
+    if (e.kind === "user" && e.author && e.authorName) names.set(e.author, e.authorName);
+    if (e.kind === "approval" && e.decidedBy && e.decidedByName) names.set(e.decidedBy, e.decidedByName);
+  }
   const nameOf = (subject: string | undefined): string => (subject === undefined || subject === me.subject ? "you" : (names.get(subject) ?? subject));
 
   const busy = isBusy(state);

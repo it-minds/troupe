@@ -175,7 +175,7 @@ export class FakeWorker {
    * sends (it resolves the profile's default itself), and `prompt`, on a first activation
    * only, is the session's first turn, said by `owner` and answered like any other.
    */
-  createSession(id: string, params: { workspace?: string; profile?: string; agent?: string; title?: string; prompt?: string; owner?: string } = {}): Session {
+  createSession(id: string, params: { workspace?: string; profile?: string; agent?: string; title?: string; prompt?: string; owner?: string; ownerName?: string } = {}): Session {
     const session: Session = {
       id,
       log: new SessionLog(),
@@ -207,7 +207,7 @@ export class FakeWorker {
     });
     session.log.append("agent_started", { profile: session.profile, mode: session.agent, bundle_version: "3" });
     const prompt = params.prompt?.trim();
-    if (prompt) void this.turn(session, prompt, `c-first-${id}`, { sub: params.owner ?? "user" });
+    if (prompt) void this.turn(session, prompt, `c-first-${id}`, { sub: params.owner ?? "user", ...(params.ownerName ? { name: params.ownerName } : {}) });
     return session;
   }
 
@@ -432,7 +432,7 @@ export class FakeWorker {
         session.log.append(
           "approval_decided",
           { call_id: callId, tool: approval.tool, decision: approval.decision, actor: client.token.sub },
-          { kind: "user", subject: client.token.sub },
+          actorOf(client.token),
         );
         reply(ws, id, { decision: approval.decision });
         await this.afterApproval(session, callId, approval.decision, approval.tool, approval.args);
@@ -448,7 +448,7 @@ export class FakeWorker {
         const callId = String(params["call_id"] ?? "");
         if (!session.questions.delete(callId)) return reply(ws, id, null, { code: -32005, message: "not_found" });
         const answer = String(params["text"] ?? "");
-        session.log.append("question_answered", { call_id: callId, text: answer }, { kind: "user", subject: client.token.sub });
+        session.log.append("question_answered", { call_id: callId, text: answer }, actorOf(client.token));
         reply(ws, id, { accepted: true });
         this.respond(session, `You answered: ${answer}`);
         this.setStatus(session, "idle");
@@ -761,8 +761,8 @@ export class FakeWorker {
    * One turn. The prefix of the prompt picks the script, so a test asks for the
    * behaviour it needs rather than for a model.
    */
-  private async turn(session: Session, text: string, commandId: string, token: Pick<PodToken, "sub">): Promise<void> {
-    const actor = { kind: "user", subject: token.sub };
+  private async turn(session: Session, text: string, commandId: string, token: Pick<PodToken, "sub" | "name">): Promise<void> {
+    const actor = actorOf(token);
     session.log.append("input_accepted", { command_id: commandId, author: token.sub }, actor);
     session.log.append("user_input", { source: "user", text }, actor);
     this.setStatus(session, "thinking");
@@ -882,6 +882,14 @@ const SUMMARY_TYPES = new Set([
   "approval_decided",
   "approval_resolved",
 ]);
+
+/**
+ * Who did it, as a pod writes the event's actor: the token's subject, and its name where
+ * the plane signed one in that is more than the subject again (troupe #931).
+ */
+export function actorOf(token: Pick<PodToken, "sub" | "name">): { kind: "user"; subject: string; display_name?: string } {
+  return { kind: "user", subject: token.sub, ...(token.name && token.name !== token.sub ? { display_name: token.name } : {}) };
+}
 
 function reply(ws: WebSocket, id: unknown, result: unknown, error?: { code: number; message: string; data?: unknown }): void {
   ws.send(JSON.stringify(error ? { jsonrpc: "2.0", id, error } : { jsonrpc: "2.0", id, result }));

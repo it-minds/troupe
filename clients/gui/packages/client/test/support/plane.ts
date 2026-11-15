@@ -593,8 +593,23 @@ export class FakePlane {
    */
   private activate(row: Row, prompt?: string): void {
     const agent = row.agent ?? defaultAgent(this.agentsOf(row.profile, row.owner));
-    this.opts.worker.createSession(row.id, { profile: row.profile, ...(agent ? { agent } : {}), ...(prompt ? { prompt, owner: row.owner } : {}) });
+    const ownerName = this.nameOf(row.owner);
+    this.opts.worker.createSession(row.id, { profile: row.profile, ...(agent ? { agent } : {}), ...(prompt ? { prompt, owner: row.owner, ...(ownerName ? { ownerName } : {}) } : {}) });
   }
+
+  /**
+   * A person's name as the plane's identity record has it (troupe #931): one a test or the
+   * fake deployment set in `names`, one `people.search` finds, or the one they signed in
+   * with. Undefined where none is more than the subject again.
+   */
+  nameOf(subject: string): string | undefined {
+    const tokens = [...this.tokens.values()].filter((t) => t.subject === subject);
+    const name = this.names.get(subject) ?? this.people.find((p) => p.subject === subject)?.display_name ?? tokens.at(-1)?.name;
+    return name && name !== subject ? name : undefined;
+  }
+
+  /** The names the identity record holds for people who have not signed in here, by subject. */
+  names = new Map<string, string>();
 
   /** How long a waiting create says to wait before asking again, in milliseconds. */
   retryAfterMs = 50;
@@ -1632,9 +1647,11 @@ export class FakePlane {
 
   private sessionJson(row: Row, subject: string): unknown {
     const session = this.opts.worker.sessions.get(row.id);
+    const ownerName = this.nameOf(row.owner);
     return {
       id: row.id,
       owner: row.owner,
+      ...(ownerName ? { owner_name: ownerName } : {}),
       profile: row.profile,
       visibility: "team",
       state: row.state,
