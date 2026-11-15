@@ -654,7 +654,7 @@ const NAMING: Record<string, { label: string; unit: string; choices?: Array<{ va
     ],
   },
   default_idle_timeout_seconds: { label: "Idle before a session goes to sleep", unit: "minutes" },
-  default_cache_eviction_days: { label: "A dormant session's cache kept", unit: "days" },
+  default_cache_eviction_days: { label: "A sleeping session's cache kept", unit: "days" },
   default_erase_after_days: { label: "Erase a session after", unit: "days" },
   pins_allowed: { label: "Members may pin a session", unit: "switch" },
   members_may_control: { label: "Members may steer a team session", unit: "switch" },
@@ -3846,7 +3846,7 @@ function limitRefusal(field: string, asked: unknown, ceiling: unknown): string {
   };
   const days = (n: unknown): string => (Number(n) === 1 ? "1 day" : `${String(n)} days`);
   if (field === "idle_timeout_seconds") return `The platform allows at most ${time(Number(ceiling))} idle; ${time(Number(asked))} is more than that.`;
-  if (field === "cache_eviction_days") return `The platform allows at most ${days(ceiling)} for a dormant session's cache; ${days(asked)} is more than that.`;
+  if (field === "cache_eviction_days") return `The platform allows at most ${days(ceiling)} for a sleeping session's cache; ${days(asked)} is more than that.`;
   if (field === "erase_after_days") return `The platform allows at most ${days(ceiling)} before a session is erased; ${days(asked)} is more than that.`;
   if (field === "pins_allowed") return "The platform does not let members pin a session; a team may not turn it on.";
   if (field === "members_may_control") return "The platform does not let members steer a team session; a team may not turn it on.";
