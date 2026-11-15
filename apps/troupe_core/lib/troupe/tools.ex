@@ -482,10 +482,22 @@ defmodule Troupe.Tools do
         agent_path: ctx.agent_path,
         always: always?
       }
+      |> put_cwd(ctx, args)
       |> put_rule(rule)
       |> put_publication(name, args)
     )
   end
+
+  # The folder the call acts in, so whoever answers sees it wherever they are: the call's
+  # own `cwd` where it names one, against the workspace, else the workspace's root.
+  defp put_cwd(req, %{workspace: %{root: root}}, args) when is_binary(root) do
+    case args do
+      %{"cwd" => cwd} when is_binary(cwd) and cwd != "" -> Map.put(req, :cwd, Path.expand(cwd, root))
+      _none -> Map.put(req, :cwd, root)
+    end
+  end
+
+  defp put_cwd(req, _ctx, _args), do: req
 
   defp put_rule(req, nil), do: req
   defp put_rule(req, rule), do: Map.put(req, :rule, Permissions.to_json(rule))

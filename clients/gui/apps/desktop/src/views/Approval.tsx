@@ -39,7 +39,9 @@ const PART_NAMES: Record<string, string> = {
 
 /** The evidence, rendered rather than dumped. */
 function Evidence({ entry }: { entry: Approval }): JSX.Element | null {
-  const { command, cwd, path } = callEvidence(entry.args);
+  const { command, cwd: named, path } = callEvidence(entry.args);
+  // The folder the call acts in: its own, else the one the server said (troupe #932).
+  const cwd = named ?? entry.cwd ?? null;
 
   if (command) {
     return (

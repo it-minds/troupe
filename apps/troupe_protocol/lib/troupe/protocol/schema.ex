@@ -428,11 +428,14 @@ defmodule Troupe.Protocol.Schema do
       # A `publish_artifact` asks with what the person aims under `publication`: `title`,
       # `kind`, `files` (how many), `visibility` and `owner` as the model proposed them
       # (null where it proposed none, and then the person must choose), `id` and `note`.
+      # A tool's call carries `cwd`, the folder it acts in: the call's own, else the
+      # session's workspace, so a person answering from another device sees where.
       "approval_requested" => %{
         "call_id" => required(:string),
         "tool" => required(:string),
         "args" => required(:object),
         "agent_path" => required({:array, :string}),
+        "cwd" => optional(:string),
         "delegation" => optional(:object),
         "publication" => optional(:object),
         "rule" => optional(:object)

@@ -13,7 +13,7 @@ defmodule Troupe.Plane.RemoteTest do
 
   alias Troupe.Plane.{Admin, Audit, Harness, Identity, Invites, Repo, Sessions}
   alias Troupe.Plane.Web.Router
-  alias Troupe.Protocol.{Client, Relay, SessionId}
+  alias Troupe.Protocol.{Client, Event, Relay, SessionId}
 
   @moduletag timeout: 60_000
 
@@ -287,10 +287,15 @@ defmodule Troupe.Plane.RemoteTest do
       laptop = laptop!(ctx, @ada)
       {:ok, _} = sync(laptop, ctx.session_id, [%{"person" => @bea, "role" => "control"}])
       {:ok, opened} = rpc(ctx, @bea, "remote.open", %{"session_id" => ctx.session_id})
-      _viewer = viewer!(ctx, laptop, opened["token"], @bea, "control")
+      viewer = viewer!(ctx, laptop, opened["token"], @bea, "control")
 
+      # Gone without a word: the view is paused, not ended, and says so.
       Client.close(laptop)
-      assert_receive {:troupe_notification, "relay.closed", %{"reason" => "the laptop went offline"}}, 5_000
+      assert_receive {:troupe_event, _topic, sid, %Event{type: "offer_paused", data: paused}}, 5_000
+      assert sid == ctx.session_id
+      assert paused["reason"] == "offline"
+      assert is_binary(paused["since"])
+      refute_received {:troupe_notification, "relay.closed", _}
 
       row =
         eventually(fn ->
@@ -299,6 +304,7 @@ defmodule Troupe.Plane.RemoteTest do
         end)
 
       assert is_binary(row["offline_since"])
+      assert row["paused"] == "offline"
 
       assert {:error, %{"message" => "unavailable", "data" => %{"offline_since" => since}}} =
                rpc(ctx, @bea, "remote.open", %{"session_id" => ctx.session_id})
@@ -310,6 +316,67 @@ defmodule Troupe.Plane.RemoteTest do
       {:ok, _} = sync(laptop, ctx.session_id, [%{"person" => @bea, "role" => "control"}])
       {:ok, %{"sessions" => [back]}} = rpc(ctx, @bea, "remote.list", %{})
       assert back["state"] == "online"
+      assert back["paused"] == nil
+
+      # The paused view hears it, and ends for its client to open again from its cursor.
+      monitor = Process.monitor(viewer)
+      assert_receive {:troupe_event, _topic, _sid, %Event{type: "offer_resumed"}}, 5_000
+      assert_receive {:troupe_notification, "relay.closed", %{"reason" => "the laptop is back"}}, 5_000
+      assert_receive {:DOWN, ^monitor, :process, _, _}, 5_000
+    end
+
+    test "a daemon that says it is stopping pauses the views with that reason, and what is sent meanwhile is refused in words",
+         ctx do
+      laptop = laptop!(ctx, @ada)
+      {:ok, _} = sync(laptop, ctx.session_id, [%{"person" => @bea, "role" => "control"}])
+      {:ok, opened} = rpc(ctx, @bea, "remote.open", %{"session_id" => ctx.session_id})
+      viewer = viewer!(ctx, laptop, opened["token"], @bea, "control")
+
+      Client.notify(laptop, "relay.pause", %{"reason" => "stopped"})
+      Client.close(laptop)
+
+      assert_receive {:troupe_event, _topic, _sid, %Event{type: "offer_paused", data: %{"reason" => "stopped"}}},
+                     5_000
+
+      assert {:error, %{message: "unavailable", data: %{"paused" => "stopped", "reason" => reason}}} =
+               Client.call(viewer, "input.send", input(ctx))
+
+      assert reason == Relay.paused_refusal()
+
+      assert eventually(fn ->
+               {:ok, %{"sessions" => [row]}} = rpc(ctx, @bea, "remote.list", %{})
+               row["paused"] == "stopped"
+             end)
+
+      # Withdrawn while away, by a laptop that came back offering nothing: the view ends so.
+      laptop = laptop!(ctx, @ada)
+      {:ok, _} = Client.call(laptop, "relay.sync", %{"offers" => []})
+      assert_receive {:troupe_notification, "relay.closed", %{"reason" => "withdrawn"}}, 5_000
+    end
+
+    test "a laptop that stops answering the plane's pings is paused as offline", ctx do
+      Application.put_env(:troupe_plane, :relay_heartbeat_ms, 100)
+      on_exit(fn -> Application.delete_env(:troupe_plane, :relay_heartbeat_ms) end)
+
+      laptop = laptop!(ctx, @ada)
+      {:ok, _} = sync(laptop, ctx.session_id, [%{"person" => @bea, "role" => "control"}])
+      {:ok, opened} = rpc(ctx, @bea, "remote.open", %{"session_id" => ctx.session_id})
+      _viewer = viewer!(ctx, laptop, opened["token"], @bea, "control")
+
+      # Answering, it stays: a second's pings, every one answered.
+      refute_receive {:troupe_event, _topic, _sid, %Event{type: "offer_paused"}}, 1_000
+
+      # Asleep, as far as the plane can tell: the socket is open and nothing answers.
+      :ok = :sys.suspend(laptop)
+      on_exit(fn -> if Process.alive?(laptop), do: :sys.resume(laptop) end)
+
+      assert_receive {:troupe_event, _topic, _sid, %Event{type: "offer_paused", data: %{"reason" => "offline"}}},
+                     5_000
+
+      assert eventually(fn ->
+               {:ok, %{"sessions" => [row]}} = rpc(ctx, @bea, "remote.list", %{})
+               row["state"] == "offline" and row["paused"] == "offline"
+             end)
     end
   end
 

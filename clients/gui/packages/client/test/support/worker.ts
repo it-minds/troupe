@@ -30,6 +30,12 @@ export interface PodToken {
   aud: string;
   /** Unix seconds. */
   exp: number;
+  /**
+   * A laptop's session through the plane's relay (troupe #58), which the fake plays with
+   * this worker: its `initialize` says `relayed`, and `relayed_allow_session` as a daemon
+   * since troupe #932 does.
+   */
+  relayed?: boolean;
 }
 
 export function encodeToken(t: PodToken): string {
@@ -61,6 +67,8 @@ interface Session {
   costMicros: number;
   /** The `ask_user` calls waiting for an answer. */
   questions: Set<string>;
+  /** Why the laptop this session stands in for is away, while it is (troupe #932). */
+  paused?: string;
 }
 
 interface Client {
@@ -115,6 +123,8 @@ export class FakeWorker {
   readonly refusing = new Map<string, { code: number; message: string; data?: unknown }>();
   /** The agents a session here could run: the built-ins, and a bundle's a test adds (troupe Decision 841). */
   readonly agents = new FakeAgents("/home/troupe/.config/troupe", true);
+  /** Whether a relayed connection is told the laptop takes `allow_session` from there; false is a daemon from before troupe #932. */
+  relayedAllowSession = true;
   /** The window `context_status` says after each call (troupe #920); null for a model whose window is not known. */
   contextWindow: number | null = 200_000;
   /**
@@ -255,8 +265,12 @@ export class FakeWorker {
           protocol_version: "1",
           server_info: { name: "fake-worker", version: "0.0.1", instance_id: this.workerId },
           // A pod fetches an artifact into a session from the plane, and writes no lasting
-          // rule from an approval: its rules are its worker profile's (troupe #920).
-          capabilities: { blobs: true, tools: true, fs_upload_artifact: true },
+          // rule from an approval: its rules are its worker profile's (troupe #920). Standing
+          // in for a laptop through the relay, it says what a laptop's daemon says there
+          // (troupe #932), which reaches no file of the laptop's.
+          capabilities: token.relayed
+            ? { blobs: true, tools: true, remote: true, relayed: true, relayed_allow_session: this.relayedAllowSession }
+            : { blobs: true, tools: true, fs_upload_artifact: true },
           principal: { subject: token.sub, display_name: token.name, kind: "user" },
           scopes: token.scopes,
           limits: { max_message_bytes: 1_048_576 },
@@ -298,6 +312,34 @@ export class FakeWorker {
   }
 
   /**
+   * The laptop this session stands in for went, as the plane says it on a relayed view
+   * (troupe #932): every subscriber is sent `offer_paused`, and what is sent meanwhile is
+   * refused in the plane's words.
+   */
+  pauseRelay(sessionId: string, reason: "stopped" | "offline" = "offline"): void {
+    const session = this.sessions.get(sessionId);
+    if (!session) throw new Error(`no session ${sessionId}`);
+    session.paused = reason;
+    this.ephemeral(session, "offer_paused", { reason, since: new Date().toISOString() }, []);
+  }
+
+  /**
+   * The laptop is back: every subscriber is sent `offer_resumed`, then `relay.closed` and
+   * the socket closes, as the plane ends a paused view for its client to open again.
+   */
+  resumeRelay(sessionId: string): void {
+    const session = this.sessions.get(sessionId);
+    if (!session) throw new Error(`no session ${sessionId}`);
+    delete session.paused;
+    this.ephemeral(session, "offer_resumed", {}, []);
+    for (const client of this.clients) {
+      if (![...client.subs.values()].some((s) => s.sessionId === sessionId)) continue;
+      notify(client.ws, "relay.closed", { reason: "the laptop is back" });
+      client.ws.close(1000, "the laptop is back");
+    }
+  }
+
+  /**
    * The agent calls a client-hosted tool: a `tool.invoke` to the socket that registered
    * it, answered with whatever the client answers. Rejects when nobody hosts it.
    */
@@ -334,6 +376,11 @@ export class FakeWorker {
     const ws = client.ws;
     const sessionId = String(params["session_id"] ?? "");
     const session = this.sessions.get(sessionId);
+
+    // A laptop that is away takes nothing, as the plane refuses for it.
+    if (session?.paused && method !== "auth.refresh") {
+      return reply(ws, id, null, { code: -32010, message: "unavailable", data: { paused: session.paused, reason: "The laptop is away: nothing sent now reaches it. Send it again once the laptop is back." } });
+    }
 
     switch (method) {
       case "auth.refresh": {
@@ -803,7 +850,8 @@ export class FakeWorker {
     const args = { command: what };
     session.approvals.set(callId, { tool: "shell", args, resolvedBy: null, decision: null });
     session.pendingApprovalCount += 1;
-    session.log.append("approval_requested", { call_id: callId, tool: "shell", args, agent_path: ["root"] });
+    // The folder it acts in, as a daemon and a pod say it (troupe #932): the workspace's.
+    session.log.append("approval_requested", { call_id: callId, tool: "shell", args, agent_path: ["root"], cwd: session.workspace });
     this.setStatus(session, "waiting");
   }
 

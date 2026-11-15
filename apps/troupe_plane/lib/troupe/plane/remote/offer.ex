@@ -26,6 +26,8 @@ defmodule Troupe.Plane.Remote.Offer do
     field :offered_at, :utc_datetime_usec
     field :offline_since, :utc_datetime_usec
     field :private, :boolean, default: false
+    # Why the laptop is away, while it is: `stopped` or `offline` (`Troupe.Protocol.Relay`).
+    field :paused_reason, :string
 
     timestamps(type: :utc_datetime_usec)
   end
@@ -40,7 +42,8 @@ defmodule Troupe.Plane.Remote.Offer do
     :shares,
     :offered_at,
     :offline_since,
-    :private
+    :private,
+    :paused_reason
   ]
 
   @spec changeset(t(), map()) :: Ecto.Changeset.t()

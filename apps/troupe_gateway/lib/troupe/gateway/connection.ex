@@ -601,7 +601,9 @@ defmodule Troupe.Gateway.Connection do
   end
 
   # A laptop session steered through the plane: one session of this daemon, and none of
-  # what is about the laptop, as `Troupe.Protocol.Relay` lists it.
+  # what is about the laptop, as `Troupe.Protocol.Relay` lists it. An approval is answered
+  # from there as here, for the call or for the rest of the session; a daemon from before
+  # that names no `relayed_allow_session`, and its clients answer once.
   defp capabilities(%{endpoint: %{kind: :relay}}) do
     %{
       "worktrees" => false,
@@ -609,6 +611,7 @@ defmodule Troupe.Gateway.Connection do
       "watch" => false,
       "remote" => true,
       "relayed" => true,
+      "relayed_allow_session" => true,
       "private_sessions" => false
     }
   end

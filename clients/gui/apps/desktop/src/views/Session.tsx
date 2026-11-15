@@ -17,6 +17,7 @@ import type { JSX } from "react";
 import {
   ALLOW_ALWAYS,
   PlaneOwn,
+  RELAYED_ALLOW_SESSION,
   UPLOAD_ARTIFACT,
   configKey,
   isBusy,
@@ -245,6 +246,9 @@ export function Session({
   // Whether the server writes a lasting rule from an approval (troupe #920): asked of what it
   // said at `initialize`, so the answer appears the day it does.
   const alwaysAllow = Boolean(sessionView?.capabilities[ALLOW_ALWAYS]);
+  // A laptop's session through the plane is answered once, unless its daemon takes an answer
+  // for the rest of the session from there (troupe #932).
+  const onceOnly = kind === "remote" && sessionView?.capabilities[RELAYED_ALLOW_SESSION] !== true;
   // Where the person's artifacts are listed from for the composer's "Add from artifacts":
   // the plane they are signed in to, for a session there; this computer's daemon otherwise.
   const own = useMemo<OwnPlane | null>(() => (!here && auth ? new PlaneOwn((method, params) => auth.rpc(method, params), auth.planeUrl) : daemon), [here, auth, daemon]);
@@ -366,7 +370,7 @@ export function Session({
               others={others}
               onAnswer={(d, a) => view.respond(entry.callId, d, a)}
               onDefinition={here ? onAgents : undefined}
-              onceOnly={kind === "remote"}
+              onceOnly={onceOnly}
               alwaysAllow={alwaysAllow}
               audiences={audiences}
             />

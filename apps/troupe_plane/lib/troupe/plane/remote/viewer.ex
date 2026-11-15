@@ -11,8 +11,18 @@ defmodule Troupe.Plane.Remote.Viewer do
   checking again against its own record.
 
   A laptop that is not there is `unavailable` with `offline_since`, and nothing is held
-  for it. A laptop that goes, a withdrawal, or a share that no longer names the person
-  ends the view with `relay.closed` and the reason.
+  for it. A withdrawal, or a share that no longer names the person, ends the view with
+  `relay.closed` and the reason.
+
+  **A laptop that goes pauses the view.** The view stays open and is sent the ephemeral
+  event `offer_paused {reason, since}` on the session's topic, `reason` being what the
+  laptop's connection said as it went (`Troupe.Protocol.Relay.paused_reasons/0`); a request
+  meanwhile is `unavailable` with `paused` and `Relay.paused_refusal/0`, and nothing is
+  held for the laptop. When the laptop holds the session again the view is sent
+  `offer_resumed` and ends with `relay.closed {reason: "the laptop is back"}`: the session's
+  connection on the laptop went with the laptop, so the client opens the view again and
+  subscribes from its own cursor, which loses nothing. A withdrawal while away ends it as
+  any withdrawal does.
   """
 
   @behaviour WebSock
@@ -20,7 +30,9 @@ defmodule Troupe.Plane.Remote.Viewer do
   alias Troupe.Plane.{Identity, Remote}
   alias Troupe.Plane.Identity.User
   alias Troupe.Plane.Remote.Auth
-  alias Troupe.Protocol.{Error, JSONRPC, Relay}
+  alias Troupe.Protocol.{Error, Event, JSONRPC, Relay}
+
+  @back "the laptop is back"
 
   @renew_warning_seconds 120
   @expiry_grace_seconds 30
@@ -36,7 +48,10 @@ defmodule Troupe.Plane.Remote.Viewer do
        role: nil,
        laptop: nil,
        monitor: nil,
-       timers: []
+       timers: [],
+       # Why the laptop is away, while the view waits for it.
+       paused: nil,
+       watching: false
      }}
   end
 
@@ -50,7 +65,7 @@ defmodule Troupe.Plane.Remote.Viewer do
 
   def handle_in({_data, [opcode: _other]}, state), do: {:stop, :normal, 1003, state}
 
-  defp handle_message({:request, id, "initialize", params}, _text, %{laptop: nil} = state) do
+  defp handle_message({:request, id, "initialize", params}, _text, %{id: nil} = state) do
     token = get_in(params, ["auth", "token"]) || state.bearer
 
     with {:ok, user, claims} <- Auth.viewer(token),
@@ -80,8 +95,16 @@ defmodule Troupe.Plane.Remote.Viewer do
     end
   end
 
-  defp handle_message({:request, id, _method, _params}, _text, %{laptop: nil} = state) do
+  defp handle_message({:request, id, _method, _params}, _text, %{id: nil} = state) do
     refuse(id, Error.new(:not_initialized), state)
+  end
+
+  # While the laptop is away nothing reaches it, and nothing is held for it: what was sent
+  # is refused in words, and sent again once the laptop is back.
+  defp handle_message({:request, id, method, _params}, _text, %{paused: reason} = state)
+       when is_binary(reason) and method != "auth.refresh" do
+    error = Error.new(:unavailable, %{paused: reason, reason: Relay.paused_refusal()})
+    {:push, frame({:error, id, error}), state}
   end
 
   defp handle_message({:request, id, "auth.refresh", params}, _text, state) do
@@ -150,9 +173,18 @@ defmodule Troupe.Plane.Remote.Viewer do
     end
   end
 
-  def handle_info({:DOWN, monitor, :process, _pid, _reason}, %{monitor: monitor} = state) do
-    closed("the laptop went offline", %{state | laptop: nil})
-  end
+  # The laptop's connection went, saying why or not: the view waits for it.
+  def handle_info({:laptop_paused, reason}, state), do: pause(state, reason)
+
+  def handle_info({:DOWN, monitor, :process, _pid, _reason}, %{monitor: monitor} = state),
+    do: pause(state, "offline")
+
+  # Something about offers changed: while the laptop is away, whether it is back, or the
+  # offer gone.
+  def handle_info({:remote_changed, _subjects}, %{paused: reason} = state) when is_binary(reason),
+    do: back?(state)
+
+  def handle_info({:remote_changed, _subjects}, state), do: {:ok, state}
 
   def handle_info(:auth_expiring, state) do
     payload = %{"expires_at" => Map.get(state, :expires_at)}
@@ -170,6 +202,47 @@ defmodule Troupe.Plane.Remote.Viewer do
   end
 
   def terminate(_reason, state), do: state
+
+  # Said once: a laptop already away that is heard going again (its connection's end and
+  # the monitor both say it) is the same pause.
+  defp pause(%{paused: reason} = state, _again) when is_binary(reason), do: {:ok, state}
+
+  defp pause(state, reason) do
+    if state.monitor, do: Process.demonitor(state.monitor, [:flush])
+    unless state.watching, do: Remote.subscribe()
+
+    state = %{state | laptop: nil, monitor: nil, paused: reason, watching: true}
+    since = DateTime.utc_now() |> DateTime.to_iso8601()
+
+    # A laptop that dialled again before its old connection was seen to go is back already.
+    case back?(state) do
+      {:ok, state} -> {:push, offer_event(state, "offer_paused", %{"reason" => reason, "since" => since}), state}
+      ended -> ended
+    end
+  end
+
+  # Back: the view ends, saying so, for the client to open it again from its cursor; gone:
+  # it ends as a withdrawal does; neither: it waits on.
+  defp back?(state) do
+    with %User{active: true} = user <- Identity.get_user(state.user.subject),
+         {:ok, _offer, _held} <- Remote.access(state.session_id, user) do
+      if Remote.laptop(state.session_id) do
+        resumed = offer_event(state, "offer_resumed", %{})
+        closing = frame({:notification, "relay.closed", %{"reason" => @back}})
+        {:stop, :normal, 1000, [resumed, closing], state}
+      else
+        {:ok, state}
+      end
+    else
+      _gone -> closed("withdrawn", state)
+    end
+  end
+
+  defp offer_event(state, type, data) do
+    event = type |> Event.ephemeral(nil, data) |> Event.to_json()
+    params = %{"topic" => "session:" <> state.session_id, "session_id" => state.session_id, "event" => event}
+    frame({:notification, "event", params})
+  end
 
   defp closed(reason, state) do
     {:stop, :normal, 1000, [frame({:notification, "relay.closed", %{"reason" => reason}})], state}

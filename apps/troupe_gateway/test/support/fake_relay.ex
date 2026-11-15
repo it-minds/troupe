@@ -8,7 +8,8 @@ defmodule Troupe.Gateway.FakeRelay do
   `auth.refresh` as the plane does, and resolving a share's person to itself. The test
   plays the plane's other half: `open/5` relays a remote person to the daemon,
   `request/5` sends one of their messages, and what the daemon sends back arrives at the
-  test as `{:relay_frame, viewer, message}` and `{:relay_close, viewer, reason}`. Every
+  test as `{:relay_frame, viewer, message}` and `{:relay_close, viewer, reason}`, and a
+  daemon saying it is going as `{:relay_pause, params}`. Every
   request the daemon makes arrives as `{:relay, method, params}`. `drop/1` closes the
   connection, as a plane that went away does.
 
@@ -158,6 +159,10 @@ defmodule Troupe.Gateway.FakeRelay do
 
         %{"method" => "relay.close", "params" => %{"viewer" => viewer} = params} ->
           send(s.test, {:relay_close, viewer, params["reason"]})
+          {:ok, s}
+
+        %{"method" => "relay.pause", "params" => params} ->
+          send(s.test, {:relay_pause, params})
           {:ok, s}
 
         _other ->

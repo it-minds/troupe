@@ -36,7 +36,7 @@ export {
   whoCanOpen,
 } from "./newSession.js";
 export type { AutoPick, MessageTokens, NewSessionWhere, ProfileRoom, ProfileRoomRow, TokenNames } from "./newSession.js";
-export { ALLOW_ALWAYS, UPLOAD_ARTIFACT, SessionView, createLocalSession, turnCompleted } from "./session.js";
+export { ALLOW_ALWAYS, RELAYED_ALLOW_SESSION, UPLOAD_ARTIFACT, SessionView, createLocalSession, turnCompleted } from "./session.js";
 export type { ApprovalDecision, ArtifactAttached, SessionViewHooks, TurnResult } from "./session.js";
 export { AuthSession, PlaneUnreachableError, memoryReachedMarks, memoryTokenStore, webReachedMarks, webTokenStore, currentOrigin } from "./auth.js";
 export type { AuthSessionOptions, ReachedMarks, SignInProgress, TokenStore, UnreachableContext } from "./auth.js";
@@ -117,6 +117,7 @@ export type {
   GateAnswered,
   PublicationGate,
   TranscriptState,
+  LaptopPresence,
   PendingInput,
   BlobRef,
   TodoItem,

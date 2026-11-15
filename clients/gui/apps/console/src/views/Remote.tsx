@@ -21,16 +21,22 @@
 // says why in words and keeps what was typed. An approval shows what the desktop app's
 // shows, the command, its folder, the file or the diff and what allowing it does, in the
 // client's words for both apps, and once answered it stays as a line saying who answered.
-// Its answers are the desktop app's for the same session: on a pod, allowed once, for the
-// rest of the session or denied, and always only where the session's server names it,
-// which a pod does not; on a laptop, allowed or denied once, since loosening the laptop's
-// rules is its own person's to do there, and a line says so.
+// Its answers are the desktop app's for the same session: allowed once, for the rest of
+// the session or denied, and always only where the session's server names it, which a pod
+// does not and a laptop's never does from here. A laptop whose daemon is from before it
+// took an answer for the session from another device (troupe #932) is answered once, and
+// a line says so.
+//
+// While the laptop is away the plane says so on the session's stream, and the status line
+// reads it: asleep or offline, or Troupe stopped there, and then that it is back. The
+// attachment's own words stay for this page's own connection.
 
 import { useEffect, useRef, useState } from "react";
 import type { JSX } from "react";
 import {
   ALLOW_ALWAYS,
   ONCE_ONLY_SENTENCE,
+  RELAYED_ALLOW_SESSION,
   callConsequence,
   callEvidence,
   callHeadline,
@@ -68,6 +74,8 @@ interface RemoteRow {
   workspace?: string | null;
   state: string;
   offline_since?: string | null;
+  /** Why the laptop is away, while it is: `stopped` (Troupe stopped there) or `offline` (troupe #932). */
+  paused?: string | null;
   your_role: string;
   /** A private session, offered with its owner's yes to its passing through the plane unsealed. */
   private?: boolean;
@@ -76,7 +84,8 @@ interface RemoteRow {
 /** The laptop's presence, as a person reads it. */
 function presence(row: RemoteRow): string {
   if (row.state === "online") return "online";
-  return row.offline_since ? `offline since ${remoteWhen(row.offline_since)}` : "offline";
+  const away = row.paused === "stopped" ? "Troupe stopped there" : "offline";
+  return row.offline_since ? `${away} since ${remoteWhen(row.offline_since)}` : away;
 }
 
 /**
@@ -230,10 +239,20 @@ function whereWords(pod: { whose: string } | undefined, row: RemoteRow | null): 
 /**
  * The session's state in words, for its status line: connecting, live and what the agent
  * is doing, waiting on a person while an approval or a question is open, or the laptop
- * (a pod, for a session on the platform) lost, with the reason the connection gave.
+ * (a pod, for a session on the platform) lost, with the reason the connection gave. A
+ * laptop the plane says is away is waited for, in the plane's words, and said to be back.
  */
 export function statusWords(status: AttachStatus, detail: string | null, state: TranscriptState, opts: { steer: boolean; laptop: boolean }): string {
   const lost = opts.laptop ? "Lost the laptop" : "Lost the connection";
+  const away = opts.laptop ? state.laptop : undefined;
+  if (away?.state === "away" && status === "live") {
+    return away.reason === "stopped" ? "Troupe stopped on the laptop; waiting for it to start again" : "The laptop is asleep or offline; waiting for it";
+  }
+  if (away?.state === "back" && (status === "reconnecting" || status === "connecting")) return "The laptop is back";
+  if (away?.state === "back" && status === "live") {
+    const { laptop: _back, ...rest } = state;
+    return `The laptop is back · ${statusWords(status, detail, rest, opts)}`;
+  }
   switch (status) {
     case "connecting":
       return "Connecting";
@@ -282,7 +301,7 @@ function decisionLine(a: ApprovalEntry, nameOf: (subject: string | undefined) =>
 /** What a call's arguments show before it is answered: the command and its folder, the file, a diff. */
 function Evidence({ entry, folder }: { entry: ApprovalEntry; folder: string | null }): JSX.Element {
   const { command, cwd, path, diff } = callEvidence(entry.args);
-  const where = cwd ?? folder;
+  const where = cwd ?? entry.cwd ?? folder;
   return (
     <div className="evidence">
       {command ? <pre className="command">{command}</pre> : path ? <pre className="command">{path}</pre> : null}
@@ -366,6 +385,9 @@ export function RemoteSession({ id, pod }: { id: string; pod?: { mode: "read" | 
   const [refusal, setRefusal] = useState<string | null>(null);
   // Whom a pod session is shared with by name, named to everybody in it (troupe #765).
   const [shared, setShared] = useState<Invitee[]>([]);
+  // Whether the laptop takes an answer for the rest of the session from here, as its
+  // daemon said at `initialize`; one from before answers a call once.
+  const [sessionWide, setSessionWide] = useState(false);
   // Whether the session's server takes a lasting rule from an approval, as it said at
   // `initialize`: a pod names none, its rules being its worker profile's.
   const [alwaysAllow, setAlwaysAllow] = useState(false);
@@ -424,6 +446,7 @@ export function RemoteSession({ id, pod }: { id: string; pod?: { mode: "read" | 
         attachment.current = a;
         // A follow-only grant holds `observe` alone; a pod session opened to read is followed too.
         setSteer(pod?.mode !== "read" && (a.conn?.scopes.has("control") ?? false));
+        setSessionWide(!pod && a.view.capabilities[RELAYED_ALLOW_SESSION] === true);
         setAlwaysAllow(Boolean(pod) && Boolean(a.view.capabilities[ALLOW_ALWAYS]));
         void a.view.followPresence().catch(() => undefined);
         void a.view.setPresence("viewing").catch(() => undefined);
@@ -566,7 +589,7 @@ export function RemoteSession({ id, pod }: { id: string; pod?: { mode: "read" | 
                       <button type="button" onClick={() => void act((x) => x.view.respondApproval(a.callId, "deny"))}>
                         Deny
                       </button>
-                      {!laptop && pub.visibility !== null && (
+                      {(!laptop || sessionWide) && pub.visibility !== null && (
                         <button
                           type="button"
                           disabled={(audiences[a.callId] ?? proposedKey(pub) ?? "") === ""}
@@ -579,7 +602,7 @@ export function RemoteSession({ id, pod }: { id: string; pod?: { mode: "read" | 
                         </button>
                       )}
                     </div>
-                    {laptop && <p className="also">{ONCE_ONLY_SENTENCE}</p>}
+                    {laptop && !sessionWide && <p className="also">{ONCE_ONLY_SENTENCE}</p>}
                   </>
                 ) : (
                   <p className="also">You follow this session: somebody who steers it answers this.</p>
@@ -603,8 +626,8 @@ export function RemoteSession({ id, pod }: { id: string; pod?: { mode: "read" | 
                         Allow once
                       </button>
                       {/* A pod session is the person's to steer, so it is answered as the
-                          desktop answers one; a laptop's is allowed or denied once. */}
-                      {!laptop && (
+                          desktop answers one; a laptop that takes it, as at the laptop. */}
+                      {(!laptop || sessionWide) && (
                         <button type="button" onClick={() => void act((x) => x.view.respondApproval(a.callId, "allow_session"))}>
                           {callScopedLabel(a.tool)}
                         </button>
@@ -618,7 +641,7 @@ export function RemoteSession({ id, pod }: { id: string; pod?: { mode: "read" | 
                         Deny
                       </button>
                     </div>
-                    {laptop && <p className="also">{ONCE_ONLY_SENTENCE}</p>}
+                    {laptop && !sessionWide && <p className="also">{ONCE_ONLY_SENTENCE}</p>}
                   </>
                 ) : (
                   <p className="also">You follow this session: somebody who steers it answers this.</p>

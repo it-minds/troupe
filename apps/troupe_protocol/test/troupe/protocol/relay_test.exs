@@ -42,9 +42,15 @@ defmodule Troupe.Protocol.RelayTest do
              Relay.check("agents.list", %{"workspace" => "/home"}, @sid, "control")
   end
 
-  test "an approval from another device is for the one call" do
-    assert {:error, %{data: %{field: "decision"}}} =
-             Relay.check("approval.respond", %{"session_id" => @sid, "decision" => "allow_session"}, @sid, "control")
+  test "an approval from another device is answered as at the laptop, for the call or the session" do
+    for decision <- ~w(allow deny allow_session) do
+      assert :ok =
+               Relay.check("approval.respond", %{"session_id" => @sid, "decision" => decision}, @sid, "control")
+    end
+
+    # Following it is not steering it.
+    assert {:error, %{data: %{required_scope: "control"}}} =
+             Relay.check("approval.respond", %{"session_id" => @sid, "decision" => "allow_session"}, @sid, "observe")
 
     # A lasting rule is the laptop's own configuration (#920).
     assert {:error, %{data: %{field: "decision", reason: reason}}} =

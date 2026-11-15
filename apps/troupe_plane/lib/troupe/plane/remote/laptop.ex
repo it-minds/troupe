@@ -12,7 +12,15 @@ defmodule Troupe.Plane.Remote.Laptop do
 
   The connection holds a `:global` name per session it offers, which is what a viewer on
   any replica finds it by and what "online" means. It is closed at its token's expiry if
-  it was not renewed, and every view it carried ends with it.
+  it was not renewed.
+
+  **When it goes, its views are paused, not ended.** A daemon that stops says so first
+  (`relay.pause {reason: "stopped"}`); a connection that ends without a word, or stops
+  answering the plane's pings (a laptop asleep or out of reach keeps its socket open as far
+  as the plane can tell, so the plane asks every `relay_heartbeat_ms`, fifteen seconds by
+  default, and closes one that has not answered for three of them), is `offline`. Each view
+  hears the reason (`Troupe.Plane.Remote.Viewer`), and the offer's row keeps it while the
+  laptop is away (`paused` in `remote.list`).
 
   Each change it makes is told to the people it concerns (`Troupe.Plane.Remote.changed/1`)
   once it is in force, the row written and the names held or let go, so a person's watch
@@ -32,22 +40,29 @@ defmodule Troupe.Plane.Remote.Laptop do
 
   @renew_warning_seconds 120
   @expiry_grace_seconds 30
+  @heartbeat_ms 15_000
+  @heartbeats_missed 3
 
   @impl WebSock
   def init(opts) do
     {:ok,
-     %{
+     schedule_heartbeat(%{
        bearer: Keyword.get(opts, :bearer),
        user: nil,
        device: nil,
        sessions: MapSet.new(),
        viewers: %{},
-       timers: []
-     }}
+       timers: [],
+       # Why the laptop is going, once its daemon said so; `offline` where it never does.
+       going: nil,
+       heard_at: now_ms()
+     })}
   end
 
   @impl WebSock
   def handle_in({text, [opcode: :text]}, state) do
+    state = %{state | heard_at: now_ms()}
+
     case JSONRPC.decode(text) do
       {:ok, message} -> handle_message(message, state)
       {:error, error} -> {:push, frame({:error, nil, error}), state}
@@ -55,6 +70,11 @@ defmodule Troupe.Plane.Remote.Laptop do
   end
 
   def handle_in({_data, [opcode: _other]}, state), do: {:stop, :normal, 1003, state}
+
+  # A pong, or a ping of the laptop's own: it is there.
+  @impl WebSock
+  def handle_control({_payload, [opcode: _control]}, state),
+    do: {:ok, %{state | heard_at: now_ms()}}
 
   # -- from the laptop --------------------------------------------------------
 
@@ -169,6 +189,13 @@ defmodule Troupe.Plane.Remote.Laptop do
     {:ok, state}
   end
 
+  # The daemon is going and says why; the connection's end, which follows, pauses the views
+  # with it.
+  defp handle_message({:notification, "relay.pause", params}, state) do
+    reason = if params["reason"] in Relay.paused_reasons(), do: params["reason"], else: "offline"
+    {:ok, %{state | going: reason}}
+  end
+
   defp handle_message({:notification, "relay.close", %{"viewer" => id} = params}, state) do
     case Map.pop(state.viewers, id) do
       {nil, _viewers} ->
@@ -236,22 +263,30 @@ defmodule Troupe.Plane.Remote.Laptop do
     {:stop, :normal, 1000, [frame({:notification, "auth.expired", %{}})], state}
   end
 
+  # A laptop that has not been heard from for three pings is not there, whatever its
+  # socket says: asleep, or out of reach.
+  def handle_info(:heartbeat, state) do
+    if now_ms() - state.heard_at > heartbeat_ms() * @heartbeats_missed,
+      do: {:stop, :normal, 1001, %{state | going: state.going || "offline"}},
+      else: {:push, {:ping, ""}, schedule_heartbeat(state)}
+  end
+
   def handle_info(_message, state), do: {:ok, state}
 
   @impl WebSock
   def terminate(_reason, %{user: %{subject: subject}} = state) do
-    Enum.each(state.viewers, fn {_id, viewer} ->
-      send(viewer.pid, {:relay_closed, "the laptop went offline"})
-    end)
+    reason = state.going || "offline"
 
-    # Let go of the names before saying so: a watch that reads again as it hears it
-    # must find the laptop gone, and a dying process would hold them a moment longer.
+    # Let go of the names before saying so: a watch or a view that reads again as it hears
+    # it must find the laptop gone, and a dying process would hold them a moment longer.
     Enum.each(state.sessions, fn session_id ->
       if :global.whereis_name(Remote.name(session_id)) == self(),
         do: :global.unregister_name(Remote.name(session_id))
     end)
 
-    Remote.offline(subject, state.device, MapSet.to_list(state.sessions))
+    Enum.each(state.viewers, fn {_id, viewer} -> send(viewer.pid, {:laptop_paused, reason}) end)
+
+    Remote.offline(subject, state.device, MapSet.to_list(state.sessions), reason)
 
     state.user
     |> Remote.offers_from(state.device)
@@ -357,4 +392,13 @@ defmodule Troupe.Plane.Remote.Laptop do
   defp expiry(state, _exp), do: state
 
   defp frame(message), do: {:text, JSONRPC.encode(message)}
+
+  defp schedule_heartbeat(state) do
+    Process.send_after(self(), :heartbeat, heartbeat_ms())
+    state
+  end
+
+  defp heartbeat_ms, do: Application.get_env(:troupe_plane, :relay_heartbeat_ms, @heartbeat_ms)
+
+  defp now_ms, do: System.monotonic_time(:millisecond)
 end

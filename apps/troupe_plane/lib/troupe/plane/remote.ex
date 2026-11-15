@@ -246,6 +246,7 @@ defmodule Troupe.Plane.Remote do
         shares: %{"people" => people},
         offered_at: now,
         offline_since: nil,
+        paused_reason: nil,
         private: private?(session_id, params)
       }
 
@@ -289,9 +290,12 @@ defmodule Troupe.Plane.Remote do
     :ok
   end
 
-  @doc "The laptop's connection went: what it offered is offline from now."
-  @spec offline(String.t(), String.t(), [String.t()]) :: :ok
-  def offline(subject, device, session_ids) do
+  @doc """
+  The laptop's connection went: what it offered is offline from now, paused for `reason`
+  (`Troupe.Protocol.Relay.paused_reasons/0`).
+  """
+  @spec offline(String.t(), String.t(), [String.t()], String.t()) :: :ok
+  def offline(subject, device, session_ids, reason \\ "offline") do
     now = DateTime.utc_now()
 
     Repo.update_all(
@@ -300,7 +304,7 @@ defmodule Troupe.Plane.Remote do
           o.owner_subject == ^subject and o.device == ^device and o.session_id in ^session_ids and
             is_nil(o.offline_since)
       ),
-      set: [offline_since: now]
+      set: [offline_since: now, paused_reason: reason]
     )
 
     :ok
@@ -456,6 +460,8 @@ defmodule Troupe.Plane.Remote do
       "workspace" => offer.workspace,
       "state" => state,
       "offline_since" => since && DateTime.to_iso8601(since),
+      # Why the laptop is away while it is: `stopped` or `offline`; `null` while it is there.
+      "paused" => if(state == "offline", do: offer.paused_reason || "offline"),
       "offered_at" => DateTime.to_iso8601(offer.offered_at),
       "private" => offer.private == true,
       "your_role" => if(offer.owner_subject == user.subject, do: "owner", else: role),

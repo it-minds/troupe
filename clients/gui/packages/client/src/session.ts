@@ -33,6 +33,12 @@ export type ApprovalDecision = "allow" | "deny" | "allow_session" | "allow_alway
 export const ALLOW_ALWAYS = "approval_allow_always";
 
 /**
+ * The capability a laptop's daemon names at `initialize` over the plane's relay when it
+ * takes `allow_session` from there (troupe #932); one from before answers a call once.
+ */
+export const RELAYED_ALLOW_SESSION = "relayed_allow_session";
+
+/**
  * The capability a server names at `initialize` when `fs.upload` takes `artifact` in place of
  * bytes: it fetches the artifact's files from the plane into the session's workspace itself,
  * a pod over its control link and a daemon with its sign-in (troupe #920).
