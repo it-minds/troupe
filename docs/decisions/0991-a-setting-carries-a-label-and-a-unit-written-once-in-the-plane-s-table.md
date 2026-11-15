@@ -1,5 +1,5 @@
 ---
-number: 990
+number: 991
 title: "A platform setting carries a label and a unit, written once in the plane's settings table; the console names the row by the label and asks for the value in the unit"
 date: 2026-11-15
 status: accepted
