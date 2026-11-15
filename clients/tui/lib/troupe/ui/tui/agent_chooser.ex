@@ -317,8 +317,9 @@ defmodule Troupe.UI.TUI.AgentChooser do
   defp bundle_words(row, name),
     do:
       row["editable_reason"] ||
-        "#{name} comes from the profile's bundle; change it in the console, or n makes " <>
-          "an agent of your own from it"
+        "#{name} comes from the profile's bundle: an administrator changes it on the console's " <>
+          "Configure → Configuration bundles (ask one if you are not), or n makes an agent of " <>
+          "your own from it"
 
   defp start(chooser) do
     with nil <- chooser.start,

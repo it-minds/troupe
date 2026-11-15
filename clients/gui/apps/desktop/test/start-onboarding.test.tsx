@@ -14,7 +14,7 @@ import { App } from "../src/App";
 import { FakeDaemon, exampleOnboarding } from "../../../packages/client/test/support/daemon.js";
 import { startHarness } from "../../../packages/client/test/support/harness.js";
 import type { Harness } from "../../../packages/client/test/support/harness.js";
-import { button, render, says, sees, startOnTheList, type, waitFor } from "./support";
+import { button, nav, render, says, sees, startOnTheList, type, waitFor } from "./support";
 
 Element.prototype.scrollIntoView = function scrollIntoView() {};
 globalThis.WebSocket = NodeWebSocket as unknown as typeof WebSocket;
@@ -89,8 +89,10 @@ describe("a session's start in a workspace onboarding is due in", () => {
     await startIn(REPO);
 
     const question = await asking(QUESTION);
-    // The harness's own line is in the stream too, as it was before anything asked.
-    await sees("Other tools' files are here");
+    // The start's line is in the stream too, in this app's words: what the panel's answers
+    // do, never the terminal's command or its Markdown (troupe #895).
+    await sees("Other tools' files are here: Onboard brings in 2 AGENTS.md files and 2 rules as Troupe's own files, and Review shows each as a diff first.");
+    expect(document.querySelector(".stream")!.textContent).not.toMatch(/`|troupe onboard/);
     // The files it is about, and what it passed over.
     expect([...question.querySelectorAll(".onboard-files li")].map((li) => li.textContent)).toEqual([
       "AGENTS.md new, and not there yet, from CLAUDE.md with .claude/CLAUDE.md",
@@ -131,6 +133,22 @@ describe("a session's start in a workspace onboarding is due in", () => {
     const parent = [...daemon.sessions.values()].find((s) => s.workspace === REPO && s.profile === "build")!;
     expect(daemon.librarians).toEqual([{ sessionId: expect.any(String), workspace: REPO, parent: parent.id, prompt: LIBRARIAN_PROMPT, worktree: "never" }]);
     expect(daemon.planOf(REPO).onboarding.due).toBe("none");
+  });
+
+  // An offer blocks nothing, so it wears none of the reserved colour: the head says Idle and
+  // the rail counts nothing, and the panel says no "Waiting for you" either (troupe #898).
+  it("is an offer, not a wait: no reserved badge on the panel, Idle in the head, nothing counted in the rail", async () => {
+    daemon.onboarding[REPO] = exampleOnboarding();
+    await startIn(REPO);
+    const question = await asking(QUESTION);
+
+    expect(question.classList.contains("offer")).toBe(true);
+    expect(question.querySelector(".pill.waiting")).toBeNull();
+    expect(question.textContent).not.toContain("Waiting for you");
+    const head = document.querySelector<HTMLElement>(".session-head")!;
+    await waitFor(() => [...head.querySelectorAll(".pill")].some((p) => p.textContent === "Idle"), "Idle in the head");
+    expect(head.querySelector(".pill.waiting")).toBeNull();
+    expect(nav("Waiting for you")!.querySelector(".pill")).toBeNull();
   });
 
   it("shows each file's diff under Review, with Write and Skip, and the new AGENTS.md in its own words", async () => {
@@ -264,6 +282,9 @@ describe("a team session", () => {
     const row = await waitFor(() => [...document.querySelectorAll<HTMLButtonElement>("button.row")].find((b) => b.textContent?.includes("Plan the release")), "the team session's row");
     row.click();
     await waitFor(() => says("would bring in 2 rules"), "the harness's line");
+    // Nothing here words it, so the harness's sentence is drawn, its Markdown rendered.
+    expect(document.querySelector(".stream code")?.textContent).toBe("troupe onboard");
+    expect(document.querySelector(".stream")!.textContent).not.toContain("`");
     await new Promise((resolve) => setTimeout(resolve, 300));
     expect(panel()).toBeNull();
     expect(calls()).toEqual([]);

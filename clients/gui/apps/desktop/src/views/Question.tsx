@@ -73,13 +73,16 @@ export function QuestionPanel({
         <Pill status="waiting" />
         <h2>{budget ? "A limit is reached. How much more, and for how long?" : "The session has a question"}</h2>
       </header>
-      <p className="consequence">{entry.question}</p>
-      {/* What the question is about, as it is: the prompt a workspace's command would send (troupe Decision 814). */}
-      {entry.preview !== undefined && (
-        <pre className="evidence" aria-label="What it would send">
-          {entry.preview}
-        </pre>
-      )}
+      {/* The question scrolls; the header and the answers stay on the screen. */}
+      <div className="panel-body">
+        <p className="consequence">{entry.question}</p>
+        {/* What the question is about, as it is: the prompt a workspace's command would send, before it is first sent. */}
+        {entry.preview !== undefined && (
+          <pre className="evidence" aria-label="What it would send">
+            {entry.preview}
+          </pre>
+        )}
+      </div>
       {error && <p className="also error">{error}</p>}
 
       {!canAnswer ? (

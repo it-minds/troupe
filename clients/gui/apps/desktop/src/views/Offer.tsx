@@ -1,12 +1,13 @@
-// Your own servers, offered to a session on a pod (troupe Decision 748).
+// Your own servers, offered to a session on a pod.
 //
 // A server you signed in to on this computer acts as you, and its sign-in never leaves
 // the daemon. A session on your team's pod can use it all the same: the app offers its
 // tools to the session as tools this computer hosts, and when the agent calls one, the
 // daemon makes the call with your sign-in and the answer goes back. The session asks
 // before it takes them, in its own words, and this is where you answer: where the
-// approval and the question panels sit, the one place on the screen a person is waited
-// on. Afterwards a line says what is offered, since everyone in the session can see it.
+// approval and the question panels sit. It is an offer, and the session carries on without
+// the tools until it is answered, so the panel wears none of the reserved colour and the
+// session is not counted as waiting for you. Afterwards a line says what is offered, since everyone in the session can see it.
 //
 // With more than one server signed in, each is a box to tick, every one ticked to begin
 // with but one the person left out before, and only the ticked ones are offered. A server
@@ -15,7 +16,6 @@
 import { useState } from "react";
 import type { JSX } from "react";
 import type { OfferAnswer, OfferAsk, OfferState } from "@troupe/client";
-import { Pill } from "./bits";
 import { Mask } from "./brand";
 
 export function OfferPanel({ ask, onAnswer }: { ask: OfferAsk; onAnswer: (allow: OfferAnswer) => void }): JSX.Element {
@@ -30,28 +30,30 @@ export function OfferPanel({ ask, onAnswer }: { ask: OfferAsk; onAnswer: (allow:
   const offering = picking ? ask.servers.filter((s) => ticked.includes(s)) : ask.servers;
 
   return (
-    <section className="approval question" aria-label="Offer your servers">
+    <section className="approval question offer" aria-label="Offer your servers">
       <header>
         <Mask size={26} />
-        <Pill status="waiting" />
         <h2>Offer your servers to this session?</h2>
       </header>
-      <p className="consequence">{ask.prompt}</p>
-      <p className="also">
-        The calls are made on this computer with your sign-in to {list(ask.servers)}. The session sees the tools, what it asks them and what
-        they answer, and never your sign-in. Everyone in it can see that it uses tools on your machine.
-      </p>
-      {picking && (
-        <fieldset className="servers" aria-label="Which servers to offer">
-          {ask.servers.map((server) => (
-            <label key={server} className="inline">
-              <input type="checkbox" checked={ticked.includes(server)} onChange={() => toggle(server)} disabled={answered} />
-              {server}
-              <span className="muted"> · {count(ask.tools.filter((t) => t.startsWith(`${server}.`)).length)}</span>
-            </label>
-          ))}
-        </fieldset>
-      )}
+      {/* What is offered scrolls; the header and the answers stay on the screen. */}
+      <div className="panel-body">
+        <p className="consequence">{ask.prompt}</p>
+        <p className="also">
+          The calls are made on this computer with your sign-in to {list(ask.servers)}. The session sees the tools, what it asks them and what
+          they answer, and never your sign-in. Everyone in it can see that it uses tools on your machine.
+        </p>
+        {picking && (
+          <fieldset className="servers" aria-label="Which servers to offer">
+            {ask.servers.map((server) => (
+              <label key={server} className="inline">
+                <input type="checkbox" checked={ticked.includes(server)} onChange={() => toggle(server)} disabled={answered} />
+                {server}
+                <span className="muted"> · {count(ask.tools.filter((t) => t.startsWith(`${server}.`)).length)}</span>
+              </label>
+            ))}
+          </fieldset>
+        )}
+      </div>
       <div className="answers">
         <button className="allow" onClick={() => answer(picking ? offering : true)} disabled={answered || offering.length === 0}>
           {picking && offering.length < ask.servers.length ? `Offer ${list(offering)}` : "Offer them"}

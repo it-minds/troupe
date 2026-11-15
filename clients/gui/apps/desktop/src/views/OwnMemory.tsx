@@ -382,7 +382,7 @@ const NOTES: Record<EntryLevel["scope"], { note: string; empty: string; emptyBod
     emptyBody: "Sessions in this team use your organisation's memory as it is.",
   },
   profile: {
-    note: "Applies to every session on this worker profile's pods. Replaces your team's memory on the same topic.",
+    note: "Applies to every session that runs on this profile. Replaces your team's memory on the same topic.",
     empty: "This profile has no memory of its own",
     emptyBody: "Sessions on it use your team's memory as it is.",
   },
@@ -397,7 +397,7 @@ const NOTES: Record<EntryLevel["scope"], { note: string; empty: string; emptyBod
 function lockOf(level: Level): string {
   if (level.level.scope === "organisation") return "Platform administrators can change this. Ask one of them if something here is wrong or out of date.";
   if (level.level.scope === "team") return `Only ${level.label}'s team admins can change this. Ask one of them if something here is wrong or out of date.`;
-  return "Platform administrators can change a worker profile's memory.";
+  return "Platform administrators can change a profile's memory.";
 }
 
 /** Where a save goes and which new sessions start with it. */
@@ -670,7 +670,7 @@ function LevelView({
                 </div>
                 {forgetting === i && (
                   <div className="forget" role="alertdialog" aria-label="Forget this memory">
-                    <p>Forget “{entry.topic || "this memory"}”? New sessions stop starting with it. Sessions already running keep it until their next turn.</p>
+                    <p>Forget “{entry.topic || "this memory"}”? New sessions stop starting with it. Sessions already running keep it until they sleep.</p>
                     {!mine && <span className="micro scope">{scopeLine}</span>}
                     {!mine && reachLine && <span className="micro reach">{reachLine}</span>}
                     <button

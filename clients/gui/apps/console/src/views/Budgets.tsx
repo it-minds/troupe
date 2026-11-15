@@ -300,6 +300,7 @@ function OwnCap({ teams, onApplied }: { teams: AdminTeam[]; onApplied: () => voi
           }
           verb="Apply"
           onCancel={() => setPreviewing(false)}
+          cancel="Back to editing"
           onConfirm={async () => {
             await apply("person.budget", person.subject, () => admin.personBudget(person.subject, asked || null), `${person.name}'s cap is ${asked ? money(asked) : "taken away"}.`, (a) => (a as { changes?: Record<string, unknown> }).changes);
             setPreviewing(false);

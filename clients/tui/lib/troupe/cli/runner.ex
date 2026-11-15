@@ -205,6 +205,16 @@ defmodule Troupe.CLI.Runner do
             true -> :update
           end
 
+        # A person at a terminal is told what the wait is, on the error stream: what
+        # the command prints stays what a script reads.
+        if action != :rollback and Troupe.CLI.Terminal.stdout?(),
+          do:
+            IO.puts(
+              :stderr,
+              Troupe.UI.Lines.first(:checking_for_an_update, System.os_time(:millisecond)) <>
+                " — checking for an update…"
+            )
+
         Troupe.Update.run(action,
           version: args.update_version,
           pick: args.update_pick,

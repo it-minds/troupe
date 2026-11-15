@@ -40,6 +40,7 @@ defmodule Troupe.UI.Setup do
   alias ExRatatui.Layout.Rect
   alias ExRatatui.Text.{Line, Span}
   alias ExRatatui.Widgets.{Block, Paragraph}
+  alias Troupe.UI.Lines
   alias Troupe.UI.TUI.{Input, Model, Theme}
 
   @steps ~w(where provider key models workspace daemon finish)
@@ -359,7 +360,9 @@ defmodule Troupe.UI.Setup do
     state = %{state | held: Map.put(state.held, "finish", answer)}
     sends = to_send(state)
     call = state.call
-    {:noreply, ask(state, "saving and starting…", :confirm, fn -> send_all(call, sends) end)}
+
+    {:noreply,
+     ask(state, busy_words("saving and starting…"), :confirm, fn -> send_all(call, sends) end)}
   end
 
   defp model_choice(state) do
@@ -462,8 +465,12 @@ defmodule Troupe.UI.Setup do
       send(me, {:standing, __MODULE__, ref, result, otherwise})
     end)
 
-    %{state | busy: "asking the daemon where the first run stands…", checking: ref}
+    %{state | busy: busy_words("asking the daemon where the first run stands…"), checking: ref}
   end
+
+  # A wait of the first run says it with a line from the shared set before the facts.
+  defp busy_words(text),
+    do: Lines.first(:first_run, System.os_time(:millisecond)) <> " — " <> text
 
   defp late_words(state) do
     seconds = div(state.patience_ms + 999, 1000)

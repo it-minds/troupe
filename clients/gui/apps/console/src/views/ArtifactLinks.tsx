@@ -160,34 +160,36 @@ function Link({ share: s, busy, onRevoke, onRevokePerson }: { share: ArtifactSha
       {s.used_by.length === 0 ? (
         <p className="note">{s.public ? "A public link signs nobody in, so it records nobody." : "Nobody has been signed in through it yet."}</p>
       ) : (
-        <table>
-          <thead>
-            <tr>
-              <th>Who</th>
-              <th>First</th>
-              <th>Last</th>
-              <th />
-            </tr>
-          </thead>
-          <tbody>
-            {s.used_by.map((u) => (
-              <tr key={u.person.subject}>
-                <td>{u.person.display_name ?? u.person.subject}</td>
-                <td>{when(u.first_used_at)}</td>
-                <td>{when(u.last_used_at)}</td>
-                <td>
-                  {u.revoked_at ? (
-                    <span className="muted">revoked</span>
-                  ) : (
-                    <button type="button" disabled={busy} onClick={() => onRevokePerson(u.person.subject)}>
-                      Revoke {u.person.display_name ?? u.person.subject}
-                    </button>
-                  )}
-                </td>
+        <div className="scroll">
+          <table>
+            <thead>
+              <tr>
+                <th>Who</th>
+                <th>First</th>
+                <th>Last</th>
+                <th />
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {s.used_by.map((u) => (
+                <tr key={u.person.subject}>
+                  <td>{u.person.display_name ?? u.person.subject}</td>
+                  <td>{when(u.first_used_at)}</td>
+                  <td>{when(u.last_used_at)}</td>
+                  <td>
+                    {u.revoked_at ? (
+                      <span className="muted">revoked</span>
+                    ) : (
+                      <button type="button" disabled={busy} onClick={() => onRevokePerson(u.person.subject)}>
+                        Revoke {u.person.display_name ?? u.person.subject}
+                      </button>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
     </li>
   );

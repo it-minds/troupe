@@ -19,6 +19,7 @@ defmodule Troupe.FramesTest do
   alias Troupe.Client.Message
   alias Troupe.Event
   alias Troupe.UI.Headless.Printer
+  alias Troupe.UI.Lines
   alias Troupe.UI.TUI.{Model, Theme, View}
 
   @answer """
@@ -418,7 +419,7 @@ defmodule Troupe.FramesTest do
     pink = Theme.color(:needs_you, %{depth: :truecolor, mode: :dark})
     assert Enum.any?(approval, &(&1.fg == pink))
 
-    for words <- Map.values(Model.curtain_set()) |> List.flatten() do
+    for words <- curtain_words() do
       refute screen =~ words
     end
   end
@@ -577,6 +578,17 @@ defmodule Troupe.FramesTest do
 
   ## The curtain line
 
+  # Every line the curtain says over a turn, which no other surface may carry.
+  defp curtain_words do
+    Enum.flat_map(
+      [:starting, :thinking, :reading, :acting, :compacting, :long_turn],
+      &Lines.all/1
+    )
+  end
+
+  # The n-th line taken over this window's turn, as the pane draws it.
+  defp said(w, kind, n), do: Lines.pick(kind, Model.curtain_seed(w), n)
+
   defp working(extra) do
     fold(opened() ++ [event(:agent_state, %{to: :thinking}, 0, transient?: true)] ++ extra)
   end
@@ -585,7 +597,7 @@ defmodule Troupe.FramesTest do
     w = Model.session_window(working([]))
 
     assert Model.curtain_line(w, "root", 0, 12_000) ==
-             "◐ the actors are powdering their nose — thinking (00:12)"
+             "◐ #{said(w, :thinking, 1)} — thinking (00:12)"
 
     acting =
       working([
@@ -594,14 +606,16 @@ defmodule Troupe.FramesTest do
         event(:tool_started, %{call_id: "c2", name: "list_files", input: %{"path" => "src"}}, 1_000)
       ])
 
-    assert Model.curtain_line(Model.session_window(acting), "root", 0, 7_000) ==
-             "◐ reading the script — running 2 tools: read_file a, list_files src (00:06)"
+    aw = Model.session_window(acting)
 
-    # The second time it thinks in the turn reads differently, and the fourth has no words
-    # left: the facts alone.
+    assert Model.curtain_line(aw, "root", 0, 7_000) ==
+             "◐ #{said(aw, :reading, 1)} — running 2 tools: read_file a, list_files src (00:06)"
+
+    # The second time it thinks in the turn reads differently, and one past the end of the
+    # list has no words left: the facts alone.
     again =
       working(
-        Enum.flat_map(1..3, fn n ->
+        Enum.flat_map(1..length(Lines.all(:thinking)), fn n ->
           [
             event(:agent_state, %{to: :acting}, n * 1_000, transient?: true),
             event(:agent_state, %{to: :thinking}, n * 1_000 + 500, transient?: true)
@@ -610,7 +624,7 @@ defmodule Troupe.FramesTest do
       )
 
     w = Model.session_window(again)
-    assert w.curtain.thinking == 4
+    assert w.curtain.thinking == length(Lines.all(:thinking)) + 1
     assert Model.curtain_line(w, "root", 0, 4_000) == "◐ thinking (00:00)"
 
     second =
@@ -621,7 +635,10 @@ defmodule Troupe.FramesTest do
         ])
       )
 
-    assert Model.curtain_line(second, "root", 0, 2_000) =~ "running lines in the wings — thinking"
+    assert Model.curtain_line(second, "root", 0, 2_000) ==
+             "◐ #{said(second, :thinking, 2)} — thinking (00:00)"
+
+    refute said(second, :thinking, 1) == said(second, :thinking, 2)
 
     # A new turn starts the set again.
     fresh =
@@ -639,7 +656,26 @@ defmodule Troupe.FramesTest do
         )
       )
 
-    assert Model.curtain_line(fresh, "root", 0, 5) =~ "the actors are powdering their nose"
+    assert Model.curtain_line(fresh, "root", 0, 5) =~ said(fresh, :thinking, 1)
+    # It is the second turn, so its order is the second turn's and not the first's.
+    assert fresh.curtain.turn == 2
+    assert Model.curtain_seed(fresh) != Model.curtain_seed(Model.session_window(working([])))
+  end
+
+  test "past five minutes a turn says it is a long one, the same line to its end, never over a person" do
+    w = Model.session_window(working([event(:llm_delta, %{text: "x"}, 1, transient?: true)]))
+    long = Lines.first(:long_turn, Model.curtain_seed(w))
+
+    assert Model.curtain_line(w, "root", 0, 299_000) =~ said(w, :thinking, 1)
+    assert Model.curtain_line(w, "root", 0, 300_000) == "◐ #{long} — thinking (05:00)"
+    assert Model.curtain_line(w, "root", 0, 900_000) == "◐ #{long} — thinking (15:00)"
+
+    waiting =
+      Model.session_window(
+        working([event(:question_asked, %{call_id: "q1", question: "which file?", options: []}, 1)])
+      )
+
+    assert Model.curtain_line(waiting, "root", 0, 900_000) == "waiting for you"
   end
 
   test "no flourish on what waits on a person, a model error, or a subagent's own pane" do
@@ -669,10 +705,11 @@ defmodule Troupe.FramesTest do
     cells = draw(model, now: 12_000)
     screen = text(cells)
 
-    assert screen =~ "◐ the actors are powdering their nose — thinking (00:12)"
+    flourish = said(Model.session_window(model), :thinking, 1)
+    assert screen =~ "◐ #{flourish} — thinking (00:12)"
 
     tile = Model.tile_lines(Model.session_window(model), 0, 12_000, false)
-    refute Enum.any?(tile, &(Model.line_text(&1) =~ "powdering"))
+    refute Enum.any?(tile, &(Model.line_text(&1) =~ flourish))
     assert Enum.any?(tile, &(Model.line_text(&1) =~ "thinking (00:12)"))
   end
 
@@ -699,7 +736,7 @@ defmodule Troupe.FramesTest do
     {_, out} = StringIO.contents(io)
     assert out =~ "list_files"
 
-    for words <- Map.values(Model.curtain_set()) |> List.flatten() do
+    for words <- curtain_words() do
       refute out =~ words
     end
   end

@@ -27,6 +27,11 @@ defmodule Troupe.RemoteLoginTest do
       assert Enum.any?(lines, &String.contains?(&1, "signed in"))
       refute Enum.any?(lines, &String.contains?(&1, "could not restrict"))
 
+      # the wait says what it waits on after a line from the shared set, the facts last
+      code = FakeRemote.user_code(remote)
+
+      assert "#{Troupe.UI.Lines.first(:signing_in, code)} — waiting for you to finish in the browser…" in lines
+
       # the refresh token is on disk, and the file is the user's alone
       assert {:ok, entry} = Credentials.fetch(Discovery.base(url))
       assert entry.refresh_token == "refresh-token"

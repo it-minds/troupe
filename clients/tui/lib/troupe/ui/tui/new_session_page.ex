@@ -12,44 +12,48 @@ defmodule Troupe.UI.TUI.NewSessionPage do
   is a token, not a path to complete, and `/local` is a token, since the box is not the
   command line. CALLED is the first line until it is edited (Tab again).
 
-  Enter starts, as Enter sends on the command line; Shift, Alt or Ctrl on Enter is a new
-  line, as it is there. Ctrl+Enter is not told from Enter by most terminals, which is why
-  the screen does not depend on it. On an empty box a digit starts like last time: that
-  recent session's where, folder, profile and agent, the box left alone.
+  Enter starts, as Enter sends on the command line; Ctrl-J is a new line, as it is there,
+  and so is Shift, Alt or Ctrl on Enter where the terminal tells them from Enter. Without
+  a keyboard protocol most do not (Windows Terminal sends Shift+Enter as Enter and keeps
+  Alt+Enter for full screen), so the footer names Ctrl-J alone. A typed character always
+  types: "start like last time" is the recents row, which Tab reaches after CALLED, where
+  ↑↓ and Enter or `1`-`3` set the chips to that session's where, folder, profile and agent,
+  the box left alone, and the line under the sentence says so.
+
+  The page is taller than a small terminal: it is folded to the width and drawn from the
+  row that keeps what has the focus on screen (the box's cursor, the picker's cursor).
 
   The page is a fold over keypresses, as HQ is; the server owns the process, starts the
-  session in a task and draws the casting steps from what the task tells it.
+  session in a task and draws the casting steps from what the task tells it. Esc on the
+  casting steps goes back to the form and the start goes on: the form says it is starting,
+  and Enter there starts nothing a second time.
   """
 
   alias ExRatatui.Layout.Rect
   alias ExRatatui.Text.{Line, Span}
   alias ExRatatui.Widgets.{Block, Paragraph}
   alias Troupe.Client
-  alias Troupe.UI.NewSession
-  alias Troupe.UI.TUI.{Input, Theme}
-
-  @quips [
-    "The stage is set. Give them the plot and step into the wings.",
-    "No auditions today. Everyone already knows their lines.",
-    "Break a leg. Or a build. Preferably not production.",
-    "Every good run starts with a cue line.",
-    "The house lights are down. What's the scene?"
-  ]
+  alias Troupe.UI.{Lines, NewSession}
+  alias Troupe.UI.TUI.{Input, Model, Theme}
 
   @typedoc "The screen's state: a plain map, as HQ's is."
   @type t :: map()
 
   @doc """
   The screen, its chips pre-set by `opts`: `:where` (`:local` or `:platform`), `:profile`,
-  `:agent`, `:private`, `:team`; `:workspace` is the folder a session here starts in, and
-  `:origin` the plane, where there is one.
+  `:agent` (one the person picked), `:private`, `:team`; `:workspace` is the folder a
+  session here starts in, and `:origin` the plane, where there is one, or else `:plane_why`
+  why there is none. `:local_agent` is the agent a session on this computer starts as when
+  none is picked, the one on screen: it is this computer's, and never sent to the plane,
+  whose profile has a default of its own.
   """
   @spec open(keyword()) :: t()
   def open(opts) do
     origin = Keyword.get(opts, :origin)
     workspace = Keyword.fetch!(opts, :workspace)
-    {profiles, sessions} = plane_rows(origin)
+    {profiles, sessions, plane_error} = plane_rows(origin)
     agents = local_agents(workspace)
+    seed = Keyword.get_lazy(opts, :seed, fn -> System.os_time(:millisecond) end)
 
     %{
       origin: origin,
@@ -62,6 +66,12 @@ defmodule Troupe.UI.TUI.NewSessionPage do
       where: Keyword.get(opts, :where),
       profile: Keyword.get(opts, :profile),
       agent: Keyword.get(opts, :agent),
+      local_agent: Keyword.get(opts, :local_agent),
+      plane_why: Keyword.get(opts, :plane_why),
+      plane_error: plane_error,
+      # A sentence a key just earned, such as why the agent chip has nothing to pick; the
+      # next key takes it away.
+      said: nil,
       private: Keyword.get(opts, :private, false),
       # The team HQ had selected, which the plane charges and opens the session to.
       team: Keyword.get(opts, :team),
@@ -71,30 +81,35 @@ defmodule Troupe.UI.TUI.NewSessionPage do
       local_agents: agents,
       recents: recents(sessions, workspace),
       last_used: last_used(sessions),
-      daemon_up: Keyword.get_lazy(opts, :daemon_up, &Troupe.Client.Daemon.Link.up?/0),
+      daemon_up: Keyword.get_lazy(opts, :daemon_up, &Client.daemon_up?/0),
       ceiling: %{},
-      quip: Enum.random(@quips),
-      casting: nil
+      seed: seed,
+      quip: Lines.first(:start_screen, seed),
+      casting: nil,
+      # The start left running when Esc went back to the form: its casting, until the
+      # server says it finished.
+      pending: Keyword.get(opts, :pending),
+      # The recent the chips were last set like, said under the sentence until a chip is
+      # picked by hand; and the recent the recents row has selected.
+      liked: nil,
+      recent: 0
     }
   end
 
-  defp plane_rows(nil), do: {[], []}
+  # The plane's profiles and sessions, and the error the profile listing answered: an
+  # expired sign-in or a plane that is down is said as itself, not as having no profile.
+  # The sessions only give the recents and the last used, so without them nothing on the
+  # page is untrue; a plane that refuses the one refuses the other alike.
+  defp plane_rows(nil), do: {[], [], nil}
 
   defp plane_rows(origin) do
-    profiles =
-      case Client.profile_rows(origin) do
-        {:ok, rows} -> rows
-        {:error, _} -> []
-      end
-
-    sessions =
-      case Client.plane_session_rows(origin) do
-        {:ok, rows} -> rows
-        {:error, _} -> []
-      end
-
-    {profiles, sessions}
+    {profiles, error} = rows_or_error(Client.profile_rows(origin))
+    {sessions, _error} = rows_or_error(Client.plane_session_rows(origin))
+    {profiles, sessions, error}
   end
+
+  defp rows_or_error({:ok, rows}), do: {rows, nil}
+  defp rows_or_error({:error, reason}), do: {[], reason}
 
   defp local_agents(workspace) do
     case Client.profiles({:local, workspace}) do
@@ -181,17 +196,51 @@ defmodule Troupe.UI.TUI.NewSessionPage do
       where == :platform and profile != nil and
         (room.at_ceiling or Map.has_key?(page.ceiling, name))
 
-    default_agent =
-      if where == :local, do: List.first(page.local_agents, "build"), else: default_of(profile)
+    offered = agents_of(profile)
 
-    named_agent = tokens[:agent] || page.agent
+    default_agent =
+      if where == :local,
+        do: page.local_agent || List.first(page.local_agents, "build"),
+        else: default_of(profile)
+
+    # On the platform an agent counts as picked only where the profile offers it: one
+    # picked here, or a recent's, does not follow the session onto a profile without it.
+    named_agent =
+      tokens[:agent] ||
+        if(where == :local or page.agent in offered, do: page.agent)
+
+    # The chip's word: on the platform an agent nobody picked is the profile's default.
+    agent_label =
+      cond do
+        named_agent -> named_agent
+        where == :platform and default_agent != nil -> default_agent <> " (default)"
+        true -> default_agent || "its default"
+      end
+
     cleaned = NewSession.clean(text, names)
     local_down = where == :local and not page.daemon_up
+    no_plane = page.origin == nil and page.where == :platform
+    not_allowed = where == :platform and profile == nil and name != nil and page.profiles != []
 
     why =
       cond do
+        page.said ->
+          {:warn, page.said}
+
+        page.pending ->
+          {:plain, starting(page.pending)}
+
         local_down ->
           {:warn, NewSession.local_down()}
+
+        no_plane ->
+          {:warn, NewSession.no_plane(page.plane_why, page.profile)}
+
+        where == :platform and page.plane_error != nil ->
+          {:warn, NewSession.plane_error(page.plane_error)}
+
+        not_allowed ->
+          {:warn, NewSession.not_allowed(name)}
 
         at_ceiling ->
           {:warn, page.ceiling[name] || NewSession.ceiling(name, room.max_sessions || 0)}
@@ -201,6 +250,11 @@ defmodule Troupe.UI.TUI.NewSessionPage do
 
         sentence = NewSession.tokens_sentence(tokens) ->
           {:plain, sentence}
+
+        # What the chips hold now, which is not always what the recent had.
+        page.liked ->
+          on = if where == :local, do: page.folder, else: name
+          {:plain, "Like #{page.liked}: #{on}, #{agent_label}."}
 
         where == :platform and page.profile == nil ->
           {:plain, auto_why}
@@ -218,9 +272,12 @@ defmodule Troupe.UI.TUI.NewSessionPage do
       full: full,
       at_ceiling: at_ceiling,
       agent: named_agent || default_agent || "its default",
+      agent_label: agent_label,
       named_agent: named_agent,
-      # What the create names: on the platform the profile's default too, where it has one.
-      sent_agent: if(where == :platform, do: named_agent || default_agent, else: named_agent),
+      # What the create names. On the platform only an agent the person picked: with none
+      # the plane fills the profile's own default, by the rule the chip shows. On this
+      # computer the one on screen, as `/new` always started.
+      sent_agent: if(where == :platform, do: named_agent, else: named_agent || page.local_agent),
       cleaned: cleaned,
       title: title_of(page, cleaned),
       local_down: local_down,
@@ -244,9 +301,16 @@ defmodule Troupe.UI.TUI.NewSessionPage do
     do:
       row["agents"] |> List.wrap() |> Enum.map(&if(is_map(&1), do: &1["name"], else: to_string(&1)))
 
-  # One the profile offers, which the create sends: a pod left to choose takes its own
-  # default. Where the profile offers none the create names none and the plane says why.
+  # The profile's default, which the chip shows and the plane fills when the create names
+  # none, by the same rule. Where the profile offers none the plane says why.
   defp default_of(row), do: row |> agents_of() |> NewSession.default_agent()
+
+  # The start Esc left running, as the form says it.
+  defp starting(%{} = c) do
+    on = if c.where == :local, do: "this computer", else: c.profile
+    wait = if c.waiting, do: " Waiting for a free place.", else: ""
+    "Starting #{c.title} on #{on}…" <> wait
+  end
 
   defp title_of(%{title: {title, _pos}}, _cleaned), do: title
   defp title_of(_page, cleaned), do: NewSession.title(cleaned)
@@ -260,47 +324,69 @@ defmodule Troupe.UI.TUI.NewSessionPage do
   """
   @spec key(t(), map()) ::
           {:ok, t()} | :close | {:start, t(), Client.origin(), map()} | {:choose_agent, t()}
-  def key(%{casting: %{failed: failed}} = page, %{code: code})
-      when is_binary(failed) and code in ["esc", "enter"],
-      do: {:ok, %{page | casting: nil}}
+  def key(page, key), do: step(%{page | said: nil}, key)
 
-  def key(%{casting: %{}} = page, %{code: "esc"}), do: {:ok, %{page | casting: nil}}
-  def key(%{casting: %{}} = page, _key), do: {:ok, page}
+  defp step(%{casting: %{failed: failed}} = page, %{code: code})
+       when is_binary(failed) and code in ["esc", "enter"],
+       do: {:ok, %{page | casting: nil}}
 
-  def key(%{open: open} = page, %{code: "esc"}) when open != nil, do: {:ok, %{page | open: nil}}
-  def key(_page, %{code: "esc"}), do: :close
+  # Back to the form; the start goes on, and the form says so until it finishes.
+  defp step(%{casting: %{} = c} = page, %{code: "esc"}),
+    do: {:ok, %{page | casting: nil, pending: c}}
 
-  def key(%{open: open} = page, %{code: code}) when open != nil and code in ["up", "k"],
+  defp step(%{casting: %{}} = page, _key), do: {:ok, page}
+
+  defp step(%{open: open} = page, %{code: "esc"}) when open != nil, do: {:ok, %{page | open: nil}}
+  defp step(_page, %{code: "esc"}), do: :close
+
+  defp step(%{open: open} = page, %{code: code}) when open != nil and code in ["up", "k"],
     do: {:ok, %{page | cursor: max(page.cursor - 1, 0)}}
 
-  def key(%{open: open} = page, %{code: code}) when open != nil and code in ["down", "j"],
+  defp step(%{open: open} = page, %{code: code}) when open != nil and code in ["down", "j"],
     do: {:ok, %{page | cursor: min(page.cursor + 1, max(length(options(page)) - 1, 0))}}
 
-  def key(%{open: open} = page, %{code: "enter"}) when open != nil, do: pick(page)
+  defp step(%{open: open} = page, %{code: "enter"}) when open != nil, do: pick(page)
 
-  def key(page, %{code: "tab"}), do: {:ok, next_field(page, 1)}
-  def key(page, %{code: "backtab"}), do: {:ok, next_field(page, -1)}
+  defp step(page, %{code: "tab"}), do: {:ok, next_field(page, 1)}
+  defp step(page, %{code: "backtab"}), do: {:ok, next_field(page, -1)}
 
-  def key(%{field: :chips} = page, %{code: code}) when code in ["left", "h"],
+  defp step(%{field: :chips} = page, %{code: code}) when code in ["left", "h"],
     do: {:ok, %{page | chip: max(page.chip - 1, 0)}}
 
-  def key(%{field: :chips} = page, %{code: code}) when code in ["right", "l"],
+  defp step(%{field: :chips} = page, %{code: code}) when code in ["right", "l"],
     do: {:ok, %{page | chip: min(page.chip + 1, 2)}}
 
-  def key(%{field: :chips} = page, %{code: "enter"}), do: open_chip(page)
+  defp step(%{field: :chips} = page, %{code: "enter"}), do: open_chip(page)
 
-  def key(%{field: :chips} = page, %{code: <<d>>}) when d in ?1..?3, do: {:ok, like(page, d - ?0)}
+  # The recents row: a digit or Enter sets the chips like that session, and the focus goes
+  # back to the box to type.
+  defp step(%{field: :recents} = page, %{code: code}) when code in ["up", "k"],
+    do: {:ok, %{page | recent: max(page.recent - 1, 0)}}
 
-  def key(%{field: :message, text: {"", _}} = page, %{code: <<d>>, modifiers: []}) when d in ?1..?3,
-    do: {:ok, like(page, d - ?0)}
+  defp step(%{field: :recents} = page, %{code: code}) when code in ["down", "j"],
+    do: {:ok, %{page | recent: min(page.recent + 1, max(length(page.recents) - 1, 0))}}
 
-  def key(%{field: field} = page, %{code: "enter", modifiers: mods})
-      when field != :chips and mods != [],
-      do: {:ok, edit(page, field, &Input.insert(&1, "\n"))}
+  defp step(%{field: :recents} = page, %{code: "enter"}),
+    do: {:ok, %{like(page, page.recent + 1) | field: :message}}
 
-  def key(%{field: field} = page, %{code: "enter"}) when field != :chips, do: start(page)
+  defp step(%{field: :recents} = page, %{code: <<d>>}) when d in ?1..?3 do
+    if d - ?0 <= length(page.recents),
+      do: {:ok, %{like(page, d - ?0) | field: :message}},
+      else: {:ok, page}
+  end
 
-  def key(%{field: field} = page, %{code: code, modifiers: mods} = key) when field != :chips do
+  defp step(%{field: :recents} = page, _key), do: {:ok, page}
+
+  defp step(%{field: field} = page, %{code: "enter", modifiers: mods})
+       when field != :chips and mods != [],
+       do: {:ok, edit(page, field, &Input.insert(&1, "\n"))}
+
+  defp step(%{field: :message} = page, %{code: "j", modifiers: ["ctrl"]}),
+    do: {:ok, edit(page, :message, &Input.insert(&1, "\n"))}
+
+  defp step(%{field: field} = page, %{code: "enter"}) when field != :chips, do: start(page)
+
+  defp step(%{field: field} = page, %{code: code, modifiers: mods} = key) when field != :chips do
     if String.length(code) == 1 and mods in [[], ["shift"]] do
       {:ok, edit(page, field, &Input.insert(&1, code))}
     else
@@ -311,11 +397,11 @@ defmodule Troupe.UI.TUI.NewSessionPage do
     end
   end
 
-  def key(page, _key), do: {:ok, page}
+  defp step(page, _key), do: {:ok, page}
 
   @doc "Pasted text, into the box being typed in."
   @spec paste(t(), String.t()) :: t()
-  def paste(%{field: :chips} = page, _text), do: page
+  def paste(%{field: field} = page, _text) when field in [:chips, :recents], do: page
   def paste(page, text), do: edit(page, page.field, &Input.insert(&1, text))
 
   defp input_of(page, :message), do: page.text
@@ -329,11 +415,15 @@ defmodule Troupe.UI.TUI.NewSessionPage do
     %{page | title: fun.(current)}
   end
 
-  @fields [:message, :chips, :title]
+  # The recents row is a stop only where there are recents.
+  defp fields(%{recents: []}), do: [:message, :chips, :title]
+  defp fields(_page), do: [:message, :chips, :title, :recents]
 
   defp next_field(page, step) do
-    i = Enum.find_index(@fields, &(&1 == page.field))
-    %{page | field: Enum.at(@fields, rem(i + step + 3, 3)), open: nil}
+    fields = fields(page)
+    n = length(fields)
+    i = Enum.find_index(fields, &(&1 == page.field))
+    %{page | field: Enum.at(fields, rem(i + step + n, n)), open: nil}
   end
 
   defp chips(page) do
@@ -342,16 +432,37 @@ defmodule Troupe.UI.TUI.NewSessionPage do
       else: [:where, :profile, :agent]
   end
 
+  # The agent chip with nothing to pick says why instead of opening an empty picker.
   defp open_chip(page) do
     case Enum.at(chips(page), page.chip) do
       :agent ->
-        if resolved(page).where == :local and page.daemon_up,
-          do: {:choose_agent, page},
-          else: {:ok, %{page | open: :agent, cursor: 0}}
+        r = resolved(page)
+
+        cond do
+          r.where == :local and page.daemon_up ->
+            {:choose_agent, page}
+
+          options(%{page | open: :agent}) == [] ->
+            {:ok, %{page | said: NewSession.no_agents(r.where, r.profile_name, page.daemon_up)}}
+
+          true ->
+            {:ok, %{page | open: :agent, cursor: 0}}
+        end
 
       kind ->
         {:ok, %{page | open: kind, cursor: 0}}
     end
+  end
+
+  @doc """
+  The daemon link came up or went down: "On this computer" switches on or off by itself,
+  and coming up, the agents this computer has are read again (`agents`, or `nil` to keep
+  them).
+  """
+  @spec daemon(t(), boolean(), [String.t()] | nil) :: t()
+  def daemon(page, up?, agents \\ nil) do
+    page = %{page | daemon_up: up?}
+    if up? and is_list(agents), do: %{page | local_agents: agents}, else: page
   end
 
   @doc "The options the open picker lists: `{value, label, detail, enabled}`."
@@ -368,7 +479,7 @@ defmodule Troupe.UI.TUI.NewSessionPage do
     here =
       if page.daemon_up,
         do: {:local, "On this computer", "your own checkout and files", true},
-        else: {:local, "On this computer", "APP NOT RUNNING: " <> NewSession.local_down(), false}
+        else: {:local, "On this computer", "DAEMON NOT RUNNING: " <> NewSession.local_down(), false}
 
     platform ++ [here]
   end
@@ -392,7 +503,13 @@ defmodule Troupe.UI.TUI.NewSessionPage do
   end
 
   def options(%{open: :agent} = page) do
-    page |> resolved() |> Map.fetch!(:profile) |> agents_of() |> Enum.map(&{&1, &1, "", true})
+    # This computer's agents are picked in the agent picker, never from a profile's list.
+    r = resolved(page)
+    profile = if r.where == :platform, do: r.profile
+    default = default_of(profile)
+
+    for name <- agents_of(profile),
+        do: {name, name, if(name == default, do: "its default", else: ""), true}
   end
 
   def options(_page), do: []
@@ -412,7 +529,7 @@ defmodule Troupe.UI.TUI.NewSessionPage do
             :agent -> {:agent, %{page | agent: value}}
           end
 
-        {:ok, %{strip(page, kind) | open: nil}}
+        {:ok, %{strip(page, kind) | open: nil, liked: nil}}
 
       nil ->
         {:ok, %{page | open: nil}}
@@ -421,7 +538,7 @@ defmodule Troupe.UI.TUI.NewSessionPage do
 
   @doc "The agent chosen in the agent picker, as a chip pick."
   @spec chose_agent(t(), String.t()) :: t()
-  def chose_agent(page, name), do: strip(%{page | agent: name, open: nil}, :agent)
+  def chose_agent(page, name), do: strip(%{page | agent: name, open: nil, liked: nil}, :agent)
 
   defp strip(page, nil), do: page
 
@@ -445,54 +562,64 @@ defmodule Troupe.UI.TUI.NewSessionPage do
 
         page = if recent.folder, do: %{page | folder: recent.folder}, else: page
         page = if recent.profile, do: %{page | profile: recent.profile}, else: page
-        if recent.agent, do: %{page | agent: recent.agent}, else: page
+        page = if recent.agent, do: %{page | agent: recent.agent}, else: page
+        %{page | liked: recent.title}
     end
   end
 
   defp start(page) do
     r = resolved(page)
 
-    if r.blocked do
-      {:ok, page}
-    else
-      casting = %{
-        title: if(r.title == "", do: "Untitled session", else: r.title),
-        where: r.where,
-        folder: page.folder,
-        profile: r.profile_name,
-        agent: r.agent,
-        named_agent: r.named_agent,
-        has_text: r.cleaned != "",
-        queued: r.full,
-        done: 0,
-        waiting: false,
-        failed: nil
-      }
+    cond do
+      page.pending ->
+        {:ok, %{page | said: "Already starting; wait for it."}}
 
-      page = %{page | casting: casting, open: nil}
-      title = if r.title == "", do: nil, else: r.title
+      r.blocked ->
+        {:ok, page}
 
-      case r.where do
-        :local ->
-          {:start, page, {:local, page.folder},
-           %{
-             profile: r.named_agent,
-             prompt: r.cleaned,
-             title: title,
-             worktree: "never",
-             private: page.private
-           }}
+      true ->
+        cast(page, r)
+    end
+  end
 
-        :platform ->
-          {:start, page, page.origin,
-           %{
-             profile: r.profile_name,
-             agent: r.sent_agent,
-             prompt: r.cleaned,
-             title: title,
-             team: page.team
-           }}
-      end
+  defp cast(page, r) do
+    casting = %{
+      title: if(r.title == "", do: "Untitled session", else: r.title),
+      where: r.where,
+      folder: page.folder,
+      profile: r.profile_name,
+      agent: r.agent,
+      named_agent: r.sent_agent,
+      has_text: r.cleaned != "",
+      queued: r.full,
+      done: 0,
+      waiting: false,
+      failed: nil
+    }
+
+    page = %{page | casting: casting, open: nil}
+    title = if r.title == "", do: nil, else: r.title
+
+    case r.where do
+      :local ->
+        {:start, page, {:local, page.folder},
+         %{
+           profile: r.sent_agent,
+           prompt: r.cleaned,
+           title: title,
+           worktree: "never",
+           private: page.private
+         }}
+
+      :platform ->
+        {:start, page, page.origin,
+         %{
+           profile: r.profile_name,
+           agent: r.sent_agent,
+           prompt: r.cleaned,
+           title: title,
+           team: page.team
+         }}
     end
   end
 
@@ -503,7 +630,16 @@ defmodule Troupe.UI.TUI.NewSessionPage do
   def waiting(%{casting: %{} = c} = page),
     do: %{page | casting: %{c | done: 1, queued: true, waiting: true}}
 
+  def waiting(%{pending: %{} = c} = page),
+    do: %{page | pending: %{c | done: 1, queued: true, waiting: true}}
+
   def waiting(page), do: page
+
+  @doc """
+  The start Esc left running finished, or failed: the form stops saying it is starting.
+  """
+  @spec settled(t()) :: t()
+  def settled(page), do: %{page | pending: nil}
 
   @doc "The create failed: why, in one line, and the form is offered back."
   @spec failed(t(), String.t()) :: t()
@@ -550,18 +686,94 @@ defmodule Troupe.UI.TUI.NewSessionPage do
   def footer(%{casting: %{failed: f}}) when is_binary(f),
     do: " casting — Enter or Esc back to the form "
 
-  def footer(%{casting: %{}}),
-    do: " casting — Esc stops waiting; the session starts by itself when a place frees "
+  # The place frees by itself only where the plane answered that the start waits for one;
+  # Esc goes back to the form, and the start goes on either way.
+  def footer(%{casting: %{waiting: true}} = page),
+    do:
+      " #{Lines.first(:waiting_for_a_place, page.seed)} — Esc goes back; it starts when a place frees "
+
+  def footer(%{casting: %{}} = page),
+    do: " #{Lines.first(:casting, page.seed)} — Esc goes back to the form; the start goes on "
 
   def footer(%{open: open}) when open != nil, do: " ↑↓ move · Enter picks · Esc closes "
 
+  def footer(%{field: :recents}),
+    do: " ↑↓ move · Enter or 1-3 sets the chips like it · Tab on · Esc closes "
+
+  def footer(%{recents: []}),
+    do: " Enter starts · Tab the settings, then ←→ and Enter · Ctrl-J new line · Esc closes "
+
   def footer(_page),
     do:
-      " Enter starts · Shift/Alt+Enter new line · Tab the settings, then ←→ and Enter · 1-3 like last time · Esc closes "
+      " Enter starts · Tab the settings, then ←→ and Enter · Ctrl-J new line · Tab to the recents to start like one · Esc closes "
 
   @spec render(t(), Rect.t(), map()) :: [{term(), Rect.t()}]
   def render(page, rect, _state) do
-    [{%Paragraph{text: lines(page, rect.width - 2), wrap: true, block: block(page)}, rect}]
+    rows = rows(page, max(rect.width - 2, 1), max(rect.height - 2, 1))
+    [{%Paragraph{text: rows, block: block(page)}, rect}]
+  end
+
+  @doc """
+  The rows drawn inside a `width` × `height` page: its lines folded to the width, from the
+  row that keeps what has the focus on screen.
+  """
+  @spec rows(t(), pos_integer(), pos_integer()) :: [Line.t()]
+  def rows(page, width, height) do
+    {lines, {keep, until}} = focused_lines(page)
+    folded = Enum.map(lines, &fold(&1, width))
+    starts = folded |> Enum.scan(0, &(length(&1) + &2)) |> then(&[0 | &1])
+    keep_row = Enum.at(starts, keep)
+    until_row = Enum.at(starts, until + 1) - 1
+    top = min(max(until_row - height + 1, 0), keep_row)
+    folded |> Enum.concat() |> Enum.drop(top) |> Enum.take(height)
+  end
+
+  @doc "The rows `rows/3` draws, as plain text."
+  @spec plain_rows(t(), pos_integer(), pos_integer()) :: [String.t()]
+  def plain_rows(page, width, height) do
+    page |> rows(width, height) |> Enum.map(&line_text/1)
+  end
+
+  defp line_text(%Line{spans: spans}), do: Enum.map_join(spans, & &1.content)
+
+  # A line folded at word ends to `width` cells, each span keeping its style; a word wider
+  # than the page is cut.
+  defp fold(%Line{spans: spans} = line, width) do
+    if Model.cell_width(line_text(line)) <= width do
+      [line]
+    else
+      pieces =
+        for span <- spans,
+            word <- Regex.split(~r/(?<= )/u, span.content, trim: true),
+            chunk <- chop(word, width),
+            do: {%{span | content: chunk}, Model.cell_width(chunk)}
+
+      {rows, row, _used} =
+        Enum.reduce(pieces, {[], [], 0}, fn {span, w}, {rows, row, used} ->
+          if used + w > width and row != [],
+            do: {[Enum.reverse(row) | rows], [span], w},
+            else: {rows, [span | row], used + w}
+        end)
+
+      [Enum.reverse(row) | rows] |> Enum.reverse() |> Enum.map(&%{line | spans: &1})
+    end
+  end
+
+  defp chop(word, width) do
+    if Model.cell_width(word) <= width do
+      [word]
+    else
+      word
+      |> String.graphemes()
+      |> Enum.chunk_while(
+        {"", 0},
+        fn g, {acc, w} ->
+          gw = Model.cell_width(g)
+          if w + gw > width, do: {:cont, acc, {g, gw}}, else: {:cont, {acc <> g, w + gw}}
+        end,
+        fn {acc, _w} -> {:cont, acc, {"", 0}} end
+      )
+    end
   end
 
   defp block(%{casting: %{}}), do: %Block{title: " casting ", borders: [:all], border_type: :double}
@@ -601,19 +813,56 @@ defmodule Troupe.UI.TUI.NewSessionPage do
     head ++ steps ++ tail
   end
 
-  defp lines(page, _width) do
+  defp lines(page, _width), do: page |> focused_lines() |> elem(0)
+
+  # The form's lines, and which of them the focus is on: `{keep, until}`, the line that
+  # must stay on screen and the last one worth showing under it.
+  defp focused_lines(%{casting: %{}} = page), do: {lines(page, 0), {0, 0}}
+
+  defp focused_lines(page) do
     r = resolved(page)
 
-    [
+    head = [
       Line.new([Span.new("What should the troupe do?", style: Theme.style(nil, [:bold]))]),
       Line.new([Span.new(page.quip, style: Theme.style(:muted, [:italic]))]),
       Line.new([])
-    ] ++
-      message_lines(page) ++
-      [Line.new([]), sentence(page, r)] ++
-      why_line(r) ++
-      picker_lines(page) ++
-      [Line.new([]), called(page, r), hint()] ++ recent_lines(page)
+    ]
+
+    message = message_lines(page)
+    why = why_line(r)
+    picker = picker_lines(page)
+
+    lines =
+      head ++
+        message ++
+        [Line.new([]), sentence(page, r)] ++
+        why ++ picker ++ [Line.new([]), called(page, r), hint()] ++ recent_lines(page)
+
+    sentence_at = length(head) + length(message) + 1
+    picker_at = sentence_at + 1 + length(why)
+    called_at = picker_at + length(picker) + 1
+
+    focus =
+      cond do
+        page.open != nil ->
+          {picker_at + 2 + page.cursor, picker_at + 2 + page.cursor}
+
+        page.field == :message ->
+          {text, pos} = page.text
+          cursor_line = (text |> String.slice(0, pos) |> String.split("\n") |> length()) - 1
+          {length(head) + cursor_line, sentence_at + length(why)}
+
+        page.field == :chips ->
+          {sentence_at, sentence_at + length(why)}
+
+        page.field == :title ->
+          {called_at, called_at}
+
+        page.field == :recents ->
+          {called_at + 4 + page.recent, called_at + 4 + page.recent}
+      end
+
+    {lines, focus}
   end
 
   defp message_lines(page) do
@@ -664,7 +913,7 @@ defmodule Troupe.UI.TUI.NewSessionPage do
       Span.new(middle_word),
       middle,
       Span.new(" as "),
-      chip.(2, r.agent, nil),
+      chip.(2, r.agent_label, nil),
       Span.new(" · " <> r.who)
     ])
   end
@@ -750,9 +999,14 @@ defmodule Troupe.UI.TUI.NewSessionPage do
           r.agent || "its default"
         ]
 
+        selected = page.field == :recents and page.recent == n - 1
+        mark = if selected, do: "▸ ", else: "  "
+        title_style = if selected, do: Theme.style(nil, [:bold, :reversed]), else: Theme.style(nil)
+
         Line.new([
-          Span.new("  #{n} ", style: Theme.style(:accent, [:bold])),
-          Span.new(r.title <> "  "),
+          Span.new("#{mark}#{n} ", style: Theme.style(:accent, [:bold])),
+          Span.new(r.title, style: title_style),
+          Span.new("  "),
           Span.new(Enum.join(facts, " · "), style: Theme.style(:muted))
         ])
       end)

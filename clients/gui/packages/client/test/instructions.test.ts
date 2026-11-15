@@ -42,7 +42,7 @@ describe("instructionLayers", () => {
       [
         ["Organisation", "the organisation's memory", "version 3"],
         ["Team", "the team design's memory", "version 5"],
-        ["Worker profile", "the worker profile dev's memory", "version 1"],
+        ["Profile", "the profile dev's memory", "version 1"],
         ["Your own", "/home/me/.config/troupe/AGENTS.md", "01234567"],
         ["Repository", "/home/me/project/AGENTS.md", "01234567"],
         ["Repository", "/home/me/project/CLAUDE.md", ""],
@@ -59,7 +59,7 @@ describe("instructionLayers", () => {
     assert.equal(rows[5]?.note, "not read: run troupe onboard");
   });
 
-  it("names a pod's memory as the activation's", () => {
+  it("names a pod's memory as the session's, in the reader's words", () => {
     const rows = instructionLayers({
       budget: 16000,
       used: 0,
@@ -67,7 +67,9 @@ describe("instructionLayers", () => {
       files: [file("profile", "memory:profile/fixing", { version: 2, label: "the worker profile fixing's memory" })],
     });
 
-    assert.equal(rows[0]?.source, "the plane, with the session's activation");
+    assert.equal(rows[0]?.source, "the plane, when the session started");
+    assert.equal(rows[0]?.heading, "Profile");
+    assert.equal(rows[0]?.what, "the profile fixing's memory");
   });
 
   // #55's user level: the person's own memory from the plane, after the organisation's,

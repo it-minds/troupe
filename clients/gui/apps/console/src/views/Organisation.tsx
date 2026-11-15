@@ -165,6 +165,7 @@ function DefaultRow({
             ].filter(Boolean)}
             verb={previewing === "reset" ? "Reset" : "Apply"}
             onCancel={() => setPreviewing(null)}
+            cancel={previewing === "put" ? "Back to editing" : "Cancel"}
             onConfirm={async () => {
               const answer = previewing === "reset" ? await admin.resetSetting(setting.key) : await admin.putSetting(setting.key, draft ?? "");
               const was = previewing;
@@ -242,26 +243,28 @@ function EnforcedSet({ setting, editable, onPut }: { setting: PlatformSetting; e
     <div className="enforced">
       {Object.keys(set).length === 0 && !draft && <Empty title="Nothing is enforced">People's own machines take the defaults above and may change any of them.</Empty>}
       {!draft && (
-        <table>
-          <thead>
-            <tr>
-              <th>Key</th>
-              <th>Enforced</th>
-              <th>To a machine, the value is</th>
-            </tr>
-          </thead>
-          <tbody>
-            {all.map((k) => (
-              <tr key={k.key}>
-                <td>
-                  <code>{k.key}</code>
-                </td>
-                <td className="mono">{isRules(k) ? `${ruleCount(set[k.key])} (below)` : k.key in set ? show(set[k.key]) : <span className="muted">not enforced</span>}</td>
-                <td>{k.meaning}</td>
+        <div className="scroll">
+          <table>
+            <thead>
+              <tr>
+                <th>Key</th>
+                <th>Enforced</th>
+                <th>To a machine, the value is</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {all.map((k) => (
+                <tr key={k.key}>
+                  <td>
+                    <code>{k.key}</code>
+                  </td>
+                  <td className="mono">{isRules(k) ? `${ruleCount(set[k.key])} (below)` : k.key in set ? show(set[k.key]) : <span className="muted">not enforced</span>}</td>
+                  <td>{k.meaning}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
       {editable && !draft && (
         <button type="button" onClick={() => setDraft(Object.fromEntries(keys.map((k) => [k.key, asText(set[k.key])])))}>
@@ -298,6 +301,7 @@ function EnforcedSet({ setting, editable, onPut }: { setting: PlatformSetting; e
           effects={[...lines.map((l) => enforcing(keys.find((k) => k.key === l.field)!, l.to)), setting.consequence ?? ""].filter(Boolean)}
           verb="Apply"
           onCancel={() => setPreviewing(false)}
+          cancel="Back to editing"
           onConfirm={async () => {
             const kept = Object.entries(set).filter(([key]) => rules.some((r) => r.key === key));
             const next = Object.fromEntries([...kept, ...Object.entries(asked).filter(([, v]) => v !== null)]);

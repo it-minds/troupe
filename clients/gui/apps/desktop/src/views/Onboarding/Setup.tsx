@@ -9,7 +9,7 @@
 // daemon's record when that answer was lost, so no screen here waits on one reply.
 
 import type { JSX } from "react";
-import { previousStep } from "@troupe/client";
+import { firstLine, previousStep } from "@troupe/client";
 import type { DaemonClient, SetupFlow, SetupStepName } from "@troupe/client";
 import { Failed, Loading } from "../bits";
 import { Daemon } from "./Daemon";
@@ -59,7 +59,7 @@ export function SetupFlowView({
   }
   if (setup.unsupported) return <p className="note">{setup.error}</p>;
   if (!setup.flow) {
-    if (!setup.error) return <Loading what="Asking the daemon where the setup stands…" />;
+    if (!setup.error) return <Loading what={`${firstLine("first_run", "setup")} — asking the daemon where the setup stands…`} />;
     return (
       <div className="stack" style={{ gap: "var(--space-3)" }}>
         <Failed error={setup.error} />

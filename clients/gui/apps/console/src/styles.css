@@ -207,6 +207,11 @@ label code {
   text-transform: uppercase;
   white-space: nowrap;
 }
+/* An id in a status keeps its case: ids are case-sensitive, and upper-casing one names another. */
+.status code {
+  text-transform: none;
+  letter-spacing: 0;
+}
 .status.running {
   color: var(--running-fg);
 }
@@ -283,6 +288,21 @@ label code {
 .banner.breakglass p {
   margin: 0;
   max-width: var(--measure-reading);
+}
+.banner.refused {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-bottom: var(--space-4);
+  padding: var(--space-3) var(--space-4);
+  border: var(--bw-hairline) solid var(--border-hairline);
+  border-left-width: var(--bw-marker);
+  color: var(--text-body);
+}
+.banner.refused p {
+  margin: 0;
 }
 
 .wordmark {
@@ -540,8 +560,31 @@ tr:hover td {
   text-align: right;
   font-variant-numeric: tabular-nums;
 }
+/* A table wider than its page scrolls sideways in its own box, never the page. The box says
+   so: a shade at each edge that has more past it, which goes once that edge is reached (the
+   covers scroll with the table, the shades stay put). A row's actions stay pinned at the
+   box's right edge, a hairline to their left, and the rest of the row scrolls under them. */
 .scroll {
+  --scroll-cover: var(--bg-canvas);
   overflow-x: auto;
+  background:
+    linear-gradient(to right, var(--scroll-cover) 40%, transparent) left / 24px 100% no-repeat local,
+    linear-gradient(to left, var(--scroll-cover) 40%, transparent) right / 24px 100% no-repeat local,
+    linear-gradient(to right, var(--border-strong), transparent) left / 12px 100% no-repeat scroll,
+    linear-gradient(to left, var(--border-strong), transparent) right / 12px 100% no-repeat scroll;
+}
+.card .scroll {
+  --scroll-cover: var(--bg-panel);
+}
+.scroll th.row-actions,
+.scroll td.row-actions {
+  position: sticky;
+  right: 0;
+  background: var(--scroll-cover);
+  box-shadow: inset var(--bw-hairline) 0 0 var(--border-hairline);
+}
+.scroll tr:hover td.row-actions {
+  background: var(--bg-hover);
 }
 
 .toolbar {
@@ -585,6 +628,7 @@ tr:hover td {
 .toolbar.filters .actions {
   margin-top: 0;
 }
+th.row-actions,
 td.row-actions {
   width: 1%;
   white-space: nowrap;
@@ -732,7 +776,7 @@ ul.attention li:last-child {
 }
 .row {
   display: grid;
-  grid-template-columns: minmax(220px, 1fr) 220px 110px 150px;
+  grid-template-columns: minmax(220px, 1fr) 220px 110px 180px;
   align-items: start;
   gap: var(--space-4);
   padding: var(--space-3) var(--space-4);
@@ -759,6 +803,14 @@ ul.attention li:last-child {
 }
 .row .wide {
   grid-column: 1 / -1;
+}
+/* A setting's four columns need about 810px beside the rail; below that it stacks, its
+   actions under its value, rather than pushing Change and Reset past the window. */
+@media (max-width: 1120px) {
+  .row {
+    grid-template-columns: 1fr;
+    gap: var(--space-2);
+  }
 }
 
 .edit {
@@ -1473,4 +1525,77 @@ pre.manifest {
 .member-view tbody th {
   border-bottom: var(--bw-hairline) solid var(--border-hairline);
   white-space: nowrap;
+}
+
+/* -- a laptop's session, followed and steered --------------------------------- */
+
+/* The transcript as lines: a person's words, the agent's, each call with its glyph, and an
+   answered approval as a calm line naming who answered. What waits on a person is the one
+   thing in pink, the panel and the status line while it waits. */
+.remote-session .status-line.waiting {
+  color: var(--waiting-fg);
+}
+.remote-session .transcript {
+  list-style: none;
+  margin: var(--space-4) 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  max-width: var(--measure-reading);
+}
+.remote-session .transcript li {
+  overflow-wrap: anywhere;
+}
+.remote-session .transcript .tool,
+.remote-session .transcript .decision {
+  font: var(--t-code-small);
+  color: var(--text-secondary);
+}
+.remote-session .transcript .tool.failed,
+.remote-session .transcript .decision.denied {
+  color: var(--denied-fg);
+}
+.remote-session .transcript .decision.allowed {
+  color: var(--allowed-fg);
+}
+.remote-session .approval {
+  margin: var(--space-4) 0;
+  padding: var(--space-3) var(--space-4);
+  border: var(--bw-hairline) solid var(--waiting-bd);
+  border-left-width: var(--bw-marker);
+  background: var(--waiting-bg);
+  max-width: var(--measure-reading);
+}
+.remote-session .approval h3 {
+  margin: 0 0 var(--space-2);
+}
+.remote-session .approval pre {
+  margin: var(--space-2) 0;
+  font: var(--t-code);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.remote-session .approval .also {
+  font: var(--t-note);
+  color: var(--text-secondary);
+}
+.remote-session .answers {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+.remote-session .composer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--space-2);
+  max-width: var(--measure-reading);
+}
+.remote-session .composer label {
+  flex: 1 1 100%;
+}
+.remote-session .composer textarea {
+  width: 100%;
 }

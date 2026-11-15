@@ -16,7 +16,7 @@ defmodule Troupe.NewSessionScreenTest do
 
   alias ExRatatui.Event.Key
   alias Troupe.{Client, FakeRemote}
-  alias Troupe.UI.NewSession
+  alias Troupe.UI.{Lines, NewSession}
   alias Troupe.UI.TUI.NewSessionPage
 
   defp page(origin, opts) do
@@ -39,6 +39,44 @@ defmodule Troupe.NewSessionScreenTest do
     login!(remote, url)
     {:ok, origin} = Client.connect_plane(url)
     {remote, origin}
+  end
+
+  describe "the status lines" do
+    test "the start screen's quip is one of the shared sentences, chosen by the page's seed" do
+      one = page(nil, seed: "a")
+      assert one.quip == Lines.first(:start_screen, "a")
+      assert NewSessionPage.plain(one) =~ one.quip
+      assert page(nil, seed: "a").quip == one.quip
+
+      openings = for n <- 1..30, do: page(nil, seed: n).quip
+      assert length(Enum.uniq(openings)) > 3
+      assert Enum.all?(openings, &(&1 in Lines.all(:start_screen)))
+    end
+
+    test "the casting footer opens with a flourish and keeps its keys, in 80 columns" do
+      for seed <- 1..40 do
+        page = page(nil, seed: seed)
+        waiting = footer(%{page | casting: %{waiting: true, failed: nil}})
+        casting = footer(%{page | casting: %{waiting: false, failed: nil}})
+
+        assert waiting =~ Lines.first(:waiting_for_a_place, seed)
+        assert casting =~ Lines.first(:casting, seed)
+
+        # A place frees only for a start the plane has queued; Esc leaves the start going.
+        assert waiting =~ "Esc goes back; it starts when a place frees"
+        assert casting =~ "Esc goes back to the form; the start goes on"
+        refute casting =~ "place frees"
+
+        for line <- [waiting, casting], do: assert(String.length(line) <= 80)
+      end
+    end
+
+    test "a failed start has no flourish: the footer says what the keys do" do
+      page = %{page(nil, seed: 1) | casting: %{waiting: false, failed: "no place"}}
+      assert footer(page) == " casting — Enter or Esc back to the form "
+    end
+
+    defp footer(page), do: NewSessionPage.footer(page)
   end
 
   describe "the rules" do
@@ -87,7 +125,7 @@ defmodule Troupe.NewSessionScreenTest do
       page = page(origin, where: :platform) |> typed("Ship the docs. Then tidy.")
       text = NewSessionPage.plain(page)
 
-      assert text =~ "Runs [on the platform] with [code] as [build]"
+      assert text =~ "Runs [on the platform] with [code] as [build (default)]"
       assert text =~ "Picked code: the first profile with room right now."
       assert text =~ "CALLED Ship the docs"
 
@@ -96,11 +134,20 @@ defmodule Troupe.NewSessionScreenTest do
                NewSessionPage.key(page, %Key{code: "enter", modifiers: []})
     end
 
-    test "starts as the agent the profile offers and sends it, never build the profile lacks" do
+    test "shows the agent the profile offers as its default and leaves it to the plane, never build the profile lacks" do
       {_remote, origin} = plane()
       row = %{"name" => "dev", "capacity" => 4, "active_sessions" => 0, "agents" => ["pr-reviewer"]}
       page = %{page(origin, where: :platform) | profiles: [row]} |> typed("Review the diff")
 
+      assert NewSessionPage.plain(page) =~ "with [dev] as [pr-reviewer (default)]"
+
+      assert {:start, _page, ^origin, %{profile: "dev", agent: nil}} =
+               NewSessionPage.key(page, %Key{code: "enter", modifiers: []})
+
+      # One picked on the chip is sent, and said without "(default)".
+      page = keys(page, ["tab", "right", "right", "enter"])
+      assert [{"pr-reviewer", "pr-reviewer", "its default", true}] = NewSessionPage.options(page)
+      page = keys(page, ["enter", "tab", "tab"])
       assert NewSessionPage.plain(page) =~ "with [dev] as [pr-reviewer]"
 
       assert {:start, _page, ^origin, %{profile: "dev", agent: "pr-reviewer"}} =
@@ -155,11 +202,11 @@ defmodule Troupe.NewSessionScreenTest do
       assert text =~ "Runs [on this computer]"
 
       assert text =~
-               "This computer's Troupe app isn't running yet. Start it, and this switches on by itself."
+               "This computer's daemon isn't running. Start it with troupe daemon, and this switches on by itself."
 
       page = keys(page, ["tab", "enter"])
 
-      assert [{:local, "On this computer", "APP NOT RUNNING: " <> _, false}] =
+      assert [{:local, "On this computer", "DAEMON NOT RUNNING: " <> _, false}] =
                NewSessionPage.options(page)
 
       # Nothing starts while it is down.
@@ -168,6 +215,137 @@ defmodule Troupe.NewSessionScreenTest do
                  code: "enter",
                  modifiers: []
                })
+
+      # The link comes up: it switches on by itself, with this computer's agents.
+      page = NewSessionPage.daemon(page, true, ["build", "plan"])
+      refute NewSessionPage.plain(page) =~ "isn't running"
+
+      assert [{:local, "On this computer", _, true}] =
+               NewSessionPage.options(%{page | open: :where})
+    end
+
+    test "the TUI switches the page on when the daemon link comes up" do
+      {first, _, _ws} = start_session!(script: [{:text_and_tools, "hi", []}])
+      {pid, _session} = start_tui(first)
+
+      type(pid, "/new")
+      press(pid, "enter")
+      eventually(fn -> user_state(pid).focus == :new_session end)
+
+      # As the page would have opened with the daemon down.
+      :sys.replace_state(pid, fn s ->
+        %{s | user_state: %{s.user_state | new_page: %{s.user_state.new_page | daemon_up: false}}}
+      end)
+
+      assert NewSessionPage.plain(user_state(pid).new_page) =~ "isn't running"
+      send(pid, {:troupe_daemon_link, true})
+      eventually(fn -> user_state(pid).new_page.daemon_up end)
+      refute NewSessionPage.plain(user_state(pid).new_page) =~ "isn't running"
+    end
+
+    test "a platform start from the TUI does not carry the agent on screen: the profile's default is the plane's" do
+      profiles =
+        Enum.map(FakeRemote.profile_fixtures(), fn
+          %{"name" => "code"} = row ->
+            %{row | "agents" => [%{"name" => "pr-reviewer", "mode" => "primary"}]}
+
+          row ->
+            row
+        end)
+
+      {remote, url} = start_remote!(transport: :http, profiles: profiles)
+      login!(remote, url)
+      {first, _, _ws} = start_session!(script: [{:text_and_tools, "hi", []}])
+      {pid, _session} = start_tui(first)
+      assert user_state(pid).default_agent == "build"
+
+      type(pid, "/new --remote code")
+      press(pid, "enter")
+      eventually(fn -> user_state(pid).focus == :new_session end)
+
+      assert NewSessionPage.plain(user_state(pid).new_page) =~
+               "with [code] as [pr-reviewer (default)]"
+
+      type(pid, "review the diff")
+      press(pid, "enter")
+
+      params =
+        eventually(fn ->
+          Enum.find_value(FakeRemote.calls(remote), fn
+            {"session.create", params} -> params
+            _ -> nil
+          end)
+        end)
+
+      assert params["profile"] == "code"
+      assert params["agent"] == nil
+    end
+
+    test "with no plane, a --remote profile is said dropped, with what to do" do
+      page = page(nil, where: :platform, profile: "dev", plane_why: :logged_out)
+      text = NewSessionPage.plain(page)
+      assert text =~ "Runs [on this computer]"
+
+      assert text =~
+               "This computer is not signed in to a platform, so dev is not on offer: run troupe login <plane-url>. Enter starts it on this computer."
+
+      text =
+        NewSessionPage.plain(page(nil, where: :platform, profile: "dev", plane_why: :local_only))
+
+      assert text =~ "Local only is on, so the platform is not asked and dev is not on offer."
+    end
+
+    test "a profile the person may not use is said, and nothing starts" do
+      {_remote, origin} = plane()
+      page = page(origin, where: :platform, profile: "nope") |> typed("try it")
+      text = NewSessionPage.plain(page)
+      assert text =~ "with [nope]"
+      assert text =~ "You may not start a session on nope. The profile chip lists the ones you may."
+      assert {:ok, %{casting: nil}} = NewSessionPage.key(page, %Key{code: "enter", modifiers: []})
+    end
+
+    test "a plane error is said as the plane's error, not as having no profile" do
+      # Over the socket, where the fake answers an injected failure.
+      {remote, url} = start_remote!(profiles: FakeRemote.profile_fixtures())
+      login!(remote, url)
+      {:ok, origin} = Client.connect_plane(url)
+      :ok = FakeRemote.fail_next(remote, "profiles.list", -32_603, "the database is down")
+      text = NewSessionPage.plain(page(origin, where: :platform))
+      refute text =~ "There is no profile you may start a session on."
+      assert text =~ "The platform did not list your profiles: "
+      assert text =~ "the database is down"
+
+      assert NewSession.plane_error("signed out: token expired") ==
+               "Your sign-in to the platform has run out: run troupe login <plane-url>, then /new again."
+
+      assert NewSession.plane_error(:logged_out) =~ "run troupe login <plane-url>"
+    end
+
+    test "the agent chip with nothing to pick says why instead of opening an empty picker" do
+      {_remote, origin} = plane()
+      row = %{"name" => "dev", "capacity" => 4, "active_sessions" => 0, "agents" => []}
+      page = %{page(origin, where: :platform) | profiles: [row]}
+
+      page = keys(page, ["tab", "right", "right", "enter"])
+      assert page.open == nil
+      assert NewSessionPage.plain(page) =~ "dev offers no agents to pick."
+      refute NewSessionPage.plain(page) =~ "HOW IT STARTS"
+      # The next key takes the line away.
+      refute NewSessionPage.plain(keys(page, ["left"])) =~ "offers no agents"
+
+      page = page(nil, daemon_up: false) |> keys(["tab", "right", "right", "enter"])
+      assert page.open == nil
+
+      assert NewSessionPage.plain(page) =~
+               "This computer's daemon is not running, so there is no agent to pick. Start it with troupe daemon."
+    end
+
+    test "the private pre-set is this computer's: on the platform the session is the team's" do
+      {_remote, origin} = plane()
+      text = NewSessionPage.plain(page(origin, where: :platform, private: true))
+      refute text =~ "only you can open it"
+      assert text =~ "can open it"
+      assert NewSessionPage.plain(page(nil, private: true)) =~ "only you can open it"
     end
 
     test "a full profile is queued, the wait said on the curtain line, and the session opens once placed" do

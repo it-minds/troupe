@@ -415,11 +415,11 @@ defmodule Troupe.AgentsManagerTest do
       text = screen_text(pid, session)
       assert text =~ ~r/build +(● *)?Your organisation's/u
       assert text =~ "read-only here"
-      assert text =~ "On a pod the agents come from the profile's bundle"
+      assert text =~ "On the platform the agents come from the profile's bundle"
 
       for code <- ["e", "c", "x", "n"] do
         press(pid, code)
-        assert picker(pid).status =~ "On a pod the agents come from the profile's bundle"
+        assert picker(pid).status =~ "On the platform the agents come from the profile's bundle"
         assert user_state(pid).focus == :switcher
         assert page(pid) == nil
       end

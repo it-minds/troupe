@@ -426,6 +426,8 @@ defmodule Troupe.FakeRemote do
       # Markdown one, the organisation's and their teams' memory documents and their own
       # document's versions, newest first, and the invitations to them.
       artifacts: Keyword.get(opts, :artifacts, []),
+      # Whether the plane's administrator has artifacts on, as `artifact.list` says it.
+      artifacts_enabled: Keyword.get(opts, :artifacts_enabled, true),
       artifact_texts: Keyword.get(opts, :artifact_texts, %{}),
       memory: Keyword.get(opts, :memory, []),
       own_versions: Keyword.get(opts, :own_versions, []),
@@ -1306,8 +1308,7 @@ defmodule Troupe.FakeRemote do
         "text" => "---\nmode: primary\n---\nYou build what the team asks for.\n",
         "editable" => false,
         "editable_reason" =>
-          "On a pod the agents come from the profile's bundle and are read-only here: " <>
-            "change them in the console",
+          "On the platform the agents come from the profile's bundle and are read-only here.",
         "also" => [],
         "running" => []
       })}, state}
@@ -1365,7 +1366,7 @@ defmodule Troupe.FakeRemote do
 
     {{:ok,
       %{
-        "enabled" => true,
+        "enabled" => state.artifacts_enabled,
         "profiles" => ["dev"],
         "teams" => Enum.map(state.teams, & &1["name"]),
         "organisation" => "Example",
@@ -1779,8 +1780,7 @@ defmodule Troupe.FakeRemote do
       "profile" => "code",
       "editable" => false,
       "editable_reason" =>
-        "On a pod the agents come from the profile's bundle and are read-only here: " <>
-          "change them in the console",
+        "On the platform the agents come from the profile's bundle and are read-only here.",
       "overrides" => [],
       "model" => nil,
       "tool_count" => 19,
@@ -2131,7 +2131,23 @@ defmodule Troupe.FakeRemote do
             {:reply, {200, %{"jsonrpc" => "2.0", "id" => id, "error" => error}}, state}
 
           true ->
-            case dispatch(state, :plane, method, params, self()) do
+            # A failure `fail_next/5` injected answers here too, as over the socket.
+            answer =
+              case Map.pop(state.failures, method) do
+                {{code, message, data, times}, failures} ->
+                  failures =
+                    if times > 1,
+                      do: Map.put(failures, method, {code, message, data, times - 1}),
+                      else: failures
+
+                  reply = if data, do: {:error, code, message, data}, else: {:error, code, message}
+                  {reply, %{state | failures: failures}}
+
+                {nil, _failures} ->
+                  dispatch(state, :plane, method, params, self())
+              end
+
+            case answer do
               {{:ok, result}, state} ->
                 {:reply, {200, %{"jsonrpc" => "2.0", "id" => id, "result" => result}}, state}
 

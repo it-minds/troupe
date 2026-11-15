@@ -9,7 +9,7 @@ import { useState } from "react";
 import type { JSX } from "react";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { WebSocket as NodeWebSocket } from "ws";
-import { DaemonClient, webTokenStore } from "@troupe/client";
+import { DaemonClient, LINES, webTokenStore } from "@troupe/client";
 import { App } from "../src/App";
 import { StartSession, castingTiming } from "../src/views/StartSession";
 import { FakeDaemon } from "../../../packages/client/test/support/daemon.js";
@@ -78,6 +78,8 @@ describe("the new-session screen", () => {
     expect(why(s)).toBe("Picked dev: the first profile with room right now.");
     // at once: the message box is the first thing on the screen.
     expect(s.querySelector("textarea")).toBe(ask(s));
+    // The quip under the heading is one of the shared sentences.
+    expect(LINES.start_screen as readonly string[]).toContain(s.querySelector(".ns-quip")?.textContent);
 
     type(ask(s), "Rewrite the placement loop. Corners first.");
     await waitFor(() => called(s).value === "Rewrite the placement loop", "the title from the first line");
@@ -103,6 +105,17 @@ describe("the new-session screen", () => {
     expect(sentence(s)).toContain("with dev as");
   });
 
+  it("counts only the person's own starts as used last and as one to start like, not a trigger's run", async () => {
+    const h = await signedIn({ room: { standard: { capacity: 2, active: 0 }, research: { capacity: 2, active: 0 } } });
+    h.plane.seed("alice@example.com", { title: "Before", profile: "standard" });
+    // Newer, and under her name, but a trigger started it.
+    h.plane.seed("alice@example.com", { title: "Nightly dependency sweep", profile: "research", origin: { kind: "trigger", trigger: "nightly-deps" } });
+    const s = await openStart();
+    await waitFor(() => why(s) === "Picked standard because you used it last.", "the last-used rule on her own start");
+    await waitFor(() => [...s.querySelectorAll("button.ns-recent")].some((b) => b.textContent?.includes("Before")), "her own session to start like");
+    expect([...s.querySelectorAll("button.ns-recent")].map((b) => b.textContent ?? "").some((t) => t.includes("Nightly dependency sweep"))).toBe(false);
+  });
+
   it("reads the tokens in the message, wins over a chip, takes them out, and a chip picked takes its token out", async () => {
     const h = await signedIn();
     const s = await openStart();
@@ -125,6 +138,23 @@ describe("the new-session screen", () => {
     expect(row.agent).toBe("build");
   });
 
+  it("reads an #agent token against the profile an @profile token switches to, typed before it or after", async () => {
+    const h = await signedIn({ profiles: ["ux", "dev"], agents: { ux: ["build"], dev: ["build", "plan"] } });
+    const s = await openStart();
+    await waitFor(() => sentence(s).includes("with ux as build"), "the pick, which offers no plan");
+    type(ask(s), "#plan Map the retry path");
+    // ux offers no plan: the token is not one, and stays as typed.
+    expect(sentence(s)).toContain("with ux as build");
+    type(ask(s), "#plan Map the retry path @dev");
+    await waitFor(() => sentence(s).includes("with dev as plan"), "the agent read against dev");
+    expect(called(s).value).toBe("Map the retry path");
+    (await startButton(s)).click();
+    await waitFor(() => [...h.plane.rows.values()].some((r) => r.title === "Map the retry path"), "the session made");
+    const row = [...h.plane.rows.values()].find((r) => r.title === "Map the retry path")!;
+    expect(row.profile).toBe("dev");
+    expect(row.agent).toBe("plan");
+  });
+
   it("queues on a full profile, shows the wait, asks again as told, and opens the session once placed", async () => {
     const h = await signedIn({ room: { dev: { capacity: 1, active: 1 }, standard: { capacity: 1, active: 1 }, research: { capacity: 1, active: 1 } } });
     const s = await openStart();
@@ -137,6 +167,12 @@ describe("the new-session screen", () => {
     queue.click();
 
     await sees("Waiting for a free place in dev");
+    // Each step says its own line after its facts: the wait from the waiting list, the rest from casting.
+    const asides = [...document.querySelectorAll(".ns-steps .ns-aside")].map((a) => a.textContent?.replace("// ", ""));
+    expect(asides).toHaveLength(3);
+    expect(LINES.waiting_for_a_place as readonly (string | undefined)[]).toContain(asides[1]);
+    for (const i of [0, 2]) expect(LINES.casting as readonly (string | undefined)[]).toContain(asides[i]);
+    expect(new Set(asides).size).toBe(3);
     const pending = [...h.plane.rows.values()].find((r) => r.state === "pending")!;
     await waitFor(() => h.plane.mints.filter((id) => id === pending.id).length >= 2, "token.mint asked again");
     // at once: still waiting, so nothing has opened.
@@ -157,15 +193,16 @@ describe("the new-session screen", () => {
     expect(row?.agent).toBe("pr-reviewer");
   });
 
-  it("on a profile that offers no agent names none, and leaves the choice to the plane", async () => {
+  it("on a profile that offers no agent names none, and says the plane's reason it cannot start one", async () => {
     const h = await signedIn({ profiles: ["dev"], agents: { dev: [] } });
     const s = await openStart();
     await waitFor(() => sentence(s).includes("with dev as its default"), "no agent named");
     type(ask(s), "Anything");
     (await startButton(s)).click();
-    await waitFor(() => document.querySelector('textarea[aria-label="Message"]'), "the session");
-    const row = [...h.plane.rows.values()].find((r) => r.title === "Anything");
-    expect(row?.agent).toBeNull();
+    // The plane refuses a profile that offers no primary, and keeps no row; had the screen
+    // named an agent, the refusal would have been "no primary agent named …".
+    await sees("Dev offers no agent a session can start as");
+    expect([...h.plane.rows.values()].find((r) => r.title === "Anything")).toBeUndefined();
   });
 
   it("calls a profile scaled to zero idle, not full, and starts on it rather than queueing", async () => {
@@ -238,6 +275,10 @@ describe("the new-session screen", () => {
     expect(rule(".ns-recents")).toContain("minmax(min(240px, 100%), 1fr)");
     expect(rule(".ns-foot")).toContain("flex-wrap: wrap");
     expect(rule(".ns-called input")).toContain("min-width: 0");
+    // The name field holds its placeholder, and the button its widest words, so the row
+    // neither cuts the one nor moves while the other changes.
+    expect(rule(".ns-called")).toContain("min-width: min(280px, 100%)");
+    expect(rule(".ns-start::after")).toContain("content: attr(data-widest)");
     expect(rule(".ns-folder input")).toContain("min-width: 0");
     expect(rule(".ns-sentence")).toContain("overflow-wrap: anywhere");
     expect(css).toMatch(/@media \(max-width: 719px\) \{\s*\.new-session \.ns-hero-mask \{\s*display: none;/);

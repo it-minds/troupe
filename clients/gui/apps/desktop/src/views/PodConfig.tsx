@@ -29,22 +29,22 @@ export function PodConfig({ view }: { view: SessionView | null }): JSX.Element {
     };
   }, [view]);
 
-  if (error) return <p className="note">The pod did not say what is in force here: {error}</p>;
-  if (!config) return <Loading what="Reading what is in force on the pod…" />;
+  if (error) return <p className="note">The platform did not say what is in force in this session: {error}</p>;
+  if (!config) return <Loading what="Reading what is in force in this session…" />;
 
   const set = config.keys.filter((k) => k.layer !== "default");
   const shown = (value: unknown): string => (typeof value === "string" ? value : JSON.stringify(value));
 
   return (
     <>
-      <p className="muted micro">In force in this session on its pod: its profile's, the platform's, its terms and its repository's. Nothing here changes it.</p>
+      <p className="muted micro">In force in this session on the platform: its profile's, the platform's, its terms and its repository's. Nothing here changes it.</p>
       <Table head={["Setting", "Value", "From"]}>
         {set.map((k) => (
           <tr key={k.key}>
             <td>
               <code>{k.key}</code>
             </td>
-            <td title={k.withheld ? undefined : shown(k.value)}>
+            <td className="token" title={k.withheld ? undefined : shown(k.value)}>
               {/* What it runs on, which the pod shows only to someone who may steer it. */}
               {k.withheld ? <span className="muted" title="Shown to the people who can steer this session">{shown(k.value)}</span> : shown(k.value)}
             </td>

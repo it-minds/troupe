@@ -221,10 +221,11 @@ defmodule Troupe.Client do
   @doc """
   Every command the session offers, built-ins and agents, as the harness lists them
   (`commands.list`, Decision 698): what the palette shows, what Tab completes, and what
-  resolves an alias. Empty when the session's harness did not answer.
+  resolves an alias, each row in the terminal's own words where the table has some for it
+  (`Troupe.Commands.for_client/2`). Empty when the session's harness did not answer.
   """
   @spec command_table(session_id()) :: [command()]
-  def command_table(sid), do: impl(sid).command_table(sid)
+  def command_table(sid), do: Troupe.Commands.for_client(impl(sid).command_table(sid), "tui")
 
   @spec context(session_id()) :: {String.t(), Config.t()}
   def context(sid), do: impl(sid).context(sid)
@@ -403,6 +404,13 @@ defmodule Troupe.Client do
   """
   @spec subscribe_settings() :: :ok
   def subscribe_settings, do: Troupe.Client.Events.subscribe_settings()
+
+  @doc """
+  Whether this process is connected to the local daemon now. The settings subscription
+  also hears `{:troupe_daemon_link, up?}` as the connection comes up or goes down.
+  """
+  @spec daemon_up?() :: boolean()
+  def daemon_up?, do: Troupe.Client.Daemon.Link.up?()
 
   @spec watch(session_id(), boolean()) :: {:ok, atom()} | :ok | {:error, term()}
   def watch(sid, enabled?), do: impl(sid).watch(sid, enabled?)
@@ -752,8 +760,9 @@ defmodule Troupe.Client do
   @spec memory_levels([map()]) :: [map()]
   defdelegate memory_levels(documents), to: OwnMemory, as: :levels
 
-  @doc "What a new session in a team starts knowing, as the plane works it out: the closest entry per topic and what it replaces."
-  @spec memory_in_effect([map()], String.t() | nil) :: {:ok, [map()]} | {:error, String.t()}
+  @doc "What a new session in a team starts knowing, as the plane works it out: the closest entry per topic and what it replaces; `:older_plane` from a plane before 0.29, which has no entries."
+  @spec memory_in_effect([map()], String.t() | nil) ::
+          {:ok, [map()]} | {:error, String.t() | :older_plane}
   defdelegate memory_in_effect(levels, team), to: OwnMemory, as: :in_effect
 
   @doc "In-effect entries as an answer carries them (the copy's, under Local only), as the page's rows."

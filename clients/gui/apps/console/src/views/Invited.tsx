@@ -31,51 +31,53 @@ export function InvitedToYou({ load, reload }: { load: Load<Invitation[]>; reloa
           rows.length === 0 ? (
             <Empty title="Nobody has invited you into a session">One appears here as soon as somebody invites you, and goes when they take it back.</Empty>
           ) : (
-            <table className="sessions invited">
-              <thead>
-                <tr>
-                  <th>Session</th>
-                  <th>Whose</th>
-                  <th>You may</th>
-                  <th>Invited</th>
-                </tr>
-              </thead>
-              <tbody>
-                {rows.map((i) => (
-                  <tr key={i.session_id}>
-                    <td className="mono">
-                      {i.kind === "private" ? (
-                        <span title="Sealed under its owner's key: open it in the desktop app on your computer, which reads it with your own key">
-                          {i.title ?? i.session_id}
-                        </span>
-                      ) : (
-                        <a href={href({ page: "mine", path: ["invited", i.session_id] })}>{i.title ?? i.session_id}</a>
-                      )}
-                    </td>
-                    <td>
-                      {i.owner_name ?? i.owner}
-                      {i.kind === "private" ? " · private: read it in the desktop app" : i.profile ? ` · ${i.profile}` : ""}
-                    </td>
-                    <td>
-                      {i.kind === "private" && i.role === "control" ? (
-                        i.offered ? (
-                          <a href={href({ page: "mine", path: ["remote", i.session_id] })}>{steerWords(i)}</a>
-                        ) : (
-                          steerWords(i)
-                        )
-                      ) : i.role === "control" ? (
-                        "steer it"
-                      ) : (
-                        "follow it"
-                      )}
-                    </td>
-                    <td>
-                      {invitationWords(i)}, {remoteWhen(i.invited_at)}
-                    </td>
+            <div className="scroll">
+              <table className="sessions invited">
+                <thead>
+                  <tr>
+                    <th>Session</th>
+                    <th>Whose</th>
+                    <th>You may</th>
+                    <th>Invited</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {rows.map((i) => (
+                    <tr key={i.session_id}>
+                      <td className="mono">
+                        {i.kind === "private" ? (
+                          <span title="Sealed under its owner's key: open it in the desktop app on your computer, which reads it with your own key">
+                            {i.title ?? i.session_id}
+                          </span>
+                        ) : (
+                          <a href={href({ page: "mine", path: ["invited", i.session_id] })}>{i.title ?? i.session_id}</a>
+                        )}
+                      </td>
+                      <td>
+                        {i.owner_name ?? i.owner}
+                        {i.kind === "private" ? " · private: read it in the desktop app" : i.profile ? ` · ${i.profile}` : ""}
+                      </td>
+                      <td>
+                        {i.kind === "private" && i.role === "control" ? (
+                          i.offered ? (
+                            <a href={href({ page: "mine", path: ["remote", i.session_id] })}>{steerWords(i)}</a>
+                          ) : (
+                            steerWords(i)
+                          )
+                        ) : i.role === "control" ? (
+                          "steer it"
+                        ) : (
+                          "follow it"
+                        )}
+                      </td>
+                      <td>
+                        {invitationWords(i)}, {remoteWhen(i.invited_at)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           )
         }
       </Loaded>
@@ -97,8 +99,8 @@ export function InvitedSession({ id }: { id: string }): JSX.Element {
   if (!invitation) {
     return (
       <div className="page remote-session">
-        <p className="crumbs">
-          <a href={href({ page: "mine" })}>← Mine</a> · <span className="mono">{id}</span>
+        <p className="meta where">
+          <span className="mono">{id}</span>
         </p>
         <Empty title="Not shared with you">
           {seen.current ? removedSentence(seen.current.owner_name ?? seen.current.owner) : "Nobody has invited you into this session."}

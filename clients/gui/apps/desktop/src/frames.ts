@@ -8,8 +8,11 @@
 // the strip, every header's grammar and the curtain line's written set are functions of
 // the transcript, the level and the time.
 
-import { isBlobRef, isBusy, isRoot, needsYou, rootState } from "@troupe/client";
-import type { BlobRef, CurtainPhase, Entry, TranscriptState } from "@troupe/client";
+import { bytes, counted, firstLine, isBlobRef, isBusy, isRoot, needsYou, pickLine, rootState, toolGlyph as glyph, toolOutcome as outcome, toolTarget as target } from "@troupe/client";
+import type { BlobRef, CurtainPhase, Entry, LineKind, TranscriptState } from "@troupe/client";
+
+// A call's glyph, target and outcome are the client's, so the console's tool lines say the same.
+export { bytes, counted, glyph, outcome, target };
 
 /** How much of a turn is open (`transcript.detail`): the answer alone, its calls too, or nothing collapsed. */
 export type Detail = "quiet" | "tools" | "everything";
@@ -34,11 +37,6 @@ export function seconds(ms: number): string {
 /** A duration from a second up; under one it says nothing a person reads for. */
 export function took(ms: number | undefined): string | null {
   return ms !== undefined && ms >= 1000 ? seconds(ms) : null;
-}
-
-/** A count in words: `1 row`, `2 rows`. */
-export function counted(n: number, one: string, many = `${one}s`): string {
-  return `${n} ${n === 1 ? one : many}`;
 }
 
 /** What is left of a cut body, said: `… 42 more lines`. */
@@ -216,67 +214,7 @@ function stripOf(turn: string, steps: ToolEntry[], level: Detail, now: number): 
 
 // -- a call's header ----------------------------------------------------------------------
 
-/** `✓` done, `✗` failed, `⋯` running. */
-export function glyph(ok: boolean | undefined): string {
-  return ok === undefined ? "⋯" : ok ? "✓" : "✗";
-}
-
-const str = (v: unknown): string | undefined => (typeof v === "string" && v !== "" ? v : undefined);
-const oneLine = (s: string): string => s.replace(/\s+/g, " ").trim();
-
-/** What a call is about, in a few words: the path, the command, the URL, the agent delegated to. */
-export function target(name: string, args: unknown): string {
-  const a = (typeof args === "object" && args !== null && !isBlobRef(args) ? args : {}) as Record<string, unknown>;
-  const said = ((): string | undefined => {
-    switch (name) {
-      case "shell":
-        return str(a["command"]);
-      case "web_fetch":
-        return str(a["url"]);
-      case "todo_write":
-        return Array.isArray(a["items"]) ? counted(a["items"].length, "item") : undefined;
-      case "delegate":
-        return str(a["agent"]) && (a["wait"] === false ? `${str(a["agent"])}, in the background` : str(a["agent"]));
-      case "stop_child":
-        return str(a["child"]);
-      case "finish":
-        return str(a["summary"])?.slice(0, 60);
-      case "ask_user":
-        return str(a["question"]);
-      default:
-        return undefined;
-    }
-  })();
-  if (said) return oneLine(said);
-  for (const key of ["path", "file", "pattern", "query", "url", "agent", "child"]) {
-    const v = str(a[key]);
-    if (v) return oneLine(v);
-  }
-  return Object.keys(a).length > 0 ? JSON.stringify(a).slice(0, 60) : "";
-}
-
 const nonEmpty = (text: string): string[] => text.split("\n").filter((l) => l.trim() !== "");
-
-/**
- * What came back, in a few words: the first line of an error with how many it has, the
- * only line of a short result, or how many lines; nothing for a `finish`, which says
- * itself in the line under it.
- */
-export function outcome(entry: ToolEntry): string | null {
-  const content = entry.content;
-  if (content === undefined) return null;
-  if (isBlobRef(content)) return bytes(content.size);
-  const lines = content.replace(/\s+$/, "").split("\n");
-  if (entry.ok === false) {
-    const first = lines.map((l) => l.trim()).find((l) => l !== "") ?? "";
-    return first.slice(0, 80) + (lines.length > 1 ? ` (${lines.length} lines)` : "");
-  }
-  if (entry.name === "finish") return null;
-  const kept = nonEmpty(content);
-  if (kept.length === 0) return null;
-  if (kept.length === 1 && kept[0]!.length <= 60) return kept[0]!.trim();
-  return counted(kept.length, "line");
-}
 
 /** A call's header in its parts: `✓ read_file lib/p.ex · 120 lines · 2s`. */
 export function toolHead(entry: ToolEntry): { glyph: string; name: string; target: string; notes: string[] } {
@@ -318,12 +256,6 @@ export function numberedSource(content: string): { head: string[]; lines: Array<
   const tail = rest.slice(lines.length).filter((l) => l !== "");
   if (lines.length === 0 || tail.some((l) => !l.startsWith("[truncated:"))) return null;
   return { head, lines, tail };
-}
-
-export function bytes(n: number): string {
-  if (n < 1024) return `${n} bytes`;
-  if (n < 1024 * 1024) return `${Math.round(n / 1024)} KB`;
-  return `${(n / 1024 / 1024).toFixed(1)} MB`;
 }
 
 export type { BlobRef };
@@ -414,20 +346,21 @@ function jsonTable(text: string): { columns: string[]; rows: string[][] } | null
 // -- the curtain line ---------------------------------------------------------------------
 
 /**
- * The curtain line's written set (docs/design/frames.md §7), by what it is said over. The
- * n-th time the agent does that in a turn takes the n-th line; past the end of a list the
- * line is its facts alone. Theatre, dry, never sorry and never a person.
+ * The curtain line's words are docs/design/lines.json's (docs/design/frames.md §7), by what
+ * they are said over, taken in an order shuffled from the turn's seed: the n-th time the
+ * agent does that in a turn takes the n-th line taken; past the end of a list the line is
+ * its facts alone. Theatre, dry, never sorry and never a person. A turn past five minutes
+ * says it is a long one in place of the phase's line.
  */
-export const CURTAIN = {
-  starting: ["the house lights go down"],
-  thinking: ["the actors are powdering their nose", "running lines in the wings", "the prompter finds the page"],
-  acting: ["fetching props", "shifting the scenery", "the stagehands are at it"],
-  reading: ["reading the script", "checking the prompt book", "rereading the second act"],
-  compacting: ["cutting the second act", "trimming for time"],
-} as const;
+export const LONG_TURN_MS = 300_000;
 
 /** The calls that only read, which have their own list. */
 export const READS: ReadonlySet<string> = new Set(["read_file", "grep", "glob", "list_files", "git_read", "read_branch", "read_output", "recall", "web_fetch"]);
+
+/** The seed a turn's lines are taken in the order of: the session's id, else a counter, and the turn's number. */
+export function curtainSeed(state: TranscriptState, session = ""): string {
+  return `${session}/${state.curtain.turn}`;
+}
 
 /** The line while a turn works: the flourish, or none, then the facts, which are always there. */
 export interface CurtainLine {
@@ -483,7 +416,7 @@ export function waitingWords(state: TranscriptState, now: number): string | null
  * rests. What runs, how many and for how long are always said; a few words from the set
  * go before them, chosen by how many times this turn it has done what it does now.
  */
-export function curtainLine(state: TranscriptState, now: number): CurtainLine | null {
+export function curtainLine(state: TranscriptState, now: number, seed = ""): CurtainLine | null {
   if (needsYou(state)) return { waiting: true, flourish: null, facts: "waiting for you" };
   if (!isBusy(state)) return null;
 
@@ -505,15 +438,17 @@ export function curtainLine(state: TranscriptState, now: number): CurtainLine | 
 
   const n = state.curtain.phases[doing as CurtainPhase] ?? 1;
   const names = running.map((r) => r.split(" ")[0]!);
-  const list: readonly string[] | null =
+  const kind: LineKind | null =
     doing === "thinking"
-      ? CURTAIN.thinking
+      ? "thinking"
       : doing === "compacting"
-        ? CURTAIN.compacting
+        ? "compacting"
         : doing === "acting"
           ? names.length > 0 && names.every((name) => READS.has(name))
-            ? CURTAIN.reading
-            : CURTAIN.acting
+            ? "reading"
+            : "acting"
           : null;
-  return { waiting: false, flourish: list?.[n - 1] ?? null, facts };
+  const turnSeed = curtainSeed(state, seed);
+  const long = state.curtain.turnAt !== undefined && now - state.curtain.turnAt >= LONG_TURN_MS && kind !== null;
+  return { waiting: false, flourish: long ? firstLine("long_turn", turnSeed) : kind ? pickLine(kind, turnSeed, n) : null, facts };
 }

@@ -97,7 +97,8 @@ describe("stage 1, done item 1: sign in, list, create, prompt, and stay signed i
       {},
     );
     const dev = profiles.find((p) => p.name === "dev")!;
-    assert.deepEqual(dev.agents, ["build", "plan", "explore"]);
+    // The primaries a session may start as: explore is a subagent, not one of them.
+    assert.deepEqual(dev.agents, ["build", "plan"]);
     assert.ok(dev.skills.length > 0);
 
     // Create, choosing the plan agent from that list.
@@ -157,7 +158,7 @@ describe("stage 1, done item 2: a plane that does not know this origin says so",
       (e: unknown) => e,
     );
     assert.ok(refused instanceof PlaneUnreachableError, `expected PlaneUnreachableError, got ${refused}`);
-    assert.match(refused.message, /Add https:\/\/gui\.example\.com to TROUPE_CORS_ORIGINS/);
+    assert.match(refused.message, /adds https:\/\/gui\.example\.com to TROUPE_CORS_ORIGINS/);
     assert.ok(refused.message.includes(h.plane.baseUrl));
 
     // Add it. Nothing else changes: same build, same store, same fetch.

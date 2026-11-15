@@ -4,6 +4,7 @@
 // composer opens it with its sections and a description per row, typing narrows it,
 // Enter runs the row, Esc closes it, and Ctrl-K opens it from anywhere.
 
+import { readFileSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { WebSocket as NodeWebSocket } from "ws";
 import { App } from "../src/App";
@@ -13,6 +14,13 @@ import { button, render, says, sees, startOnTheList, type, waitFor } from "./sup
 
 Element.prototype.scrollIntoView = function scrollIntoView() {};
 globalThis.WebSocket = NodeWebSocket as unknown as typeof WebSocket;
+
+/** The rows this app lists: the table less the terminal client's own. */
+// A name in a variable, so the bundler reads it as a file to open and not as an asset.
+const sheet = "../src/styles.css";
+const css = readFileSync(new URL(sheet, import.meta.url), "utf8");
+
+const SHOWN = COMMANDS.filter((c) => c.availability !== "tui").length;
 
 let daemon: FakeDaemon;
 let unmount: (() => void) | null = null;
@@ -67,12 +75,13 @@ describe("the command palette", () => {
 
     key(composer, "/");
     const dialog = await waitFor(palette, "the palette");
-    await waitFor(() => rowNames().length === COMMANDS.length, "every command the daemon listed");
+    await waitFor(() => rowNames().length === SHOWN, "every command the daemon listed");
     expect(daemon.calls.some((c) => c.method === "commands.list")).toBe(true);
 
     // Sections in the table's order, and a summary beside each name.
     const sections = [...dialog.querySelectorAll(".section")].map((el) => el.textContent);
-    expect(sections).toEqual(["Session", "Navigate", "Workspace", "Setup", "Agents", "Custom", "Quit"]);
+    // No Quit: leaving is the terminal client's, and its rows are not listed here.
+    expect(sections).toEqual(["Session", "Navigate", "Workspace", "Setup", "Agents", "Custom"]);
     expect(rowNames()).toContain("/merge");
     await sees("Land a worktree branch on the checkout");
     await sees("Set, show or clear the session's goal");
@@ -95,7 +104,7 @@ describe("the command palette", () => {
     await openSession();
     key(window, "k", { ctrlKey: true });
     const dialog = await waitFor(palette, "the palette, from Ctrl-K");
-    await waitFor(() => rowNames().length === COMMANDS.length, "the list");
+    await waitFor(() => rowNames().length === SHOWN, "the list");
     const input = dialog.querySelector<HTMLInputElement>("input")!;
 
     type(input, "mer");
@@ -103,20 +112,19 @@ describe("the command palette", () => {
     expect(rowNames()).toEqual(["/merge"]);
 
     // An alias finds its command and the cursor lands on it.
-    type(input, "q");
-    await waitFor(() => rowNames().includes("/quit"), "quit by its alias");
-    // Among the others the letter finds (`/detail`'s summary says quiet), once the filter has settled.
-    await waitFor(() => selected() === "/quit", "the cursor on /quit");
+    type(input, "resume");
+    await waitFor(() => rowNames().includes("/sessions"), "sessions by its alias");
+    await waitFor(() => selected() === "/sessions", "the cursor on /sessions");
 
     // A word from a summary.
     type(input, "worktree");
     await waitFor(() => rowNames().join() === "/merge", "merge by its summary");
 
     // Enter on a command this app cannot run says why, and the palette stays.
-    type(input, "upload");
-    await waitFor(() => rowNames().join() === "/upload", "upload");
+    type(input, "merge");
+    await waitFor(() => rowNames().join() === "/merge", "merge");
     key(input, "Enter");
-    await waitFor(() => document.querySelector(".palette .notice")?.textContent === "not in the desktop app yet", "the reason");
+    await waitFor(() => document.querySelector(".palette .notice")?.textContent?.startsWith("branches and worktrees are the terminal client's"), "the reason");
     expect(palette()).not.toBeNull();
 
     // Enter on /settings leaves for This computer.
@@ -131,7 +139,7 @@ describe("the command palette", () => {
     const composer = await openSession();
     key(composer, "/");
     const dialog = await waitFor(palette, "the palette");
-    await waitFor(() => rowNames().length === COMMANDS.length, "the list");
+    await waitFor(() => rowNames().length === SHOWN, "the list");
     const input = dialog.querySelector<HTMLInputElement>("input")!;
 
     type(input, "goal make the suite green");
@@ -152,7 +160,7 @@ describe("the command palette", () => {
     const composer = await openSession();
     key(composer, "/");
     const dialog = await waitFor(palette, "the palette");
-    await waitFor(() => rowNames().length === COMMANDS.length, "the list");
+    await waitFor(() => rowNames().length === SHOWN, "the list");
     const input = dialog.querySelector<HTMLInputElement>("input")!;
 
     type(input, "review the parser");
@@ -178,7 +186,7 @@ describe("the command palette", () => {
     const composer = await openSession();
     key(composer, "/");
     const dialog = await waitFor(palette, "the palette");
-    await waitFor(() => rowNames().length === COMMANDS.length, "the list");
+    await waitFor(() => rowNames().length === SHOWN, "the list");
     const input = dialog.querySelector<HTMLInputElement>("input")!;
     const sends = (): string | null => dialog.querySelector(".detail .sends pre")?.textContent ?? null;
 
@@ -186,11 +194,19 @@ describe("the command palette", () => {
     await waitFor(() => selected() === "/review", "/review selected");
     expect(sends()).toBe("Review the change on this branch. Look hardest at $ARGUMENTS.");
 
-    // Twelve lines: eight shown, and the rest counted.
+    // Forty lines: twelve shown, and the rest counted.
     type(input, "audit");
     await waitFor(() => selected() === "/audit", "/audit selected");
-    expect(sends()?.split("\n")).toEqual(["Audit the dependencies, one at a time:", ...[1, 2, 3, 4, 5, 6, 7].map((n) => `${n}. check package ${n}`)]);
-    expect(dialog.querySelector(".detail .sends")?.textContent).toContain("… 4 more lines in the file");
+    expect(sends()?.split("\n")).toEqual(["Audit the dependencies, one at a time:", ...Array.from({ length: 11 }, (_, i) => `${i + 1}. check package ${i + 1}`)]);
+    expect(dialog.querySelector(".detail .sends")?.textContent).toContain("… 28 more lines in the file");
+    // The detail is a box of its own beside or under the list, never inside it, and the
+    // sheet keeps the list eight rows tall at least and gives the detail its own scroll:
+    // a long prompt takes no rows from the list (troupe #919). The pane measurements are
+    // in the pull request; jsdom lays nothing out.
+    expect(dialog.querySelector(".rows .detail")).toBeNull();
+    expect(css).toMatch(/\.palette \.rows \{\s*min-height: min\(18rem, 40vh\);/);
+    expect(css).toMatch(/\.palette \.detail \{[^}]*min-height: min\(7rem, 16vh\);[^}]*max-height: 30vh;[^}]*overflow-y: auto;/);
+    expect(css).toMatch(/\.palette > \.detail \{\s*grid-column: 2;/);
 
     // A built-in sends no prompt of its own, and says nothing of one.
     type(input, "goal");
@@ -208,7 +224,7 @@ describe("the command palette", () => {
     const run = async (line: string): Promise<void> => {
       key(composer, "/");
       const dialog = await waitFor(palette, "the palette");
-      await waitFor(() => rowNames().length === COMMANDS.length, "the list");
+      await waitFor(() => rowNames().length === SHOWN, "the list");
       type(dialog.querySelector<HTMLInputElement>("input")!, line);
       await waitFor(() => selected() === `/${line.split(" ")[0]}`, "the command selected");
       key(dialog.querySelector("input")!, "Enter");
@@ -238,5 +254,60 @@ describe("the command palette", () => {
     button("deny", audit)!.click();
     await waitFor(() => says("/audit was not sent. Run /audit again to be asked again"), "the reason in the transcript");
     expect(inputs()).toHaveLength(2);
+  });
+});
+
+// The palette speaks for this app (troupe #898): a row in the table's words for it where
+// they differ from the terminal's, none of the terminal client's own rows, and an agent's
+// row switching the session as the head's switch does.
+describe("the palette in this app's words", () => {
+  function paletteRow(name: string): HTMLElement | undefined {
+    return [...document.querySelectorAll<HTMLElement>(".palette .row")].find((r) => r.querySelector(".name")?.textContent === `/${name}`);
+  }
+
+  it("leaves out /quit and /upload, and says /cancel and /sessions as this app runs them", async () => {
+    const composer = await openSession();
+    key(composer, "/");
+    const dialog = await waitFor(palette, "the palette");
+    await waitFor(() => rowNames().length === SHOWN, "the list");
+
+    expect(rowNames()).not.toContain("/quit");
+    expect(rowNames()).not.toContain("/upload");
+    const input = dialog.querySelector<HTMLInputElement>("input")!;
+    type(input, "exit");
+    await waitFor(() => !rowNames().includes("/quit"), "no quit by its alias either");
+
+    type(input, "cancel");
+    await waitFor(() => selected() === "/cancel", "/cancel");
+    expect(paletteRow("cancel")!.textContent).toContain("Stop the agent mid-turn");
+    // No window in its usage either: this app has none.
+    expect(dialog.querySelector(".palette .detail")!.textContent).not.toMatch(/window/);
+    expect(paletteRow("cancel")!.textContent).not.toMatch(/window/);
+
+    type(input, "sessions");
+    await waitFor(() => selected() === "/sessions", "/sessions");
+    expect(paletteRow("sessions")!.textContent).toContain("Your sessions, newest first");
+    expect(dialog.querySelector(".palette .detail")!.textContent).not.toMatch(/window|directory/);
+  });
+
+  it("switches the session to an agent from its row, and sends what follows the name", async () => {
+    const composer = await openSession();
+    key(composer, "/");
+    const dialog = await waitFor(palette, "the palette");
+    await waitFor(() => rowNames().length === SHOWN, "the list");
+    await waitFor(() => daemon.calls.some((c) => c.method === "agents.list" && typeof c.params["session_id"] === "string"), "the session's own listing");
+
+    const input = dialog.querySelector<HTMLInputElement>("input")!;
+    type(input, "plan look at the parser");
+    await waitFor(() => selected() === "/plan", "/plan selected");
+    await waitFor(() => paletteRow("plan")?.classList.contains("unavailable") === false, "/plan enabled");
+    expect(dialog.querySelector(".palette .detail")!.textContent).toContain("Enter switches this session to plan");
+    key(input, "Enter");
+    await waitFor(() => palette() === null, "the palette to close");
+    await waitFor(() => daemon.calls.some((c) => c.method === "profile.switch" && c.params["profile"] === "plan"), "profile.switch");
+    await waitFor(() => daemon.calls.some((c) => c.method === "input.send" && c.params["text"] === "look at the parser"), "the rest sent as the next message");
+    // Switched first, so the message is the new agent's first turn.
+    const order = daemon.calls.map((c) => c.method).filter((m) => m === "profile.switch" || m === "input.send");
+    expect(order).toEqual(["profile.switch", "input.send"]);
   });
 });

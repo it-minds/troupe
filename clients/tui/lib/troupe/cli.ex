@@ -658,6 +658,7 @@ defmodule Troupe.CLI do
   def help do
     sections =
       Troupe.Commands.builtins()
+      |> Troupe.Commands.for_client("tui")
       |> Enum.chunk_by(& &1["section"])
       |> Enum.map_join("\n", fn [%{"section" => section} | _] = entries ->
         String.capitalize(section) <> "\n" <> columns(Enum.map(entries, &slash_row/1))

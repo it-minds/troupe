@@ -32,6 +32,11 @@ interface Row {
   created_at: number;
 }
 
+/** The agent a session given none runs as: `build` where the profile offers it, else its first; none where it offers none. */
+function defaultAgent(offered: string[]): string | null {
+  return offered.includes("build") ? "build" : (offered[0] ?? null);
+}
+
 /** The subject a break-glass token signs in as, as the plane's `Troupe.Plane.Breakglass.subject()` names it. */
 export const BREAKGLASS_SUBJECT = "breakglass";
 
@@ -59,9 +64,11 @@ export interface PlaneOptions {
    */
   room?: Record<string, { capacity: number; active: number; max_sessions?: number | null }>;
   /**
-   * The primaries each profile offers, by name, where they are not the default (`build`,
-   * `plan`, `explore`): what `profiles.list` answers as `agents` and what a create naming an
-   * agent is held to, as the plane holds it.
+   * The primaries each profile offers, by name, where they are not the default: the
+   * primaries of the profile's composition for the person asking (`profileSpecs`, its
+   * rule and their team's grant applied), or the built-in `build` and `plan` for a profile
+   * no spec names. What `profiles.list` answers as `agents`, what a create naming an agent
+   * is held to, and what a create naming none is given, as the plane holds it.
    */
   agents?: Record<string, string[]>;
   /** The teams every person signed in here is in, which `team:<name>` artifacts are for. */
@@ -87,7 +94,7 @@ export interface PlaneOptions {
   admin?: FakeAdmin;
   /** A plane from before a person's watch (`/v1/relay/watch`): `remote.list` is asked instead. */
   beforeWatch?: boolean;
-  /** What `me.clients` answers: the person's own clients as the plane last saw them. */
+  /** What `me.clients` answers: the person's own clients as the plane last saw them. Defaults to the administrative half's records of them, which Client versions counts. */
   clientsSeen?: Array<Record<string, unknown>>;
   /** What `me.memory` answers: the organisation's and the person's teams' documents. */
   memory?: Array<Record<string, unknown>>;
@@ -554,14 +561,28 @@ export class FakePlane {
     await closed;
   }
 
-  /** Put a session on the worker and in the index, as `session.create` would. */
-  seed(owner: string, params: { id?: string; profile?: string; title?: string; agent?: string | null; origin?: Row["origin"] } = {}): Row {
-    const id = params.id ?? `s-${++this.counter}`;
+  /**
+   * Put a session on the worker and in the index, as `session.create` would. Its ids are
+   * `s-p-<n>`, apart from the fake daemon's `s-l-<n>`, so a list holding both shows each.
+   * `prompt` is its first turn.
+   */
+  seed(owner: string, params: { id?: string; profile?: string; title?: string; agent?: string | null; origin?: Row["origin"]; prompt?: string } = {}): Row {
+    const id = params.id ?? `s-p-${++this.counter}`;
     const row: Row = { ...this.blankRow(id, owner, params.profile ?? "dev", params.title ?? null), agent: params.agent ?? null };
     if (params.origin) row.origin = params.origin;
     this.rows.set(id, row);
-    this.opts.worker.createSession(id, { profile: row.profile });
+    this.activate(row, params.prompt);
     return row;
+  }
+
+  /**
+   * Place a row's session on the worker: as the row's agent, or, for a row with none (a
+   * seeded one, standing in for a row from before the plane kept one), the profile's
+   * default, never the pod's own.
+   */
+  private activate(row: Row, prompt?: string): void {
+    const agent = row.agent ?? defaultAgent(this.agentsOf(row.profile, row.owner));
+    this.opts.worker.createSession(row.id, { profile: row.profile, ...(agent ? { agent } : {}), ...(prompt ? { prompt, owner: row.owner } : {}) });
   }
 
   /** How long a waiting create says to wait before asking again, in milliseconds. */
@@ -580,15 +601,26 @@ export class FakePlane {
     const row = this.rows.get(id);
     if (!row || row.state !== "pending") return;
     row.state = "active";
-    this.opts.worker.createSession(id, { profile: row.profile });
+    // The prompt it held while it waited is its first turn now.
+    const prompt = this.heldPrompts.get(id);
+    this.heldPrompts.delete(id);
+    this.activate(row, prompt);
   }
 
-  private agentsOf(profile: string): string[] {
-    return this.opts.agents?.[profile] ?? ["build", "plan", "explore"];
+  /** What a waiting session holds to start with, by id. */
+  private readonly heldPrompts = new Map<string, string>();
+
+  private agentsOf(profile: string, subject: string): string[] {
+    const set = this.opts.agents?.[profile];
+    if (set) return set;
+    const spec = (this.opts.profileSpecs ?? exampleProfiles()).find((p) => p.name === profile);
+    const view = spec ? composeProfile(spec, { teams: this.teamsOf(subject) }, { capacity: 0, active_sessions: 0 }) : null;
+    return view ? view.agents.filter((a) => a.mode === "primary").map((a) => a.name) : ["build", "plan"];
   }
 
+  /** How full a profile is: what a test set, else 8 places and its own active sessions, which `profiles.list` and `profile.get` both answer. */
   private roomOf(profile: string): { capacity: number; active: number; max_sessions?: number | null } {
-    return this.opts.room?.[profile] ?? { capacity: 8, active: this.opts.worker.sessions.size };
+    return this.opts.room?.[profile] ?? { capacity: 8, active: [...this.rows.values()].filter((r) => r.profile === profile && r.state === "active").length };
   }
 
   private blankRow(id: string, owner: string, profile: string, title: string | null): Row {
@@ -1148,7 +1180,7 @@ export class FakePlane {
               channel: "stable",
               bundle_version: "3",
               bundle_hash: "sha256:abc",
-              agents: this.agentsOf(p),
+              agents: this.agentsOf(p, subject),
               skills: [{ name: "review", description: "read a diff and comment" }],
               mcp_servers: ["github"],
             })),
@@ -1167,7 +1199,7 @@ export class FakePlane {
           (known ? specOfAdminProfile(known, [...this.opts.admin!.teams.values()].filter((t) => t.grants.some((g) => g.profile === wanted)).map((t) => t.name)) : undefined);
         const view =
           spec && (admin || profiles.includes(wanted))
-            ? composeProfile(spec, { teams: this.teamsOf(subject), admin }, { capacity: 8, active_sessions: [...this.rows.values()].filter((r) => r.profile === wanted && r.state === "active").length })
+            ? composeProfile(spec, { teams: this.teamsOf(subject), admin }, { capacity: this.roomOf(wanted).capacity, active_sessions: this.roomOf(wanted).active })
             : null;
         if (!view) return { error: { code: -32005, message: "not_found", data: { profile: wanted } } };
         return { result: view };
@@ -1193,10 +1225,16 @@ export class FakePlane {
       case "session.create": {
         const profile = String(params["profile"] ?? "");
         if (!profiles.includes(profile)) return { error: { code: -32002, message: "invalid_params", data: { profiles } } };
-        const agent = params["agent"] === undefined ? undefined : String(params["agent"]);
-        if (agent && !this.agentsOf(profile).includes(agent)) {
-          return { error: { code: -32602, message: "invalid_params", data: { field: "agent", agent, agents: this.agentsOf(profile) } } };
+        // The agent named, or the profile's default (`build` where offered, else the first),
+        // kept on the row; one the profile lacks, or a profile offering none, is refused.
+        const offered = this.agentsOf(profile, subject);
+        const named = params["agent"] === undefined || params["agent"] === null ? undefined : String(params["agent"]);
+        if (named !== undefined && !offered.includes(named)) {
+          return { error: { code: -32602, message: "invalid_params", data: { field: "agent", agent: named, reason: `no primary agent named ${named}`, agents: offered } } };
         }
+        const agent = named ?? defaultAgent(offered);
+        if (!agent) return { error: { code: -32602, message: "invalid_params", data: { field: "agent", reason: `${profile} offers no agent a session can start as`, agents: [] } } };
+        const prompt = typeof params["prompt"] === "string" && params["prompt"].trim() ? params["prompt"] : undefined;
         const title = params["title"] === undefined ? undefined : String(params["title"]);
         const room = this.opts.room?.[profile];
         if (room && typeof room.max_sessions === "number" && room.active >= room.max_sessions) {
@@ -1205,12 +1243,13 @@ export class FakePlane {
         }
         if (room && room.active >= room.capacity) {
           // No room, and more coming: the session exists, waits, and holds its prompt.
-          const id = `s-${++this.counter}`;
-          const row: Row = { ...this.blankRow(id, subject, profile, title ?? null), agent: agent ?? null, state: "pending" };
+          const id = `s-p-${++this.counter}`;
+          const row: Row = { ...this.blankRow(id, subject, profile, title ?? null), agent, state: "pending" };
           this.rows.set(id, row);
+          if (prompt) this.heldPrompts.set(id, prompt);
           return { result: { session_id: id, epoch: 1, state: "pending", mode: "waiting", reason: `waiting for a free place on ${profile}`, retry_after_ms: this.retryAfterMs } };
         }
-        const row = this.seed(subject, { profile, ...(title === undefined ? {} : { title }), agent: agent ?? null });
+        const row = this.seed(subject, { profile, ...(title === undefined ? {} : { title }), agent, ...(prompt ? { prompt } : {}) });
         if (room) room.active += 1;
         return { result: this.attachment(row, subject, name, "owner", "activate") };
       }
@@ -1282,7 +1321,7 @@ export class FakePlane {
 
       // A person's own clients, as the plane last saw them, against its policy now.
       case "me.clients":
-        return { result: { clients: this.opts.clientsSeen ?? [] } };
+        return { result: { clients: this.opts.clientsSeen ?? this.opts.admin?.clientsOf(subject) ?? [] } };
 
       // The memory a person's machine reads into every session: signed, as the plane signs it.
       // With `entries`, as a client showing memory asks it: each document's and their own's

@@ -556,6 +556,13 @@ const SETTINGS: Setting[] = [
   { key: "pins_allowed", group: "team_defaults", type: "boolean", fallback: true, summary: "Whether a session may be pinned against eviction.", consequence: "Off here and no team may turn it on, whatever their own setting says." },
   { key: "members_may_control", group: "team_defaults", type: "boolean", fallback: true, summary: "Whether a team's members may drive each other's sessions.", consequence: "Off here and no team may turn it on." },
   {
+    key: "client_release_url",
+    group: "releases",
+    type: "string",
+    summary: "Where people's machines download releases from, each at <url>/v<version>/ as GitHub lays them out: this plane's own /downloads, a mirror, or empty for GitHub's.",
+    consequence: "troupe update and the desktop app install from here, and only what the release key signed. Empty means GitHub, which a closed network cannot reach.",
+  },
+  {
     key: "client_provider",
     group: "client_defaults",
     type: "enum",
@@ -626,6 +633,7 @@ const GROUPS = [
   { key: "administration", title: "Who administers this platform", blurb: "Both of these decide whether anybody can use this console at all." },
   { key: "provisioning", title: "How a change reaches the cluster", blurb: "Both are the deployment's to decide." },
   { key: "team_defaults", title: "What a new team starts with", blurb: "Applied when a group is enabled as a team." },
+  { key: "releases", title: "Where people's machines get releases", blurb: "The plane names it in the version policy it signs. Every release is still checked against the release key." },
   {
     key: "client_defaults",
     title: "What people's own machines talk to",
@@ -1598,7 +1606,7 @@ export class FakeAdmin {
           ? { name: "Platform admins", ok: false, detail: "No platform admin group is set, so nobody who signs in is a platform admin.", took_ms: 0 }
           : members === null
             ? { name: "Platform admins", ok: false, detail: `${candidate} has never arrived in the ${claim} claim of anybody's token. Either the group id is wrong, or the provider is not sending group claims, or nobody in it has signed in yet.`, took_ms: 0 }
-            : { name: "Platform admins", ok: members.length > 0, detail: `${members.length} person/people known here carry ${candidate} in the ${claim} claim${you ? ", including you." : ", and you are not one of them."}`, took_ms: 0 };
+            : { name: "Platform admins", ok: members.length > 0, detail: `${members.length === 1 ? "1 person" : `${members.length} people`} known here ${members.length === 1 ? "carries" : "carry"} ${candidate} in the ${claim} claim${you ? ", including you." : ", and you are not one of them."}`, took_ms: 0 };
         const checks = [...this.providerChecks(this.signInValues()), adminCheck];
         return { result: { checks, ok: checks.every((c) => c.ok), group: candidate, redirect_uri: `${this.baseUrl()}/console` } };
       }
@@ -3389,8 +3397,23 @@ export class FakeAdmin {
   releases: Array<{ version: string; state: "mirrored" | "mirroring"; files: number }> = [];
   /** Versions whose manifest the release keys did not sign: mirroring one is refused. */
   readonly unsignedReleases = new Set<string>();
-  /** The `client_release_url` setting. */
-  releaseUrl: string | null = null;
+  /** The `client_release_url` setting, as the settings list holds it: empty or unset is GitHub's. */
+  get releaseUrl(): string | null {
+    const url = this.stored.get("client_release_url");
+    return typeof url === "string" && url !== "" ? url : null;
+  }
+
+  set releaseUrl(url: string | null) {
+    if (url === null) this.stored.delete("client_release_url");
+    else this.stored.set("client_release_url", url);
+  }
+
+  /** One person's clients as `me.clients` answers them: the same records Client versions counts, against the policy now. */
+  clientsOf(subject: string): Array<Record<string, unknown>> {
+    return this.seen
+      .filter((s) => s.subject === subject)
+      .map((s) => ({ component: s.component, version: s.version, platform: s.platform, since: s.since, seen_at: s.seen_at, standing: standing(this.policies[s.component]!, s.version), recommended: this.policies[s.component]!.recommended }));
+  }
 
   private signingJson(): { algorithm: string; public_key: string; fingerprint: string; version: number; created_at: string; versions: unknown[] } {
     const versions = Array.from({ length: this.signingVersions }, (_v, i) => this.signingVersions - i).map((version) => ({
@@ -4165,9 +4188,9 @@ export function exampleAdmin(): FakeAdmin {
   });
   admin.github.webhook_secret_version = 1;
   admin.deliveries.push(
-    { id: "7a1e0c00-1", event: "issues", action: "opened", received_at: "2026-10-13T02:58:00Z", outcome: { runs: ["nightly-deps"] } },
+    { id: "7a1e0c00-1", event: "issues", action: "opened", received_at: "2026-10-13T02:58:00Z", outcome: { fired: [{ trigger: "nightly-deps", run: "r-0c11a7", session_id: null }] } },
     { id: "7a1e0c00-2", event: "pull_request_review", action: "submitted", received_at: "2026-10-13T09:12:00Z", outcome: { resumed: "s-7f3a9c24" } },
-    { id: "7a1e0c00-3", event: "push", action: null, received_at: "2026-10-13T09:30:00Z", outcome: { reason: "nothing here acts on a push" } },
+    { id: "7a1e0c00-3", event: "push", action: null, received_at: "2026-10-13T09:30:00Z", outcome: { ignored: "push is not an event this plane acts on" } },
   );
   admin.githubKnows = { app_id: 4242, slug: "troupe-example", fingerprint: "SHA256:qZk3cX9mVb2fT0aLr8Hn1yWp4sEo6uJd7gKi5", installations: [{ owner: "example-org", installation_id: 77001 }] };
   // The build box is a machine of somebody's, registered and enrolled; a second never was.

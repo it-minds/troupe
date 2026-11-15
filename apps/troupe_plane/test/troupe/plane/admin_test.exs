@@ -491,6 +491,8 @@ defmodule Troupe.Plane.AdminTest do
       assert {:ok, platform} = Admin.identity_check(context.root, "platform")
       assert List.last(platform.checks).ok
       assert List.last(platform.checks).detail =~ "including you."
+      # A count says its noun in the right number, not both.
+      assert List.last(platform.checks).detail =~ ~r/\A(1 person known here carries|\d+ people known here carry) platform /
     end
 
     test "a profile's choices are the protocol's provider types and the plane's size classes",

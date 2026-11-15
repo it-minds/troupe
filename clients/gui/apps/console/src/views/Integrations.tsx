@@ -31,7 +31,7 @@ import { useState } from "react";
 import type { JSX } from "react";
 import type { GitHubApp, GitHubAppChange, GitHubCheck, GitHubDelivery, GitHubRepositoryTest, IntegrationServer, Integrations as IntegrationsAnswer, PlaneReleases, SigningKey } from "@troupe/client";
 import { describeError, show, useConsole, useLoad } from "../console";
-import { AuditNote, Checks, DetailList, Empty, Field, Fields, GitopsProblem, Loaded, Locked, Preview, Region, Status, changed, useChange, when } from "./bits";
+import { AuditNote, Checks, Empty, Field, Fields, GitopsProblem, Loaded, Locked, Preview, Region, Status, changed, useChange, when } from "./bits";
 import type { DiffLine } from "./bits";
 
 export function Integrations(): JSX.Element {
@@ -127,22 +127,24 @@ function TokenPermissions({ test }: { test: GitHubRepositoryTest }): JSX.Element
         A token for <span className="mono">{test.name}</span> (installation {test.installation_id}) was minted
         {test.revoked ? " and revoked at once" : ", and GitHub did not confirm it revoked: it expires within the hour"}. It is never shown.
       </p>
-      <table className="permissions">
-        <thead>
-          <tr>
-            <th scope="col">Permission</th>
-            <th scope="col">There</th>
-          </tr>
-        </thead>
-        <tbody>
-          {keys.map((k) => (
-            <tr key={k}>
-              <th scope="row">{PERMISSION_WORDS[k] ?? k.replace(/_/g, " ")}</th>
-              <td>{test.permissions[k] ?? "none"}</td>
+      <div className="scroll">
+        <table className="permissions">
+          <thead>
+            <tr>
+              <th scope="col">Permission</th>
+              <th scope="col">There</th>
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {keys.map((k) => (
+              <tr key={k}>
+                <th scope="row">{PERMISSION_WORDS[k] ?? k.replace(/_/g, " ")}</th>
+                <td>{test.permissions[k] ?? "none"}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }
@@ -357,6 +359,7 @@ function GitHubCard({ app, onApplied }: { app: GitHubApp; onApplied: () => void 
           effects={appWords(app, change)}
           verb="Apply"
           onCancel={() => setPreviewing(false)}
+          cancel="Back to editing"
           onConfirm={async () => {
             await apply("github.put", "app", () => admin.putGithub(change), "The GitHub App is changed.", (a) => (a as GitHubApp).changes);
             setPreviewing(false);
@@ -719,6 +722,34 @@ function Notify({ answer }: { answer: IntegrationsAnswer }): JSX.Element {
   );
 }
 
+/**
+ * What the plane did with a delivery, as a sentence: the runs it fired, the session it sent
+ * back to work, or why it did neither. The plane's record keys each of these by a field
+ * (`fired`, `resumed`, `ignored`, `failed`, `ping`); the reader is told what happened, not
+ * which field said so.
+ */
+export function outcomeWords(outcome: Record<string, unknown>): string {
+  const text = (v: unknown): string => (typeof v === "string" ? v : show(v));
+  const end = (s: string): string => (/[.!?]$/.test(s) ? s : `${s}.`);
+  if (outcome["ping"]) return "GitHub checked that the webhook answers.";
+  if (typeof outcome["resumed"] === "string") return `Sent ${outcome["resumed"]} back to work.`;
+  if (outcome["ignored"] !== undefined) return end(`Nothing done: ${text(outcome["ignored"])}`);
+  if (outcome["failed"] !== undefined) return end(`Failed: ${text(outcome["failed"])}`);
+  if (Array.isArray(outcome["fired"])) {
+    const each = (outcome["fired"] as Array<Record<string, unknown>>).map((f) => {
+      const trigger = text(f["trigger"]);
+      if (f["refused"] !== undefined) return `${trigger} was refused: ${text(f["refused"])}`;
+      if (f["skipped"] !== undefined) return `${trigger}'s run ${text(f["run"])} was skipped: ${text(f["skipped"])}`;
+      return `fired ${trigger}, run ${text(f["run"])}`;
+    });
+    const said = each.join("; ");
+    if (!said) return "Nothing fired.";
+    return end(said.charAt(0).toUpperCase() + said.slice(1));
+  }
+  const rest = Object.values(outcome).map(text).join("; ");
+  return rest ? end(rest.charAt(0).toUpperCase() + rest.slice(1)) : "—";
+}
+
 /** What the App's webhook took lately, and what the plane made of each: a platform admin's. */
 function Deliveries(): JSX.Element | null {
   const { admin, role } = useConsole();
@@ -754,7 +785,7 @@ function Deliveries(): JSX.Element | null {
                         {d.event}
                         {d.action ? `.${d.action}` : ""}
                       </td>
-                      <td>{d.outcome ? <DetailList detail={d.outcome} /> : "—"}</td>
+                      <td>{d.outcome ? outcomeWords(d.outcome) : "—"}</td>
                       <td className="mono">{d.id}</td>
                     </tr>
                   ))}

@@ -105,6 +105,8 @@ export type Entry =
       decision: string | undefined;
       /** Set when another client got there first. */
       resolvedBy: string | undefined;
+      /** Who answered it, the subject `approval_decided`'s actor names; absent where it names nobody. */
+      decidedBy?: string;
       /** Set when it ended unanswered: its call was cancelled, or timed out while it waited. */
       closed: boolean;
       /**
@@ -236,6 +238,24 @@ export interface TokenUsage {
   output_tokens: number;
 }
 
+/** How full the model's context is: the tokens in it, and the window when the harness says it. */
+export interface ContextFill {
+  used: number;
+  window: number | undefined;
+}
+
+/**
+ * A `context_status` event's fill (troupe #920): `{window_tokens, used_tokens}`, both
+ * whole numbers, the window more than none. Anything else is not one, and is ignored.
+ */
+export function contextStatus(data: Record<string, unknown>): ContextFill | null {
+  const window = data["window_tokens"];
+  const used = data["used_tokens"];
+  if (typeof window !== "number" || typeof used !== "number") return null;
+  if (!Number.isInteger(window) || !Number.isInteger(used) || window <= 0 || used < 0) return null;
+  return { used, window };
+}
+
 /**
  * What a turn cost, from the `turn` on the event that ends it (`turn_ended`, `cancelled`,
  * `agent_done`): its model calls, its subagents' and a compaction's summariser's among
@@ -292,6 +312,13 @@ export interface TranscriptState {
   costMicros: number | undefined;
   /** The session's tokens: every `llm_response.usage`, and a compaction's summariser's. */
   usage: TokenUsage | undefined;
+  /**
+   * How full the model's context is: `used`, the tokens the root agent's last model call
+   * sent (its `usage`'s input, cache read and cache write), and `window`, the model's
+   * context window, which only a `context_status` event says (troupe #920); undefined
+   * before the first call.
+   */
+  context: ContextFill | undefined;
   /** The session's goal from `goal_set`, until `goal_cleared`: what every turn works towards. */
   goal: string | undefined;
   /** The latest loop towards the goal, running or how it ended; undefined before the first. */
@@ -331,6 +358,10 @@ export interface CurtainState {
   sentAt: number | undefined;
   requestAt: number | undefined;
   byteAt: number | undefined;
+  /** Which turn of the session this is, counted from one: the picking rule's seed, with the session's id. */
+  turn: number;
+  /** When the turn began, by this client's clock: past a few minutes the line says it is a long one. */
+  turnAt: number | undefined;
 }
 
 /**
@@ -351,6 +382,46 @@ export interface OnboardingSuggested {
   due: string | undefined;
   /** `first`, `stale`, `outdated` or `none`, the same way. */
   briefDue: string | undefined;
+  /**
+   * What the harness's sentence was made of, for a client that words it for its own
+   * surface: the parts due (`first`, `outdated`, `brief`), the workspace's proposals by
+   * kind (`instructions`, `rules`, ...), how many files a client would ask about, and the
+   * versions the outdated parts name. Empty or undefined from a daemon that sent none.
+   */
+  reasons: string[];
+  proposals: Record<string, number>;
+  files: number | undefined;
+  onboardedVersion: number | undefined;
+  onboardingVersion: number | undefined;
+  briefVersion: number | undefined;
+  surveyVersion: number | undefined;
+}
+
+/** The kinds of file an `onboarding_suggested` counts, in the harness's order, and their words. */
+const ONBOARD_KINDS: Array<[string, string, string]> = [
+  ["instructions", "AGENTS.md", "AGENTS.md files"],
+  ["rules", "rule", "rules"],
+  ["agents", "agent", "agents"],
+  ["commands", "command", "commands"],
+  ["skills", "skill file", "skill files"],
+  ["workflows", "workflow", "workflows"],
+  ["mcp", "MCP servers file", "MCP servers files"],
+  ["other", "other file", "other files"],
+];
+
+/**
+ * The files an `onboarding_suggested` would bring in, in words: "1 AGENTS.md and 2 rules"
+ * by kind as the harness counts them, else "4 files"; undefined when it said neither.
+ */
+export function onboardingFiles(o: Pick<OnboardingSuggested, "proposals" | "files">): string | undefined {
+  const words: string[] = [];
+  for (const [kind, one, many] of ONBOARD_KINDS) {
+    const n = o.proposals[kind];
+    if (n !== undefined && n > 0) words.push(n === 1 ? `1 ${one}` : `${n} ${many}`);
+  }
+  if (words.length > 0) return words.length === 1 ? words[0] : `${words.slice(0, -1).join(", ")} and ${words.at(-1)}`;
+  if (o.files !== undefined && o.files > 0) return o.files === 1 ? "1 file" : `${o.files} files`;
+  return undefined;
 }
 
 export interface PresenceMember {
@@ -376,7 +447,7 @@ export const emptyTranscript: TranscriptState = {
   thinking: "",
   thinkingAt: undefined,
   agentState: {},
-  curtain: { phases: {}, since: undefined, sentAt: undefined, requestAt: undefined, byteAt: undefined },
+  curtain: { phases: {}, since: undefined, sentAt: undefined, requestAt: undefined, byteAt: undefined, turn: 0, turnAt: undefined },
   pending: [],
   todo: [],
   presence: [],
@@ -388,6 +459,7 @@ export const emptyTranscript: TranscriptState = {
   failed: undefined,
   costMicros: undefined,
   usage: undefined,
+  context: undefined,
   goal: undefined,
   loop: undefined,
   onboarding: undefined,
@@ -740,6 +812,18 @@ function addUsage(sum: TokenUsage | undefined, more: TokenUsage | undefined): To
 }
 
 /**
+ * The context after a root model call: what the call sent is what the context holds now
+ * (output comes back into it on the next call). The window stays whatever a
+ * `context_status` said; a call with no usage leaves the fill as it was.
+ */
+function filled(was: ContextFill | undefined, usage: TokenUsage | undefined): ContextFill | undefined {
+  if (!usage) return was;
+  const used = usage.input_tokens + usage.cache_read + usage.cache_write;
+  if (used === 0) return was;
+  return { used, window: was?.window };
+}
+
+/**
  * The line under a turn the event ends, as the entries to add after the event's own: one
  * when it carries a `turn` that made a call, none for a turn that made none or a log
  * written before turns were counted.
@@ -783,7 +867,7 @@ function systemText(d: DurableEvent): string {
     case "session_dormant":
       return "session went dormant";
     case "session_activated":
-      return `session activated on ${str(d.data["pod"], "a pod")}`;
+      return "session woke on the platform";
     case "session_resumed":
       return d.data["moved"] ? "session resumed on another device" : "session resumed";
     case "fs_changed":
@@ -937,6 +1021,12 @@ function writtenAt(d: DurableEvent): number | undefined {
  */
 export function fold(state: TranscriptState, e: TroupeEvent, options: FoldOptions = {}): TranscriptState {
   const now = (): number => options.now ?? Date.now();
+  // The context window and what is in it, durable or not: the ring's, and nothing else's.
+  if (e.type === "context_status") {
+    const fill = contextStatus(e.data);
+    const kept = isDurable(e) ? { ...state, lastSeq: Math.max(state.lastSeq, e.seq) } : state;
+    return fill && isRoot(e.agent) ? { ...kept, context: fill } : kept;
+  }
   if (!isDurable(e)) return foldEphemeral(state, e, now);
 
   const d = e;
@@ -965,9 +1055,14 @@ export function fold(state: TranscriptState, e: TroupeEvent, options: FoldOption
       // A line somebody sent, or a loop's, starts a wait on the daemon's request too; the
       // harness's own notes to the model do not.
       const source = str(d.data["source"], "user");
-      const sentAt = ["harness", "subagent"].includes(source) ? next.curtain.sentAt : now();
+      const own = !["harness", "subagent"].includes(source);
+      const sentAt = own ? now() : next.curtain.sentAt;
       const started = isRoot(d.agent)
-        ? { ...next, failed: undefined, curtain: { ...next.curtain, phases: {}, sentAt, requestAt: undefined, byteAt: undefined } }
+        ? {
+            ...next,
+            failed: undefined,
+            curtain: { ...next.curtain, phases: {}, sentAt, requestAt: undefined, byteAt: undefined, turn: next.curtain.turn + (own ? 1 : 0), turnAt: own ? sentAt : next.curtain.turnAt },
+          }
         : next;
       // A loop's iteration starts the agent's turn like any input, but nobody typed it:
       // the note `loop_iteration_started` left says which iteration it is, rather than
@@ -1070,6 +1165,7 @@ export function fold(state: TranscriptState, e: TroupeEvent, options: FoldOption
         error: undefined,
         costMicros: cost === undefined ? next.costMicros : (next.costMicros ?? 0) + cost,
         usage: addUsage(next.usage, usageOf(d.data["usage"])),
+        context: isRoot(d.agent) ? filled(next.context, usageOf(d.data["usage"])) : next.context,
       };
     }
 
@@ -1254,8 +1350,18 @@ export function fold(state: TranscriptState, e: TroupeEvent, options: FoldOption
 
     // What a session's start found due: onboarding other tools' files, or the brief
     // (troupe Decisions 827 and 835). The harness's own sentence goes in the stream, and
-    // what is due is kept for the screen that asks.
-    case "onboarding_suggested":
+    // what is due, and what the sentence was made of, is kept for the screen that asks.
+    case "onboarding_suggested": {
+      const reasons = Array.isArray(d.data["reasons"]) ? d.data["reasons"].filter((r): r is string => typeof r === "string") : [];
+      const given = d.data["proposals"];
+      const proposals: Record<string, number> = {};
+      if (given && typeof given === "object" && !Array.isArray(given)) {
+        for (const [kind, n] of Object.entries(given as Record<string, unknown>)) {
+          const count = num(n);
+          if (count !== null) proposals[kind] = count;
+        }
+      }
+      const counts = d.data["counts"] as Record<string, unknown> | undefined;
       return {
         ...next,
         onboarding: {
@@ -1263,9 +1369,17 @@ export function fold(state: TranscriptState, e: TroupeEvent, options: FoldOption
           workspace: str(d.data["workspace"]) || undefined,
           due: str(d.data["due"]) || undefined,
           briefDue: str(d.data["brief_due"]) || undefined,
+          reasons,
+          proposals,
+          files: num(counts?.["files"]) ?? undefined,
+          onboardedVersion: num(d.data["onboarded_version"]) ?? undefined,
+          onboardingVersion: num(d.data["onboarding_version"]) ?? undefined,
+          briefVersion: num(d.data["brief_version"]) ?? undefined,
+          surveyVersion: num(d.data["survey_version"]) ?? undefined,
         },
         entries: [...state.entries, { kind: "system", ...base, type: d.type, text: str(d.data["message"], "other tools' files are here: troupe onboard brings them in") }],
       };
+    }
 
     // Something the configuration did to the session, said once under the root: the
     // harness's own sentence (troupe #644, an organisation's output ceiling shortened the
@@ -1310,11 +1424,17 @@ export function fold(state: TranscriptState, e: TroupeEvent, options: FoldOption
     case "approval_decided": {
       const id = str(d.data["call_id"]);
       const answered = answeredOf(d.data);
+      const by = d.actor?.subject;
       return {
         ...next,
         entries: state.entries.map((en) =>
           en.kind === "approval" && en.callId === id
-            ? { ...en, decision: str(d.data["decision"]), ...(answered && (en.delegation || en.publication) ? { answered } : {}) }
+            ? {
+                ...en,
+                decision: str(d.data["decision"]),
+                ...(answered && (en.delegation || en.publication) ? { answered } : {}),
+                ...(typeof by === "string" && by !== "" ? { decidedBy: by } : {}),
+              }
             : en,
         ),
       };
@@ -1367,7 +1487,7 @@ export function fold(state: TranscriptState, e: TroupeEvent, options: FoldOption
         ...next,
         loop,
         // An iteration is a turn of its own, and the curtain line's words start again.
-        curtain: { ...next.curtain, phases: {} },
+        curtain: { ...next.curtain, phases: {}, turn: next.curtain.turn + 1, turnAt: now() },
         entries: [...state.entries, { kind: "system", ...base, type: d.type, text: `loop iteration ${iteration}${loop.max ? `/${loop.max}` : ""}` }],
       };
     }

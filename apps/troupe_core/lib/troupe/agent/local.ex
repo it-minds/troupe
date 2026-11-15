@@ -32,10 +32,9 @@ defmodule Troupe.Agent.Local do
   # command, as the built-in `plan` and `explore` deny them.
   @writers ~w(write_file edit_file shell)
 
-  @on_a_pod "On a pod the agents come from the profile's bundle and are read-only here: " <>
-              "change them in the console"
+  @on_a_pod "On the platform the agents come from the profile's bundle and are read-only here."
 
-  @doc "Why nothing is written on a pod (Decision 841)."
+  @doc "Why nothing is written on a pod, in the words a person reads."
   @spec on_a_pod() :: String.t()
   def on_a_pod, do: @on_a_pod
 

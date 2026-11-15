@@ -187,20 +187,29 @@ have to expand anything to learn that `shell` has been going for four minutes.
 **The flourish is a prefix**, never a replacement, and the first thing to go where there
 is less room: a window's tile in the terminal says the facts alone.
 
-**The set is small and written down here.** By what the agent is doing, the n-th time it
-does that in a turn takes the n-th line; past the end of a list the line is its facts
-alone. So nothing repeats within a turn, and a new turn starts each list again.
+**The words are one file, [lines.json](lines.json)**, for every loading and starting state
+in the terminal, the desktop app and the console, by what each is said over: `starting`,
+`thinking`, `reading` (calls that only read: `read_file`, `grep`, `glob`, `list_files`,
+`git_read`, `read_branch`, `read_output`, `recall`, `web_fetch`), `acting` (any other
+call), `compacting`, `long_turn`, `casting`, `waiting_for_a_place`, `daemon_starting`,
+`signing_in`, `checking_for_an_update`, `first_run`, `loading`, and the two sentence lists,
+`start_screen` and `curtain_up`. The clients read it through generated readers (`pnpm
+lines`, `mix troupe.lines`), checked in CI; a line is added to the file and to nothing
+else.
 
-| over | the lines, in order |
-|---|---|
-| starting | the house lights go down |
-| thinking | the actors are powdering their nose · running lines in the wings · the prompter finds the page |
-| calls that only read (`read_file`, `grep`, `glob`, `list_files`, `git_read`, `read_branch`, `read_output`, `recall`, `web_fetch`) | reading the script · checking the prompt book · rereading the second act |
-| any other call | fetching props · shifting the scenery · the stagehands are at it |
-| compacting the context | cutting the second act · trimming for time |
+**The picking rule.** Per turn (or per wait) a kind's lines are taken in an order shuffled
+from a seed: the turn's id, else the session's, else a counter. The n-th time the agent
+does that in a turn takes the n-th line taken; past the end of a list the line is its facts
+alone. So nothing repeats within a turn, and two turns do not open the same way. Both
+clients use the one rule, and a fixture of seed to order keeps their tests to it. A turn
+past five minutes says a `long_turn` line in place of the phase's.
 
-**The register is fixed**: theatre, dry, never sorry, never pretending to be a person.
-A line is localisable, since the facts beside it are.
+**The register is fixed**: theatre, dry, never sorry, never pretending to be a person, no
+exclamation mark, no emoji, and the vocabulary of a working theatre (backstage, the
+prompter, the flies, the green room, the half, the interval, the understudy, the ghost
+light), not of a performance. A line the curtain says is a lower-case fragment, since it
+follows `◐` and precedes ` — the facts`; a full sentence stands only where it stands alone
+(the start screen's quip). A line is localisable, since the facts beside it are.
 
 **No flourish** on what waits on a person (`waiting for you`, in the reserved colour), on
 a model error, or in a subagent's own pane. **No curtain line at all** in a headless run,

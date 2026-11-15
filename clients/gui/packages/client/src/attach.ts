@@ -112,7 +112,7 @@ export class SessionAttachment {
       return await command();
     } catch (e) {
       if (!notHere(e) || this.stopped) throw e;
-      await this.follow("the pod no longer holds the session");
+      await this.follow("the session moved on the platform");
       if (this.status !== "live") throw e;
       return command();
     }

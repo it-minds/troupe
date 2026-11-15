@@ -1,5 +1,5 @@
 // Which agent a window runs, in the session's head, and the one agent picker over it
-// (troupe #503 and #594, Decision 841).
+// (troupe #503 and #594).
 //
 // `profile.switch` changes the agent of a session, or of a branch, which is a session:
 // the conversation stays, and from its next turn the new definition's tools, permissions,
@@ -16,18 +16,45 @@
 //
 // From the picker a session is started on the agent too, beside this one (in the same
 // workspace on this computer, on the same profile on the platform), and a person's or a
-// repository's agent is opened in their editor.
+// repository's agent is opened in their editor. Only this computer's files are opened: on
+// the platform the dialog says where the agents come from instead, and offers no edit.
 
 import { useEffect, useState } from "react";
 import type { JSX } from "react";
 import { onThisComputer } from "@troupe/client";
-import type { AgentRow, AuthSession, DaemonClient, SessionKind } from "@troupe/client";
+import type { AgentRow, AuthSession, DaemonClient, SessionKind, SessionView } from "@troupe/client";
 import type { SessionHandle } from "../hooks";
 import { AgentPicker } from "./AgentPicker";
 import type { PickerAction } from "./AgentPicker";
 import { Dialog } from "./bits";
 
-/** The agents a session could run, by its own listing, or as an older server answered. */
+/**
+ * The agents a session could run, by its own listing, or as an older server answered: the
+ * workspace's `agents.list` on this computer, else the agents section of its `commands.list`.
+ * The head's switch offers these, and the palette switches to the same ones.
+ */
+export function sessionAgents(view: SessionView, daemon: DaemonClient | null, local: boolean, workspace: string | null): Promise<AgentRow[]> {
+  const older = (): Promise<AgentRow[]> =>
+    local && daemon && workspace
+      ? daemon.listAgents(workspace).then((r) => r.agents)
+      : view.commands().then((r) =>
+          r.commands
+            .filter((c) => c.section === "agents" && c.source === "agent")
+            .map((c) => ({ name: c.name, description: c.summary, source: "bundle", layer: "bundle" as const })),
+        );
+  // Asked inside a promise: a view between sockets throws as it is asked, and that is a
+  // refusal to say, not a crash of the screen.
+  return Promise.resolve()
+    .then(() => view.agents())
+    .then((r) => r.agents)
+    .catch(() => older());
+}
+
+/** Whether a session can be switched to an agent of its listing: a primary it can run. */
+export function switchable(row: AgentRow): boolean {
+  return (row.mode === undefined || row.mode === "primary") && row.available !== false;
+}
+
 function useRows(view: SessionHandle, daemon: DaemonClient | null, kind: SessionKind, workspace: string | null): { rows: AgentRow[] | null; error: string | null } {
   const [rows, setRows] = useState<AgentRow[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -40,18 +67,7 @@ function useRows(view: SessionHandle, daemon: DaemonClient | null, kind: Session
     let live = true;
     const v = view.view;
     if (!v) return;
-    const older = (): Promise<AgentRow[]> =>
-      local && workspace
-        ? daemon!.listAgents(workspace).then((r) => r.agents)
-        : v.commands().then((r) =>
-            r.commands
-              .filter((c) => c.section === "agents" && c.source === "agent")
-              .map((c) => ({ name: c.name, description: c.summary, source: "bundle", layer: "bundle" as const })),
-          );
-    void v
-      .agents()
-      .then((r) => r.agents)
-      .catch(() => older())
+    void sessionAgents(v, daemon, local, workspace)
       .then((r) => {
         if (!live) return;
         setRows(r);
@@ -75,7 +91,6 @@ export function AgentSwitch({
   planeProfile,
   current,
   canChange,
-  onAbout,
   onStarted,
 }: {
   view: SessionHandle;
@@ -89,8 +104,6 @@ export function AgentSwitch({
   planeProfile?: string | null;
   current: string | null;
   canChange: boolean;
-  /** Open the agent in the agents manager, where the session is this computer's. */
-  onAbout?: ((name: string) => void) | undefined;
   /** A session started from the picker, to open. */
   onStarted?: ((id: string, kind: SessionKind, workspace?: string) => void) | undefined;
 }): JSX.Element | null {
@@ -101,7 +114,6 @@ export function AgentSwitch({
 
   const switchTo: PickerAction = canChange
     ? async (name) => {
-        if (name === current) throw new Error(`This session runs ${name} already.`);
         await view.switchProfile(name);
         setOpen(false);
       }
@@ -128,26 +140,26 @@ export function AgentSwitch({
 
   return (
     <div className="agent-switch">
+      {/* A chip in the composer: the agent, which the next turn runs, and a press away the
+          dialog that switches it, starts another session on one, or edits one. */}
       <button
         type="button"
-        className="agent-current"
+        className="agent-current chip"
         aria-haspopup="dialog"
         aria-expanded={open}
         aria-label="Agent"
-        title="The agent this session runs: switch it, start another session on one, or edit one."
+        title="The agent this session runs: switch it from the next turn, start another session on one, or edit one."
         onClick={() => setOpen((o) => !o)}
       >
-        Agent <span className="mono">{current ?? "—"}</span>
+        <span className="dot agent-dot" aria-hidden="true" />
+        <span className="mono">{current ?? "—"}</span>
+        <span aria-hidden="true"> ▾</span>
       </button>
-      {onAbout && current && (
-        <button type="button" className="link" onClick={() => onAbout(current)}>
-          About
-        </button>
-      )}
       {open && (
         <Dialog label="The agent this session runs" onClose={() => setOpen(false)} className="agent-dialog">
           <h1>Agent</h1>
-          <AgentPicker label="Agents" rows={rows} error={error} current={current} start={start} switchTo={switchTo} />
+          {kind === "team" && <p className="note">{planeProfile ? `The agents on ${planeProfile} come from its bundle.` : "The agents on the platform come from the profile's bundle."}</p>}
+          <AgentPicker label="Agents" rows={rows} error={error} current={current} start={start} switchTo={switchTo} editable={onThisComputer(kind)} />
           <div className="actions">
             <button type="button" onClick={() => setOpen(false)}>
               Close

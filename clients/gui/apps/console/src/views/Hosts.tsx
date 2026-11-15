@@ -228,7 +228,7 @@ function Machines({ profile }: { profile: AdminProfile }): JSX.Element {
                     <th>State</th>
                     <th>Registered</th>
                     <th>Last enrolled</th>
-                    <th aria-label="Actions" />
+                    <th className="row-actions" aria-label="Actions" />
                   </tr>
                 </thead>
                 <tbody>
@@ -251,6 +251,7 @@ function Machines({ profile }: { profile: AdminProfile }): JSX.Element {
                               <button type="button" onClick={() => setActing({ kind: "rotate", host: h })}>
                                 Rotate
                               </button>
+                              {" "}
                               <button type="button" onClick={() => setActing({ kind: "switch", host: h })}>
                                 {h.enabled ? "Switch off" : "Switch on"}
                               </button>
@@ -353,6 +354,7 @@ function Machines({ profile }: { profile: AdminProfile }): JSX.Element {
           ]}
           verb="Register"
           onCancel={() => setPreviewing(false)}
+          cancel="Back to editing"
           onConfirm={async () => {
             const host = { name: form.name.trim(), ...(form.address.trim() ? { address: form.address.trim() } : {}) };
             await apply("host.register", `${profile.name}/${host.name}`, async () => keep(await admin.registerHost(profile.name, host)), `${host.name} is registered to ${profile.name}.`);

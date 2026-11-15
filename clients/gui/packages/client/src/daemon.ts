@@ -14,7 +14,7 @@
 import { TroupeConnection, TroupeRpcError } from "./connection.js";
 import { SessionView } from "./session.js";
 import type { CallOptions, ConnectOptions, ConnectionHooks } from "./connection.js";
-import type { Artifact, ArtifactDetail, ArtifactFilter, ArtifactKind, ArtifactList, ArtifactNewLink, ArtifactOwner, ArtifactTicket, ArtifactTransferTo, ArtifactUpload } from "./artifacts.js";
+import type { Artifact, ArtifactDetail, ArtifactFilter, ArtifactKind, ArtifactList, ArtifactNewLink, ArtifactOwner, ArtifactText, ArtifactTicket, ArtifactTransferTo, ArtifactUpload } from "./artifacts.js";
 import type { AgentBroken, AgentCheck, AgentDefinition, AgentDeleted, AgentRow, AgentScope, AgentSkippedFile, AgentsChanged, AgentWritten } from "./agents.js";
 import type { ConfigScope, ConfigSetParams, ModelConfig, ModelDiscovery, ModelsParams } from "./config.js";
 import { remoteOffer, syncState } from "./fleet.js";
@@ -1229,6 +1229,11 @@ export class DaemonClient implements OwnPlane {
   /** One artifact with its versions, and for its owner its links: the plane's `artifact.get`. */
   artifact(id: string): Promise<ArtifactDetail> {
     return this.call<ArtifactDetail>("artifact.get", { id });
+  }
+
+  /** One text file of a version (the current one if none): the plane's `artifact.read`, as the person. */
+  readArtifact(id: string, path: string, version?: number): Promise<ArtifactText> {
+    return this.call<ArtifactText>("artifact.read", version === undefined ? { id, path } : { id, path, version });
   }
 
   /** A one-time address on the artifacts host that opens it, or one version of it, asked at the moment it is opened. */

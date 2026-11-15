@@ -4,6 +4,7 @@
 
 import { useEffect, useId, useRef, useState } from "react";
 import type { JSX, ReactNode } from "react";
+import { firstLine } from "@troupe/client";
 import { describeError, recorded, show, useConsole } from "../console";
 import type { Load } from "../console";
 
@@ -50,11 +51,18 @@ export function Field({
   );
 }
 
-export function Loading({ what }: { what: string }): JSX.Element {
+/**
+ * What is being read. A `slow` load, a whole page that takes a while (the audit trail, a
+ * check of the whole chain), says a line from the shared set before the facts, the same
+ * line for the same thing so it does not change under the person; a panel does not.
+ */
+export function Loading({ what, slow = false }: { what: string; slow?: boolean }): JSX.Element {
   return (
     <div className="state loading" role="status" aria-live="polite">
       <span className="bar" aria-hidden="true" />
-      <span>Loading {what}…</span>
+      <span>
+        {slow ? `${firstLine("loading", what)} — ` : ""}Loading {what}…
+      </span>
     </div>
   );
 }
@@ -73,7 +81,8 @@ export function Failure({ error, what, retry }: { error: unknown; what: string; 
   );
 }
 
-export function Empty({ title, children }: { title: string; children?: ReactNode }): JSX.Element {
+/** An empty state. The title is upper-cased as a status is; an id in it goes in a `<code>`, which keeps its case. */
+export function Empty({ title, children }: { title: ReactNode; children?: ReactNode }): JSX.Element {
   return (
     <div className="state empty">
       <span className="status muted">○ {title}</span>
@@ -83,8 +92,8 @@ export function Empty({ title, children }: { title: string; children?: ReactNode
 }
 
 /** A read's three states, and the screen once it has its answer. */
-export function Loaded<T>({ load, what, retry, children }: { load: Load<T>; what: string; retry: () => void; children: (data: T) => ReactNode }): JSX.Element {
-  if (load.state === "loading") return <Loading what={what} />;
+export function Loaded<T>({ load, what, retry, slow = false, children }: { load: Load<T>; what: string; retry: () => void; slow?: boolean; children: (data: T) => ReactNode }): JSX.Element {
+  if (load.state === "loading") return <Loading what={what} slow={slow} />;
   if (load.state === "error") return <Failure error={load.error} what={what} retry={retry} />;
   return <>{children(load.data)}</>;
 }
@@ -97,6 +106,28 @@ export function Status({ kind, glyph, children }: { kind: StatusKind; glyph: str
     <span className={`status ${kind}`}>
       <span aria-hidden="true">{glyph}</span> {children}
     </span>
+  );
+}
+
+const SESSION_STATES: Record<string, { kind: StatusKind; glyph: string; word: string }> = {
+  active: { kind: "running", glyph: "●", word: "active" },
+  dormant: { kind: "dormant", glyph: "◑", word: "dormant" },
+  read_only: { kind: "muted", glyph: "◇", word: "read-only" },
+  erasure_pending: { kind: "denied", glyph: "✕", word: "erasure pending" },
+};
+
+/** A session's state as every page says it: one glyph and one word per state, never the plane's key. */
+export function sessionState(state: string): { kind: StatusKind; glyph: string; word: string } {
+  return SESSION_STATES[state] ?? { kind: "muted", glyph: "○", word: state.replace(/_/g, " ") };
+}
+
+/** A session's state, as a status. */
+export function SessionState({ state }: { state: string }): JSX.Element {
+  const st = sessionState(state);
+  return (
+    <Status kind={st.kind} glyph={st.glyph}>
+      {st.word}
+    </Status>
   );
 }
 
@@ -125,6 +156,7 @@ export function Preview({
   typeToConfirm,
   onConfirm,
   onCancel,
+  cancel = "Cancel",
   body,
 }: {
   title: string;
@@ -134,6 +166,11 @@ export function Preview({
   typeToConfirm?: string | null;
   onConfirm: () => Promise<void>;
   onCancel: () => void;
+  /**
+   * What the way out says: "Cancel" where nothing was edited first (a row's Erase, Drain,
+   * Rotate), "Back to editing" where the preview follows a form and leaving it returns there.
+   */
+  cancel?: string;
   /** What a document's change is shown as, line by line, in place of the fields' diff; `lines` still says whether anything changes. */
   body?: ReactNode;
 }): JSX.Element {
@@ -198,9 +235,9 @@ export function Preview({
             {busy ? "Applying…" : verb}
           </button>
           <button type="button" onClick={onCancel} disabled={busy}>
-            Back to editing
+            {cancel}
           </button>
-          <span className="hint">{blocked ? "The name must match exactly." : `Nothing changes until you ${verb.toLowerCase()}.`}</span>
+          <span className="hint">{blocked ? "Type it exactly as shown." : `Nothing changes until you ${verb.toLowerCase()}.`}</span>
         </div>
       </div>
     </section>
@@ -457,10 +494,25 @@ export function changed(before: Record<string, unknown>, after: Record<string, u
     .map((k) => ({ field: k, from: before[k] ?? null, to: after[k] ?? null }));
 }
 
-/** Money in millionths of a currency unit, as the plane keeps it, in units. */
+/**
+ * Money in millionths of a dollar, as the plane keeps it, in dollars: `$12.50`, `$1,473.50`.
+ * One unit wherever the console shows a spend, a reservation or a ceiling.
+ */
 export function money(micros: number | null | undefined): string {
   if (micros === null || micros === undefined) return "—";
-  return (micros / 1_000_000).toLocaleString("en", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const dollars = (Math.abs(micros) / 1_000_000).toLocaleString("en", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return `${micros < 0 ? "−" : ""}$${dollars}`;
+}
+
+/** A length of time the plane keeps in seconds, in hours, minutes and seconds, leaving out what is nought: `45 s`, `20 min`, `1 h 30 min`. */
+export function duration(seconds: number | null | undefined): string {
+  if (seconds === null || seconds === undefined || !Number.isFinite(seconds)) return "—";
+  const total = Math.max(0, Math.round(seconds));
+  if (total === 0) return "0 s";
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  const s = total % 60;
+  return [h ? `${h} h` : "", m ? `${m} min` : "", s ? `${s} s` : ""].filter(Boolean).join(" ");
 }
 
 /** Bytes, in binary units, as a volume and a disk are measured and `kubectl` shows them. */

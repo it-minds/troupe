@@ -13,20 +13,12 @@ import { useState } from "react";
 import type { JSX } from "react";
 import type { AdminSessionRow, SessionErasePreview, SessionErased, SessionGitHub } from "@troupe/client";
 import { recorded, useConsole, useLoad } from "../console";
-import { AuditNote, Empty, Field, Loaded, Preview, Status, bytes, count, when } from "./bits";
-import type { StatusKind } from "./bits";
+import { AuditNote, Empty, Field, Loaded, Preview, Status, bytes, count, sessionState, when } from "./bits";
 
 const PAGE = 25;
 
 /** What the plane answers at most, newest activity first, when asked for no fewer. */
 const PLANE_LIMIT = 200;
-
-const STATE: Record<string, { kind: StatusKind; glyph: string; word: string }> = {
-  active: { kind: "running", glyph: "●", word: "active" },
-  dormant: { kind: "dormant", glyph: "◑", word: "dormant" },
-  read_only: { kind: "muted", glyph: "◇", word: "read-only" },
-  erasure_pending: { kind: "denied", glyph: "✕", word: "erasure pending" },
-};
 
 /** `query` is what the search starts with: a run's page links to its session by id. */
 export function Sessions({ query: initial = "" }: { query?: string } = {}): JSX.Element {
@@ -110,7 +102,7 @@ export function Sessions({ query: initial = "" }: { query?: string } = {}): JSX.
               </Empty>
             );
           }
-          if (shown.length === 0) return <Empty title={`No session matches "${query.trim()}"`}>Search by a session's id, its owner or its profile.</Empty>;
+          if (shown.length === 0) return <Empty title={<>No session matches <code>"{query.trim()}"</code></>}>Search by a session's id, its owner or its profile.</Empty>;
           const pages = Math.ceil(shown.length / PAGE);
           const at = Math.min(page, pages - 1);
           const rows = shown.slice(at * PAGE, at * PAGE + PAGE);
@@ -129,7 +121,7 @@ export function Sessions({ query: initial = "" }: { query?: string } = {}): JSX.
                       <th>Pinned</th>
                       <th>On GitHub</th>
                       <th>Last active</th>
-                      <th aria-label="Actions" />
+                      <th className="row-actions" aria-label="Actions" />
                     </tr>
                   </thead>
                   <tbody>
@@ -166,7 +158,7 @@ export function Sessions({ query: initial = "" }: { query?: string } = {}): JSX.
 }
 
 function SessionRow({ session: s, busy, onErase }: { session: AdminSessionRow; busy: boolean; onErase: () => void }): JSX.Element {
-  const st = STATE[s.state] ?? { kind: "muted" as const, glyph: "○", word: s.state };
+  const st = sessionState(s.state);
   return (
     <tr>
       <td className="mono">{s.id}</td>

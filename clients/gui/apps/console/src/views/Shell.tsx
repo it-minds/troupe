@@ -75,7 +75,18 @@ export function Shell(): JSX.Element {
   const current = area(here.page)!;
   const within = here.path ?? [];
   const title = here.team ?? titleWithin(here.page, within) ?? current.label;
-  const crumb = here.team ? `${groupOf(here.page)} / Teams` : within.length ? `${groupOf(here.page)} / ${current.label}` : groupOf(here.page);
+  // A screen within an area is placed by its group and its area, and the area's name is a
+  // way back to it; where the group is the area (Mine), it is said once.
+  const group = groupOf(here.page);
+  const back = here.team ? { label: "Teams", to: { page: here.page } } : within.length ? { label: current.label, to: { page: here.page } } : null;
+  const crumb = back ? (
+    <>
+      {back.label === group ? null : `${group} / `}
+      <a href={href(back.to)}>{back.label}</a>
+    </>
+  ) : (
+    group
+  );
   // The folded map is open on the screen it was opened on, so choosing an area folds it
   // again with nothing to fold it. An effect that folded it on each new screen also ran
   // once the shell first drew, and undid a Menu pressed before that.
@@ -86,6 +97,25 @@ export function Shell(): JSX.Element {
   useEffect(() => {
     globalThis.document.title = `${title} · Troupe console`;
   }, [title]);
+  // Signed out, the console has no screen to name.
+  useEffect(
+    () => () => {
+      globalThis.document.title = "Troupe console";
+    },
+    [],
+  );
+
+  // An address this role may not open shows where the role starts, says why in one line,
+  // and becomes that place's address, so the bar no longer names a page that is not shown.
+  const [refused, setRefused] = useState(false);
+  useEffect(() => {
+    if (here === route) {
+      setRefused(false);
+      return;
+    }
+    setRefused(area(route.page) !== null);
+    globalThis.history?.replaceState?.(globalThis.history.state, "", href(START));
+  }, [route, here, START]);
 
   // A new screen starts at its top, not wherever the last one was scrolled to.
   useEffect(() => {
@@ -145,6 +175,14 @@ export function Shell(): JSX.Element {
       </nav>
       <main className="main">
         {signed.me.breakglass && <BreakGlassBanner until={signed.auth.me?.expires_at ?? null} />}
+        {refused && (
+          <section className="banner refused" role="status" aria-label="Not for your role">
+            <p>{signed.role === "member" ? "That page is for administrators." : "That page is for platform administrators."}</p>
+            <button type="button" onClick={() => setRefused(false)}>
+              Dismiss
+            </button>
+          </section>
+        )}
         <header className="head">
           <span className="crumb">{crumb}</span>
           <h1>{title}</h1>

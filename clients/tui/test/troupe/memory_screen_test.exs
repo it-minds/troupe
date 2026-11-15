@@ -137,6 +137,8 @@ defmodule Troupe.MemoryScreenTest do
     press(pid, "down")
     press(pid, "f")
     assert screen_text(pid, session) =~ "Forget “Prices”? New sessions stop starting with it."
+    # The design's words for the sessions already running.
+    assert screen_text(pid, session) =~ "Sessions already running keep it until they sleep."
     press(pid, "n")
     assert screen_text(pid, session) =~ "kept"
     press(pid, "f")
@@ -159,6 +161,68 @@ defmodule Troupe.MemoryScreenTest do
     type(pid, "Bullets when summarising.")
     press(pid, "s", ["ctrl"])
     assert eventually(fn -> screen_text(pid, session) =~ "Saved “Lists”. Version 5" end)
+  end
+
+  # The line under says where a save goes; Ctrl-S saves only in the box of words, so the
+  # topic's line does not offer it (#894).
+  test "the saves-to line names Ctrl-S in the box of words, not while the topic is typed", ctx do
+    %{pid: pid, session: session} = ctx
+    Application.delete_env(:troupe, :edit_file)
+    System.delete_env("VISUAL")
+    System.delete_env("EDITOR")
+    open(pid)
+    press(pid, "4")
+    press(pid, "a")
+    type(pid, "Lists")
+
+    text = screen_text(pid, session)
+    assert text =~ "topic: Lists▏   saves to Only you · your new sessions in any team"
+    refute text =~ "Ctrl-S"
+
+    press(pid, "enter")
+    assert screen_text(pid, session) =~ "saves to Only you · your new sessions in any team · Ctrl-S"
+  end
+
+  # A plane from before memory was entries has no `memory.in_effect`: the page says once,
+  # above the list, why nothing is changed here, and changes nothing (#894, D138).
+  test "a plane older than 0.29 is said, and memory is read-only there", ctx do
+    %{pid: pid, session: session, remote: remote} = ctx
+
+    :ok =
+      FakeRemote.fail_next(remote, "memory.in_effect", -32_601, "method not found", times: 100)
+
+    open(pid)
+    text = screen_text(pid, session)
+    older = "This plane is older than 0.29: memory is read-only here."
+    assert text =~ older
+    assert length(String.split(text, older)) == 2
+    refute text =~ "what is in effect could not be read"
+    assert text =~ "4 ○ Only you 1 · read"
+
+    press(pid, "4")
+    press(pid, "a")
+    assert screen_text(pid, session) |> String.split(older) |> length() == 3
+    assert user_state(pid).memory_page.mode == :list
+    refute screen_text(pid, session) =~ "· a add ·"
+  end
+
+  # The key line is the command box's top border, and at 80 columns its end, the way out,
+  # was cut (#894): the way out stays on it, and what left it is in the box under it.
+  for width <- [80, 120] do
+    test "the key line keeps Esc back at #{width} columns, the rest under it", ctx do
+      %{pid: pid, session: session} = ctx
+      open(pid)
+      press(pid, "4")
+      resize(pid, session, unquote(width), 40)
+
+      rows = screen(pid, session)
+      line = Enum.find(rows, &(&1 =~ "Esc back" and &1 =~ "Enter reads"))
+      assert line, Enum.join(rows, "\n")
+      text = Enum.join(rows, "\n")
+
+      for key <- ["a add", "e edit", "f forget", "h versions", "b who wrote it", "s status"],
+          do: assert(text =~ key, "#{key} is not on the screen at #{unquote(width)} columns")
+    end
   end
 
   test "a save over a version saved elsewhere shows both and reloads; the versions side by side and a roll back; who wrote it",

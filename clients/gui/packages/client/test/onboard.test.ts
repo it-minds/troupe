@@ -7,7 +7,7 @@
 
 import assert from "node:assert/strict";
 import { after, afterEach, before, beforeEach, describe, it } from "node:test";
-import { DaemonClient, LIBRARIAN_PROMPT, StartQuestions, describeItem, emptyTranscript, fold } from "../src/index.js";
+import { DaemonClient, LIBRARIAN_PROMPT, StartQuestions, describeItem, emptyTranscript, fold, onboardingFiles } from "../src/index.js";
 import type { StartAnswer, StartState, TroupeEvent } from "../src/index.js";
 import { FakeDaemon, exampleOnboarding } from "./support/daemon.js";
 
@@ -299,10 +299,52 @@ describe("onboarding_suggested in the transcript", () => {
       data: { workspace: REPO, due: "first", brief_due: "outdated", counts: { files: 2, write: 2, create_agents_md: 0 }, message: "Other tools' files are here.", reasons: ["first", "brief"] },
     } as unknown as TroupeEvent;
     const state = fold(emptyTranscript, event);
-    assert.deepEqual(state.onboarding, { seq: 2, workspace: REPO, due: "first", briefDue: "outdated" });
+    assert.deepEqual(state.onboarding, {
+      seq: 2,
+      workspace: REPO,
+      due: "first",
+      briefDue: "outdated",
+      reasons: ["first", "brief"],
+      proposals: {},
+      files: 2,
+      onboardedVersion: undefined,
+      onboardingVersion: undefined,
+      briefVersion: undefined,
+      surveyVersion: undefined,
+    });
     assert.deepEqual(
       state.entries.map((e) => (e.kind === "system" ? [e.type, e.text] : e.kind)),
       [["onboarding_suggested", "Other tools' files are here."]],
     );
+  });
+
+  // What the harness's sentence was made of, for a client that words it for its own
+  // surface rather than draw a terminal's command (troupe #895).
+  it("keeps the proposals by kind and the versions, and says the files as the harness counts them", () => {
+    const event = {
+      seq: 5,
+      ts: "2026-10-10T08:00:00Z",
+      type: "onboarding_suggested",
+      agent: ["root"],
+      actor: { kind: "system" },
+      data: {
+        workspace: REPO,
+        reasons: ["first", "brief"],
+        proposals: { rules: 2, instructions: 1, skills: 1 },
+        counts: { files: 4, write: 4, create_agents_md: 0 },
+        onboarding_version: 3,
+        brief_version: 1,
+        survey_version: 2,
+        message: "Other tools' files are here: `troupe onboard` would bring in 1 AGENTS.md, 2 rules and 1 skill file as Troupe's own files.",
+      },
+    } as unknown as TroupeEvent;
+    const o = fold(emptyTranscript, event).onboarding!;
+    assert.deepEqual(o.proposals, { rules: 2, instructions: 1, skills: 1 });
+    assert.equal(o.onboardingVersion, 3);
+    assert.equal(o.briefVersion, 1);
+    assert.equal(o.surveyVersion, 2);
+    assert.equal(onboardingFiles(o), "1 AGENTS.md, 2 rules and 1 skill file");
+    assert.equal(onboardingFiles({ proposals: {}, files: 1 }), "1 file");
+    assert.equal(onboardingFiles({ proposals: {}, files: undefined }), undefined);
   });
 });

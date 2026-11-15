@@ -431,7 +431,7 @@ function TeamPrincipals({ team }: { team: AdminTeam }): JSX.Element {
                     <th>May use</th>
                     <th>Sponsor</th>
                     <th>Last used</th>
-                    <th aria-label="Actions" />
+                    <th className="row-actions" aria-label="Actions" />
                   </tr>
                 </thead>
                 <tbody>
@@ -451,6 +451,7 @@ function TeamPrincipals({ team }: { team: AdminTeam }): JSX.Element {
                             <button type="button" onClick={() => setActing({ kind: "rotate", principal: p })}>
                               Rotate
                             </button>
+                            {" "}
                             <button type="button" className="danger" onClick={() => setActing({ kind: "disable", principal: p })}>
                               Disable
                             </button>
@@ -573,6 +574,7 @@ function MakePrincipal({
         ]}
         verb="Make it"
         onCancel={() => setPreviewing(false)}
+        cancel="Back to editing"
         onConfirm={() => onConfirm(principal)}
       />
     );

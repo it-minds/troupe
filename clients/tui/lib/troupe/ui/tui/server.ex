@@ -106,6 +106,7 @@ defmodule Troupe.UI.TUI.Server do
           profiles_page: ProfilesPage.t() | nil,
           new_page: NewSessionPage.t() | nil,
           new_task: reference() | nil,
+          new_start: map() | nil,
           hq: HQ.t() | nil,
           shell: shell() | nil,
           theme: Theme.t(),
@@ -338,9 +339,11 @@ defmodule Troupe.UI.TUI.Server do
       memory_page: nil,
       # `/profiles` and `/profile <name>`: what a profile the person may use gives a session.
       profiles_page: nil,
-      # `/new`'s screen, and the start it is waiting on.
+      # `/new`'s screen, and the start it is waiting on with its casting: one start at a
+      # time, which goes on when the screen goes back to the form or closes.
       new_page: nil,
       new_task: nil,
+      new_start: nil,
       hq: nil,
       shell: nil,
       # The person's theme, from `ui.theme` (`read_appearance/1`), and the value last said
@@ -640,18 +643,61 @@ defmodule Troupe.UI.TUI.Server do
   end
 
   # The start `/new`'s screen is waiting on: the plane's wait for a place, then the session,
-  # or why not. An answer for a start since left is not this screen's.
-  def handle_info({:new_session_wait, ref}, %{new_task: ref, new_page: %{} = page} = state),
-    do:
-      {:noreply, %{state | new_page: NewSessionPage.waiting(page)} |> notice(waiting_line(page)),
-       render?: true}
+  # or why not. One start at a time: going back to the form, or closing the screen, leaves
+  # it running, and its answer is still this screen's.
+  def handle_info({:new_session_wait, ref}, %{new_task: ref, new_page: %{} = page} = state) do
+    start = state.new_start && %{state.new_start | done: 1, queued: true, waiting: true}
+    state = %{state | new_page: NewSessionPage.waiting(page), new_start: start}
+    {:noreply, notice(state, waiting_line(start)), render?: true}
+  end
+
+  # The screen closed while the start ran: the curtain line says how it ended, and the
+  # session is in /sessions; nothing is taken from what is on screen now.
+  def handle_info({:new_session_done, ref, result}, %{new_task: ref, new_page: nil} = state) do
+    title = (state.new_start && state.new_start.title) || "The new session"
+    state = %{state | new_task: nil, new_start: nil}
+
+    said =
+      case result do
+        {:ok, sid} -> "#{title} started (#{sid}); /sessions shows it"
+        {:error, reason} -> "#{title} did not start: #{to_message(reason)}"
+      end
+
+    {:noreply, notice(state, said), render?: true}
+  end
+
+  # Back on the form when it failed: the form is offered as it is, and the curtain line
+  # says why.
+  def handle_info(
+        {:new_session_done, ref, {:error, reason}},
+        %{new_task: ref, new_page: %{casting: nil} = page} = state
+      ) do
+    title = (state.new_start && state.new_start.title) || "The new session"
+
+    state = %{
+      state
+      | new_task: nil,
+        new_start: nil,
+        new_page: NewSessionPage.settled(page)
+    }
+
+    {:noreply, notice(state, "#{title} did not start: #{to_message(reason)}"), render?: true}
+  end
 
   # A session here on an agent the screen named: a line typed on its command line starts
   # that agent, as a session the agent picker started always did.
   def handle_info({:new_session_done, ref, {:ok, sid}}, %{new_task: ref} = state) do
-    casting = state.new_page && state.new_page.casting
+    casting = state.new_start
     agent = casting && casting.where == :local && casting.named_agent
-    state = %{state | new_task: nil, new_page: nil, focus: :command, switcher: nil}
+
+    state = %{
+      state
+      | new_task: nil,
+        new_start: nil,
+        new_page: nil,
+        focus: :command,
+        switcher: nil
+    }
 
     said =
       if agent,
@@ -669,11 +715,45 @@ defmodule Troupe.UI.TUI.Server do
       ),
       do:
         {:noreply,
-         %{state | new_task: nil, new_page: NewSessionPage.failed(page, to_message(reason))},
-         render?: true}
+         %{
+           state
+           | new_task: nil,
+             new_start: nil,
+             new_page: NewSessionPage.failed(page, to_message(reason))
+         }, render?: true}
+
+  def handle_info({:new_session_wait, ref}, %{new_task: ref, new_start: %{} = start} = state),
+    do:
+      {:noreply, %{state | new_start: %{start | done: 1, queued: true, waiting: true}},
+       render?: false}
 
   def handle_info({:new_session_wait, _ref}, state), do: {:noreply, state, render?: false}
   def handle_info({:new_session_done, _ref, _result}, state), do: {:noreply, state, render?: false}
+
+  # This computer's daemon link came up or went down: `/new`'s "On this computer" follows
+  # it. Coming up, the agents are read again off this process before the page switches on;
+  # going down, the page greys and asks after the daemon until it is back.
+  def handle_info({:troupe_daemon_link, true}, %{new_page: %{} = page} = state) do
+    check_daemon(page)
+    {:noreply, state, render?: false}
+  end
+
+  def handle_info({:troupe_daemon_link, false}, %{new_page: %{} = page} = state) do
+    if page.daemon_up, do: check_daemon_later()
+    state = %{state | new_page: NewSessionPage.daemon(page, false), dirty: true}
+    {:noreply, schedule_tick(state), render?: false}
+  end
+
+  def handle_info(:new_page_daemon_check, %{new_page: %{daemon_up: false} = page} = state) do
+    check_daemon(page)
+    {:noreply, state, render?: false}
+  end
+
+  def handle_info({:new_page_daemon, up?, agents}, %{new_page: %{} = page} = state) do
+    unless up?, do: check_daemon_later()
+    state = %{state | new_page: NewSessionPage.daemon(page, up?, agents), dirty: true}
+    {:noreply, schedule_tick(state), render?: false}
+  end
 
   def handle_info(_msg, state), do: {:noreply, state, render?: false}
 
@@ -2286,29 +2366,72 @@ defmodule Troupe.UI.TUI.Server do
     end
   end
 
+  # The agent on screen is this computer's: the page starts a session here as it, and never
+  # sends it to the plane, whose profile has a default of its own.
   defp open_new_page(state, opts, origin \\ :default) do
-    origin = if origin == :default, do: new_page_plane(), else: origin
+    {origin, why} = if origin == :default, do: new_page_plane(), else: {origin, nil}
     agent = if Client.remote?(state.session_id), do: nil, else: state.default_agent
-    opts = Keyword.merge([origin: origin, workspace: here(state), agent: agent], opts)
-    %{put_cmd(state, "") | focus: :new_session, new_page: NewSessionPage.open(opts)}
+
+    # A start still running from the last time the screen was open is said on it, and
+    # Enter does not start a second.
+    pending = if state.new_task, do: state.new_start
+
+    opts =
+      Keyword.merge(
+        [
+          origin: origin,
+          plane_why: why,
+          workspace: here(state),
+          local_agent: agent,
+          pending: pending
+        ],
+        opts
+      )
+
+    page = NewSessionPage.open(opts)
+    unless page.daemon_up, do: check_daemon_later()
+    %{put_cmd(state, "") | focus: :new_session, new_page: page}
   end
 
-  # The plane this machine is signed in to, unless Local only: the screen offers it.
+  # The plane this machine is signed in to, unless Local only: the screen offers it, and
+  # says why where there is none.
   defp new_page_plane do
     case Client.signed_in_plane() do
-      {:ok, origin} -> origin
-      {:error, _none} -> nil
+      {:ok, origin} -> {origin, nil}
+      {:error, why} -> {nil, why}
     end
+  end
+
+  # While the page has "On this computer" greyed, the daemon is asked after again, so it
+  # switches on by itself once `troupe daemon` runs; off the screen's process, as every
+  # daemon call is.
+  @daemon_check_ms 3_000
+
+  defp check_daemon_later, do: Process.send_after(self(), :new_page_daemon_check, @daemon_check_ms)
+
+  defp check_daemon(%{folder: folder}) do
+    server = self()
+
+    Task.start(fn ->
+      agents =
+        case Client.profiles({:local, folder}) do
+          {:ok, rows} -> Enum.map(rows, & &1.name)
+          {:error, _} -> nil
+        end
+
+      send(server, {:new_page_daemon, Client.daemon_up?(), agents})
+    end)
   end
 
   defp new_page_key(key, %{new_page: page} = state) do
     case NewSessionPage.key(page, key) do
-      # Back to the form from the casting steps: the start is no longer this screen's.
+      # Back to the form from the casting steps, or the screen closed: the start goes on,
+      # and its answer is said when it comes.
       {:ok, page} ->
-        %{state | new_page: page, new_task: if(page.casting, do: state.new_task)}
+        %{state | new_page: page}
 
       :close ->
-        %{state | focus: :command, new_page: nil, new_task: nil}
+        %{state | focus: :command, new_page: nil}
 
       {:choose_agent, page} ->
         case AgentChooser.open(state.session_id, page.agent || state.default_agent,
@@ -2345,12 +2468,15 @@ defmodule Troupe.UI.TUI.Server do
         send(server, {:new_session_done, ref, Client.create_session(origin, params)})
       end)
 
-    {_word, first} = state.new_page.casting |> NewSessionPage.steps() |> hd()
-    notice(%{state | new_task: ref}, "casting: " <> first)
+    casting = state.new_page.casting
+    {_word, first} = casting |> NewSessionPage.steps() |> hd()
+    notice(%{state | new_task: ref, new_start: casting}, "casting: " <> first)
   end
 
-  defp waiting_line(%{casting: %{profile: profile}}), do: "waiting for a free place in #{profile}"
-  defp waiting_line(_page), do: "waiting for a free place"
+  defp waiting_line(%{profile: profile}) when is_binary(profile),
+    do: "waiting for a free place in #{profile}"
+
+  defp waiting_line(_start), do: "waiting for a free place"
 
   # The session made and on screen; on an agent chosen, the first line typed starts it.
   defp open_kind(state, kind, agent) do
@@ -2383,13 +2509,6 @@ defmodule Troupe.UI.TUI.Server do
 
   defp open_new(state, :branch, _agent) do
     with {:ok, sid} <- fork_of(state), do: Client.fork_session(sid)
-  end
-
-  defp open_new(_state, {:remote, profile}, _agent) do
-    case ensure_plane(Client.default_plane()) do
-      nil -> {:error, "no plane; run troupe login <plane-url> first"}
-      origin -> Client.create_session(origin, %{profile: profile})
-    end
   end
 
   # What `--branch` forks (root Decision 812): the branch whose window is activated, its own

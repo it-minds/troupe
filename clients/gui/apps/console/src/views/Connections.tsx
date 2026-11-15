@@ -11,7 +11,7 @@ import type { JSX } from "react";
 import type { Connections as ConnectionsAnswer } from "@troupe/client";
 import { useConsole, useLoad } from "../console";
 import { href } from "../route";
-import { Empty, Loaded, Region, Status } from "./bits";
+import { Empty, Loaded, Region, SessionState, Status } from "./bits";
 
 export function Connections(): JSX.Element {
   const { admin } = useConsole();
@@ -38,34 +38,36 @@ export function Connections(): JSX.Element {
                     {s.people.length === 0 ? (
                       <Empty title="Nobody may use it yet">No team granted these profiles has anybody in it.</Empty>
                     ) : (
-                      <table>
-                        <thead>
-                          <tr>
-                            <th>Person</th>
-                            <th>Their credential</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {s.people.map((p) => (
-                            <tr key={p.subject}>
-                              <td>
-                                {p.display_name ?? p.subject} <span className="mono muted">{p.subject}</span>
-                              </td>
-                              <td>
-                                {p.connected ? (
-                                  <Status kind="running" glyph="●">
-                                    connected
-                                  </Status>
-                                ) : (
-                                  <Status kind="muted" glyph="○">
-                                    not connected
-                                  </Status>
-                                )}
-                              </td>
+                      <div className="scroll">
+                        <table>
+                          <thead>
+                            <tr>
+                              <th>Person</th>
+                              <th>Their credential</th>
                             </tr>
-                          ))}
-                        </tbody>
-                      </table>
+                          </thead>
+                          <tbody>
+                            {s.people.map((p) => (
+                              <tr key={p.subject}>
+                                <td>
+                                  {p.display_name ?? p.subject} <span className="mono muted">{p.subject}</span>
+                                </td>
+                                <td>
+                                  {p.connected ? (
+                                    <Status kind="running" glyph="●">
+                                      connected
+                                    </Status>
+                                  ) : (
+                                    <Status kind="muted" glyph="○">
+                                      not connected
+                                    </Status>
+                                  )}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
                     )}
                   </section>
                 );
@@ -96,7 +98,7 @@ export function Connections(): JSX.Element {
                         </td>
                         <td>{x.profile}</td>
                         <td className="mono">{x.owner}</td>
-                        <td>{x.state}</td>
+                        <td><SessionState state={x.state} /></td>
                       </tr>
                     ))}
                   </tbody>

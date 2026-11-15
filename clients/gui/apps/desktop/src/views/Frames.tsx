@@ -286,6 +286,16 @@ export function Markdown({ text, full }: { text: string; full: boolean }): JSX.E
 }
 
 /**
+ * A line's inline Markdown, rendered as a reply's is (inline code, emphasis, links), for
+ * a sentence of the harness's that goes in a note rather than a frame: never the
+ * backticks as written.
+ */
+export function InlineMarkdown({ text }: { text: string }): JSX.Element {
+  const tokens = useMemo(() => Lexer.lexInline(text, { gfm: true, breaks: false, async: false }), [text]);
+  return <>{inline(tokens)}</>;
+}
+
+/**
  * A prose frame: the model's Markdown, rendered, on the rendered surface, with no header
  * but the toggle that shows what it wrote as written — which settles whether a reply's
  * Markdown is broken or the rendering is.

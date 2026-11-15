@@ -18,6 +18,7 @@ defmodule Troupe.FirstPromptWaitTest do
   alias Troupe.Event
   alias Troupe.Remote.Translate
   alias Troupe.UI.Headless.Printer
+  alias Troupe.UI.Lines
   alias Troupe.UI.TUI.{Model, View}
 
   # The prompt went at this wall-clock time; the clock is read `ms` after it.
@@ -52,6 +53,9 @@ defmodule Troupe.FirstPromptWaitTest do
   defp window(events), do: Model.session_window(fold(events))
 
   defp line(events, ms), do: Model.curtain_line(window(events), "root", 0, at(ms))
+
+  # The n-th line taken over the turn these events are in.
+  defp said(events, kind, n), do: Lines.pick(kind, Model.curtain_seed(window(events)), n)
 
   ## Drawn
 
@@ -97,20 +101,20 @@ defmodule Troupe.FirstPromptWaitTest do
   ## The curtain line
 
   test "before the request: preparing with the flourish, then the facts alone from 10 s" do
-    assert line(opened(), 4_000) == "◐ the house lights go down — preparing (00:04)"
-    assert line(opened(), 9_000) == "◐ the house lights go down — preparing (00:09)"
+    assert line(opened(), 4_000) == "◐ #{said(opened(), :starting, 1)} — preparing (00:04)"
+    assert line(opened(), 9_000) == "◐ #{said(opened(), :starting, 1)} — preparing (00:09)"
     assert line(opened(), 14_000) == "◐ the daemon has not sent the model request yet (00:14)"
 
     # A tile says the facts alone, as it always did.
     tile = Model.tile_lines(window(opened()), 0, at(14_000), false)
     assert Enum.any?(tile, &(Model.line_text(&1) =~ "has not sent the model request yet (00:14)"))
-    refute Enum.any?(tile, &(Model.line_text(&1) =~ "house lights"))
+    refute Enum.any?(tile, &(Model.line_text(&1) =~ said(opened(), :starting, 1)))
   end
 
   test "after the request: thinking as ever, then no answer from the host from 20 s" do
     requested = opened() ++ [thinking(20_000)]
 
-    assert line(requested, 32_000) == "◐ the actors are powdering their nose — thinking (00:12)"
+    assert line(requested, 32_000) == "◐ #{said(requested, :thinking, 1)} — thinking (00:12)"
     assert line(requested, 55_000) == "◐ no answer from api.anthropic.com yet (00:35)"
 
     # Where the host is not known (a pod's configuration is its plane's), it is the model.
@@ -119,7 +123,7 @@ defmodule Troupe.FirstPromptWaitTest do
 
     # The first byte ends the wait, and the flourish comes back to the same place.
     answered = requested ++ [event(:llm_delta, %{text: "On it."}, 56_000, transient?: true)]
-    assert line(answered, 60_000) == "◐ the actors are powdering their nose — thinking (00:40)"
+    assert line(answered, 60_000) == "◐ #{said(answered, :thinking, 1)} — thinking (00:40)"
     assert Model.waiting(window(answered), "root", at(60_000)) == nil
   end
 
@@ -140,7 +144,7 @@ defmodule Troupe.FirstPromptWaitTest do
     assert line(first, 30_000) == nil
 
     second = first ++ [event(:input, %{source: :user, content: "next", command_id: "c2"}, 70_000)]
-    assert line(second, 72_000) == "◐ the house lights go down — preparing (00:02)"
+    assert line(second, 72_000) == "◐ #{said(second, :starting, 1)} — preparing (00:02)"
     assert line(second, 84_000) == "◐ the daemon has not sent the model request yet (00:14)"
 
     # A line sent while the agent works is queued, and the request on the wire is still the

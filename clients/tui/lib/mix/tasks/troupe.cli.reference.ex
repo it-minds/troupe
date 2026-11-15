@@ -62,6 +62,7 @@ defmodule Mix.Tasks.Troupe.Cli.Reference do
   # define are a session's own, so the hand-written text after the part says so.
   defp slash_commands do
     Troupe.Commands.builtins()
+    |> Troupe.Commands.for_client("tui")
     |> Enum.chunk_by(& &1["section"])
     |> Enum.map_join("\n", fn [%{"section" => section} | _] = entries ->
       "### #{String.capitalize(section)}\n\n" <>
@@ -87,6 +88,8 @@ defmodule Mix.Tasks.Troupe.Cli.Reference do
   defp needs("window"), do: "a window: the activated one, or one named"
   defp needs("local"), do: "a session on this machine"
   defp needs("plane"), do: "a plane"
+  # The terminal client's alone, and this is the terminal client's reference.
+  defp needs("tui"), do: ""
   defp needs(other), do: other
 
   defp table(header, rows) do

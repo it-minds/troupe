@@ -24,6 +24,7 @@ defmodule Troupe.UI.TUI.View do
     Agents,
     ArtifactsPage,
     Input,
+    KeyLine,
     MemoryPage,
     Model,
     ProfilesPage,
@@ -1924,6 +1925,8 @@ defmodule Troupe.UI.TUI.View do
   defp availability_word("window"), do: "acts on the activated window, or one named"
   defp availability_word("local"), do: "for a session on this machine"
   defp availability_word("plane"), do: "needs a plane"
+  # The terminal client's alone: always, here.
+  defp availability_word("tui"), do: "always available"
   defp availability_word(other), do: other
 
   defp settings_command_line(%{settings: %{picker: %{typed?: true}} = s}) do
@@ -3181,6 +3184,11 @@ defmodule Troupe.UI.TUI.View do
 
     focused_cmd? = state.focus in [:command, :palette]
 
+    # The key line fits the border it is drawn on; the keys that leave it are shown in the
+    # box under it, where a page has nothing typed.
+    {title, more} = KeyLine.fit(title, cmd_inner_width(state, box_rows))
+    text = with_more_keys(text, more)
+
     {%Paragraph{
        text: input_box_text(state, text, box_rows),
        block: %Block{
@@ -3191,6 +3199,11 @@ defmodule Troupe.UI.TUI.View do
        wrap: false
      }, rect}
   end
+
+  defp with_more_keys(text, nil), do: text
+  defp with_more_keys({:edit, _} = text, _more), do: text
+  defp with_more_keys("", more), do: "also " <> more
+  defp with_more_keys(text, more), do: text <> "\nalso " <> more
 
   # An editable box scrolls: fold the whole input to the inner width (hard
   # breaking, so a too-long row's continuation stays visible), then show the

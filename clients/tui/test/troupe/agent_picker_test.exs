@@ -211,8 +211,8 @@ defmodule Troupe.AgentPickerTest do
     to_row(pid, "careful")
     press(pid, "enter")
     assert user_state(pid).focus == :new_session
-    press(pid, "tab")
-    press(pid, "tab")
+    # Back from the chips to the box (Tab goes on to CALLED and the recents).
+    press(pid, "backtab")
     press(pid, "enter")
     eventually(fn -> user_state(pid).session_id != sid end)
     fresh = user_state(pid).session_id

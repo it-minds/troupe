@@ -19,11 +19,18 @@ defmodule Troupe.CommandsTest do
     assert length(entries) > 20
 
     for entry <- entries do
-      assert Enum.sort(Map.keys(entry)) == Enum.sort(@fields), entry["name"]
+      assert Enum.sort(Map.keys(entry) -- ~w(summaries details)) == Enum.sort(@fields),
+             entry["name"]
+
       assert entry["summary"] != "", entry["name"]
       assert String.starts_with?(entry["usage"], "/" <> entry["name"]), entry["name"]
       assert entry["section"] in Commands.sections(), entry["name"]
-      assert entry["availability"] in ~w(always window local plane), entry["name"]
+      assert entry["availability"] in ~w(always window local plane tui), entry["name"]
+
+      for map <- ~w(summaries details), words = entry[map], words != nil do
+        assert Map.keys(words) -- ~w(tui desktop) == [], entry["name"]
+        assert Enum.all?(Map.values(words), &(is_binary(&1) and &1 != "")), entry["name"]
+      end
       assert entry["source"] == "builtin", entry["name"]
 
       for arg <- entry["args"] do
@@ -41,6 +48,33 @@ defmodule Troupe.CommandsTest do
     assert "loop" in names
     assert "help" in names
     assert "settings" in names
+  end
+
+  # A row says what it does in words true in every client, and a client whose way of
+  # running it differs has its own; what only the terminal client can do is `tui`.
+  test "each client reads its own words where a row has them, and the neutral ones elsewhere" do
+    by_name = fn entries -> Map.new(entries, &{&1["name"], &1}) end
+    neutral = by_name.(Commands.builtins())
+    tui = by_name.(Commands.for_client(Commands.builtins(), "tui"))
+    desktop = by_name.(Commands.for_client(Commands.builtins(), "desktop"))
+
+    assert tui["cancel"]["summary"] == "Stop a branch mid-turn and remove its window"
+    assert tui["cancel"]["detail"] =~ "removes the window"
+    assert desktop["cancel"]["summary"] == "Stop the agent mid-turn"
+    refute desktop["cancel"]["detail"] =~ "window"
+    assert neutral["cancel"]["summary"] == desktop["cancel"]["summary"]
+
+    for client <- [tui, desktop], do: assert(client["sessions"]["summary"] == "Your sessions, newest first")
+    assert tui["sessions"]["detail"] =~ "Enter switches the window"
+    refute desktop["sessions"]["detail"] =~ "window"
+
+    assert neutral["quit"]["availability"] == "tui"
+    assert neutral["upload"]["availability"] == "tui"
+    # A row with no words of a client's own is the same row for it.
+    assert tui["goal"] == neutral["goal"]
+    # A row from a harness before the maps reads as it was.
+    old = Map.drop(neutral["cancel"], ~w(summaries details))
+    assert Commands.for_client([old], "desktop") == [old]
   end
 
   test "the list comes grouped by section in the sections' order, agents in their own" do

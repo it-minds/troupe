@@ -1,4 +1,5 @@
 export * from "./types.js";
+export { LINES, first as firstLine, order as lineOrder, orderOf as lineOrderOf, pick as pickLine } from "./lines.js";export type { LineKind } from "./lines.js";
 export { TroupeConnection, TroupeRpcError, TroupeConnectionClosed, TroupeCallTimedOut, callTimeout, callTimeouts, waitWords } from "./connection.js";
 export type { CallOptions, ConnectOptions, ConnectionHooks } from "./connection.js";
 export { PlaneClient, PlaneHttpError, normalizeEndpoint } from "./plane.js";
@@ -35,10 +36,10 @@ export {
   whoCanOpen,
 } from "./newSession.js";
 export type { AutoPick, MessageTokens, NewSessionWhere, ProfileRoom, ProfileRoomRow, TokenNames } from "./newSession.js";
-export { SessionView, createLocalSession, turnCompleted } from "./session.js";
-export type { SessionViewHooks, TurnResult } from "./session.js";
-export { AuthSession, PlaneUnreachableError, memoryTokenStore, webTokenStore, currentOrigin } from "./auth.js";
-export type { AuthSessionOptions, SignInProgress, TokenStore } from "./auth.js";
+export { ALLOW_ALWAYS, SessionView, createLocalSession, turnCompleted } from "./session.js";
+export type { ApprovalDecision, SessionViewHooks, TurnResult } from "./session.js";
+export { AuthSession, PlaneUnreachableError, memoryReachedMarks, memoryTokenStore, webReachedMarks, webTokenStore, currentOrigin } from "./auth.js";
+export type { AuthSessionOptions, ReachedMarks, SignInProgress, TokenStore, UnreachableContext } from "./auth.js";
 export { beginRedirect, completeRedirect, hasRedirectAnswer, scrubRedirect, idpMetadata, pkcePair } from "./pkce.js";
 export type { BeginRedirectOptions, IdpMetadata, PkcePair, PendingRedirect, RedirectResult } from "./pkce.js";
 export { SessionAttachment, waitOn } from "./attach.js";
@@ -96,13 +97,17 @@ export {
   openQuestions,
   presentMembers,
   loopEnding,
+  contextStatus,
   settleLoop,
+  onboardingFiles,
   turnLine,
   partsOf,
   BRIEF_PARTS,
   FINISH_PARTS,
   LEGACY_BUDGET_OPTIONS,
 } from "./transcript.js";
+export { ONCE_ONLY_SENTENCE, bytes, callConsequence, callEvidence, callHeadline, callScopedLabel, counted, toolGlyph, toolOutcome, toolTarget } from "./calls.js";
+export type { CallEvidence, CallWhere } from "./calls.js";
 export { SCRATCH_KINDS, foldScratch, scratchDocumentOf, scratchLine, scratchSize, scratchVersion } from "./scratch.js";
 export type {
   Entry,
@@ -119,6 +124,7 @@ export type {
   LoopState,
   OnboardingSuggested,
   TokenUsage,
+  ContextFill,
   TurnCost,
   CurtainPhase,
   CurtainState,
@@ -361,6 +367,7 @@ export {
   describeOverride,
   discoveryParams,
   formFromConfig,
+  inReadersWords,
   keySource,
   modelConfigError,
   providerTypes,

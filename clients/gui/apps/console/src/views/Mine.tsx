@@ -5,15 +5,18 @@
 // memory (#55's user level), which every session of theirs reads on every machine, to
 // change, with the preview the administrators' pages have.
 //
-// Nothing here is an administrative call. Each is what any client of the person's asks the
-// plane as that person (`sessions.list`, `remote.*`, `me.clients`, `me.memory`,
-// `me.memory.preview`, `me.memory.put`), so the plane answers it as it answers the desktop
-// app, and a member is shown nothing of anybody else's.
+// Nothing here is an administrative call for a member. Each is what any client of the
+// person's asks the plane as that person (`sessions.list`, `remote.*`, `me.clients`,
+// `me.memory`, `me.memory.preview`, `me.memory.put`), so the plane answers it as it answers
+// the desktop app, and a member is shown nothing of anybody else's. An administrator's role
+// also asks `admin.sessions.list`, only to know which of their own sessions Sessions shows
+// them, so a row links there where it can.
 
 import { useState } from "react";
 import type { JSX } from "react";
 import type { OwnMemory, OwnMemoryPreview, OwnMemorySaved, SessionRow } from "@troupe/client";
 import { describeError, show, useConsole, useLoad } from "../console";
+import { href } from "../route";
 import { Empty, Field, Loaded, Preview, Region, Status, TextDiff, count, when } from "./bits";
 import type { StatusKind } from "./bits";
 import { InvitedToYou } from "./Invited";
@@ -64,14 +67,24 @@ export function Mine(): JSX.Element {
   );
 }
 
+/**
+ * The person's sessions on the plane, each saying where it opens: a session is read and
+ * steered in the desktop app or the terminal, and one this person's role may see on
+ * Sessions links there too. Which those are is what `admin.sessions.list` answers them; a
+ * member is asked nothing administrative, and sees the sentence alone.
+ */
 function YourSessions(): JSX.Element {
-  const { auth, me } = useConsole();
-  const [load, reload] = useLoad(() => auth.rpc<{ sessions: SessionRow[] }>("sessions.list", {}).then((r) => r.sessions.filter((s) => s.owner === me.subject)), [auth, me.subject]);
+  const { auth, admin, me, role } = useConsole();
+  const [load, reload] = useLoad(async () => {
+    const mine = await auth.rpc<{ sessions: SessionRow[] }>("sessions.list", {}).then((r) => r.sessions.filter((s) => s.owner === me.subject));
+    const seen = role === "member" || mine.length === 0 ? [] : await admin.sessions().catch(() => []);
+    return { rows: mine, onSessions: new Set(seen.map((s) => s.id)) };
+  }, [auth, admin, me.subject, role]);
   return (
     <section aria-label="Your sessions">
       <Region>Your sessions</Region>
       <Loaded load={load} what="your sessions" retry={reload}>
-        {(rows) =>
+        {({ rows, onSessions }) =>
           rows.length === 0 ? (
             <Empty title="No session of yours on the plane">One you start on a worker, from the desktop app or the terminal, is listed here.</Empty>
           ) : (
@@ -84,16 +97,26 @@ function YourSessions(): JSX.Element {
                     <th>Profile</th>
                     <th>State</th>
                     <th>Last active</th>
+                    <th>Where it opens</th>
                   </tr>
                 </thead>
                 <tbody>
                   {rows.map((s) => (
                     <tr key={s.id}>
-                      <td className="mono">{s.id}</td>
+                      <td className="mono">{onSessions.has(s.id) ? <a href={href({ page: "sessions", path: [s.id] })}>{s.id}</a> : s.id}</td>
                       <td>{s.title ?? "—"}</td>
                       <td>{s.profile ?? "—"}</td>
                       <td>{s.status ? `${s.state} · ${s.status}` : s.state}</td>
                       <td>{when(s.last_active_at ?? null)}</td>
+                      <td>
+                        Open it in the desktop app or the terminal.
+                        {onSessions.has(s.id) && (
+                          <>
+                            {" "}
+                            What the plane keeps of it is on <a href={href({ page: "sessions", path: [s.id] })}>Sessions</a>.
+                          </>
+                        )}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -170,22 +193,23 @@ function YourMemory(): JSX.Element {
   return (
     <section aria-label="Your memory">
       <Region>Your memory</Region>
-      <p className="note">What every session on your machines starts from, as instructions from your organisation, before your own. Read-only here: an administrator of its scope keeps it.</p>
+      <p className="note">What every session on your machines starts from: instructions from your organisation, then your own.</p>
       <Loaded load={load} what="your memory" retry={reload}>
         {({ documents, own }) => (
           <>
             {documents.length === 0 ? (
               <Empty title="Your organisation keeps no memory for you" />
             ) : (
-              documents.map((d) => (
+              <p className="note">Your organisation's and your teams' are read-only here: an administrator of each keeps it.</p>
+            )}
+            {documents.map((d) => (
                 <article key={`${d.scope}/${d.name ?? ""}`} className="memory-read" aria-label={d.scope === "team" ? `The ${d.name} team's memory` : "The organisation's memory"}>
                   <h3>
                     {d.scope === "team" ? `The ${d.name} team's` : "The organisation's"} <span className="meta">version {show(d.version)}{d.updated_at ? ` · ${when(d.updated_at)}` : ""}</span>
                   </h3>
                   <pre className="memory-text">{d.text}</pre>
                 </article>
-              ))
-            )}
+              ))}
             {own && <YourOwn key={own.version} own={own} onSaved={reload} />}
           </>
         )}
@@ -213,7 +237,7 @@ function YourOwn({ own, onSaved }: { own: OwnMemory; onSaved: () => void }): JSX
         Your own <span className="meta">{own.version > 0 ? `version ${own.version}${own.changed_at ? ` · ${when(own.changed_at)}` : ""} · ${count(own.bytes, "byte")}` : "nothing written yet"}</span>
       </h3>
       <p className="note">
-        Every session you run reads it, on every machine, after your organisation's memory and before the repository's files. Only you change it; an agent of yours only adds an entry when
+        Yours to change. Every session you run reads it, on every machine, after your organisation's memory and before the repository's files. An agent of yours only adds an entry when
         you ask it to remember something. Nobody else reads it.
       </p>
       {draft === null && own.text !== "" && <pre className="memory-text">{own.text}</pre>}
@@ -268,6 +292,7 @@ function YourOwn({ own, onSaved }: { own: OwnMemory; onSaved: () => void }): JSX
             onSaved();
           }}
           onCancel={() => setPreview(null)}
+          cancel="Back to editing"
         />
       )}
     </article>

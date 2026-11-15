@@ -109,7 +109,7 @@ describe("the GitHub App", () => {
     await open();
     await waitFor(() => says("signed with a secret at version 1"), "the webhook");
     await waitFor(() => says("pull_request_review.submitted") && says("s-7f3a9c24"), "the deliveries");
-    await sees("nothing here acts on a push");
+    await sees("Nothing done: push is not an event this plane acts on.");
 
     button("Change the App")!.click();
     type(await waitFor(() => field("Webhook secret"), "the form"), "0123456789abcdef0123456789abcdef");

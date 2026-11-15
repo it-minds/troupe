@@ -24,6 +24,10 @@ defmodule Troupe.CLI.Artifacts do
 
   @type say :: (String.t() -> any())
 
+  # Where the plane answers that artifacts are off, the list says so in the desktop app's
+  # words rather than that nothing is published.
+  @off "An administrator has switched artifacts off on this plane."
+
   @switches [
     scope: :string,
     json: :boolean,
@@ -108,9 +112,11 @@ defmodule Troupe.CLI.Artifacts do
          {:ok, answer} <- Artifacts.list(params) do
       rows = Enum.filter(answer.artifacts, keep)
 
-      if asked[:json],
-        do: say.(Jason.encode!(Enum.map(rows, &json_row/1), pretty: true)),
-        else: Enum.each(listing(rows, answer.organisation), say)
+      cond do
+        asked[:json] -> say.(Jason.encode!(Enum.map(rows, &json_row/1), pretty: true))
+        rows == [] and not answer.enabled -> say.(@off)
+        true -> Enum.each(listing(rows, answer.organisation), say)
+      end
 
       0
     else

@@ -11,12 +11,12 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { JSX } from "react";
-import { BRIEF_PARTS, ruleScope, visibilityWords } from "@troupe/client";
-import type { DelegationGate, Entry, GateAnswer, PublicationGate } from "@troupe/client";
+import { BRIEF_PARTS, callConsequence as consequence, callEvidence, callHeadline as headline, callScopedLabel as scopedLabel, ruleScope, visibilityWords } from "@troupe/client";
+import type { ApprovalDecision, DelegationGate, Entry, GateAnswer, PublicationGate } from "@troupe/client";
 import { Pill } from "./bits";
 import { Mask } from "./brand";
 
-export type Decision = "allow" | "deny" | "allow_session";
+export type Decision = ApprovalDecision;
 type Approval = Extract<Entry, { kind: "approval" }>;
 
 /** The audiences a person may publish for: their teams and the profiles they are covered by, as the plane names them. */
@@ -34,45 +34,18 @@ const PART_NAMES: Record<string, string> = {
   do_not: "Do not",
 };
 
-/** Four words, phrased as a question, in the reader's language and not the protocol's. */
-function headline(tool: string): string {
-  if (tool === "delegate") return "Hand work to a subagent?";
-  if (tool === "publish_artifact") return "Publish this?";
-  if (/shell|bash|command|exec/i.test(tool)) return "Run a command?";
-  if (/write|edit|patch|apply/i.test(tool)) return "Change a file?";
-  if (/delete|remove|rm/i.test(tool)) return "Delete a file?";
-  if (/fetch|http|web|browse/i.test(tool)) return "Open a web page?";
-  return "Allow this action?";
-}
-
-/** One plain sentence about the consequence. Never a scope name, never an endpoint. */
-function consequence(tool: string): string {
-  if (/shell|bash|command|exec/i.test(tool)) {
-    return "The session wants to run this command. It runs on the platform, not on your computer.";
-  }
-  if (/write|edit|patch|apply/i.test(tool)) return "The session wants to change a file in its workspace.";
-  if (/delete|remove|rm/i.test(tool)) return "The session wants to delete a file from its workspace. This cannot be undone from here.";
-  return `The session wants to use ${tool}.`;
-}
-
-/** The scoped answer is spelled out in full, because it is the one people regret. */
-function scopedLabel(tool: string): string {
-  if (/shell|bash|command|exec/i.test(tool)) return "Allow every command for this session";
-  if (/write|edit|patch|apply/i.test(tool)) return "Allow every file change for this session";
-  return `Allow ${tool} for this session`;
-}
+// The headline, the consequence and the scoped answer's label are the client's words, which
+// the console's relayed approval says too.
 
 /** The evidence, rendered rather than dumped. */
 function Evidence({ entry }: { entry: Approval }): JSX.Element | null {
-  const args = (entry.args ?? {}) as Record<string, unknown>;
-  const command = typeof args["command"] === "string" ? args["command"] : null;
-  const path = typeof args["path"] === "string" ? args["path"] : null;
+  const { command, cwd, path } = callEvidence(entry.args);
 
   if (command) {
     return (
       <div className="evidence">
         <div className="command">{command}</div>
-        {typeof args["cwd"] === "string" && <p className="also">In {args["cwd"]}.</p>}
+        {cwd && <p className="also">In {cwd}.</p>}
       </div>
     );
   }
@@ -97,6 +70,7 @@ export function ApprovalPanel({
   onAnswer,
   onDefinition,
   onceOnly = false,
+  alwaysAllow = false,
   audiences,
 }: {
   entry: Approval;
@@ -112,6 +86,12 @@ export function ApprovalPanel({
    * once, and allowing it for the rest of the session is the laptop's person's to do there.
    */
   onceOnly?: boolean;
+  /**
+   * Whether the server takes `allow_always` (it named `approval_allow_always` at
+   * `initialize`): a lasting per-tool rule for the person, written from the approval. Until
+   * then the answer is drawn, and disabled with the reason.
+   */
+  alwaysAllow?: boolean;
   /** Whom a publication may be for: the person's teams and profiles, once the plane said them. */
   audiences?: Audiences | null | undefined;
 }): JSX.Element {
@@ -133,7 +113,7 @@ export function ApprovalPanel({
       />
     );
   }
-  return <ToolApproval entry={entry} canAnswer={canAnswer} others={others} onAnswer={onAnswer} onceOnly={onceOnly} />;
+  return <ToolApproval entry={entry} canAnswer={canAnswer} others={others} onAnswer={onAnswer} onceOnly={onceOnly} alwaysAllow={alwaysAllow} />;
 }
 
 function ToolApproval({
@@ -142,12 +122,14 @@ function ToolApproval({
   others,
   onAnswer,
   onceOnly,
+  alwaysAllow,
 }: {
   entry: Approval;
   canAnswer: boolean;
   others: string[];
   onAnswer: (decision: Decision) => Promise<void>;
   onceOnly: boolean;
+  alwaysAllow: boolean;
 }): JSX.Element {
   const [busy, setBusy] = useState<Decision | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -209,36 +191,52 @@ function ToolApproval({
         <Pill status="waiting" />
         <h2>{headline(entry.tool)}</h2>
       </header>
-      <p className="consequence">{consequence(entry.tool)}</p>
-      {/* A per-tool rule of the configuration asked (troupe #658): which, and whose. */}
-      {entry.rule && (
-        <p className="also asked-by">
-          Asked by the rule <code>ask {entry.rule.rule}</code>, from {ruleScope(entry.rule)}
-          {entry.rule.source ? ` (${entry.rule.source})` : ""}. Every call it matches asks, whatever was allowed for this session.
-        </p>
-      )}
-      <Evidence entry={entry} />
-      {others.length > 0 && (
-        <p className="also">
-          {others.length === 1 ? `${others[0]} can answer this too.` : `${others.slice(0, -1).join(", ")} and ${others.at(-1)} can answer this too.`}{" "}
-          The first answer counts.
-        </p>
-      )}
+      {/* What it is about scrolls; the header and the answers stay on the screen. */}
+      <div className="panel-body">
+        <p className="consequence">{consequence(entry.tool)}</p>
+        {/* A per-tool rule of the configuration asked (troupe #658): which, and whose. */}
+        {entry.rule && (
+          <p className="also asked-by">
+            Asked by the rule <code>ask {entry.rule.rule}</code>, from {ruleScope(entry.rule)}
+            {entry.rule.source ? ` (${entry.rule.source})` : ""}. Every call it matches asks, whatever was allowed for this session.
+          </p>
+        )}
+        <Evidence entry={entry} />
+        {others.length > 0 && (
+          <p className="also">
+            {others.length === 1 ? `${others[0]} can answer this too.` : `${others.slice(0, -1).join(", ")} and ${others.at(-1)} can answer this too.`}{" "}
+            The first answer counts.
+          </p>
+        )}
+      </div>
       {error && <p className="also error">{error}</p>}
 
       {canAnswer ? (
         <div className="answers">
           <button ref={allow} className="allow" onClick={() => void answer("allow")} disabled={busy !== null}>
-            {busy === "allow" ? "Allowing…" : onceOnly ? "Allow once" : "Allow"}
-          </button>
-          <button className="deny" onClick={() => void answer("deny")} disabled={busy !== null}>
-            {busy === "deny" ? "Denying…" : "Deny"}
+            {busy === "allow" ? "Allowing…" : "Allow once"}
           </button>
           {!onceOnly && (
             <button className="scoped" onClick={() => void answer("allow_session")} disabled={busy !== null}>
               {scopedLabel(entry.tool)}
             </button>
           )}
+          {/* A lasting rule from the approval needs the server's `allow_always` (troupe
+              #920): until it names the capability the answer is here, with the one that
+              works today beside it. */}
+          {!onceOnly &&
+            (alwaysAllow ? (
+              <button className="always" onClick={() => void answer("allow_always")} disabled={busy !== null} title="A rule of yours: every call like this runs unasked from now on">
+                {busy === "allow_always" ? "Allowing…" : `Always allow ${entry.tool}`}
+              </button>
+            ) : (
+              <button className="always" disabled title="Not yet: allow it for this session instead">
+                Always allow (not yet: allow it for this session instead)
+              </button>
+            ))}
+          <button className="deny" onClick={() => void answer("deny")} disabled={busy !== null}>
+            {busy === "deny" ? "Denying…" : "Deny"}
+          </button>
         </div>
       ) : (
         <p className="also">You can read this session but not answer for it.</p>
@@ -326,98 +324,100 @@ function DelegationPanel({
         <Pill status="waiting" />
         <h2>Hand this to {agent}?</h2>
       </header>
-      <p className="consequence">
-        The session wants a subagent to do this. Nothing starts until you answer, and what you change here is what it is given.
-      </p>
+      <div className="panel-body">
+        <p className="consequence">
+          The session wants a subagent to do this. Nothing starts until you answer, and what you change here is what it is given.
+        </p>
 
-      <dl className="facts gate">
-        <dt>Agent</dt>
-        <dd>
-          {gate.agent}
-          {gate.definition.description ? ` — ${gate.definition.description}` : ""}{" "}
-          {onDefinition ? (
-            <button type="button" className="link" onClick={() => onDefinition(gate.agent)}>
-              Open its definition
-            </button>
-          ) : (
-            <span className="muted">{[gate.definition.layer, gate.definition.path].filter(Boolean).join(" ")}</span>
-          )}
-        </dd>
-        {switched && (
-          <>
-            <dt>Sent to</dt>
-            <dd>
-              {switched.name}
-              {switched.description ? ` — ${switched.description}` : ""}, with its own tools and budget
-            </dd>
-          </>
-        )}
-        <dt>Depth</dt>
-        <dd>
-          {gate.depth ?? "?"} of {gate.maxDepth ?? "?"}
-        </dd>
-        {share && (
-          <>
-            <dt>Budget</dt>
-            <dd>{share}</dd>
-          </>
-        )}
-        <dt>Tools</dt>
-        <dd>{gate.tools.length > 0 ? gate.tools.map((t) => `${t.name} ${t.permission}`).join(", ") : "its own"}</dd>
-      </dl>
-
-      <dl className="facts wide parts brief" aria-label="The brief">
-        {BRIEF_PARTS.map((part) => {
-          const text = edits[part] ?? gate.brief[part] ?? "";
-          const edited = edits[part] !== undefined;
-          return (
-            <div key={part} className="gate-part">
-              <dt>
-                {PART_NAMES[part]}
-                {edited ? " · edited" : ""}
-              </dt>
+        <dl className="facts gate">
+          <dt>Agent</dt>
+          <dd>
+            {gate.agent}
+            {gate.definition.description ? ` — ${gate.definition.description}` : ""}{" "}
+            {onDefinition ? (
+              <button type="button" className="link" onClick={() => onDefinition(gate.agent)}>
+                Open its definition
+              </button>
+            ) : (
+              <span className="muted">{[gate.definition.layer, gate.definition.path].filter(Boolean).join(" ")}</span>
+            )}
+          </dd>
+          {switched && (
+            <>
+              <dt>Sent to</dt>
               <dd>
-                {editing === part ? (
-                  <form
-                    className="answers"
-                    onSubmit={(e) => {
-                      e.preventDefault();
-                      keep(part);
-                    }}
-                  >
-                    <textarea value={draft} onChange={(e) => setDraft(e.target.value)} aria-label={`Edit ${PART_NAMES[part]}`} rows={3} />
-                    <button type="submit" className="deny">
-                      Keep
-                    </button>
-                    <button type="button" className="deny" onClick={() => setEditing(null)}>
-                      Back
-                    </button>
-                  </form>
-                ) : (
-                  <>
-                    <span className="gate-text">{text}</span>{" "}
-                    {canAnswer && editing === null && (
-                      <button
-                        type="button"
-                        className="link"
-                        aria-label={`Edit ${PART_NAMES[part]}`}
-                        onClick={() => {
-                          setDraft(text);
-                          setEditing(part);
-                        }}
-                      >
-                        Edit
-                      </button>
-                    )}
-                  </>
-                )}
+                {switched.name}
+                {switched.description ? ` — ${switched.description}` : ""}, with its own tools and budget
               </dd>
-            </div>
-          );
-        })}
-      </dl>
+            </>
+          )}
+          <dt>Depth</dt>
+          <dd>
+            {gate.depth ?? "?"} of {gate.maxDepth ?? "?"}
+          </dd>
+          {share && (
+            <>
+              <dt>Budget</dt>
+              <dd>{share}</dd>
+            </>
+          )}
+          <dt>Tools</dt>
+          <dd>{gate.tools.length > 0 ? gate.tools.map((t) => `${t.name} ${t.permission}`).join(", ") : "its own"}</dd>
+        </dl>
 
-      {others.length > 0 && <p className="also">{others.join(", ")} can answer this too. The first answer counts.</p>}
+        <dl className="facts wide parts brief" aria-label="The brief">
+          {BRIEF_PARTS.map((part) => {
+            const text = edits[part] ?? gate.brief[part] ?? "";
+            const edited = edits[part] !== undefined;
+            return (
+              <div key={part} className="gate-part">
+                <dt>
+                  {PART_NAMES[part]}
+                  {edited ? " · edited" : ""}
+                </dt>
+                <dd>
+                  {editing === part ? (
+                    <form
+                      className="answers"
+                      onSubmit={(e) => {
+                        e.preventDefault();
+                        keep(part);
+                      }}
+                    >
+                      <textarea value={draft} onChange={(e) => setDraft(e.target.value)} aria-label={`Edit ${PART_NAMES[part]}`} rows={3} />
+                      <button type="submit" className="deny">
+                        Keep
+                      </button>
+                      <button type="button" className="deny" onClick={() => setEditing(null)}>
+                        Back
+                      </button>
+                    </form>
+                  ) : (
+                    <>
+                      <span className="gate-text">{text}</span>{" "}
+                      {canAnswer && editing === null && (
+                        <button
+                          type="button"
+                          className="link"
+                          aria-label={`Edit ${PART_NAMES[part]}`}
+                          onClick={() => {
+                            setDraft(text);
+                            setEditing(part);
+                          }}
+                        >
+                          Edit
+                        </button>
+                      )}
+                    </>
+                  )}
+                </dd>
+              </div>
+            );
+          })}
+        </dl>
+
+        {others.length > 0 && <p className="also">{others.join(", ")} can answer this too. The first answer counts.</p>}
+      </div>
       {error && <p className="also error">{error}</p>}
 
       {!canAnswer ? (
@@ -583,41 +583,43 @@ function PublishPanel({
         <Pill status="waiting" />
         <h2>{headline(entry.tool)}</h2>
       </header>
-      <p className="consequence">
-        {publication.id ? "The session wants to publish a new version of an artifact. " : "The session wants to publish an artifact. "}
-        Nothing is published until you say whom it is for.
-      </p>
-      <dl className="facts gate">
-        <dt>Title</dt>
-        <dd>{publication.title}</dd>
-        <dt>What</dt>
-        <dd>
-          {what}, {files}
-        </dd>
-        {publication.id && (
-          <>
-            <dt>Of</dt>
-            <dd>{publication.id}</dd>
-          </>
-        )}
-        {publication.note && (
-          <>
-            <dt>Note</dt>
-            <dd>{publication.note}</dd>
-          </>
-        )}
-      </dl>
-      <fieldset className="audience-choices" disabled={!canAnswer || busy !== null}>
-        <legend>Who may open it</legend>
-        {choices.map((c) => (
-          <label key={c.key} className="inline">
-            <input type="radio" name={`publish-${entry.callId}`} value={c.key} checked={chosen === c.key} onChange={() => setChosen(c.key)} /> {c.label}
-          </label>
-        ))}
-        {publication.visibility === null && <p className="also">The agent did not say whom it is for.</p>}
-        {publication.visibility !== null && chosen !== proposedKey && <p className="also">The agent proposed {choices.find((c) => c.key === proposedKey)?.label.toLowerCase() ?? visibilityWords(publication.visibility)}.</p>}
-      </fieldset>
-      {others.length > 0 && <p className="also">{others.join(", ")} can answer this too. The first answer counts.</p>}
+      <div className="panel-body">
+        <p className="consequence">
+          {publication.id ? "The session wants to publish a new version of an artifact. " : "The session wants to publish an artifact. "}
+          Nothing is published until you say whom it is for.
+        </p>
+        <dl className="facts gate">
+          <dt>Title</dt>
+          <dd>{publication.title}</dd>
+          <dt>What</dt>
+          <dd>
+            {what}, {files}
+          </dd>
+          {publication.id && (
+            <>
+              <dt>Of</dt>
+              <dd>{publication.id}</dd>
+            </>
+          )}
+          {publication.note && (
+            <>
+              <dt>Note</dt>
+              <dd>{publication.note}</dd>
+            </>
+          )}
+        </dl>
+        <fieldset className="audience-choices" disabled={!canAnswer || busy !== null}>
+          <legend>Who may open it</legend>
+          {choices.map((c) => (
+            <label key={c.key} className="inline">
+              <input type="radio" name={`publish-${entry.callId}`} value={c.key} checked={chosen === c.key} onChange={() => setChosen(c.key)} /> {c.label}
+            </label>
+          ))}
+          {publication.visibility === null && <p className="also">The agent did not say whom it is for.</p>}
+          {publication.visibility !== null && chosen !== proposedKey && <p className="also">The agent proposed {choices.find((c) => c.key === proposedKey)?.label.toLowerCase() ?? visibilityWords(publication.visibility)}.</p>}
+        </fieldset>
+        {others.length > 0 && <p className="also">{others.join(", ")} can answer this too. The first answer counts.</p>}
+      </div>
       {error && <p className="also error">{error}</p>}
       {canAnswer ? (
         <div className="answers">
@@ -644,7 +646,7 @@ function PublishPanel({
 export function DecisionRecord({ entry, self }: { entry: Approval; self: string | undefined }): JSX.Element {
   const by = entry.resolvedBy ?? self;
   const mine = by === undefined || by === self;
-  const verb = entry.decision === "deny" ? "Denied" : entry.decision === "allow_session" ? "Allowed for this session" : "Allowed";
+  const verb = entry.decision === "deny" ? "Denied" : entry.decision === "allow_session" ? "Allowed for this session" : entry.decision === "allow_always" ? "Always allowed" : "Allowed";
   const said = entry.answered;
   // A delegation's answer says what it changed: where it went, which parts, the word back.
   // A publication's says whom it went to and whose it is.
