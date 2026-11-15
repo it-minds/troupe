@@ -74,7 +74,7 @@ defmodule Troupe.Worker.BundleWinsTest do
     assert Enum.map(skipped.data["files"], &{&1["kind"], &1["name"]}) ==
              [{"agent", "build"}, {"skill", "review-checklist"}]
 
-    assert hd(skipped.data["files"])["reason"] =~ "on a pod the bundle's beats a repository's"
+    assert hd(skipped.data["files"])["reason"] =~ "on the platform the bundle's beats a repository's"
   end
 
   test "a profile that allows the repository's gets the repository's", context do

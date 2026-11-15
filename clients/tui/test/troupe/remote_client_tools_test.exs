@@ -140,7 +140,7 @@ defmodule Troupe.RemoteClientToolsTest do
   test "a session whose profile takes no personal tools is not offered them, and says why once",
        %{remote: remote, origin: origin} do
     reason =
-      "the worker profile code does not take a person's own tools on its pods " <>
+      "the profile code does not take a person's own tools " <>
         "(personalTools: forbid); only the profile's MCP servers are available"
 
     :ok =

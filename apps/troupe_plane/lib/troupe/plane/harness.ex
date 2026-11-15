@@ -40,6 +40,7 @@ defmodule Troupe.Plane.Harness do
     Identity,
     Invites,
     Memory,
+    Names,
     Placement,
     ProfileView,
     Remote,
@@ -79,6 +80,9 @@ defmodule Troupe.Plane.Harness do
   # How long a client should wait before asking again. The scaler's interval plus the
   # time a cold worker takes to schedule, bind its volume and fetch its bundle.
   @wait_hint_ms 5_000
+
+  # A session row names its owner by subject, and by name beside it where there is one.
+  @owner_name [{"owner", "owner_name"}]
 
   # How long an archive waits for the pod: what a pod gives one session to seal, upload
   # its workspace and stop (`Troupe.Worker.Session.Manager.go_dormant/2`).
@@ -205,6 +209,9 @@ defmodule Troupe.Plane.Harness do
     "artifact.rollback" => :control,
     "artifact.pin" => :control,
     "artifact.read" => :observe,
+    # Every file of a version, in base64, for a laptop's daemon to put into a session's
+    # workspace (`fs.upload` with `artifact`): reading, as `artifact.read` is.
+    "artifact.files" => :observe,
     "artifact.preview" => :control,
     "artifact.upload.begin" => :control,
     "artifact.share" => :control,
@@ -547,6 +554,9 @@ defmodule Troupe.Plane.Harness do
   defp handle("artifact.read", %{"id" => id} = params, %{user: user} = context),
     do: Artifacts.read(id, user, params, platform_admin?: admin?(context))
 
+  defp handle("artifact.files", %{"id" => id} = params, %{user: user} = context),
+    do: Artifacts.files(id, user, params, platform_admin?: admin?(context))
+
   defp handle("artifact.preview", %{"id" => id} = params, %{user: user} = context),
     do: Artifacts.preview(id, user, params, platform_admin?: admin?(context))
 
@@ -723,7 +733,7 @@ defmodule Troupe.Plane.Harness do
       |> put_option(:limit, params["limit"])
 
     sessions = Sessions.visible_to(user, options)
-    {:ok, %{"sessions" => Enum.map(sessions, &session_json(&1, user))}}
+    {:ok, %{"sessions" => sessions |> Enum.map(&session_row(&1, user)) |> Names.decorate(@owner_name)}}
   end
 
   # Laptop sessions offered for steering from another device (#58): the caller's own, from
@@ -1451,7 +1461,7 @@ defmodule Troupe.Plane.Harness do
   # Waiting for room, or between the epoch bump and its placement: there is no pod to tell.
   defp archive(%Session{} = session, _user) do
     {:error,
-     Error.new(:conflict, %{reason: "this session is not on a pod yet", state: session.state})}
+     Error.new(:conflict, %{reason: "this session has not started on the platform yet", state: session.state})}
   end
 
   # The pod reports its dormancy down the control channel before it answers, so the row
@@ -1766,7 +1776,7 @@ defmodule Troupe.Plane.Harness do
   end
 
   defp effect_profile(_user, _team, _profile),
-    do: invalid("profile is a worker profile's name", field: "profile")
+    do: invalid("profile names a profile", field: "profile")
 
   # A person's own memory is a person's: a service principal has no row to keep it under.
   defp own_memory(%User{id: id}) when is_binary(id), do: :ok
@@ -3735,7 +3745,10 @@ defmodule Troupe.Plane.Harness do
     }
   end
 
-  defp session_json(session, user) do
+  # A session by its owner's name as well as their subject, where the plane knows one.
+  defp session_json(session, user), do: session |> session_row(user) |> Names.decorate(@owner_name)
+
+  defp session_row(session, user) do
     %{
       "id" => session.id,
       "owner" => session.owner_subject,

@@ -4,7 +4,8 @@
 // runs the row, Esc closes. A command this app cannot run is greyed with the reason
 // rather than hidden, because the list is how somebody learns the tool; a row the table
 // marks as the terminal client's alone (`availability` `tui`: leaving it, reading a file
-// from where it started) is left out, since there is nothing here for it to do. Each row
+// from where it started, a branch's worktree, a window, the agent tree) is left out, since
+// there is nothing here for it to do. Each row
 // says what it does in this app's words where the table has some for it (`summaries`,
 // `details`), and in the words true in any client where it has none.
 //
@@ -151,12 +152,7 @@ const ASKS_ITSELF = new Set(["publish"]);
 /** Why a built-in has no runner here: said on its row, not hidden. */
 const NOT_HERE: Record<string, string> = {
   compact: "a session on this computer compacts by itself",
-  merge: "branches and worktrees are the terminal client's: merge there, or in the repository",
-  discard: "branches and worktrees are the terminal client's",
-  dismiss: "there are no windows to dismiss here",
-  observer: "not in the desktop app yet",
   watch: "on This computer, under this session's controls",
-  worktree: "start a branch from the terminal client, or a new session from the list",
 };
 
 interface Row {
@@ -204,6 +200,7 @@ function inThisApp(entry: CommandEntry): CommandEntry {
     ...entry,
     summary: entry.summaries?.["desktop"] ?? entry.summary,
     detail: entry.details?.["desktop"] ?? entry.detail,
+    availability: entry.availabilities?.["desktop"] ?? entry.availability,
     ...(windowed
       ? { usage: entry.usage.replace(/\s*\[window\]/, ""), args: entry.args.filter((a) => a.kind !== "window"), example: null }
       : {}),
@@ -253,6 +250,16 @@ function kindOf(entry: CommandEntry): Kind {
     default:
       return "command";
   }
+}
+
+function sectionName(section: string): string {
+  return SECTION_NAMES[section] ?? section;
+}
+
+/** What the detail's head names beside the command: whose it is, or for one of Troupe's own, the section it sits under. */
+function areaOf(entry: CommandEntry): string {
+  const kind = kindOf(entry);
+  return kind === "command" ? sectionName(entry.section).toLowerCase() : kind;
 }
 
 /** Where an agent comes from, in as few letters as say it. */
@@ -414,7 +421,7 @@ export function CommandPalette({
       return;
     }
     v.commands()
-      .then((r) => live && setCommands(r.commands.filter((c) => c.availability !== "tui").map(inThisApp)))
+      .then((r) => live && setCommands(r.commands.map(inThisApp).filter((c) => c.availability !== "tui")))
       .catch((e: unknown) => live && setError(e instanceof Error ? e.message : String(e)));
     input.current?.focus();
     return () => {
@@ -588,7 +595,7 @@ export function CommandPalette({
 
           {grouped.map((group) => (
             <div key={group.section}>
-              <div className="section">{SECTION_NAMES[group.section] ?? group.section}</div>
+              <div className="section screen">{sectionName(group.section)}</div>
               {group.rows.map(({ row, index }) => {
                 const kind = kindOf(row.entry);
                 const agent = kind === "agent" ? agents.get(row.entry.name) : undefined;
@@ -603,7 +610,6 @@ export function CommandPalette({
                     onClick={() => void run(row)}
                   >
                     <span className="name">/{row.entry.name}</span>
-                    <span className="kind">{kind}</span>
                     <span className="summary">
                       {agent && <span className="badges">{agentBadges(agent).join(" · ")}</span>}
                       {row.entry.summary}
@@ -617,8 +623,9 @@ export function CommandPalette({
         </div>
 
         {selected && (
-          <div className="detail">
+          <div className={`detail kind-${kindOf(selected.entry)}`}>
             <span className="usage">{selected.entry.usage}</span>
+            <span className="area"> · {areaOf(selected.entry)}</span>
             {selected.entry.aliases.length > 0 && <span className="micro muted"> also {selected.entry.aliases.map((a) => `/${a}`).join(", ")}</span>}
             <p>{selected.entry.detail}</p>
             {selected.entry.source === "agent" && <AgentAbout name={selected.entry.name} agent={agents.get(selected.entry.name)} manager={Boolean(actions.agents)} switches={selected.reason === null} />}

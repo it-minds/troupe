@@ -24,6 +24,8 @@
 //                          Markdown with, and no other file (src/agent_file.rs)
 //   an artifact's window   an artifact shown from its own host in a window of its own,
 //                          granted nothing, never fetched into the app (src/artifact_window.rs)
+//   its window's place     the main window opens at the size and place it was closed at,
+//                          on a screen that still exists (src/window.rs)
 //
 // Each one is reached through `TroupeShell` in `src/shell.ts`, which the shell installs
 // on `window.troupe` at startup. Nothing else in the bundle knows this process exists.
@@ -38,6 +40,7 @@ mod release;
 mod secrets;
 mod update;
 mod signin;
+mod window;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -56,6 +59,8 @@ pub fn run() {
         // Driven from `update.rs` alone, with the key and the release it checked; the
         // page is granted none of the plugin's own commands.
         .plugin(tauri_plugin_updater::Builder::new().build())
+        // Kept and restored by the shell alone; the page is granted none of its commands.
+        .plugin(window::plugin())
         .manage(update::Updates::default())
         .invoke_handler(tauri::generate_handler![
             secrets::secret_get,

@@ -51,11 +51,11 @@ describe("a confirm's way out", () => {
   it("says Back to editing where the preview follows a form", async () => {
     await open("#/teams/core/limits");
     (await waitFor(() => button("Change core's limits"), "the limits")).click();
-    type(await waitFor(() => field("Idle before it goes dormant"), "the form"), "600");
+    type(await waitFor(() => field("Idle before it falls asleep"), "the form"), "600");
     button("Preview")!.click();
     await waitFor(() => says("What will happen"), "the preview");
     button("Back to editing")!.click();
-    await waitFor(() => field("Idle before it goes dormant"), "the form again");
+    await waitFor(() => field("Idle before it falls asleep"), "the form again");
   });
 });
 
@@ -107,7 +107,7 @@ describe("states, counts and outcomes", () => {
     const states = [...table.querySelectorAll("tbody tr")].map((r) => r.lastElementChild?.textContent ?? "").filter(Boolean);
     expect(states.length).toBeGreaterThan(0);
     expect(states.filter((s) => /_|\bread_only\b/.test(s))).toEqual([]);
-    for (const s of states) expect(["active", "dormant", "read-only", "erasure pending"].some((w) => s.includes(w))).toBe(true);
+    for (const s of states) expect(["active", "asleep", "read-only", "erasure pending"].some((w) => s.includes(w))).toBe(true);
   });
 
   it("says what the plane did with a delivery as a sentence, not by its field", () => {

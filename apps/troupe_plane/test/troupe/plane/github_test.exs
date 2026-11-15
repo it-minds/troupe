@@ -653,6 +653,7 @@ defmodule Troupe.Plane.GitHubTest do
 
       assert {:error, error} = create.("example-org/widgets")
       assert error.data.reason =~ "does not declare 127.0.0.1 in egress.gitHosts"
+      assert error.data.reason =~ "the profile dev does not declare 127.0.0.1 in egress.gitHosts, so its sessions cannot reach it"
 
       assert Sessions.visible_to(ada, []) == []
     end

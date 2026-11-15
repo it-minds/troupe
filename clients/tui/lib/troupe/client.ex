@@ -38,6 +38,7 @@ defmodule Troupe.Client do
   it over) or `"erasure_pending"`; a plane's private row says only the last.
   """
   @type summary :: %{
+          optional(:owner_name) => String.t() | nil,
           id: session_id(),
           title: String.t(),
           owner: String.t() | nil,

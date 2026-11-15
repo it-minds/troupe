@@ -428,7 +428,7 @@ defmodule Troupe.Worker.GitHub do
     said = repository["visibility"] || if(repository["private"] == false, do: "public")
 
     "#{credential["repository"]} is #{said || "not reported as private"} on GitHub, and this " <>
-      "session's worker profile pushes to private repositories only (github.allowPublic)."
+      "session's profile pushes to private repositories only (github.allowPublic)."
   end
 
   defp path_problems(root, sent, policy) do
@@ -440,7 +440,7 @@ defmodule Troupe.Worker.GitHub do
       if denied == [],
         do: [],
         else: [
-          "The push would carry paths the worker profile denies (github.denyPaths): " <>
+          "The push would carry paths the profile denies (github.denyPaths): " <>
             Enum.map_join(denied, ", ", fn {path, pattern} -> "#{path} (#{pattern})" end) <>
             "."
         ]
@@ -756,7 +756,7 @@ defmodule Troupe.Worker.GitHub do
 
   defp cannot_read({:error, :cannot_read_ci}),
     do:
-      {:error, "the worker profile grants neither checks nor statuses, so CI cannot be read here"}
+      {:error, "the profile grants neither checks nor statuses, so CI cannot be read here"}
 
   defp cannot_read(other), do: other
 
@@ -1055,7 +1055,7 @@ defmodule Troupe.Worker.GitHub do
       do: :ok,
       else:
         {:error,
-         "this session's token cannot #{what}: its worker profile grants #{name}: " <>
+         "this session's token cannot #{what}: its profile grants #{name}: " <>
            "#{held || "none"} on GitHub"}
   end
 

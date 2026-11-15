@@ -60,6 +60,8 @@ defmodule Troupe.Plane.Settings do
   @settings [
     %Setting{
       key: "platform_admin_group",
+      label: "Group that administers the platform",
+      unit: :text,
       group: :administration,
       type: :string,
       app_key: :platform_admin_group,
@@ -70,6 +72,8 @@ defmodule Troupe.Plane.Settings do
     },
     %Setting{
       key: "groups_claim",
+      label: "Claim that carries a person's groups",
+      unit: :text,
       group: :administration,
       type: :string,
       app_key: :groups_claim,
@@ -79,26 +83,32 @@ defmodule Troupe.Plane.Settings do
         "Wrong, and every login arrives with no groups: nobody is a platform admin and nobody is in a team. Entra ID calls it groups; some providers use roles.",
       effect: :immediate
     },
-    # The deployment's, not the console's (Decision 736). In gitops a repository holds the
+    # The deployment's, not the console's. In gitops a repository holds the
     # profiles and something outside the plane applies them, which is a fact about how
     # this plane was deployed; a console that could switch it back to direct would be a
     # lock with the key hanging next to it, and a profile it then created would be one
     # the repository never saw and its applier never prunes.
     %Setting{
       key: "provisioning_mode",
+      label: "How a profile reaches the cluster",
+      unit: :choice,
+      choices: [direct: "Direct: this plane applies it", gitops: "Gitops: a repository holds it"],
       group: :provisioning,
       type: :enum,
       values: [:direct, :gitops],
       app_key: :provisioning_mode,
       editable: false,
       fallback: :direct,
-      summary: "Whether this plane writes profiles to the cluster, or reads them from resources a repository puts there.",
+      summary:
+        "Whether this plane writes profiles to the cluster, or reads them from resources a repository puts there.",
       consequence:
         "In direct the console's profile editor changes the cluster when you apply. In gitops the profiles, the cluster policy and the triggers are the resources a repository holds and Flux (or anything like it) applies: the console shows them locked, the admin API refuses to change them, and the plane writes only what no repository could know — workers wanted, teams' volumes, MCP servers. Running a trigger by hand and minting its key still work. Deployment only.",
       effect: :restart
     },
     %Setting{
       key: "gitops_source",
+      label: "Where the profiles come from in gitops",
+      unit: :text,
       group: :provisioning,
       type: :string,
       app_key: :gitops_source,
@@ -111,37 +121,45 @@ defmodule Troupe.Plane.Settings do
     },
     %Setting{
       key: "default_budget_micros",
+      label: "Budget a new team starts with",
+      unit: :dollars,
       group: :team_defaults,
       type: :integer,
       fallback: 0,
-      summary: "The spend ceiling a team gets when it is enabled, in millionths.",
+      summary: "The spend ceiling a team gets when it is enabled.",
       consequence:
         "Only for teams enabled after the change. 0 is unlimited, which is what a team gets today unless you set this.",
       effect: :next_team
     },
     %Setting{
       key: "platform_budget_micros",
+      label: "Budget for the platform",
+      unit: :dollars,
       group: :administration,
       type: :integer,
       fallback: 0,
-      summary:
-        "A ceiling on everything this plane spends in a month, in millionths. 0 is no ceiling.",
+      summary: "A ceiling on everything this plane spends in a month. 0 is no ceiling.",
       consequence:
         "Above every team's, and counted over the calendar month in UTC, so it turns over on the 1st. It only ever narrows: where the deployment was given a tighter ceiling, that one binds and this is ignored. A reservation refused here names which of the two it was.",
       effect: :immediate
     },
     %Setting{
       key: "default_person_budget_micros",
+      label: "Budget for each person",
+      unit: :dollars,
       group: :team_defaults,
       type: :integer,
       fallback: 0,
-      summary: "The spend ceiling a person gets per month, in millionths, across every team.",
+      summary: "The spend ceiling a person gets per month, across every team.",
       consequence:
         "Applied to people who have not been given one of their own. It counts the calendar month in UTC and turns over on the 1st. 0 is unlimited, which is what everybody gets today unless you set this.",
       effect: :immediate
     },
     %Setting{
       key: "default_budget_period",
+      label: "A new team's budget counted over",
+      unit: :choice,
+      choices: [monthly: "monthly, from the 1st (UTC)", never: "never turns over"],
       group: :team_defaults,
       type: :enum,
       # `Identity.Team.budget_periods/0`, as atoms, and the settings test fails if the two
@@ -158,6 +176,8 @@ defmodule Troupe.Plane.Settings do
     },
     %Setting{
       key: "default_idle_timeout_seconds",
+      label: "Idle before a session goes dormant",
+      unit: :minutes,
       group: :team_defaults,
       type: :integer,
       app_key: :default_idle_timeout_seconds,
@@ -169,6 +189,8 @@ defmodule Troupe.Plane.Settings do
     },
     %Setting{
       key: "default_cache_eviction_days",
+      label: "A dormant session's cache kept",
+      unit: :days,
       group: :team_defaults,
       type: :integer,
       app_key: :default_cache_eviction_days,
@@ -180,6 +202,8 @@ defmodule Troupe.Plane.Settings do
     },
     %Setting{
       key: "pins_allowed",
+      label: "Members may pin a session",
+      unit: :switch,
       group: :team_defaults,
       type: :boolean,
       app_key: :pins_allowed,
@@ -191,6 +215,8 @@ defmodule Troupe.Plane.Settings do
     },
     %Setting{
       key: "members_may_control",
+      label: "Members may steer a team session",
+      unit: :switch,
       group: :team_defaults,
       type: :boolean,
       app_key: :members_may_control,
@@ -202,6 +228,8 @@ defmodule Troupe.Plane.Settings do
     },
     %Setting{
       key: "managed_permission_rules_only",
+      label: "Only the platform's permission rules",
+      unit: :switch,
       group: :sessions,
       type: :boolean,
       app_key: :managed_permission_rules_only,
@@ -213,6 +241,8 @@ defmodule Troupe.Plane.Settings do
     },
     %Setting{
       key: "managed_mcp_servers_only",
+      label: "Only the profile's MCP servers",
+      unit: :switch,
       group: :sessions,
       type: :boolean,
       app_key: :managed_mcp_servers_only,
@@ -224,6 +254,8 @@ defmodule Troupe.Plane.Settings do
     },
     %Setting{
       key: "default_erase_after_days",
+      label: "Erase a session after",
+      unit: :days,
       group: :team_defaults,
       type: :integer,
       app_key: :default_erase_after_days,
@@ -235,6 +267,8 @@ defmodule Troupe.Plane.Settings do
     },
     %Setting{
       key: "default_bundle_channel",
+      label: "Channel a new profile follows",
+      unit: :text,
       group: :sessions,
       type: :string,
       fallback: "stable",
@@ -246,16 +280,21 @@ defmodule Troupe.Plane.Settings do
     # -- where people sign in: the provider, editable behind a check ------------
     %Setting{
       key: "issuer",
+      label: "Identity provider's issuer",
+      unit: :url,
       group: :sign_in,
       type: :string,
       app_key: [:oidc, :issuer],
-      summary: "The identity provider this plane trusts, as it names itself in its discovery document.",
+      summary:
+        "The identity provider this plane trusts, as it names itself in its discovery document.",
       consequence:
         "Every token is checked against this issuer's keys. Saving one the provider does not answer for is refused unless you say save anyway; a wrong one is undone with reset, and the break-glass door opens this console without any provider.",
       effect: :immediate
     },
     %Setting{
       key: "client_id",
+      label: "Client ID",
+      unit: :text,
       group: :sign_in,
       type: :string,
       app_key: [:oidc, :client_id],
@@ -266,6 +305,8 @@ defmodule Troupe.Plane.Settings do
     },
     %Setting{
       key: "client_secret",
+      label: "Client secret",
+      unit: :text,
       group: :sign_in,
       type: :string,
       app_key: [:oidc, :client_secret],
@@ -278,34 +319,45 @@ defmodule Troupe.Plane.Settings do
     },
     %Setting{
       key: "authorization_endpoint",
+      label: "Authorization endpoint",
+      unit: :url,
       group: :sign_in,
       type: :string,
       app_key: [:oidc, :authorization_endpoint],
       summary: "Where the console sends a browser to sign in.",
-      consequence: "Blank means <issuer>/authorize, which is right for most providers and wrong for Entra.",
+      consequence:
+        "Blank means <issuer>/authorize, which is right for most providers and wrong for Entra.",
       effect: :immediate
     },
     %Setting{
       key: "device_authorization_endpoint",
+      label: "Device authorization endpoint",
+      unit: :url,
       group: :sign_in,
       type: :string,
       app_key: [:oidc, :device_authorization_endpoint],
-      summary: "Where the CLI starts the device grant. Published to every client at /.well-known/troupe.",
+      summary:
+        "Where the CLI starts the device grant. Published to every client at /.well-known/troupe.",
       consequence:
         "The check compares it with what the provider publishes: an Entra v2 issuer with a v1 endpoint fails every device login with a message about the audience.",
       effect: :immediate
     },
     %Setting{
       key: "token_endpoint",
+      label: "Token endpoint",
+      unit: :url,
       group: :sign_in,
       type: :string,
       app_key: [:oidc, :token_endpoint],
-      summary: "Where codes and device grants are exchanged for tokens. Published to every client.",
+      summary:
+        "Where codes and device grants are exchanged for tokens. Published to every client.",
       consequence: "Checked against the provider's discovery document before it is saved.",
       effect: :immediate
     },
     %Setting{
       key: "scopes",
+      label: "Scopes a client asks for",
+      unit: :text,
       group: :sign_in,
       type: :list,
       app_key: [:oidc, :scopes],
@@ -317,6 +369,8 @@ defmodule Troupe.Plane.Settings do
     },
     %Setting{
       key: "mcp_scope",
+      label: "Scope an MCP client asks for",
+      unit: :text,
       group: :sign_in,
       type: :string,
       app_key: [:oidc, :mcp_scope],
@@ -325,10 +379,12 @@ defmodule Troupe.Plane.Settings do
         "Blank means <base_url>/mcp/admin, the resource's own name, which is the only name a client may send as RFC 8707's resource. Set it only where the registration exposes another.",
       effect: :immediate
     },
-    # The deployment's, not the console's (Decision 751). Changing it re-keys every person
+    # The deployment's, not the console's. Changing it re-keys every person
     # at their next sign-in, and there is no reset that puts a re-keyed person back.
     %Setting{
       key: "subject_claim",
+      label: "Claim that is the person",
+      unit: :text,
       group: :sign_in,
       type: :string,
       app_key: [:oidc, :subject_claim],
@@ -342,6 +398,8 @@ defmodule Troupe.Plane.Settings do
     # -- read-only: what this plane was deployed with ---------------------------
     %Setting{
       key: "audience",
+      label: "Audience of this plane's tokens",
+      unit: :text,
       group: :deployment,
       type: :string,
       app_key: :audience,
@@ -354,6 +412,8 @@ defmodule Troupe.Plane.Settings do
     },
     %Setting{
       key: "base_url",
+      label: "Address of this plane",
+      unit: :url,
       group: :deployment,
       type: :string,
       app_key: :base_url,
@@ -365,6 +425,8 @@ defmodule Troupe.Plane.Settings do
     },
     %Setting{
       key: "scim_token",
+      label: "SCIM token",
+      unit: :text,
       group: :deployment,
       type: :string,
       app_key: :scim_token,
@@ -377,6 +439,8 @@ defmodule Troupe.Plane.Settings do
     },
     %Setting{
       key: "breakglass_token",
+      label: "Break-glass token",
+      unit: :text,
       group: :deployment,
       type: :string,
       app_key: [:breakglass, :token],
@@ -395,6 +459,13 @@ defmodule Troupe.Plane.Settings do
     # Every type a machine may be set up with, from the one list of them the clients offer.
     %Setting{
       key: "client_provider",
+      label: "Provider for people's machines",
+      unit: :choice,
+      choices:
+        Enum.map(
+          Troupe.Protocol.ProviderTypes.named(),
+          &{String.to_atom(&1), Troupe.Protocol.ProviderTypes.fetch(&1).label}
+        ),
       group: :client_defaults,
       type: :enum,
       values: Enum.map(Troupe.Protocol.ProviderTypes.named(), &String.to_atom/1),
@@ -408,6 +479,8 @@ defmodule Troupe.Plane.Settings do
     },
     %Setting{
       key: "client_base_url",
+      label: "Provider's address",
+      unit: :url,
       group: :client_defaults,
       type: :string,
       summary: "Where that provider is: a gateway's URL, or empty for the provider's own API.",
@@ -418,16 +491,23 @@ defmodule Troupe.Plane.Settings do
     },
     %Setting{
       key: "client_auth",
+      label: "How the key is presented",
+      unit: :choice,
+      choices: [api_key: "The provider's own header", bearer: "Authorization: Bearer"],
       group: :client_defaults,
       type: :enum,
       values: [:api_key, :bearer],
       fallback: :api_key,
-      summary: "How the key is presented: the provider's own header, or Authorization: Bearer for a gateway.",
-      consequence: "Wrong, and every request from a machine using the defaults is refused as unauthenticated.",
+      summary:
+        "How the key is presented: the provider's own header, or Authorization: Bearer for a gateway.",
+      consequence:
+        "Wrong, and every request from a machine using the defaults is refused as unauthenticated.",
       effect: :immediate
     },
     %Setting{
       key: "client_model_default",
+      label: "Default model for clients",
+      unit: :text,
       group: :client_defaults,
       type: :string,
       summary: "The model that does the editing, as the provider names it.",
@@ -436,6 +516,8 @@ defmodule Troupe.Plane.Settings do
     },
     %Setting{
       key: "client_model_cheap",
+      label: "Cheap model for clients",
+      unit: :text,
       group: :client_defaults,
       type: :string,
       summary: "The cheaper model for exploring, summarising and quick questions.",
@@ -444,14 +526,19 @@ defmodule Troupe.Plane.Settings do
     },
     %Setting{
       key: "client_model_expensive",
+      label: "Expensive model for clients",
+      unit: :text,
       group: :client_defaults,
       type: :string,
       summary: "The premium model an orchestrating agent may ask for, if there is one.",
-      consequence: "Pre-filled as the expensive model; empty means the default model is used for that too.",
+      consequence:
+        "Pre-filled as the expensive model; empty means the default model is used for that too.",
       effect: :immediate
     },
     %Setting{
       key: "client_key_help",
+      label: "Where a person gets a key",
+      unit: :text,
       group: :client_defaults,
       type: :string,
       summary:
@@ -464,6 +551,8 @@ defmodule Troupe.Plane.Settings do
     },
     %Setting{
       key: "client_key",
+      label: "Key for everybody",
+      unit: :text,
       group: :client_defaults,
       type: :string,
       secret: true,
@@ -477,10 +566,12 @@ defmodule Troupe.Plane.Settings do
           "goes from them when it is cleared.",
       effect: :immediate
     },
-    # What people's own machines may not go past (Decision 869): a JSON object of the keys
+    # What people's own machines may not go past: a JSON object of the keys
     # `Troupe.Protocol.Organisation` lists, and nothing else.
     %Setting{
       key: "client_enforced",
+      label: "What machines may not go past",
+      unit: :text,
       group: :client_defaults,
       type: :enforced,
       summary:
@@ -497,6 +588,8 @@ defmodule Troupe.Plane.Settings do
     # `me.client_versions` names as `release.url`, each release at `<url>/v<version>/`.
     %Setting{
       key: "client_release_url",
+      label: "Where machines get releases",
+      unit: :url,
       group: :releases,
       type: :string,
       summary:
@@ -512,6 +605,8 @@ defmodule Troupe.Plane.Settings do
     # their own. Whether there are any, and who may put one before the whole organisation.
     %Setting{
       key: "artifacts_enabled",
+      label: "Artifacts may be published",
+      unit: :switch,
       group: :artifacts,
       type: :boolean,
       fallback: true,
@@ -523,6 +618,9 @@ defmodule Troupe.Plane.Settings do
     },
     %Setting{
       key: "artifacts_publish_organisation",
+      label: "Who may publish to the whole organisation",
+      unit: :choice,
+      choices: [everyone: "Everyone", platform_admins: "Platform admins only"],
       group: :artifacts,
       type: :enum,
       values: [:everyone, :platform_admins],
@@ -535,10 +633,13 @@ defmodule Troupe.Plane.Settings do
     },
     %Setting{
       key: "artifacts_public_links",
+      label: "Public links to artifacts",
+      unit: :switch,
       group: :artifacts,
       type: :boolean,
       fallback: false,
-      summary: "Whether an artifact's owner may make a public link, which opens it for anybody who has it, signed in or not.",
+      summary:
+        "Whether an artifact's owner may make a public link, which opens it for anybody who has it, signed in or not.",
       consequence:
         "On, an owner may make view-only public links that expire within 90 days, and switch an artifact's off. " <>
           "Off, none is made and every one made already stops opening; links that honour sign-in work either way.",
@@ -642,6 +743,9 @@ defmodule Troupe.Plane.Settings do
       key: setting.key,
       group: setting.group,
       type: setting.type,
+      label: setting.label,
+      unit: setting.unit,
+      choices: choices(setting),
       # As strings, because that is what a form option and a JSON schema hold. The
       # registry keeps them as atoms so that parsing one never has to make an atom out
       # of something a caller sent.
@@ -661,6 +765,29 @@ defmodule Troupe.Plane.Settings do
       if setting.type == :enforced, do: Map.put(base, :enforceable, enforceable()), else: base
 
     if setting.secret, do: base, else: Map.put(base, :value, display(setting, value))
+  end
+
+  @doc """
+  How a setting is named and read: its label, the unit a person reads and types it in, and
+  a choice's values with their words. What every answer that names a setting carries, so a
+  surface heads a row with the label and asks in the unit without a table of its own.
+  """
+  @spec naming(String.t()) :: %{
+          label: String.t() | nil,
+          unit: atom() | nil,
+          choices: [map()] | nil
+        }
+  def naming(key) do
+    case Map.fetch(@by_key, key) do
+      :error -> %{label: nil, unit: nil, choices: nil}
+      {:ok, setting} -> %{label: setting.label, unit: setting.unit, choices: choices(setting)}
+    end
+  end
+
+  defp choices(%Setting{choices: nil}), do: nil
+
+  defp choices(%Setting{choices: choices}) do
+    Enum.map(choices, fn {value, label} -> %{value: to_string(value), label: label} end)
   end
 
   # The keys an enforced set may hold, with what enforcing each means and the type its
@@ -870,8 +997,11 @@ defmodule Troupe.Plane.Settings do
 
       text ->
         case Jason.decode(text) do
-          {:ok, set} -> enforced(set)
-          {:error, _invalid} -> {:error, {:invalid, ~s|must be a JSON object, such as {"approvals": "deny"}|}}
+          {:ok, set} ->
+            enforced(set)
+
+          {:error, _invalid} ->
+            {:error, {:invalid, ~s|must be a JSON object, such as {"approvals": "deny"}|}}
         end
     end
   end

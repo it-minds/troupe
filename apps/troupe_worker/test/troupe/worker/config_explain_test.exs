@@ -85,7 +85,7 @@ defmodule Troupe.Worker.ConfigExplainTest do
     assert %{"value" => "profile-cheap-model", "layer" => "profile", "source" => source} =
              keys["models.cheap"]
 
-    assert source == "the worker profile fixing (TROUPE_SMALL_MODEL)"
+    assert source == "the profile fixing (TROUPE_SMALL_MODEL)"
 
     # The terms the session was created with.
     assert %{"value" => 7, "layer" => "session", "source" => "the session's terms"} =
@@ -146,7 +146,7 @@ defmodule Troupe.Worker.ConfigExplainTest do
                "explain" => "text"
              })
 
-    assert text =~ "configuration in force in session #{context.session_id}, on a worker pod"
+    assert text =~ "configuration in force in session #{context.session_id}, on the platform"
     assert text =~ ~r/max_turns\s+7\s+session/
     assert text =~ ~r/models\.cheap\s+profile-cheap-model\s+profile/
     assert text =~ ~r/deny\s+shell\(curl\)\s+profile\s+standard/

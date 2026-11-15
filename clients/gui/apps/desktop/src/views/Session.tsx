@@ -5,7 +5,7 @@
 // The three primary things are the only ones guaranteed on screen at 380px, because
 // they are the only three a person ever *has* to do: read what happened, decide, and
 // reply. Tasks, files and who is working live in the backstage track, shown on asking,
-// which stacks below the conversation on a narrow screen.
+// which on a phone is a sheet over the whole screen.
 //
 // Nothing here is held that a reconnect could not rebuild. A message the person sends
 // renders as Queued until the server echoes it back — not inserted optimistically into
@@ -16,6 +16,8 @@ import { Fragment, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRe
 import type { JSX } from "react";
 import {
   ALLOW_ALWAYS,
+  PlaneOwn,
+  UPLOAD_ARTIFACT,
   configKey,
   isBusy,
   isRoot,
@@ -23,6 +25,7 @@ import {
   onThisComputer,
   openApprovals,
   openQuestions,
+  nameOrSubject,
   presentMembers,
   rootState,
   scratchSize,
@@ -40,14 +43,16 @@ import type {
   FleetRow,
   LoopInfo,
   LoopState,
+  OwnPlane,
   ScratchDocument,
   SessionKind,
   SessionView,
   TranscriptState,
 } from "@troupe/client";
 import { useSessionView, useStartQuestions } from "../hooks";
+import { useNarrow } from "../narrow";
 import type { SessionHandle } from "../hooks";
-import { curtainLine, DEFAULT_DETAIL, isDetail, layout, waitingOn, waitingWords } from "../frames";
+import { curtainLine, curtainUp, DEFAULT_DETAIL, isDetail, layout, waitingOn, waitingWords } from "../frames";
 import type { Detail, Drawn } from "../frames";
 import { copyText } from "../clipboard";
 import { saveFile, shell } from "../shell";
@@ -141,6 +146,17 @@ export function Session({
   // The scratchpad document open beside the conversation, by name; null while it is closed.
   const [scratch, setScratch] = useState<string | null>(null);
   useEffect(() => setScratch(null), [sessionId]);
+  // On a phone the backstage and the scratchpad are sheets over the whole screen, one at a
+  // time: opening one shuts the other. Beside the conversation both may be open.
+  const narrow = useNarrow();
+  const showBackstage = (on: boolean): void => {
+    setBackstage(on);
+    if (on && narrow) setScratch(null);
+  };
+  const showScratch = (name: string | null): void => {
+    setScratch(name);
+    if (name !== null && narrow) setBackstage(false);
+  };
   // On this computer, through its daemon; a team session and a laptop's relayed one are
   // reached through the plane, and the person is who the plane says.
   const here = onThisComputer(kind);
@@ -229,6 +245,9 @@ export function Session({
   // Whether the server writes a lasting rule from an approval (troupe #920): asked of what it
   // said at `initialize`, so the answer appears the day it does.
   const alwaysAllow = Boolean(sessionView?.capabilities[ALLOW_ALWAYS]);
+  // Where the person's artifacts are listed from for the composer's "Add from artifacts":
+  // the plane they are signed in to, for a session there; this computer's daemon otherwise.
+  const own = useMemo<OwnPlane | null>(() => (!here && auth ? new PlaneOwn((method, params) => auth.rpc(method, params), auth.planeUrl) : daemon), [here, auth, daemon]);
   // A reply's Retry sends the person's words again, as a new turn.
   const retry = useCallback((text: string) => view.send(text), [view]);
   const publishReply = useMemo(() => (daemon ? (text: string) => setPublishing({ text }) : undefined), [daemon]);
@@ -242,11 +261,11 @@ export function Session({
       actions={{
         go: (screen) => (screen === "sessions" ? onBack() : onGo?.(screen)),
         showFiles: () => {
-          setBackstage(true);
+          showBackstage(true);
           setPane("files");
         },
         showMemory: (what) => {
-          setBackstage(true);
+          showBackstage(true);
           setPane("memory");
           if (what) setMemoryAsk((a) => ({ what, n: (a?.n ?? 0) + 1 }));
         },
@@ -284,10 +303,10 @@ export function Session({
             sessionId={sessionId}
             row={row}
             backstage={backstage}
-            onToggleBackstage={() => setBackstage((b) => !b)}
+            onToggleBackstage={() => showBackstage(!backstage)}
             scratchpad={
               view.state.scratch.length > 0
-                ? { open: scratch !== null, onToggle: () => setScratch((s) => (s === null ? latest(view.state.scratch) : null)) }
+                ? { open: scratch !== null, onToggle: () => showScratch(scratch === null ? latest(view.state.scratch) : null) }
                 : null
             }
             onAbout={here && onAgents && current ? () => onAgents(current) : undefined}
@@ -331,7 +350,7 @@ export function Session({
             detail={detail.level}
             readBlob={view.readBlob}
             onSetup={onGo ? () => onGo("setup") : undefined}
-            onScratch={setScratch}
+            onScratch={showScratch}
             onSave={saveReady}
             onRetry={readOnly ? undefined : retry}
             onPublish={publishReply}
@@ -370,6 +389,7 @@ export function Session({
             <Composer
               view={view}
               daemon={daemon}
+              own={own}
               here={here}
               dormant={dormant}
               busy={isBusy(view.state)}
@@ -399,7 +419,7 @@ export function Session({
           )}
         </div>
 
-        {scratch !== null && <Scratchpad view={view.view} docs={view.state.scratch} open={scratch} onOpen={setScratch} onClose={() => setScratch(null)} />}
+        {scratch !== null && <Scratchpad view={view.view} docs={view.state.scratch} open={scratch} onOpen={showScratch}onClose={() => setScratch(null)} />}
 
         {backstage && (
           <Backstage
@@ -593,7 +613,7 @@ function useDetail(
 /** What was said, for `/copy`: the people's and the agent's words, not the tool traffic. */
 function transcriptText(state: TranscriptState): string {
   return state.entries
-    .flatMap((e) => (e.kind === "user" ? [`${e.author ?? "You"}: ${e.text}`] : e.kind === "assistant" ? [`Troupe: ${e.text}`] : []))
+    .flatMap((e) => (e.kind === "user" ? [`${e.authorName ?? e.author ?? "You"}: ${e.text}`] : e.kind === "assistant" ? [`Troupe: ${e.text}`] : []))
     .join("\n\n");
 }
 
@@ -1044,7 +1064,7 @@ function Stream({
       {state.entries.length === 0 && <Loading what="Reading the session. The newest part arrives first." />}
       {state.entries[0]?.seq === 1 && (
         <div className="divider" aria-hidden="true">
-          CURTAIN UP
+          {curtainUp(state.startedAt)}
         </div>
       )}
 
@@ -1221,7 +1241,8 @@ const StreamEntry = memo(function StreamEntry({
   switch (entry.kind) {
     case "user": {
       const mine = entry.author === self || entry.author === undefined;
-      const name = mine ? "You" : (entry.author ?? entry.source);
+      // Another person by their name where the event carries one, and their subject where not.
+      const name = mine ? "You" : (entry.authorName ?? entry.author ?? entry.source);
       // A person's words on the right; your own need no name, somebody else's carry theirs.
       const said = [mine ? null : name, entry.source !== "user" ? `via ${entry.source}` : null, entry.via === "plane" ? "from another device" : null].filter(Boolean);
       return (
@@ -1649,7 +1670,7 @@ function Backstage({
           <dt>Owner</dt>
           {/* A session on this computer with no owner on record is this computer's user's,
               which is the person looking at it. */}
-          <dd>{row?.owner === self || (row && onThisComputer(row.kind) && !row.owner) ? "you" : (row?.owner ?? "—")}</dd>
+          <dd>{row?.owner === self || (row && onThisComputer(row.kind) && !row.owner) ? "you" : row?.owner ? nameOrSubject(row.owner, row.ownerName) : "—"}</dd>
           {/* The bundle is what the platform loaded the session's agents from: a session on
               this computer has none, so it has no row rather than a dash. */}
           {view.state.bundleVersion && !(row && onThisComputer(row.kind)) && (
@@ -1731,11 +1752,14 @@ function ReplyFoot({
 /** A file, an artifact's file or a folder, attached to the message being written. */
 interface Attachment {
   id: string;
-  kind: "file" | "folder";
-  /** The name it lands under, `session:/<name>`, or the folder's path. */
+  /** `artifact`: one the server puts into the workspace itself, fetching it from the plane (troupe #920). */
+  kind: "file" | "folder" | "artifact";
+  /** The name it lands under, `session:/<name>`, the folder's path, or the artifact's title. */
   name: string;
   /** Its text, for a file. */
   content?: string;
+  /** The artifact and its version, for an `artifact`. */
+  artifact?: { id: string; version: number | undefined };
   /** What it is, in a few words: its size, or the artifact it came from. */
   about: string;
 }
@@ -1799,26 +1823,46 @@ export function ContextRing({ fill }: { fill: ContextFill | undefined }): JSX.El
 }
 
 /**
- * The person's artifacts on the plane, to attach one's files to the message: each file of
- * its newest version read with `artifact.read`, and uploaded with the message as a picked
- * file is. Through this computer's daemon, signed in to the plane.
+ * The person's artifacts on the plane, to attach one's files to the message. Where the
+ * session's server takes `fs.upload` with `artifact` (`UPLOAD_ARTIFACT`, troupe #920) the
+ * artifact itself is attached, and the server fetches its newest version's files from the
+ * plane into the workspace as the message goes: a pod over its control link, a daemon with
+ * its sign-in, so the files never pass through this app. Before that, on this computer,
+ * each file is read with `artifact.read` through the daemon and uploaded as a picked file is.
  */
-function ArtifactPicker({ daemon, onPick, onClose }: { daemon: DaemonClient; onPick: (files: Attachment[]) => void; onClose: () => void }): JSX.Element {
+function ArtifactPicker({
+  source,
+  read,
+  onPick,
+  onClose,
+}: {
+  /** Where the artifacts are listed from: the plane, or this computer's daemon. */
+  source: OwnPlane;
+  /** The daemon to read each file through, where the server does not fetch them itself. */
+  read: DaemonClient | null;
+  onPick: (files: Attachment[]) => void;
+  onClose: () => void;
+}): JSX.Element {
   const [list, setList] = useState<Artifact[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   useEffect(() => {
     let live = true;
-    daemon.artifacts({}).then(
+    source.artifacts({}).then(
       (l) => live && setList(l.artifacts),
       (e: unknown) => live && setError(reasonOf(e)),
     );
     return () => {
       live = false;
     };
-  }, [daemon]);
+  }, [source]);
 
   const pick = async (a: Artifact): Promise<void> => {
+    if (!read) {
+      onPick([{ id: `a${++attached}`, kind: "artifact", name: a.title, artifact: { id: a.id, version: a.current ?? a.version }, about: `version ${a.current ?? a.version}` }]);
+      return;
+    }
+    const daemon = read;
     setBusy(a.id);
     setError(null);
     try {
@@ -1889,6 +1933,7 @@ function reasonOf(e: unknown): string {
 function Composer({
   view,
   daemon,
+  own,
   here,
   dormant,
   busy,
@@ -1905,6 +1950,8 @@ function Composer({
 }: {
   view: SessionHandle;
   daemon: DaemonClient | null;
+  /** Where the person's artifacts are listed from: the plane for a session there, else the daemon. */
+  own: OwnPlane | null;
   /** A session on this computer: a folder can be named, and artifacts read through its daemon. */
   here: boolean;
   dormant: boolean;
@@ -2020,6 +2067,12 @@ function Composer({
           continue;
         }
         if (!v) throw new Error("not attached: the session is not open yet");
+        // The server fetches an artifact's files from the plane itself, and says where each landed.
+        if (f.kind === "artifact" && f.artifact) {
+          const put = await v.fsUploadArtifact(f.artifact.id, f.artifact.version === undefined ? {} : { version: f.artifact.version });
+          for (const p of put.files) lines.push(`uploaded ${p.path} to session:/${p.path}`);
+          continue;
+        }
         const target = `session:/${f.name}`;
         await v.fsUpload(target, f.content ?? "");
         lines.push(`uploaded ${f.name} to ${target}`);
@@ -2056,7 +2109,20 @@ function Composer({
             ? "Not connected. What you send is held and goes when the connection comes back."
             : null;
   const canSend = (draft.trim() !== "" || files.length > 0) && !sending;
-  const artifactsWhy = !here ? "Not yet on the platform" : !daemon ? "Needs this computer's daemon" : null;
+  // Attached as the artifact where the session's server fetches it from the plane itself
+  // (troupe #920); else, on this computer, read through the daemon file by file.
+  const fetchesArtifacts = Boolean(view.view?.capabilities[UPLOAD_ARTIFACT]);
+  const artifactsWhy = !own
+    ? here
+      ? "Needs this computer's daemon"
+      : "Sign in to the plane to list your artifacts"
+    : fetchesArtifacts
+      ? null
+      : !here
+        ? "Not yet on the platform"
+        : !daemon
+          ? "Needs this computer's daemon"
+          : null;
   const folderWhy = !here ? "Only for sessions on this computer" : !pickDirectory ? "Needs the desktop app's folder chooser" : null;
 
   return (
@@ -2135,8 +2201,8 @@ function Composer({
                     <span className="d">Text files, into the workspace with your message. Or drop them anywhere on the window</span>
                   </span>
                 </button>
-                {/* On a session on the platform the plane would have to put the files into
-                    its workspace itself: troupe #920, part 3. */}
+                {/* Where the session's server fetches an artifact from the plane itself, a
+                    pod's or a daemon's, the artifact is attached as it is (troupe #920). */}
                 <button
                   type="button"
                   className="item"
@@ -2203,7 +2269,14 @@ function Composer({
           {error}
         </p>
       )}
-      {artifacts && daemon && <ArtifactPicker daemon={daemon} onPick={(picked) => (setFiles((had) => [...had, ...picked]), setArtifacts(false))} onClose={() => setArtifacts(false)} />}
+      {artifacts && own && (
+        <ArtifactPicker
+          source={own}
+          read={fetchesArtifacts ? null : daemon}
+          onPick={(picked) => (setFiles((had) => [...had, ...picked]), setArtifacts(false))}
+          onClose={() => setArtifacts(false)}
+        />
+      )}
       {dragging && (
         <div className="drop" aria-hidden="true">
           <div>Drop files to hand them to the troupe</div>

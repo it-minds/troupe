@@ -33,7 +33,10 @@ describe("the organisation's document", () => {
     unmount = render(<App />).unmount;
     await waitFor(() => enforced(), "the enforced set");
 
-    await sees("openai", () => row("client_provider"));
+    // A choice reads as its words, the label heads the row and the key is under it.
+    await sees("OpenAI", () => row("client_provider"));
+    expect(row("client_provider")!.querySelector(".name")?.textContent).toBe("Provider for people's machines"); // at once: the row is drawn, its value seen above
+    expect(row("client_provider")!.querySelector("code.key")?.textContent).toBe("client_provider"); // at once: the same row
     await sees("deployed", () => row("client_provider"));
     await sees("glm-5.2", () => row("client_model_default"));
     await sees("set here", () => row("client_model_default"));
@@ -107,7 +110,7 @@ describe("the organisation's document", () => {
     unmount = render(<App />).unmount;
     const cheap = await waitFor(() => row("client_model_cheap"), "the defaults");
     button("Change", cheap)!.click();
-    type(await waitFor(() => field("client_model_cheap", cheap), "the field"), "qwen3.6-35b");
+    type(await waitFor(() => field("Cheap model for clients", cheap), "the field"), "qwen3.6-35b");
     button("Preview", cheap)!.click();
     await waitFor(() => says("A person's own settings file still wins over a default.", cheap), "the preview");
     button("Apply", cheap)!.click();
@@ -120,6 +123,31 @@ describe("the organisation's document", () => {
     button("Reset", row("client_model_default")!)!.click();
     await waitFor(() => says("Recorded in the audit as setting.reset on client_model_default"), "the reset's note");
     expect(fake.admin.stored.has("client_model_default")).toBe(false);
+  });
+
+  it("asks for a choice by its words, and previews the change in them", async () => {
+    await signedInAs(fake, PEOPLE.alice);
+    unmount = render(<App />).unmount;
+    button("Change", await waitFor(() => row("client_auth"), "the setting"))!.click();
+    const auth = (await waitFor(() => field("How the key is presented", row("client_auth")!), "the choice")) as HTMLSelectElement;
+    expect([...auth.options].map((o) => o.textContent)).toEqual(["The provider's own header", "Authorization: Bearer"]);
+    type(auth, "api_key");
+    button("Preview", row("client_auth")!)!.click();
+    await sees("How the key is presented: Authorization: Bearer", () => row("client_auth"));
+    await sees("How the key is presented: The provider's own header", () => row("client_auth"));
+    button("Apply", row("client_auth")!)!.click();
+    await waitFor(() => fake.admin.stored.get("client_auth") === "api_key", "the value stored as the plane's");
+  });
+
+  it("names a default by its key on a plane that names none", async () => {
+    fake.admin.named = false;
+    await signedInAs(fake, PEOPLE.alice);
+    unmount = render(<App />).unmount;
+    await waitFor(() => row("client_provider"), "the defaults");
+    await sees("openai", () => row("client_provider"));
+    expect(row("client_provider")!.querySelector(".name")).toBeNull(); // at once: the row is drawn, its value seen above
+    button("Change", row("client_model_cheap")!)!.click();
+    expect(await waitFor(() => field("client_model_cheap", row("client_model_cheap")!), "the key's field")).not.toBeNull();
   });
 
   it("shows a plane's refusal of the set where it was made", async () => {

@@ -735,6 +735,19 @@ defmodule Troupe.Config do
   """
   @spec context_window(t(), String.t()) :: pos_integer()
   def context_window(%__MODULE__{} = config, model) when is_binary(model) do
+    known_window(config, model) || config.context_window
+  end
+
+  @doc """
+  The window `model` is known to have: what a provider's `models:` entry or
+  `models.windows` declares, else what the catalog last reported, else `nil`. Unlike
+  `context_window/2` it has no fallback, since `context_window`'s default is a number
+  nobody said about this model; a client drawing how full the window is draws it unknown.
+  """
+  @spec known_window(t(), String.t() | nil) :: pos_integer() | nil
+  def known_window(_config, nil), do: nil
+
+  def known_window(%__MODULE__{} = config, model) when is_binary(model) do
     model = resolve_model(config, model)
 
     declared =
@@ -743,7 +756,7 @@ defmodule Troupe.Config do
         _ -> Map.get(config.windows, model)
       end
 
-    declared || catalog_window(config, model) || config.context_window
+    declared || catalog_window(config, model)
   end
 
   defp catalog_window(config, model) do

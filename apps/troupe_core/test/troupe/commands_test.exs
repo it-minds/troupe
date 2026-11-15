@@ -19,7 +19,8 @@ defmodule Troupe.CommandsTest do
     assert length(entries) > 20
 
     for entry <- entries do
-      assert Enum.sort(Map.keys(entry) -- ~w(summaries details)) == Enum.sort(@fields),
+      assert Enum.sort(Map.keys(entry) -- ~w(summaries details availabilities)) ==
+               Enum.sort(@fields),
              entry["name"]
 
       assert entry["summary"] != "", entry["name"]
@@ -31,6 +32,13 @@ defmodule Troupe.CommandsTest do
         assert Map.keys(words) -- ~w(tui desktop) == [], entry["name"]
         assert Enum.all?(Map.values(words), &(is_binary(&1) and &1 != "")), entry["name"]
       end
+
+      # A client's own requirement is one the others could have, never a second `tui`.
+      for {client, needs} <- entry["availabilities"] || %{} do
+        assert client in ~w(tui desktop), entry["name"]
+        assert needs in ~w(always window local plane), entry["name"]
+      end
+
       assert entry["source"] == "builtin", entry["name"]
 
       for arg <- entry["args"] do
@@ -75,6 +83,37 @@ defmodule Troupe.CommandsTest do
     # A row from a harness before the maps reads as it was.
     old = Map.drop(neutral["cancel"], ~w(summaries details))
     assert Commands.for_client([old], "desktop") == [old]
+
+    # HQ on the desktop is its sessions list, which names no plane by URL.
+    assert desktop["hq"]["summary"] =~ "this computer's"
+    refute desktop["hq"]["detail"] =~ "URL"
+    assert tui["hq"]["detail"] =~ "Names a plane by URL"
+    refute Map.has_key?(neutral["hq"], "availabilities")
+    assert neutral["hq"]["availability"] == "always"
+  end
+
+  # The branch and window commands, and the agent tree, have nothing in the desktop app to
+  # act on, so it leaves them out as it leaves /quit; the terminal client still judges what
+  # each needs there, as it did.
+  test "the commands of branches, windows and the agent tree are the terminal client's, with its own needs kept" do
+    by_name = fn entries -> Map.new(entries, &{&1["name"], &1}) end
+    neutral = by_name.(Commands.builtins())
+    tui = by_name.(Commands.for_client(Commands.builtins(), "tui"))
+    desktop = by_name.(Commands.for_client(Commands.builtins(), "desktop"))
+
+    for name <- ~w(dismiss merge discard observer worktree) do
+      assert neutral[name]["availability"] == "tui", name
+      assert desktop[name]["availability"] == "tui", name
+    end
+
+    assert tui["dismiss"]["availability"] == "window"
+    assert tui["merge"]["availability"] == "local"
+    assert tui["discard"]["availability"] == "local"
+    assert tui["worktree"]["availability"] == "local"
+    assert tui["observer"]["availability"] == "tui"
+    # A row from a harness before the map reads as it was.
+    old = Map.drop(neutral["merge"], ~w(availabilities))
+    assert Commands.for_client([old], "tui") == [old]
   end
 
   test "the list comes grouped by section in the sections' order, agents in their own" do

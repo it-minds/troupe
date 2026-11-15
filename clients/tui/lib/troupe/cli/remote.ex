@@ -325,7 +325,40 @@ defmodule Troupe.CLI.Remote do
         {:ok, discovery}
 
       {:error, reason} ->
-        {:error, {:discovery, reason}}
+        {:error, {:discovery, Discovery.base(plane_url), reason}}
+    end
+  end
+
+  # The first thing `troupe login` asks, so the usual first mistake (an address that is
+  # not a plane's, or no plane there at all) is said in words with the address in it,
+  # rather than as the term the HTTP client gave back.
+  @doc false
+  @spec discovery_failed(String.t(), term()) :: String.t()
+  def discovery_failed(url, reason) do
+    document = url <> "/.well-known/troupe"
+
+    case reason do
+      r when r in [:econnrefused, :nxdomain, :ehostunreach, :enetunreach, :timeout, :closed] ->
+        "could not reach #{url} (#{r}); check the address and your network"
+
+      {:http, 404, _body} ->
+        "#{url} is not a Troupe plane: #{document} was not found (HTTP 404); " <>
+          "check the address, which is the plane's own and not its identity provider's"
+
+      {:http, status, _body} ->
+        "could not read the plane's discovery document: #{document} answered HTTP #{status}"
+
+      {:malformed_json, _body} ->
+        "#{url} is not a Troupe plane: #{document} is not JSON"
+
+      {:malformed_discovery, _body} ->
+        "#{url} is not a Troupe plane: #{document} is not a discovery document"
+
+      {:discovery_missing, key} ->
+        "the plane's discovery document at #{document} has no #{key}"
+
+      other ->
+        "could not read the plane's discovery document at #{document}: #{inspect(other)}"
     end
   end
 
@@ -577,8 +610,8 @@ defmodule Troupe.CLI.Remote do
       else: " (warning: could not restrict this file to your account)"
   end
 
-  defp fail(say, {:discovery, reason}) do
-    say.("could not read the plane's discovery document: #{inspect(reason)}")
+  defp fail(say, {:discovery, url, reason}) do
+    say.(discovery_failed(url, reason))
     1
   end
 

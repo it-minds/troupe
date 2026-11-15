@@ -58,7 +58,7 @@ defmodule Troupe.Onboard.WiringTest do
       assert %{proposals: [], sources: [], refused: [%{reason: reason}]} =
                Onboard.plan(ctx.workspace, ctx.opts)
 
-      assert reason =~ "not on a pod"
+      assert reason =~ "not on the platform"
     end
 
     test "the onboarding tool refuses before it reads anything", ctx do
@@ -72,7 +72,7 @@ defmodule Troupe.Onboard.WiringTest do
       }
 
       assert {:error, reason} = OnboardWrite.run(args, ctx_map)
-      assert reason =~ "not on a pod"
+      assert reason =~ "not on the platform"
     end
   end
 end

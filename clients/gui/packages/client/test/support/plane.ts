@@ -122,6 +122,8 @@ export interface PlaneOptions {
   breakglass?: string;
   /** Seconds a break-glass plane token is good for; short, for a test of its expiry. */
   breakglassLifetime?: number;
+  /** The plane's own build version, which discovery says as `plane.build.version`. None is a plane whose discovery names no build. */
+  version?: string;
 }
 
 /** A file of an artifact's version, with what it holds, which no answer carries. */
@@ -498,6 +500,15 @@ export class FakePlane {
 
   static async start(opts: PlaneOptions): Promise<FakePlane> {
     const p = new FakePlane(opts);
+    // What a pod asks over its control link for `fs.upload` with `artifact` (troupe #920):
+    // the version's files, read as the person who asked, and nothing for one they may not see.
+    opts.worker.artifactSource ??= (subject, id, version) => {
+      const a = p.artifacts.get(id);
+      if (!a || !p.mayRead(a, subject)) return null;
+      const n = version ?? a.pinned ?? a.versions[a.versions.length - 1]!.n;
+      const v = a.versions.find((x) => x.n === n);
+      return v ? { id: a.id, title: a.title, version: v.n, files: v.files.map((f) => ({ path: f.path, text: f.content })) } : null;
+    };
     await new Promise<void>((r) => p.server.listen(0, "127.0.0.1", r));
     p.url = `http://127.0.0.1:${(p.server.address() as AddressInfo).port}`;
     return p;
@@ -582,8 +593,23 @@ export class FakePlane {
    */
   private activate(row: Row, prompt?: string): void {
     const agent = row.agent ?? defaultAgent(this.agentsOf(row.profile, row.owner));
-    this.opts.worker.createSession(row.id, { profile: row.profile, ...(agent ? { agent } : {}), ...(prompt ? { prompt, owner: row.owner } : {}) });
+    const ownerName = this.nameOf(row.owner);
+    this.opts.worker.createSession(row.id, { profile: row.profile, ...(agent ? { agent } : {}), ...(prompt ? { prompt, owner: row.owner, ...(ownerName ? { ownerName } : {}) } : {}) });
   }
+
+  /**
+   * A person's name as the plane's identity record has it (troupe #931): one a test or the
+   * fake deployment set in `names`, one `people.search` finds, or the one they signed in
+   * with. Undefined where none is more than the subject again.
+   */
+  nameOf(subject: string): string | undefined {
+    const tokens = [...this.tokens.values()].filter((t) => t.subject === subject);
+    const name = this.names.get(subject) ?? this.people.find((p) => p.subject === subject)?.display_name ?? tokens.at(-1)?.name;
+    return name && name !== subject ? name : undefined;
+  }
+
+  /** The names the identity record holds for people who have not signed in here, by subject. */
+  names = new Map<string, string>();
 
   /** How long a waiting create says to wait before asking again, in milliseconds. */
   retryAfterMs = 50;
@@ -695,7 +721,7 @@ export class FakePlane {
   }
 
   /** Whether this person may see this artifact: their own, the organisation's, a profile of theirs, or a link's. */
-  private mayRead(a: FakeArtifact, subject: string): boolean {
+  mayRead(a: FakeArtifact, subject: string): boolean {
     return this.roleOf(a, subject) !== null;
   }
 
@@ -1013,7 +1039,7 @@ export class FakePlane {
         device_authorization_endpoint: this.opts.idp.deviceAuthorizationEndpoint,
         token_endpoint: this.opts.idp.tokenEndpoint,
         scopes: ["openid", "profile", "email", "offline_access", "groups"],
-        plane: { name: "fake", rpc: "/rpc", jwks: "/.well-known/jwks.json", protocol_version: "1" },
+        plane: { name: "fake", rpc: "/rpc", jwks: "/.well-known/jwks.json", protocol_version: "1", ...(this.opts.version ? { build: { version: this.opts.version } } : {}) },
         breakglass: typeof this.opts.breakglass === "string",
       });
     }
@@ -1621,9 +1647,11 @@ export class FakePlane {
 
   private sessionJson(row: Row, subject: string): unknown {
     const session = this.opts.worker.sessions.get(row.id);
+    const ownerName = this.nameOf(row.owner);
     return {
       id: row.id,
       owner: row.owner,
+      ...(ownerName ? { owner_name: ownerName } : {}),
       profile: row.profile,
       visibility: "team",
       state: row.state,

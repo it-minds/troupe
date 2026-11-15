@@ -557,6 +557,32 @@ defmodule Troupe.Gateway.Dispatch do
     end
   end
 
+  # One of the person's artifacts put into the session's workspace in place of bytes the
+  # client sends (#920): the host fetches its files from the plane as the person who asked,
+  # a pod over its control link and a daemon with its sign-in, so they never pass through
+  # the client. `path` is the folder they land in (`session:/` where none is named), each at
+  # its own path in the artifact; `file` narrows it to one. Each is an `fs_changed` of the
+  # person's, as an upload of bytes is.
+  defp handle("fs.upload", %{"artifact" => _} = params, context) do
+    with {:ok, session_id} <- fetch(params, "session_id"),
+         {:ok, artifact} <- fetch(params, "artifact"),
+         {:ok, workspace} <- workspace_of(session_id),
+         {:ok, fetched} <- artifact_files(session_id, artifact, params, context),
+         {:ok, written} <- put_artifact(workspace, params["path"], fetched["files"]) do
+      Enum.each(written, fn file ->
+        Log.append(session_id, ["root"], :fs_changed, file, actor(context))
+      end)
+
+      {:ok,
+       %{
+         "artifact" => fetched["id"] || artifact,
+         "title" => fetched["title"],
+         "version" => fetched["version"],
+         "files" => Enum.map(written, &%{"path" => &1["path"], "bytes" => &1["size"]})
+       }}
+    end
+  end
+
   defp handle("fs.upload", params, context) do
     with {:ok, session_id} <- fetch(params, "session_id"),
          {:ok, path} <- fetch(params, "path"),
@@ -1055,6 +1081,29 @@ defmodule Troupe.Gateway.Dispatch do
   # subagent and `brief` with the parts the person edited (Decision 850), a publication's
   # `visibility` and `owner` for whom it is and whose it is, and `reason` with a no. A
   # wrong one is refused with the sentence that says why, and the request waits on.
+  #
+  # `allow_always` writes the person's own rule for the tool first, into the file `scope`
+  # names, and then answers the call as allowed. Only on this computer: a pod's rules are
+  # its worker profile's, which an administrator sets, and no person has a file there.
+  defp handle("approval.respond", %{"decision" => "allow_always"} = params, context) do
+    with {:ok, session_id} <- fetch(params, "session_id"),
+         {:ok, call_id} <- fetch(params, "call_id"),
+         :ok <- lasting_here(session_id),
+         :ok <- rule_writer(context),
+         :ok <- activate(session_id, context),
+         {:ok, req} <- lasting_request(session_id, call_id),
+         {:ok, session} <- lookup(session_id),
+         scope = Map.get(params, "scope") || "everywhere",
+         {:ok, written} <- write_allow(req.tool, scope, session.workspace) do
+      answer = %{"always" => written}
+
+      case Troupe.approve(session_id, call_id, :allow_always, actor(context), answer) do
+        :ok -> {:ok, %{"accepted" => true, "rule" => written}}
+        {:error, sentence} -> {:error, Error.new(:invalid_params, %{reason: sentence})}
+      end
+    end
+  end
+
   defp handle("approval.respond", params, context) do
     with {:ok, session_id} <- fetch(params, "session_id"),
          {:ok, call_id} <- fetch(params, "call_id"),
@@ -1150,7 +1199,7 @@ defmodule Troupe.Gateway.Dispatch do
              setting: "personalTools",
              profile: profile,
              reason:
-               "the worker profile #{profile} does not take a person's own tools on its pods " <>
+               "the profile #{profile} does not take a person's own tools " <>
                  "(personalTools: forbid); only the profile's MCP servers are available"
            })}
 
@@ -2754,6 +2803,153 @@ defmodule Troupe.Gateway.Dispatch do
     {:error, Error.new(:invalid_params, %{field: "decision", value: other})}
   end
 
+  defp artifact_files(session_id, artifact, params, context) do
+    ask =
+      %{
+        "session_id" => session_id,
+        "subject" => context.principal["subject"],
+        "artifact" => artifact,
+        "version" => params["version"],
+        "file" => params["file"]
+      }
+      |> Map.reject(fn {_key, value} -> is_nil(value) end)
+
+    daemon? = Process.whereis(Troupe.Gateway.Daemon) != nil
+
+    case Troupe.Artifacts.files(ask) do
+      {:ok, %{"files" => files} = answer} when is_list(files) -> {:ok, answer}
+      {:ok, _other} -> {:error, Error.new(:internal_error, %{reason: "the plane answered no files"})}
+      {:error, %Error{} = error} -> {:error, error}
+      {:error, sentence} when is_binary(sentence) -> {:error, Error.new(:unavailable, %{reason: sentence})}
+      {:error, %{"message" => message} = refusal} -> {:error, plane_refusal(message, refusal)}
+      {:error, :signed_out} when not daemon? -> {:error, Error.new(:unavailable, %{reason: "nothing here fetches artifacts from a plane"})}
+      other -> forwarded("artifact.files", other)
+    end
+  end
+
+  # A refusal the pod's control link handed back as the plane gave it.
+  defp plane_refusal(message, refusal) do
+    token =
+      case Error.token(refusal["code"]) do
+        :unknown -> Enum.find(Map.keys(Error.codes()), :unavailable, &(Atom.to_string(&1) == message))
+        token -> token
+      end
+
+    Error.new(token, refusal["data"] || %{reason: "the plane refused it (#{message})"})
+  end
+
+  # Every file decoded and confined before any is written, so a bad one writes nothing.
+  defp put_artifact(workspace, folder, files) do
+    folder = if is_binary(folder) and folder != "", do: folder, else: "session:/"
+
+    with {:ok, planned} <- each_ok(files, &plan_file(workspace, folder, &1)),
+         do: each_ok(planned, &put_planned(workspace, &1))
+  end
+
+  defp put_planned(workspace, {resolved, body}) do
+    with :ok <- write_file(resolved, body), do: {:ok, written_json(workspace, resolved, body)}
+  end
+
+  defp plan_file(workspace, folder, file) do
+    with {:ok, body} <- decoded(file),
+         {:ok, resolved} <- resolve_path(workspace, join_into(folder, file["path"]), :write),
+         do: {:ok, {resolved, body}}
+  end
+
+  # `fun` over each, in order, stopping at the first error: `{:ok, results}` or that error.
+  defp each_ok(items, fun) do
+    items
+    |> Enum.reduce_while({:ok, []}, fn item, {:ok, acc} ->
+      case fun.(item) do
+        {:ok, result} -> {:cont, {:ok, [result | acc]}}
+        {:error, _} = error -> {:halt, error}
+      end
+    end)
+    |> case do
+      {:ok, results} -> {:ok, Enum.reverse(results)}
+      error -> error
+    end
+  end
+
+  defp decoded(%{"bytes" => bytes} = file) when is_binary(bytes) do
+    case Base.decode64(bytes, ignore: :whitespace) do
+      {:ok, body} -> {:ok, body}
+      :error -> {:error, Error.new(:internal_error, %{reason: "#{file["path"]}'s bytes are not base64"})}
+    end
+  end
+
+  defp decoded(file), do: {:error, Error.new(:internal_error, %{reason: "#{inspect(file["path"])} came with no bytes"})}
+
+  defp join_into(folder, path) when is_binary(path) do
+    if String.ends_with?(folder, "/"), do: folder <> path, else: folder <> "/" <> path
+  end
+
+  defp join_into(folder, _path), do: folder
+
+  defp written_json(workspace, resolved, body) do
+    %{
+      "path" => Workspace.relative(workspace, resolved),
+      "hash" => "sha256:" <> (:sha256 |> :crypto.hash(body) |> Base.encode16(case: :lower)),
+      "size" => byte_size(body)
+    }
+  end
+
+  # A lasting rule is a line of a file on this computer. A pod's rules are its worker
+  # profile's, an administrator's to set, and no person has a file there to keep one in.
+  defp lasting_here(session_id) do
+    pod? = match?(%{kind: :team}, Troupe.Session.resolved(session_id))
+
+    if Process.whereis(Troupe.Gateway.Daemon) && not pod?,
+      do: :ok,
+      else:
+        {:error,
+         Error.new(:forbidden, %{
+           field: "decision",
+           reason:
+             "rules on the platform are the worker profile's, which an administrator sets; " <>
+               "allow it once or for this session"
+         })}
+  end
+
+  # Writing into this computer's configuration takes what `config.set` takes.
+  defp rule_writer(%Context{scopes: scopes}) do
+    if :admin in scopes,
+      do: :ok,
+      else:
+        {:error,
+         Error.new(:forbidden, %{
+           required_scope: "admin",
+           reason: "a lasting rule is written into this computer's configuration, which is its person's"
+         })}
+  end
+
+  defp lasting_request(session_id, call_id) do
+    case Troupe.lasting_approval(session_id, call_id) do
+      {:ok, req} ->
+        {:ok, req}
+
+      {:error, :none} ->
+        {:error, Error.new(:not_found, %{kind: "approval", call_id: call_id})}
+
+      {:error, {:managed, sentence}} ->
+        {:error,
+         Error.new(:forbidden, %{setting: "managed_permission_rules_only", reason: sentence})}
+
+      {:error, sentence} ->
+        {:error, Error.new(:invalid_params, %{field: "decision", reason: sentence})}
+    end
+  end
+
+  # Announced as a `config.set` is, so the Rules panel and `/settings` show the rule at once.
+  defp write_allow(tool, scope, workspace) do
+    file_scope = if scope == "workspace", do: "local", else: "user"
+
+    case announcing(file_scope, workspace, fn -> Settings.allow_rule(tool, scope, workspace) end) do
+      {:ok, written} -> {:ok, written}
+      {:error, sentence} -> {:error, Error.new(:invalid_params, %{field: "scope", reason: sentence})}
+    end
+  end
+
   defp build_edit("add", params) do
     with {:ok, content} <- fetch(params, "content") do
       {:ok, Edit.add(content)}
@@ -2843,14 +3039,22 @@ defmodule Troupe.Gateway.Dispatch do
   end
 
   # A person steering from another device through the plane is written as such, so the
-  # transcript says who did what and from where.
+  # transcript says who did what and from where. Each is written with their name where the
+  # connection carries one; a name that is only the subject again, which a token without a
+  # name claim gives, is no name, so a client falls back to the subject as it would.
   defp actor(%Context{principal: %{"via" => "plane"} = principal}) do
-    Event.Actor.remote(principal["subject"], principal["display_name"])
+    Event.Actor.remote(principal["subject"], name_of(principal))
   end
 
   defp actor(%Context{principal: principal}) do
-    Event.Actor.user(principal["subject"], principal["display_name"])
+    Event.Actor.user(principal["subject"], name_of(principal))
   end
+
+  defp name_of(%{"subject" => subject, "display_name" => name})
+       when is_binary(name) and name not in ["", subject],
+       do: name
+
+  defp name_of(_principal), do: nil
 
   defp session_json(session) do
     %{

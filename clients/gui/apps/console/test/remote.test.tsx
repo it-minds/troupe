@@ -74,6 +74,23 @@ describe("laptop sessions offered to you", () => {
     await sees("The laptop is offline since");
   });
 
+  // The stream's own events name who said what by name where the actor carries one, so
+  // somebody present nowhere else on the page is still a name, not an email (troupe #931).
+  it("names each person in the transcript as the event's actor names them, the subject where it names nobody", async () => {
+    fake.plane.relay("ada@example.com", { id: "s-laptop-6", ownerName: "Ada", workspace: "billing", shares: [{ subject: PEOPLE.alice.subject, role: "observe" }] });
+    await signedInAs(fake, PEOPLE.alice);
+    visit("#/mine/remote/s-laptop-6");
+    unmount = render(<App />).unmount;
+    await waitFor(() => document.querySelector('[role="status"]')?.textContent?.startsWith("Idle"), "the session attached");
+
+    const log = fake.worker.sessions.get("s-laptop-6")!.log;
+    log.append("user_input", { source: "user", text: "from Bea" }, { kind: "user", subject: "idp|bea", display_name: "Bea Example" });
+    log.append("user_input", { source: "user", text: "from Cy" }, { kind: "user", subject: "cy@example.com" });
+
+    await sees("Bea Example: from Bea", () => document.querySelector('[aria-label="Transcript"]'));
+    await sees("cy@example.com: from Cy", () => document.querySelector('[aria-label="Transcript"]'));
+  });
+
   it("a link from before Mine opens the session where it is now", async () => {
     fake.plane.relay("ada@example.com", { id: "s-laptop-3", ownerName: "Ada", shares: [{ subject: PEOPLE.alice.subject, role: "control" }] });
     await signedInAs(fake, PEOPLE.alice);

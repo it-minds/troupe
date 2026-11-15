@@ -290,6 +290,7 @@ defmodule Troupe.Plane.GitHubIssuesTest do
       assert {:error, why} = Issues.sweep(trigger, ~U[2026-10-18 10:00:00Z])
       assert why =~ "is public"
       assert why =~ "github.allowPublic"
+      assert why =~ "is public, and the profile "
       assert Triggers.runs(context.team) == []
 
       FakeGitHub.visibility(context.fake, @repository, "private")

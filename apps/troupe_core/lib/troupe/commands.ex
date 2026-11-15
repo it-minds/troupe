@@ -29,13 +29,17 @@ defmodule Troupe.Commands do
   terminal client's alone: leaving it, or reading a file from where it was started). A
   client shows a command it cannot run greyed, with the reason, rather than hiding it —
   that is how somebody learns the tool — except a `tui` one, which any other client
-  leaves out of its palette, since there is nothing there for it to do.
+  leaves out of its palette, since there is nothing there for it to do. A `tui` row whose
+  command needs more than the terminal client (`/merge` a session on this machine,
+  `/dismiss` a window) says so for that client in `availabilities`, a map from a client's
+  name to its own `availability`, chosen as its own words are.
 
   `summary` and `detail` are a client's words for the command, said so they read true in
   any of them. Where a client runs a command differently enough that the one sentence
   would name what that client has not got (a window, a directory), the row also carries
   `summaries` and `details`, maps from a client's name (`tui`, `desktop`) to its own
-  sentence, and that client shows its own. `for_client/2` makes the choice for a client.
+  sentence, and that client shows its own. `for_client/2` makes the choice for a client,
+  of the words and of the `availability`.
   """
 
   alias Troupe.Agent.Definition
@@ -323,7 +327,8 @@ defmodule Troupe.Commands do
       entry("dismiss", "session", "Let go of a window",
         usage: "/dismiss [window]",
         args: [window()],
-        availability: "window",
+        availability: "tui",
+        availabilities: %{"tui" => "window"},
         detail:
           "Closes the activated window, or the one named: a branch's window closes for " <>
             "good and its session stays in the daemon, where /sessions still lists it. " <>
@@ -333,7 +338,8 @@ defmodule Troupe.Commands do
       entry("merge", "session", "Land a worktree branch on the checkout",
         usage: "/merge [window]",
         args: [window()],
-        availability: "local",
+        availability: "tui",
+        availabilities: %{"tui" => "local"},
         detail:
           "Commits whatever the branch left uncommitted, merges its branch into the " <>
             "checkout with a merge commit, and removes the worktree and the window. A merge " <>
@@ -344,7 +350,8 @@ defmodule Troupe.Commands do
       entry("discard", "session", "Throw a worktree branch away",
         usage: "/discard [window]",
         args: [window()],
-        availability: "local",
+        availability: "tui",
+        availabilities: %{"tui" => "local"},
         detail:
           "Removes the branch's worktree and deletes its branch, uncommitted work " <>
             "included, and closes the window.",
@@ -435,11 +442,18 @@ defmodule Troupe.Commands do
         detail:
           "This machine's own sessions are listed alongside. Names a plane by URL; " <>
             "without one, the plane this machine is logged in to.",
+        summaries: %{"desktop" => "Every session you can open: the plane's and this computer's"},
+        details: %{
+          "desktop" =>
+            "Opens the sessions list, where the plane's sessions you can see, by team and " <>
+              "profile, are listed alongside this computer's own."
+        },
         example: "/hq https://troupe.example"
       ),
       entry("observer", "navigate", "The agent tree: every branch and subagent",
         aliases: ["agents-tree", "tree"],
         usage: "/observer",
+        availability: "tui",
         detail: "Each with its state, worktree and tokens; Enter opens the agent's transcript."
       ),
       entry("files", "navigate", "The session's files, live",
@@ -471,7 +485,7 @@ defmodule Troupe.Commands do
         availability: "tui",
         detail:
           "The file is read on this machine and written to session:/<name>, the directory " <>
-            "the session works in. On a pod that is the session's own, gone when it is " <>
+            "the session works in. On the platform that is the session's own, gone when it is " <>
             "erased, and a worker never sees this machine's disk. In a local session it is " <>
             "the checkout: git sees the file, other sessions there see it, and erasing the " <>
             "session leaves it.",
@@ -481,10 +495,10 @@ defmodule Troupe.Commands do
         usage: "/save <path> [to]",
         args: [arg("path", true, "text"), arg("to", false, "file")],
         detail:
-          "The file is read where the session runs, a pod's workspace as much as a local " <>
+          "The file is read where the session runs, a workspace on the platform as much as a local " <>
             "checkout, and written on this machine: at `to`, in it when it is a directory, or " <>
             "under its own name where the terminal started. What a file an agent made for you " <>
-            "says to run when the session is on a pod.",
+            "says to run when the session is on the platform.",
         example: "/save report.md ~/Documents"
       ),
       entry("publish", "workspace", "Publish a page, a document or a file for others to read",
@@ -655,7 +669,8 @@ defmodule Troupe.Commands do
       entry("worktree", "agents", "Run the default agent on a branch in a worktree of its own",
         usage: "/worktree [name:] <prompt>",
         args: [prompt()],
-        availability: "local",
+        availability: "tui",
+        availabilities: %{"tui" => "local"},
         detail:
           "/worktree <prompt> works in a fresh worktree, to /merge or /discard later; " <>
             "/worktree <name>: <prompt> in a Troupe worktree of that name, created the first " <>
@@ -748,9 +763,9 @@ defmodule Troupe.Commands do
     do: text |> String.split("\n") |> Enum.map(&String.trim/1) |> Enum.find(&(&1 != ""))
 
   @doc """
-  The rows as `client` shows them: each row's `summary` and `detail` replaced by the
-  client's own where `summaries` or `details` has one for it (`"tui"`, `"desktop"`), and
-  the neutral sentence kept where it has none. A row from a harness before the maps, which
+  The rows as `client` shows them: each row's `summary`, `detail` and `availability`
+  replaced by the client's own where `summaries`, `details` or `availabilities` has one
+  for it (`"tui"`, `"desktop"`), and the neutral one kept where it has none. A row from a harness before the maps, which
   has neither, is as it was.
   """
   @spec for_client([entry()], String.t()) :: [entry()]
@@ -759,6 +774,7 @@ defmodule Troupe.Commands do
       entry
       |> own(client, "summaries", "summary")
       |> own(client, "details", "detail")
+      |> own(client, "availabilities", "availability")
     end)
   end
 
@@ -784,6 +800,7 @@ defmodule Troupe.Commands do
     }
     |> put_given("summaries", Keyword.get(opts, :summaries))
     |> put_given("details", Keyword.get(opts, :details))
+    |> put_given("availabilities", Keyword.get(opts, :availabilities))
   end
 
   # A client's own words go on the wire only where a row has them.

@@ -15,7 +15,7 @@ defmodule Troupe.PodLayersTest do
   alias Troupe.Protocol.Schema
   alias Troupe.Skills
 
-  @reason "the session's bundle has an agent named build, and on a pod the bundle's " <>
+  @reason "the session's bundle has an agent named build, and on the platform the bundle's " <>
             "beats a repository's unless the profile allows the repository's"
 
   setup context do
@@ -265,7 +265,7 @@ defmodule Troupe.PodLayersTest do
       assert path == Troupe.Paths.display(Path.join(context.workspace, ".troupe/agents/build.md"))
 
       assert reason ==
-               "build is an agent Troupe ships, and on a pod Troupe's own beats a repository's " <>
+               "build is an agent Troupe ships, and on the platform Troupe's own beats a repository's " <>
                  "unless the profile allows the repository's"
     end
 

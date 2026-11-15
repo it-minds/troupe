@@ -136,6 +136,32 @@ export function markChosen(subject: string | undefined): void {
   prefs.set(`appearance.chosen.${subject ?? "anonymous"}`, "yes");
 }
 
+const FIRST_RUN_LOOK = "troupe.firstRunLook";
+
+/**
+ * This window's first run picked the look and is ending on a sign-in: the person signing
+ * in is the one who just picked, so their first sign-in takes that as their answer. Kept
+ * for the window alone, and across the browser build's sign-in, which leaves the page for
+ * the provider's and comes back to a new one.
+ */
+export const firstRunLook = {
+  picked(): boolean {
+    try {
+      return globalThis.sessionStorage?.getItem(FIRST_RUN_LOOK) === "yes";
+    } catch {
+      return false;
+    }
+  },
+  set(on: boolean): void {
+    try {
+      if (on) globalThis.sessionStorage?.setItem(FIRST_RUN_LOOK, "yes");
+      else globalThis.sessionStorage?.removeItem(FIRST_RUN_LOOK);
+    } catch {
+      // A window that keeps nothing asks the theme again at the sign-in, as before.
+    }
+  },
+};
+
 /**
  * The appearance, applied and kept.
  *

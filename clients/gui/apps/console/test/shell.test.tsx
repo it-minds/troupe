@@ -43,7 +43,7 @@ describe("the shell", () => {
     await open();
     const groups = [...rail().querySelectorAll(".group > .screen")].map((g) => g.textContent);
     expect(groups).toEqual(["Mine", "Watch", "Configure", "Operate", "Govern"]);
-    for (const area of ["Overview", "Sessions", "Worker profiles", "Configuration bundles", "Workers and pods", "Budgets", "Teams", "Client versions", "Organisation", "Audit"]) {
+    for (const area of ["Overview", "Sessions", "Profiles", "Configuration bundles", "Pods", "Budgets", "Teams", "Client versions", "Organisation", "Audit"]) {
       await seesLink(area, rail());
     }
     await sees("Alice", rail());

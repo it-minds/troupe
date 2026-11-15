@@ -1138,7 +1138,7 @@ defmodule Troupe.Instructions do
 
   defp possessive(%{"scope" => "organisation"}), do: "the organisation's"
   defp possessive(%{"scope" => "team", "name" => name}), do: "the team #{name}'s"
-  defp possessive(%{"scope" => "profile", "name" => name}), do: "the worker profile #{name}'s"
+  defp possessive(%{"scope" => "profile", "name" => name}), do: "the profile #{name}'s"
   defp possessive(%{"scope" => "user"}), do: "the person's own"
 
   # Troupe's own word, one file of its own scope, whole: a paragraph and three lines, held

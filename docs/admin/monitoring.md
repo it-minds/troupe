@@ -35,7 +35,7 @@ deployed, the rollout has not finished or the image tag did not move.
 
 The console at `/console` ([console.md](console.md)) opens on the overview: what needs attention,
 per profile its pods and load, per team its spend against its budget, and session counts,
-read again every ten seconds. Workers and pods, sessions, bundles (with adoption per pod),
+read again every ten seconds. Pods, sessions, bundles (with adoption per pod),
 triggers, audit and settings each have a screen. Every screen is a call into
 `Troupe.Plane.Admin`, and `admin.overview` returns the same map to `/rpc` and `/mcp`.
 

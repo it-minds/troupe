@@ -151,7 +151,7 @@ defmodule Troupe.PlaneMemoryTest do
                resolve(ctx, [plane_memory: [profile | @documents]], trust: :never)
 
       assert Enum.map(config.plane_memory, & &1["scope"]) == ["organisation", "team", "profile"]
-      assert layers.memory.source == "the plane, with the session's activation"
+      assert layers.memory.source == "the plane, when the session started"
     end
 
     test "a document past the limit is kept to it, and says so", ctx do

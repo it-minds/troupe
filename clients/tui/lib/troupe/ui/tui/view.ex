@@ -883,7 +883,7 @@ defmodule Troupe.UI.TUI.View do
        field("origin", origin_label(entry.origin)),
        field("workspace", entry.workspace || "on the worker"),
        field("last event", "#{age(entry.updated_at, state.now)} · #{stamp(entry.updated_at)}"),
-       field("owner", entry.owner || "you"),
+       field("owner", Map.get(entry, :owner_name) || entry.owner || "you"),
        field("profile", entry.profile || "—"),
        field("branches", "#{length(branches)}")
      ] ++ private_block(entry) ++ branch_block(branches, width))
@@ -1946,7 +1946,7 @@ defmodule Troupe.UI.TUI.View do
   end
 
   defp settings_command_line(%{settings: %{editing: nil, view: %{pod?: true}} = s}),
-    do: {s.status || "", " settings in force on the pod — ↑↓ move · Esc back "}
+    do: {s.status || "", " settings in force on the platform — ↑↓ move · Esc back "}
 
   defp settings_command_line(%{settings: %{editing: nil} = s}) do
     hint =
@@ -1973,7 +1973,7 @@ defmodule Troupe.UI.TUI.View do
 
     cond do
       s.view[:pod?] ->
-        "in force in this session on its worker pod; nothing here changes it"
+        "in force in this session on the platform; nothing here changes it"
 
       Settings.enforced(s.view, field.key) ->
         "#{field.label} is set by your organisation"
@@ -3079,17 +3079,19 @@ defmodule Troupe.UI.TUI.View do
 
   # What Enter does with a line that is no command (TUI Decision 155): starts the agent
   # chosen with Ctrl-N, or the default one in the checkout; on a session that starts no
-  # branches (a pod's), it is said to the session's own agent.
+  # branches (a pod's), it is said to the session's own agent. The keys come first, what
+  # Enter starts in its own words, so at 80 columns the line keeps every key the box is
+  # typed with and gives up a note first.
   defp plain_title(state) do
     case Map.get(state, :choice) do
       %{agent: agent, where: where} ->
-        " → #{agent} in #{where_words(where)}: type the task · Enter starts it · Esc forgets the choice "
+        " type the task — Enter starts #{agent} in #{where_words(where)} · Esc forgets the choice "
 
       nil ->
         if Map.get(state, :branches?, true),
           do:
-            " → #{Map.get(state, :default_agent, "build")} in the checkout · Enter starts it · " <>
-              "Ctrl-N chooses the agent and a worktree · / commands ",
+            " Enter starts #{Map.get(state, :default_agent, "build")} in the checkout · " <>
+              "Ctrl-N chooses agent and worktree · / commands ",
           else: " → the session's agent · Enter sends · / commands "
     end
   end
@@ -3201,9 +3203,24 @@ defmodule Troupe.UI.TUI.View do
   end
 
   defp with_more_keys(text, nil), do: text
-  defp with_more_keys({:edit, _} = text, _more), do: text
+  defp with_more_keys({:edit, input}, more), do: {:edit, input, "also " <> more}
   defp with_more_keys("", more), do: "also " <> more
   defp with_more_keys(text, more), do: text <> "\nalso " <> more
+
+  # A box typed in shows the keys its line could not hold on its last row, while what is
+  # typed leaves that row free; a longer input takes the row back.
+  defp input_box_text(state, {:edit, input, more}, box_rows) do
+    content = max(box_rows - 2, 1)
+    w = cmd_inner_width(state, box_rows)
+    {rows, _cursor_row} = Input.rows(input, w)
+    typed = input_box_text(state, {:edit, input}, box_rows)
+    below = Model.wrap(more, w, :char)
+    free = content - length(rows)
+
+    if free >= length(below),
+      do: Enum.join([typed | List.duplicate("", free - length(below))] ++ below, "\n"),
+      else: typed
+  end
 
   # An editable box scrolls: fold the whole input to the inner width (hard
   # breaking, so a too-long row's continuation stays visible), then show the

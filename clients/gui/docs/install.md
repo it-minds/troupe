@@ -97,6 +97,12 @@ The shell also runs the *device* grant rather than the browser build's authoriza
 flow: a desktop app has no redirect to come back from, and the device grant is exactly
 right for one.
 
+The window opens where you last closed it, at that size: the place is kept in
+`.window-state.json` in the app's own directory (`%APPDATA%\com.objective-mj.troupe` on
+Windows, `~/Library/Application Support/com.objective-mj.troupe` on macOS,
+`~/.config/com.objective-mj.troupe` on Linux). Delete it and the next launch opens
+centred.
+
 From 0.15.0 the app updates itself, only from a release the release key signed
 ([updating](../../../docs/user/updating.md#the-desktop-app)); one older than that is
 updated once by its installer.

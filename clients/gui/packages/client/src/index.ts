@@ -36,8 +36,8 @@ export {
   whoCanOpen,
 } from "./newSession.js";
 export type { AutoPick, MessageTokens, NewSessionWhere, ProfileRoom, ProfileRoomRow, TokenNames } from "./newSession.js";
-export { ALLOW_ALWAYS, SessionView, createLocalSession, turnCompleted } from "./session.js";
-export type { ApprovalDecision, SessionViewHooks, TurnResult } from "./session.js";
+export { ALLOW_ALWAYS, UPLOAD_ARTIFACT, SessionView, createLocalSession, turnCompleted } from "./session.js";
+export type { ApprovalDecision, ArtifactAttached, SessionViewHooks, TurnResult } from "./session.js";
 export { AuthSession, PlaneUnreachableError, memoryReachedMarks, memoryTokenStore, webReachedMarks, webTokenStore, currentOrigin } from "./auth.js";
 export type { AuthSessionOptions, ReachedMarks, SignInProgress, TokenStore, UnreachableContext } from "./auth.js";
 export { beginRedirect, completeRedirect, hasRedirectAnswer, scrubRedirect, idpMetadata, pkcePair } from "./pkce.js";
@@ -45,6 +45,7 @@ export type { BeginRedirectOptions, IdpMetadata, PkcePair, PendingRedirect, Redi
 export { SessionAttachment, waitOn } from "./attach.js";
 export type { AttachOptions, AttachStatus } from "./attach.js";
 export { ServerOffer, offeredName } from "./offer.js";
+export { initials, named, nameOrSubject } from "./people.js";
 export { draftOf, draftProblems, joinCommand, pairsFromText, pairsToText, readsEnvironment, serverChanges, serverPatch, serverTrial, splitCommand } from "./servers.js";
 export type { DraftOAuth, DraftPair, SecretChange, ServerDraft } from "./servers.js";
 export type { OfferAnswer, OfferAsk, OfferOptions, OfferState } from "./offer.js";
@@ -172,7 +173,7 @@ export type { EntryDraft, EntryLevel, InEffect, MemoryEntry, MemoryInEffect } fr
 export type { Artifact, ArtifactAudience, ArtifactDetail, ArtifactFile, ArtifactFilter, ArtifactKind, ArtifactLinkUse, ArtifactList, ArtifactNewLink, ArtifactOrigin, ArtifactOwner, ArtifactPerson, ArtifactPublish, ArtifactPut, ArtifactRole, ArtifactScope, ArtifactShare, ArtifactText, ArtifactTicket, ArtifactTransferTo, ArtifactUpload, ArtifactVersion } from "./artifacts.js";
 export { openRemote, remoteRefusal, watchRemote, watchUrl, when as remoteWhen } from "./remote.js";
 export type { RemoteListRow, RemoteWatch, RemoteWatchOptions } from "./remote.js";
-export { AdminApi, bundleErrors, requiredRole } from "./admin.js";
+export { AdminApi, bundleErrors, clientStanding, releaseVersion, requiredRole, versionOlder } from "./admin.js";
 export type {
   AdminFilter,
   AdminPod,
@@ -236,6 +237,8 @@ export type {
   ScimConnector,
   SettingsList,
   PlatformSetting,
+  SettingNaming,
+  SettingUnit,
   ServicePrincipal,
   TeamSpend,
   Trigger,
@@ -367,7 +370,6 @@ export {
   describeOverride,
   discoveryParams,
   formFromConfig,
-  inReadersWords,
   keySource,
   modelConfigError,
   providerTypes,
