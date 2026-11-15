@@ -439,7 +439,8 @@ defmodule Troupe.Protocol.Schema do
       # `brief` as the person edited it and which parts (`edited`), and the person's word
       # back with a denial (`reason`). `allow_session` lets that agent run unasked for the
       # session. A publication's names the `visibility` and `owner` it ran with and which of
-      # them the person changed (`edited`).
+      # them the person changed (`edited`). `allow_always`'s names the rule the person kept,
+      # its scope and its file (`always`).
       "approval_decided" => %{
         "call_id" => required(:string),
         "tool" => required(:string),
@@ -451,7 +452,8 @@ defmodule Troupe.Protocol.Schema do
         "edited" => optional({:array, :string}),
         "reason" => optional(:string),
         "visibility" => optional(:string),
-        "owner" => optional(:string)
+        "owner" => optional(:string),
+        "always" => optional(:object)
       },
       # `ask_user` (Decision 651): the agent hands a decision to a person and waits.
       # `preview` is text the question is about, shown as it is beneath it: the prompt a
@@ -692,6 +694,13 @@ defmodule Troupe.Protocol.Schema do
         "done_reason" => optional(:string)
       },
       "progress" => %{"message" => required(:string)},
+      # How full the root's context window is, after each call and before a turn on a
+      # model not yet said: the window compaction plans against, null where the model's
+      # is not known, and the last call's whole prompt.
+      "context_status" => %{
+        "window_tokens" => required({:nullable, :integer}),
+        "used_tokens" => required(:integer)
+      },
       # Never durable, and not by a filter: presence is published through a function that
       # has no path to the log at all. `state` is `joined`, `left`, `focused` or `typing`.
       "presence" => %{
@@ -868,7 +877,9 @@ defmodule Troupe.Protocol.Schema do
         "brief" => optional(:object),
         "reason" => optional(:string),
         "visibility" => optional(:string),
-        "owner" => optional(:string)
+        "owner" => optional(:string),
+        # With `allow_always`: where the person's rule is kept, `workspace` or `everywhere`.
+        "scope" => optional(:string)
       },
       "todo.edit" => %{
         "command_id" => required(:string),
@@ -888,10 +899,16 @@ defmodule Troupe.Protocol.Schema do
         "session_id" => required(:string),
         "path" => required(:string)
       },
+      # `content` at `path`; or, in its place, one of the person's artifacts (`artifact`, its
+      # `version`, one `file` of it), whose files the server fetches from the plane into the
+      # folder `path` names (`session:/` where none is).
       "fs.upload" => %{
         "session_id" => required(:string),
-        "path" => required(:string),
-        "content" => required(:string),
+        "path" => optional(:string),
+        "content" => optional(:string),
+        "artifact" => optional(:string),
+        "version" => optional(:integer),
+        "file" => optional(:string),
         "command_id" => optional(:string)
       },
       # The session's scratchpad documents (Decision 870): the latest of each name, in the

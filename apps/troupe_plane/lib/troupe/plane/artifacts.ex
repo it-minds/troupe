@@ -1692,6 +1692,88 @@ defmodule Troupe.Plane.Artifacts do
     end
   end
 
+  # What one attachment carries at most, every file of it together: under what one message
+  # of a daemon's call or a pod's control link carries comfortably once in base64.
+  @max_attach 2_000_000
+
+  @doc """
+  The files of a version, for a session's workspace (#920): what `fs.upload` with
+  `artifact` puts there, on a pod through its control link and on a laptop through its
+  daemon's call, so the bytes never pass through the person's client. `path` narrows it to
+  one file; `version` is the current one where none is named. Whoever may see it reads it,
+  as `read/4`; each file is `{path, content_type, bytes}` with the bytes in base64, and the
+  answer names the artifact's `id`, `title` and `version`. A version past what one
+  attachment carries is refused with its size.
+  """
+  @spec files(String.t(), User.t(), map(), keyword()) :: {:ok, map()} | {:error, Error.t()}
+  def files(id, %User{} = user, params, opts \\ []) do
+    admin? = Keyword.get(opts, :platform_admin?, false)
+    n = params["version"]
+
+    with {:ok, artifact} <- visible(id, user, admin?),
+         %Version{} = version <- version_of(artifact, if(is_integer(n), do: n, else: :current)),
+         {:ok, wanted} <- wanted_files(version, params["path"]),
+         :ok <- attachable(wanted),
+         {:ok, files} <- read_all(artifact, version, wanted) do
+      {:ok,
+       %{
+         "id" => artifact.id,
+         "title" => artifact.title,
+         "version" => version.n,
+         "files" => files
+       }}
+    else
+      {:error, %Error{}} = error -> error
+      _no -> {:error, Error.new(:not_found, %{id: id, version: n, path: params["path"]})}
+    end
+  end
+
+  defp wanted_files(version, nil), do: {:ok, version.files}
+
+  defp wanted_files(version, path) when is_binary(path) do
+    case Enum.filter(version.files, &(&1["path"] == path)) do
+      [] -> :error
+      one -> {:ok, one}
+    end
+  end
+
+  defp wanted_files(_version, _path), do: :error
+
+  defp attachable(files) do
+    size = files |> Enum.map(&(&1["size"] || 0)) |> Enum.sum()
+
+    if size <= @max_attach,
+      do: :ok,
+      else:
+        {:error,
+         invalid(
+           "the version's files are #{size} bytes together, more than #{@max_attach} attached at once; " <>
+             "name one file with path"
+         )}
+  end
+
+  defp read_all(artifact, version, wanted) do
+    Enum.reduce_while(wanted, {:ok, []}, fn entry, {:ok, acc} ->
+      case file_of(artifact, version, entry["path"]) do
+        {:ok, file, body} ->
+          read = %{
+            "path" => file["path"],
+            "content_type" => file["content_type"],
+            "bytes" => Base.encode64(body)
+          }
+
+          {:cont, {:ok, [read | acc]}}
+
+        :error ->
+          {:halt, :error}
+      end
+    end)
+    |> case do
+      {:ok, files} -> {:ok, Enum.reverse(files)}
+      :error -> :error
+    end
+  end
+
   @doc """
   An edit's preview on the artifacts host: `text` as `path` over version `base` (the
   current one if none), served from `/p/<nonce>/` for an hour with the version's other

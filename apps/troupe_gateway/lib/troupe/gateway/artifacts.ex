@@ -34,8 +34,41 @@ defmodule Troupe.Gateway.Artifacts do
   of them can publish now: when this daemon is signed in to a plane.
   """
   @spec install() :: :ok
-  def install,
-    do: Troupe.Artifacts.install(&__MODULE__.publish/2, ready: &__MODULE__.signed_in?/1)
+  def install do
+    :ok = Troupe.Artifacts.install_files(&__MODULE__.files/1)
+    Troupe.Artifacts.install(&__MODULE__.publish/2, ready: &__MODULE__.signed_in?/1)
+  end
+
+  @doc """
+  The files of one of the person's artifacts for a session here (`fs.upload` with
+  `artifact`): the plane's `artifact.files`, with this daemon's sign-in. A session under
+  Local only asks the plane nothing.
+  """
+  @spec files(map()) :: {:ok, map()} | {:error, :signed_out | term()}
+  def files(ask) do
+    if LocalOnly.session?(ask["session_id"]),
+      do:
+        {:error,
+         "this session is under Local only, so nothing is fetched from the plane for it; " <>
+           "save the artifact's file and upload it instead"},
+      else: fetch_files(ask)
+  end
+
+  defp fetch_files(ask) do
+    params =
+      %{"id" => ask["artifact"], "version" => ask["version"], "path" => ask["file"]}
+      |> Map.reject(fn {_key, value} -> is_nil(value) end)
+
+    with url when is_binary(url) <- Plane.url(),
+         true <- Plane.linked?(),
+         {:ok, answer} <- Plane.call("artifact.files", params) do
+      {:ok, answer}
+    else
+      {:error, :unlinked} -> {:error, :signed_out}
+      {:error, reason} -> {:error, reason}
+      _signed_out -> {:error, :signed_out}
+    end
+  end
 
   @doc "Whether a session here can publish now: this daemon is signed in to a plane."
   @spec signed_in?(String.t() | nil) :: boolean()

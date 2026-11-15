@@ -254,6 +254,24 @@ defmodule Troupe.Plane.ArtifactVersionsTest do
     end
   end
 
+  # Issue #920: a laptop's daemon fetches a version's files for a session's workspace.
+  describe "artifact.files" do
+    test "answers every file of a version in base64, for whoever may see it", context do
+      id = context.doc["id"]
+
+      assert {:ok, answer} = call(context.bo, "artifact.files", %{"id" => id})
+      assert answer["version"] == 1
+      assert Enum.map(answer["files"], &{&1["path"], Base.decode64!(&1["bytes"])}) ==
+               [{"figure.svg", "<svg/>"}, {"index.md", "# One"}]
+
+      assert {:ok, %{"files" => [_]}} = call(context.bo, "artifact.files", %{"id" => id, "path" => "index.md"})
+
+      assert {:error, %{message: "not_found"}} = call(context.cy, "artifact.files", %{"id" => id})
+      assert {:error, %{message: "not_found"}} = call(context.ada, "artifact.files", %{"id" => id, "path" => "nope.md"})
+      assert {:error, %{message: "not_found"}} = call(context.ada, "artifact.files", %{"id" => id, "version" => 9})
+    end
+  end
+
   describe "editing in the console" do
     test "reads one text file of a version for the editor", context do
       id = context.doc["id"]

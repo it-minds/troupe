@@ -88,8 +88,8 @@ export function ApprovalPanel({
   onceOnly?: boolean;
   /**
    * Whether the server takes `allow_always` (it named `approval_allow_always` at
-   * `initialize`): a lasting per-tool rule for the person, written from the approval. Until
-   * then the answer is drawn, and disabled with the reason.
+   * `initialize`): a lasting per-tool rule for the person, written from the approval. A
+   * server that does not (a pod, whose rules are its profile's) is not offered it.
    */
   alwaysAllow?: boolean;
   /** Whom a publication may be for: the person's teams and profiles, once the plane said them. */
@@ -127,7 +127,7 @@ function ToolApproval({
   entry: Approval;
   canAnswer: boolean;
   others: string[];
-  onAnswer: (decision: Decision) => Promise<void>;
+  onAnswer: (decision: Decision, answer?: GateAnswer) => Promise<void>;
   onceOnly: boolean;
   alwaysAllow: boolean;
 }): JSX.Element {
@@ -157,7 +157,9 @@ function ToolApproval({
     setBusy(decision);
     setError(null);
     try {
-      await onAnswer(decision);
+      // A lasting rule is kept in the person's own config.yaml, which every session on this
+      // computer reads: the daemon writes it, and refuses where only the platform's rules count.
+      await (decision === "allow_always" ? onAnswer(decision, { scope: "everywhere" }) : onAnswer(decision));
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -221,19 +223,19 @@ function ToolApproval({
               {scopedLabel(entry.tool)}
             </button>
           )}
-          {/* A lasting rule from the approval needs the server's `allow_always` (troupe
-              #920): until it names the capability the answer is here, with the one that
-              works today beside it. */}
-          {!onceOnly &&
-            (alwaysAllow ? (
-              <button className="always" onClick={() => void answer("allow_always")} disabled={busy !== null} title="A rule of yours: every call like this runs unasked from now on">
-                {busy === "allow_always" ? "Allowing…" : `Always allow ${entry.tool}`}
-              </button>
-            ) : (
-              <button className="always" disabled title="Not yet: allow it for this session instead">
-                Always allow (not yet: allow it for this session instead)
-              </button>
-            ))}
+          {/* A lasting rule from the approval is the server's `allow_always` (troupe #920): a
+              daemon names it at `initialize`. A pod does not, its rules being its worker
+              profile's, and there the answer is not drawn: allowing for the session is. */}
+          {!onceOnly && alwaysAllow && (
+            <button
+              className="always"
+              onClick={() => void answer("allow_always")}
+              disabled={busy !== null}
+              title={`A rule in your own config.yaml: every call to ${entry.tool} runs unasked from now on, in every session on this computer`}
+            >
+              {busy === "allow_always" ? "Allowing…" : `Always allow ${entry.tool}`}
+            </button>
+          )}
           <button className="deny" onClick={() => void answer("deny")} disabled={busy !== null}>
             {busy === "deny" ? "Denying…" : "Deny"}
           </button>

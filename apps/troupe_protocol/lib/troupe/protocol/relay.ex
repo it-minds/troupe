@@ -20,7 +20,8 @@ defmodule Troupe.Protocol.Relay do
   **The laptop's rules hold.** A remote prompt is a prompt: the session's enforced layer,
   per-tool rules and approvals apply to it as to one typed at the laptop. An approval
   answered remotely is `allow` or `deny` for that one call; `allow_session`, which would
-  stop the session asking for that tool, is the laptop's person's to give at the laptop.
+  stop the session asking for that tool, and `allow_always`, which writes a rule into the
+  laptop's configuration, are the laptop's person's to give at the laptop.
 
   **A private session, with its owner's consent.** A private session is sealed under its
   person's key, and the relay carries what an offered session says through the plane
@@ -181,6 +182,17 @@ defmodule Troupe.Protocol.Relay do
        field: "decision",
        reason:
          "allowing a tool for the rest of the session is done at the laptop; " <>
+           "from another device a call is allowed or denied once"
+     })}
+  end
+
+  # A lasting rule is a line of the laptop's own configuration.
+  defp decision("approval.respond", %{"decision" => "allow_always"}) do
+    {:error,
+     Error.new(:forbidden, %{
+       field: "decision",
+       reason:
+         "a lasting rule is written into the laptop's own configuration, at the laptop; " <>
            "from another device a call is allowed or denied once"
      })}
   end

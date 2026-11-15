@@ -115,6 +115,14 @@ export class FakeWorker {
   readonly refusing = new Map<string, { code: number; message: string; data?: unknown }>();
   /** The agents a session here could run: the built-ins, and a bundle's a test adds (troupe Decision 841). */
   readonly agents = new FakeAgents("/home/troupe/.config/troupe", true);
+  /** The window `context_status` says after each call (troupe #920); null for a model whose window is not known. */
+  contextWindow: number | null = 200_000;
+  /**
+   * Where `fs.upload` with `artifact` fetches an artifact's files from, as a pod asks the
+   * plane over its control link for the person who asked (troupe #920): the fake plane sets
+   * it; null answers `unavailable`, as a pod with no link does.
+   */
+  artifactSource: ((subject: string, id: string, version?: number) => { id: string; title: string; version: number; files: Array<{ path: string; text: string }> } | null) | null = null;
 
   private readonly clients = new Set<Client>();
   private readonly opts: Required<WorkerOptions>;
@@ -246,7 +254,9 @@ export class FakeWorker {
         return reply(ws, msg.id, {
           protocol_version: "1",
           server_info: { name: "fake-worker", version: "0.0.1", instance_id: this.workerId },
-          capabilities: { blobs: true, tools: true },
+          // A pod fetches an artifact into a session from the plane, and writes no lasting
+          // rule from an approval: its rules are its worker profile's (troupe #920).
+          capabilities: { blobs: true, tools: true, fs_upload_artifact: true },
           principal: { subject: token.sub, display_name: token.name, kind: "user" },
           scopes: token.scopes,
           limits: { max_message_bytes: 1_048_576 },
@@ -403,6 +413,13 @@ export class FakeWorker {
         const callId = String(params["call_id"] ?? "");
         const approval = session.approvals.get(callId);
         if (!approval) return reply(ws, id, null, { code: -32005, message: "not_found" });
+        if (params["decision"] === "allow_always") {
+          return reply(ws, id, null, {
+            code: -32004,
+            message: "forbidden",
+            data: { field: "decision", reason: "rules on the platform are the worker profile's, which an administrator sets; allow it once or for this session" },
+          });
+        }
         if (approval.resolvedBy) {
           // First response wins. The later one is told who resolved it and changes
           // nothing — no second decision, and no second continuation of the turn.
@@ -684,6 +701,30 @@ export class FakeWorker {
         });
       }
 
+      // A file into the session's own directory, or one of the person's artifacts, whose
+      // files the pod fetches from the plane for the person who asked (troupe #920): never
+      // through the client. Each is recorded as the person's, as an upload is.
+      case "fs.upload": {
+        if (!session) return reply(ws, id, null, { code: -32005, message: "not_found" });
+        if (!client.token.scopes.includes("control")) return reply(ws, id, null, { code: -32004, message: "forbidden", data: { required_scope: "control" } });
+        const actor = { kind: "user", subject: client.token.sub };
+        const put = (path: string, content: string): { path: string; bytes: number } => {
+          session.files.set(path, content);
+          session.log.append("fs_changed", { path, hash: `sha256:${createHash("sha256").update(content).digest("hex")}`, size: Buffer.byteLength(content) }, actor);
+          return { path, bytes: Buffer.byteLength(content) };
+        };
+        const folder = String(params["path"] ?? "session:/").replace(/^session:\/?/, "");
+        if (folder.includes("..")) return reply(ws, id, null, { code: -32004, message: "forbidden" });
+        if (typeof params["artifact"] !== "string") return reply(ws, id, put(folder, String(params["content"] ?? "")));
+        if (!this.artifactSource) return reply(ws, id, null, { code: -32010, message: "unavailable", data: { reason: "the plane could not be reached from this pod; try again later" } });
+        const version = typeof params["version"] === "number" ? params["version"] : undefined;
+        const found = this.artifactSource(client.token.sub, params["artifact"], version);
+        if (!found) return reply(ws, id, null, { code: -32005, message: "not_found", data: { id: params["artifact"] } });
+        const prefix = folder === "" || folder.endsWith("/") ? folder : `${folder}/`;
+        const files = found.files.filter((f) => params["file"] === undefined || f.path === params["file"]).map((f) => put(`${prefix}${f.path}`, f.text));
+        return reply(ws, id, { artifact: found.id, title: found.title, version: found.version, files });
+      }
+
       default:
         return reply(ws, id, null, { code: -32601, message: "method_not_found", data: { method } });
     }
@@ -753,6 +794,8 @@ export class FakeWorker {
       model: "fake",
       gateway: { request_id: `r-${session.log.headSeq}`, cost_micros: 100 },
     });
+    // How full the window is after the call, as the harness says it (troupe #920).
+    this.ephemeral(session, "context_status", { window_tokens: this.contextWindow, used_tokens: 10 });
   }
 
   private askApproval(session: Session, what: string): void {

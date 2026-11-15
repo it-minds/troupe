@@ -45,6 +45,12 @@ defmodule Troupe.Protocol.RelayTest do
   test "an approval from another device is for the one call" do
     assert {:error, %{data: %{field: "decision"}}} =
              Relay.check("approval.respond", %{"session_id" => @sid, "decision" => "allow_session"}, @sid, "control")
+
+    # A lasting rule is the laptop's own configuration (#920).
+    assert {:error, %{data: %{field: "decision", reason: reason}}} =
+             Relay.check("approval.respond", %{"session_id" => @sid, "decision" => "allow_always"}, @sid, "control")
+
+    assert reason =~ "the laptop's own configuration"
   end
 
   test "the narrower of two roles holds, and none is none" do

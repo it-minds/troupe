@@ -1,7 +1,7 @@
 // The session view as a chat (troupe #919, docs/design/session-chat.dc.html): the backstage
 // under the head's ⋯, a reply's row (Copy, Retry, Publish and what the turn cost), the
 // composer's + (files, an artifact's files, a folder) and its context ring, and the voids
-// troupe #920 fills: Always allow, the context window, artifacts on the platform.
+// troupe #920 made real: Always allow, the context window, artifacts on the platform.
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { WebSocket as NodeWebSocket } from "ws";
@@ -11,6 +11,7 @@ import { App } from "../src/App";
 import { ApprovalPanel } from "../src/views/Approval";
 import { ContextRing } from "../src/views/Session";
 import { FakeDaemon } from "../../../packages/client/test/support/daemon.js";
+import { artifact as planeArtifact } from "../../../packages/client/test/support/plane.js";
 import { startHarness } from "../../../packages/client/test/support/harness.js";
 import type { Harness } from "../../../packages/client/test/support/harness.js";
 import { button, render, sees, seesButton, startOnTheList, type, waitFor } from "./support";
@@ -152,8 +153,9 @@ describe("the composer", () => {
     (await waitFor(() => plusItem("Add from artifacts"), "the + menu")).click();
     const picker = await waitFor(() => document.querySelector<HTMLElement>(".artifact-picker"), "the artifact picker");
     (await seesButton("The brief", picker)).click();
-    await waitFor(() => document.querySelector(".composer .file .n")?.textContent === "brief.md", "the artifact's file attached");
-    expect(daemon.calls.find((c) => c.method === "artifact.read")?.params).toEqual({ id: "art-brief", path: "brief.md", version: 2 });
+    // The daemon fetches the artifact from the plane itself (troupe #920): the app reads none of its files.
+    await waitFor(() => document.querySelector(".composer .file .n")?.textContent === "The brief", "the artifact attached");
+    expect(daemon.calls.some((c) => c.method === "artifact.read")).toBe(false);
 
     document.querySelector<HTMLButtonElement>('.composer button[aria-label="Add files"]')!.click();
     (await waitFor(() => plusItem("Add a folder"), "the + menu")).click();
@@ -163,7 +165,31 @@ describe("the composer", () => {
     button("Send")!.click();
     await waitFor(() => sent().length === 1, "the message");
     expect(daemon.uploads.map((u) => [u.path, u.content])).toEqual([["session:/brief.md", "Brief"]]);
+    expect(daemon.calls.find((c) => c.method === "fs.upload")?.params).toMatchObject({ artifact: "art-brief", version: 2 });
     expect(sent()[0]).toBe("use them\n\nuploaded brief.md to session:/brief.md\nthe folder /home/ada/docs on this computer");
+  });
+
+  it("reads an artifact's files through a daemon from before it fetched them itself", async () => {
+    await daemon.stop();
+    daemon = new FakeDaemon({ osUser: "ada", capabilities: { blobs: true, tools: true } });
+    await daemon.start();
+    location.hash = `#daemon=${daemon.port}:${daemon.token}`;
+    daemon.artifacts = [
+      { id: "art-brief", title: "The brief", kind: "markdown", visibility: "private", mine: true, version: 2, current: 2, bytes: 5, url: "https://artifacts.example.test/a/art-brief/", owner: { subject: "ada" }, origin: {}, team: null, files: [{ path: "brief.md", text: "Brief" }] },
+    ];
+    const { composer } = await open();
+
+    document.querySelector<HTMLButtonElement>('.composer button[aria-label="Add files"]')!.click();
+    (await waitFor(() => plusItem("Add from artifacts"), "the + menu")).click();
+    const picker = await waitFor(() => document.querySelector<HTMLElement>(".artifact-picker"), "the artifact picker");
+    (await seesButton("The brief", picker)).click();
+    await waitFor(() => document.querySelector(".composer .file .n")?.textContent === "brief.md", "the artifact's file attached");
+    expect(daemon.calls.find((c) => c.method === "artifact.read")?.params).toEqual({ id: "art-brief", path: "brief.md", version: 2 });
+
+    type(composer, "use it");
+    button("Send")!.click();
+    await waitFor(() => sent().length === 1, "the message");
+    expect(daemon.uploads.map((u) => [u.path, u.content])).toEqual([["session:/brief.md", "Brief"]]);
   });
 
   it("is Stop while the troupe works, and the commands open over it on /", async () => {
@@ -206,40 +232,63 @@ describe("the voids", () => {
     closed: false,
   };
 
-  it("draws Always allow disabled with its reason until the server takes allow_always, beside allowing for the session", async () => {
-    const answers: string[] = [];
-    const panel = render(<ApprovalPanel entry={approval} canAnswer others={[]} onAnswer={async (d) => void answers.push(d)} />);
-    const always = await seesButton("Always allow");
-    expect(always.disabled).toBe(true);
-    expect(always.textContent).toBe("Always allow (not yet: allow it for this session instead)");
+  it("offers Always allow only where the server takes allow_always, and sends it with the scope", async () => {
+    const answers: Array<[string, unknown]> = [];
+    const panel = render(<ApprovalPanel entry={approval} canAnswer others={[]} onAnswer={async (d, a) => void answers.push([d, a])} />);
     await seesButton("Allow once");
     await seesButton("Allow every command for this session");
+    expect(button("Always allow shell")).toBeNull();
+    expect([...document.querySelectorAll("button")].some((b) => b.textContent?.startsWith("Always allow"))).toBe(false);
     panel.unmount();
 
-    unmount = render(<ApprovalPanel entry={approval} canAnswer others={[]} alwaysAllow onAnswer={async (d) => void answers.push(d)} />).unmount;
+    unmount = render(<ApprovalPanel entry={approval} canAnswer others={[]} alwaysAllow onAnswer={async (d, a) => void answers.push([d, a])} />).unmount;
     (await seesButton("Always allow shell")).click();
-    await waitFor(() => answers.includes("allow_always"), "allow_always sent");
+    await waitFor(() => answers.some(([d]) => d === "allow_always"), "allow_always sent");
+    expect(answers.find(([d]) => d === "allow_always")?.[1]).toEqual({ scope: "everywhere" });
   });
 
-  it("says why Add from artifacts and Add a folder wait on a session on the platform, and shows the profile it keeps", async () => {
-    {
-      const plane = (await signedIn()).plane;
-      plane.seed("alice@example.com", { id: "team-1", title: "Plan the release", profile: "dev" });
-      unmount = render(<App />).unmount;
-      const row = await waitFor(() => [...document.querySelectorAll<HTMLButtonElement>("button.row")].find((b) => b.textContent?.includes("Plan the release")), "the team session's row");
-      row.click();
-      await waitFor(() => document.querySelector('textarea[aria-label="Message"]'), "the session");
-      expect(document.querySelector(".composer .chip.wide")?.textContent).toBe("dev");
-      document.querySelector<HTMLButtonElement>('.composer button[aria-label="Add files"]')!.click();
-      const artifacts = await waitFor(() => plusItem("Add from artifacts"), "the + menu");
-      expect(artifacts.disabled).toBe(true);
-      expect(artifacts.querySelector(".d")?.textContent).toBe("Not yet on the platform");
-      expect(plusItem("Add a folder")!.disabled).toBe(true);
-      expect(plusItem("Add a folder")!.querySelector(".d")?.textContent).toBe("Only for sessions on this computer");
-      expect(plusItem("Upload files")!.disabled).toBe(false);
-      // The ring on the platform, with no window reported.
-      expect(document.querySelector(".composer .ring-context")?.getAttribute("aria-label")).toMatch(/the window size is not reported yet\.$/);
-    }
+  it("writes the person's rule through this computer's daemon, which named the capability, and records it", async () => {
+    const { session } = await open();
+    daemon.askTool(session.id, "write_file", { path: "plan.md" });
+    (await seesButton("Always allow write_file")).click();
+    await waitFor(() => daemon.permissions.some((r) => r["rule"] === "write_file"), "the rule written");
+    expect(daemon.calls.find((c) => c.method === "approval.respond")?.params).toMatchObject({ decision: "allow_always", scope: "everywhere" });
+    await sees("Always allowed");
+  });
+
+  it("attaches an artifact on the platform, which the pod fetches from the plane, and shows the profile it keeps", async () => {
+    const h = await signedIn();
+    h.plane.seed("alice@example.com", { id: "team-1", title: "Plan the release", profile: "dev" });
+    h.plane.artifacts.set("art-plan", planeArtifact("art-plan", { subject: "alice@example.com", display_name: "Alice" }, { title: "Release plan", visibility: "private" }));
+    unmount = render(<App />).unmount;
+    const row = await waitFor(() => [...document.querySelectorAll<HTMLButtonElement>("button.row")].find((b) => b.textContent?.includes("Plan the release")), "the team session's row");
+    row.click();
+    const composer = await waitFor(() => document.querySelector<HTMLTextAreaElement>('textarea[aria-label="Message"]'), "the session");
+    expect(document.querySelector(".composer .chip.wide")?.textContent).toBe("dev");
+    // The ring on the platform, with no window reported until a call says it.
+    expect(document.querySelector(".composer .ring-context")?.getAttribute("aria-label")).toMatch(/the window size is not reported yet\.$/);
+
+    document.querySelector<HTMLButtonElement>('.composer button[aria-label="Add files"]')!.click();
+    const artifacts = await waitFor(() => plusItem("Add from artifacts"), "the + menu");
+    expect(artifacts.disabled).toBe(false);
+    expect(plusItem("Add a folder")!.disabled).toBe(true);
+    expect(plusItem("Add a folder")!.querySelector(".d")?.textContent).toBe("Only for sessions on this computer");
+    expect(plusItem("Upload files")!.disabled).toBe(false);
+    artifacts.click();
+    const picker = await waitFor(() => document.querySelector<HTMLElement>(".artifact-picker"), "the artifact picker");
+    (await seesButton("Release plan", picker)).click();
+    await waitFor(() => document.querySelector(".composer .file .n")?.textContent === "Release plan", "the artifact attached");
+
+    type(composer, "read the plan");
+    button("Send")!.click();
+    const said = (): string[] => h.worker.calls.filter((c) => c.method === "input.send").map((c) => String(c.params["text"]));
+    await waitFor(() => said().length === 1, "the message on the pod");
+    expect(h.worker.calls.find((c) => c.method === "fs.upload")?.params).toMatchObject({ artifact: "art-plan", version: 1 });
+    expect(h.worker.sessions.get("team-1")?.files.get("index.html")).toBe("<h1>A page</h1>");
+    expect(said()[0]).toBe("read the plan\n\nuploaded index.html to session:/index.html");
+
+    // The pod's call said the window: the ring is the share of it.
+    await waitFor(() => /^Context \d+% full/.test(document.querySelector(".composer .ring-context")?.getAttribute("aria-label") ?? ""), "the window from the pod");
   });
 
   it("says the tokens in, alone, with no window", async () => {
