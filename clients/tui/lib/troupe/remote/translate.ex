@@ -607,7 +607,7 @@ defmodule Troupe.Remote.Translate do
 
       type when type in ["session.activated", "session_activated"] ->
         {[
-           emit.(:remote_note, %{text: "session activated" <> on(data)}),
+           emit.(:remote_note, %{text: "session woke on the platform"}),
            emit.(:remote_status, %{state: :active})
          ], memory}
 
@@ -619,7 +619,7 @@ defmodule Troupe.Remote.Translate do
 
       type when type in ["session.dormant", "session_dormant"] ->
         {[
-           emit.(:remote_note, %{text: "session went dormant"}),
+           emit.(:remote_note, %{text: "session went to sleep"}),
            emit.(:remote_status, %{state: :dormant})
          ], memory}
 

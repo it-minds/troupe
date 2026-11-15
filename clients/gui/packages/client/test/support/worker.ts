@@ -489,7 +489,7 @@ export class FakeWorker {
         // A profile with `personalTools: forbid` refuses before any challenge, as the gateway does.
         if (this.personalToolsForbiddenBy) {
           const profile = this.personalToolsForbiddenBy;
-          const reason = `the worker profile ${profile} does not take a person's own tools on its pods (personalTools: forbid); only the profile's MCP servers are available`;
+          const reason = `the profile ${profile} does not take a person's own tools (personalTools: forbid); only the profile's MCP servers are available`;
           return reply(ws, id, null, { code: -32004, message: "forbidden", data: { setting: "personalTools", profile, reason } });
         }
         const specs = (params["tools"] as Array<{ name: string; description?: string; schema?: unknown }> | undefined) ?? [];
@@ -581,10 +581,10 @@ export class FakeWorker {
           files: [
             memory("organisation", null, 3, "the organisation's memory"),
             memory("team", "engineering", 2, "the team engineering's memory"),
-            memory("profile", session.profile, 1, `the worker profile ${session.profile}'s memory`),
+            memory("profile", session.profile, 1, `the profile ${session.profile}'s memory`),
             { scope: "root", path: `/state/workspaces/${session.id}/AGENTS.md`, size: 20, chars: 20, budget: 16000, status: "whole", hash: "sha256:abcdef0123" },
           ],
-          memory_from: { source: "the plane, with the session's activation", fetched_at: null },
+          memory_from: { source: "the plane, when the session started", fetched_at: null },
         });
       }
 
@@ -609,9 +609,9 @@ export class FakeWorker {
           files: [{ scope: "project", path: `/state/workspaces/${session.id}/.troupe/config.yaml`, exists: true }],
           organisation: [],
           keys: [
-            key("models.default", "pod-model", "profile", `the worker profile ${session.profile} (TROUPE_MODEL)`),
+            key("models.default", "pod-model", "profile", `the profile ${session.profile} (TROUPE_MODEL)`),
             key("max_turns", 7, "session", "the session's terms"),
-            machinery("base_url", "http://llm.example.test/v1", "profile", `the worker profile ${session.profile} (TROUPE_BASE_URL)`),
+            machinery("base_url", "http://llm.example.test/v1", "profile", `the profile ${session.profile} (TROUPE_BASE_URL)`),
             key("compact_at", 0.6, "project", `/state/workspaces/${session.id}/.troupe/config.yaml`),
             key("managed_permission_rules_only", true, "enforced", "the plane's platform settings", {
               value: true,

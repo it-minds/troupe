@@ -188,19 +188,6 @@ export interface SessionConfig {
   errors: string[];
 }
 
-/**
- * A sentence the plane or the machine a session runs on wrote, in the reader's words. They
- * name what a session runs under as an operator does: a worker profile, the session's
- * activation. The person reading it knows a profile, and a session that started.
- */
-export function inReadersWords(text: string): string {
-  return text
-    .replace(/\bthe worker profile\b/g, "the profile")
-    .replace(/\bWorker profile\b/g, "Profile")
-    .replace(/\bworker profile\b/g, "profile")
-    .replace(/\bwith the session's activation\b/g, "when the session started");
-}
-
 /** Where a key's value came from, in words a settings page shows. */
 export function keySource(key: Pick<ConfigKey, "layer" | "source">): string {
   const whose: Record<string, string> = {
@@ -214,7 +201,7 @@ export function keySource(key: Pick<ConfigKey, "layer" | "source">): string {
     cli: "the command line",
   };
   // A pod's own layers say whose in their source: the profile, the session's terms.
-  if (key.layer === "profile" || key.layer === "session") return key.source ? inReadersWords(key.source) : key.layer;
+  if (key.layer === "profile" || key.layer === "session") return key.source ?? key.layer;
   return whose[key.layer] ?? key.layer;
 }
 

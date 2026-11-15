@@ -412,7 +412,7 @@ defmodule Troupe.Config.LayersTest do
       trust(ctx)
       config = load!(ctx, [], trust: :never)
       assert {config.auto_approve, config.mcp, config.base_url} == {false, %{}, nil}
-      assert Enum.any?(config.warnings, &(&1 =~ "are ignored: a session on a pod never reads them from a project's file"))
+      assert Enum.any?(config.warnings, &(&1 =~ "are ignored: a session on the platform never reads them from a project's file"))
     end
 
     test "are trusted by a directory above them", ctx do

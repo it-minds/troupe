@@ -241,7 +241,7 @@ defmodule Troupe.Plane.GitHub.Policy do
 
     cond do
       profile_cap && live.(profile: profile) >= profile_cap ->
-        "the worker profile #{profile} allows #{profile_cap} " <>
+        "the profile #{profile} allows #{profile_cap} " <>
           "#{runs(profile_cap)} on a repository at once (github.maxRuns)"
 
       team_cap && live.(team_id: team_id) >= team_cap ->

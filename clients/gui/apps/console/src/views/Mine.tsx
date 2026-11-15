@@ -17,7 +17,7 @@ import type { JSX } from "react";
 import type { OwnMemory, OwnMemoryPreview, OwnMemorySaved, SessionRow } from "@troupe/client";
 import { describeError, show, useConsole, useLoad } from "../console";
 import { href } from "../route";
-import { Empty, Field, Loaded, Preview, Region, Status, TextDiff, count, when } from "./bits";
+import { Empty, Field, Loaded, Preview, Region, SessionState, Status, TextDiff, count, when } from "./bits";
 import type { StatusKind } from "./bits";
 import { InvitedToYou } from "./Invited";
 import { RemoteSessions, useOffered } from "./Remote";
@@ -86,7 +86,7 @@ function YourSessions(): JSX.Element {
       <Loaded load={load} what="your sessions" retry={reload}>
         {({ rows, onSessions }) =>
           rows.length === 0 ? (
-            <Empty title="No session of yours on the plane">One you start on a worker, from the desktop app or the terminal, is listed here.</Empty>
+            <Empty title="No session of yours on the plane">One you start on the platform, from the desktop app or the terminal, is listed here.</Empty>
           ) : (
             <div className="scroll">
               <table className="sessions">
@@ -106,7 +106,10 @@ function YourSessions(): JSX.Element {
                       <td className="mono">{onSessions.has(s.id) ? <a href={href({ page: "sessions", path: [s.id] })}>{s.id}</a> : s.id}</td>
                       <td>{s.title ?? "—"}</td>
                       <td>{s.profile ?? "—"}</td>
-                      <td>{s.status ? `${s.state} · ${s.status}` : s.state}</td>
+                      <td>
+                        <SessionState state={s.state} />
+                        {s.state === "active" && s.status && s.status !== "idle" && ` · ${s.status.replace(/_/g, " ")}`}
+                      </td>
                       <td>{when(s.last_active_at ?? null)}</td>
                       <td>
                         Open it in the desktop app or the terminal.

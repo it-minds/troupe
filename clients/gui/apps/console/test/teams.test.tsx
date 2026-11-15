@@ -106,7 +106,7 @@ describe("a team", () => {
     // The team asked for 90 days; the platform stored 180 and the deployment 365, so the team's is in force.
     await sees("90 days", erase);
     await sees("team", erase);
-    const idle = limit("Idle before it goes dormant")!;
+    const idle = limit("Idle before it falls asleep")!;
     await sees("20 min", idle);
     button("Why?", erase)!.click();
     await waitFor(() => says("deployment", limit("Sessions erased after")!) && says("365 days", limit("Sessions erased after")!), "the ladder");
@@ -119,21 +119,21 @@ describe("a team", () => {
     visit("#/teams/core/limits");
     unmount = render(<App />).unmount;
     (await waitFor(() => button("Change core's limits"), "the limits")).click();
-    type(await waitFor(() => field("Idle before it goes dormant"), "the form"), "600");
+    type(await waitFor(() => field("Idle before it falls asleep"), "the form"), "600");
     await sees("The platform allows at most 30 min.");
     button("Preview")!.click();
 
     await waitFor(() => says("What will happen"), "the preview");
     await sees("idle_timeout_seconds: 20 min");
     await sees("idle_timeout_seconds: 10 min");
-    await sees("A core session idle for 10 min goes dormant");
+    await sees("A core session idle for 10 min falls asleep");
     expect(fake.admin.teams.get("core")!.idle_timeout_seconds).toBe(1200);
 
     button("Apply")!.click();
     await waitFor(() => says("Recorded in the audit as team.update on core"), "the audit's note");
     expect(fake.admin.teams.get("core")!.idle_timeout_seconds).toBe(600);
     expect(fake.admin.audit.at(-1)).toMatchObject({ action: "team.update", subject_id: "core", detail: { idle_timeout_seconds: { from: 1200, to: 600 } } });
-    await waitFor(() => says("10 min", limit("Idle before it goes dormant") ?? document.body), "the limit as it now is");
+    await waitFor(() => says("10 min", limit("Idle before it falls asleep") ?? document.body), "the limit as it now is");
   });
 
   it("says before sending that the plane will refuse a wider limit, and shows the plane's refusal", async () => {
@@ -141,7 +141,7 @@ describe("a team", () => {
     visit("#/teams/core/limits");
     unmount = render(<App />).unmount;
     (await waitFor(() => button("Change core's limits"), "the limits")).click();
-    type(await waitFor(() => field("Idle before it goes dormant"), "the form"), "7200");
+    type(await waitFor(() => field("Idle before it falls asleep"), "the form"), "7200");
     button("Preview")!.click();
     await waitFor(() => says("The plane will refuse idle_timeout_seconds: 7200 is wider than 1800"), "the warning");
     const recorded = fake.admin.audit.length;

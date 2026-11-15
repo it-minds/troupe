@@ -50,7 +50,7 @@ defmodule Troupe.Worker.PersonalToolsTest do
     assert {:error, %Error{message: "forbidden", data: data}} = result
     assert data.setting == "personalTools"
     assert data.profile == "dev"
-    assert data.reason =~ "worker profile dev"
+    assert data.reason =~ "profile dev"
     assert data.reason =~ "personalTools: forbid"
 
     assert log =~ "refused tools.register"

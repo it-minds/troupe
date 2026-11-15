@@ -241,9 +241,9 @@ defmodule Troupe.Agent.BudgetAnswerTest do
       ctx = ctx(:max_input_tokens, 150_000, scopes: [:run, :session])
 
       refute Enum.any?(labels(ctx), &String.contains?(&1, "workspace"))
-      assert BudgetQuestion.question(ctx) =~ "On a pod a raise lasts this run or this session"
+      assert BudgetQuestion.question(ctx) =~ "On the platform a raise lasts this run or this session"
       assert {:error, note} = parse("+50k workspace", ctx)
-      assert note =~ "on a pod"
+      assert note =~ "on the platform"
       assert parse("+50k", ctx) == {:ok, {:extend, :session, 50_000}}
     end
   end

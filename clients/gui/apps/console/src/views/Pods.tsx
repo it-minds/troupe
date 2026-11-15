@@ -1,4 +1,4 @@
-// Workers and pods: the pods behind each profile, with their state, version, bundle,
+// Pods: the pods behind each profile, with their state, version, bundle,
 // sessions and disk, and a drain for each; and the profiles, the cluster policy and the
 // triggers as a repository would hold them, for bootstrapping one before a plane is
 // switched to gitops.
@@ -73,7 +73,7 @@ export function Pods(): JSX.Element {
       <p className="lead">The pods behind each profile: their state, the release and bundle they run, the sessions they hold and their disk.</p>
       {drained && (
         <p className="note" role="status">
-          {drained.pod} held {count(drained.sessions, "session")}: {drained.unreachable ? "it could not be reached, so they are marked dormant and open elsewhere" : `${show(drained.drained)} moved`}
+          {drained.pod} held {count(drained.sessions, "session")}: {drained.unreachable ? "it could not be reached, so they are asleep and open elsewhere" : `${show(drained.drained)} moved`}
           {drained.cancelled.length ? `, ${count(drained.cancelled.length, "turn")} cancelled` : ""}.
         </p>
       )}
@@ -81,7 +81,7 @@ export function Pods(): JSX.Element {
       <Loaded load={load} what="the profiles' pods" retry={reload}>
         {(profiles) =>
           profiles.length === 0 ? (
-            <Empty title="No profile yet">A profile is made under Worker profiles.</Empty>
+            <Empty title="No profile yet">A profile is made under Configure → Profiles.</Empty>
           ) : (
             <>
               {profiles.map((p) => (

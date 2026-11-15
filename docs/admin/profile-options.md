@@ -209,7 +209,7 @@ spec:
 
 A session on those pods then refuses the offer before it asks the person anything,
 answering `forbidden` with `setting: personalTools`, the profile's name, and the sentence
-`the worker profile <name> does not take a person's own tools on its pods (personalTools:
+`the profile <name> does not take a person's own tools (personalTools:
 forbid); only the profile's MCP servers are available`. The pod logs one warning per
 refusal, with the session, the person and the tools; nothing is registered, and the
 session's own log records nothing. The desktop app shows the sentence where it would have

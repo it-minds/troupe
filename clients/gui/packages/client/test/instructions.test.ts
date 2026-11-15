@@ -27,7 +27,7 @@ describe("instructionLayers", () => {
       files: [
         file("organisation", "memory:organisation", { version: 3, label: "the organisation's memory", budget: 8192 }),
         file("team", "memory:team/design", { version: 5, name: "design", label: "the team design's memory", budget: 8192 }),
-        file("profile", "memory:profile/dev", { version: 1, name: "dev", label: "the worker profile dev's memory", budget: 8192 }),
+        file("profile", "memory:profile/dev", { version: 1, name: "dev", label: "the profile dev's memory", budget: 8192 }),
         file("user", "/home/me/.config/troupe/AGENTS.md"),
         file("root", "/home/me/project/AGENTS.md"),
         file("root", "/home/me/project/CLAUDE.md", { status: "skipped", reason: "not read: run troupe onboard", hash: null }),
@@ -59,12 +59,12 @@ describe("instructionLayers", () => {
     assert.equal(rows[5]?.note, "not read: run troupe onboard");
   });
 
-  it("names a pod's memory as the session's, in the reader's words", () => {
+  it("names a pod's memory as the session's, as the pod says it", () => {
     const rows = instructionLayers({
       budget: 16000,
       used: 0,
-      memory_from: { source: "the plane, with the session's activation", fetched_at: null },
-      files: [file("profile", "memory:profile/fixing", { version: 2, label: "the worker profile fixing's memory" })],
+      memory_from: { source: "the plane, when the session started", fetched_at: null },
+      files: [file("profile", "memory:profile/fixing", { version: 2, label: "the profile fixing's memory" })],
     });
 
     assert.equal(rows[0]?.source, "the plane, when the session started");

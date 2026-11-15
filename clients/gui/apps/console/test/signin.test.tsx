@@ -103,7 +103,7 @@ describe("signing in to the console", () => {
     await waitFor(() => link("design"), "the design team");
     expect(link("core")).toBeNull();
     expect(link("Provisioners and hosts")).toBeNull();
-    expect(link("Workers and pods")).toBeNull();
+    expect(link("Pods")).toBeNull();
     expect(link("Sign-in")).toBeNull();
     expect(link("Connections")).toBeNull();
     await seesLink("Triggers");

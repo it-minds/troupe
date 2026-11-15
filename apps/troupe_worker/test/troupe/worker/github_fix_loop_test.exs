@@ -557,6 +557,7 @@ defmodule Troupe.Worker.GitHubFixLoopTest do
     assert {:error, why} = GitHub.push(id, ws, "Two", nil)
     assert why =~ "example-org/widgets is public on GitHub"
     assert why =~ "pushes to private repositories only (github.allowPublic)"
+    assert why =~ "this session's profile pushes to private repositories only"
     assert why =~ "Nothing was pushed."
     assert {:error, why} = GitHub.open_pull_request(id, "Visible", nil)
     assert why =~ "is public on GitHub"

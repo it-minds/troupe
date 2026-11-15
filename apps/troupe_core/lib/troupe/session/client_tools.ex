@@ -263,7 +263,7 @@ defmodule Troupe.Session.ClientTools do
     Logger.warning(
       "troupe: refused tools.register in #{state.session_id} from " <>
         "#{Keyword.get(opts, :subject) || "an unnamed client"} (#{Enum.join(names, ", ")}): " <>
-        "the worker profile #{profile} sets personalTools: forbid"
+        "the profile #{profile} sets personalTools: forbid"
     )
 
     {:reply, {:error, {:personal_tools_forbidden, profile}}, state}

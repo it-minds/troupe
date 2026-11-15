@@ -3217,7 +3217,7 @@ defmodule Troupe.UI.TUI.Model do
         %{"scope" => "enforced"} -> "your organisation"
         %{"scope" => "org"} -> "your organisation's defaults"
         # A pod session's: the worker profile it runs on, named by the source.
-        %{"scope" => "profile"} -> "the worker profile"
+        %{"scope" => "profile"} -> "the profile"
         %{"scope" => scope} when is_binary(scope) -> scope
         _unsaid -> "the configuration"
       end

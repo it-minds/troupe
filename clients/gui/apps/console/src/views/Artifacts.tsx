@@ -536,7 +536,7 @@ export function ArtifactOpen({ id, version }: { id: string; version?: number | u
   );
 }
 
-const WHERE: Record<string, string> = { pod: "a worker on the plane", laptop: "a laptop", person: "a person, by hand" };
+const WHERE: Record<string, string> = { pod: "the platform", laptop: "a laptop", person: "a person, by hand" };
 
 /**
  * Where it was published from, and the session that published it. The console has no page of

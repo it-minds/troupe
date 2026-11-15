@@ -458,7 +458,7 @@ defmodule Troupe.FramesTest do
     assert screen =~ "asked by the rule ask shell(git push), from your organisation"
   end
 
-  # Root #724: on a pod, a rule of the worker profile the session runs on says so, by name.
+  # Root #724: on a pod, a rule of the profile the session runs on says so, by name.
   test "an approval a worker profile's rule asked for names the profile" do
     model =
       fold(
@@ -488,7 +488,7 @@ defmodule Troupe.FramesTest do
       )
 
     screen = model |> draw() |> text()
-    assert screen =~ "from the worker profile (fixing)"
+    assert screen =~ "from the profile (fixing)"
   end
 
   test "a scratchpad document stays a card at every level" do

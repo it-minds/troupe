@@ -115,7 +115,7 @@ defmodule Troupe.Tools.OnboardWrite do
 
       nil ->
         {:error,
-         "onboard_write runs on the person's own machine; this session runs on a pod, " <>
+         "onboard_write runs on the person's own machine; this session runs on the platform, " <>
            "where the bundle's files are the ones that count"}
 
       refusal ->

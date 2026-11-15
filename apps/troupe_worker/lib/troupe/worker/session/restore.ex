@@ -408,10 +408,10 @@ defmodule Troupe.Worker.Session.Restore do
   # platform's two switches are what the organisation enforces; the terms are the session's
   # own, set when it was created; and what this pod sets of its own is the pod's.
   defp sources(profile) do
-    owner = if profile, do: "the worker profile #{profile}", else: "the worker profile"
+    owner = if profile, do: "the profile #{profile}", else: "the profile"
     terms = {:session, "the session's terms"}
     platform = {:enforced, "the plane's platform settings"}
-    pod = {:cli, "the worker pod"}
+    pod = {:cli, "the platform"}
 
     %{
       env: {:profile, owner},

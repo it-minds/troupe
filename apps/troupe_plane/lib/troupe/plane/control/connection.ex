@@ -736,7 +736,8 @@ defmodule Troupe.Plane.Control.Connection do
            scope: scope,
            reason:
              "an agent writes only its person's own memory: the organisation's, a team's and " <>
-               "a profile's are read-only to agents, and an administrator changes them in the console"
+               "a profile's are read-only to agents: an administrator changes them on the " <>
+               "console's Govern → Company memory; ask one if you are not"
          }), state}
 
       :stale_epoch ->

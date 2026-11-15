@@ -373,11 +373,11 @@ defmodule Troupe.Agent.BudgetQuestionTest do
     {loose, _fake} = run(context, tools(6) ++ [finish("ok")], max_turns: 2, terms: %{})
     asked = await_question(loose, "budget-1")
     refute Enum.any?(labels(asked), &String.contains?(&1, "workspace"))
-    assert asked["question"] =~ "On a pod a raise lasts this run or this session"
+    assert asked["question"] =~ "On the platform a raise lasts this run or this session"
 
     Troupe.answer(loose, "budget-1", "+10 workspace")
     assert %{"decision" => "unclear", "note" => note} = await_answered(loose, "budget-1")
-    assert note =~ "on a pod"
+    assert note =~ "on the platform"
 
     await_question(loose, "budget-2")
     Troupe.answer(loose, "budget-2", "+10")

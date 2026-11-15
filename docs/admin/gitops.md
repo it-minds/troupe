@@ -27,7 +27,7 @@ the profile as the last version that passed, so a mistake in the repository does
 down a running profile. The reasons are in the log once, in `admin.profiles.list` (each
 profile carries `gitops`: the source, the generation it was read at, and a `problem` of
 `refused`, `missing`, `plane_only` or `unwritten` with `reasons`; a refused resource with no
-profile is listed with nothing running), and on the console's **Workers and pods** and the
+profile is listed with nothing running), and on the console's **Pods** and the
 profile's own page.
 
 The console shows every profile read-only, marked **Locked to gitops** with
@@ -57,7 +57,7 @@ places and scales by is read off `sessionsPerPod`.
 
 ## A profile in a repository
 
-`admin.profiles.export` (the console's **Workers and pods**, **Manifests for a repository**)
+`admin.profiles.export` (the console's **Pods**, **Manifests for a repository**)
 gives every profile in this shape, the policy and every trigger. This one is written by hand:
 
 ```yaml
@@ -230,7 +230,7 @@ reads each resource into the row it was copied into, key and runs included.
 
 **Direct to gitops.** Export the manifests, commit them, and let the applier apply them
 while the plane is still in direct mode: it takes the fields over, and the workers do not
-notice. Export with `admin.profiles.export` or the console's **Workers and pods**, not
+notice. Export with `admin.profiles.export` or the console's **Pods**, not
 `kubectl get workerprofiles`: a resource the plane wrote in direct mode has no field for a
 profile's ceiling, warm count or provisioner, which the export gives as the
 `troupe.dev/max-sessions`, `troupe.dev/warm-workers` and `troupe.dev/provisioner`

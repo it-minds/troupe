@@ -1829,7 +1829,7 @@ description`; or `listed`, its `description` alone in the prompt and counted in 
 with `reason` `requested by description only: listed in the prompt, not joined`. `rule`
 and `applies` are null for every other file.
 `memory_from`, where a plane gave any, says where the memory documents came from: `source`, the plane's URL, or
-`the plane, with the session's activation` on a pod, and `fetched_at`, when this machine
+`the plane, when the session started` on a pod, and `fetched_at`, when this machine
 fetched its copy.
 `searched` is every directory looked in. Read from disk when asked, as the next
 turn reads it, so it says what an edit will do; what a past turn read is its
@@ -1946,10 +1946,10 @@ token as to anyone the session's role lets observe; a session not running there 
 `permissions`, `warnings` and `errors` as above, without the model panel's fields, plus
 `session_id` and `pod`. On a pod (`pod: true`) `layer` has two more values: `profile`, the
 worker profile's settings, which are the pod's environment, its `source` naming the
-profile and the variable (`the worker profile fixing (TROUPE_MODEL)`); and `session`, the
+profile and the variable (`the profile fixing (TROUPE_MODEL)`); and `session`, the
 terms the session was created with (`the session's terms`). What the platform enforces
 (`managed_permission_rules_only`, `managed_mcp_servers_only`) is `enforced`, from `the
-plane's platform settings`; what the pod sets of its own is `cli`, from `the worker pod`;
+plane's platform settings`; what the pod sets of its own is `cli`, from `the platform`;
 the worker profile's rules are in `permissions` with `scope` `profile` and `source` the
 profile that wrote each; and a repository's own files are read as a pod reads them, no key
 marked trusted taken from them. No key has a scope on a pod: none of it is a client's to

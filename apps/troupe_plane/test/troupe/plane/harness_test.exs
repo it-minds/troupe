@@ -630,6 +630,7 @@ defmodule Troupe.Plane.HarnessTest do
                Harness.call("session.archive", %{"session_id" => waiting.id}, context(owner))
 
       assert error.message == "conflict"
+      assert error.data.reason == "this session has not started on the platform yet"
       assert Sessions.get(waiting.id).state == "pending"
 
       refute_receive {:pushed, "session.dormant", _}, 200

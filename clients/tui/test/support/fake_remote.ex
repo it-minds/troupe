@@ -1257,7 +1257,7 @@ defmodule Troupe.FakeRemote do
           "models.default",
           "pod-model",
           "profile",
-          "the worker profile fixing (TROUPE_MODEL)",
+          "the profile fixing (TROUPE_MODEL)",
           %{}
         ),
         key.("max_turns", 7, "session", "the session's terms", %{}),
@@ -1266,9 +1266,9 @@ defmodule Troupe.FakeRemote do
           "base_url",
           "http://llm.example.test/v1",
           "profile",
-          "the worker profile fixing (TROUPE_BASE_URL)"
+          "the profile fixing (TROUPE_BASE_URL)"
         ),
-        machinery.("state_dir", "/state", "cli", "the worker pod"),
+        machinery.("state_dir", "/state", "cli", "the platform"),
         key.("compact_at", 0.6, "project", "/state/workspaces/#{sid}/.troupe/config.yaml", %{}),
         key.("managed_permission_rules_only", true, "enforced", "the plane's platform settings", %{
           "enforced" => %{"value" => true, "source" => "the plane's platform settings"}

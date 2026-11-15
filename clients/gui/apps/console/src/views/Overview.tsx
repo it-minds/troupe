@@ -81,7 +81,7 @@ export function Overview(): JSX.Element {
             <>
               <div className="metrics">
                 <Metric label="Active sessions" value={String(overview.sessions.active)}>
-                  {overview.sessions.dormant} dormant, {overview.sessions.read_only} read-only
+                  {overview.sessions.dormant} asleep, {overview.sessions.read_only} read-only
                 </Metric>
                 <Metric label="Pods" value={`${healthy} / ${pods.length}`}>
                   healthy, across {count(overview.profiles.length, "profile")}
