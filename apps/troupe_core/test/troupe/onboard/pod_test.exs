@@ -25,7 +25,7 @@ defmodule Troupe.Onboard.PodTest do
     %{session: session} = start_session(context, kind: :team)
 
     refute Pod.allowed?(session.id)
-    assert Pod.refusal(session.id) =~ "Onboarding runs on your own machine, not on a pod"
+    assert Pod.refusal(session.id) =~ "Onboarding runs on your own machine, not on the platform"
     assert Pod.refusal(session.id) =~ "troupe onboard"
   end
 
@@ -42,7 +42,7 @@ defmodule Troupe.Onboard.PodTest do
     %{session: session} = start_session(context)
     System.put_env("TROUPE_WORKER_AUTOSTART", "true")
 
-    assert Pod.refusal() =~ "not on a pod"
+    assert Pod.refusal() =~ "not on the platform"
     refute Pod.allowed?(session.id)
   end
 end

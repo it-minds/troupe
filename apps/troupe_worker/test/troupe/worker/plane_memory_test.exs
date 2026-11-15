@@ -66,17 +66,17 @@ defmodule Troupe.Worker.PlaneMemoryTest do
              at.("The team design's memory (version 3):\nTeam: use the design tokens.")
 
     assert at.("Team: use the design tokens.") <
-             at.("The worker profile fixing's memory (version 1):\nProfile: fix one issue at a time.")
+             at.("The profile fixing's memory (version 1):\nProfile: fix one issue at a time.")
 
     assert at.("Profile: fix one issue at a time.") < at.("Repository: run mix check.")
 
     {text, 0} = Explain.explain_session(context.session_id)
 
     assert text =~
-             "  memory   the organisation's memory, version 7 (the plane, with the session's activation)"
+             "  memory   the organisation's memory, version 7 (the plane, when the session started)"
 
     assert text =~ "  memory   the team design's memory, version 3"
-    assert text =~ "  memory   the worker profile fixing's memory, version 1"
+    assert text =~ "  memory   the profile fixing's memory, version 1"
   end
 
   # A save on the plane while the session runs here: the plane says `session.memory`, and

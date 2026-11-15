@@ -367,7 +367,6 @@ export {
   describeOverride,
   discoveryParams,
   formFromConfig,
-  inReadersWords,
   keySource,
   modelConfigError,
   providerTypes,

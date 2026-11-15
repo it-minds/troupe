@@ -59,7 +59,7 @@ export function Sessions({ query: initial = "" }: { query?: string } = {}): JSX.
             <select {...p} value={state} onChange={(e) => narrow(() => setState(e.target.value))}>
               <option value="">any</option>
               <option value="active">active</option>
-              <option value="dormant">dormant</option>
+              <option value="dormant">asleep</option>
               <option value="read_only">read-only</option>
             </select>
           )}

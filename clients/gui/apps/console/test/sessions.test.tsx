@@ -39,7 +39,7 @@ describe("sessions", () => {
     await sees("s-7f3a9c21", rows()[0]!);
     const pinned = row("s-7f3a9c22")!;
     await sees("dan@example.com", pinned);
-    await sees("dormant", pinned);
+    await sees("asleep", pinned);
     await sees("pinned by dan@example.com", pinned);
     await sees("171.7 MiB", () => row("s-7f3a9c21"));
     await sees("Metadata only");

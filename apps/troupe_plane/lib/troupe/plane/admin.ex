@@ -3026,7 +3026,7 @@ defmodule Troupe.Plane.Admin do
     do: "only #{name}'s team admins and the platform administrators change #{name}'s memory"
 
   defp memory_who(_token, _scope, _name),
-    do: "only a platform administrator changes a worker profile's memory"
+    do: "only a platform administrator changes a profile's memory"
 
   defp memory_name(:organisation), do: nil
   defp memory_name(%Identity.Team{name: name}), do: name

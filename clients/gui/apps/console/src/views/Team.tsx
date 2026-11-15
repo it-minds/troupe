@@ -572,8 +572,8 @@ interface Limit {
 const LIMITS: Limit[] = [
   { field: "budget_micros", label: "Budget", kind: "money" },
   { field: "budget_period", label: "Budget counted over", kind: "period" },
-  { field: "idle_timeout_seconds", label: "Idle before it goes dormant", kind: "seconds" },
-  { field: "cache_eviction_days", label: "A dormant session's cache kept", kind: "days" },
+  { field: "idle_timeout_seconds", label: "Idle before it falls asleep", kind: "seconds" },
+  { field: "cache_eviction_days", label: "A sleeping session's cache kept", kind: "days" },
   { field: "erase_after_days", label: "Sessions erased after", kind: "days" },
   { field: "members_may_control", label: "Members may steer team sessions", kind: "switch" },
   { field: "pins_allowed", label: "Members may pin a session", kind: "switch" },
@@ -820,9 +820,9 @@ function consequence(team: string, line: DiffLine, laddered: LadderValue | undef
     case "budget_period":
       return to === "never" ? "The ceiling never turns over: what is spent stays spent." : "The ceiling turns over on the 1st of each month, UTC.";
     case "idle_timeout_seconds":
-      return `A ${team} session idle for ${typeof to === "number" ? duration(to) : show(to)} goes dormant: it stops costing anything and wakes with its history.`;
+      return `A ${team} session idle for ${typeof to === "number" ? duration(to) : show(to)} falls asleep: it stops costing anything and wakes with its history.`;
     case "cache_eviction_days":
-      return `A dormant ${team} session keeps its cache ${show(to)} days.`;
+      return `A sleeping ${team} session keeps its cache ${show(to)} days.`;
     case "erase_after_days":
       return `${team}'s sessions older than ${show(to)} days are erased. Erasure cannot be undone.`;
     case "members_may_control":
@@ -936,7 +936,7 @@ function GitHub({ team, onApplied }: { team: AdminTeam; onApplied: () => void })
             </div>
           </div>
           <p className="note">
-            A worker profile may set its own caps; the lower of the two holds. A run that asks for a push past its cap stops, with a comment on its draft pull request, as three red CI rounds stop it. A sweep leaves an issue for a person once as many of its
+            A profile may set its own caps; the lower of the two holds. A run that asks for a push past its cap stops, with a comment on its draft pull request, as three red CI rounds stop it. A sweep leaves an issue for a person once as many of its
             runs as it may start have ended without a fix (one, where neither says); a person asks again with the label, the command or fix this.
           </p>
           {!gitops && (

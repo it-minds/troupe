@@ -201,7 +201,7 @@ defmodule Troupe.CLI do
      "every setting, or KEY's, and which file set it (secrets masked)",
      [["config", "--explain"], ["config", "--explain", "max_turns", "--json"]]},
     {"troupe config --explain [KEY] [--json] --session SESSION_ID",
-     "what is in force in a running session, here or on a worker pod of the plane you are " <>
+     "what is in force in a running session, here or on the platform you are " <>
        "signed in to, and where each part came from: its profile, the platform, its terms, its files",
      [
        ["config", "--explain", "--session", "id"],

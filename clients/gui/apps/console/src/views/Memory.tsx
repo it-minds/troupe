@@ -26,7 +26,7 @@ export function Memory(): JSX.Element {
           <>
             <p className="lead">
               What every agent in a scope starts from: the organisation's for every session, a team's for that team's sessions and its members' machines. Each reaches a
-              session as instructions from the organisation, before the person's own and the repository's, and no agent can change it. A worker profile's is on the
+              session as instructions from the organisation, before the person's own and the repository's, and no agent can change it. A profile's is on the
               profile's page. Each document holds at most {list.limit} bytes.
             </p>
             <Region>The organisation's</Region>

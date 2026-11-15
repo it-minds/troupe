@@ -165,7 +165,7 @@ describe("artifacts", () => {
     await sees("Carol's weekly");
     await sees("the whole organisation");
     // The agent as the apps name one, never the plane's `agent:` key.
-    await sees("From a worker on the plane on the dev profile, by build, an agent.");
+    await sees("From the platform on the dev profile, by build, an agent.");
     expect(document.body.textContent).not.toContain("agent:build");
     expect(document.querySelector("iframe")).toBeNull();
     expect(document.body.innerHTML).not.toContain("Week forty-three in full");

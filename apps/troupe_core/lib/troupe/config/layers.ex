@@ -915,7 +915,7 @@ defmodule Troupe.Config.Layers do
 
   defp reason(:user_only, "it", ctx), do: "it is read only from the user's config.yaml#{at(ctx.user_path)}"
   defp reason(:user_only, "them", ctx), do: "they are read only from the user's config.yaml#{at(ctx.user_path)}"
-  defp reason(:pod, pronoun, _ctx), do: "a session on a pod never reads #{pronoun} from a project's file"
+  defp reason(:pod, pronoun, _ctx), do: "a session on the platform never reads #{pronoun} from a project's file"
 
   defp reason(:untrusted, pronoun, ctx) do
     "a project's file sets #{pronoun} only in a trusted workspace. To trust this one, run " <>

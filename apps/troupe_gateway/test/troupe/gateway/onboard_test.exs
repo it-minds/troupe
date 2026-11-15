@@ -232,7 +232,7 @@ defmodule Troupe.Gateway.OnboardTest do
     assert {:ok, %{"refusal" => refusal, "onboarding" => %{"due" => "none", "items" => []}}} =
              plan(client, ws)
 
-    assert refusal =~ "Onboarding runs on your own machine, not on a pod"
+    assert refusal =~ "Onboarding runs on your own machine, not on the platform"
 
     assert {:error, %Error{message: "invalid_params", data: %{"reason" => ^refusal}}} =
              Client.call(client, "onboard.apply", %{"workspace" => ws, "all" => true})

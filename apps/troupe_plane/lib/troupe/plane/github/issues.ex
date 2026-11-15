@@ -323,7 +323,7 @@ defmodule Troupe.Plane.GitHub.Issues do
           do: :ok,
           else:
             {:error,
-             "#{reader.repository} is public, and the worker profile #{profile} does not " <>
+             "#{reader.repository} is public, and the profile #{profile} does not " <>
                "allow public repositories (github.allowPublic), so a run on it could not push"}
 
       {:ok, _other} ->

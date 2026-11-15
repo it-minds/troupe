@@ -1946,7 +1946,7 @@ defmodule Troupe.UI.TUI.View do
   end
 
   defp settings_command_line(%{settings: %{editing: nil, view: %{pod?: true}} = s}),
-    do: {s.status || "", " settings in force on the pod — ↑↓ move · Esc back "}
+    do: {s.status || "", " settings in force on the platform — ↑↓ move · Esc back "}
 
   defp settings_command_line(%{settings: %{editing: nil} = s}) do
     hint =
@@ -1973,7 +1973,7 @@ defmodule Troupe.UI.TUI.View do
 
     cond do
       s.view[:pod?] ->
-        "in force in this session on its worker pod; nothing here changes it"
+        "in force in this session on the platform; nothing here changes it"
 
       Settings.enforced(s.view, field.key) ->
         "#{field.label} is set by your organisation"

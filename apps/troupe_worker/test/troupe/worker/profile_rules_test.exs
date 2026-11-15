@@ -57,7 +57,7 @@ defmodule Troupe.Worker.ProfileRulesTest do
 
     # The parent's deny holds over the child's allow: two scopes, and the strictest wins.
     assert completed.data["content"] =~
-             "refused by the rule deny shell(touch), from the worker profile standard"
+             "refused by the rule deny shell(touch), from the profile standard"
 
     refute File.exists?(Path.join(defaults[:workspace], "ran.txt"))
   end
@@ -73,7 +73,7 @@ defmodule Troupe.Worker.ProfileRulesTest do
              shell(context.session_id, "touch ran.txt")
 
     assert data.setting == "permissions"
-    assert data.reason =~ "deny shell(touch), from the worker profile standard"
+    assert data.reason =~ "deny shell(touch), from the profile standard"
 
     # Asleep, and woken with the rule gone from the profile: the next activation is where
     # the profile's word arrives.

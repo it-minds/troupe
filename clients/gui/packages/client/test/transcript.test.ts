@@ -166,6 +166,19 @@ describe("the transcript fold", () => {
     assert.equal(state.agentState["general#1"], "done");
   });
 
+  // A session sleeps and wakes in the reader's words (DESIGN.md §11): asleep, never dormant,
+  // and never the pod it was placed on.
+  it("says a session went to sleep and woke on the platform", () => {
+    seq = 0;
+    const state = foldAll([
+      durable("session_dormant", { last_seq: 9 }),
+      durable("session_activated", { epoch: 2, pod: "troupe-w-dev-0" }),
+    ]);
+
+    const lines = state.entries.filter((e): e is Extract<Entry, { kind: "system" }> => e.kind === "system").map((e) => e.text);
+    assert.deepEqual(lines, ["session went to sleep", "session woke on the platform"]);
+  });
+
   // The child's first message is that brief, from the agent that delegated it: never a
   // person's turn, in whichever order the two are written (troupe Decision 852).
   it("folds a subagent's first message into the brief it was handed, in either order", () => {

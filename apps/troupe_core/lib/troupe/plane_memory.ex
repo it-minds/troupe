@@ -64,7 +64,7 @@ defmodule Troupe.PlaneMemory do
   def in_force(given, opts \\ [])
 
   def in_force(given, _opts) when is_list(given),
-    do: {%{documents: Shape.read(given), source: "the plane, with the session's activation", fetched_at: nil, cache: nil}, []}
+    do: {%{documents: Shape.read(given), source: "the plane, when the session started", fetched_at: nil, cache: nil}, []}
 
   def in_force(_none, opts) do
     if Keyword.get(opts, :trust) == :never do
@@ -305,7 +305,7 @@ defmodule Troupe.PlaneMemory do
   @spec label(Shape.document()) :: String.t()
   def label(%{"scope" => "organisation"}), do: "the organisation's memory"
   def label(%{"scope" => "team", "name" => name}), do: "the team #{name}'s memory"
-  def label(%{"scope" => "profile", "name" => name}), do: "the worker profile #{name}'s memory"
+  def label(%{"scope" => "profile", "name" => name}), do: "the profile #{name}'s memory"
   def label(%{"scope" => "user"}), do: "your own memory"
 
   defp from(%{source: nil}), do: ""

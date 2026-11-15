@@ -1451,7 +1451,7 @@ defmodule Troupe.Plane.Harness do
   # Waiting for room, or between the epoch bump and its placement: there is no pod to tell.
   defp archive(%Session{} = session, _user) do
     {:error,
-     Error.new(:conflict, %{reason: "this session is not on a pod yet", state: session.state})}
+     Error.new(:conflict, %{reason: "this session has not started on the platform yet", state: session.state})}
   end
 
   # The pod reports its dormancy down the control channel before it answers, so the row
@@ -1766,7 +1766,7 @@ defmodule Troupe.Plane.Harness do
   end
 
   defp effect_profile(_user, _team, _profile),
-    do: invalid("profile is a worker profile's name", field: "profile")
+    do: invalid("profile names a profile", field: "profile")
 
   # A person's own memory is a person's: a service principal has no row to keep it under.
   defp own_memory(%User{id: id}) when is_binary(id), do: :ok

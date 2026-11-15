@@ -190,7 +190,7 @@ describe("the person's own servers, offered to a pod session", () => {
     assert.equal(asks.length, 0);
     assert.equal(worker.tools.size, 0);
     const refusal = states.find((s) => s.state === "refused");
-    assert.match(refusal?.state === "refused" ? refusal.reason : "", /worker profile dev .*\(personalTools: forbid\)/);
+    assert.match(refusal?.state === "refused" ? refusal.reason : "", /^the profile dev does not take .*\(personalTools: forbid\)/);
 
     const listed = daemon.calls.filter((c) => c.method === "mcp.list").length;
     await drop(a);

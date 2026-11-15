@@ -2300,7 +2300,7 @@ defmodule Troupe.Agent.Server do
       Logger.warning(
         "troupe: #{model} has no price, so its calls count as free in session #{state.session_id}: " <>
           "the gateway did not say what they cost, and neither the catalog nor models.prices prices it. " <>
-          "Set models.prices for it (on a pod, the profile's llm.prices)"
+          "Set models.prices for it (on the platform, the profile's llm.prices)"
       )
 
       :telemetry.execute([:troupe, :llm, :unpriced], %{count: 1}, %{

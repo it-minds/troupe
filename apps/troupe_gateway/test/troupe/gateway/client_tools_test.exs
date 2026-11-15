@@ -112,7 +112,7 @@ defmodule Troupe.Gateway.ClientToolsTest do
 
       assert error.data["setting"] == "personalTools"
       assert error.data["profile"] == "dev"
-      assert error.data["reason"] =~ "the worker profile dev does not take a person's own tools"
+      assert error.data["reason"] =~ "the profile dev does not take a person's own tools"
       assert error.data["reason"] =~ "(personalTools: forbid)"
 
       assert ClientTools.list(session.id) == []

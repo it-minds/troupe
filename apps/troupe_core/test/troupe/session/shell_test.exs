@@ -225,7 +225,7 @@ defmodule Troupe.Session.ShellTest do
       config = %Troupe.Config{permissions: rules(%{"deny" => ["shell(curl)"]}, :profile, "fixing")}
 
       assert {"permissions", sentence} = Shell.denied(config, "ls && curl https://example.com", nil)
-      assert sentence =~ "deny shell(curl), from the worker profile fixing"
+      assert sentence =~ "deny shell(curl), from the profile fixing"
       assert Shell.denied(config, "ls -la", nil) == nil
     end
 
@@ -250,7 +250,7 @@ defmodule Troupe.Session.ShellTest do
       assert {:error, {:forbidden, "permissions", sentence}} =
                Troupe.shell_run(session.id, "touch ran.txt")
 
-      assert sentence =~ "the worker profile fixing"
+      assert sentence =~ "the profile fixing"
       refute File.exists?(Path.join(context.workspace, "ran.txt"))
     end
   end

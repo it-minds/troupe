@@ -1150,7 +1150,7 @@ defmodule Troupe.Gateway.Dispatch do
              setting: "personalTools",
              profile: profile,
              reason:
-               "the worker profile #{profile} does not take a person's own tools on its pods " <>
+               "the profile #{profile} does not take a person's own tools " <>
                  "(personalTools: forbid); only the profile's MCP servers are available"
            })}
 

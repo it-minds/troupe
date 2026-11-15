@@ -14,7 +14,7 @@ defmodule Troupe.Onboard.Pod do
   anything, so the two cannot come to disagree about what a pod is.
   """
 
-  @refusal "Onboarding runs on your own machine, not on a pod: run `troupe onboard` in " <>
+  @refusal "Onboarding runs on your own machine, not on the platform: run `troupe onboard` in " <>
              "your checkout, commit what it writes, and sessions here read it from the repository."
 
   @doc """

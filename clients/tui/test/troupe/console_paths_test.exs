@@ -30,7 +30,9 @@ defmodule Troupe.ConsolePathsTest do
     "clients/gui/packages/client/src",
     "apps/troupe_core/lib",
     "apps/troupe_gateway/lib",
-    "apps/troupe_daemon/lib"
+    "apps/troupe_daemon/lib",
+    "apps/troupe_worker/lib",
+    "apps/troupe_plane/lib"
   ]
 
   # `Group → Area`: a capitalised phrase, the arrow, and what follows it.

@@ -137,7 +137,7 @@ defmodule Troupe.Plane.Admin.API do
       name: "api_url",
       type: :string,
       description:
-        "Where GitHub's API is: https://api.github.com (the default, also when null), https://api.<name>.ghe.com for GitHub Enterprise Cloud, or https://<host>/api/v3 for GitHub Enterprise Server. Clones come from the matching host, which a worker profile must declare in egress.gitHosts."
+        "Where GitHub's API is: https://api.github.com (the default, also when null), https://api.<name>.ghe.com for GitHub Enterprise Cloud, or https://<host>/api/v3 for GitHub Enterprise Server. Clones come from the matching host, which a profile must declare in egress.gitHosts."
     },
     %Argument{
       name: "installations",
@@ -167,7 +167,7 @@ defmodule Troupe.Plane.Admin.API do
       required: true,
       values: Troupe.Protocol.Memory.organisation_scopes(),
       description:
-        "Whose document: organisation (every session's), team (that team's sessions and its members' machines) or profile (the sessions on that worker profile's pods)."
+        "Whose document: organisation (every session's), team (that team's sessions and its members' machines) or profile (the sessions that run on that profile)."
     },
     %Argument{
       name: "name",
@@ -1494,7 +1494,7 @@ defmodule Troupe.Plane.Admin.API do
       name: "admin.memory.list",
       function: :memory_list,
       summary:
-        "Every memory document you may read: the organisation's, each team's you administer (every team's for a platform admin) and, for a platform admin, each worker profile's; each with the version in force, who saved it and when, its size, and whether you may change it, and the limit in bytes a document is held to. A memory document is instructions from the organisation that every session in its scope reads, before the person's own and the repository's, read-only to agents.",
+        "Every memory document you may read: the organisation's, each team's you administer (every team's for a platform admin) and, for a platform admin, each profile's; each with the version in force, who saved it and when, its size, and whether you may change it, and the limit in bytes a document is held to. A memory document is instructions from the organisation that every session in its scope reads, before the person's own and the repository's, read-only to agents.",
       risk: :read,
       arguments: []
     },
@@ -1773,7 +1773,7 @@ defmodule Troupe.Plane.Admin.API do
           name: "profile",
           type: :string,
           description:
-            "The worker profile whose monthly budget to include. Absent, or a profile with none, leaves that rung out."
+            "The profile whose monthly budget to include. Absent, or a profile with none, leaves that rung out."
         }
       ]
     },

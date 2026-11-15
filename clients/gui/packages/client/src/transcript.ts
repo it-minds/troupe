@@ -865,7 +865,7 @@ function systemText(d: DurableEvent): string {
     case "llm_error":
       return `model error: ${str(d.data["reason"], "unknown")}`;
     case "session_dormant":
-      return "session went dormant";
+      return "session went to sleep";
     case "session_activated":
       return "session woke on the platform";
     case "session_resumed":

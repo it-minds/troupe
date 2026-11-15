@@ -60,7 +60,7 @@ describe("a team session's settings", () => {
 
     await sees("In force in this session on the platform");
     const pane = (): HTMLElement => backstage();
-    // The pod names its layer as an operator would; the pane says it in the reader's words.
+    // The pod names its layer in the reader's words, and the pane shows it as it came.
     await sees("the profile dev (TROUPE_MODEL)");
     expect(pane().textContent).not.toMatch(/worker profile|\bpod\b/i);
     await sees("the session's terms");
@@ -81,7 +81,7 @@ describe("a team session's settings", () => {
 describe("a team session's settings, for someone who may only watch it", () => {
   it("say what the session runs on was set by the profile, as the pod answers, and not what it is", async () => {
     const withheld: ConfigKey = {
-      key: "base_url", value: "set by the profile", layer: "profile", source: "the worker profile dev (TROUPE_BASE_URL)",
+      key: "base_url", value: "set by the profile", layer: "profile", source: "the profile dev (TROUPE_BASE_URL)",
       default: null, scopes: [], secret: false, label: null, doc: null, withheld: true,
     };
     const config: SessionConfig = {

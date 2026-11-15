@@ -393,7 +393,7 @@ defmodule Troupe.Config.Explain do
   # changes that.
   defp title(layers, %{id: id, kind: :team}),
     do:
-      "configuration in force in session #{id}, on a worker pod, in #{shown(layers.workspace)} " <>
+      "configuration in force in session #{id}, on the platform, in #{shown(layers.workspace)} " <>
         "(its repository's files set no key marked trusted)"
 
   defp title(layers, %{id: id}),

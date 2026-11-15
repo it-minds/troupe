@@ -471,7 +471,7 @@ defmodule Troupe.Commands do
         availability: "tui",
         detail:
           "The file is read on this machine and written to session:/<name>, the directory " <>
-            "the session works in. On a pod that is the session's own, gone when it is " <>
+            "the session works in. On the platform that is the session's own, gone when it is " <>
             "erased, and a worker never sees this machine's disk. In a local session it is " <>
             "the checkout: git sees the file, other sessions there see it, and erasing the " <>
             "session leaves it.",
@@ -481,10 +481,10 @@ defmodule Troupe.Commands do
         usage: "/save <path> [to]",
         args: [arg("path", true, "text"), arg("to", false, "file")],
         detail:
-          "The file is read where the session runs, a pod's workspace as much as a local " <>
+          "The file is read where the session runs, a workspace on the platform as much as a local " <>
             "checkout, and written on this machine: at `to`, in it when it is a directory, or " <>
             "under its own name where the terminal started. What a file an agent made for you " <>
-            "says to run when the session is on a pod.",
+            "says to run when the session is on the platform.",
         example: "/save report.md ~/Documents"
       ),
       entry("publish", "workspace", "Publish a page, a document or a file for others to read",

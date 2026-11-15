@@ -1,17 +1,16 @@
 // What a session's next prompt is read from (`context.get`), as layers a person reads
-// (troupe #55): the organisation's memory, a team's, a worker profile's chain, the person's
+// (troupe #55): the organisation's memory, a team's, a profile's chain, the person's
 // own instruction file, the repository's files and its brief, in the order the prompt
 // reads them, nearer later. The terminal UI's `/context` says the same in a line.
 //
 // The organisation's memory documents come from the plane: their source is the plane's URL
-// and when this machine fetched them, or the session's activation on a pod, and they carry
+// and when this machine fetched them, or when the session started on the platform, and they carry
 // the version in force. A file's source is its path; its "version" is the start of its hash.
 // After them comes the person's own memory from the plane (`person`), the one layer they
 // edit from here and an agent of theirs adds to with `remember`.
 
 import type { MemoryBlameLine, MemoryLine } from "./admin.js";
 import type { MemoryEntry } from "./entries.js";
-import { inReadersWords } from "./config.js";
 
 /** One file or document `context.get` lists. */
 export interface InstructionFile {
@@ -152,9 +151,9 @@ const HEADINGS: Record<InstructionLayer, string> = {
 
 function memorySource(from: InstructionsContext["memory_from"]): string {
   if (!from || !from.source) return "the plane";
-  const source = inReadersWords(from.source);
-  if (from.fetched_at) return `${source}, fetched ${from.fetched_at}`;
-  return source;
+  // The plane and the pod write it in the reader's words already: shown as it comes.
+  if (from.fetched_at) return `${from.source}, fetched ${from.fetched_at}`;
+  return from.source;
 }
 
 function fileSource(f: InstructionFile): string {
@@ -201,7 +200,7 @@ export function instructionLayers(context: InstructionsContext): InstructionRow[
     return {
       layer,
       heading: HEADINGS[layer],
-      what: memory ? inReadersWords(f.label ?? f.path) : f.path,
+      what: memory ? (f.label ?? f.path) : f.path,
       source: memory ? memorySource(context.memory_from) : fileSource(f),
       version: memory ? `version ${f.version ?? "?"}` : shortHash(f.hash),
       inForce: ["whole", "trimmed"].includes(f.status) || (memory && f.status !== "skipped"),
