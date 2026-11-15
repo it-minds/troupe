@@ -88,9 +88,10 @@ function NotKept({ auth }: { auth: AuthSession | null }): JSX.Element | null {
  * again when the client arrives, so a client that comes late is no loss; but one that was
  * there and not yet linked refused the first ask as not signed in, and one that opened
  * again may be a daemon that restarted and holds other sessions and no token. The screen
- * cannot tell, and the app does not remount it uninvited, which would lose whatever the
- * person is in the middle of. So it says so and offers the refresh, which is a remount of
- * that one screen; the banner goes at the refresh and at the next screen.
+ * cannot tell. Where the person has typed nothing on it the app remounts it by itself,
+ * since that loses nothing; where they have, it does not, since that would lose what they
+ * are in the middle of, and says so and offers the refresh, which is a remount of that one
+ * screen; the banner goes at the refresh and at the next screen.
  */
 function DaemonReady({ onRefresh }: { onRefresh: () => void }): JSX.Element {
   return (
@@ -101,6 +102,23 @@ function DaemonReady({ onRefresh }: { onRefresh: () => void }): JSX.Element {
       </button>
     </div>
   );
+}
+
+/**
+ * Whether a field the person typed into or changed on the screen still holds something:
+ * a text field with text in it, or any other control they changed. A field the screen has
+ * since dropped holds nothing.
+ */
+function hasDraft(fields: Set<Element>): boolean {
+  for (const el of fields) {
+    if (!el.isConnected) continue;
+    if (el instanceof HTMLTextAreaElement) {
+      if (el.value.trim() !== "") return true;
+    } else if (el instanceof HTMLInputElement && !["checkbox", "radio", "range", "color", "file"].includes(el.type)) {
+      if (el.value.trim() !== "") return true;
+    } else return true;
+  }
+  return false;
 }
 
 /**
@@ -163,6 +181,25 @@ export function App(): JSX.Element {
   if (entered.place !== place) setEntered({ place, ...readiness, remount: entered.remount });
   const readySince = daemon.opened > entered.opened || (readiness.linked && !entered.linked);
   const refreshScreen = (): void => setEntered({ place, ...readiness, remount: entered.remount + 1 });
+  // What the person has typed into on the screen on show since it was entered or
+  // refreshed: the fields an input or a change came from, kept for that screen alone.
+  const screenKey = `${place}#${entered.remount}`;
+  const typed = useRef<{ key: string; fields: Set<Element> }>({ key: screenKey, fields: new Set() });
+  if (typed.current.key !== screenKey) typed.current = { key: screenKey, fields: new Set() };
+  // Heard on the screens' container, whenever it is drawn: the sign-in and setup screens
+  // come before it.
+  const main = useCallback((el: HTMLElement | null) => {
+    if (!el) return;
+    const heard = (e: Event): void => {
+      if (e.target instanceof Element) typed.current.fields.add(e.target);
+    };
+    el.addEventListener("input", heard, true);
+    el.addEventListener("change", heard, true);
+    return () => {
+      el.removeEventListener("input", heard, true);
+      el.removeEventListener("change", heard, true);
+    };
+  }, []);
   // The theme, light or dark and notifications follow the person through the daemon (troupe #57).
   useSharedPrefs(daemon.client);
   // What the plane makes of this version, and the app's own update (Decision 874). A
@@ -186,6 +223,20 @@ export function App(): JSX.Element {
   // in; and nothing under Local only.
   const ownPlane = useMemo(() => (planeAuth ? new PlaneOwn((method, params) => planeAuth.rpc(method, params), planeAuth.planeUrl) : null), [planeAuth]);
   const own: OwnPlane | null = localOnly ? null : (ownPlane ?? daemon.client);
+  // The daemon became ready after the screen on show was entered. Not said on the
+  // new-session screen, whose "On this computer" turns on by itself; and Memory and
+  // Artifacts read the plane when signed in, so a daemon getting ready changes nothing they
+  // show. Elsewhere the screen is remounted by itself when the person has typed nothing on
+  // it, since then a remount loses nothing; with a draft, and on a session, whose remount
+  // reads its transcript again from the top and loses the place in it, the banner offers
+  // the refresh instead.
+  const readySinceSaid = readySince && where.screen !== "new" && !(ownPlane && !localOnly && (where.screen === "memory" || where.screen === "artifacts"));
+  const remountsItself = readySinceSaid && where.screen !== "session";
+  useEffect(() => {
+    if (remountsItself && !hasDraft(typed.current.fields)) refreshScreen();
+    // Asked once as the daemon turns ready for this screen, not at every render after.
+  }, [remountsItself, screenKey]);
+  const readySinceShown = readySinceSaid && (!remountsItself || hasDraft(typed.current.fields));
   const appearance = useAppearance();
   // Opening a session reads it, which clears its row's `unseen` at the daemon: the row
   // says so now rather than at the next poll. What rows count while nobody reads their
@@ -454,7 +505,7 @@ export function App(): JSX.Element {
         )}
       </div>
 
-      <main>
+      <main ref={main}>
         <UpdateBanner updates={updates} />
         <NotKept auth={planeAuth} />
         {offline && (
@@ -483,12 +534,7 @@ export function App(): JSX.Element {
           </div>
         )}
 
-        {/* Not on the new-session screen, whose "On this computer" turns on by itself; and
-            Memory and Artifacts read the plane when signed in, so a daemon getting ready
-            changes nothing they show and they are not offered a refresh for it. */}
-        {readySince &&
-          where.screen !== "new" &&
-          !(ownPlane && !localOnly && (where.screen === "memory" || where.screen === "artifacts")) && <DaemonReady onRefresh={refreshScreen} />}
+        {readySinceShown && <DaemonReady onRefresh={refreshScreen} />}
 
         {/* Keyed so a refresh is a remount of the screen alone, never of the window. */}
         <Fragment key={entered.remount}>

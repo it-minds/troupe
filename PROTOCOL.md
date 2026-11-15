@@ -1577,7 +1577,7 @@ same method, read from the file at the switch.
 {"session_id": "s-9f"}
 ```
 → `{"commands": [{"name", "aliases", "section", "summary", "usage", "args", "availability",
-"source", "detail", "example"}]}`
+"source", "detail", "example", "summaries"?, "details"?}]}`
 
 The slash commands a client may offer for the session — the one table behind every
 client's palette, so `/help` in the terminal and the desktop app show the same list and
@@ -1610,8 +1610,15 @@ own for any of them.
 `availability` is what the command needs, for a client to judge and say rather than
 hide the row: `always`; `window` (acts on a window — the activated one, or one named
 as an argument); `local` (a session on this machine: a pod has no checkout, watcher or
-project brief of the person's to act on); `plane` (needs a plane). A client runs what
+project brief of the person's to act on); `plane` (needs a plane); `tui` (the terminal
+client's alone, such as `/quit`: any other client leaves the row out). A client runs what
 it can and shows the rest greyed with the reason. Reading the table wakes nothing.
+
+`summary` and `detail` are words true in any client. A row that a client runs
+differently enough to need its own also carries `summaries` and `details`, maps from a
+client's name (`tui`, `desktop`) to that client's sentence, which it shows instead
+(`/cancel`'s `tui` summary names the window it removes); a row without them, and every
+row from an older harness, has the neutral words alone.
 
 #### `memory.get`
 ```json

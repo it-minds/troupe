@@ -119,6 +119,8 @@ describe("the Memory view", () => {
     button("Forget", tone())!.click();
     const ask = await waitFor(() => screen.querySelector<HTMLElement>('[role="alertdialog"]'), "the confirm");
     await sees("Forget “Tone”?");
+    // In the design's words, and the terminal's: a running session keeps it until it sleeps.
+    expect(ask.textContent).toContain("Sessions already running keep it until they sleep.");
     button("Forget", ask)!.click();
     await sees("Forgotten. New sessions will not start with “Tone”.");
     expect(daemon.own).toEqual({ version: 5, text: "## Language\n\nBritish English." });

@@ -22,13 +22,37 @@
 import { useEffect, useState } from "react";
 import type { JSX } from "react";
 import { onThisComputer } from "@troupe/client";
-import type { AgentRow, AuthSession, DaemonClient, SessionKind } from "@troupe/client";
+import type { AgentRow, AuthSession, DaemonClient, SessionKind, SessionView } from "@troupe/client";
 import type { SessionHandle } from "../hooks";
 import { AgentPicker } from "./AgentPicker";
 import type { PickerAction } from "./AgentPicker";
 import { Dialog } from "./bits";
 
-/** The agents a session could run, by its own listing, or as an older server answered. */
+/**
+ * The agents a session could run, by its own listing, or as an older server answered: the
+ * workspace's `agents.list` on this computer, else the agents section of its `commands.list`.
+ * The head's switch offers these, and the palette switches to the same ones.
+ */
+export function sessionAgents(view: SessionView, daemon: DaemonClient | null, local: boolean, workspace: string | null): Promise<AgentRow[]> {
+  const older = (): Promise<AgentRow[]> =>
+    local && daemon && workspace
+      ? daemon.listAgents(workspace).then((r) => r.agents)
+      : view.commands().then((r) =>
+          r.commands
+            .filter((c) => c.section === "agents" && c.source === "agent")
+            .map((c) => ({ name: c.name, description: c.summary, source: "bundle", layer: "bundle" as const })),
+        );
+  return view
+    .agents()
+    .then((r) => r.agents)
+    .catch(() => older());
+}
+
+/** Whether a session can be switched to an agent of its listing: a primary it can run. */
+export function switchable(row: AgentRow): boolean {
+  return (row.mode === undefined || row.mode === "primary") && row.available !== false;
+}
+
 function useRows(view: SessionHandle, daemon: DaemonClient | null, kind: SessionKind, workspace: string | null): { rows: AgentRow[] | null; error: string | null } {
   const [rows, setRows] = useState<AgentRow[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -41,18 +65,7 @@ function useRows(view: SessionHandle, daemon: DaemonClient | null, kind: Session
     let live = true;
     const v = view.view;
     if (!v) return;
-    const older = (): Promise<AgentRow[]> =>
-      local && workspace
-        ? daemon!.listAgents(workspace).then((r) => r.agents)
-        : v.commands().then((r) =>
-            r.commands
-              .filter((c) => c.section === "agents" && c.source === "agent")
-              .map((c) => ({ name: c.name, description: c.summary, source: "bundle", layer: "bundle" as const })),
-          );
-    void v
-      .agents()
-      .then((r) => r.agents)
-      .catch(() => older())
+    void sessionAgents(v, daemon, local, workspace)
       .then((r) => {
         if (!live) return;
         setRows(r);

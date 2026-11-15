@@ -1,30 +1,38 @@
-// The command palette: one list behind the protocol (`commands.list`, Decision 698),
-// drawn as a popup over the session. `/` in an empty composer, Ctrl-K (⌘K) or the
-// Commands button opens it; typing filters by name, alias and summary; ↑↓ move, Enter
+// The command palette: one list behind the protocol (`commands.list`), drawn as a popup
+// over the session. `/` in an empty composer, Ctrl-K (⌘K) or the Commands button opens
+// it; typing filters by name, alias and summary; ↑↓ move, Enter
 // runs the row, Esc closes. A command this app cannot run is greyed with the reason
-// rather than hidden, because the list is how somebody learns the tool.
+// rather than hidden, because the list is how somebody learns the tool; a row the table
+// marks as the terminal client's alone (`availability` `tui`: leaving it, reading a file
+// from where it started) is left out, since there is nothing here for it to do. Each row
+// says what it does in this app's words where the table has some for it (`summaries`,
+// `details`), and in the words true in any client where it has none.
 //
 // The list is the harness's and nothing here is one: this file holds only what running
 // each command means in this app, and which ones it cannot run yet. A command a markdown
-// file defines (`source` `user` or `project`, Decision 763) is the harness's to run: it
-// sends the file's prompt as the session's input, and its detail shows that prompt
-// (Decision 814), since a description is only what the file says of itself; a
+// file defines (`source` `user` or `project`) is the harness's to run: it
+// sends the file's prompt as the session's input, and its detail shows that prompt,
+// since a description is only what the file says of itself; a
 // workspace's may ask first, in the session, with the prompt in view. It uses the
 // theme's tokens and restyles nothing around it, so the app's coming re-skin (#52) can
 // take it as a component.
 //
 // Three kinds of row, each drawn as what it is, as the terminal's palette draws them
-// (troupe #565, TUI Decision 156): a `command` Troupe has; an `agent`, which is not a
+// (troupe #565): a `command` Troupe has; an `agent`, which is not a
 // command but something a branch or a session runs, with where it comes from, its model,
 // whether it is read-only and whether a session on it gets a worktree or works in the
 // checkout, from `agents.list` for a session on this computer; and a file's command,
-// `repository` or `yours`. A row that cannot run here says why.
+// `repository` or `yours`. A row that cannot run here says why. An agent's row switches
+// the session to it, by the head's rule: the session's own listing offers it as a primary
+// it can run, and the person may change the session; what is typed after its name is then
+// sent as the next message.
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { JSX } from "react";
 import type { AgentLayer, AgentRow, CommandEntry } from "@troupe/client";
 import { copyText } from "../clipboard";
 import type { SessionHandle } from "../hooks";
+import { switchable } from "./AgentSwitch";
 import { loopError } from "./Goal";
 
 /** The screens a command can leave the session for; `setup` is also where a refused key sends people. */
@@ -55,6 +63,12 @@ export interface PaletteActions {
    * to be signed in to none.
    */
   planeLinked?: (() => Promise<boolean>) | undefined;
+  /** The agents the session's own listing offers, which the head's switch offers too. */
+  sessionAgents?: (() => Promise<AgentRow[]>) | undefined;
+  /** Switch the session to an agent, as the head does: absent where the person may only read it. */
+  switchAgent?: ((name: string) => Promise<void>) | undefined;
+  /** The agent the session runs now. */
+  currentAgent?: string | null | undefined;
 }
 
 interface RunContext extends PaletteActions {
@@ -129,7 +143,6 @@ const RUNNERS: Record<string, (ctx: RunContext, args: string) => Promise<string 
     return "copied the transcript";
   },
   help: () => "",
-  quit: () => void window.close(),
 };
 
 /** The built-ins this app asks its arguments of in a dialog of their own, rather than on the line. */
@@ -142,7 +155,6 @@ const NOT_HERE: Record<string, string> = {
   discard: "branches and worktrees are the terminal client's",
   dismiss: "there are no windows to dismiss here",
   observer: "not in the desktop app yet",
-  upload: "not in the desktop app yet",
   watch: "on This computer, under this session's controls",
   worktree: "start a branch from the terminal client, or a new session from the list",
 };
@@ -177,14 +189,51 @@ async function runDefined({ view }: RunContext, name: string, args: string): Pro
   return undefined;
 }
 
-function reasonFor(entry: CommandEntry, local: boolean, agent: AgentRow | undefined, linked: boolean | null): string | null {
+/**
+ * The row in this app's words, where the table has some for it. This app has no windows,
+ * so a command that may name one is typed without it, and an example naming one is not
+ * this app's.
+ */
+function inThisApp(entry: CommandEntry): CommandEntry {
+  const windowed = entry.args.some((a) => a.kind === "window");
+  // An agent's row switches here, and what follows its name is an optional message.
+  if (entry.source === "agent") {
+    return { ...entry, usage: entry.usage.replace("<prompt>", "[message]"), args: entry.args.map((a) => ({ ...a, required: false })) };
+  }
+  return {
+    ...entry,
+    summary: entry.summaries?.["desktop"] ?? entry.summary,
+    detail: entry.details?.["desktop"] ?? entry.detail,
+    ...(windowed
+      ? { usage: entry.usage.replace(/\s*\[window\]/, ""), args: entry.args.filter((a) => a.kind !== "window"), example: null }
+      : {}),
+  };
+}
+
+/**
+ * What the palette knows of switching the session's agent: whether the person may, and
+ * the names its own listing offers as primaries it can run, or null until it answers.
+ */
+interface Switching {
+  may: boolean;
+  offered: Set<string> | null;
+}
+
+function reasonFor(entry: CommandEntry, local: boolean, agent: AgentRow | undefined, linked: boolean | null, switching: Switching): string | null {
+  // An agent's row switches the session to it, wherever the head's switch would: its
+  // `local` is the terminal client's branch, which this app does not start.
+  if (entry.source === "agent") {
+    // The daemon's own reason first: an agent no session could run here (a model the
+    // provider does not serve) cannot run from the terminal client either.
+    if (agent?.available === false) return `${entry.name} cannot run here: ${agent.reason ?? "the daemon says it cannot"}`;
+    if (!switching.may) return "you can read this session, not change the agent it runs";
+    // Never while the listing is not in yet: a row greyed for a moment would read as a refusal.
+    if (switching.offered && !switching.offered.has(entry.name)) return "start a branch on it from the terminal client, or a new session from the list";
+    return null;
+  }
   if (entry.availability === "local" && !local) return "only for a session on this computer";
   // Never while it is not known yet: a row greyed for a moment would read as a refusal.
   if (entry.availability === "plane" && linked === false) return "needs a plane: sign in to a Troupe plane first";
-  // The daemon's own reason first: an agent no session could run here (a model the
-  // provider does not serve) cannot run from the terminal client either.
-  if (entry.source === "agent" && agent?.available === false) return `${entry.name} cannot run here: ${agent.reason ?? "the daemon says it cannot"}`;
-  if (entry.source === "agent") return "start a branch on it from the terminal client, or a new session from the list";
   if (defined(entry)) return null;
   if (!(entry.name in RUNNERS)) return NOT_HERE[entry.name] ?? "not in the desktop app yet";
   return null;
@@ -261,7 +310,7 @@ function Sends({ body }: { body: string }): JSX.Element {
 }
 
 /** An agent's row is not a command: the detail says what it is, and where it is changed. */
-function AgentAbout({ name, agent, manager }: { name: string; agent: AgentRow | undefined; manager: boolean }): JSX.Element {
+function AgentAbout({ name, agent, manager, switches }: { name: string; agent: AgentRow | undefined; manager: boolean; switches: boolean }): JSX.Element {
   const facts = agent
     ? [
         agent.model ? `model ${agent.model}` : "the session's model",
@@ -277,6 +326,7 @@ function AgentAbout({ name, agent, manager }: { name: string; agent: AgentRow | 
       An agent, not a command{from}
       {facts.length > 0 ? `: ${facts.join(" · ")}` : ""}. A branch or a session runs {name}
       {manager ? "; /agents reads, edits and copies it." : "."}
+      {switches && ` Enter switches this session to ${name} from its next turn, and sends what you type after the name.`}
     </p>
   );
 }
@@ -322,7 +372,8 @@ export function CommandPalette({
   const input = useRef<HTMLInputElement>(null);
   const list = useRef<HTMLDivElement>(null);
   const [linked, setLinked] = useState<boolean | null>(null);
-  const { agentRows, planeLinked } = actions;
+  const [listed, setListed] = useState<AgentRow[] | null>(null);
+  const { agentRows, planeLinked, sessionAgents, switchAgent, currentAgent } = actions;
 
   useEffect(() => {
     let live = true;
@@ -344,7 +395,7 @@ export function CommandPalette({
       return;
     }
     v.commands()
-      .then((r) => live && setCommands(r.commands))
+      .then((r) => live && setCommands(r.commands.filter((c) => c.availability !== "tui").map(inThisApp)))
       .catch((e: unknown) => live && setError(e instanceof Error ? e.message : String(e)));
     input.current?.focus();
     return () => {
@@ -353,16 +404,29 @@ export function CommandPalette({
   }, [view.view]);
 
   // The agents' facts come a moment after the commands, and the list never waits on them:
-  // a row without them is still the agent it is.
+  // a row without them is still the agent it is. On this computer they are the
+  // workspace's `agents.list`; on the platform, the session's own listing.
   useEffect(() => {
     let live = true;
     void agentRows?.()
       .then((rows) => live && setAgents(new Map(rows.map((a) => [a.name, a]))))
       .catch(() => undefined);
+    void sessionAgents?.()
+      .then((rows) => {
+        if (!live) return;
+        setListed(rows);
+        if (!agentRows) setAgents(new Map(rows.map((a) => [a.name, a])));
+      })
+      .catch(() => undefined);
     return () => {
       live = false;
     };
-  }, [agentRows]);
+  }, [agentRows, sessionAgents]);
+
+  const switching = useMemo<Switching>(
+    () => ({ may: switchAgent !== undefined, offered: listed ? new Set(listed.filter(switchable).map((a) => a.name)) : null }),
+    [switchAgent, listed],
+  );
 
   const { word, args } = split(query);
 
@@ -370,11 +434,11 @@ export function CommandPalette({
     () =>
       (commands ?? [])
         .filter((c) => matches(c, word))
-        .map((entry) => ({ entry, reason: reasonFor(entry, local, entry.source === "agent" ? agents.get(entry.name) : undefined, linked) })),
-    [commands, word, local, agents, linked],
+        .map((entry) => ({ entry, reason: reasonFor(entry, local, entry.source === "agent" ? agents.get(entry.name) : undefined, linked, switching) })),
+    [commands, word, local, agents, linked, switching],
   );
 
-  // A new filter starts on the row that matches it exactly, so "q" + Enter is /quit.
+  // A new filter starts on the row that matches it exactly, so "resume" + Enter is /sessions.
   useEffect(() => {
     const exact = rows.findIndex((r) => r.entry.name === word || r.entry.aliases.includes(word));
     setCursor(exact >= 0 ? exact : 0);
@@ -393,6 +457,20 @@ export function CommandPalette({
       return;
     }
     const { entry } = row;
+    if (entry.source === "agent") {
+      if (entry.name === currentAgent) {
+        setNotice(`this session runs ${entry.name} already`);
+        return;
+      }
+      try {
+        await switchAgent!(entry.name);
+        if (args !== "") await view.send(args);
+        onClose();
+      } catch (e) {
+        setNotice(e instanceof Error ? e.message : String(e));
+      }
+      return;
+    }
     if (entry.args.some((a) => a.required) && args === "" && !ASKS_ITSELF.has(entry.name)) {
       // It wants an argument: leave the name on the line to finish typing.
       setQuery(`${entry.name} `);
@@ -521,7 +599,7 @@ export function CommandPalette({
             <span className="usage">{selected.entry.usage}</span>
             {selected.entry.aliases.length > 0 && <span className="micro muted"> also {selected.entry.aliases.map((a) => `/${a}`).join(", ")}</span>}
             <p>{selected.entry.detail}</p>
-            {selected.entry.source === "agent" && <AgentAbout name={selected.entry.name} agent={agents.get(selected.entry.name)} manager={Boolean(actions.agents)} />}
+            {selected.entry.source === "agent" && <AgentAbout name={selected.entry.name} agent={agents.get(selected.entry.name)} manager={Boolean(actions.agents)} switches={selected.reason === null} />}
             {typeof selected.entry.body === "string" && <Sends body={selected.entry.body} />}
             {selected.entry.example && (
               <p className="micro muted">

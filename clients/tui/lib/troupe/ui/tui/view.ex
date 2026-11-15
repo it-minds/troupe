@@ -1925,6 +1925,8 @@ defmodule Troupe.UI.TUI.View do
   defp availability_word("window"), do: "acts on the activated window, or one named"
   defp availability_word("local"), do: "for a session on this machine"
   defp availability_word("plane"), do: "needs a plane"
+  # The terminal client's alone: always, here.
+  defp availability_word("tui"), do: "always available"
   defp availability_word(other), do: other
 
   defp settings_command_line(%{settings: %{picker: %{typed?: true}} = s}) do

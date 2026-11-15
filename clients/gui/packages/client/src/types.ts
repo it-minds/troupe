@@ -285,7 +285,10 @@ export interface CommandArg {
  * judge and say rather than hide the row. `source` `user` or `project` is a command a
  * markdown file defines, which `commands.run` runs; its `body` is the prompt it sends, as
  * the file has it (troupe Decision 814), absent from every other row and from a daemon
- * older than it.
+ * older than it. `summary` and `detail` are words true in any client; `summaries` and
+ * `details`, where a row has them, hold a client's own (`tui`, `desktop`), which that
+ * client shows instead. `availability` `tui` is the terminal client's alone, and another
+ * client leaves the row out.
  */
 export interface CommandEntry {
   name: string;
@@ -294,11 +297,13 @@ export interface CommandEntry {
   summary: string;
   usage: string;
   args: CommandArg[];
-  availability: "always" | "window" | "local" | "plane" | string;
+  availability: "always" | "window" | "local" | "plane" | "tui" | string;
   source: "builtin" | "agent" | "user" | "project" | string;
   detail: string;
   example: string | null;
   body?: string;
+  summaries?: Record<string, string>;
+  details?: Record<string, string>;
   [k: string]: unknown;
 }
 

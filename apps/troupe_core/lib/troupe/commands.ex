@@ -25,8 +25,17 @@ defmodule Troupe.Commands do
   `availability` is a requirement the client judges, not a verdict: `always`; `window`
   (acts on a window: the activated one, or one named as an argument); `local` (a session
   on this machine: a pod has no checkout, watcher or brief of the person's); `plane`
-  (needs the client's daemon signed in to a plane, which the client asks it). A client shows a command it cannot run greyed, with the reason, rather
-  than hiding it — that is how somebody learns the tool.
+  (needs the client's daemon signed in to a plane, which the client asks it); `tui` (the
+  terminal client's alone: leaving it, or reading a file from where it was started). A
+  client shows a command it cannot run greyed, with the reason, rather than hiding it —
+  that is how somebody learns the tool — except a `tui` one, which any other client
+  leaves out of its palette, since there is nothing there for it to do.
+
+  `summary` and `detail` are a client's words for the command, said so they read true in
+  any of them. Where a client runs a command differently enough that the one sentence
+  would name what that client has not got (a window, a directory), the row also carries
+  `summaries` and `details`, maps from a client's name (`tui`, `desktop`) to its own
+  sentence, and that client shows its own. `for_client/2` makes the choice for a client.
   """
 
   alias Troupe.Agent.Definition
@@ -295,13 +304,19 @@ defmodule Troupe.Commands do
             "from this conversation as it stands.",
         example: "/new --branch"
       ),
-      entry("cancel", "session", "Stop a branch mid-turn and remove its window",
+      entry("cancel", "session", "Stop the agent mid-turn",
+        summaries: %{"tui" => "Stop a branch mid-turn and remove its window"},
         usage: "/cancel [window]",
         args: [window()],
         availability: "window",
         detail:
-          "Stops the agent in the activated window, or in the one named by its tile " <>
-            "number or path, and removes the window; a worktree Troupe made for it goes too.",
+          "Stops the agent where it is in its turn; the session stays, and the next message " <>
+            "starts a new turn.",
+        details: %{
+          "tui" =>
+            "Stops the agent in the activated window, or in the one named by its tile " <>
+              "number or path, and removes the window; a worktree Troupe made for it goes too."
+        },
         example: "/cancel 2"
       ),
       entry("dismiss", "session", "Let go of a window",
@@ -395,12 +410,15 @@ defmodule Troupe.Commands do
             "already showed.",
         example: "/uninvite bea@example.com"
       ),
-      entry("sessions", "navigate", "This directory's sessions, newest first",
+      entry("sessions", "navigate", "Your sessions, newest first",
         aliases: ["resume"],
         usage: "/sessions [n | id]",
         args: [arg("session", false, "text")],
-        detail:
-          "Enter switches the window to one; /resume 2 or /resume <id> goes straight there.",
+        detail: "The list of your sessions; this one carries on while you look.",
+        details: %{
+          "tui" =>
+            "Enter switches the window to one; /resume 2 or /resume <id> goes straight there."
+        },
         example: "/resume 2"
       ),
       entry("back", "navigate", "Go back to the session you were in before",
@@ -449,6 +467,7 @@ defmodule Troupe.Commands do
       entry("upload", "workspace", "Send a local file into the session's workspace",
         usage: "/upload <path>",
         args: [arg("path", true, "file")],
+        availability: "tui",
         detail:
           "The file is read on this machine and written to session:/<name>, the directory " <>
             "the session works in. On a pod that is the session's own, gone when it is " <>
@@ -663,6 +682,7 @@ defmodule Troupe.Commands do
       entry("quit", "quit", "Leave the terminal client; the session carries on",
         aliases: ["exit", "q"],
         usage: "/quit",
+        availability: "tui",
         detail:
           "Sessions live in the daemon, so nothing stops; troupe resume comes back to " <>
             "this one. Ctrl-C twice does the same."
@@ -726,6 +746,28 @@ defmodule Troupe.Commands do
   defp first_line(text),
     do: text |> String.split("\n") |> Enum.map(&String.trim/1) |> Enum.find(&(&1 != ""))
 
+  @doc """
+  The rows as `client` shows them: each row's `summary` and `detail` replaced by the
+  client's own where `summaries` or `details` has one for it (`"tui"`, `"desktop"`), and
+  the neutral sentence kept where it has none. A row from a harness before the maps, which
+  has neither, is as it was.
+  """
+  @spec for_client([entry()], String.t()) :: [entry()]
+  def for_client(entries, client) do
+    Enum.map(entries, fn entry ->
+      entry
+      |> own(client, "summaries", "summary")
+      |> own(client, "details", "detail")
+    end)
+  end
+
+  defp own(entry, client, map, key) do
+    case entry do
+      %{^map => %{^client => text}} when is_binary(text) -> Map.put(entry, key, text)
+      _neutral -> entry
+    end
+  end
+
   defp entry(name, section, summary, opts) do
     %{
       "name" => name,
@@ -739,7 +781,13 @@ defmodule Troupe.Commands do
       "detail" => Keyword.get(opts, :detail, summary),
       "example" => Keyword.get(opts, :example)
     }
+    |> put_given("summaries", Keyword.get(opts, :summaries))
+    |> put_given("details", Keyword.get(opts, :details))
   end
+
+  # A client's own words go on the wire only where a row has them.
+  defp put_given(entry, _key, nil), do: entry
+  defp put_given(entry, key, words), do: Map.put(entry, key, words)
 
   defp arg(name, required?, kind), do: %{"name" => name, "required" => required?, "kind" => kind}
   defp window, do: arg("window", false, "window")

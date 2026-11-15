@@ -44,7 +44,7 @@ import type { SessionHandle } from "../hooks";
 import { curtainLine, DEFAULT_DETAIL, isDetail, layout, waitingOn, waitingWords } from "../frames";
 import type { Detail, Drawn } from "../frames";
 import { saveFile } from "../shell";
-import { AgentSwitch } from "./AgentSwitch";
+import { AgentSwitch, sessionAgents } from "./AgentSwitch";
 import { ApprovalPanel, DecisionRecord } from "./Approval";
 import type { Audiences } from "./Approval";
 import { AnswerRecord, QuestionPanel } from "./Question";
@@ -171,6 +171,15 @@ export function Session({
   // workspace (troupe #565); a session on the platform has its commands.list alone.
   const agentRows = useMemo(() => (daemon && workspace ? () => daemon.listAgents(workspace).then((r) => r.agents) : undefined), [daemon, workspace]);
   const planeLinked = useMemo(() => (daemon ? () => daemon.identity().then((i) => i.linked === true) : undefined), [daemon]);
+  // What the head's agent switch offers, which the palette's agent rows switch to.
+  const switchWorkspace = here ? (workspaceOf(row) ?? workspace ?? null) : null;
+  const listAgents = useMemo(
+    () => {
+      const v = view.view;
+      return v ? () => sessionAgents(v, daemon, here, switchWorkspace) : undefined;
+    },
+    [view.view, daemon, here, switchWorkspace],
+  );
   // How much of each turn is open: the config ladder's `transcript.detail`, unless `/detail`
   // chose for this session (troupe #474).
   const detail = useDetail(daemon, workspace, sessionId);
@@ -230,6 +239,9 @@ export function Session({
             ...(agentRows ? { agentRows } : {}),
             ...(daemon ? { publish: () => setPublishing(true) } : {}),
             ...(planeLinked ? { planeLinked } : {}),
+            ...(listAgents ? { sessionAgents: listAgents } : {}),
+            ...(readOnly ? {} : { switchAgent: async (name: string) => void (await view.switchProfile(name)) }),
+            currentAgent: agentOf(view.state, row),
           }}
         />
       )}
@@ -257,7 +269,7 @@ export function Session({
             auth={auth}
             daemon={daemon}
             kind={kind}
-            workspace={here ? (workspaceOf(row) ?? workspace ?? null) : null}
+            workspace={switchWorkspace}
             planeProfile={kind === "team" ? (row?.profile ?? null) : null}
             current={agentOf(view.state, row)}
             canChange={!readOnly}
