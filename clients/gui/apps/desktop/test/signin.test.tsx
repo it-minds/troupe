@@ -168,12 +168,17 @@ describe("signing in to a plane", () => {
     (await waitFor(() => button("Sign in"), "the sign-in screen")).click();
     await approveTheCode();
     await waitFor(() => says("Welcome, Ada."), "the first sign-in's theme");
+    // It names the rail's entry the theme is changed in (#930: it said "Settings", which
+    // is the launcher's way to This computer).
+    await sees("You can change this any time in Appearance.");
+    expect(says("any time in Settings")).toBe(false);
     button("Continue")!.click();
     await waitFor(launcher, "the launcher");
 
     // Into the list, then out.
     button("02")!.click();
     await waitFor(() => nav("Sessions")?.getAttribute("aria-current") === "page", "the list");
+    expect(nav("Appearance")).not.toBeNull();
     button("Sign out")!.click();
     (await waitFor(() => button("Sign in"), "the sign-in screen again")).click();
     await approveTheCode();
