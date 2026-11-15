@@ -1354,7 +1354,7 @@ defmodule Troupe.Plane.Admin.API do
       name: "admin.settings.list",
       function: :settings_list,
       summary:
-        "Every platform setting: what it is set to, where that value came from, and what changing it would do.",
+        "Every platform setting: its label and the unit a person reads it in, what it is set to, where that value came from, and what changing it would do.",
       risk: :read
     },
     %Method{
@@ -1375,7 +1375,7 @@ defmodule Troupe.Plane.Admin.API do
           type: :string,
           required: true,
           description:
-            "The new value, written as a string. It is parsed against the setting's type and refused if it does not fit."
+            "The new value, written as a string. It is parsed against the setting's type and refused if it does not fit. A setting's unit says how a person reads it, not how it is sent: a dollars setting is sent in millionths of a dollar, a minutes one in seconds, a switch as true or false, a choice as one of its values."
         }
       ]
     },

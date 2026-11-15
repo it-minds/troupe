@@ -20,10 +20,11 @@
 import { useState } from "react";
 import type { JSX } from "react";
 import type { AdminTeam, IdentityCheckResult, LadderValue, PlatformSetting, SettingChanged, SettingsList } from "@troupe/client";
-import { describeError, show, useConsole, useLoad } from "../console";
+import { describeError, useConsole, useLoad } from "../console";
 import { href } from "../route";
 import { AuditNote, Checks, Empty, Field, Loaded, Preview, Region, Status, changed } from "./bits";
 import type { DiffLine } from "./bits";
+import { UnitControl, changesInUnit, fromDraft, inUnit, labelled, lineInUnit, nameOf, toDraft, unitHint, unitOf } from "./settingUnits";
 
 /** The panels drawn elsewhere: the organisation's document, and sign-in. */
 const ELSEWHERE: Record<string, { page: string; label: string }> = {
@@ -37,11 +38,11 @@ const GATED = "platform_admin_group";
 export function Policy(): JSX.Element {
   const { admin, role, notify } = useConsole();
   const [load, reload] = useLoad(() => admin.settings(), [admin]);
-  const [done, setDone] = useState<{ action: string; answer: SettingChanged } | null>(null);
+  const [done, setDone] = useState<{ action: string; answer: SettingChanged; setting: PlatformSetting } | null>(null);
   const editable = role === "platform_admin";
-  const applied = (action: string) => (answer: SettingChanged) => {
-    notify(`${answer.key} is ${action === "setting.reset" ? "reset" : "applied"}. ${answer.effect}`);
-    setDone({ action, answer });
+  const applied = (action: string) => (answer: SettingChanged, setting: PlatformSetting) => {
+    notify(`${nameOf(setting)} is ${action === "setting.reset" ? "reset" : "applied"}. ${answer.effect}`);
+    setDone({ action, answer, setting });
     reload();
   };
 
@@ -49,7 +50,7 @@ export function Policy(): JSX.Element {
     <div className="page">
       <p className="lead">Every platform setting, what it is, where its value came from, and what changing it would do.</p>
       {!editable && <p className="note">Read-only for you: only a platform admin changes a platform setting. A team's own values are on its Limits tab.</p>}
-      {done && <AuditNote action={done.action} subject={done.answer.key} detail={done.answer.changes} />}
+      {done && <AuditNote action={done.action} subject={done.answer.key} detail={changesInUnit(done.setting, done.answer.changes)} />}
       <Loaded load={load} what="the platform's settings" retry={reload}>
         {(list: SettingsList) => (
           <>
@@ -107,8 +108,7 @@ function Source({ setting }: { setting: PlatformSetting }): JSX.Element {
 
 function shown(setting: PlatformSetting): string {
   if (setting.secret) return setting.set ? "set · never shown" : "not set";
-  if (setting.type === "boolean") return setting.value === true ? "on" : setting.value === false ? "off" : "—";
-  return show(setting.value);
+  return inUnit(unitOf(setting), setting.value);
 }
 
 function SettingRow({
@@ -119,12 +119,16 @@ function SettingRow({
 }: {
   setting: PlatformSetting;
   editable: boolean;
-  onPut: (answer: SettingChanged) => void;
-  onReset: (answer: SettingChanged) => void;
+  onPut: (answer: SettingChanged, setting: PlatformSetting) => void;
+  onReset: (answer: SettingChanged, setting: PlatformSetting) => void;
 }): JSX.Element {
   const { admin } = useConsole();
   const [draft, setDraft] = useState<string | null>(null);
   const [previewing, setPreviewing] = useState<"put" | "reset" | null>(null);
+  const unit = unitOf(setting);
+  // What the field holds, as the plane will be sent it: dollars as millionths, minutes as seconds.
+  const asked = draft === null ? null : fromDraft(unit, draft);
+  const invalid = asked !== null && "error" in asked ? asked.error : null;
   const [check, setCheck] = useState<{ value: string; answer: IdentityCheckResult } | { value: string; error: unknown } | null>(null);
   const value = setting.value ?? null;
   const changeable = editable && setting.editable !== false && !setting.secret;
@@ -134,13 +138,14 @@ function SettingRow({
   const lines: DiffLine[] =
     previewing === "reset"
       ? changed({ [setting.key]: value }, { [setting.key]: setting.deployed ?? null })
-      : draft !== null
-        ? changed({ [setting.key]: value === null ? null : String(value) }, { [setting.key]: draft })
+      : asked !== null && "value" in asked
+        ? changed({ [setting.key]: value === null ? null : String(value) }, { [setting.key]: asked.value })
         : [];
 
   return (
     <div className="row" aria-label={setting.key}>
       <div className="what">
+        {labelled(setting) && <span className="name">{nameOf(setting)}</span>}
         <code className="key">{setting.key}</code>
         <p>{setting.summary}</p>
         {setting.editable === false && <p className="hint">The deployment's: changed in the deployment and rolled, not here. {setting.consequence}</p>}
@@ -152,7 +157,7 @@ function SettingRow({
           <button
             type="button"
             onClick={() => {
-              setDraft(value === null ? "" : String(value));
+              setDraft(toDraft(unit, value));
               setCheck(null);
             }}
           >
@@ -170,29 +175,11 @@ function SettingRow({
           className="edit wide"
           onSubmit={(e) => {
             e.preventDefault();
-            if (passed) setPreviewing("put");
+            if (passed && !invalid) setPreviewing("put");
           }}
         >
-          <Field label={<code>{setting.key}</code>} hint={setting.consequence}>
-            {(p) =>
-              setting.type === "boolean" ? (
-                <select {...p} value={draft} onChange={(e) => setDraft(e.target.value)}>
-                  <option value="true">on</option>
-                  <option value="false">off</option>
-                </select>
-              ) : setting.values ? (
-                <select {...p} value={draft} onChange={(e) => setDraft(e.target.value)}>
-                  {!setting.values.includes(draft) && <option value={draft}>{draft || "unset"}</option>}
-                  {setting.values.map((v) => (
-                    <option key={v} value={v}>
-                      {v}
-                    </option>
-                  ))}
-                </select>
-              ) : (
-                <input {...p} value={draft} onChange={(e) => setDraft(e.target.value)} inputMode={setting.type === "integer" ? "numeric" : undefined} spellCheck={false} />
-              )
-            }
+          <Field label={labelled(setting) ? nameOf(setting) : <code>{setting.key}</code>} hint={[unitHint(unit), setting.consequence].filter(Boolean).join(" ")} error={invalid}>
+            {(p) => <UnitControl unit={unit} value={draft} onChange={setDraft} control={p} />}
           </Field>
           {gated && (
             <div className="gate" role="status" aria-label="The check before saving">
@@ -213,7 +200,7 @@ function SettingRow({
             </div>
           )}
           <div className="actions">
-            <button type="submit" className="primary" disabled={lines.length === 0 || !passed}>
+            <button type="submit" className="primary" disabled={lines.length === 0 || !passed || invalid !== null}>
               Preview
             </button>
             <button type="button" onClick={() => setDraft(null)}>
@@ -226,7 +213,7 @@ function SettingRow({
         <div className="wide">
           <Preview
             title={`setting/${setting.key}`}
-            lines={lines}
+            lines={lines.map((l) => lineInUnit(setting, l))}
             effects={[
               ...(previewing === "reset" ? ["It goes back to what the plane was deployed with."] : []),
               setting.consequence ?? "",
@@ -236,11 +223,12 @@ function SettingRow({
             onCancel={() => setPreviewing(null)}
             cancel={previewing === "put" ? "Back to editing" : "Cancel"}
             onConfirm={async () => {
-              const answer = previewing === "reset" ? await admin.resetSetting(setting.key) : await admin.putSetting(setting.key, draft ?? "");
+              const sent = asked !== null && "value" in asked ? asked.value : (draft ?? "");
+              const answer = previewing === "reset" ? await admin.resetSetting(setting.key) : await admin.putSetting(setting.key, sent);
               const was = previewing;
               setDraft(null);
               setPreviewing(null);
-              (was === "reset" ? onReset : onPut)(answer);
+              (was === "reset" ? onReset : onPut)(answer, setting);
             }}
           />
         </div>
@@ -307,14 +295,20 @@ function Ladder({ list }: { list: SettingsList }): JSX.Element {
                   {values.map((v) => (
                     <tr key={v.key}>
                       <td>
+                        {labelled(v) && (
+                          <>
+                            {nameOf(v)}
+                            <br />
+                          </>
+                        )}
                         <code>{v.key}</code>
                       </td>
-                      <td className="mono">{show(v.value)}</td>
+                      <td className="mono">{inUnit(unitOf(v), v.value)}</td>
                       <td>{RUNGS[v.decided_by] ?? v.decided_by}</td>
                       <td>
                         {v.opinions.map((o) => (
                           <span key={o.rung} className={o.rung === v.decided_by ? "in-force" : "muted"}>
-                            {o.rung} {show(o.value)}
+                            {o.rung} {inUnit(unitOf(v), o.value)}
                             {o.rung === v.decided_by ? " (in force)" : ""}
                             {"; "}
                           </span>

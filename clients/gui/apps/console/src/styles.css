@@ -793,6 +793,19 @@ ul.attention li:last-child {
 .row .key {
   color: var(--text-primary);
 }
+/* A setting the plane names: its label heads the row, and its key is the mono line under it. */
+.row .name {
+  display: block;
+  font: var(--t-name);
+  color: var(--text-primary);
+}
+.row .name + .key {
+  display: block;
+  margin-top: var(--space-1);
+  font: var(--t-code-small);
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
 .row .value {
   color: var(--text-primary);
   overflow-wrap: anywhere;

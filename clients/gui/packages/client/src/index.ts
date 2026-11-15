@@ -236,6 +236,8 @@ export type {
   ScimConnector,
   SettingsList,
   PlatformSetting,
+  SettingNaming,
+  SettingUnit,
   ServicePrincipal,
   TeamSpend,
   Trigger,

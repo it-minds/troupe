@@ -217,6 +217,76 @@ defmodule Troupe.Plane.SettingsTest do
     end
   end
 
+  describe "a setting is named and read in a unit" do
+    alias Troupe.Plane.Settings.Setting
+
+    # The guard that keeps a new setting from arriving as a bare key: a row a person reads
+    # is headed by a label, and asked for in a unit, or this fails naming the setting.
+    test "every setting has a label and a unit" do
+      for setting <- Settings.definitions() do
+        assert is_binary(setting.label) and String.trim(setting.label) != "",
+               "#{setting.key} has no label"
+
+        assert setting.unit in Setting.units(),
+               "#{setting.key} has no unit, or one no surface reads"
+      end
+    end
+
+    test "money is in dollars, a switch is a switch, and a choice offers exactly its values" do
+      for setting <- Settings.definitions() do
+        if String.ends_with?(setting.key, "_micros"),
+          do: assert(setting.unit == :dollars, setting.key)
+
+        if String.ends_with?(setting.key, "_seconds"),
+          do: assert(setting.unit in [:minutes, :seconds], setting.key)
+
+        if String.ends_with?(setting.key, "_days"), do: assert(setting.unit == :days, setting.key)
+        assert setting.type == :boolean == (setting.unit == :switch), setting.key
+        assert setting.type == :enum == (setting.unit == :choice), setting.key
+
+        if setting.unit == :choice do
+          assert Keyword.keys(setting.choices) == setting.values, setting.key
+
+          assert Enum.all?(Keyword.values(setting.choices), &(is_binary(&1) and &1 != "")),
+                 setting.key
+        else
+          assert is_nil(setting.choices), setting.key
+        end
+      end
+    end
+
+    test "the list carries each one's label, unit and choices", context do
+      assert {:ok, %{settings: settings}} = Admin.settings_list(context.root)
+
+      budget = Enum.find(settings, &(&1.key == "platform_budget_micros"))
+      assert budget.label == "Budget for the platform"
+      assert budget.unit == :dollars
+      assert budget.choices == nil
+
+      period = Enum.find(settings, &(&1.key == "default_budget_period"))
+      assert period.unit == :choice
+
+      assert period.choices == [
+               %{value: "monthly", label: "monthly, from the 1st (UTC)"},
+               %{value: "never", label: "never turns over"}
+             ]
+
+      assert Enum.all?(settings, &is_binary(&1.label))
+    end
+
+    test "the effective answer is named as the list names it", context do
+      assert {:ok, idle} =
+               Admin.setting_effective(context.root, "default_idle_timeout_seconds", nil)
+
+      assert idle.label == "Idle before a session goes dormant"
+      assert idle.unit == :minutes
+
+      assert {:ok, erase} = Admin.setting_effective(context.root, "default_erase_after_days", nil)
+      assert erase.label == "Erase a session after"
+      assert erase.unit == :days
+    end
+  end
+
   describe "who may" do
     test "a team admin reads the settings", context do
       assert {:ok, %{settings: settings, groups: groups}} = Admin.settings_list(context.lead)
