@@ -252,6 +252,15 @@ export function App(): JSX.Element {
   // two people on one computer are two first sign-ins, and the second should not
   // inherit an answer the first one gave.
   const [chosen, setChosen] = useState(false);
+  // This window's first run picked the look a moment ago, and the person who finishes it
+  // is the one who signs in next: their first sign-in takes that pick as their answer.
+  const [lookPicked, setLookPicked] = useState(false);
+  const firstSignIn = auth !== null && !chosen && !hasChosen(auth.me?.subject);
+  useEffect(() => {
+    if (!firstSignIn || !lookPicked || !auth) return;
+    markChosen(auth.me?.subject);
+    setChosen(true);
+  }, [firstSignIn, lookPicked, auth]);
   const planeUrl = prefs.get("planeUrl", likelyPlaneUrl());
   // A fresh machine in local mode meets the first run's questions (Decision 705); the
   // daemon says whether they are needed, once per connection.
@@ -268,6 +277,7 @@ export function App(): JSX.Element {
     // Whoever signs in next is a different person until proved otherwise, and whether
     // *they* have picked a theme is a question about them.
     setChosen(false);
+    setLookPicked(false);
   }, [auth, daemon.client]);
 
   const setLocalOnly = useCallback((on: boolean) => {
@@ -360,7 +370,18 @@ export function App(): JSX.Element {
   };
 
   if (mode === "local" && daemon.client && setup.needed === true) {
-    return <FirstRun client={daemon.client} opened={daemon.opened} appearance={appearance} onDone={setupDone} />;
+    return (
+      <FirstRun
+        client={daemon.client}
+        opened={daemon.opened}
+        appearance={appearance}
+        onDone={(outcome) => {
+          // The first run opened on the look, so the sign-in it ends on does not ask again.
+          setLookPicked(true);
+          setupDone(outcome);
+        }}
+      />
+    );
   }
 
   // A private session another device holds, taken over by this computer's daemon, and the
@@ -368,7 +389,7 @@ export function App(): JSX.Element {
   const thisComputer = daemon.client;
   const claim = thisComputer ? (id: string) => thisComputer.claimSession(id).then(() => refresh()) : undefined;
 
-  if (auth && !chosen && !hasChosen(auth.me?.subject)) {
+  if (auth && firstSignIn && !lookPicked) {
     return (
       <Onboarding
         name={auth.me?.display_name ?? null}

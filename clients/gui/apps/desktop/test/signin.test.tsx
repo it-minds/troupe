@@ -110,6 +110,12 @@ describe("signing in to a plane", () => {
     button("Continue")!.click();
     await waitFor(() => says("Sign in next"), "the plane's finish");
     await sees("Finishing here signs you in to it.");
+    // What the screen says above the step is the plane's way, not this machine's: nothing
+    // is written here, and the last step is the sign-in, not a first session.
+    await sees("nothing is written to this computer's settings: signing in is next");
+    expect(says("Everything is written to this computer's own settings")).toBe(false);
+    const steps = [...document.querySelectorAll('[aria-label="Steps"] li')].map((li) => li.textContent);
+    expect(steps).toEqual(["✓ Where", "→ Sign in"]);
     button("Finish and sign in")!.click();
 
     // The sign-in has started by itself, at the address the run recorded: the code is
@@ -119,9 +125,11 @@ describe("signing in to a plane", () => {
     expect(localStorage.getItem("troupe.pref.planeUrl")).toBe(harness.plane.baseUrl);
     harness.idp.approve("ada@example.com", "Ada");
 
-    await waitFor(() => says("Welcome, Ada."), "the first sign-in's theme");
-    button("Continue")!.click();
-    await waitFor(launcher, "the launcher");
+    // The first run opened on the look; the sign-in it ends on does not ask for it again,
+    // and keeps that answer as this person's, so the next sign-in does not either.
+    await waitFor(launcher, "the launcher, with no second theme screen");
+    expect(says("Welcome, Ada.")).toBe(false);
+    await waitFor(() => localStorage.getItem("troupe.pref.appearance.chosen.ada@example.com") === "yes", "the pick kept as Ada's");
   });
 
   // D134: the window said nothing of a sign-in the credential store refused; only the
