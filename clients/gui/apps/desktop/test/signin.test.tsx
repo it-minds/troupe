@@ -144,7 +144,9 @@ describe("signing in to a plane", () => {
     await approveTheCode();
     await waitFor(launcher, "the launcher, with no theme screen");
     expect(says("Welcome, Ada.")).toBe(false);
-    expect(sessionStorage.getItem("troupe.firstRunLook")).toBeNull();
+    // Spent once the sign-in has taken it, which is just after the launcher is drawn.
+    await waitFor(() => sessionStorage.getItem("troupe.firstRunLook") === null || null, "the pick spent");
+    expect(localStorage.getItem("troupe.pref.appearance.chosen.ada@example.com")).toBe("yes");
   });
 
   // D134: the window said nothing of a sign-in the credential store refused; only the
