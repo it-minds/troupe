@@ -3,16 +3,20 @@ defmodule Troupe.Client.Message do
   The content blocks a transcript is drawn from.
 
   An `assistant_message` event carries `content: [block]`, where a block is a text block
-  (`%{type: :text, text: …}`) or a tool use (`%{type: :tool_use, id, name, input}`). These
+  (`%{type: :text, text: …}`), a tool use (`%{type: :tool_use, id, name, input}`) or the
+  model's reasoning as the log kept it (`%{type: :reasoning, text: …}`). These
   are the client's own shapes — what `Troupe.Remote.Translate` builds from a protocol
   `llm_response` — and the two readers the UI needs. The harness's `Troupe.LLM.Message`
   is a request/response struct for a model call and is not this.
   """
 
-  @type block :: %{required(:type) => :text | :tool_use, optional(atom()) => term()}
+  @type block :: %{required(:type) => :text | :tool_use | :reasoning, optional(atom()) => term()}
 
   @spec text_block(String.t()) :: block()
   def text_block(text) when is_binary(text), do: %{type: :text, text: text}
+
+  @spec reasoning_block(String.t()) :: block()
+  def reasoning_block(text) when is_binary(text), do: %{type: :reasoning, text: text}
 
   @spec tool_use(String.t(), String.t(), map()) :: block()
   def tool_use(id, name, input) when is_map(input),
@@ -27,5 +31,13 @@ defmodule Troupe.Client.Message do
     blocks
     |> Enum.filter(&match?(%{type: :text}, &1))
     |> Enum.map_join("\n", & &1.text)
+  end
+
+  @doc "The reasoning the message carries, its blocks' text in order; empty when it has none."
+  @spec reasoning([block()]) :: String.t()
+  def reasoning(blocks) when is_list(blocks) do
+    blocks
+    |> Enum.filter(&match?(%{type: :reasoning}, &1))
+    |> Enum.map_join("\n\n", & &1.text)
   end
 end

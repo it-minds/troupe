@@ -165,6 +165,7 @@ const PARSER_ANSWER = [
   "@@ -1,3 +1,3 @@",
   " defmodule P do",
   "-  def parse(text), do: text |> String.split(\"\\n\") |> Enum.drop(-1)",
+  "+  # The last line is a line too: String.split/2 keeps what follows the final newline, and a caller that wants it gone trims it there, where it knows why.",
   "+  def parse(text), do: String.split(text, \"\\n\")",
   " end",
   "```",
@@ -173,6 +174,13 @@ const PARSER_ANSWER = [
   "test,before,after",
   "keeps the last line,fail,pass",
   "empty input,pass,pass",
+  "```",
+  "",
+  "How a line goes through it now:",
+  "",
+  "```mermaid",
+  "flowchart LR",
+  "  input[text] --> split[String.split] --> lines[every line, the last too]",
   "```",
 ].join("\n");
 
@@ -192,7 +200,19 @@ function rehearse(text: string, live: boolean): void {
     [0, now("agent_state", { state: "thinking" })],
     [900, now("llm_delta", { kind: "reasoning", text: "The test says the parser loses the last line of its input. " })],
     [1400, now("llm_delta", { kind: "reasoning", text: "Read the parser before touching it, then run the tests." })],
-    [1200, say("llm_response", { message: { role: "assistant", content: [{ type: "text", text: "Looking at the parser first." }] } })],
+    // The log keeps the reasoning in the reply (troupe #659), which a replay draws.
+    [
+      1200,
+      say("llm_response", {
+        message: {
+          role: "assistant",
+          content: [
+            { type: "reasoning", provider: "openai", text: "The test says the parser loses the last line of its input. Read the parser before touching it, then run the tests." },
+            { type: "text", text: "Looking at the parser first." },
+          ],
+        },
+      }),
+    ],
     [0, now("agent_state", { state: "acting" })],
     ...call(`ls-${tag}`, "list_files", { path: "lib" }, true, "lib/p.ex\nlib/q.ex\nlib/r.ex", 700),
     ...call(`nope-${tag}`, "read_file", { path: "nope.ex" }, false, "No such file: nope.ex", 300),

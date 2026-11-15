@@ -599,7 +599,15 @@ defmodule Troupe.UI.TUI.Model do
       :assistant_message ->
         text = Message.text(d.content)
         used = used(Map.get(d, :usage) || %{})
-        reasoning = reasoning_so_far(w, path)
+
+        # What streamed, else what the logged message carries: a replayed or late-attached
+        # session saw none of it stream.
+        reasoning =
+          case reasoning_so_far(w, path) do
+            "" -> Message.reasoning(d.content)
+            streamed -> streamed
+          end
+
         thought = thought(w, path, ts)
 
         w =
