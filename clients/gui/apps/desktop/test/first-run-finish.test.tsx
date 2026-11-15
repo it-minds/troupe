@@ -53,6 +53,8 @@ class Updater implements ShellUpdater {
 
 beforeEach(async () => {
   localStorage.clear();
+  // A first run's pick of the look is kept for the window (theme.ts): each test is a new one.
+  sessionStorage.clear();
   setupTiming.patienceMs = 400;
 });
 

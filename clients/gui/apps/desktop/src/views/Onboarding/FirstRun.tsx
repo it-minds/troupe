@@ -41,7 +41,7 @@ export function FirstRun({
           {stage === "appearance"
             ? "Pick how Troupe looks. Every theme says the same things in the same places — one colour is reserved, in each of them, for work that has stopped and needs you. You can change this any time in Appearance."
             : planeChosen(setup.flow)
-              ? "Your organisation's Troupe runs the sessions, so nothing is written to this computer's settings: signing in is next. Setup in the rail asks again whenever you like."
+              ? "Signing in to your organisation's Troupe is next. Setup in the rail asks again whenever you like."
               : "A few questions, and the first session starts. Everything is written to this computer's own settings; Setup in the rail asks them again whenever you like."}
         </p>
       </header>

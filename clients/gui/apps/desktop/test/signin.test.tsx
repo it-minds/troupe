@@ -28,6 +28,7 @@ const address = (): HTMLInputElement | null => document.querySelector<HTMLInputE
 
 beforeEach(async () => {
   localStorage.clear();
+  sessionStorage.clear();
   harness = await startHarness();
   // The desktop shell's way in: a code to enter in a browser, never a redirect.
   window.troupe = { name: "Test shell", version: "0", signInFlow: "device" };
@@ -112,7 +113,7 @@ describe("signing in to a plane", () => {
     await sees("Finishing here signs you in to it.");
     // What the screen says above the step is the plane's way, not this machine's: nothing
     // is written here, and the last step is the sign-in, not a first session.
-    await sees("nothing is written to this computer's settings: signing in is next");
+    await sees("Signing in to your organisation's Troupe is next.");
     expect(says("Everything is written to this computer's own settings")).toBe(false);
     const steps = [...document.querySelectorAll('[aria-label="Steps"] li')].map((li) => li.textContent);
     expect(steps).toEqual(["✓ Where", "→ Sign in"]);
@@ -130,6 +131,20 @@ describe("signing in to a plane", () => {
     await waitFor(launcher, "the launcher, with no second theme screen");
     expect(says("Welcome, Ada.")).toBe(false);
     await waitFor(() => localStorage.getItem("troupe.pref.appearance.chosen.ada@example.com") === "yes", "the pick kept as Ada's");
+    expect(sessionStorage.getItem("troupe.firstRunLook")).toBeNull();
+  });
+
+  // The browser build signs in by leaving for the provider's page and coming back to a new
+  // one: the first run's pick has to outlast the page that made it.
+  it("after a first run, a sign-in that came back to a new page does not ask for the theme either", async () => {
+    sessionStorage.setItem("troupe.firstRunLook", "yes");
+    localStorage.setItem("troupe.pref.planeUrl", harness.plane.baseUrl);
+    unmount = render(<App />).unmount;
+    (await waitFor(() => button("Sign in"), "the sign-in screen")).click();
+    await approveTheCode();
+    await waitFor(launcher, "the launcher, with no theme screen");
+    expect(says("Welcome, Ada.")).toBe(false);
+    expect(sessionStorage.getItem("troupe.firstRunLook")).toBeNull();
   });
 
   // D134: the window said nothing of a sign-in the credential store refused; only the
