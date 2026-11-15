@@ -452,7 +452,7 @@ export interface TeamUpdated {
  * the rung that decided it, what a team may not go past, and every rung that had an
  * opinion. `admin.setting.effective` answers one; a team's `effective` is all of them.
  */
-export interface LadderValue {
+export interface LadderValue extends SettingNaming {
   key: string;
   /** The team's own column the setting lands in. */
   field: string;
@@ -854,7 +854,22 @@ export interface TriggerRun {
   reviewed_at: string | null;
 }
 
-export interface PlatformSetting {
+/**
+ * How a person reads and types a setting's value. Not the value's own unit: a `dollars`
+ * value is millionths of a dollar and a `minutes` one seconds, on the wire both ways.
+ */
+export type SettingUnit = "days" | "minutes" | "seconds" | "dollars" | "bytes" | "count" | "switch" | "text" | "choice" | "url";
+
+/** A setting's name and unit, as `admin.settings.list` and `admin.setting.effective` carry them; absent from a plane from before them. */
+export interface SettingNaming {
+  /** The reader's name for it, which heads its row: "Erase a session after". */
+  label?: string | null;
+  unit?: SettingUnit | string | null;
+  /** A `choice`'s values with the words each is picked by, in the order offered. */
+  choices?: Array<{ value: string; label: string }> | null;
+}
+
+export interface PlatformSetting extends SettingNaming {
   key: string;
   /** Absent for a secret: the plane says `set` and nothing more. */
   value?: unknown;

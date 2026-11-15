@@ -17,6 +17,7 @@ import { show, useConsole, useLoad } from "../console";
 import { AuditNote, Empty, Field, Loaded, Preview, Region, Status, changed } from "./bits";
 import type { DiffLine, FieldProps } from "./bits";
 import { PermissionRules } from "./PermissionRules";
+import { UnitControl, changesInUnit, fromDraft, inUnit, labelled, lineInUnit, nameOf, toDraft, unitHint, unitOf } from "./settingUnits";
 
 const GROUP = "client_defaults";
 const ENFORCED = "client_enforced";
@@ -24,17 +25,17 @@ const ENFORCED = "client_enforced";
 export function Organisation(): JSX.Element {
   const { admin, role, notify } = useConsole();
   const [load, reload] = useLoad(() => admin.settings(), [admin]);
-  const [done, setDone] = useState<{ action: string; answer: SettingChanged } | null>(null);
+  const [done, setDone] = useState<{ action: string; answer: SettingChanged; setting?: PlatformSetting } | null>(null);
   const editable = role === "platform_admin";
-  const applied = (action: string) => (answer: SettingChanged) => {
-    notify(`${answer.key} is ${action === "setting.reset" ? "reset" : "applied"}. ${answer.effect}`);
-    setDone({ action, answer });
+  const applied = (action: string) => (answer: SettingChanged, setting?: PlatformSetting) => {
+    notify(`${setting ? nameOf(setting) : answer.key} is ${action === "setting.reset" ? "reset" : "applied"}. ${answer.effect}`);
+    setDone({ action, answer, ...(setting ? { setting } : {}) });
     reload();
   };
 
   return (
     <div className="page">
-      {done && <AuditNote action={done.action} subject={done.answer.key} detail={done.answer.changes} />}
+      {done && <AuditNote action={done.action} subject={done.answer.key} detail={done.setting && !done.setting.secret ? changesInUnit(done.setting, done.answer.changes) : done.answer.changes} />}
       <Loaded load={load} what="the organisation's document" retry={reload}>
         {(list) => {
           const group = list.groups.find((g) => g.key === GROUP);
@@ -81,34 +82,39 @@ function DefaultRow({
 }: {
   setting: PlatformSetting;
   editable: boolean;
-  onPut: (answer: SettingChanged) => void;
-  onReset: (answer: SettingChanged) => void;
+  onPut: (answer: SettingChanged, setting: PlatformSetting) => void;
+  onReset: (answer: SettingChanged, setting: PlatformSetting) => void;
 }): JSX.Element {
   const { admin } = useConsole();
   const [draft, setDraft] = useState<string | null>(null);
   const [previewing, setPreviewing] = useState<"put" | "reset" | null>(null);
   const value = setting.value ?? null;
+  const unit = unitOf(setting);
+  const asked = draft === null || setting.secret ? null : fromDraft(unit, draft);
+  const invalid = asked !== null && "error" in asked ? asked.error : null;
+  const sent = asked !== null && "value" in asked ? asked.value : (draft ?? "");
   // A secret is previewed as set or unset, never as what was typed.
   const shown = setting.secret ? (setting.set ? "set" : null) : value;
   const lines: DiffLine[] =
     previewing === "reset"
       ? changed({ [setting.key]: shown }, { [setting.key]: setting.secret ? null : (setting.deployed ?? null) })
       : draft !== null
-        ? changed({ [setting.key]: shown }, { [setting.key]: setting.secret ? (draft ? "set (new)" : null) : draft })
+        ? changed({ [setting.key]: shown }, { [setting.key]: setting.secret ? (draft ? "set (new)" : null) : sent })
         : [];
 
   return (
     <div className="row" aria-label={setting.key}>
       <div className="what">
+        {labelled(setting) && <span className="name">{nameOf(setting)}</span>}
         <code className="key">{setting.key}</code>
         <p>{setting.summary}</p>
       </div>
       {/* A secret's value never comes back from the plane: only whether one is set. */}
-      <div className="value mono">{setting.secret ? (setting.set ? "set" : "unset") : show(value)}</div>
+      <div className="value mono">{setting.secret ? (setting.set ? "set" : "unset") : inUnit(unit, value)}</div>
       <Source setting={setting} />
       {editable && draft === null && previewing === null && (
         <div className="row-actions">
-          <button type="button" onClick={() => setDraft(setting.secret ? "" : String(value ?? ""))}>
+          <button type="button" onClick={() => setDraft(setting.secret ? "" : toDraft(unit, value))}>
             Change
           </button>
           {setting.source === "stored" && (
@@ -123,27 +129,18 @@ function DefaultRow({
           className="edit wide"
           onSubmit={(e) => {
             e.preventDefault();
-            setPreviewing("put");
+            if (!invalid) setPreviewing("put");
           }}
         >
-          <Field label={<code>{setting.key}</code>}>
-            {(p) =>
-              setting.values ? (
-                <select {...p} value={draft} onChange={(e) => setDraft(e.target.value)}>
-                  {!setting.values.includes(draft) && <option value={draft}>{draft || "unset"}</option>}
-                  {setting.values.map((v) => (
-                    <option key={v} value={v}>
-                      {v}
-                    </option>
-                  ))}
-                </select>
-              ) : (
-                <input {...p} type={setting.secret ? "password" : "text"} value={draft} onChange={(e) => setDraft(e.target.value)} spellCheck={false} autoComplete="off" />
-              )
-            }
+          <Field
+            label={labelled(setting) ? nameOf(setting) : <code>{setting.key}</code>}
+            hint={labelled(setting) ? [unitHint(unit), setting.consequence].filter(Boolean).join(" ") : undefined}
+            error={invalid}
+          >
+            {(p) => <UnitControl unit={unit} value={draft} onChange={setDraft} control={p} secret={setting.secret === true} />}
           </Field>
           <div className="actions">
-            <button type="submit" className="primary" disabled={lines.length === 0}>
+            <button type="submit" className="primary" disabled={lines.length === 0 || invalid !== null}>
               Preview
             </button>
             <button type="button" onClick={() => setDraft(null)}>
@@ -156,7 +153,7 @@ function DefaultRow({
         <div className="wide">
           <Preview
             title={`setting/${setting.key}`}
-            lines={lines}
+            lines={lines.map((l) => lineInUnit(setting, l))}
             effects={[
               ...(previewing === "reset" ? ["It goes back to what the plane was deployed with."] : []),
               setting.consequence ?? "",
@@ -167,11 +164,11 @@ function DefaultRow({
             onCancel={() => setPreviewing(null)}
             cancel={previewing === "put" ? "Back to editing" : "Cancel"}
             onConfirm={async () => {
-              const answer = previewing === "reset" ? await admin.resetSetting(setting.key) : await admin.putSetting(setting.key, draft ?? "");
+              const answer = previewing === "reset" ? await admin.resetSetting(setting.key) : await admin.putSetting(setting.key, sent);
               const was = previewing;
               setDraft(null);
               setPreviewing(null);
-              (was === "reset" ? onReset : onPut)(answer);
+              (was === "reset" ? onReset : onPut)(answer, setting);
             }}
           />
         </div>

@@ -107,6 +107,9 @@ defmodule Troupe.Plane.Settings.Ladder do
       ceiling: ceiling(spec, opinions),
       opinions: opinions
     }
+    # Named and read as the settings list names it, so a row of the ladder says the same
+    # words and the same unit as the setting it is about.
+    |> Map.merge(Settings.naming(key))
   end
 
   def effective(_key, _team), do: nil
