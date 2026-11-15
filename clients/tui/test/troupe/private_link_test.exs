@@ -182,6 +182,7 @@ defmodule Troupe.PrivateLinkTest do
       assert daemon_token()
 
       assert logout(url) == 0
+
       # The daemon lets go of the token after it has answered; wait for it, as the link is waited for.
       eventually(fn -> daemon_token() == nil end)
       assert Enum.any?(said(), &(&1 =~ "the daemon on this machine no longer holds"))
