@@ -11,6 +11,7 @@ defmodule Troupe.Plane.ControlTest do
   use Troupe.Plane.DataCase, async: false
 
   alias Troupe.Plane.{
+    Artifacts,
     Audit,
     Bundles,
     Drain,
@@ -396,6 +397,65 @@ defmodule Troupe.Plane.ControlTest do
 
       assert {:error, %{"message" => "forbidden"}} =
                call(mine, "session.artifact.publish", Map.merge(page, %{"session_id" => "s-ada-a", "visibility" => "profile:lab"}))
+    end
+
+    # Issue #920: a person attaching one of their artifacts to a message in a pod's session.
+    # The files go down to the pod for the session's workspace, read as the person who asked,
+    # and only for someone who steers the session.
+    test "session.artifact.files hands a pod a version's files for a person who steers the session",
+         %{port: port} do
+      mine = enrolled(port, "dev-token", "troupe-w-dev-0")
+      answer_index(mine, [])
+      [here] = Fleet.list_workers("dev")
+
+      team = team_with_grant("engineering", "dev", name: "engineering")
+      ada = person("ada@example.test", ["engineering"])
+      _bo = person("bo@example.test", ["engineering"])
+      {:ok, _} = Sessions.create(%{id: "s-ada-f", owner_subject: ada.subject, profile: "dev", team_id: team.id})
+      {:ok, _} = Sessions.place("s-ada-f", here)
+
+      {:ok, published} =
+        Artifacts.publish(ada, %{
+          "title" => "Notes",
+          "kind" => "markdown",
+          "visibility" => "private",
+          "files" => [
+            %{"path" => "notes.md", "bytes" => Base.encode64("# Notes\n")},
+            %{"path" => "data.csv", "bytes" => Base.encode64("a,b\n1,2\n")}
+          ]
+        })
+
+      ask = %{"session_id" => "s-ada-f", "subject" => ada.subject, "artifact" => published["id"]}
+
+      assert {:ok, answer} = call(mine, "session.artifact.files", ask)
+      assert answer["title"] == "Notes"
+      assert answer["version"] == 1
+
+      assert Enum.sort(Enum.map(answer["files"], &{&1["path"], Base.decode64!(&1["bytes"])})) ==
+               [{"data.csv", "a,b\n1,2\n"}, {"notes.md", "# Notes\n"}]
+
+      assert {:ok, %{"files" => [%{"path" => "notes.md"}]}} =
+               call(mine, "session.artifact.files", Map.put(ask, "path", "notes.md"))
+
+      [row | _] = Enum.filter(Audit.list(), &(&1.action == "artifact.attach"))
+      assert row.actor == ada.subject
+      assert row.detail["session_id"] == "s-ada-f"
+
+      # Someone who does not steer the session, someone who is nobody, an artifact nobody
+      # may see, and a session another pod holds.
+      assert {:error, %{"message" => "forbidden", "data" => %{"reason" => reason}}} =
+               call(mine, "session.artifact.files", Map.put(ask, "subject", "bo@example.test"))
+
+      assert reason =~ "does not steer"
+
+      assert {:error, %{"message" => "forbidden"}} =
+               call(mine, "session.artifact.files", Map.put(ask, "subject", "nobody@example.test"))
+
+      assert {:error, %{"message" => "not_found"}} =
+               call(mine, "session.artifact.files", Map.put(ask, "artifact", Ecto.UUID.generate()))
+
+      assert {:error, %{"message" => "not_found"}} =
+               call(mine, "session.artifact.files", Map.put(ask, "session_id", "s-elsewhere"))
     end
   end
 

@@ -10,7 +10,9 @@ defmodule Troupe.Plane.Control.Connection do
   its activation, and the one thing that comes back is an entry an agent was asked to keep
   in its person's own memory (`session.memory.put`), which is that person's from then on.
   Nor is an artifact an agent publishes for its person (`session.artifact.publish`): the
-  page or file they asked to have published, and nothing else of the session's.
+  page or file they asked to have published, and nothing else of the session's. The other
+  way, an artifact a person attaches to a message goes down (`session.artifact.files`), as
+  memory does: what they chose to put into their session.
   As a turn begins a pod says which versions its session holds (`session.memory.read`):
   each document's scope, name, version and hash, never its text.
 
@@ -794,6 +796,53 @@ defmodule Troupe.Plane.Control.Connection do
     end
   end
 
+  # A person attaching one of their artifacts to a message in a session on this pod
+  # (`fs.upload` with `artifact`): the files go down to the pod, which writes them into the
+  # session's workspace, so they never pass through the person's client. The pod names who
+  # asked; the plane reads the artifact as them, and only for a person who may steer the
+  # session, so a pod can fetch nothing for someone who has not joined one of its sessions.
+  # What crosses is what that person chose to put into the session, as memory goes down
+  # with an activation, and nothing of the session's comes back.
+  defp dispatch("session.artifact.files", params, state) do
+    with %Session{} = session <- session_of(params["session_id"], state.worker),
+         :ok <- at_epoch(session, params["epoch"]),
+         {:person, %User{active: true} = person} <- {:person, person_of(params["subject"])},
+         {:steers, true} <- {:steers, Sessions.role_for(person, session) in [:admin, :control]},
+         {:ok, id} <- artifact_id(params["artifact"]) do
+      answer =
+        Artifacts.files(id, person, Map.take(params, ~w(version path)),
+          platform_admin?: Admin.actor_for(person).role == :platform_admin
+        )
+
+      case answer do
+        {:ok, files} ->
+          {:ok, _event} =
+            Audit.record(person.subject, "artifact.attach", id, %{
+              "session_id" => session.id,
+              "version" => files["version"],
+              "files" => length(files["files"])
+            })
+
+          {:ok, files, state}
+
+        {:error, %Error{} = error} ->
+          {:error, error, state}
+      end
+    else
+      {:person, _none} ->
+        {:error, Error.new(:forbidden, %{reason: "who asked is not an active person of this plane"}), state}
+
+      {:steers, false} ->
+        {:error, Error.new(:forbidden, %{reason: "who asked does not steer this session"}), state}
+
+      {:error, %Error{} = error} ->
+        {:error, error, state}
+
+      refused ->
+        pod_artifact_refusal(refused, params, state)
+    end
+  end
+
   # A session on this pod beginning a turn says which memory documents it holds, by scope,
   # name, version and hash and never their text. The plane keeps that as what the turn runs
   # under and, where the session is behind the versions in force, answers with them, for the
@@ -932,6 +981,12 @@ defmodule Troupe.Plane.Control.Connection do
   end
 
   defp session_of(_session_id, _worker), do: nil
+
+  defp person_of(subject) when is_binary(subject) and subject != "", do: Identity.get_user(subject)
+  defp person_of(_subject), do: nil
+
+  defp artifact_id(id) when is_binary(id) and id != "", do: {:ok, id}
+  defp artifact_id(_id), do: {:error, Error.new(:invalid_params, %{field: "artifact", reason: "an artifact's id"})}
 
   # Why a pod's artifact call for a session was refused before anything was looked at.
   defp pod_artifact_refusal(:stale_epoch, _params, state),

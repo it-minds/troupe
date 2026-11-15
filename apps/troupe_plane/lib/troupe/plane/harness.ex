@@ -205,6 +205,9 @@ defmodule Troupe.Plane.Harness do
     "artifact.rollback" => :control,
     "artifact.pin" => :control,
     "artifact.read" => :observe,
+    # Every file of a version, in base64, for a laptop's daemon to put into a session's
+    # workspace (`fs.upload` with `artifact`): reading, as `artifact.read` is.
+    "artifact.files" => :observe,
     "artifact.preview" => :control,
     "artifact.upload.begin" => :control,
     "artifact.share" => :control,
@@ -546,6 +549,9 @@ defmodule Troupe.Plane.Harness do
 
   defp handle("artifact.read", %{"id" => id} = params, %{user: user} = context),
     do: Artifacts.read(id, user, params, platform_admin?: admin?(context))
+
+  defp handle("artifact.files", %{"id" => id} = params, %{user: user} = context),
+    do: Artifacts.files(id, user, params, platform_admin?: admin?(context))
 
   defp handle("artifact.preview", %{"id" => id} = params, %{user: user} = context),
     do: Artifacts.preview(id, user, params, platform_admin?: admin?(context))

@@ -3,10 +3,16 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": true,
   "properties": {
+    "artifact": {
+      "type": "string"
+    },
     "command_id": {
       "type": "string"
     },
     "content": {
+      "type": "string"
+    },
+    "file": {
       "type": "string"
     },
     "path": {
@@ -14,11 +20,12 @@
     },
     "session_id": {
       "type": "string"
+    },
+    "version": {
+      "type": "integer"
     }
   },
   "required": [
-    "content",
-    "path",
     "session_id"
   ],
   "title": "fs.upload",
