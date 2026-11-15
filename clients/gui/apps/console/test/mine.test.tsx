@@ -89,10 +89,11 @@ describe("Mine", () => {
     const sessions = () => document.querySelector<HTMLElement>('[aria-label="Your sessions"]');
     const row = () => [...(sessions()?.querySelectorAll("tbody tr") ?? [])].find((r) => r.textContent?.includes("Tidy the icons")) ?? null;
     await waitFor(() => row(), "carol's session");
-    await sees("Open it in the desktop app or the terminal.", row);
-    // A member has no Sessions page, so nothing links there.
+    await sees("Open in the app, or in the terminal.", row);
+    // A member has no Sessions page, so nothing links there; the one link opens the app
+    // at this session (#959).
     // at once: the row was waited for above, and drawn whole
-    expect(row()!.querySelector("a")).toBeNull();
+    expect([...row()!.querySelectorAll("a")].map((a) => a.getAttribute("href"))).toEqual([`troupe://session/s-carol-1?plane=${encodeURIComponent(fake.plane.baseUrl)}`]);
 
     const memory = () => document.querySelector<HTMLElement>('[aria-label="Your memory"]');
     await sees("Your organisation's and your teams' are read-only here", memory);
@@ -114,11 +115,12 @@ describe("Mine", () => {
     const sessions = () => document.querySelector<HTMLElement>('[aria-label="Your sessions"]');
     const row = (title: string) => [...(sessions()?.querySelectorAll("tbody tr") ?? [])].find((r) => r.textContent?.includes(title)) ?? null;
     await waitFor(() => row("Icons, again")?.querySelector("a"), "the link to Sessions");
-    expect([...row("Icons, again")!.querySelectorAll("a")].map((a) => a.getAttribute("href"))).toEqual(["#/sessions/s-4b81d003", "#/sessions/s-4b81d003"]);
-    await sees("Open it in the desktop app or the terminal.", () => row("Icons, again"));
+    const app = (id: string) => `troupe://session/${id}?plane=${encodeURIComponent(fake.plane.baseUrl)}`;
+    expect([...row("Icons, again")!.querySelectorAll("a")].map((a) => a.getAttribute("href"))).toEqual(["#/sessions/s-4b81d003", app("s-4b81d003"), "#/sessions/s-4b81d003"]);
+    await sees("Open in the app, or in the terminal.", () => row("Icons, again"));
     // at once: drawn in the same answer as the row waited for above
-    expect(row("Not on Sessions")!.querySelector("a")).toBeNull();
-    await sees("Open it in the desktop app or the terminal.", () => row("Not on Sessions"));
+    expect([...row("Not on Sessions")!.querySelectorAll("a")].map((a) => a.getAttribute("href"))).toEqual([app("s-bob-elsewhere")]);
+    await sees("Open in the app, or in the terminal.", () => row("Not on Sessions"));
   });
 
   it("lets a person change their own memory, previewed line by line and saved over the version they edited", async () => {

@@ -95,6 +95,53 @@ defmodule Troupe.Plane.ClientVersions do
     end
   end
 
+  # The public release page, where releases are published when this plane names no
+  # other place: one release's page, or the latest.
+  @release_pages "https://github.com/it-minds/troupe/releases"
+
+  # The installer each platform's person is offered, as a release names it: the desktop
+  # app's number without its pre-release, since an MSI version must be numeric.
+  @installers %{
+    "windows" => "_x64-setup.exe",
+    "macos" => "_universal.dmg",
+    "linux" => "_amd64.AppImage"
+  }
+
+  @doc """
+  Where a web page sends a person to install the desktop app: the version this plane
+  recommends for it, the release's page, and its installer for each of the three
+  platforms, from where this plane says releases are (`release_url/0`) or else GitHub's.
+  With no recommended version, the files are `nil` and the page is the latest release's.
+
+  For `/.well-known/troupe`, which anybody may read: the recommended version is what a
+  page offers to install, and says nothing of which versions are refused.
+  """
+  @spec downloads() :: map()
+  def downloads do
+    case policy("desktop").recommended do
+      version when is_binary(version) and version != "" ->
+        file = "Troupe_" <> (version |> String.split(["-", "+"], parts: 2) |> hd())
+        base = (release_url() || @release_pages <> "/download") <> "/v#{version}/"
+
+        Map.merge(
+          %{
+            "version" => version,
+            "page" => if(release_url(), do: base, else: @release_pages <> "/tag/v#{version}")
+          },
+          Map.new(@installers, fn {platform, suffix} -> {platform, base <> file <> suffix} end)
+        )
+
+      _none ->
+        %{
+          "version" => nil,
+          "page" => @release_pages <> "/latest",
+          "windows" => nil,
+          "macos" => nil,
+          "linux" => nil
+        }
+    end
+  end
+
   @doc """
   Change one component's policy.
 

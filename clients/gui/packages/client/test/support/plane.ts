@@ -124,6 +124,11 @@ export interface PlaneOptions {
   breakglassLifetime?: number;
   /** The plane's own build version, which discovery says as `plane.build.version`. None is a plane whose discovery names no build. */
   version?: string;
+  /**
+   * What discovery says a web page offers to install, as `plane.downloads` (#959). None is
+   * a plane that recommends no desktop version: the latest release's page and no files.
+   */
+  downloads?: { version: string | null; page: string; windows: string | null; macos: string | null; linux: string | null };
 }
 
 /** A file of an artifact's version, with what it holds, which no answer carries. */
@@ -1065,7 +1070,15 @@ export class FakePlane {
         device_authorization_endpoint: this.opts.idp.deviceAuthorizationEndpoint,
         token_endpoint: this.opts.idp.tokenEndpoint,
         scopes: ["openid", "profile", "email", "offline_access", "groups"],
-        plane: { name: "fake", rpc: "/rpc", jwks: "/.well-known/jwks.json", protocol_version: "1", ...(this.opts.version ? { build: { version: this.opts.version } } : {}) },
+        plane: {
+          name: "fake",
+          rpc: "/rpc",
+          jwks: "/.well-known/jwks.json",
+          protocol_version: "1",
+          console: null,
+          downloads: this.opts.downloads ?? { version: null, page: "https://github.com/it-minds/troupe/releases/latest", windows: null, macos: null, linux: null },
+          ...(this.opts.version ? { build: { version: this.opts.version } } : {}),
+        },
         breakglass: typeof this.opts.breakglass === "string",
       });
     }

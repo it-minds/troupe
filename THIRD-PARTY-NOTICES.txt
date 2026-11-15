@@ -225,14 +225,14 @@ WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ========================================================================================
 Hex packages: decimal, hpax, mint, nimble_options, telemetry
 npm packages: @tauri-apps/api
-Rust crates: allocator-api2, anyhow, arboard, constant_time_eq, dtoa, dyn-clone,
-  erased-serde, fdeflate, field-offset, finl_unicode, half, image, image-webp,
-  inventory, itoa, libc, miniz_oxide, num-conv, num_enum, osakit, pin-project-lite,
-  portable-atomic, portable-atomic-util, proc-macro2, quote, rand_xoshiro,
-  raw-window-handle, ref-cast, rustc-hash, ryu, semver, serde, serde-untagged,
-  serde_core, serde_json, serde_urlencoded, simdutf8, syn, sync_wrapper, tauri,
-  tauri-plugin-clipboard-manager, tauri-plugin-dialog, tauri-plugin-fs,
-  tauri-plugin-http, tauri-plugin-notification, tauri-plugin-opener,
+Rust crates: allocator-api2, anyhow, arboard, constant_time_eq, dlv-list, dtoa,
+  dyn-clone, erased-serde, fdeflate, field-offset, finl_unicode, half, image,
+  image-webp, inventory, itoa, libc, miniz_oxide, num-conv, num_enum, osakit,
+  pin-project-lite, portable-atomic, portable-atomic-util, proc-macro2, quote,
+  rand_xoshiro, raw-window-handle, ref-cast, rustc-hash, ryu, semver, serde,
+  serde-untagged, serde_core, serde_json, serde_urlencoded, simdutf8, syn, sync_wrapper,
+  tauri, tauri-plugin-clipboard-manager, tauri-plugin-deep-link, tauri-plugin-dialog,
+  tauri-plugin-fs, tauri-plugin-http, tauri-plugin-notification, tauri-plugin-opener,
   tauri-plugin-single-instance, tauri-plugin-updater, tauri-plugin-window-state,
   tauri-runtime, tauri-runtime-wry, tauri-utils, tauri-winrt-notification, thiserror,
   time, time-core, typed-path, typeid, unicode-ident, utf8parse, vte, wasm-streams
@@ -465,7 +465,7 @@ Hex packages: owl, pluggable
 Rust crates: approx, arrayvec, async-channel, async-executor, async-io, async-lock,
   async-process, async-signal, async-task, atomic, atomic-waker, base64, bit-set,
   bit-vec, bitflags, block-buffer, blocking, bs58, bytemuck, camino, cfg-if, chacha20,
-  concurrent-queue, core-foundation, core-foundation-sys, core-graphics,
+  concurrent-queue, const-random, core-foundation, core-foundation-sys, core-graphics,
   core-graphics-types, core_detect, cpufeatures, critical-section, crossbeam-channel,
   crossbeam-deque, crossbeam-epoch, crossbeam-utils, crypto-common, data-url,
   dbus-secret-service, defmt, digest, downcast-rs, either, embed_plist, encoding_rs,
@@ -1157,10 +1157,10 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
 
 ========================================================================================
 npm packages: @tauri-apps/api
-Rust crates: tauri, tauri-plugin-clipboard-manager, tauri-plugin-dialog,
-  tauri-plugin-fs, tauri-plugin-http, tauri-plugin-notification, tauri-plugin-opener,
-  tauri-plugin-updater, tauri-plugin-window-state, tauri-runtime, tauri-runtime-wry,
-  tauri-utils, tauri-winrt-notification
+Rust crates: tauri, tauri-plugin-clipboard-manager, tauri-plugin-deep-link,
+  tauri-plugin-dialog, tauri-plugin-fs, tauri-plugin-http, tauri-plugin-notification,
+  tauri-plugin-opener, tauri-plugin-updater, tauri-plugin-window-state, tauri-runtime,
+  tauri-runtime-wry, tauri-utils, tauri-winrt-notification
 ----------------------------------------------------------------------------------------
 
 MIT License
@@ -1213,9 +1213,10 @@ Creator: Person: Daniel Thompson-Yvetot
 ========================================================================================
 npm packages: @tauri-apps/plugin-clipboard-manager, @tauri-apps/plugin-dialog,
   @tauri-apps/plugin-http, @tauri-apps/plugin-notification, @tauri-apps/plugin-opener
-Rust crates: tauri-plugin-clipboard-manager, tauri-plugin-dialog, tauri-plugin-fs,
-  tauri-plugin-http, tauri-plugin-notification, tauri-plugin-opener,
-  tauri-plugin-single-instance, tauri-plugin-updater, tauri-plugin-window-state
+Rust crates: tauri-plugin-clipboard-manager, tauri-plugin-deep-link,
+  tauri-plugin-dialog, tauri-plugin-fs, tauri-plugin-http, tauri-plugin-notification,
+  tauri-plugin-opener, tauri-plugin-single-instance, tauri-plugin-updater,
+  tauri-plugin-window-state
 ----------------------------------------------------------------------------------------
 
 SPDXVersion: SPDX-2.1
@@ -3158,6 +3159,36 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+========================================================================================
+Rust crates: const-random, hashbrown
+----------------------------------------------------------------------------------------
+
+Copyright (c) 2016 Amanieu d'Antras
+
+Permission is hereby granted, free of charge, to any
+person obtaining a copy of this software and associated
+documentation files (the "Software"), to deal in the
+Software without restriction, including without
+limitation the rights to use, copy, modify, merge,
+publish, distribute, sublicense, and/or sell copies of
+the Software, and to permit persons to whom the Software
+is furnished to do so, subject to the following
+conditions:
+
+The above copyright notice and this permission notice
+shall be included in all copies or substantial portions
+of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF
+ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED
+TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
+PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT
+SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
+IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+DEALINGS IN THE SOFTWARE.
 
 ========================================================================================
 Rust crates: constant_time_eq, dunce, fast-srgb8
@@ -5285,6 +5316,32 @@ Permission is granted to anyone to use this software for any purpose, including 
      3. This notice may not be removed or altered from any source distribution.
 
 ========================================================================================
+Rust crates: dlv-list
+----------------------------------------------------------------------------------------
+
+MIT License
+
+Copyright (c) 2022 Scott Godwin
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+========================================================================================
 Rust crates: dom_query
 ----------------------------------------------------------------------------------------
 
@@ -6629,36 +6686,6 @@ Rust crates: h2
 ----------------------------------------------------------------------------------------
 
 Copyright (c) 2017 h2 authors
-
-Permission is hereby granted, free of charge, to any
-person obtaining a copy of this software and associated
-documentation files (the "Software"), to deal in the
-Software without restriction, including without
-limitation the rights to use, copy, modify, merge,
-publish, distribute, sublicense, and/or sell copies of
-the Software, and to permit persons to whom the Software
-is furnished to do so, subject to the following
-conditions:
-
-The above copyright notice and this permission notice
-shall be included in all copies or substantial portions
-of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF
-ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED
-TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
-PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT
-SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
-CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
-OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
-IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-DEALINGS IN THE SOFTWARE.
-
-========================================================================================
-Rust crates: hashbrown
-----------------------------------------------------------------------------------------
-
-Copyright (c) 2016 Amanieu d'Antras
 
 Permission is hereby granted, free of charge, to any
 person obtaining a copy of this software and associated
@@ -9260,6 +9287,32 @@ Exhibit B - "Incompatible With Secondary Licenses" Notice
   defined by the Mozilla Public License, v. 2.0.
 
 ========================================================================================
+Rust crates: ordered-multimap
+----------------------------------------------------------------------------------------
+
+MIT License
+
+Copyright (c) 2018 sgodwincs
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+========================================================================================
 Rust crates: os_pipe
 ----------------------------------------------------------------------------------------
 
@@ -10786,6 +10839,20 @@ Rust crates: rstest
    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
    See the License for the specific language governing permissions and
    limitations under the License.
+
+========================================================================================
+Rust crates: rust-ini
+----------------------------------------------------------------------------------------
+
+The MIT License (MIT)
+
+Copyright (c) 2014 Y. T. CHUNG
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 ========================================================================================
 Rust crates: rustix

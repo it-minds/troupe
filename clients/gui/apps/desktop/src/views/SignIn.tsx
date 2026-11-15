@@ -21,7 +21,7 @@
 
 import { useEffect, useState } from "react";
 import type { JSX } from "react";
-import { AuthSession, PlaneUnreachableError } from "@troupe/client";
+import { AuthSession, PlaneUnreachableError, planeAddress } from "@troupe/client";
 import type { DeviceAuthorization, Discovery } from "@troupe/client";
 import { copyText } from "../clipboard";
 import { throughTheGate } from "../mode";
@@ -56,11 +56,21 @@ const SECRETS: Record<string, string> = {
 };
 
 export function SignIn({
+  linkFor = null,
+  note = null,
   signInNow = false,
   onSignedIn,
   onLocalOnly,
   onOffline,
 }: {
+  /**
+   * A `troupe://` link named this plane: the field is filled with it and the sentence asks,
+   * and nothing is sent to it until the person presses Sign in. A sign-in kept for another
+   * plane is not restored meanwhile, since the person asked for this one.
+   */
+  linkFor?: { plane: string; sentence: string } | null;
+  /** A link that was not followed, said in a line. */
+  note?: string | null;
   /**
    * The first run has just named the plane and the person pressed "Finish and sign in":
    * sign in to the address it recorded rather than ask for it again.
@@ -72,7 +82,7 @@ export function SignIn({
   /** The plane did not answer: work on this computer until it does. */
   onOffline: () => void;
 }): JSX.Element {
-  const [planeUrl, setPlaneUrl] = useState(() => prefs.get("planeUrl", likelyPlaneUrl()));
+  const [planeUrl, setPlaneUrl] = useState(() => linkFor?.plane ?? prefs.get("planeUrl", likelyPlaneUrl()));
   const [device, setDevice] = useState<DeviceAuthorization | null>(null);
   const [discovery, setDiscovery] = useState<Discovery | null>(null);
   const [status, setStatus] = useState("");
@@ -91,7 +101,9 @@ export function SignIn({
     let live = true;
     const url = prefs.get("planeUrl", likelyPlaneUrl());
     const returning = AuthSession.returning;
-    if (!url) {
+    // A link's plane is asked about first; a sign-in kept for that same plane is restored,
+    // since the person signed in there before, and one kept for another is left alone.
+    if (!url || (linkFor && !returning && !samePlane(url, linkFor.plane))) {
       setRestoring(false);
       return;
     }
@@ -109,7 +121,7 @@ export function SignIn({
         if (!live) return;
         if (signedIn) return onSignedIn(signedIn);
         setRestoring(false);
-        if (signInNow) void signIn(url);
+        if (signInNow && !linkFor) void signIn(url);
       })
       .catch((e: unknown) => {
         if (!live) return;
@@ -194,6 +206,17 @@ export function SignIn({
         <Wordmark size={44} />
         <p>Sign in to see your team's sessions, and answer what is waiting for you.</p>
       </header>
+
+      {linkFor && (
+        <section className="banner ready" role="status" aria-label="A link">
+          <p>{linkFor.sentence}</p>
+        </section>
+      )}
+      {note && (
+        <section className="banner offline" role="status">
+          <p>{note}</p>
+        </section>
+      )}
 
       <form
         onSubmit={(e) => {
@@ -325,6 +348,10 @@ function SignInError({ message, onRetry }: { message: string; onRetry: (() => vo
 function describe(e: unknown): string {
   if (e instanceof PlaneUnreachableError) return e.message;
   return e instanceof Error ? e.message : String(e);
+}
+
+function samePlane(a: string, b: string): boolean {
+  return (planeAddress(a) ?? a) === (planeAddress(b) ?? b);
 }
 
 function hostOf(url: string): string {

@@ -13,7 +13,7 @@ defmodule Troupe.Plane.WebTest do
   use Troupe.Plane.DataCase, async: false
 
   alias Troupe.Plane.Build
-  alias Troupe.Plane.{Bundles, Fleet, Identity, OIDC, Principals, Sessions, Tokens}
+  alias Troupe.Plane.{Bundles, ClientVersions, Fleet, Identity, OIDC, Principals, Sessions, Settings, Tokens}
   alias Troupe.Plane.Web.Router
   alias Troupe.Protocol.Token
 
@@ -343,6 +343,61 @@ defmodule Troupe.Plane.WebTest do
       Application.put_env(:troupe_plane, :app_url, "")
       assert {:ok, %{body: %{"plane" => plane}}} = get(context, "/.well-known/troupe")
       assert Map.fetch(plane, "app") == {:ok, nil}
+    end
+
+    # A web page's banner offers the desktop app from here (#959): the version this plane
+    # recommends and its three installers, from GitHub's release or where this plane says
+    # releases are; with none recommended, the latest release's page and no files.
+    test "says where the desktop app the plane recommends is downloaded from", context do
+      on_exit(fn -> Application.delete_env(:troupe_plane, :console_url) end)
+
+      assert {:ok, %{body: %{"plane" => plane}}} = get(context, "/.well-known/troupe")
+
+      assert plane["downloads"] == %{
+               "version" => nil,
+               "page" => "https://github.com/it-minds/troupe/releases/latest",
+               "windows" => nil,
+               "macos" => nil,
+               "linux" => nil
+             }
+
+      assert plane["console"] == context.url <> "/console"
+
+      {:ok, _} =
+        ClientVersions.put(
+          "desktop",
+          %{"recommended" => "0.39.0-beta"},
+          "root@example.test"
+        )
+
+      assert {:ok, %{body: %{"plane" => %{"downloads" => downloads}}}} =
+               get(context, "/.well-known/troupe")
+
+      github = "https://github.com/it-minds/troupe/releases"
+      assert downloads["version"] == "0.39.0-beta"
+      assert downloads["page"] == github <> "/tag/v0.39.0-beta"
+
+      assert downloads["windows"] ==
+               github <> "/download/v0.39.0-beta/Troupe_0.39.0_x64-setup.exe"
+
+      assert downloads["macos"] == github <> "/download/v0.39.0-beta/Troupe_0.39.0_universal.dmg"
+
+      assert downloads["linux"] ==
+               github <> "/download/v0.39.0-beta/Troupe_0.39.0_amd64.AppImage"
+
+      {:ok, _} = Settings.put("client_release_url", context.url <> "/downloads/", "root@example.test")
+
+      assert {:ok, %{body: %{"plane" => %{"downloads" => mirrored}}}} =
+               get(context, "/.well-known/troupe")
+
+      assert mirrored["page"] == context.url <> "/downloads/v0.39.0-beta/"
+
+      assert mirrored["windows"] ==
+               context.url <> "/downloads/v0.39.0-beta/Troupe_0.39.0_x64-setup.exe"
+
+      Application.put_env(:troupe_plane, :console_url, "")
+      assert {:ok, %{body: %{"plane" => plane}}} = get(context, "/.well-known/troupe")
+      assert Map.fetch(plane, "console") == {:ok, nil}
     end
 
     test "says which build is answering, so a deploy can be checked without a browser",

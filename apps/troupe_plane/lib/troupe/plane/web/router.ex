@@ -47,6 +47,7 @@ defmodule Troupe.Plane.Web.Router do
     Admin,
     Breakglass,
     Build,
+    ClientVersions,
     Harness,
     Identity,
     OIDC,
@@ -160,6 +161,12 @@ defmodule Troupe.Plane.Web.Router do
         # Where the web app is, for `troupe-daemon open`: an address it can open wherever
         # the app is mounted rather than the chart's usual place, and null without one.
         "app" => app_address(conn),
+        # Where the console is, as the same kind of address, for a link to one of its pages
+        # copied from the desktop app beside the app's own `troupe://` one; null without one.
+        "console" => console_address(conn),
+        # What a web page offers to install the desktop app from: the recommended version
+        # and its three installers, from where this plane says releases are.
+        "downloads" => ClientVersions.downloads(),
         "protocol_version" => Troupe.Protocol.version(),
         # The same facts the footer shows, so a deploy check and a browser cannot disagree.
         "build" => Build.to_json()
@@ -723,6 +730,13 @@ defmodule Troupe.Plane.Web.Router do
   # a browser resolves the index's door.
   defp app_address(conn) do
     case app_url() do
+      nil -> nil
+      url -> URI.to_string(URI.merge(base_url(conn) <> "/", url))
+    end
+  end
+
+  defp console_address(conn) do
+    case Index.console_url() do
       nil -> nil
       url -> URI.to_string(URI.merge(base_url(conn) <> "/", url))
     end

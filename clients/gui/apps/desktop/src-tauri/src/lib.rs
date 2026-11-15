@@ -26,6 +26,8 @@
 //                          granted nothing, never fetched into the app (src/artifact_window.rs)
 //   its window's place     the main window opens at the size and place it was closed at,
 //                          on a screen that still exists (src/window.rs)
+//   its own links          `troupe://` opens the app, or brings it forward, at a session,
+//                          an artifact or a plane's sign-in (src/deep_link.rs)
 //
 // Each one is reached through `TroupeShell` in `src/shell.ts`, which the shell installs
 // on `window.troupe` at startup. Nothing else in the bundle knows this process exists.
@@ -33,6 +35,7 @@
 mod agent_file;
 mod artifact_window;
 mod daemon;
+mod deep_link;
 mod file_save;
 mod notify;
 mod plane_word;
@@ -51,6 +54,14 @@ pub fn run() {
     #[cfg(all(desktop, not(debug_assertions)))]
     let builder = builder.plugin(tauri_plugin_single_instance::init(|app, args, _cwd| notify::second_launch(app, args)));
     builder
+        // After single-instance, as the plugin asks, so a second launch's link reaches
+        // this copy; driven from `deep_link.rs`, and the page is granted none of its commands.
+        .plugin(tauri_plugin_deep_link::init())
+        .manage(deep_link::Links::default())
+        .setup(|app| {
+            deep_link::setup(app);
+            Ok(())
+        })
         .plugin(tauri_plugin_http::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_clipboard_manager::init())
@@ -81,6 +92,7 @@ pub fn run() {
             update::update_check,
             update::update_download,
             update::update_install,
+            deep_link::deep_link_take,
             shell_platform
         ])
         .run(tauri::generate_context!())

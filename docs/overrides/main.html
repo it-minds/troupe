@@ -22,8 +22,85 @@
   {%- endif %}
 {% endblock %}
 
+{#- The desktop app, offered on every page, the landing page too (it extends this one):
+    open it where it is installed, install it where it is not (#959). Hidden until the
+    script below has decided it is wanted, so a page without scripts shows only the release
+    line. The same rules as the console's banner (`@troupe/client`'s deeplink.ts): no plane
+    here, so the link only brings the app forward, and Install is the release's page. -#}
 {% block announce %}
   These pages describe Troupe
   <a href="{{ config.repo_url }}/releases/tag/v{{ config.extra.troupe_version }}">{{ config.extra.troupe_version }}</a>
   and whatever has merged into <code>main</code> since.
+  <style>
+    .troupe-app { display: block; margin-top: .25em; }
+    .troupe-app[hidden], .troupe-app [hidden] { display: none; }
+    .troupe-app a { font-weight: 700; }
+    .troupe-app button { margin-left: .75em; font: inherit; text-decoration: underline; cursor: pointer; background: none; border: 0; color: inherit; padding: 0; }
+  </style>
+  <span class="troupe-app" data-version="{{ config.extra.troupe_version | e }}" hidden>
+    <span class="troupe-app-line">Troupe is better in the app.</span>
+    <a class="troupe-app-open" href="troupe://open">Open in the app</a> ·
+    <a class="troupe-app-install" href="{{ config.repo_url }}/releases/tag/v{{ config.extra.troupe_version }}">Install</a>
+    <button type="button" class="troupe-app-copy" hidden>Copy the link</button>
+    <button type="button" class="troupe-app-dismiss">Dismiss</button>
+  </span>
+{% endblock %}
+
+{% block scripts %}
+  {{ super() }}
+  <script>
+    (function () {
+      var box = document.querySelector(".troupe-app");
+      if (!box) return;
+      var version = box.getAttribute("data-version") || "any";
+      var KEY = "troupe.appBanner.dismissed";
+      var store = null;
+      try { store = window.localStorage; } catch (e) { store = null; }
+      var dismissed = false;
+      try { dismissed = !!store && store.getItem(KEY) === version; } catch (e) { dismissed = false; }
+      if (dismissed || window.__TAURI__ || window.__TAURI_INTERNALS__) return;
+      var ua = navigator.userAgent || "";
+      var phone = /Android|iPhone|iPad|iPod|Mobile/i.test(ua) || (/Macintosh/i.test(ua) && navigator.maxTouchPoints > 1);
+      var line = box.querySelector(".troupe-app-line");
+      var openIt = box.querySelector(".troupe-app-open");
+      var install = box.querySelector(".troupe-app-install");
+      var copy = box.querySelector(".troupe-app-copy");
+      if (phone) {
+        line.textContent = "Troupe's app is for a computer. Send yourself the link to this page to open it there.";
+        openIt.hidden = true;
+        install.hidden = true;
+        openIt.nextSibling.textContent = " ";
+        copy.hidden = false;
+        copy.addEventListener("click", function () {
+          if (navigator.clipboard) navigator.clipboard.writeText(location.href).then(function () { copy.textContent = "Copied"; });
+        });
+      }
+      // Whether the app opened is a guess: an app that opens takes the focus, which the page
+      // hears; a browser that knows no handler keeps it (or shows its own line), and Chrome's
+      // "Open Troupe?" question takes it too, so a person who cancels that is offered nothing.
+      openIt.addEventListener("click", function (e) {
+        e.preventDefault();
+        var settled = false;
+        var left = function () {
+          if (settled) return;
+          settled = true;
+          window.removeEventListener("blur", left);
+        };
+        window.addEventListener("blur", left);
+        document.addEventListener("visibilitychange", function () { if (document.visibilityState === "hidden") left(); });
+        setTimeout(function () {
+          if (settled) return;
+          left();
+          line.textContent = "The app did not open, so it may not be installed here.";
+          install.textContent = "Install it from the release page";
+        }, 1500);
+        location.href = openIt.getAttribute("href");
+      });
+      box.querySelector(".troupe-app-dismiss").addEventListener("click", function () {
+        try { if (store) store.setItem(KEY, version); } catch (e) { /* kept nowhere: shown next time */ }
+        box.hidden = true;
+      });
+      box.hidden = false;
+    })();
+  </script>
 {% endblock %}

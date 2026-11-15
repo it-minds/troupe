@@ -2,8 +2,8 @@
 // everything a screen needs besides its own calls, worked out once after the sign-in.
 
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
-import { AdminApi, TroupeRpcError, requiredRole } from "@troupe/client";
-import type { AuthSession, Discovery, Me, ProfileView } from "@troupe/client";
+import { AdminApi, TroupeRpcError, downloadsOf, requiredRole } from "@troupe/client";
+import type { AppDownloads, AuthSession, Discovery, Me, ProfileView } from "@troupe/client";
 import type { Role } from "./nav";
 
 export interface Signed {
@@ -14,7 +14,7 @@ export interface Signed {
   role: Role;
   /** The teams a team admin administers; every team, for a platform admin, is not listed here. */
   teams: string[];
-  plane: { url: string; name: string; version: string | null };
+  plane: { url: string; name: string; version: string | null; downloads: AppDownloads };
   signOut: () => void;
   /** A short line at the corner of the screen once something has been done. */
   notify: (text: string) => void;
@@ -127,6 +127,7 @@ export function planeOf(auth: AuthSession, discovery: Discovery | null): Signed[
     url: auth.planeUrl,
     name: typeof plane.name === "string" ? plane.name : new URL(auth.planeUrl).host,
     version: typeof plane.build?.version === "string" ? plane.build.version : null,
+    downloads: downloadsOf(discovery),
   };
 }
 
