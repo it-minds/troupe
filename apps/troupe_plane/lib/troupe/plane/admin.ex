@@ -1572,7 +1572,7 @@ defmodule Troupe.Plane.Admin do
 
   defp limit_refusal(:cache_eviction_days, asked, ceiling),
     do:
-      "The platform allows at most #{days_words(ceiling)} for a dormant session's cache; #{days_words(asked)} is more than that."
+      "The platform allows at most #{days_words(ceiling)} for a sleeping session's cache; #{days_words(asked)} is more than that."
 
   defp limit_refusal(:erase_after_days, asked, ceiling),
     do:
