@@ -10,7 +10,7 @@ import { App } from "../src/App";
 import { FakeDaemon } from "../../../packages/client/test/support/daemon.js";
 import { startHarness } from "../../../packages/client/test/support/harness.js";
 import type { Harness } from "../../../packages/client/test/support/harness.js";
-import { button, nav, render, sees, seesButton, startOnTheList, waitFor } from "./support";
+import { button, nav, render, sees, seesButton, showBackstage, startOnTheList, waitFor } from "./support";
 
 Element.prototype.scrollIntoView = function scrollIntoView() {};
 globalThis.WebSocket = NodeWebSocket as unknown as typeof WebSocket;
@@ -123,7 +123,7 @@ describe("profiles", () => {
     );
     session.click();
     const backstage = (): HTMLElement => document.querySelector<HTMLElement>(".backstage")!;
-    (await waitFor(() => document.querySelector(".backstage") && button("Settings", backstage()), "the Settings tab")).click();
+    (await showBackstage(), await waitFor(() => button("Settings", backstage()), "the Settings tab")).click();
     (await seesButton("What this profile can reach", backstage())).click();
     await waitFor(() => document.querySelector(".screen-head h1")?.textContent === "ux", "ux's page");
     await sees("the profile does not have it");

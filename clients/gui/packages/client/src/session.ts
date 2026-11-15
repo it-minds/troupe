@@ -22,6 +22,16 @@ import type {
 } from "./types.js";
 import { isDurable } from "./types.js";
 
+/**
+ * An answer to an approval. `allow_always` writes a lasting per-tool rule for the person;
+ * a client offers it only where the server named `ALLOW_ALWAYS` among its capabilities at
+ * `initialize` (troupe #920).
+ */
+export type ApprovalDecision = "allow" | "deny" | "allow_session" | "allow_always";
+
+/** The capability a server names at `initialize` when `approval.respond` takes `allow_always`. */
+export const ALLOW_ALWAYS = "approval_allow_always";
+
 export interface SessionViewHooks {
   /** Every event for this session, durable or ephemeral, in arrival order. */
   onEvent?: (e: TroupeEvent) => void;
@@ -264,7 +274,7 @@ export class SessionView {
    * for and whose it is; either may carry a word back with a denial. Each is a key beside
    * `decision`. A wrong one is refused with why, and the request waits on.
    */
-  async respondApproval(callId: string, decision: "allow" | "deny" | "allow_session", answer: GateAnswer = {}): Promise<void> {
+  async respondApproval(callId: string, decision: ApprovalDecision, answer: GateAnswer = {}): Promise<void> {
     await this.conn.call("approval.respond", {
       command_id: this.conn.nextCommandId(),
       session_id: this.sessionId,
@@ -416,6 +426,26 @@ export class SessionView {
 
   fsRead(path: string): Promise<FsFile> {
     return this.conn.call<FsFile>("fs.read", { session_id: this.sessionId, path });
+  }
+
+  /**
+   * `fs.upload`: a text file into the session's workspace, at `session:/<name>` as the
+   * terminal client's `/upload` puts it: the checkout of a session on a daemon, the
+   * session's own directory on a pod. Needs `control`.
+   */
+  fsUpload(path: string, content: string): Promise<{ path: string; bytes: number }> {
+    return this.conn.call<{ path: string; bytes: number }>("fs.upload", { command_id: this.conn.nextCommandId(), session_id: this.sessionId, path, content });
+  }
+
+  /** What the server this view speaks to said it can do at `initialize`; nothing while unbound. */
+  get capabilities(): Record<string, unknown> {
+    return (this.connection?.hello.capabilities ?? {}) as Record<string, unknown>;
+  }
+
+  /** The largest message the server takes, as it said at `initialize`; undefined where it said none. */
+  get maxMessageBytes(): number | undefined {
+    const max = this.connection?.hello.limits?.max_message_bytes;
+    return typeof max === "number" && max > 0 ? max : undefined;
   }
 
   /**

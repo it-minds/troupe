@@ -12,7 +12,7 @@ import { WebSocket as NodeWebSocket } from "ws";
 import { DaemonClient } from "@troupe/client";
 import { App } from "../src/App";
 import { FakeDaemon } from "../../../packages/client/test/support/daemon.js";
-import { button, nav, render, says, sees, type, waitFor } from "./support";
+import { button, nav, render, says, sees, showBackstage, type, waitFor } from "./support";
 
 Element.prototype.scrollIntoView = function scrollIntoView() {};
 globalThis.WebSocket = NodeWebSocket as unknown as typeof WebSocket;
@@ -222,6 +222,7 @@ describe("the watch box (D114)", () => {
   it("shows what watch.get says, and follows each watch_changed, as the terminal's /watch turns it on and off", async () => {
     daemon.seed(REPO);
     await openSession();
+    await showBackstage();
     const box = await waitFor(() => document.querySelector<HTMLInputElement>('input[aria-label="Act on notes I leave in the files"]:not([disabled])'), "the watch box, read");
     expect(box.checked).toBe(false);
     expect(daemon.calls.some((c) => c.method === "watch.get" && c.params["workspace"] === REPO)).toBe(true);

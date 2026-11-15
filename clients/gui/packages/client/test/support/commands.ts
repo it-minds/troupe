@@ -12,7 +12,7 @@ import type { CommandEntry } from "../../src/types.js";
 export const DEFINED: Record<string, string> = {
   review: "Review the change on this branch. Look hardest at $ARGUMENTS.",
   // Longer than a palette's detail shows (troupe Decision 814).
-  audit: ["Audit the dependencies, one at a time:", ...Array.from({ length: 11 }, (_, i) => `${i + 1}. check package ${i + 1}`)].join("\n"),
+  audit: ["Audit the dependencies, one at a time:", ...Array.from({ length: 39 }, (_, i) => `${i + 1}. check package ${i + 1}`)].join("\n"),
 };
 
 /** What `commands.run` sends for a defined command, or null for a name no file defines. */

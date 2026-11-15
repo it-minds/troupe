@@ -41,6 +41,13 @@ async function uploads(files: File[]): Promise<ArtifactUpload[]> {
   return Promise.all(files.map(async (f) => ({ path: f.name, bytes: base64Of(await f.arrayBuffer()), ...(f.type ? { content_type: f.type } : {}) })));
 }
 
+/** A reply's title: its first line, its Markdown marks left off, at most 80 characters. */
+export function replyTitle(text: string): string {
+  const first = text.split("\n").find((l) => l.trim() !== "") ?? "";
+  const plain = first.replace(/^#+\s*/, "").replace(/[*_`]/g, "").trim();
+  return plain.length > 80 ? `${plain.slice(0, 79)}…` : plain;
+}
+
 function sentence(e: unknown): string {
   const data = (e as { data?: { reason?: unknown } } | null)?.data;
   if (data && typeof data.reason === "string") return data.reason;
@@ -74,20 +81,23 @@ export function Publish({
   daemon,
   sessionId,
   target: chosenTarget,
+  reply,
   onClose,
 }: {
   daemon: DaemonClient;
   sessionId?: string | undefined;
   /** One of the person's own, chosen already: the gallery's "Publish a new version". */
   target?: string | undefined;
+  /** A reply's Markdown, from its Publish: the one file, a document titled by its first line. */
+  reply?: string | undefined;
   onClose: () => void;
 }): JSX.Element {
   const [list, setList] = useState<ArtifactList & { plane_url?: string } | null>(null);
   const [listError, setListError] = useState<string | null>(null);
   const [mode, setMode] = useState<"new" | "version">(chosenTarget ? "version" : "new");
   const [target, setTarget] = useState<string>(chosenTarget ?? "");
-  const [files, setFiles] = useState<File[]>([]);
-  const [title, setTitle] = useState("");
+  const [files, setFiles] = useState<File[]>(() => (reply ? [new File([reply], "reply.md", { type: "text/markdown" })] : []));
+  const [title, setTitle] = useState(() => (reply ? replyTitle(reply) : ""));
   const [visibility, setVisibility] = useState("private");
   // Whether one published for a team is the team's: on unless the person says otherwise.
   const [teamOwned, setTeamOwned] = useState(true);

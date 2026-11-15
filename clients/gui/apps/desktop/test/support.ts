@@ -181,6 +181,17 @@ export function seesButton(label: string, within: ParentNode = document): Promis
 }
 
 /**
+ * The session's backstage, shown as a person shows it (it starts hidden): Show backstage
+ * under the head's ⋯, once the session is drawn.
+ */
+export async function showBackstage(): Promise<HTMLElement> {
+  const shown = document.querySelector<HTMLElement>(".backstage");
+  if (shown) return shown;
+  (await seesButton("Show backstage")).click();
+  return waitFor(() => document.querySelector<HTMLElement>(".backstage"), "the backstage");
+}
+
+/**
  * Start where a person who chose the list starts, rather than on the launcher (Decision
  * 709). For the suites about the list and what opens from it; `launcher.test.tsx` is the
  * one about the first screen. Call it after `localStorage.clear()`.

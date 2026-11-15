@@ -27,6 +27,7 @@ import { storedLocalOnly } from "./mode";
 import { noticeEvent } from "./notify";
 import { adoptFragment, daemonHint, forgetDaemon, rememberDaemon, shell } from "./shell";
 import type {
+  ApprovalDecision,
   AttachStatus,
   AuthSession,
   DaemonEndpoint,
@@ -476,7 +477,7 @@ export interface SessionHandle {
   view: SessionView | null;
   send(text: string): Promise<void>;
   /** Answer an approval; a delegation's may carry an agent, the edited parts and a word back. */
-  respond(callId: string, decision: "allow" | "deny" | "allow_session", answer?: GateAnswer): Promise<void>;
+  respond(callId: string, decision: ApprovalDecision, answer?: GateAnswer): Promise<void>;
   /** Answer a question — the agent's, or the harness's about the budget. */
   answer(callId: string, text: string): Promise<void>;
   cancel(): Promise<void>;
@@ -720,7 +721,7 @@ export function useSessionView(
   }, [following]);
 
   // A delegation's answer carries more than its word (troupe Decision 850).
-  const respond = useCallback(async (callId: string, decision: "allow" | "deny" | "allow_session", answer: GateAnswer = {}) => {
+  const respond = useCallback(async (callId: string, decision: ApprovalDecision, answer: GateAnswer = {}) => {
     const v = ref.current;
     if (v) await following(() => v.respondApproval(callId, decision, answer));
   }, [following]);

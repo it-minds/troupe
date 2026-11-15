@@ -6,6 +6,7 @@ Files:
 
 - `themes/` — the system as data: four themes from one token contract, and [`themes/THEMES.md`](themes/THEMES.md) for what a theme may change. **Afterglow is the default**; §2's palette tables are Footlight's, where this document started.
 - `afterglow.dc.html` — the Afterglow comp: the launcher, the session list, a new session and a session, dark only. The app is drawn to it (§0).
+- `session-chat.dc.html` — the session screen as a chat (issue #919): the head, the column, the composer; the app's session screen is drawn to it (§4).
 - `example.dc.html` — all six surfaces of the design before Afterglow, self-contained, keyboard-usable, works at 380px. Opens directly in a browser.
 
 ---
@@ -19,7 +20,7 @@ The app's design is **Afterglow** (`afterglow.dc.html`, issue #52). It keeps eve
 - **Colour.** Void and pit under cream. Pink is the reserved colour and, through `--accent` and `--link`, the brand as well: the mask's lit half, links, the current nav item. Cyan is the machine working, and the one filled button on a screen. Amber is this machine (`--local-*`). Violet is asleep and private; clay is denied.
 - **Themes.** Afterglow is the default and its structure is every theme's; Signal, Footlight and Limelight are palettes on it (`themes/THEMES.md`; Decisions 702 and 704, in `docs/decisions/`).
 - **Drawn.** Every screen: the four in the comp — the launcher, the session list, a new session and a session with its transcript, tool calls, questions and approvals — and the ones the app has that the comp does not (sign-in, setup, the inbox, review, This computer, agents, appearance, the command palette), on the same tokens. The app opens on the launcher, as the comp does, and the lockup in the rail opens it again; a person who would rather start on the list ticks the box at its foot, and Appearance turns it back (Decision 709). A session doing nothing is `idle`, drawn in the chrome's grey with no token of its own, so `queued` keeps the comp's amber for a held message. The comp lends the reserved pink to the in-progress task; the app keeps that in the machine's cyan, because pink has one job.
-- **The session head.** Its subject column stacks the breadcrumb and the title, then the goal line, the loop's controls and a "while you were away" marker (Decision 708).
+- **The session head.** One line (`session-chat.dc.html`): back, the mask, the title, the setup as tags, who is here, the status, Invite and ⋯. The goal, set with `/goal`, is a line under it with the loop; "while you were away" is a line under that (Decision 986).
 
 ---
 
@@ -128,19 +129,11 @@ Rules:
 
 A single fluid column system with wrapping flex tracks — no fixed breakpoint jumps in the markup. Regions declare a flex basis and the browser decides when to stack. The client is a React app rendered in the browser, and a layout that depends on measured widths re-renders on every resize; the tracks make that the browser's job.
 
-**Session screen, wide (≥1040px):** two tracks — conversation `flex: 3 1 420px`, backstage `flex: 1 1 280px` capped at 380px. The approval panel is sticky to the bottom of the conversation track.
+**Session screen (`session-chat.dc.html`, Decision 986).** A chat, not a dashboard: one column of 760px centred in the conversation track. A person's words are a block on the right; the troupe's reply stands on the page beside the mask, its working one strip above it, and Copy, Retry, Publish and what the turn cost in a row under it on hover or focus. The cards that wait on a person sit at the column's foot, sticky, their answers always on screen. The composer is one box under them: attachments as tags, the message, `+` and `/` on the left; the profile, the agent chip, the context ring and Send (Stop while it works) on the right. It grows with the text to 40% of the window, and files dropped on the window attach.
 
-**Session screen, medium (720–1040px):** same two tracks; backstage narrows first. A "Hide backstage" toggle in the header gives the reading column the full width.
+The backstage (tasks, files, instructions, memory, settings) and the scratchpad are tracks beside the conversation, opened from the head's ⋯ and hidden until then at every width; on a narrow screen (<720px) they stack under it. With neither open the conversation is the whole screen, on a phone too: the transcript scrolls and the composer stays at the foot.
 
-**Session screen, narrow (<720px, down to 380px):** the tracks stack. Order is fixed and deliberate:
-
-1. Session header (subject, state, who is here)
-2. Any banner (asleep / read only)
-3. Conversation
-4. **Approval** — sticky to the bottom of the viewport, above the composer
-5. Composer
-6. Backstage (tasks → who is working → files)
-
+What the backend does not support yet is drawn with its reason rather than left out (the context window, Always allow, artifacts on the platform: troupe #920), the one place §8's remove-don't-disable gives way, because the comp promises them.
 ### What is primary, secondary, collapsed — and why
 
 | | Element | Rationale |
@@ -150,7 +143,7 @@ A single fluid column system with wrapping flex tracks — no fixed breakpoint j
 | **Tertiary** | Agent tree, presence | The agent tree is the most *impressive* part of the product and the least *useful* to this audience — a project manager does not act on the existence of a proofreading subagent. It is a compact status list, not a diagram, and it is last. Presence collapses to three avatars plus a sentence in the header. |
 | **Collapsed by default** | Tool activity | Every tool call is one mono line: verb, target, duration. Expandable to a payload. Collapsed by default because a session produces hundreds of these and none of them is the point. |
 
-The approval is the one element that refuses to be secondary at any width. It is `position: sticky` inside the conversation column, so scrolling up to read context never loses the decision.
+The approval is the one element that refuses to be secondary at any width. It is `position: sticky` at the foot of the conversation column, so scrolling up to read context never loses the decision. Its answers are one row: **Allow once**, the session-wide allowance, **Always allow** (once the server takes it) and **Deny** at the far end.
 
 ---
 
@@ -208,7 +201,7 @@ What it deliberately does *not* do: no modal, no dimming, no sound, no red, no c
 - *File diff* — path, `+n`/`−n` counts, then hunks with a coloured left marker per line and a `+`/`−` glyph. Colour is never the only signal, which also means the diff survives red-green colour blindness. The body scrolls horizontally in its own container so long lines never widen the page.
 - *Shell command* — the command in mono with a `$` prompt, wrapped rather than truncated, plus the working folder and a sentence saying what it does in ordinary words. Always states that it runs on the platform, not on the user's computer. This audience has no mental model of a remote worker, and telling them is cheaper than teaching them.
 
-**Answered confidently.** Three actions, always in the same order and always the same words: **Allow**, **Deny**, **Allow … for this session**. Allow is the only filled button. The scoped option is full-width and secondary, because it is the one people regret. Keyboard: `A` and `D` when focus is not in a text field; the buttons are also plain focusable buttons in DOM order. Hit areas are 44px, and at 380px Allow and Deny sit side by side with the scoped option beneath.
+**Answered confidently.** A call's answers, always in the same order and always the same words, in one row: **Allow once**, **Allow … for this session**, **Always allow …** (drawn with its reason until the server takes it, Decision 986) and **Deny** at the far end. Allow once is the only filled button; the two that allow more are secondary, because they are the ones people regret. A delegation and a publication keep their own answers. Keyboard: `A` and `D` when focus is not in a text field; the buttons are also plain focusable buttons in DOM order. Hit areas are 44px, and at 380px the row wraps, Allow once first.
 
 **Someone else answered first.** First answer wins, and this will happen while you are reading. The panel does not vanish — that would leave the user wondering whether they pressed something. It is replaced in place by a calm record: the amber goes, the state pill becomes "✓ Allowed", and the text names the person, the action, and the fact that nothing is waiting for you now. It is `aria-live="assertive"` because the interactive thing under the user's finger has just changed. Offering "Follow the work" gives them somewhere to go.
 

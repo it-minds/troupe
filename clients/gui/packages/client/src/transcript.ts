@@ -238,6 +238,24 @@ export interface TokenUsage {
   output_tokens: number;
 }
 
+/** How full the model's context is: the tokens in it, and the window when the harness says it. */
+export interface ContextFill {
+  used: number;
+  window: number | undefined;
+}
+
+/**
+ * A `context_status` event's fill (troupe #920): `{window_tokens, used_tokens}`, both
+ * whole numbers, the window more than none. Anything else is not one, and is ignored.
+ */
+export function contextStatus(data: Record<string, unknown>): ContextFill | null {
+  const window = data["window_tokens"];
+  const used = data["used_tokens"];
+  if (typeof window !== "number" || typeof used !== "number") return null;
+  if (!Number.isInteger(window) || !Number.isInteger(used) || window <= 0 || used < 0) return null;
+  return { used, window };
+}
+
 /**
  * What a turn cost, from the `turn` on the event that ends it (`turn_ended`, `cancelled`,
  * `agent_done`): its model calls, its subagents' and a compaction's summariser's among
@@ -294,6 +312,13 @@ export interface TranscriptState {
   costMicros: number | undefined;
   /** The session's tokens: every `llm_response.usage`, and a compaction's summariser's. */
   usage: TokenUsage | undefined;
+  /**
+   * How full the model's context is: `used`, the tokens the root agent's last model call
+   * sent (its `usage`'s input, cache read and cache write), and `window`, the model's
+   * context window, which only a `context_status` event says (troupe #920); undefined
+   * before the first call.
+   */
+  context: ContextFill | undefined;
   /** The session's goal from `goal_set`, until `goal_cleared`: what every turn works towards. */
   goal: string | undefined;
   /** The latest loop towards the goal, running or how it ended; undefined before the first. */
@@ -434,6 +459,7 @@ export const emptyTranscript: TranscriptState = {
   failed: undefined,
   costMicros: undefined,
   usage: undefined,
+  context: undefined,
   goal: undefined,
   loop: undefined,
   onboarding: undefined,
@@ -786,6 +812,18 @@ function addUsage(sum: TokenUsage | undefined, more: TokenUsage | undefined): To
 }
 
 /**
+ * The context after a root model call: what the call sent is what the context holds now
+ * (output comes back into it on the next call). The window stays whatever a
+ * `context_status` said; a call with no usage leaves the fill as it was.
+ */
+function filled(was: ContextFill | undefined, usage: TokenUsage | undefined): ContextFill | undefined {
+  if (!usage) return was;
+  const used = usage.input_tokens + usage.cache_read + usage.cache_write;
+  if (used === 0) return was;
+  return { used, window: was?.window };
+}
+
+/**
  * The line under a turn the event ends, as the entries to add after the event's own: one
  * when it carries a `turn` that made a call, none for a turn that made none or a log
  * written before turns were counted.
@@ -983,6 +1021,12 @@ function writtenAt(d: DurableEvent): number | undefined {
  */
 export function fold(state: TranscriptState, e: TroupeEvent, options: FoldOptions = {}): TranscriptState {
   const now = (): number => options.now ?? Date.now();
+  // The context window and what is in it, durable or not: the ring's, and nothing else's.
+  if (e.type === "context_status") {
+    const fill = contextStatus(e.data);
+    const kept = isDurable(e) ? { ...state, lastSeq: Math.max(state.lastSeq, e.seq) } : state;
+    return fill && isRoot(e.agent) ? { ...kept, context: fill } : kept;
+  }
   if (!isDurable(e)) return foldEphemeral(state, e, now);
 
   const d = e;
@@ -1121,6 +1165,7 @@ export function fold(state: TranscriptState, e: TroupeEvent, options: FoldOption
         error: undefined,
         costMicros: cost === undefined ? next.costMicros : (next.costMicros ?? 0) + cost,
         usage: addUsage(next.usage, usageOf(d.data["usage"])),
+        context: isRoot(d.agent) ? filled(next.context, usageOf(d.data["usage"])) : next.context,
       };
     }
 

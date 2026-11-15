@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { WebSocket as NodeWebSocket } from "ws";
 import { App } from "../src/App";
 import { FakeDaemon } from "../../../packages/client/test/support/daemon.js";
-import { render, startOnTheList, waitFor } from "./support";
+import { render, showBackstage, startOnTheList, waitFor } from "./support";
 
 Element.prototype.scrollIntoView = function scrollIntoView() {};
 globalThis.WebSocket = NodeWebSocket as unknown as typeof WebSocket;
@@ -63,9 +63,11 @@ describe("what a turn cost", () => {
 
     const line = await waitFor(() => document.querySelector(".stream .note.turn-cost"), "the turn's line");
     expect(line.textContent).toBe("turn: 3 calls · ↑ 1.1k sent · 2.0k cached · ↓ 42 received · $0.03");
-    expect(line.previousElementSibling?.textContent).toBe("conversation compacted");
+    // Under the reply, in the row with what can be done with it, after what happened last.
+    expect(line.closest(".foot")?.previousElementSibling?.textContent).toBe("conversation compacted");
 
     // The two answers and the summary, not the answers alone.
+    await showBackstage();
     const facts = [...document.querySelectorAll(".backstage dt")].find((dt) => dt.textContent === "Cost so far");
     const cost = facts?.nextElementSibling?.querySelector(".when");
     expect(cost?.getAttribute("title")).toBe("30000 micros");

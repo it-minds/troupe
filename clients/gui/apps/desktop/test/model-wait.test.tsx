@@ -97,7 +97,9 @@ describe("a prompt that draws nothing", () => {
     await sees("model error: no key");
 
     skew = 60_000;
-    await sees("Enter sends");
+    // The composer says nothing over its box; what Enter does is its placeholder.
+    await waitFor(() => document.querySelector(".dock > .hint") === null, "nothing said over the composer");
+    expect(document.querySelector<HTMLTextAreaElement>('textarea[aria-label="Message"]')!.placeholder).toContain("Enter sends");
     expect(says("nothing back yet")).toBe(false);
     expect(says("has not sent the model request")).toBe(false);
   });
