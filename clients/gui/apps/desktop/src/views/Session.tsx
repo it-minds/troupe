@@ -16,6 +16,8 @@ import { Fragment, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRe
 import type { JSX } from "react";
 import {
   ALLOW_ALWAYS,
+  PlaneOwn,
+  UPLOAD_ARTIFACT,
   configKey,
   isBusy,
   isRoot,
@@ -40,6 +42,7 @@ import type {
   FleetRow,
   LoopInfo,
   LoopState,
+  OwnPlane,
   ScratchDocument,
   SessionKind,
   SessionView,
@@ -229,6 +232,9 @@ export function Session({
   // Whether the server writes a lasting rule from an approval (troupe #920): asked of what it
   // said at `initialize`, so the answer appears the day it does.
   const alwaysAllow = Boolean(sessionView?.capabilities[ALLOW_ALWAYS]);
+  // Where the person's artifacts are listed from for the composer's "Add from artifacts":
+  // the plane they are signed in to, for a session there; this computer's daemon otherwise.
+  const own = useMemo<OwnPlane | null>(() => (!here && auth ? new PlaneOwn((method, params) => auth.rpc(method, params), auth.planeUrl) : daemon), [here, auth, daemon]);
   // A reply's Retry sends the person's words again, as a new turn.
   const retry = useCallback((text: string) => view.send(text), [view]);
   const publishReply = useMemo(() => (daemon ? (text: string) => setPublishing({ text }) : undefined), [daemon]);
@@ -370,6 +376,7 @@ export function Session({
             <Composer
               view={view}
               daemon={daemon}
+              own={own}
               here={here}
               dormant={dormant}
               busy={isBusy(view.state)}
@@ -1731,11 +1738,14 @@ function ReplyFoot({
 /** A file, an artifact's file or a folder, attached to the message being written. */
 interface Attachment {
   id: string;
-  kind: "file" | "folder";
-  /** The name it lands under, `session:/<name>`, or the folder's path. */
+  /** `artifact`: one the server puts into the workspace itself, fetching it from the plane (troupe #920). */
+  kind: "file" | "folder" | "artifact";
+  /** The name it lands under, `session:/<name>`, the folder's path, or the artifact's title. */
   name: string;
   /** Its text, for a file. */
   content?: string;
+  /** The artifact and its version, for an `artifact`. */
+  artifact?: { id: string; version: number | undefined };
   /** What it is, in a few words: its size, or the artifact it came from. */
   about: string;
 }
@@ -1799,26 +1809,46 @@ export function ContextRing({ fill }: { fill: ContextFill | undefined }): JSX.El
 }
 
 /**
- * The person's artifacts on the plane, to attach one's files to the message: each file of
- * its newest version read with `artifact.read`, and uploaded with the message as a picked
- * file is. Through this computer's daemon, signed in to the plane.
+ * The person's artifacts on the plane, to attach one's files to the message. Where the
+ * session's server takes `fs.upload` with `artifact` (`UPLOAD_ARTIFACT`, troupe #920) the
+ * artifact itself is attached, and the server fetches its newest version's files from the
+ * plane into the workspace as the message goes: a pod over its control link, a daemon with
+ * its sign-in, so the files never pass through this app. Before that, on this computer,
+ * each file is read with `artifact.read` through the daemon and uploaded as a picked file is.
  */
-function ArtifactPicker({ daemon, onPick, onClose }: { daemon: DaemonClient; onPick: (files: Attachment[]) => void; onClose: () => void }): JSX.Element {
+function ArtifactPicker({
+  source,
+  read,
+  onPick,
+  onClose,
+}: {
+  /** Where the artifacts are listed from: the plane, or this computer's daemon. */
+  source: OwnPlane;
+  /** The daemon to read each file through, where the server does not fetch them itself. */
+  read: DaemonClient | null;
+  onPick: (files: Attachment[]) => void;
+  onClose: () => void;
+}): JSX.Element {
   const [list, setList] = useState<Artifact[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   useEffect(() => {
     let live = true;
-    daemon.artifacts({}).then(
+    source.artifacts({}).then(
       (l) => live && setList(l.artifacts),
       (e: unknown) => live && setError(reasonOf(e)),
     );
     return () => {
       live = false;
     };
-  }, [daemon]);
+  }, [source]);
 
   const pick = async (a: Artifact): Promise<void> => {
+    if (!read) {
+      onPick([{ id: `a${++attached}`, kind: "artifact", name: a.title, artifact: { id: a.id, version: a.current ?? a.version }, about: `version ${a.current ?? a.version}` }]);
+      return;
+    }
+    const daemon = read;
     setBusy(a.id);
     setError(null);
     try {
@@ -1889,6 +1919,7 @@ function reasonOf(e: unknown): string {
 function Composer({
   view,
   daemon,
+  own,
   here,
   dormant,
   busy,
@@ -1905,6 +1936,8 @@ function Composer({
 }: {
   view: SessionHandle;
   daemon: DaemonClient | null;
+  /** Where the person's artifacts are listed from: the plane for a session there, else the daemon. */
+  own: OwnPlane | null;
   /** A session on this computer: a folder can be named, and artifacts read through its daemon. */
   here: boolean;
   dormant: boolean;
@@ -2020,6 +2053,12 @@ function Composer({
           continue;
         }
         if (!v) throw new Error("not attached: the session is not open yet");
+        // The server fetches an artifact's files from the plane itself, and says where each landed.
+        if (f.kind === "artifact" && f.artifact) {
+          const put = await v.fsUploadArtifact(f.artifact.id, f.artifact.version === undefined ? {} : { version: f.artifact.version });
+          for (const p of put.files) lines.push(`uploaded ${p.path} to session:/${p.path}`);
+          continue;
+        }
         const target = `session:/${f.name}`;
         await v.fsUpload(target, f.content ?? "");
         lines.push(`uploaded ${f.name} to ${target}`);
@@ -2056,7 +2095,20 @@ function Composer({
             ? "Not connected. What you send is held and goes when the connection comes back."
             : null;
   const canSend = (draft.trim() !== "" || files.length > 0) && !sending;
-  const artifactsWhy = !here ? "Not yet on the platform" : !daemon ? "Needs this computer's daemon" : null;
+  // Attached as the artifact where the session's server fetches it from the plane itself
+  // (troupe #920); else, on this computer, read through the daemon file by file.
+  const fetchesArtifacts = Boolean(view.view?.capabilities[UPLOAD_ARTIFACT]);
+  const artifactsWhy = !own
+    ? here
+      ? "Needs this computer's daemon"
+      : "Sign in to the plane to list your artifacts"
+    : fetchesArtifacts
+      ? null
+      : !here
+        ? "Not yet on the platform"
+        : !daemon
+          ? "Needs this computer's daemon"
+          : null;
   const folderWhy = !here ? "Only for sessions on this computer" : !pickDirectory ? "Needs the desktop app's folder chooser" : null;
 
   return (
@@ -2135,8 +2187,8 @@ function Composer({
                     <span className="d">Text files, into the workspace with your message. Or drop them anywhere on the window</span>
                   </span>
                 </button>
-                {/* On a session on the platform the plane would have to put the files into
-                    its workspace itself: troupe #920, part 3. */}
+                {/* Where the session's server fetches an artifact from the plane itself, a
+                    pod's or a daemon's, the artifact is attached as it is (troupe #920). */}
                 <button
                   type="button"
                   className="item"
@@ -2203,7 +2255,14 @@ function Composer({
           {error}
         </p>
       )}
-      {artifacts && daemon && <ArtifactPicker daemon={daemon} onPick={(picked) => (setFiles((had) => [...had, ...picked]), setArtifacts(false))} onClose={() => setArtifacts(false)} />}
+      {artifacts && own && (
+        <ArtifactPicker
+          source={own}
+          read={fetchesArtifacts ? null : daemon}
+          onPick={(picked) => (setFiles((had) => [...had, ...picked]), setArtifacts(false))}
+          onClose={() => setArtifacts(false)}
+        />
+      )}
       {dragging && (
         <div className="drop" aria-hidden="true">
           <div>Drop files to hand them to the troupe</div>

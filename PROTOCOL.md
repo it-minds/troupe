@@ -205,6 +205,8 @@ The server's `capabilities`:
 | `watch` | `watch.set` and `watch.get` are served, a saved `AI!` or `AI?` comment starts a branch (`watch_triggered`), and `fs_changed` events arrive |
 | `remote` | this is a worker pod rather than a local daemon |
 | `private_sessions` | this server can seal a session under the caller's own key, so a client may offer to make one |
+| `approval_allow_always` | `approval.respond` takes `allow_always`, which writes the person's own rule for the tool (a daemon's; a pod's rules are its worker profile's, and a relayed connection's the laptop's) |
+| `fs_upload_artifact` | `fs.upload` takes `artifact` in place of `content`, and the server fetches the artifact's files from the plane itself (a daemon and a pod) |
 
 `private_sessions` is computed at every `initialize`, never compiled in, and it is what
 un-gates the client's control. It is true only where both things it needs are true: a
@@ -388,11 +390,22 @@ Under `approvals: deny` the agent answers `stop` itself. A subagent does not ask
 `tool_failures` and hands its parent what it found, labelled partial.
 
 Ephemeral: `llm_delta`, `agent_state` (`state`, `profile`, `agent`, `todos`, `budget`,
-`done_reason`: an agent's state as it changes), `progress`, `presence`, `summary_diff`, and `shell_started` and
+`done_reason`: an agent's state as it changes), `progress`, `presence`, `summary_diff`, `context_status` (below), and `shell_started` and
 `shell_output` while a person's command runs (`shell.run`); `watch_notice` (`message`)
 when watch mode falls back to polling or cannot start, and `watch_changed` (`enabled`,
 `backend`: `native`, `poll` or `off`) on the session whose watch went on or off or
 changed backend, which `watch.get` answers at any time.
+
+`context_status` — `window_tokens`, `used_tokens` — is how full the root agent's context
+window is (Decision 988): ephemeral, on the root, after each of its calls and before the
+first call of a turn on a model it has not said the window of (its first turn, or one
+after the model changed). `window_tokens` is the window compaction plans against where the
+model's is known, declared in a provider's `models:` entry or `models.windows` or reported
+by the provider's model list, and `null` where only `context_window`'s fallback is, so a
+client draws the share unknown rather than of a number nobody said; `used_tokens` is the
+last call's whole prompt, cached or not. It is derived from `llm_response` and the
+configuration, so it is never in the log; a client that attached late has the window from
+the next call.
 
 `budget_warning` — `dimension` (`turns`, `input`, `output`, `wall`, `context`), `used`,
 `limit`, `fraction`, `detail` (`input tokens 4.9M/6.0M (82%)`) — is written once per
@@ -1093,9 +1106,33 @@ dormant. A daemon configured to resume (`resume_on_restart`) resumes the loop to
 {"command_id": "c-4", "session_id": "s-9f", "call_id": "call_3",
  "decision": "allow"}
 ```
-`decision` is `allow`, `deny`, or `allow_session`. **First response wins**; a later
-one receives an `approval_resolved` event naming who resolved it, and has no second
-effect.
+`decision` is `allow`, `deny`, `allow_session`, or `allow_always` where the server named
+`approval_allow_always` at `initialize`. **First response wins**; a later one receives an
+`approval_resolved` event naming who resolved it, and has no second effect.
+
+`allow_always` (Decision 989) writes the person's own per-tool rule for the call's tool,
+the whole tool (`shell`, `write_file`; an MCP tool as `mcp(server.tool)`), into
+`permissions.allow` of the file `scope` names: `everywhere`, the default, is the user's
+`config.yaml`; `workspace` is the workspace's `.troupe/config.local.yaml`, the person's and
+not the repository's. It is the rule a person would write by hand, and every session that
+starts later reads it; this session lets the tool through for the rest of it, as
+`allow_session` does. The call is then allowed, `approval_decided` carries `decision:
+"allow_always"` and `always: {rule, scope, path}`, with the person as its actor, and
+`config.changed` is announced as for `config.set`. The answer is `{"accepted": true,
+"rule": {rule, scope, path}}`. It takes `admin`, as `config.set` does. Refused, with the
+request still waiting: `forbidden` with `setting: "managed_permission_rules_only"` where
+the platform allows only its own rules; `invalid_params` for a delegation or a
+publication, a call a rule's `ask` or the tool itself always asks about (an `allow` of the
+person's would not loosen it), `workspace` in an untrusted workspace (where a project's
+`allow` is held), and any other `scope`. A pod answers `forbidden`, "rules on the platform
+are the worker profile's, which an administrator sets", and does not name the capability;
+over a relayed connection it is `forbidden` as `allow_session` is. A server from before it
+answers `invalid_params` naming `decision`.
+
+```json
+{"command_id": "c-7", "session_id": "s-9f", "call_id": "call_3",
+ "decision": "allow_always", "scope": "everywhere"}
+```
 
 A delegation's request (`approval_requested` with `delegation`, Decision 850) takes three
 more, each optional: `agent`, one of the subagents its `delegation.agents` offers, to send
@@ -1362,6 +1399,28 @@ that is the session's own, erased with it. On a daemon it is the checkout the se
 was started in: git sees the file, another session in that checkout sees it, and erasing
 the session leaves it there. A `path` whose prefix names no mount (`plans:/x`) is
 `forbidden`, with a `reason` naming the ones there are, as every file tool refuses it.
+
+**An artifact in place of bytes** (Decision 990), where the server named
+`fs_upload_artifact` at `initialize`:
+
+```json
+{"command_id": "c-10", "session_id": "s-9f", "artifact": "a-7f3", "version": 2,
+ "path": "session:/plan"}
+```
+→ `{"artifact", "title", "version", "files": [{"path", "bytes"}]}`
+
+The server fetches the artifact's files from the plane itself, as the person on the
+connection, so they never pass through the client: a pod asks over its control link
+(`session.artifact.files`), and the plane reads the artifact as that person and only for
+someone who steers the session; a daemon asks the plane's `artifact.files` with its
+sign-in. `version` is the one its address serves where none is named, `file` narrows it to
+one of the version's files, and `path` is the folder they land in, `session:/` where none
+is named, each at its own path in the artifact. Every file is confined to the workspace
+before any is written, and each is an `fs_changed` of the person's. A version past 2 MB of
+files together is refused with its size (name one `file`). Refused as the plane refuses:
+`not_found` for one the person may not see; `unavailable` for a daemon not signed in to a
+plane ("troupe login signs it in"), a pod whose link is down, and a session under Local
+only. A server from before it reads `content` and refuses the call without it.
 
 #### `scratch.list`
 ```json

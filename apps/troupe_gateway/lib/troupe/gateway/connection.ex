@@ -593,7 +593,10 @@ defmodule Troupe.Gateway.Connection do
       "branches" => false,
       "watch" => true,
       "remote" => true,
-      "private_sessions" => false
+      "private_sessions" => false,
+      # `fs.upload` takes `artifact` in place of bytes: the plane sends its files down the
+      # control link, for the person who asked.
+      "fs_upload_artifact" => true
     }
   end
 
@@ -619,7 +622,14 @@ defmodule Troupe.Gateway.Connection do
       "branches" => true,
       "watch" => true,
       "remote" => false,
-      "private_sessions" => private_sessions?()
+      "private_sessions" => private_sessions?(),
+      # `approval.respond` takes `allow_always`: the person's own rule for the tool, written
+      # into their file on this computer. Not a pod's (its rules are its worker profile's)
+      # nor a relayed connection's (the laptop's file is the laptop's person's).
+      "approval_allow_always" => true,
+      # `fs.upload` takes `artifact` in place of bytes, which this daemon fetches from its
+      # plane with its sign-in.
+      "fs_upload_artifact" => true
     }
   end
 

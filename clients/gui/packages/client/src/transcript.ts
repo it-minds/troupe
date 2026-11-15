@@ -549,6 +549,8 @@ export interface GateAnswer {
   visibility?: string;
   owner?: "me" | "team";
   reason?: string;
+  /** With `allow_always`: where the person's rule is kept, the workspace's own file or their `config.yaml` (troupe #920). */
+  scope?: "workspace" | "everywhere";
 }
 
 /** What `approval_decided` says the answer carried. */

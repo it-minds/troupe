@@ -137,6 +137,7 @@
     "events/compacted.json",
     "events/config_note.json",
     "events/config_upgraded.json",
+    "events/context_status.json",
     "events/delegation_started.json",
     "events/file_ready.json",
     "events/files_skipped.json",

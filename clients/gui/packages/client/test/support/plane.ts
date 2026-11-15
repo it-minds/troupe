@@ -498,6 +498,15 @@ export class FakePlane {
 
   static async start(opts: PlaneOptions): Promise<FakePlane> {
     const p = new FakePlane(opts);
+    // What a pod asks over its control link for `fs.upload` with `artifact` (troupe #920):
+    // the version's files, read as the person who asked, and nothing for one they may not see.
+    opts.worker.artifactSource ??= (subject, id, version) => {
+      const a = p.artifacts.get(id);
+      if (!a || !p.mayRead(a, subject)) return null;
+      const n = version ?? a.pinned ?? a.versions[a.versions.length - 1]!.n;
+      const v = a.versions.find((x) => x.n === n);
+      return v ? { id: a.id, title: a.title, version: v.n, files: v.files.map((f) => ({ path: f.path, text: f.content })) } : null;
+    };
     await new Promise<void>((r) => p.server.listen(0, "127.0.0.1", r));
     p.url = `http://127.0.0.1:${(p.server.address() as AddressInfo).port}`;
     return p;
@@ -695,7 +704,7 @@ export class FakePlane {
   }
 
   /** Whether this person may see this artifact: their own, the organisation's, a profile of theirs, or a link's. */
-  private mayRead(a: FakeArtifact, subject: string): boolean {
+  mayRead(a: FakeArtifact, subject: string): boolean {
     return this.roleOf(a, subject) !== null;
   }
 

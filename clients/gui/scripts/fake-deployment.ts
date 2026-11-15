@@ -90,11 +90,28 @@ const artifact = (over: Record<string, unknown>): Record<string, unknown> => ({
   ...over,
 });
 daemon.artifacts = [
-  artifact({ id: "art-weekly", title: "Weekly licence audit, October", kind: "markdown", version: 3, current: 3 }),
+  artifact({
+    id: "art-weekly",
+    title: "Weekly licence audit, October",
+    kind: "markdown",
+    version: 3,
+    current: 3,
+    files: [
+      { path: "audit.md", text: "# Weekly licence audit\n\nThree packages changed licence this week; none is copyleft.\n" },
+      { path: "packages.csv", text: "package,before,after\nleft-pad,MIT,MIT\nfast-json,BSD-2,MIT\n" },
+    ],
+  }),
   artifact({ id: "art-ledger", title: "Ledger migration plan", visibility: "profile:dev", published_at: day(2) }),
   artifact({ id: "art-interviews", title: "Field interview guide", kind: "file", visibility: "profile:ux", shared: true, role: "view", published_at: day(4) }),
   artifact({ id: "art-mine", title: "Placement loop benchmarks", mine: true, role: "owner", owner: { subject: "alice@example.com", display_name: "Alice" }, version: 2, current: 2, published_at: day(12), may_delete: true }),
 ];
+// A pod fetches an artifact into a session from the plane, which keeps the daemon's here.
+worker.artifactSource = (_subject, id, version) => {
+  const a = daemon.artifacts?.find((x) => x["id"] === id);
+  if (!a) return null;
+  const files = (a["files"] as Array<{ path: string; text: string }> | undefined) ?? [];
+  return { id, title: String(a["title"]), version: version ?? Number(a["current"] ?? a["version"]), files };
+};
 daemon.own = { version: 2, text: "## Tone\n\nKeep answers short. Full sentences when drafting for somebody else.\n\n## Tools\n\nUse pnpm, never npm." };
 daemon.ownVersions.push({ version: 1, text: "## Tone\n\nKeep answers short.", by: "alice@example.com", at: day(9) });
 daemon.ownAbove = [
@@ -111,6 +128,9 @@ notes.scratch.show(
   { name: "plan.md", title: "Migration plan", content: "# Migration plan\n\n1. copy the ledger table\n2. check the counts in `rows.csv`\n3. drop the old index\n" },
   "call-plan-2",
 );
+// An approval of a plain tool, which "Always allow" answers with a rule of the person's
+// (troupe #920): the Rules panel under This computer lists it afterwards.
+daemon.askTool(notes.id, "write_file", { path: "plan.md" });
 // Frames (issue #474): a turn to read in /home/ada/parser, its working one strip above an
 // answer with a table, a nested list and fenced code, a diff and a csv; and the same turn
 // played live whenever something is sent there, so its reasoning streams and the curtain
@@ -178,7 +198,9 @@ function rehearse(text: string, live: boolean): void {
     [0, now("agent_state", { state: "acting" })],
     ...call(`test-${tag}`, "shell", { command: "mix test" }, true, "....\nFinished in 0.04 seconds\n4 tests, 0 failures", 3500),
     [0, now("agent_state", { state: "thinking" })],
-    [1500, say("llm_response", { message: { role: "assistant", content: [{ type: "text", text: PARSER_ANSWER }] } })],
+    [1500, say("llm_response", { message: { role: "assistant", content: [{ type: "text", text: PARSER_ANSWER }] }, usage: { input_tokens: 9_400, cache_read: 31_000 } })],
+    // How full the window is after the call, as the harness says it (troupe #920).
+    [0, now("context_status", { window_tokens: 200_000, used_tokens: 40_400 })],
     [0, say("turn_ended", { turn: { calls: 4, input_tokens: 9_400, cache_read: 31_000, cache_write: 0, output_tokens: 820, cost_micros: 41_000, unpriced: 0 } })],
     [0, now("agent_state", { state: "idle" })],
   ];
