@@ -1655,7 +1655,8 @@ same method, read from the file at the switch.
 {"session_id": "s-9f"}
 ```
 → `{"commands": [{"name", "aliases", "section", "summary", "usage", "args", "availability",
-"source", "detail", "example", "summaries"?, "details"?, "availabilities"?}]}`
+"source", "detail", "example", "summaries"?, "details"?, "usages"?, "examples"?,
+"availabilities"?}]}`
 
 The slash commands a client may offer for the session — the one table behind every
 client's palette, so `/help` in the terminal and the desktop app show the same list and
@@ -1699,7 +1700,11 @@ reason. Reading the table wakes nothing.
 differently enough to need its own also carries `summaries` and `details`, maps from a
 client's name (`tui`, `desktop`) to that client's sentence, which it shows instead
 (`/cancel`'s `tui` summary names the window it removes); a row without them, and every
-row from an older harness, has the neutral words alone.
+row from an older harness, has the neutral words alone. A row a client types with other
+arguments carries `usages` and `examples` the same way (`/hq`'s `{"desktop": "/hq"}`
+and `{"desktop": null}`: the desktop app takes no plane address): that client shows its
+own usage, keeps only the `args` it names, and its own example, `null` for none
+(Decision 1001).
 
 #### `memory.get`
 ```json

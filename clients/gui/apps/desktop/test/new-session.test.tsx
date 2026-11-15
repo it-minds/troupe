@@ -70,6 +70,17 @@ async function openStart(): Promise<HTMLElement> {
 }
 
 describe("the new-session screen", () => {
+  // troupe #956: the start screen's own head and the rail both carried the name, one above
+  // the other. The rail's lockup is the brand (DESIGN.md §0); the screen opens on its hero.
+  it("carries the brand once, the rail's, and no head of its own", async () => {
+    await signedIn();
+    const s = await openStart();
+    expect(s.querySelector(".ns-brand")).toBeNull();
+    expect([...s.querySelectorAll(".mask")].some((m) => m.getAttribute("aria-label") === "Troupe")).toBe(false);
+    expect(document.querySelectorAll(".wordmark").length).toBe(1);
+    expect(s.firstElementChild?.classList.contains("body")).toBe(true);
+  });
+
   it("picks the first profile with room when nothing was used, says why, and starts from the message", async () => {
     const h = await signedIn();
     const s = await openStart();

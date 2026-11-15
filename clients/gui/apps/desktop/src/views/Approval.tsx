@@ -17,6 +17,8 @@ import { Pill } from "./bits";
 import { Mask } from "./brand";
 
 export type Decision = ApprovalDecision;
+/** Where an Always allow rule is written: the workspace's own file or the person's config.yaml. */
+type RuleScope = "workspace" | "everywhere";
 type Approval = Extract<Entry, { kind: "approval" }>;
 
 /** The audiences a person may publish for: their teams and the profiles they are covered by, as the plane names them. */
@@ -154,14 +156,19 @@ function ToolApproval({
     return () => globalThis.removeEventListener("keydown", onKey);
   });
 
-  const answer = async (decision: Decision): Promise<void> => {
+  // Always allow asks where the rule applies, once, before it is written: this workspace
+  // (the default) or every session on this computer.
+  const [asking, setAsking] = useState(false);
+
+  const answer = async (decision: Decision, scope?: RuleScope): Promise<void> => {
     if (busy) return;
     setBusy(decision);
     setError(null);
     try {
-      // A lasting rule is kept in the person's own config.yaml, which every session on this
-      // computer reads: the daemon writes it, and refuses where only the platform's rules count.
-      await (decision === "allow_always" ? onAnswer(decision, { scope: "everywhere" }) : onAnswer(decision));
+      // A lasting rule is kept in the person's own file: the workspace's config.local.yaml, or
+      // their config.yaml, which every session on this computer reads. The daemon writes it,
+      // and refuses where only the platform's rules count, or in a workspace not trusted.
+      await (decision === "allow_always" ? onAnswer(decision, { scope: scope ?? "workspace" }) : onAnswer(decision));
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -231,9 +238,10 @@ function ToolApproval({
           {!onceOnly && alwaysAllow && (
             <button
               className="always"
-              onClick={() => void answer("allow_always")}
+              onClick={() => setAsking((open) => !open)}
               disabled={busy !== null}
-              title={`A rule in your own config.yaml: every call to ${entry.tool} runs unasked from now on, in every session on this computer`}
+              aria-expanded={asking}
+              title={`A rule of your own: every call to ${entry.tool} runs unasked from now on, in this workspace or everywhere`}
             >
               {busy === "allow_always" ? "Allowing…" : `Always allow ${entry.tool}`}
             </button>
@@ -241,6 +249,26 @@ function ToolApproval({
           <button className="deny" onClick={() => void answer("deny")} disabled={busy !== null}>
             {busy === "deny" ? "Denying…" : "Deny"}
           </button>
+          {asking && !onceOnly && alwaysAllow && (
+            <div className="always-scope" role="group" aria-label={`Where to always allow ${entry.tool}`}>
+              <span className="where">Always allow {entry.tool} where?</span>
+              <button
+                autoFocus
+                onClick={() => void answer("allow_always", "workspace")}
+                disabled={busy !== null}
+                title="A rule in this workspace's .troupe/config.local.yaml, which is yours and not the repository's"
+              >
+                This workspace
+              </button>
+              <button
+                onClick={() => void answer("allow_always", "everywhere")}
+                disabled={busy !== null}
+                title="A rule in your own config.yaml, which every session on this computer reads"
+              >
+                Everywhere
+              </button>
+            </div>
+          )}
         </div>
       ) : (
         <p className="also">You can read this session but not answer for it.</p>

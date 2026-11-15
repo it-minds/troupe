@@ -2477,6 +2477,26 @@ details.advanced > summary {
   border-color: transparent;
   color: var(--denied-fg);
 }
+/* Where an Always allow rule applies, asked once under the row: this workspace first, the
+   default, then everywhere. A line of its own, so the row above keeps its order. */
+.approval .answers .always-scope {
+  flex: 1 1 100%;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+.approval .answers .always-scope .where {
+  font: var(--t-note);
+  color: var(--text-secondary);
+  margin-right: var(--space-2);
+}
+.approval .answers .always-scope button {
+  flex: 0 1 auto;
+  min-height: var(--touch-target);
+  border-color: var(--border-hairline);
+  font: var(--t-note);
+}
 
 /* A delegation at the gate (troupe Decision 850): what the subagent gets, as facts, and
    the brief's parts, each changed in place. */
@@ -3654,18 +3674,6 @@ details.advanced > summary {
   clip: rect(0 0 0 0);
   white-space: nowrap;
 }
-.new-session .ns-brand {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  padding: var(--space-3) var(--space-6);
-  border-bottom: var(--bw-hairline) solid var(--border-hairline);
-  color: var(--text-primary);
-}
-.new-session .ns-word {
-  font: var(--t-wordmark);
-  letter-spacing: var(--tracking-wordmark);
-}
 .new-session .body {
   max-width: 860px;
   gap: var(--space-5);
@@ -4031,10 +4039,6 @@ details.advanced > summary {
 }
 @media (max-width: 719px) {
   .new-session .ns-hero-mask {
-    display: none;
-  }
-  /* The phone's top bar carries the mark already. */
-  .new-session .ns-brand {
     display: none;
   }
   .ns-sentence,

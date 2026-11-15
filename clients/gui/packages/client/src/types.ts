@@ -305,6 +305,10 @@ export interface CommandEntry {
   body?: string;
   summaries?: Record<string, string>;
   details?: Record<string, string>;
+  /** A client's own usage where it takes other arguments (`/hq`'s `{ desktop: "/hq" }`). */
+  usages?: Record<string, string>;
+  /** A client's own example, `null` for none, beside its own usage. */
+  examples?: Record<string, string | null>;
   availabilities?: Record<string, string>;
   [k: string]: unknown;
 }

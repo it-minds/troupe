@@ -191,14 +191,22 @@ function Answers({ entry, busy, onAnswer }: { entry: Question; busy: string | nu
 }
 
 /** The question once answered: a calm line in the stream, so the panel can go. */
-export function AnswerRecord({ entry }: { entry: Question }): JSX.Element {
+export function AnswerRecord({ entry, self, several = false }: { entry: Question; self?: string | undefined; several?: boolean }): JSX.Element {
+  // Where two or more people steer the session, the answer says whose it was: the reader's
+  // own as "you", another's by the name the event's actor carries, else their subject.
+  const by = several && entry.answeredBy !== undefined ? (entry.answeredBy === self ? "you" : (entry.answeredByName ?? entry.answeredBy)) : null;
   if (entry.asked === "budget") {
     const words = BUDGET_ANSWERS[entry.answer ?? ""] ?? entry.answer ?? "answered";
-    return <p className="note">Limit reached — {words.toLowerCase()}.</p>;
+    return (
+      <p className="note">
+        Limit reached — {words.toLowerCase()}
+        {by ? `, answered by ${by}` : ""}.
+      </p>
+    );
   }
   return (
     <p className="note">
-      Asked: {entry.question} — answered: {entry.answer}
+      Asked: {entry.question} — {by ? `answered by ${by}` : "answered"}: {entry.answer}
     </p>
   );
 }

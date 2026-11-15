@@ -93,6 +93,23 @@ export const COMMANDS: CommandEntry[] = [
     details: { tui: "Enter switches the window to one." },
     example: "/resume 2",
   },
+  // The desktop app's own usage and example beside the terminal client's (troupe #956).
+  {
+    name: "hq",
+    aliases: ["remote"],
+    section: "navigate",
+    summary: "HQ: a plane's teams, profiles and sessions",
+    usage: "/hq [plane]",
+    args: [arg("plane", false, "text")],
+    availability: "always",
+    source: "builtin",
+    detail: "This machine's own sessions are listed alongside. Names a plane by URL; without one, the plane this machine is logged in to.",
+    summaries: { desktop: "Every session you can open: the plane's and this computer's" },
+    details: { desktop: "Opens the sessions list, where the plane's sessions you can see, by team and profile, are listed alongside this computer's own." },
+    usages: { desktop: "/hq" },
+    examples: { desktop: null },
+    example: "/hq https://troupe.example",
+  },
   {
     name: "detail",
     aliases: [],
