@@ -1,5 +1,6 @@
-// Generate `src/tokens.css` and `src/mark.ts` in the desktop app and the console from
-// `docs/design/themes/*.tokens.json`.
+// Generate `src/tokens.css` and `src/mark.ts` in the desktop app and the console, and the
+// documentation site's front-page palette (`docs/assets/afterglow.css` at the repository
+// root), from `docs/design/themes/*.tokens.json`.
 //
 //   pnpm tokens
 //
@@ -295,6 +296,26 @@ ${blocks.join("\n\n")}
 const APPS = ["apps/desktop", "apps/console"];
 
 for (const app of APPS) writeFileSync(`${root}${app}/src/tokens.css`, css);
+
+// The documentation site's front page draws in the product's default palette too, so the
+// page a stranger meets first looks like the app it is about. MkDocs Material switches its
+// two schemes with `data-md-color-scheme` on the body, `default` light and `slate` dark,
+// so the default theme's two modes are emitted under those, and `landing.css` reads the
+// same names the apps do. Only the colours: the site keeps its own type and structure.
+const site = `/* Generated from clients/gui/docs/design/themes/${DEFAULT_THEME}.tokens.json by
+   clients/gui/scripts/tokens.ts. Do not edit by hand: run \`pnpm tokens\` in clients/gui.
+   The product's default palette, for the site's front page (landing.css), under the
+   theme's two colour schemes. */
+
+[data-md-color-scheme="default"] {
+${trim(colours(base.tokens, "light"))}
+}
+
+[data-md-color-scheme="slate"] {
+${trim(colours(base.tokens, "dark"))}
+}
+`;
+writeFileSync(`${root}../../docs/assets/afterglow.css`, site);
 
 // The mask, as data. The brand is one silhouette drawn by one component, so the
 // geometry is generated out of the design file too rather than retyped into a `<path>`

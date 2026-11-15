@@ -1,5 +1,7 @@
 # Troupe
 
+<div class="tx-top" markdown>
+
 <div class="tx-hero" markdown>
 
 Troupe is an open-source harness for coding agents, on your own machine and on your team's
@@ -25,15 +27,26 @@ powershell -ExecutionPolicy Bypass -File .\install.ps1 -Tui
 Then, in a new terminal, `troupe config` sets up a model and `troupe` in a project
 directory opens a session. Troupe is a beta, Apache-2.0, and has nothing to sign up for.
 
+The desktop app, from the latest release, [unsigned for now](../clients/gui/docs/install.md):
+
+<p class="tx-downloads">
+  <a class="md-button" data-os="windows" href="https://github.com/it-minds/troupe/releases/latest">Windows<small>x64-setup.exe or .msi</small></a>
+  <a class="md-button" data-os="macos" href="https://github.com/it-minds/troupe/releases/latest">macOS<small>universal .dmg</small></a>
+  <a class="md-button" data-os="linux" href="https://github.com/it-minds/troupe/releases/latest">Linux<small>.AppImage, .deb or .rpm</small></a>
+</p>
+
 </div>
 
-<!-- recording: docs/assets/seam.mp4, from gate issue #786 row 4. Until the file exists the
-     figure shows its poster, the still below; then a <video controls poster> takes the img's place. -->
+<!-- recording: none yet (gate issue #786 row 4). These are screenshots of the desktop app
+     against the GUI's fake plane, one per theme; a <video controls poster> takes their place
+     when a recording exists. -->
 <figure class="tx-recording">
-  <img src="assets/desktop-app.png" width="1280" height="800" alt="The desktop app: a team's session on a plane, stopped to ask before it runs a command, with what it has cost so far">
-  <figcaption>A team's session on a plane, in the desktop app, stopped to ask before it runs
-  a command, with what it has cost so far.</figcaption>
+  <img src="assets/landing-desktop-dark.webp#gh-dark-mode-only" width="1280" height="800" fetchpriority="high" alt="The desktop app: a team's session, stopped to ask before it runs a command, with Allow once, Allow every command and Deny">
+  <img src="assets/landing-desktop-light.webp#gh-light-mode-only" width="1280" height="800" fetchpriority="high" alt="The desktop app, light: a team's session, stopped to ask before it runs a command, with Allow once, Allow every command and Deny">
+  <figcaption>A team's session in the desktop app, stopped to ask before it runs a command.</figcaption>
 </figure>
+
+</div>
 
 ## What is different
 
@@ -94,18 +107,47 @@ same log.
 
 ## Who it is for
 
-An engineer who wants an agent's work to carry on when the terminal closes, and to follow
-it from the terminal, the desktop app or a script at once. A team that wants agents on
-shared infrastructure, with sign-in from its identity provider, budgets per team and per
-person, and an audit trail. Anyone writing a client of their own, against
-[one documented protocol](../PROTOCOL.md) that the bundled clients use too.
-[Why Troupe](why-troupe.md) says more, and when you do not need it.
+An engineer who wants a terminal coding agent whose work carries on when the terminal
+closes, and to follow it from the terminal, the desktop app or a script at once: if you use
+Claude Code or another agent CLI, Troupe is an open-source alternative that reads the
+instruction files, agents and MCP servers you already have. A team that wants a self-hosted
+coding agent on shared infrastructure, with agent orchestration on Kubernetes: sign-in from
+its identity provider, budgets per team and per person, and an audit trail. Anyone writing
+a client of their own, against [one documented protocol](../PROTOCOL.md) that the bundled
+clients use too. [Why Troupe](why-troupe.md) says more, and when you do not need it.
+
+<div class="tx-shots" markdown>
+
+<figure>
+  <img src="assets/landing-tui.webp" width="1280" height="711" loading="lazy" alt="The terminal client: the agent has read add.py, found the subtraction, and waits for approval of its one-line edit">
+  <figcaption>The terminal client, waiting for you to allow a one-line edit.</figcaption>
+</figure>
+
+<figure>
+  <img src="assets/landing-console-dark.webp#gh-dark-mode-only" width="1280" height="800" loading="lazy" alt="The console's overview, with example data: active sessions, pods, what was spent against what was committed, and what needs attention, worst first">
+  <img src="assets/landing-console-light.webp#gh-light-mode-only" width="1280" height="800" loading="lazy" alt="The console's overview, light, with example data: active sessions, pods, what was spent against what was committed, and what needs attention, worst first">
+  <figcaption>A plane's console, with example data: what is running, what it cost, and what needs attention.</figcaption>
+</figure>
+
+</div>
+
+## What it costs
+
+Troupe is free, under Apache-2.0, and runs no model of its own: an agent calls the
+[provider](glossary.md#provider) you name, with your key, and you pay that provider for
+what the calls use. Every turn says what it cost, and [`troupe bench --live`](user/bench.md)
+tells you what a task costs on your setup before the bill does. A plane runs on a cluster
+you already pay for, beside the PostgreSQL, object storage, OpenBao and identity provider
+it needs ([what a plane asks of you](why-troupe.md#what-a-plane-asks-of-you)), and holds
+each team and person to a budget in money.
 
 ## Try it in ten minutes
 
 The [quick start](quick-start.md): the install above, a key for a model, a first session,
 what it cost and a cap on the next one, and what a plane would add. CI runs its commands
 against the latest release every night.
+
+<p class="tx-paths" markdown>[Install Troupe](quick-start.md) [Deploy it for a team](admin/installing.md)</p>
 
 ## Where to go
 
@@ -115,6 +157,7 @@ against the latest release every night.
 | **Run it for a team** | [Installing a plane](admin/installing.md), from an empty cluster to a first team in the console, then the rest of the [administrator's guide](admin/README.md). |
 | **The documentation** | By reader, below; the words it uses are in the [glossary](glossary.md). |
 | **The repository** | [it-minds/troupe](https://github.com/it-minds/troupe): the code, the [releases](https://github.com/it-minds/troupe/releases) and the issues. |
+
 ## The documentation, by reader
 
 Four kinds of reader come here, and each has a track and an order to read it in. The
