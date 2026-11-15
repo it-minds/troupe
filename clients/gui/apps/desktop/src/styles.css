@@ -4153,6 +4153,29 @@ details.advanced > summary {
   .nav-sheet .me button {
     min-height: var(--touch-target);
   }
+  .nav-sheet-title {
+    font: var(--t-ui);
+    font-weight: 700;
+    color: var(--text-primary);
+  }
+  /* The sessions list's head keeps the search, the Filter button, the count and Start;
+     the four selects are in a sheet from Filter, one under another at the full width. */
+  .toolbar .search {
+    flex: 1 1 140px;
+    min-width: 0;
+    max-width: none;
+  }
+  .filter-sheet {
+    gap: var(--space-3);
+    padding: var(--space-4);
+  }
+  .filter-sheet select {
+    width: 100%;
+    min-height: var(--touch-target);
+  }
+  .filter-sheet .count {
+    color: var(--text-muted);
+  }
   /* The backstage and the scratchpad over the whole window, each with its own Close. */
   .stagearea > .backstage,
   .stagearea > .scratchpad {
