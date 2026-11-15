@@ -218,8 +218,9 @@ describe("signing in from a first run against an older plane", () => {
       await signingInTo(harness!.plane.baseUrl, opened);
       harness!.idp.approve("ada@example.com", "Ada");
 
-      await waitFor(() => says("Welcome, Ada.") && button("Continue"), "the first sign-in's theme").then((b) => b.click());
+      // The first run picked the look, so its sign-in goes straight on (#930).
       await waitFor(launcher, "the launcher");
+      expect(says("Welcome, Ada.")).toBe(false);
       await sees("Rewrite the placement loop");
       // Asked about, as the plane recommends, and nothing to do: no refusal, no offer, no download.
       await waitFor(() => updater.checks.some((c) => c.version === older) || null, "a check for the recommended version");
