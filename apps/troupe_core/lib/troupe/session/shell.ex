@@ -117,8 +117,8 @@ defmodule Troupe.Session.Shell do
     case Permissions.decide(profile, "shell", %{"command" => command}, workspace) do
       {:deny, rule} ->
         {"permissions",
-         "this command was refused by the rule #{Permissions.describe(rule)}: on its pods a " <>
-           "command typed with ! obeys the worker profile's deny rules as the agent's do"}
+         "this command was refused by the rule #{Permissions.describe(rule)}: on the platform a " <>
+           "command typed with ! obeys the profile's deny rules as the agent's do"}
 
       _other ->
         nil

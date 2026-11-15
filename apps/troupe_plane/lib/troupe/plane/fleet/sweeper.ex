@@ -19,6 +19,11 @@ defmodule Troupe.Plane.Fleet.Sweeper do
 
   The sweep runs on every replica, and stranding is idempotent: a session that is already
   dormant is not on a worker, so the next sweep has nothing to find.
+
+  A third pass forgets a pod its substrate no longer runs, once it has been quiet past a
+  drain's deadline and holds nothing (`Fleet.forget_gone/0`): a scale-down's pods were
+  otherwise listed for ever as draining. Idempotent too, since a row deleted is not found
+  again.
   """
 
   use GenServer
@@ -60,6 +65,15 @@ defmodule Troupe.Plane.Fleet.Sweeper do
       Logger.warning(
         "troupe plane: #{worker.namespace}/#{worker.pod_name} is gone with " <>
           "#{length(stranded)} session(s) on it; they are dormant and can be activated elsewhere"
+      )
+    end
+
+    # After the rescue, so a pod whose sessions were just marked dormant holds none, and
+    # its row goes once it has been quiet past a drain's deadline and is no longer run.
+    for worker <- Fleet.forget_gone() do
+      Logger.info(
+        "troupe plane: #{worker.namespace}/#{worker.pod_name} was removed and has not been " <>
+          "heard from since #{DateTime.to_iso8601(worker.last_heartbeat_at)}; its row is forgotten"
       )
     end
 

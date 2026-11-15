@@ -132,7 +132,8 @@ defmodule Troupe.Client.Remote do
   # A pod's session asks nothing at its start: onboarding runs on the person's own machine
   # (root Decision 826), and its brief is the pod's.
   @impl true
-  def answer_local(_sid, _id, _key), do: {:error, "a session on a pod asks nothing at its start"}
+  def answer_local(_sid, _id, _key),
+    do: {:error, "a session on the platform asks nothing at its start"}
 
   @impl true
   def edit_todo(sid, _path, change), do: describe(Worker.edit_todo(sid, change))
@@ -1032,6 +1033,8 @@ defmodule Troupe.Client.Remote do
       id: session["id"],
       title: session["title"] || session["id"],
       owner: session["owner"],
+      # The owner's name, where the plane has one (#931); a view shows the subject without it.
+      owner_name: session["owner_name"],
       team: session["team"],
       profile: session["profile"],
       state: Worker.session_state(session["state"]) || :dormant,

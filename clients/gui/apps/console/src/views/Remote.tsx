@@ -21,8 +21,11 @@
 // says why in words and keeps what was typed. An approval shows what the desktop app's
 // shows, the command, its folder, the file or the diff and what allowing it does, in the
 // client's words for both apps, and once answered it stays as a line saying who answered.
-// A laptop that honours it (troupe #932) takes an answer for the rest of the session from
-// here, as at the laptop; one from before answers once, and a line says so.
+// Its answers are the desktop app's for the same session: allowed once, for the rest of
+// the session or denied, and always only where the session's server names it, which a pod
+// does not and a laptop's never does from here. A laptop whose daemon is from before it
+// took an answer for the session from another device (troupe #932) is answered once, and
+// a line says so.
 //
 // While the laptop is away the plane says so on the session's stream, and the status line
 // reads it: asleep or offline, or Troupe stopped there, and then that it is back. The
@@ -31,6 +34,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { JSX } from "react";
 import {
+  ALLOW_ALWAYS,
   ONCE_ONLY_SENTENCE,
   RELAYED_ALLOW_SESSION,
   callConsequence,
@@ -288,7 +292,7 @@ type QuestionEntry = Extract<Entry, { kind: "question" }>;
 
 /** An answered approval as its line in the transcript: who answered it, and what it was. */
 function decisionLine(a: ApprovalEntry, nameOf: (subject: string | undefined) => string): string {
-  const verb = a.decision === "deny" ? "Denied" : a.decision === "allow_session" ? "Allowed for this session" : "Allowed";
+  const verb = a.decision === "deny" ? "Denied" : a.decision === "allow_session" ? "Allowed for this session" : a.decision === "allow_always" ? "Always allowed" : "Allowed";
   const what = callHeadline(a.tool).replace(/\?$/, "").toLowerCase();
   const target = toolTarget(a.tool, a.args);
   return `${verb} by ${nameOf(a.resolvedBy ?? a.decidedBy)}: ${what}${target ? ` · ${target}` : ""}${a.decision === "deny" ? ". Nothing was changed." : ""}`;
@@ -384,6 +388,9 @@ export function RemoteSession({ id, pod }: { id: string; pod?: { mode: "read" | 
   // Whether the laptop takes an answer for the rest of the session from here, as its
   // daemon said at `initialize`; one from before answers a call once.
   const [sessionWide, setSessionWide] = useState(false);
+  // Whether the session's server takes a lasting rule from an approval, as it said at
+  // `initialize`: a pod names none, its rules being its worker profile's.
+  const [alwaysAllow, setAlwaysAllow] = useState(false);
   const attachment = useRef<SessionAttachment | null>(null);
 
   useEffect(() => {
@@ -440,6 +447,7 @@ export function RemoteSession({ id, pod }: { id: string; pod?: { mode: "read" | 
         // A follow-only grant holds `observe` alone; a pod session opened to read is followed too.
         setSteer(pod?.mode !== "read" && (a.conn?.scopes.has("control") ?? false));
         setSessionWide(!pod && a.view.capabilities[RELAYED_ALLOW_SESSION] === true);
+        setAlwaysAllow(Boolean(pod) && Boolean(a.view.capabilities[ALLOW_ALWAYS]));
         void a.view.followPresence().catch(() => undefined);
         void a.view.setPresence("viewing").catch(() => undefined);
         a.view
@@ -472,11 +480,15 @@ export function RemoteSession({ id, pod }: { id: string; pod?: { mode: "read" | 
   };
 
   // People by name where anything here knows one: the person signed in, the laptop's
-  // person as the plane lists the offer, and whoever the session's presence names. The
-  // stream's own events name a subject alone.
+  // person as the plane lists the offer, whoever the session's presence names, and each
+  // event's actor, which carries the name where the connection knew it (troupe #931).
   const names = new Map<string, string>();
   for (const p of state.presence) if (p.subject && p.display_name) names.set(p.subject, p.display_name);
   if (row?.owner_name) names.set(row.owner, row.owner_name);
+  for (const e of state.entries) {
+    if (e.kind === "user" && e.author && e.authorName) names.set(e.author, e.authorName);
+    if (e.kind === "approval" && e.decidedBy && e.decidedByName) names.set(e.decidedBy, e.decidedByName);
+  }
   const nameOf = (subject: string | undefined): string => (subject === undefined || subject === me.subject ? "you" : (names.get(subject) ?? subject));
 
   const busy = isBusy(state);
@@ -577,7 +589,7 @@ export function RemoteSession({ id, pod }: { id: string; pod?: { mode: "read" | 
                       <button type="button" onClick={() => void act((x) => x.view.respondApproval(a.callId, "deny"))}>
                         Deny
                       </button>
-                      {laptop && sessionWide && pub.visibility !== null && (
+                      {(!laptop || sessionWide) && pub.visibility !== null && (
                         <button
                           type="button"
                           disabled={(audiences[a.callId] ?? proposedKey(pub) ?? "") === ""}
@@ -613,10 +625,16 @@ export function RemoteSession({ id, pod }: { id: string; pod?: { mode: "read" | 
                       <button type="button" className="primary" onClick={() => void act((x) => x.view.respondApproval(a.callId, "allow"))}>
                         Allow once
                       </button>
-                      {/* A laptop that takes it answers for the session from here as at the laptop. */}
-                      {laptop && sessionWide && (
+                      {/* A pod session is the person's to steer, so it is answered as the
+                          desktop answers one; a laptop that takes it, as at the laptop. */}
+                      {(!laptop || sessionWide) && (
                         <button type="button" onClick={() => void act((x) => x.view.respondApproval(a.callId, "allow_session"))}>
                           {callScopedLabel(a.tool)}
+                        </button>
+                      )}
+                      {!laptop && alwaysAllow && (
+                        <button type="button" title="A rule of yours: every call like this runs unasked from now on" onClick={() => void act((x) => x.view.respondApproval(a.callId, "allow_always"))}>
+                          Always allow {a.tool}
                         </button>
                       )}
                       <button type="button" onClick={() => void act((x) => x.view.respondApproval(a.callId, "deny"))}>

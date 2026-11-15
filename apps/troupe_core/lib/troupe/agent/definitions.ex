@@ -104,12 +104,12 @@ defmodule Troupe.Agent.Definitions do
   def lost_to_bundle(kind, name, owner \\ :bundle)
 
   def lost_to_bundle(kind, name, :bundle) do
-    "the session's bundle has #{kind_name(kind)} named #{name}, and on a pod the bundle's " <>
+    "the session's bundle has #{kind_name(kind)} named #{name}, and on the platform the bundle's " <>
       "beats a repository's unless the profile allows the repository's"
   end
 
   def lost_to_bundle(kind, name, :builtin) do
-    "#{name} is #{kind_name(kind)} Troupe ships, and on a pod Troupe's own beats a " <>
+    "#{name} is #{kind_name(kind)} Troupe ships, and on the platform Troupe's own beats a " <>
       "repository's unless the profile allows the repository's"
   end
 

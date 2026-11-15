@@ -101,7 +101,10 @@ defmodule Troupe.Gateway.CommandsListTest do
     assert by_name["goal"]["section"] == "session"
     assert by_name["loop"]["usage"] == "/loop [n | stop]"
     assert by_name["quit"]["aliases"] == ["exit", "q"]
-    assert by_name["merge"]["availability"] == "local"
+    # The terminal client's own, with what it needs there on the wire beside it.
+    assert by_name["merge"]["availability"] == "tui"
+    assert by_name["merge"]["availabilities"] == %{"tui" => "local"}
+    assert by_name["watch"]["availability"] == "local"
 
     assert [%{"kind" => "window", "name" => "window", "required" => false}] =
              by_name["cancel"]["args"]

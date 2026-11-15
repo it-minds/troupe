@@ -1032,7 +1032,9 @@ defmodule Troupe.Remote.Worker do
         error: nil,
         scopes: result["scopes"] || [],
         capabilities: result["capabilities"] || %{},
-        max_message: max_message(result["limits"])
+        max_message: max_message(result["limits"]),
+        # Who this connection is, so a line another person sent is drawn with their name.
+        memory: Translate.me(state.memory, get_in(result, ["principal", "subject"]))
     }
 
     publish_status(state)

@@ -391,7 +391,5 @@ defmodule Troupe.Plane.Drain do
   @spec undrain(Worker.t()) :: {:ok, Worker.t()} | {:error, term()}
   def undrain(%Worker{} = worker), do: Fleet.drain(worker, false)
 
-  defp drain_timeout_ms do
-    Application.get_env(:troupe_plane, :drain_timeout_seconds, 300) * 1_000
-  end
+  defp drain_timeout_ms, do: Fleet.drain_deadline_ms()
 end

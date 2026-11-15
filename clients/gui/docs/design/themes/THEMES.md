@@ -105,7 +105,7 @@ The screen follows four rules:
 1. **Afterglow is preselected.** Someone who presses Continue without reading gets the default and loses nothing.
 2. **The previews are real.** Each card shows the session row that needs you, an approval, and the agent list — the three things the person will actually look at all day. Not swatches: swatches tell you nothing about whether you can work in a theme.
 3. **Light and dark are a separate control, not eight cards.** Theme and mode are different questions. Mixing them into one grid turns a ten-second choice into a puzzle. The mode control defaults to **Follow my system**.
-4. **The copy says it is changeable.** "You can change this any time in Settings." One sentence removes all the weight from the decision, which is the point — nobody should spend two minutes here.
+4. **The copy says it is changeable.** "You can change this any time in Appearance." One sentence removes all the weight from the decision, which is the point — nobody should spend two minutes here.
 
 Skipping is allowed, and skipping means Afterglow with system mode.
 

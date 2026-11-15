@@ -125,6 +125,14 @@ export class FakeWorker {
   readonly agents = new FakeAgents("/home/troupe/.config/troupe", true);
   /** Whether a relayed connection is told the laptop takes `allow_session` from there; false is a daemon from before troupe #932. */
   relayedAllowSession = true;
+  /** The window `context_status` says after each call (troupe #920); null for a model whose window is not known. */
+  contextWindow: number | null = 200_000;
+  /**
+   * Where `fs.upload` with `artifact` fetches an artifact's files from, as a pod asks the
+   * plane over its control link for the person who asked (troupe #920): the fake plane sets
+   * it; null answers `unavailable`, as a pod with no link does.
+   */
+  artifactSource: ((subject: string, id: string, version?: number) => { id: string; title: string; version: number; files: Array<{ path: string; text: string }> } | null) | null = null;
 
   private readonly clients = new Set<Client>();
   private readonly opts: Required<WorkerOptions>;
@@ -177,7 +185,7 @@ export class FakeWorker {
    * sends (it resolves the profile's default itself), and `prompt`, on a first activation
    * only, is the session's first turn, said by `owner` and answered like any other.
    */
-  createSession(id: string, params: { workspace?: string; profile?: string; agent?: string; title?: string; prompt?: string; owner?: string } = {}): Session {
+  createSession(id: string, params: { workspace?: string; profile?: string; agent?: string; title?: string; prompt?: string; owner?: string; ownerName?: string } = {}): Session {
     const session: Session = {
       id,
       log: new SessionLog(),
@@ -209,7 +217,7 @@ export class FakeWorker {
     });
     session.log.append("agent_started", { profile: session.profile, mode: session.agent, bundle_version: "3" });
     const prompt = params.prompt?.trim();
-    if (prompt) void this.turn(session, prompt, `c-first-${id}`, { sub: params.owner ?? "user" });
+    if (prompt) void this.turn(session, prompt, `c-first-${id}`, { sub: params.owner ?? "user", ...(params.ownerName ? { name: params.ownerName } : {}) });
     return session;
   }
 
@@ -256,7 +264,13 @@ export class FakeWorker {
         return reply(ws, msg.id, {
           protocol_version: "1",
           server_info: { name: "fake-worker", version: "0.0.1", instance_id: this.workerId },
-          capabilities: { blobs: true, tools: true, ...(token.relayed ? { remote: true, relayed: true, relayed_allow_session: this.relayedAllowSession } : {}) },
+          // A pod fetches an artifact into a session from the plane, and writes no lasting
+          // rule from an approval: its rules are its worker profile's (troupe #920). Standing
+          // in for a laptop through the relay, it says what a laptop's daemon says there
+          // (troupe #932), which reaches no file of the laptop's.
+          capabilities: token.relayed
+            ? { blobs: true, tools: true, remote: true, relayed: true, relayed_allow_session: this.relayedAllowSession }
+            : { blobs: true, tools: true, fs_upload_artifact: true },
           principal: { subject: token.sub, display_name: token.name, kind: "user" },
           scopes: token.scopes,
           limits: { max_message_bytes: 1_048_576 },
@@ -446,6 +460,13 @@ export class FakeWorker {
         const callId = String(params["call_id"] ?? "");
         const approval = session.approvals.get(callId);
         if (!approval) return reply(ws, id, null, { code: -32005, message: "not_found" });
+        if (params["decision"] === "allow_always") {
+          return reply(ws, id, null, {
+            code: -32004,
+            message: "forbidden",
+            data: { field: "decision", reason: "rules on the platform are the worker profile's, which an administrator sets; allow it once or for this session" },
+          });
+        }
         if (approval.resolvedBy) {
           // First response wins. The later one is told who resolved it and changes
           // nothing — no second decision, and no second continuation of the turn.
@@ -458,7 +479,7 @@ export class FakeWorker {
         session.log.append(
           "approval_decided",
           { call_id: callId, tool: approval.tool, decision: approval.decision, actor: client.token.sub },
-          { kind: "user", subject: client.token.sub },
+          actorOf(client.token),
         );
         reply(ws, id, { decision: approval.decision });
         await this.afterApproval(session, callId, approval.decision, approval.tool, approval.args);
@@ -474,7 +495,7 @@ export class FakeWorker {
         const callId = String(params["call_id"] ?? "");
         if (!session.questions.delete(callId)) return reply(ws, id, null, { code: -32005, message: "not_found" });
         const answer = String(params["text"] ?? "");
-        session.log.append("question_answered", { call_id: callId, text: answer }, { kind: "user", subject: client.token.sub });
+        session.log.append("question_answered", { call_id: callId, text: answer }, actorOf(client.token));
         reply(ws, id, { accepted: true });
         this.respond(session, `You answered: ${answer}`);
         this.setStatus(session, "idle");
@@ -532,7 +553,7 @@ export class FakeWorker {
         // A profile with `personalTools: forbid` refuses before any challenge, as the gateway does.
         if (this.personalToolsForbiddenBy) {
           const profile = this.personalToolsForbiddenBy;
-          const reason = `the worker profile ${profile} does not take a person's own tools on its pods (personalTools: forbid); only the profile's MCP servers are available`;
+          const reason = `the profile ${profile} does not take a person's own tools (personalTools: forbid); only the profile's MCP servers are available`;
           return reply(ws, id, null, { code: -32004, message: "forbidden", data: { setting: "personalTools", profile, reason } });
         }
         const specs = (params["tools"] as Array<{ name: string; description?: string; schema?: unknown }> | undefined) ?? [];
@@ -624,10 +645,10 @@ export class FakeWorker {
           files: [
             memory("organisation", null, 3, "the organisation's memory"),
             memory("team", "engineering", 2, "the team engineering's memory"),
-            memory("profile", session.profile, 1, `the worker profile ${session.profile}'s memory`),
+            memory("profile", session.profile, 1, `the profile ${session.profile}'s memory`),
             { scope: "root", path: `/state/workspaces/${session.id}/AGENTS.md`, size: 20, chars: 20, budget: 16000, status: "whole", hash: "sha256:abcdef0123" },
           ],
-          memory_from: { source: "the plane, with the session's activation", fetched_at: null },
+          memory_from: { source: "the plane, when the session started", fetched_at: null },
         });
       }
 
@@ -652,9 +673,9 @@ export class FakeWorker {
           files: [{ scope: "project", path: `/state/workspaces/${session.id}/.troupe/config.yaml`, exists: true }],
           organisation: [],
           keys: [
-            key("models.default", "pod-model", "profile", `the worker profile ${session.profile} (TROUPE_MODEL)`),
+            key("models.default", "pod-model", "profile", `the profile ${session.profile} (TROUPE_MODEL)`),
             key("max_turns", 7, "session", "the session's terms"),
-            machinery("base_url", "http://llm.example.test/v1", "profile", `the worker profile ${session.profile} (TROUPE_BASE_URL)`),
+            machinery("base_url", "http://llm.example.test/v1", "profile", `the profile ${session.profile} (TROUPE_BASE_URL)`),
             key("compact_at", 0.6, "project", `/state/workspaces/${session.id}/.troupe/config.yaml`),
             key("managed_permission_rules_only", true, "enforced", "the plane's platform settings", {
               value: true,
@@ -727,6 +748,30 @@ export class FakeWorker {
         });
       }
 
+      // A file into the session's own directory, or one of the person's artifacts, whose
+      // files the pod fetches from the plane for the person who asked (troupe #920): never
+      // through the client. Each is recorded as the person's, as an upload is.
+      case "fs.upload": {
+        if (!session) return reply(ws, id, null, { code: -32005, message: "not_found" });
+        if (!client.token.scopes.includes("control")) return reply(ws, id, null, { code: -32004, message: "forbidden", data: { required_scope: "control" } });
+        const actor = { kind: "user", subject: client.token.sub };
+        const put = (path: string, content: string): { path: string; bytes: number } => {
+          session.files.set(path, content);
+          session.log.append("fs_changed", { path, hash: `sha256:${createHash("sha256").update(content).digest("hex")}`, size: Buffer.byteLength(content) }, actor);
+          return { path, bytes: Buffer.byteLength(content) };
+        };
+        const folder = String(params["path"] ?? "session:/").replace(/^session:\/?/, "");
+        if (folder.includes("..")) return reply(ws, id, null, { code: -32004, message: "forbidden" });
+        if (typeof params["artifact"] !== "string") return reply(ws, id, put(folder, String(params["content"] ?? "")));
+        if (!this.artifactSource) return reply(ws, id, null, { code: -32010, message: "unavailable", data: { reason: "the plane could not be reached from this pod; try again later" } });
+        const version = typeof params["version"] === "number" ? params["version"] : undefined;
+        const found = this.artifactSource(client.token.sub, params["artifact"], version);
+        if (!found) return reply(ws, id, null, { code: -32005, message: "not_found", data: { id: params["artifact"] } });
+        const prefix = folder === "" || folder.endsWith("/") ? folder : `${folder}/`;
+        const files = found.files.filter((f) => params["file"] === undefined || f.path === params["file"]).map((f) => put(`${prefix}${f.path}`, f.text));
+        return reply(ws, id, { artifact: found.id, title: found.title, version: found.version, files });
+      }
+
       default:
         return reply(ws, id, null, { code: -32601, message: "method_not_found", data: { method } });
     }
@@ -763,8 +808,8 @@ export class FakeWorker {
    * One turn. The prefix of the prompt picks the script, so a test asks for the
    * behaviour it needs rather than for a model.
    */
-  private async turn(session: Session, text: string, commandId: string, token: Pick<PodToken, "sub">): Promise<void> {
-    const actor = { kind: "user", subject: token.sub };
+  private async turn(session: Session, text: string, commandId: string, token: Pick<PodToken, "sub" | "name">): Promise<void> {
+    const actor = actorOf(token);
     session.log.append("input_accepted", { command_id: commandId, author: token.sub }, actor);
     session.log.append("user_input", { source: "user", text }, actor);
     this.setStatus(session, "thinking");
@@ -796,6 +841,8 @@ export class FakeWorker {
       model: "fake",
       gateway: { request_id: `r-${session.log.headSeq}`, cost_micros: 100 },
     });
+    // How full the window is after the call, as the harness says it (troupe #920).
+    this.ephemeral(session, "context_status", { window_tokens: this.contextWindow, used_tokens: 10 });
   }
 
   private askApproval(session: Session, what: string): void {
@@ -883,6 +930,14 @@ const SUMMARY_TYPES = new Set([
   "approval_decided",
   "approval_resolved",
 ]);
+
+/**
+ * Who did it, as a pod writes the event's actor: the token's subject, and its name where
+ * the plane signed one in that is more than the subject again (troupe #931).
+ */
+export function actorOf(token: Pick<PodToken, "sub" | "name">): { kind: "user"; subject: string; display_name?: string } {
+  return { kind: "user", subject: token.sub, ...(token.name && token.name !== token.sub ? { display_name: token.name } : {}) };
+}
 
 function reply(ws: WebSocket, id: unknown, result: unknown, error?: { code: number; message: string; data?: unknown }): void {
   ws.send(JSON.stringify(error ? { jsonrpc: "2.0", id, error } : { jsonrpc: "2.0", id, result }));

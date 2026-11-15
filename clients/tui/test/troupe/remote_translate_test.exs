@@ -335,10 +335,18 @@ defmodule Troupe.RemoteTranslateTest do
              %{type: :agent_state, data: %{to: :idle, reason: "cancelled"}}
            ] = translate(durable("cancelled", %{}))
 
-    assert [%{type: :remote_note}, %{type: :remote_status, data: %{state: :active}}] =
+    # Said in the reader's words: a session wakes and goes to sleep on the platform, and the
+    # pod it was placed on is not theirs to know.
+    assert [
+             %{type: :remote_note, data: %{text: "session woke on the platform"}},
+             %{type: :remote_status, data: %{state: :active}}
+           ] =
              translate(durable("session_activated", %{"epoch" => 2, "pod" => "troupe-w-dev-0"}))
 
-    assert [%{type: :remote_note}, %{type: :remote_status, data: %{state: :dormant}}] =
+    assert [
+             %{type: :remote_note, data: %{text: "session went to sleep"}},
+             %{type: :remote_status, data: %{state: :dormant}}
+           ] =
              translate(durable("session_dormant", %{"last_seq" => 40}))
 
     assert [
@@ -929,11 +937,11 @@ defmodule Troupe.RemoteTranslateTest do
   # the event's field names.
   test "files_skipped says what was not read, how many, and why" do
     bundle =
-      "the session's bundle has an agent named build, and on a pod the bundle's beats a " <>
+      "the session's bundle has an agent named build, and on the platform the bundle's beats a " <>
         "repository's unless the profile allows the repository's"
 
     shipped =
-      "plan is an agent Troupe ships, and on a pod Troupe's own beats a repository's " <>
+      "plan is an agent Troupe ships, and on the platform Troupe's own beats a repository's " <>
         "unless the profile allows the repository's"
 
     files = [

@@ -204,6 +204,9 @@ test("the fake admin's settings and clients agree with the screens that read the
   const keys = (settings.result as { settings: Array<{ key: string; group: string }>; groups: Array<{ key: string }> });
   assert.equal(keys.settings.find((s) => s.key === "client_release_url")?.group, "releases");
   assert.ok(keys.groups.some((g) => g.key === "releases"));
+  // Each is named and read in a unit, as the plane's table writes them: none is a bare key.
+  const unnamed = (keys.settings as Array<{ key: string; label?: string; unit?: string }>).filter((s) => !s.label || !s.unit).map((s) => s.key);
+  assert.deepEqual(unnamed, [], "every fake setting carries a label and a unit");
   await admin.call("alice@example.com", "admin.setting.put", { key: "client_release_url", value: "https://plane.example.test/downloads" });
   assert.equal(admin.releaseUrl, "https://plane.example.test/downloads", "Integrations reads the setting Policy writes");
 

@@ -66,9 +66,91 @@ defmodule Troupe.KeyLineTest do
       assert more =~ "←/→ level"
     end
 
+    # A box's line (troupe #929): the keys it is typed with stay, and a note that names
+    # no key goes before any key.
+    test "a note that names no key goes before a key, and Tab and Ctrl- keys act" do
+      shell =
+        " shell — runs in the session's workspace · no stdin · cd does not carry over · !! keeps it from the agent "
+
+      assert KeyLine.fit(shell, 78) ==
+               {" runs in the session's workspace · no stdin · !! keeps it from the agent ",
+                "cd does not carry over"}
+
+      plain =
+        " Enter starts build in the checkout · Ctrl-N chooses agent and worktree · / commands "
+
+      assert KeyLine.fit(plain, 78) ==
+               {" Enter starts build in the checkout · Ctrl-N chooses agent and worktree ",
+                "/ commands"}
+
+      # A spare key goes before Tab or Ctrl-; Enter and Esc stay longest.
+      line = " box — Enter sends · Tab completes · x drops · Ctrl-J new line · Esc back "
+
+      assert KeyLine.fit(line, 60) ==
+               {" Enter sends · Tab completes · Ctrl-J new line · Esc back ", "x drops"}
+    end
+
     test "a line with no keys to spare is left to the border" do
       title = " → lib/a/very/long/path/to/a/file.ex (Enter sends, Esc back) "
       assert KeyLine.fit(title, 20) == {title, nil}
+    end
+  end
+
+  # The boxes typed in (troupe #929): at 80 columns the command line and the palette keep
+  # every key they are typed with on their border, and what the command line's still
+  # gives up is on the box's last row while what is typed leaves it free.
+  describe "a box's key line at 80 columns" do
+    setup do
+      {sid, _, _ws} = start_session!(script: [])
+      %{sid: sid}
+    end
+
+    defp border(rows, word), do: Enum.find(rows, &(&1 =~ "┌" and &1 =~ word))
+
+    defp ready(pid) do
+      eventually(fn -> user_state(pid).commands != [] end)
+      eventually(fn -> Troupe.UI.TUI.Model.session_window(user_state(pid).model) != nil end)
+    end
+
+    test "the command line keeps Enter and Ctrl-N, and shows / commands in the box", %{sid: sid} do
+      {pid, session} = start_tui(sid, width: 80)
+      ready(pid)
+
+      rows = screen(pid, session)
+      line = border(rows, "Enter starts")
+      assert line, "no border says Enter starts at 80 columns:\n" <> Enum.join(rows, "\n")
+      assert line =~ "Enter starts build in the checkout"
+      assert line =~ "Ctrl-N chooses agent and worktree"
+      assert Enum.any?(rows, &(&1 =~ "also / commands"))
+
+      # A line long enough to need the row takes it back.
+      type(pid, String.duplicate("word ", 70))
+      refute screen_text(pid, session) =~ "also / commands"
+    end
+
+    test "an agent chosen keeps Enter and Esc, the note giving way first", %{sid: sid} do
+      {pid, session} = start_tui(sid, width: 80)
+      ready(pid)
+      press(pid, "n", ["ctrl"])
+      press(pid, "enter")
+      press(pid, "c")
+
+      line = border(screen(pid, session), "Esc forgets")
+      assert line =~ "Enter starts build in the checkout · Esc forgets the choice"
+    end
+
+    test "the palette keeps every key it is typed with", %{sid: sid} do
+      {pid, session} = start_tui(sid, width: 80)
+      ready(pid)
+      eventually(fn -> user_state(pid).commands != [] end)
+      press(pid, "/")
+      assert user_state(pid).focus == :palette
+
+      line = border(screen(pid, session), "Enter runs")
+      assert line, "no border says Enter runs at 80 columns"
+
+      for key <- ["type to filter", "↑↓ move", "Enter runs", "Tab puts it on the line", "Esc back"],
+          do: assert(line =~ key, "#{key} left the palette's line: #{line}")
     end
   end
 

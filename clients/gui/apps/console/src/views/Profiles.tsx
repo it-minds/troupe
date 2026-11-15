@@ -1,4 +1,4 @@
-// Worker profiles: the list, a profile read whole, and the editor.
+// Profiles: the list, a profile read whole, and the editor.
 //
 // The list says, per profile, how its pods are doing, which image it runs and which teams
 // may use it. A profile's page reads every field of its spec: what the editor has fields
@@ -94,7 +94,7 @@ export function Profiles(): JSX.Element {
             <>
               <p className="lead">
                 {platform
-                  ? "A worker profile is a named answer to what an agent of its kind may reach: its image, its model, its egress and its MCP servers. Pods are pooled per profile, and a team uses one once it is granted it."
+                  ? "A profile is a named answer to what an agent of its kind may reach: its image, its model, its egress and its MCP servers. Pods are pooled per profile, and a team uses one once it is granted it."
                   : "The profiles your teams are granted, and how their pods are doing. A profile's settings are a platform admin's to read and change."}
               </p>
               {locked && <Locked things="profiles" source={source} />}

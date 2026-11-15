@@ -1474,6 +1474,7 @@ defmodule Troupe.Agent.Server do
         request = build_request(state, definition)
         {prefix, changed} = prefix_changes(state.prefix, request)
         :ok = note_held(state, request)
+        state = announce_context(state)
 
         log(
           state,
@@ -2179,7 +2180,38 @@ defmodule Troupe.Agent.Server do
         overflow_retried: false
     }
     |> warn_headroom()
+    |> context_status()
   end
+
+  # How full the root's window is, for a client's gauge: the window compaction plans
+  # against where the model's is known (declared, or the provider's catalog), `nil` where
+  # only the fallback is, and the prompt's whole length on the last call. Ephemeral: it is
+  # derived from the log's `llm_response` and the configuration, so a replay loses nothing.
+  defp context_status(%State{agent_path: ["root"]} = state) do
+    model = state.definition.model || state.config.model
+
+    publish(state, %{
+      type: :context_status,
+      data: %{
+        "window_tokens" => Config.known_window(state.config, model),
+        "used_tokens" => state.last_input_tokens
+      }
+    })
+
+    %{state | context_model: model}
+  end
+
+  defp context_status(state), do: state
+
+  # Before the call of a turn on a model the root has not yet said the window of: the
+  # first turn of this process, or one after the model changed.
+  defp announce_context(%State{agent_path: ["root"]} = state) do
+    if state.context_model == (state.definition.model || state.config.model),
+      do: state,
+      else: context_status(state)
+  end
+
+  defp announce_context(state), do: state
 
   # A model call, wherever spend is added up: the listing, telemetry, the budget, which is
   # charged what was billed (Decision 657), and the turn's spend (Decision 769). The
@@ -2300,7 +2332,7 @@ defmodule Troupe.Agent.Server do
       Logger.warning(
         "troupe: #{model} has no price, so its calls count as free in session #{state.session_id}: " <>
           "the gateway did not say what they cost, and neither the catalog nor models.prices prices it. " <>
-          "Set models.prices for it (on a pod, the profile's llm.prices)"
+          "Set models.prices for it (on the platform, the profile's llm.prices)"
       )
 
       :telemetry.execute([:troupe, :llm, :unpriced], %{count: 1}, %{

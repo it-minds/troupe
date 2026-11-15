@@ -5,7 +5,7 @@ import { useEffect, useState } from "react";
 import type { JSX } from "react";
 import { APPROVAL_CHOICES } from "@troupe/client";
 import type { DaemonClient } from "@troupe/client";
-import { shell } from "../../shell";
+import { useChooseFolder } from "../ChooseFolder";
 import { Actions, StepFrame } from "./Step";
 import type { StepProps } from "./Step";
 
@@ -14,7 +14,7 @@ export function Workspace({ client, flow, busy, error, onAnswer, onBack }: StepP
   const [workspace, setWorkspace] = useState<string>((earlier?.["workspace"] as string | null) ?? "");
   const [approvals, setApprovals] = useState<"ask" | "auto">(earlier?.["approvals"] === "auto" ? "auto" : "ask");
   const [recent, setRecent] = useState<string[]>([]);
-  const picker = shell()?.pickDirectory;
+  const choose = useChooseFolder(setWorkspace);
 
   useEffect(() => {
     let live = true;
@@ -40,18 +40,15 @@ export function Workspace({ client, flow, busy, error, onAnswer, onBack }: StepP
           <input
             value={workspace}
             onChange={(e) => setWorkspace(e.target.value)}
-            placeholder={picker ? "Choose one, or type a path" : "/home/you/project"}
+            placeholder={choose.button ? "Choose one, or type a path" : "/home/you/project"}
             spellCheck={false}
             aria-label="Directory"
             style={{ flex: 1 }}
           />
-          {picker && (
-            <button type="button" onClick={() => void picker().then((p) => p && setWorkspace(p))}>
-              Choose…
-            </button>
-          )}
+          {choose.button}
         </div>
       </label>
+      {choose.failed}
 
       {recent.length > 0 && (
         <div className="stack" style={{ gap: "var(--space-2)" }}>

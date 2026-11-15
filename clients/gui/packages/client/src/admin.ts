@@ -24,6 +24,8 @@ import type { MemoryEntry } from "./entries.js";
 export interface AdminSessionRow {
   id: string;
   owner: string;
+  /** The owner's name, where the plane has one (troupe #931); absent from an older plane. */
+  owner_name?: string | null;
   profile: string | null;
   state: string;
   visibility: string | null;
@@ -132,6 +134,12 @@ export interface AdminPod {
   healthy: boolean;
   draining: boolean;
   last_seen_at: string | null;
+  /**
+   * Removed: its substrate no longer runs it (a scale-down took it) and it has gone quiet.
+   * Kept until the plane's sweep forgets it; not draining, not broken, and nowhere a drained
+   * pod's sessions could go. Absent from a plane before troupe #883.
+   */
+  gone?: boolean;
   capacity: number;
   active_sessions: number;
   disk_fraction: number | null;
@@ -452,7 +460,7 @@ export interface TeamUpdated {
  * the rung that decided it, what a team may not go past, and every rung that had an
  * opinion. `admin.setting.effective` answers one; a team's `effective` is all of them.
  */
-export interface LadderValue {
+export interface LadderValue extends SettingNaming {
   key: string;
   /** The team's own column the setting lands in. */
   field: string;
@@ -519,6 +527,58 @@ export interface ClientPolicyPut extends ClientPolicy {
   changes: AuditChanges;
   /** How the component's clients last seen stand against the policy now, as the audit records it. */
   affected?: ClientCounts;
+}
+
+const RELEASE_VERSION = /^v?(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?(?:\+[0-9A-Za-z.-]+)?$/;
+
+/**
+ * A version as a policy names it, the way releases are numbered (`0.38.0-beta`, a leading
+ * `v` dropped), or `null` for one SemVer cannot read, which the plane refuses in a policy.
+ */
+export function releaseVersion(version: string): string | null {
+  const m = RELEASE_VERSION.exec(version.trim());
+  return m ? `${m[1]}.${m[2]}.${m[3]}${m[4] ? `-${m[4]}` : ""}` : null;
+}
+
+/**
+ * Whether `a` comes before `b` as SemVer orders them, as the plane orders a policy's
+ * versions: the numbers, then a pre-release before none (`0.38.0-beta` before `0.38.0`).
+ * False where either is not a version SemVer reads.
+ */
+export function versionOlder(a: string, b: string): boolean {
+  const x = RELEASE_VERSION.exec(a.trim());
+  const y = RELEASE_VERSION.exec(b.trim());
+  if (!x || !y) return false;
+  for (let i = 1; i <= 3; i += 1) {
+    if (Number(x[i]) !== Number(y[i])) return Number(x[i]) < Number(y[i]);
+  }
+  const [p, q] = [x[4], y[4]];
+  if (p === q) return false;
+  if (!p) return false;
+  if (!q) return true;
+  const ps = p.split(".");
+  const qs = q.split(".");
+  for (let i = 0; i < Math.min(ps.length, qs.length); i += 1) {
+    const [s, t] = [ps[i]!, qs[i]!];
+    if (s === t) continue;
+    const [sn, tn] = [/^\d+$/.test(s), /^\d+$/.test(t)];
+    if (sn && tn) return Number(s) < Number(t);
+    if (sn !== tn) return sn;
+    return s < t;
+  }
+  return ps.length < qs.length;
+}
+
+/**
+ * How a client's version stands against a policy, as the plane judges it at `initialize`:
+ * refused on a blocked version or below the minimum, behind below the recommended one,
+ * else current. A version SemVer cannot read is judged against `blocked` alone.
+ */
+export function clientStanding(policy: Pick<ClientPolicy, "recommended" | "minimum" | "blocked">, version: string): ClientStanding {
+  if (policy.blocked.includes(version)) return "refused";
+  if (policy.minimum && versionOlder(version, policy.minimum)) return "refused";
+  if (policy.recommended && versionOlder(version, policy.recommended)) return "behind";
+  return "current";
 }
 
 /**
@@ -605,6 +665,8 @@ export interface BundlePreview {
 
 export interface AuditRow {
   actor: string;
+  /** The actor's name, where the plane has one (troupe #931); absent from an older plane. */
+  actor_name?: string | null;
   action: string;
   subject_kind: string | null;
   subject_id: string | null;
@@ -802,7 +864,22 @@ export interface TriggerRun {
   reviewed_at: string | null;
 }
 
-export interface PlatformSetting {
+/**
+ * How a person reads and types a setting's value. Not the value's own unit: a `dollars`
+ * value is millionths of a dollar and a `minutes` one seconds, on the wire both ways.
+ */
+export type SettingUnit = "days" | "minutes" | "seconds" | "dollars" | "bytes" | "count" | "switch" | "text" | "choice" | "url";
+
+/** A setting's name and unit, as `admin.settings.list` and `admin.setting.effective` carry them; absent from a plane from before them. */
+export interface SettingNaming {
+  /** The reader's name for it, which heads its row: "Erase a session after". */
+  label?: string | null;
+  unit?: SettingUnit | string | null;
+  /** A `choice`'s values with the words each is picked by, in the order offered. */
+  choices?: Array<{ value: string; label: string }> | null;
+}
+
+export interface PlatformSetting extends SettingNaming {
   key: string;
   /** Absent for a secret: the plane says `set` and nothing more. */
   value?: unknown;

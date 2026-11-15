@@ -552,8 +552,11 @@ label code {
 
 /* -- shell ----------------------------------------------------------------- */
 
+/* The visible height, keyboard and browser bars taken off where the browser knows them,
+   so the composer at the foot stays above a phone's keyboard. */
 .app {
   height: 100%;
+  height: 100dvh;
   display: flex;
   background: var(--bg-canvas);
 }
@@ -602,13 +605,16 @@ button.wordmark:hover:not(:disabled) {
   flex: none;
   padding: 0 var(--space-5) var(--space-5);
 }
-.rail nav {
+.rail nav,
+.nav-sheet nav {
   display: flex;
   flex-direction: column;
 }
 /* A nav item is a word in the margin, lowercase, and the current one is lit along its
-   left edge in the accent. The words themselves stay as written in the markup. */
-.rail nav button {
+   left edge in the accent. The words themselves stay as written in the markup. The
+   phone's sheet (below) holds the same list. */
+.rail nav button,
+.nav-sheet nav button {
   min-height: var(--touch-target);
   background: none;
   border: none;
@@ -622,20 +628,24 @@ button.wordmark:hover:not(:disabled) {
   text-transform: lowercase;
   color: var(--text-secondary);
 }
-.rail nav button:hover:not(:disabled) {
+.rail nav button:hover:not(:disabled),
+.nav-sheet nav button:hover:not(:disabled) {
   filter: none;
   color: var(--text-primary);
   background: var(--bg-hover);
 }
-.rail nav button[aria-current="page"] {
+.rail nav button[aria-current="page"],
+.nav-sheet nav button[aria-current="page"] {
   background: var(--bg-panel);
   border-left-color: var(--accent);
   color: var(--text-primary);
 }
-.rail nav .count {
+.rail nav .count,
+.nav-sheet nav .count {
   color: var(--text-muted);
 }
-.rail .me {
+.rail .me,
+.nav-sheet .me {
   margin-top: auto;
   padding: var(--space-5) 20px 0;
   display: flex;
@@ -646,10 +656,12 @@ button.wordmark:hover:not(:disabled) {
   line-height: 1.6;
   color: var(--text-muted);
 }
-.rail .me .name {
+.rail .me .name,
+.nav-sheet .me .name {
   color: var(--text-secondary);
 }
-.rail .me button {
+.rail .me button,
+.nav-sheet .me button {
   align-self: flex-start;
   margin-top: var(--space-2);
   font: var(--t-micro);
@@ -1207,7 +1219,7 @@ main {
 @media (max-width: 760px) {
   .session-head {
     gap: var(--space-2);
-    padding: 8px 12px;
+    padding: 4px 12px;
   }
   .session-head .crumbs,
   .session-head .back .wide,
@@ -1329,10 +1341,12 @@ main {
 }
 /* `--transcript-min`: the room the transcript keeps above the panels (`.stream`).
    `--column`: the chat's one column, which the transcript, the cards under it and the
-   composer share, centred in the track; `--gutter` is the space either side of it. */
+   composer share, centred in the track; `--gutter` is the space either side of it. The
+   column is 760px on a laptop (1280 wide) and widens with the window to 1200px by about
+   1900 wide, where it stops; a track narrower than the column keeps the gutter's floor. */
 .conversation {
   --transcript-min: min(9rem, 22vh);
-  --column: 760px;
+  --column: clamp(760px, 71vw - 149px, 1200px);
   --gutter: max(var(--space-5), calc((100% - var(--column)) / 2));
   flex: 3 1 420px;
   min-width: 0;
@@ -2589,6 +2603,7 @@ details.advanced > summary {
   width: 100%;
   min-height: 52px;
   max-height: 40vh;
+  max-height: 40dvh;
   padding: 14px 16px 6px;
   border: none;
   background: transparent;
@@ -4018,8 +4033,9 @@ details.advanced > summary {
   .new-session .ns-hero-mask {
     display: none;
   }
+  /* The phone's top bar carries the mark already. */
   .new-session .ns-brand {
-    padding: var(--space-3) var(--space-4);
+    display: none;
   }
   .ns-sentence,
   .ns-why,
@@ -4053,63 +4069,110 @@ details.advanced > summary {
   }
 }
 
-/* At the 380px floor the rail becomes a top band and every track stacks. The band
-   wraps rather than scrolls sideways: the lockup and Sign out on its first line, and
-   every destination below them, in as many lines as the width needs, none hidden. */
+/* On a phone (below 720px, where the app draws the top bar instead of the rail) the
+   conversation gets the screen. The rail is one line at the top: the mark, the screen's
+   name, and the menu, which carries the "waiting for you" count and opens the rail's list
+   as a sheet over the whole window, Sign out at its foot. The backstage and the
+   scratchpad are sheets too, one at a time, and every other track stacks. */
 @media (max-width: 719px) {
   .app {
     flex-direction: column;
   }
-  .rail {
-    width: auto;
-    flex-direction: row;
-    flex-wrap: wrap;
+  .top-bar {
+    flex: none;
+    height: 52px;
+    display: flex;
     align-items: center;
-    gap: var(--space-1) var(--space-2);
-    padding: var(--space-2) var(--space-3);
-    border-right: none;
+    gap: var(--space-2);
+    padding: 0 var(--space-2) 0 var(--space-3);
+    background: var(--bg-panel);
     border-bottom: var(--bw-hairline) solid var(--border-hairline);
   }
-  .rail .wordmark {
-    padding: 0 var(--space-2) 0 0;
-  }
-  .rail .spacer {
-    display: none;
-  }
-  .rail nav {
-    order: 1;
-    flex: 1 1 100%;
-    flex-direction: row;
-    flex-wrap: wrap;
-    min-width: 0;
-  }
-  .rail nav button {
-    padding: var(--space-2) var(--space-2);
-    border-left: none;
-    border-bottom: var(--bw-marker) solid transparent;
-    white-space: nowrap;
-  }
-  .rail nav button[aria-current="page"] {
-    border-left: none;
-    border-bottom-color: var(--accent);
-  }
-  /* Who you are is not what you came for on a phone: the strip keeps the two things
-     you might actually press and drops the rest. */
-  .rail .me {
+  .top-bar .top-mark {
+    flex: none;
+    min-width: var(--touch-target);
+    min-height: var(--touch-target);
     padding: 0;
-    flex-direction: row;
-    align-items: center;
-    gap: var(--space-3);
-    margin-left: auto;
+    display: grid;
+    place-items: center;
+    border: none;
+    color: var(--text-primary);
+  }
+  .top-bar .top-title {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
     white-space: nowrap;
+    font: var(--t-ui);
+    font-weight: 700;
+    color: var(--text-primary);
   }
-  .rail .me .name,
-  .rail .me .teams,
-  .rail .me .host {
-    display: none;
+  .top-bar .top-menu {
+    flex: none;
+    min-width: var(--touch-target);
+    min-height: var(--touch-target);
+    padding: 0 var(--space-2);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--space-2);
+    border: none;
+    font-size: 20px;
   }
-  .rail .me button {
-    margin-top: 0;
+  .top-bar .top-menu .pill {
+    font-size: 14px;
+  }
+  .nav-sheet {
+    position: fixed;
+    inset: 0;
+    z-index: 40;
+    display: flex;
+    flex-direction: column;
+    overflow-y: auto;
+    background: var(--bg-panel);
+  }
+  .nav-sheet-head {
+    flex: none;
+    height: 52px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 var(--space-2) 0 var(--space-3);
+    border-bottom: var(--bw-hairline) solid var(--border-hairline);
+  }
+  .nav-sheet-head button {
+    min-height: var(--touch-target);
+  }
+  .nav-sheet-body {
+    flex: 1 0 auto;
+    display: flex;
+    flex-direction: column;
+    padding-bottom: var(--space-4);
+  }
+  .nav-sheet .me button {
+    min-height: var(--touch-target);
+  }
+  /* The backstage and the scratchpad over the whole window, each with its own Close. */
+  .stagearea > .backstage,
+  .stagearea > .scratchpad {
+    position: fixed;
+    inset: 0;
+    z-index: 30;
+    max-width: none;
+    border: none;
+  }
+  .backstage-head button,
+  .scratchpad > header button {
+    min-height: var(--touch-target);
+  }
+  /* A finger, not a pointer: every control a thumb's height. A link-styled button stays
+     the height of the sentence it stands in. */
+  .app.narrow main button:not(.link),
+  .app.narrow main select,
+  .app.narrow main input:not([type="checkbox"], [type="radio"], [type="range"], [type="color"]),
+  .app.narrow main button.link.subject,
+  .app.narrow main .run-actions > button.link {
     min-height: var(--touch-target);
   }
   /* The session head on a phone keeps the way back, the title, the status, Invite and ⋯;
@@ -4160,13 +4223,7 @@ details.advanced > summary {
   .theme {
     flex-basis: 100%;
   }
-  /* The backstage is last on a narrow screen, and it is the one thing that may be
-     scrolled past rather than shown. */
   .backstage {
-    flex-basis: 100%;
-    border-left: none;
-    border-top: var(--bw-hairline) solid var(--border-hairline);
-    max-width: none;
     padding: var(--space-5) var(--space-4);
   }
 }
@@ -4636,20 +4693,17 @@ pre.instruction {
 .palette .rows .note {
   margin: var(--space-2) var(--space-4);
 }
+/* A section's header is the screen's eyebrow (`.screen`: the face, tracked, the cyan), so
+   the list reads as groups; the commands under it are in the text's own colour. */
 .palette .section {
   padding: var(--space-3) var(--space-4) var(--space-1);
-  font: var(--t-screen);
-  letter-spacing: var(--tracking-screen);
-  text-transform: uppercase;
-  color: var(--running-fg);
 }
-.palette .section::before {
-  content: "// ";
-}
+/* A row is the command and its one line: its area is the header it sits under, and the
+   detail's head names it. */
 .palette .row {
   min-height: 0;
   display: grid;
-  grid-template-columns: 12ch 11ch 1fr;
+  grid-template-columns: 12ch minmax(0, 1fr);
   gap: var(--space-3);
   align-items: baseline;
   padding: var(--space-2) var(--space-4) var(--space-2) calc(var(--space-4) - var(--bw-marker));
@@ -4657,25 +4711,26 @@ pre.instruction {
 }
 .palette .row .name {
   font: var(--t-code);
-  color: var(--running-fg);
+  color: var(--text-primary);
 }
 .palette .row .summary {
   font: var(--t-note);
   color: var(--text-secondary);
+  overflow-wrap: anywhere;
 }
-/* Three kinds of row, each drawn as what it is (troupe #565): Troupe's own commands
-   muted, an agent in the accent, a file's command in the colour of whose it is. */
-.palette .row .kind {
-  font: var(--t-code-small);
-  color: var(--text-muted);
-}
-.palette .row.kind-agent .kind {
+/* Three kinds of row, each drawn as what it is (troupe #565): Troupe's own commands in
+   the text's colour, an agent in the accent, a file's command in the colour of whose it
+   is; the detail's head names the kind in the same colour. */
+.palette .row.kind-agent .name,
+.palette .detail.kind-agent .area {
   color: var(--accent);
 }
-.palette .row.kind-repository .kind {
+.palette .row.kind-repository .name,
+.palette .detail.kind-repository .area {
   color: var(--p-agent);
 }
-.palette .row.kind-yours .kind {
+.palette .row.kind-yours .name,
+.palette .detail.kind-yours .area {
   color: var(--p-self);
 }
 .palette .row .badges {
@@ -4688,7 +4743,6 @@ pre.instruction {
   border-left-color: var(--accent);
 }
 .palette .row.unavailable .name,
-.palette .row.unavailable .kind,
 .palette .row.unavailable .badges,
 .palette .row.unavailable .summary {
   color: var(--text-muted);
@@ -4706,6 +4760,10 @@ pre.instruction {
 .palette .detail .usage {
   font: var(--t-code);
   color: var(--text-primary);
+}
+.palette .detail .area {
+  font: var(--t-code-small);
+  color: var(--text-muted);
 }
 .palette .detail p {
   margin: var(--space-1) 0 0;
@@ -4733,7 +4791,8 @@ pre.instruction {
 /* The list keeps its room whatever the chosen command's detail says: eight rows at least,
    scrolling inside itself, and the detail (a file's prompt can be long) scrolls in a box of
    its own and takes no rows from it. From 1024px the detail stands beside the list, each
-   scrolling on its own; narrower it stacks under the list, held to a share of the height. */
+   scrolling on its own, the list the narrower column and the palette wider to hold both;
+   narrower it stacks under the list, held to a share of the height. */
 .palette .rows {
   min-height: min(18rem, 40vh);
 }
@@ -4752,8 +4811,9 @@ pre.instruction {
 }
 @media (min-width: 1024px) {
   .palette {
+    width: min(960px, 100%);
     display: grid;
-    grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+    grid-template-columns: minmax(min(16rem, 40%), 2fr) minmax(0, 3fr);
     grid-template-rows: auto minmax(0, 1fr) auto auto;
     height: min(80vh, 600px);
   }

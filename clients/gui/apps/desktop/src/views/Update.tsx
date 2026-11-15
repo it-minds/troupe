@@ -3,7 +3,8 @@
 // Quiet while it is an offer — a newer release, or the version the plane recommends — and
 // in the refusal's colour when the plane does not serve this version, which is the one
 // time the line cannot be put away. Each step says what it will do before it does it:
-// downloading checks the release against its signature; restarting is asked for, and
+// downloading checks the release against its signature, under a status line from
+// lines.json as every wait has (frames.md section 7); restarting is asked for, and
 // waits for a turn on this computer to end. Above all of it, a plane whose signing key has
 // changed since this computer pinned it, which asks its person to accept the new one.
 // Beside the recommended release, quieter still, the newest release that says it supports
@@ -11,6 +12,7 @@
 // is the person's to ask for.
 
 import type { JSX } from "react";
+import { firstLine } from "@troupe/client";
 import type { UpdateOffer } from "../shell";
 import type { Updates } from "../updates";
 
@@ -105,7 +107,8 @@ export function UpdateBanner({ updates }: { updates: Updates }): JSX.Element | n
         <>
           {required && <p>{required}</p>}
           <p>
-            Downloading Troupe {phase.offer.version} and checking it against the release key{share}…
+            <span className="flourish">{firstLine("checking_for_an_update", phase.offer.version)}</span> — Downloading Troupe {phase.offer.version} and checking it
+            against the release key{share}…
           </p>
         </>
       );

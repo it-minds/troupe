@@ -52,7 +52,7 @@ export const NAV: Group[] = [
   {
     label: "Configure",
     areas: [
-      { id: "profiles", label: "Worker profiles", built: true, teamAdmin: true, lead: "Each kind of worker: its image, size, model, egress and MCP servers." },
+      { id: "profiles", label: "Profiles", built: true, teamAdmin: true, lead: "What a session runs on: its image, size, model, egress and MCP servers." },
       { id: "bundles", label: "Configuration bundles", built: true, teamAdmin: true, lead: "Versioned agents, skills and MCP servers that sessions pick up from a channel." },
       { id: "triggers", label: "Triggers", built: true, teamAdmin: true, lead: "Scheduled and webhook runs per team, each as a named service principal." },
       { id: "integrations", label: "Integrations", built: true, teamAdmin: true, lead: "The GitHub App, every external host anything dials, and which profiles share which servers." },
@@ -61,7 +61,7 @@ export const NAV: Group[] = [
   {
     label: "Operate",
     areas: [
-      { id: "pods", label: "Workers and pods", built: true, teamAdmin: false, lead: "The pods behind each profile, with their state, version, bundle, sessions and disk." },
+      { id: "pods", label: "Pods", built: true, teamAdmin: false, lead: "The pods behind each profile, with their state, version, bundle, sessions and disk." },
       { id: "hosts", label: "Provisioners and hosts", built: true, teamAdmin: false, lead: "What each provisioner guarantees, and the machines registered to run workers." },
       { id: "budgets", label: "Budgets", built: true, teamAdmin: true, lead: "Every team's spend against its ceiling, per-person caps, and which ceiling binds." },
       { id: "published", label: "Published artifacts", built: true, teamAdmin: true, lead: "Every artifact published here, or a team admin's teams' own, with a takedown for each." },

@@ -324,6 +324,8 @@ export interface FakePod {
   healthy: boolean;
   draining: boolean;
   last_seen_at: string | null;
+  /** Removed by a scale-down and quiet since, as the plane says it (troupe #883). */
+  gone?: boolean;
   capacity: number;
   active_sessions: number;
   disk_fraction: number | null;
@@ -537,7 +539,7 @@ const SETTINGS: Setting[] = [
     summary: "The claim in an identity token that carries a person's groups.",
     consequence: "Wrong, and every login arrives with no groups: nobody is a platform admin and nobody is in a team.",
   },
-  { key: "platform_budget_micros", group: "administration", type: "integer", summary: "What the whole platform may spend in a month, in millionths.", consequence: "Above every team's. It only ever narrows." },
+  { key: "platform_budget_micros", group: "administration", type: "integer", summary: "What the whole platform may spend in a month; 0 is no ceiling.", consequence: "Above every team's. It only ever narrows." },
   {
     key: "provisioning_mode",
     group: "provisioning",
@@ -548,7 +550,7 @@ const SETTINGS: Setting[] = [
     summary: "Whether this plane writes profiles to the cluster, or reads them from resources a repository puts there.",
     consequence: "Deployment only.",
   },
-  { key: "default_budget_micros", group: "team_defaults", type: "integer", summary: "What a new team may spend, in millionths; 0 is no ceiling.", consequence: "Existing teams keep theirs." },
+  { key: "default_budget_micros", group: "team_defaults", type: "integer", summary: "What a new team may spend; 0 is no ceiling.", consequence: "Existing teams keep theirs." },
   { key: "default_budget_period", group: "team_defaults", type: "enum", values: ["monthly", "never"], fallback: "monthly", summary: "Whether a new team's ceiling turns over each month or is a total.", consequence: "Existing teams keep theirs." },
   { key: "default_idle_timeout_seconds", group: "team_defaults", type: "integer", fallback: 1800, summary: "How long a session sits idle before it is put to sleep.", consequence: "No team may set a longer one." },
   { key: "default_cache_eviction_days", group: "team_defaults", type: "integer", fallback: 7, summary: "How long a dormant session's workspace is kept on a pod's disk.", consequence: "No team may set a longer one." },
@@ -625,6 +627,92 @@ const SETTINGS: Setting[] = [
   { key: "scim_token", group: "deployment", type: "string", secret: true, editable: false, summary: "The deployment's own SCIM token.", consequence: "Deployment only, and never shown." },
   { key: "breakglass_token", group: "deployment", type: "string", secret: true, editable: false, summary: "The break-glass door's token.", consequence: "Deployment only, and never shown." },
 ];
+
+/**
+ * Each setting's label and unit, as the plane's table writes them once: how a row is
+ * headed and what a person types the value in. A `choice` lists its values with words.
+ */
+const NAMING: Record<string, { label: string; unit: string; choices?: Array<{ value: string; label: string }> }> = {
+  platform_admin_group: { label: "Group that administers the platform", unit: "text" },
+  groups_claim: { label: "Claim that carries a person's groups", unit: "text" },
+  platform_budget_micros: { label: "Budget for the platform", unit: "dollars" },
+  provisioning_mode: {
+    label: "How a profile reaches the cluster",
+    unit: "choice",
+    choices: [
+      { value: "direct", label: "Direct: this plane applies it" },
+      { value: "gitops", label: "Gitops: a repository holds it" },
+    ],
+  },
+  default_budget_micros: { label: "Budget a new team starts with", unit: "dollars" },
+  default_budget_period: {
+    label: "A new team's budget counted over",
+    unit: "choice",
+    choices: [
+      { value: "monthly", label: "monthly, from the 1st (UTC)" },
+      { value: "never", label: "never turns over" },
+    ],
+  },
+  default_idle_timeout_seconds: { label: "Idle before a session goes dormant", unit: "minutes" },
+  default_cache_eviction_days: { label: "A dormant session's cache kept", unit: "days" },
+  default_erase_after_days: { label: "Erase a session after", unit: "days" },
+  pins_allowed: { label: "Members may pin a session", unit: "switch" },
+  members_may_control: { label: "Members may steer a team session", unit: "switch" },
+  client_release_url: { label: "Where machines get releases", unit: "url" },
+  client_provider: {
+    label: "Provider for people's machines",
+    unit: "choice",
+    choices: [
+      { value: "anthropic", label: "Anthropic" },
+      { value: "openai", label: "OpenAI" },
+    ],
+  },
+  client_base_url: { label: "Provider's address", unit: "url" },
+  client_auth: {
+    label: "How the key is presented",
+    unit: "choice",
+    choices: [
+      { value: "api_key", label: "The provider's own header" },
+      { value: "bearer", label: "Authorization: Bearer" },
+    ],
+  },
+  client_model_default: { label: "Default model for clients", unit: "text" },
+  client_model_cheap: { label: "Cheap model for clients", unit: "text" },
+  client_model_expensive: { label: "Expensive model for clients", unit: "text" },
+  client_key_help: { label: "Where a person gets a key", unit: "text" },
+  client_key: { label: "Key for everybody", unit: "text" },
+  client_enforced: { label: "What machines may not go past", unit: "text" },
+  managed_mcp_servers_only: { label: "Only the profile's MCP servers", unit: "switch" },
+  default_bundle_channel: { label: "Channel a new profile follows", unit: "text" },
+  artifacts_enabled: { label: "Artifacts may be published", unit: "switch" },
+  artifacts_publish_organisation: {
+    label: "Who may publish to the whole organisation",
+    unit: "choice",
+    choices: [
+      { value: "everyone", label: "Everyone" },
+      { value: "platform_admins", label: "Platform admins only" },
+    ],
+  },
+  artifacts_public_links: { label: "Public links to artifacts", unit: "switch" },
+  issuer: { label: "Identity provider's issuer", unit: "url" },
+  client_id: { label: "Client ID", unit: "text" },
+  client_secret: { label: "Client secret", unit: "text" },
+  authorization_endpoint: { label: "Authorization endpoint", unit: "url" },
+  device_authorization_endpoint: { label: "Device authorization endpoint", unit: "url" },
+  token_endpoint: { label: "Token endpoint", unit: "url" },
+  scopes: { label: "Scopes a client asks for", unit: "text" },
+  subject_claim: { label: "Claim that is the person", unit: "text" },
+  audience: { label: "Audience of this plane's tokens", unit: "text" },
+  base_url: { label: "Address of this plane", unit: "url" },
+  scim_token: { label: "SCIM token", unit: "text" },
+  breakglass_token: { label: "Break-glass token", unit: "text" },
+};
+
+/** A setting's naming as the plane answers it, or nothing for a plane from before it named them. */
+function naming(key: string, named: boolean): Record<string, unknown> {
+  const n = NAMING[key];
+  return named && n ? { label: n.label, unit: n.unit, choices: n.choices ?? null } : {};
+}
 
 /** The keys of the identity provider's settings, as `admin.provider.*` take them. */
 const SIGN_IN_KEYS = ["issuer", "client_id", "client_secret", "authorization_endpoint", "device_authorization_endpoint", "token_endpoint", "scopes"];
@@ -928,6 +1016,8 @@ export class FakeAdmin {
   readonly failing = new Map<string, { code: number; message: string; data?: unknown }>();
   /** Hold every answer this long: how a test, or a person, sees a screen's loading state. */
   holdMs = 0;
+  /** Whether settings carry their `label`, `unit` and `choices`; `false` is a plane from before they did. */
+  named = true;
   /** The keys the enforced set may hold, as this plane lists them; `null` is a plane from before it listed any. */
   enforceable: ReadonlyArray<Record<string, unknown> & { key: string }> | null = ENFORCEABLE;
   /** How this plane provisions: `direct` writes profiles and triggers, `gitops` reads them from a repository and refuses a write. */
@@ -1099,7 +1189,9 @@ export class FakeAdmin {
               asked,
               ceiling,
               decided_by: this.stored.has(key) ? "platform" : "deployment",
-              reason: "a lower rung may only narrow",
+              limit: ceiling,
+              unit: spec.field === "idle_timeout_seconds" ? "seconds" : spec.field.endsWith("_days") ? "days" : "switch",
+              reason: limitRefusal(spec.field, asked, ceiling),
             });
           }
         }
@@ -2446,7 +2538,12 @@ export class FakeAdmin {
         if (typeof filter["kind"] === "string") rows = rows.filter((r) => r.subject_kind === filter["kind"]);
         if (typeof filter["subject_id"] === "string") rows = rows.filter((r) => r.subject_id === filter["subject_id"]);
         const limit = typeof filter["limit"] === "number" ? filter["limit"] : 100;
-        return { result: rows.slice(0, limit) };
+        return {
+          result: rows.slice(0, limit).map((r) => {
+            const name = this.nameOf(r.actor);
+            return name ? { ...r, actor_name: name } : r;
+          }),
+        };
       }
 
       default:
@@ -2738,10 +2835,19 @@ export class FakeAdmin {
   }
 
   /** What the plane's summary of a session says: no team, no cost, never content. */
+  /** A person's name as the plane's identity record has it, where it is more than the subject again. */
+  nameOf(subject: string): string | undefined {
+    const member = [...this.teams.values()].flatMap((t) => t.members).find((m) => m.subject === subject);
+    const name = member?.display_name ?? this.names[subject];
+    return name && name !== subject ? name : undefined;
+  }
+
   private sessionJson(s: FakeSession): Record<string, unknown> {
+    const ownerName = this.nameOf(s.owner);
     return {
       id: s.id,
       owner: s.owner,
+      ...(ownerName ? { owner_name: ownerName } : {}),
       profile: s.profile,
       state: s.state,
       visibility: s.visibility,
@@ -3127,7 +3233,7 @@ export class FakeAdmin {
     const spec = LADDERED[key]!;
     const opinions = this.opinions(key, team);
     const winner = opinions.reduce((best, o) => (this.tightness(spec, o.value) < this.tightness(spec, best.value) ? o : best), opinions[0]!);
-    return { key, field: spec.field, value: winner.value, decided_by: winner.rung, ceiling: this.ceiling(key), opinions };
+    return { key, field: spec.field, value: winner.value, decided_by: winner.rung, ceiling: this.ceiling(key), opinions, ...naming(key, this.named) };
   }
 
   // -- settings ------------------------------------------------------------------------
@@ -3146,6 +3252,7 @@ export class FakeAdmin {
       key: setting.key,
       group: setting.group,
       type: setting.type,
+      ...naming(setting.key, this.named),
       values: setting.values ?? null,
       summary: setting.summary,
       consequence: setting.consequence,
@@ -3248,7 +3355,9 @@ export class FakeAdmin {
   private principalJson(row: FakePrincipal): Record<string, unknown> {
     const team = this.teams.get(row.team);
     const sponsored = row.sponsor !== null && (team?.members.some((m) => m.subject === row.sponsor) ?? false);
-    const state = row.disabled_at ? "disabled" : sponsored ? "active" : "needs_sponsor";
+    // As `ServicePrincipal.state/1`: one the plane disabled because its sponsor left still
+    // needs a sponsor, and is not somebody's decision to disable.
+    const state = row.disabled_at ? (row.disabled_reason === "sponsor_left" ? "needs_sponsor" : "disabled") : sponsored ? "active" : "needs_sponsor";
     return {
       subject: row.subject,
       name: row.name,
@@ -3260,7 +3369,9 @@ export class FakeAdmin {
       disabled_at: row.disabled_at,
       disabled_reason: row.disabled_reason,
       last_used_at: row.last_used_at,
-      enabled: state === "active",
+      // As `ServicePrincipal.enabled?/1`: whether it may still authenticate, so one held for want
+      // of a sponsor that nobody disabled is still enabled.
+      enabled: row.disabled_at === null,
       state,
     };
   }
@@ -3727,6 +3838,21 @@ export function team(name: string, fields: Partial<FakeTeam> = {}): FakeTeam {
   };
 }
 
+/** A limit's refusal in the plane's words (Admin.limit_refusal/3): a length of time as the console says one, days counted. */
+function limitRefusal(field: string, asked: unknown, ceiling: unknown): string {
+  const time = (seconds: number): string => {
+    const [h, m, s] = [Math.floor(seconds / 3600), Math.floor((seconds % 3600) / 60), seconds % 60];
+    return [h ? `${h} h` : "", m ? `${m} min` : "", s ? `${s} s` : ""].filter(Boolean).join(" ") || "0 s";
+  };
+  const days = (n: unknown): string => (Number(n) === 1 ? "1 day" : `${String(n)} days`);
+  if (field === "idle_timeout_seconds") return `The platform allows at most ${time(Number(ceiling))} idle; ${time(Number(asked))} is more than that.`;
+  if (field === "cache_eviction_days") return `The platform allows at most ${days(ceiling)} for a dormant session's cache; ${days(asked)} is more than that.`;
+  if (field === "erase_after_days") return `The platform allows at most ${days(ceiling)} before a session is erased; ${days(asked)} is more than that.`;
+  if (field === "pins_allowed") return "The platform does not let members pin a session; a team may not turn it on.";
+  if (field === "members_may_control") return "The platform does not let members steer a team session; a team may not turn it on.";
+  return `The platform allows at most ${String(ceiling)} for ${field}; ${String(asked)} is more than that.`;
+}
+
 /** A pod, healthy and reporting unless told otherwise. */
 export function pod(name: string, ordinal: number, fields: Partial<FakePod> = {}): FakePod {
   return {
@@ -3926,7 +4052,8 @@ export function exampleAdmin(): FakeAdmin {
         provisioner: "kubernetes",
         missing_guarantees: [],
         unenforced: false,
-        pods: [pod("troupe-w-ux-0", 0, { active_sessions: 2 })],
+        // ux-1 was retired by a scale-down a month ago: gone until the plane forgets it.
+        pods: [pod("troupe-w-ux-0", 0, { active_sessions: 2 }), pod("troupe-w-ux-1", 1, { gone: true, healthy: false, draining: true, last_seen_at: "2026-09-14T10:02:00Z" })],
         warm_workers: 1,
         conditions: [
           { type: "Ready", status: "True", reason: "Reconciled", message: "14 resources reconciled" },

@@ -1659,17 +1659,17 @@ defmodule Troupe.Plane.GitHub do
 
   def explain({:host_not_declared, profile, host}),
     do:
-      "the worker profile #{profile || "(none)"} does not declare #{host} in egress.gitHosts, " <>
-        "so its pods cannot reach it"
+      "the profile #{profile || "(none)"} does not declare #{host} in egress.gitHosts, " <>
+        "so its sessions cannot reach it"
 
   def explain({:api_not_declared, profile, host}),
     do:
-      "the worker profile #{profile || "(none)"} does not declare #{host}, where GitHub's API " <>
-        "is, in egress.gitHosts, so its pods cannot push or open a pull request"
+      "the profile #{profile || "(none)"} does not declare #{host}, where GitHub's API " <>
+        "is, in egress.gitHosts, so its sessions cannot push or open a pull request"
 
   def explain({:no_write, profile}),
     do:
-      "the worker profile #{profile || "(none)"} grants GitHub nothing to write with " <>
+      "the profile #{profile || "(none)"} grants GitHub nothing to write with " <>
         "(spec.github.permissions), so its sessions clone and do no more"
 
   def explain({:access, access}), do: "#{inspect(access)} is not read or write"

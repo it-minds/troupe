@@ -80,11 +80,34 @@ defmodule Troupe.Artifacts do
     :ok
   end
 
+  @doc """
+  The files of one of the person's artifacts, for a session's workspace (#920): what
+  `fs.upload` with `artifact` writes there. `ask` names `session_id`, `subject` (who asked),
+  `artifact`, and `version` and `file` where given. Through the host, as `publish/2` is: a
+  laptop's daemon asks the plane's `artifact.files` with its person's sign-in, a pod asks
+  `session.artifact.files` over its control link for the person who asked. The answer is the
+  plane's, `{id, title, version, files}`, each file `{path, content_type, bytes}` in base64.
+  `{:error, :signed_out}` where this host has nowhere to ask.
+  """
+  @spec files(map()) :: {:ok, map()} | {:error, term()}
+  def files(ask) when is_map(ask) do
+    case Application.get_env(:troupe_core, :artifact_files) do
+      fun when is_function(fun, 1) -> fun.(ask)
+      _none -> {:error, :signed_out}
+    end
+  end
+
+  @doc "Install `fun` as where `files/1` asks."
+  @spec install_files((map() -> {:ok, map()} | {:error, term()})) :: :ok
+  def install_files(fun) when is_function(fun, 1),
+    do: Application.put_env(:troupe_core, :artifact_files, fun)
+
   @doc "Take the host away again, and the tool with it: for a test that installed one."
   @spec uninstall() :: :ok
   def uninstall do
     Application.delete_env(:troupe_core, :artifacts)
     Application.delete_env(:troupe_core, :artifacts_ready)
+    Application.delete_env(:troupe_core, :artifact_files)
 
     Application.put_env(
       :troupe_core,

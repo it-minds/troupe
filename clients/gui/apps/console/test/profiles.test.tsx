@@ -1,4 +1,4 @@
-// Worker profiles: the list, a profile read whole, and the editor, against the fake plane's
+// Profiles: the list, a profile read whole, and the editor, against the fake plane's
 // `admin.profiles.list`, `admin.profile.get`, `.preview`, `.put` and `.delete`. The editor
 // is held to the rule the plane's own editor is: it writes the paths it has fields for and
 // carries every other part of the spec through a save as it was loaded.
@@ -59,7 +59,7 @@ describe("the profile list", () => {
     expect(button("New profile")).toBeNull();
 
     visit("#/profiles/ux");
-    await waitFor(() => heading() === "Worker profiles" && row("ux"), "the list, not the page");
+    await waitFor(() => heading() === "Profiles" && row("ux"), "the list, not the page");
     expect(button("Change ux")).toBeNull();
   });
 });

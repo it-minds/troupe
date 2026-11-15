@@ -184,6 +184,30 @@ describe("a team's service principals", () => {
     await open();
     await waitFor(() => row("svc:core/orphan"), "the orphan");
     await sees("needs a sponsor", () => row("svc:core/orphan"));
+    // Still enabled, since nobody disabled it: one Disable, beside Rotate, never two.
+    const buttons = [...row("svc:core/orphan")!.querySelectorAll("button")].map((b) => b.textContent);
+    expect(buttons).toEqual(["Rotate", "Disable"]);
+  });
+
+  it("offer a principal whose sponsor left, which the plane disabled, one Disable and no Rotate", async () => {
+    fake.admin.teams.get("core")!.principals.push("svc:core/left");
+    fake.admin.principalRows.set("svc:core/left", {
+      subject: "svc:core/left",
+      team: "core",
+      name: "left",
+      description: null,
+      profiles: ["dev"],
+      sponsor: null,
+      created_by: "alice@example.com",
+      created_at: "2026-10-01T09:30:00Z",
+      disabled_at: "2026-11-01T09:30:00Z",
+      disabled_reason: "sponsor_left",
+      last_used_at: null,
+    });
+    await open();
+    await waitFor(() => row("svc:core/left"), "the principal");
+    const buttons = [...row("svc:core/left")!.querySelectorAll("button")].map((b) => b.textContent);
+    expect(buttons).toEqual(["Disable"]);
   });
 });
 

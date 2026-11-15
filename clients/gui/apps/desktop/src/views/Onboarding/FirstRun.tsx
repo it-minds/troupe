@@ -16,6 +16,7 @@ import type { Appearance } from "../Appearance";
 import { useSetupFlow } from "./hooks";
 import { outcomeOf, SetupFlowView } from "./Setup";
 import type { SetupOutcome } from "./Setup";
+import { planeChosen } from "./Step";
 
 export function FirstRun({
   client,
@@ -39,7 +40,9 @@ export function FirstRun({
         <p>
           {stage === "appearance"
             ? "Pick how Troupe looks. Every theme says the same things in the same places — one colour is reserved, in each of them, for work that has stopped and needs you. You can change this any time in Appearance."
-            : "A few questions, and the first session starts. Everything is written to this computer's own settings; Setup in the rail asks them again whenever you like."}
+            : planeChosen(setup.flow)
+              ? "Signing in to your organisation's Troupe is next. Setup in the rail asks again whenever you like."
+              : "A few questions, and the first session starts. Everything is written to this computer's own settings; Setup in the rail asks them again whenever you like."}
         </p>
       </header>
 

@@ -284,7 +284,7 @@ defmodule Troupe.Tools.OnboardWriteTest do
     {_name, args} = call()
 
     assert {:error, reason} = OnboardWrite.run(args, %{ctx(context) | bundle: %{version: "1"}})
-    assert reason =~ "this session runs on a pod"
+    assert reason =~ "this session runs on the platform"
 
     project = %Definition{name: "mine", mode: :primary, prompt: "", source: :project}
     {_name, user} = call(%{"target" => "user", "source" => "~/.claude/agents/reviewer.md"})

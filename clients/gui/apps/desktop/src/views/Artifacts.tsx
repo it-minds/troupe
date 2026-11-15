@@ -269,15 +269,19 @@ export function Artifacts({
             <div className="empty">
               <p className="title">{q ? `Nothing matches “${query.trim()}”` : "Nothing here yet"}</p>
               <p className="muted">{q ? "Try a person's name or the session it came from." : "When someone publishes for this audience, it appears here. Publish from any session with /publish."}</p>
-              <button
-                type="button"
-                onClick={() => {
-                  setFilter("all");
-                  setQuery("");
-                }}
-              >
-                Show everything
-              </button>
+              {/* Only where something narrows the list: with every audience shown and
+                  nothing typed it would show what is already shown, which is nothing. */}
+              {(q || filter !== "all") && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setFilter("all");
+                    setQuery("");
+                  }}
+                >
+                  Show everything
+                </button>
+              )}
             </div>
           )}
         </div>

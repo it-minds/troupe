@@ -332,11 +332,30 @@ defmodule Troupe do
     # Who it belongs to. A worker is told; a daemon works it out from the link, and a
     # daemon nobody has linked leaves the field out rather than writing a username that
     # means nothing anywhere else.
-    |> put_present("owner", Keyword.get(session_opts, :owner) || linked_owner())
+    |> put_owner(Keyword.get(session_opts, :owner))
     # The session this is a branch of. A client that groups a workspace's sessions into
     # one view reads it back from the listing; the log is where it survives dormancy.
     |> put_present("parent", Keyword.get(session_opts, :parent))
   end
+
+  # The owner a worker is told, or the linked person, with their name where the link
+  # carries one that is more than the subject again, so a client shows a person by name.
+  defp put_owner(data, owner) when is_binary(owner), do: Map.put(data, "owner", owner)
+
+  defp put_owner(data, nil) do
+    case Troupe.Identity.get() do
+      nil ->
+        data
+
+      identity ->
+        data
+        |> Map.put("owner", identity.subject)
+        |> put_present("owner_name", named(identity.display_name, identity.subject))
+    end
+  end
+
+  defp named(name, subject) when is_binary(name) and name not in ["", subject], do: name
+  defp named(_name, _subject), do: nil
 
   defp put_present(data, _key, nil), do: data
   defp put_present(data, key, value), do: Map.put(data, key, value)
@@ -489,17 +508,28 @@ defmodule Troupe do
   `answer` is what a delegation's answer carries besides its word (Decision 850):
   `agent`, the subagent it goes to instead; `brief`, the parts the person edited; `reason`,
   a word back with a denial. A wrong one is `{:error, sentence}`, and the request waits on.
+  `:allow_always` is the answer of a person whose lasting rule the daemon has just written
+  (`answer`'s `always` says which and where): this call runs, and so does every later call
+  to the tool in this session.
   """
   @spec approve(
           String.t(),
           String.t(),
-          :allow | :deny | :allow_session,
+          :allow | :deny | :allow_session | :allow_always,
           Troupe.Protocol.Event.Actor.t() | nil,
           map()
         ) :: :ok | {:error, String.t()}
   def approve(session_id, call_id, decision, actor \\ nil, answer \\ %{}) do
     Approvals.decide(session_id, call_id, decision, actor, answer)
   end
+
+  @doc """
+  Whether the approval waiting under `call_id` may be answered with a lasting rule, and the
+  request it is for: what `Approvals.lasting/2` answers.
+  """
+  @spec lasting_approval(String.t(), String.t()) ::
+          {:ok, map()} | {:error, :none | {:managed, String.t()} | String.t()}
+  def lasting_approval(session_id, call_id), do: Approvals.lasting(session_id, call_id)
 
   @doc "Receive `{:troupe_event, session_id, event}` for everything the session does."
   @spec subscribe(String.t()) :: :ok

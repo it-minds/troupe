@@ -6,6 +6,7 @@
 // the message being produced, the agent's state, who else is here — and may be dropped
 // under load without changing what the transcript says.
 
+import { named } from "./people.js";
 import { foldScratch, scratchDocumentOf } from "./scratch.js";
 import type { DurableEvent, LlmDeltaData, LoopInfo, ScratchDocument, TroupeEvent } from "./types.js";
 import { isDurable } from "./types.js";
@@ -42,6 +43,8 @@ export type Entry =
       agent: string[];
       text: string;
       author: string | undefined;
+      /** The author's name, where the event's actor carries one (troupe #931); absent from an older server's. */
+      authorName?: string;
       source: string;
       /** `plane` for a person who sent it from another device, through the plane (troupe #58). */
       via?: string;
@@ -107,6 +110,8 @@ export type Entry =
       resolvedBy: string | undefined;
       /** Who answered it, the subject `approval_decided`'s actor names; absent where it names nobody. */
       decidedBy?: string;
+      /** Their name, where the actor carries one (troupe #931). */
+      decidedByName?: string;
       /** Set when it ended unanswered: its call was cancelled, or timed out while it waited. */
       closed: boolean;
       /**
@@ -300,6 +305,12 @@ export interface TranscriptState {
   profile: string | undefined;
   bundleVersion: string | undefined;
   lastSeq: number;
+  /**
+   * When the session began: the `ts` its first event (seq 1) was written at, in
+   * milliseconds, which the curtain's divider says; undefined until that event is folded,
+   * or where it carries no time (a replay with none).
+   */
+  startedAt: number | undefined;
   /** The last `llm_error`, cleared by the next successful response. */
   error: string | undefined;
   /** Set once the root agent reports it has finished; its `agent_done.reason`. */
@@ -469,6 +480,7 @@ export const emptyTranscript: TranscriptState = {
   profile: undefined,
   bundleVersion: undefined,
   lastSeq: 0,
+  startedAt: undefined,
   error: undefined,
   doneReason: undefined,
   failed: undefined,
@@ -564,6 +576,8 @@ export interface GateAnswer {
   visibility?: string;
   owner?: "me" | "team";
   reason?: string;
+  /** With `allow_always`: where the person's rule is kept, the workspace's own file or their `config.yaml` (troupe #920). */
+  scope?: "workspace" | "everywhere";
 }
 
 /** What `approval_decided` says the answer carried. */
@@ -639,6 +653,12 @@ export function partsOf(value: unknown, names: readonly string[]): Array<[string
 
 function str(v: unknown, fallback = ""): string {
   return typeof v === "string" ? v : v === undefined || v === null ? fallback : String(v);
+}
+
+/** The actor's name as an entry carries it, where the event has one worth showing (troupe #931). */
+function nameOf(actor: { subject?: string; [k: string]: unknown }): { authorName?: string } {
+  const name = named(actor["display_name"], actor.subject);
+  return name ? { authorName: name } : {};
 }
 
 function num(v: unknown): number | null {
@@ -880,7 +900,7 @@ function systemText(d: DurableEvent): string {
     case "llm_error":
       return `model error: ${str(d.data["reason"], "unknown")}`;
     case "session_dormant":
-      return "session went dormant";
+      return "session went to sleep";
     case "session_activated":
       return "session woke on the platform";
     case "session_resumed":
@@ -1047,7 +1067,12 @@ export function fold(state: TranscriptState, e: TroupeEvent, options: FoldOption
   const d = e;
   // "The laptop is back" is said until the session says something after it.
   const { laptop, ...rest } = state;
-  const next: TranscriptState = { ...rest, ...(laptop && laptop.state === "away" ? { laptop } : {}), lastSeq: Math.max(state.lastSeq, d.seq) };
+  const next: TranscriptState = {
+    ...rest,
+    ...(laptop && laptop.state === "away" ? { laptop } : {}),
+    lastSeq: Math.max(state.lastSeq, d.seq),
+    ...(d.seq === 1 ? { startedAt: writtenAt(d) } : {}),
+  };
   const base = { seq: d.seq, agent: d.agent };
 
   switch (d.type) {
@@ -1116,6 +1141,7 @@ export function fold(state: TranscriptState, e: TroupeEvent, options: FoldOption
                 ...base,
                 text,
                 author: d.actor.subject,
+                ...nameOf(d.actor),
                 source: str(d.data["source"], "user"),
                 ...(typeof d.actor["via"] === "string" ? { via: d.actor["via"] } : {}),
               },
@@ -1444,6 +1470,7 @@ export function fold(state: TranscriptState, e: TroupeEvent, options: FoldOption
       const id = str(d.data["call_id"]);
       const answered = answeredOf(d.data);
       const by = d.actor?.subject;
+      const byName = d.actor ? nameOf(d.actor).authorName : undefined;
       return {
         ...next,
         entries: state.entries.map((en) =>
@@ -1453,6 +1480,7 @@ export function fold(state: TranscriptState, e: TroupeEvent, options: FoldOption
                 decision: str(d.data["decision"]),
                 ...(answered && (en.delegation || en.publication) ? { answered } : {}),
                 ...(typeof by === "string" && by !== "" ? { decidedBy: by } : {}),
+                ...(byName ? { decidedByName: byName } : {}),
               }
             : en,
         ),

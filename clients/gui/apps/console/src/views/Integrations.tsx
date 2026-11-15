@@ -649,7 +649,7 @@ function Egress({ answer }: { answer: IntegrationsAnswer }): JSX.Element {
         and it is changed where it was declared, which is the column beside it. Read-only here: an allowlist edited in two places is one nobody trusts.
       </p>
       {answer.egress.length === 0 ? (
-        <Empty title="Nothing dials out">Nothing here dials anything outside the cluster.</Empty>
+        <Empty title="Nothing dials out">Nothing here dials anything outside the plane.</Empty>
       ) : (
         <div className="scroll">
           <table>

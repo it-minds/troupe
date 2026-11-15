@@ -75,7 +75,8 @@ defmodule Troupe.Agent.Local do
   def not_editable(%Definition{} = definition, opts \\ []) do
     cond do
       definition.source == :bundle ->
-        "#{definition.name} comes from the profile's bundle; change it in the console"
+        "#{definition.name} comes from the profile's bundle: an administrator changes it on " <>
+          "the console's Configure → Configuration bundles; ask one if you are not"
 
       opts[:pod] ->
         @on_a_pod

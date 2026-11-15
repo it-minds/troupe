@@ -104,13 +104,14 @@ describe("the palette's kinds (#565)", () => {
     await waitFor(() => paletteRow("build")?.querySelector(".badges"), "build's facts");
     expect(daemon.calls.some((c) => c.method === "agents.list" && c.params["workspace"] === REPO)).toBe(true);
 
-    expect(paletteRow("goal")!.querySelector(".kind")!.textContent).toBe("command");
-    expect(paletteRow("review")!.querySelector(".kind")!.textContent).toBe("repository");
-    expect(paletteRow("standup")!.querySelector(".kind")!.textContent).toBe("yours");
+    // The kind is the row's colour, and the detail's head names it (troupe #926).
+    expect(paletteRow("goal")!.classList.contains("kind-command")).toBe(true);
+    expect(paletteRow("review")!.classList.contains("kind-repository")).toBe(true);
+    expect(paletteRow("standup")!.classList.contains("kind-yours")).toBe(true);
 
     // An agent: where it comes from, its model, read-only, and worktree or checkout.
     const build = paletteRow("build")!;
-    expect(build.querySelector(".kind")!.textContent).toBe("agent");
+    expect(build.classList.contains("kind-agent")).toBe(true);
     expect(build.querySelector(".badges")!.textContent).toBe("built in · default · worktree");
     // It switches the session to it, as the head's switch does.
     expect(build.classList.contains("unavailable")).toBe(false);
@@ -125,6 +126,8 @@ describe("the palette's kinds (#565)", () => {
     const input = document.querySelector<HTMLInputElement>(".palette input")!;
     type(input, "build");
     await waitFor(() => document.querySelector(".palette .detail")?.textContent?.includes("An agent, not a command, from the built-ins"), "build's detail");
+    expect(document.querySelector(".palette .detail .area")!.textContent).toBe(" · agent");
+    expect(document.querySelector(".palette .detail")!.classList.contains("kind-agent")).toBe(true);
     expect(document.querySelector(".palette .detail")!.textContent).toContain("/agents reads, edits and copies it.");
   });
 });

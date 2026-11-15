@@ -11,12 +11,17 @@
 // person's client of each kind last gave when it connected, so a count says how many are
 // current, behind the recommended version, or refused when they next connect, and a list
 // says who is behind and since when. A team admin's are their teams' people.
+//
+// Above the policies, a platform admin's one button for the usual step after an upgrade:
+// recommend the version this plane runs (its discovery's `plane.build.version`) for every
+// kind of client, previewed and applied as the policies' own changes are (#925).
 
 import { useState } from "react";
 import type { JSX } from "react";
-import type { ClientFleet, ClientPolicy, ClientPolicyChange, ClientPolicyPut, ClientSeen } from "@troupe/client";
-import { show, useConsole, useLoad } from "../console";
-import { AuditNote, Empty, Field, Loaded, Preview, Region, Status, changed, count, when } from "./bits";
+import { andList, clientStanding, releaseVersion, versionOlder } from "@troupe/client";
+import type { ClientCounts, ClientFleet, ClientPolicy, ClientPolicyChange, ClientPolicyPut, ClientSeen } from "@troupe/client";
+import { describeError, show, useConsole, useLoad } from "../console";
+import { AuditNote, Diff, Empty, Field, Loaded, Preview, Region, Status, changed, count, when } from "./bits";
 import type { DiffLine } from "./bits";
 
 /** What each component is to a person, for the ones this console knows the name of. */
@@ -31,10 +36,14 @@ function known(component: string): { name: string; program: string; updates: boo
 }
 
 export function ClientVersions(): JSX.Element {
-  const { admin, role } = useConsole();
+  const { admin, role, plane } = useConsole();
   const [load, reload] = useLoad(() => admin.clients(), [admin]);
-  const [done, setDone] = useState<ClientPolicyPut | null>(null);
+  const [done, setDone] = useState<ClientPolicyPut[] | null>(null);
   const [query, setQuery] = useState("");
+  const applied = (answers: ClientPolicyPut[]) => {
+    setDone(answers);
+    reload();
+  };
 
   return (
     <div className="page">
@@ -42,7 +51,7 @@ export function ClientVersions(): JSX.Element {
         Each kind of client is held to a policy here. One below the minimum, or on a blocked version, is refused when it next connects and told what to
         run; the recommended version is the one people are nudged to, and the one <code>troupe update</code> installs.
       </p>
-      {done && <AuditNote action="clients.put" subject={done.component} detail={done.changes} />}
+      {done && done.length > 0 && <AuditNote action="clients.put" subject={done.map((d) => d.component).join(", ")} detail={auditOf(done)} />}
       <Loaded load={load} what="the version policy" retry={reload}>
         {(data) => {
           const policies = Object.values(data.clients);
@@ -55,17 +64,9 @@ export function ClientVersions(): JSX.Element {
                   {role === "platform_admin" ? "Set a minimum to turn away clients older than a release." : "A platform admin sets one."}
                 </Empty>
               )}
+              {role === "platform_admin" && plane.version && <RecommendPlane version={plane.version} policies={policies} fleet={data.fleet} onApplied={applied} />}
               {policies.map((p) => (
-                <Component
-                  key={p.component}
-                  policy={p}
-                  fleet={data.fleet?.[p.component]}
-                  editable={role === "platform_admin"}
-                  onApplied={(answer) => {
-                    setDone(answer);
-                    reload();
-                  }}
-                />
+                <Component key={p.component} policy={p} fleet={data.fleet?.[p.component]} editable={role === "platform_admin"} onApplied={(answer) => applied([answer])} />
               ))}
               {role !== "platform_admin" && <p className="note">Only a platform admin changes these, since they hold every team's clients alike.</p>}
               {data.fleet && <Behind fleet={data.fleet} query={query} onQuery={setQuery} team={role !== "platform_admin"} />}
@@ -75,6 +76,151 @@ export function ClientVersions(): JSX.Element {
       </Loaded>
     </div>
   );
+}
+
+/** What the audit recorded of one put or several: a component's own fields, or each prefixed with its component where there are several. */
+function auditOf(answers: ClientPolicyPut[]): Record<string, unknown> {
+  if (answers.length === 1) return answers[0]!.changes;
+  return Object.fromEntries(answers.flatMap((a) => Object.entries(a.changes).map(([field, moved]) => [`${a.component}.${field}`, moved])));
+}
+
+/** Where one component stands against recommending the plane's version: already, can, or the plane would refuse it and why. */
+type Plan = { policy: ClientPolicy; refused: string | null };
+
+function planOf(policy: ClientPolicy, version: string): Plan | null {
+  if (policy.recommended === version) return null;
+  const name = known(policy.component).name.toLowerCase();
+  if (policy.blocked.includes(version)) return { policy, refused: `${name}'s policy blocks ${version}` };
+  if (policy.minimum && versionOlder(version, policy.minimum)) return { policy, refused: `${name}'s minimum, ${policy.minimum}, is newer than ${version}` };
+  return { policy, refused: null };
+}
+
+/** A component's clients last seen, counted against its policy with `recommended` moved to `version`, from what the plane last saw of them. */
+function countsWith(policy: ClientPolicy, version: string, fleet: ClientFleet): ClientCounts {
+  const next = { recommended: version, minimum: policy.minimum, blocked: policy.blocked };
+  const standings = fleet.people.map((p) => clientStanding(next, p.version));
+  const n = (s: string) => standings.filter((x) => x === s).length;
+  return { current: n("current"), behind: n("behind"), refused: n("refused") };
+}
+
+function countsLine(counts: ClientCounts, version: string): string {
+  const seen = counts.current + counts.behind + counts.refused;
+  if (seen === 0) return "None has connected since the plane began recording versions.";
+  const parts = [`${counts.current} current`, `${counts.behind} behind ${version}`];
+  if (counts.refused > 0) parts.push(`${counts.refused} refused when ${counts.refused === 1 ? "it next connects" : "they next connect"}, as now`);
+  return `Of ${count(seen, "client")} last seen: ${parts.join(", ")}.`;
+}
+
+/**
+ * After an upgrade, the usual intent: recommend what this plane runs, for every kind of
+ * client at once, through the same preview and the same puts as one component's change.
+ * The puts go one at a time, in the page's order; one the plane refuses stops the rest and
+ * says which, and the ones before it stand. A component whose policy the plane would refuse
+ * it for (the version blocked, or a minimum newer than it) is left as it is, and the
+ * preview says so before anything is sent. The counts are worked out here from the clients
+ * last seen, as the plane judges them, since a put has no dry run.
+ */
+function RecommendPlane({
+  version: reported,
+  policies,
+  fleet,
+  onApplied,
+}: {
+  version: string;
+  policies: ClientPolicy[];
+  fleet: Record<string, ClientFleet> | undefined;
+  onApplied: (answers: ClientPolicyPut[]) => void;
+}): JSX.Element {
+  const { admin, notify } = useConsole();
+  const [previewing, setPreviewing] = useState(false);
+  const version = releaseVersion(reported);
+  if (!version) {
+    return (
+      <p className="note">
+        This plane says it runs <code>{reported}</code>, which is not a version as releases are numbered, so it cannot be recommended from here. Set each kind of client's
+        recommended version below.
+      </p>
+    );
+  }
+  const plans = policies.map((p) => planOf(p, version)).filter((p): p is Plan => p !== null);
+  const todo = plans.filter((p) => !p.refused).map((p) => p.policy);
+  const refused = plans.filter((p) => p.refused).map((p) => p.refused!);
+  if (todo.length === 0) {
+    return (
+      <p className="note recommend">
+        {refused.length === 0
+          ? `Every client is recommended this plane's version, ${version}.`
+          : `This plane's version, ${version}, cannot be recommended for every client: the plane refuses it while ${andList(refused)}.`}
+      </p>
+    );
+  }
+  const lines: DiffLine[] = todo.map((p) => ({ field: `${p.component}.recommended`, from: p.recommended, to: version }));
+  const effects = [
+    ...todo.map((p) => {
+      const { name, program, updates } = known(p.component);
+      return `${name}: ${updates ? `troupe update installs ${version} for people signed in here, and ${anOlder(program)}` : anOlder(program)} is told ${version} is out.`;
+    }),
+    ...(refused.length > 0 ? [`Left as it is, since the plane refuses it while ${andList(refused)}.`] : []),
+    "A client already connected is held to it when it next connects. The plane installs and removes nothing.",
+  ];
+
+  return (
+    <section className="recommend" aria-label="Recommend this plane's version">
+      {!previewing && (
+        <button type="button" onClick={() => setPreviewing(true)}>
+          Recommend this plane's version
+        </button>
+      )}
+      {previewing && (
+        <Preview
+          title="clients"
+          lines={lines}
+          body={
+            <>
+              {todo.map((p) => {
+                const f = fleet?.[p.component];
+                return (
+                  <div key={p.component} className="recommend-row">
+                    <Diff title={`clients/${p.component}`} lines={[{ field: "recommended", from: p.recommended, to: version }]} />
+                    {f && <p className="fleet">{countsLine(countsWith(p, version, f), version)}</p>}
+                  </div>
+                );
+              })}
+            </>
+          }
+          effects={effects}
+          verb="Apply"
+          onCancel={() => setPreviewing(false)}
+          onConfirm={async () => {
+            const answers: ClientPolicyPut[] = [];
+            for (const p of todo) {
+              try {
+                answers.push(await admin.putClients(p.component, { recommended: version }));
+              } catch (e) {
+                if (answers.length > 0) onApplied(answers);
+                const kept = answers.map((a) => a.component);
+                const failed = `${known(p.component).name}'s recommended version was not changed: ${describeError(e)}`;
+                throw new Error(kept.length > 0 ? `${named(kept)} now ${kept.length === 1 ? "recommends" : "recommend"} ${version}; ${lower(failed)}` : failed);
+              }
+            }
+            setPreviewing(false);
+            onApplied(answers);
+            notify(`${named(answers.map((a) => a.component))} now ${answers.length === 1 ? "recommends" : "recommend"} ${version}.`);
+          }}
+        />
+      )}
+    </section>
+  );
+}
+
+const lower = (s: string): string => s.charAt(0).toLowerCase() + s.slice(1);
+
+/** "an older troupe", and "an older desktop app" rather than "an older the desktop app". */
+const anOlder = (program: string): string => `an older ${program.replace(/^the /, "")}`;
+
+/** Components by the names people know them by, as a sentence begins: "The terminal, the daemon and the desktop app". */
+function named(components: string[]): string {
+  return andList(components.map((c, i) => (i === 0 ? known(c).name : lower(known(c).name))));
 }
 
 /** A component's clients last seen, as one line: how many, and how they stand. */
@@ -298,7 +444,7 @@ function effects(lines: DiffLine[], program: string, updates: boolean): string[]
     if (field === "recommended") {
       out.push(
         to
-          ? `${updates ? `troupe update installs ${String(to)} for people signed in here, and an` : "An"} older ${program} is told ${String(to)} is out.`
+          ? `${updates ? `troupe update installs ${String(to)} for people signed in here, and ${anOlder(program)}` : `A${anOlder(program).slice(1)}`} is told ${String(to)} is out.`
           : `Nobody is nudged to a version${updates ? ", and troupe update installs the latest release" : ""}.`,
       );
     }

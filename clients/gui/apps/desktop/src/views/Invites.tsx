@@ -292,7 +292,7 @@ export function InvitedSession({ daemon, row, onBack }: { daemon: DaemonClient |
       <ol className="transcript" aria-label="Transcript">
         {words.map((e) => (
           <li key={e.seq} className={e.kind === "user" ? "person" : "agent"}>
-            {e.kind === "user" ? <b>{e.author ?? "somebody"}: </b> : null}
+            {e.kind === "user" ? <b>{e.authorName ?? e.author ?? "somebody"}: </b> : null}
             {e.text}
           </li>
         ))}

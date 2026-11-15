@@ -111,7 +111,7 @@ export function Status({ kind, glyph, children }: { kind: StatusKind; glyph: str
 
 const SESSION_STATES: Record<string, { kind: StatusKind; glyph: string; word: string }> = {
   active: { kind: "running", glyph: "●", word: "active" },
-  dormant: { kind: "dormant", glyph: "◑", word: "dormant" },
+  dormant: { kind: "dormant", glyph: "◑", word: "asleep" },
   read_only: { kind: "muted", glyph: "◇", word: "read-only" },
   erasure_pending: { kind: "denied", glyph: "✕", word: "erasure pending" },
 };

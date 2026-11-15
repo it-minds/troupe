@@ -394,11 +394,11 @@ defmodule Troupe.Config.Permissions do
 
   @doc """
   Where a rule came from, in words: "your organisation (managed.yaml)", "your config.yaml",
-  "this project's .troupe/config.yaml", and on a pod "the worker profile fixing".
+  "this project's .troupe/config.yaml", and on the platform "the profile fixing".
   """
   @spec scope(rule()) :: String.t()
   # A worker profile's rules are its name's, not a file's.
-  def scope(%{layer: :profile, source: profile}), do: "the worker profile #{profile}"
+  def scope(%{layer: :profile, source: profile}), do: "the profile #{profile}"
 
   def scope(%{layer: layer, source: source}) do
     shown = if source, do: " (#{Troupe.Paths.display(source)})", else: ""

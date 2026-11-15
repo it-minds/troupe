@@ -51,6 +51,12 @@ defmodule Troupe.Protocol.RelayTest do
     # Following it is not steering it.
     assert {:error, %{data: %{required_scope: "control"}}} =
              Relay.check("approval.respond", %{"session_id" => @sid, "decision" => "allow_session"}, @sid, "observe")
+
+    # A lasting rule is the laptop's own configuration (#920).
+    assert {:error, %{data: %{field: "decision", reason: reason}}} =
+             Relay.check("approval.respond", %{"session_id" => @sid, "decision" => "allow_always"}, @sid, "control")
+
+    assert reason =~ "the laptop's own configuration"
   end
 
   test "the narrower of two roles holds, and none is none" do

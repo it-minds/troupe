@@ -53,9 +53,9 @@ defmodule Troupe.CLI.SessionConfig do
       {:error, reason} ->
         if not_here?(reason),
           do:
-            {"session #{session_id} is not running, here or on a worker pod; its configuration is " <>
+            {"session #{session_id} is not running, here or on the platform; its configuration is " <>
                "resolved when it starts, so open it and ask again\n", 1},
-          else: {"could not ask the session's worker pod: #{describe(reason)}\n", 1}
+          else: {"could not ask the platform about the session: #{describe(reason)}\n", 1}
     end
   end
 

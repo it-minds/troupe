@@ -80,6 +80,35 @@ describe("Invited to you", () => {
     await waitFor(() => invitedRow("not offered · read-only"), "withdrawn, pushed", PUSHED_MS);
   });
 
+  it("answers a pod session's approval as the desktop does: once, for the session, or deny, and never always where the pod does not take it", async () => {
+    const row = fake.plane.seed("ada@example.com", { id: "s-pod-9", title: "release prep" });
+    fake.plane.invite(row.id, PEOPLE.carol.subject, "control", "ada@example.com", { ownerName: "Ada" });
+    await signedInAs(fake, PEOPLE.carol);
+    visit(`#/mine/invited/${row.id}`);
+    unmount = render(<App />).unmount;
+    await waitFor(() => document.querySelector('[role="status"]')?.textContent?.startsWith("Idle"), "the session attached");
+
+    const box = await waitFor(() => document.querySelector<HTMLTextAreaElement>(".composer textarea"), "the prompt");
+    const set = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!;
+    set.call(box, "approve: ls -la");
+    box.dispatchEvent(new Event("input", { bubbles: true }));
+    [...document.querySelectorAll("button")].find((b) => b.textContent === "Send")!.click();
+
+    const approval = await waitFor(() => document.querySelector<HTMLElement>('[aria-label="Approve shell"]'), "the approval");
+    const answers = [...approval.querySelectorAll("button")].map((b) => b.textContent);
+    // The desktop's words, from the shared calls: once, every command for the session, deny.
+    expect(answers).toEqual(["Allow once", "Allow every command for this session", "Deny"]);
+    // A pod names no lasting rule, its rules being its worker profile's, and the laptop's
+    // sentence is not said of it.
+    expect(approval.textContent).not.toContain("Always allow");
+    expect(approval.textContent).not.toContain("done at the laptop");
+
+    [...approval.querySelectorAll("button")].find((b) => b.textContent === "Allow every command for this session")!.click();
+    const decided = await waitFor(() => fake.worker.calls.find((c) => c.method === "approval.respond"), "the answer at the pod");
+    expect(decided.params["decision"]).toBe("allow_session");
+    await sees("Allowed for this session by you: run a command · ls -la");
+  });
+
   it("lists a private session and says it is read on your own computer", async () => {
     fake.plane.invite("s-priv-3", PEOPLE.carol.subject, "observe", "ada@example.com", { kind: "private", title: "ada's notes", ownerName: "Ada" });
     await signedInAs(fake, PEOPLE.carol);

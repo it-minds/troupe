@@ -17,7 +17,35 @@ defmodule Troupe.Worker.Artifacts do
 
   @doc "Install this pod as where its sessions' artifacts go."
   @spec install() :: :ok
-  def install, do: Troupe.Artifacts.install(&__MODULE__.publish/2)
+  def install do
+    :ok = Troupe.Artifacts.install_files(&__MODULE__.files/1)
+    Troupe.Artifacts.install(&__MODULE__.publish/2)
+  end
+
+  @doc """
+  The files of one of a person's artifacts for a session on this pod (`fs.upload` with
+  `artifact`, #920): `session.artifact.files` over the control link, naming the session and
+  who asked. The plane reads the artifact as that person, only for someone who steers the
+  session, and the bytes come down to this pod without passing through the person's client.
+  """
+  @spec files(map()) :: {:ok, map()} | {:error, term()}
+  def files(ask) do
+    params =
+      %{
+        "session_id" => ask["session_id"],
+        "subject" => ask["subject"],
+        "artifact" => ask["artifact"],
+        "version" => ask["version"],
+        "path" => ask["file"]
+      }
+      |> Map.reject(fn {_key, value} -> is_nil(value) end)
+
+    case request("session.artifact.files", params) do
+      {:ok, answer} -> {:ok, answer}
+      {:error, :no_link} -> {:error, "the plane could not be reached from this pod; try again later"}
+      {:error, refused} -> {:error, refused}
+    end
+  end
 
   @doc "Send the artifact for the owner of the session `ctx` names; the plane's answer or its refusal."
   @spec publish(map(), Troupe.Tool.Ctx.t()) :: {:ok, map()} | {:error, String.t()}

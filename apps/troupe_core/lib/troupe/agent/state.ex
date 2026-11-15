@@ -156,6 +156,9 @@ defmodule Troupe.Agent.State do
     child_reports: [],
     child_seq: 0,
     last_input_tokens: 0,
+    # The model the last `context_status` was about: a turn on another one (or the first
+    # turn of this process) says its window before it calls. Not folded: ephemeral.
+    context_model: nil,
     # What the turn this agent is on has cost so far (Decision 769): its own calls, folded,
     # and what its subagents reported, which a restart forgets as the budget does. Written
     # on the event that ends the turn, and started again after it.
@@ -264,6 +267,7 @@ defmodule Troupe.Agent.State do
           child_reports: [Troupe.Agent.Background.ended()],
           child_seq: non_neg_integer(),
           last_input_tokens: non_neg_integer(),
+          context_model: String.t() | nil,
           turn: Spend.t(),
           truncation_retried: boolean(),
           overflow_retried: boolean(),

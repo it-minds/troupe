@@ -24,6 +24,8 @@ defmodule Troupe.Protocol.Relay do
   since the owner's consent to their steering covers answering, and what it allows ends
   with the session. A call one of the laptop's own rules asks about is asked again
   whatever was allowed for the session, so nothing of the laptop's rules is loosened.
+  `allow_always`, which writes a rule into the laptop's configuration, is the laptop's
+  person's to give at the laptop.
 
   **A laptop that is away is paused.** When the laptop's connection goes, its daemon
   having said why (`relay.pause`) or not, the plane keeps each view open, tells it
@@ -198,6 +200,18 @@ defmodule Troupe.Protocol.Relay do
   # is about the laptop.
   defp decision("agents.list", %{"workspace" => _path}) do
     {:error, Error.new(:forbidden, %{field: "workspace", reason: "the session's own agents only"})}
+  end
+
+  # A lasting rule is a line of the laptop's own configuration; a call allowed for the
+  # session ends with it, and is answered from another device as at the laptop.
+  defp decision("approval.respond", %{"decision" => "allow_always"}) do
+    {:error,
+     Error.new(:forbidden, %{
+       field: "decision",
+       reason:
+         "a lasting rule is written into the laptop's own configuration, at the laptop; " <>
+           "from another device a call is allowed once or for the session, or denied"
+     })}
   end
 
   defp decision(_method, _params), do: :ok

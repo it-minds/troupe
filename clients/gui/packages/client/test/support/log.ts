@@ -8,6 +8,8 @@ import { createHash } from "node:crypto";
 export interface Actor {
   kind: string;
   subject?: string;
+  /** The person's name, where the connection knew one (troupe #931). */
+  display_name?: string;
 }
 
 export interface LoggedEvent {
