@@ -1,5 +1,5 @@
 ---
-number: 1000
+number: 1002
 title: "A troupe:// link is an address and nothing more: three forms, refused whole when it carries anything else, a new plane confirmed in words before any request; and every web surface offers the desktop app, from the version the plane recommends"
 date: 2026-11-16
 status: accepted
