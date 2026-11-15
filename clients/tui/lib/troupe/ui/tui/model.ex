@@ -270,6 +270,20 @@ defmodule Troupe.UI.TUI.Model do
   def relayed?(%__MODULE__{remote: %{relayed?: true}}), do: true
   def relayed?(_model), do: false
 
+  @doc """
+  Whether the session's server takes Always allow, a rule of the person's own written from
+  an approval: a daemon names `approval_allow_always` at `initialize`; a pod does not, its
+  rules being its worker profile's.
+  """
+  @spec always_allow?(t()) :: boolean()
+  def always_allow?(%__MODULE__{remote: %{always_allow?: true}} = m), do: not relayed?(m)
+  def always_allow?(_model), do: false
+
+  @doc "Whether the session's server fetches an artifact attached by name (`fs_upload_artifact`)."
+  @spec attach_artifact?(t()) :: boolean()
+  def attach_artifact?(%__MODULE__{remote: %{attach_artifact?: true}}), do: true
+  def attach_artifact?(_model), do: false
+
   @spec apply(t(), Event.t()) :: t()
   def apply(%__MODULE__{} = m, %Event{} = e) do
     root = root(e.agent_path)
@@ -355,6 +369,25 @@ defmodule Troupe.UI.TUI.Model do
       :scratch_updated ->
         update_window(%{m | scratch_version: m.scratch_version + 1}, root, fn w ->
           w |> apply_to_window(e) |> settle(e)
+        end)
+
+      # Where two or more people steer the session, an answered question says who answered
+      # it, in its agent's transcript; with one, it goes as ever.
+      :question_answered when is_map_key(e.data, :by) ->
+        several? = e.data.mine? != true or map_size(m.present) > 0
+
+        update_window(m, root, fn w ->
+          asked = Enum.find(w.pending, &(&1.call_id == e.data.call_id))
+          w = w |> apply_to_window(e) |> settle(e)
+
+          if several? and asked,
+            do:
+              push(
+                ensure_agent(w, asked.agent_path),
+                asked.agent_path,
+                {:system, answered(asked, e.data)}
+              ),
+            else: w
         end)
 
       _ ->
@@ -1324,6 +1357,13 @@ defmodule Troupe.UI.TUI.Model do
     do: push_entry(w, path, {:said, %{by: sanitize(by), text: sanitize(text)}})
 
   defp push(w, path, entry), do: push_entry(w, path, entry)
+
+  # The line an answered question leaves where several people steer: what was asked, who
+  # answered ("you" for the person here) and what they said.
+  defp answered(asked, d) do
+    who = if d.mine?, do: "you", else: d.by
+    "“#{asked.question}” answered by #{who}: #{one_line(d.text)}"
+  end
 
   defp push_step(w, _path, nil), do: w
   defp push_step(w, path, step), do: push(w, path, {:system, step})
@@ -3197,7 +3237,15 @@ defmodule Troupe.UI.TUI.Model do
 
   defp pending_blocks(w, path, selection, gate, view) do
     once_only = view.once_only
-    keys = if once_only, do: "y allow once / n deny", else: "y allow / n deny / a allow for session"
+    # Always allow where the server writes the person's rule.
+    always? = not once_only and Map.get(view, :always_allow, false)
+
+    keys =
+      cond do
+        once_only -> "y allow once / n deny"
+        always? -> "y allow / n deny / a allow for session / w always allow"
+        true -> "y allow / n deny / a allow for session"
+      end
 
     [
       Enum.flat_map(w.pending, fn item ->
@@ -3217,7 +3265,8 @@ defmodule Troupe.UI.TUI.Model do
             [
               {:blank, ""},
               {:pending, "#{who}APPROVAL: #{name} (#{keys})"}
-              | asked_by(item) ++
+              | always_lines(item, always?, view) ++
+                  asked_by(item) ++
                   ((preview || "") |> sanitize() |> String.split("\n") |> Enum.map(&diff_line/1))
             ]
 
@@ -3244,6 +3293,17 @@ defmodule Troupe.UI.TUI.Model do
       end)
     ]
   end
+
+  # `w` asked where an Always allow's rule goes: the box says the two
+  # places in the words the desktop app's buttons use, and the key for each.
+  defp always_lines(%{call_id: id, name: name}, true, %{always: id}),
+    do: [
+      {:pending,
+       "Always allow #{name} where? w this workspace (.troupe/config.local.yaml) · " <>
+         "g everywhere (your config.yaml) · Esc back"}
+    ]
+
+  defp always_lines(_item, _always?, _view), do: []
 
   # A call a per-tool rule of the configuration asks about (root #658) says which rule and
   # whose; allowing it for the session does not stop the next such call asking.

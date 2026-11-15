@@ -37,6 +37,9 @@ defmodule Troupe.UI.TUI.Server do
   @once_only "From another device a call is allowed or denied once: y allows it, n denies it. " <>
                "Allowing it for the rest of the session is done at the laptop."
 
+  # Where an Always allow's rule goes, by the key that answers the box's question.
+  @always_scopes %{"w" => "workspace", "g" => "everywhere"}
+
   @type state :: %{
           session_id: String.t(),
           workspace: String.t(),
@@ -92,6 +95,8 @@ defmodule Troupe.UI.TUI.Server do
           size: {non_neg_integer(), non_neg_integer()},
           answer: answer() | nil,
           gate: map() | nil,
+          always: String.t() | nil,
+          attached: %{optional(String.t()) => map()},
           audience: map() | nil,
           settings: settings() | nil,
           observer: %{cursor: non_neg_integer()} | nil,
@@ -320,6 +325,12 @@ defmodule Troupe.UI.TUI.Server do
       # agent's publication: whom it is for, picked from `audience`, the person's teams
       # and profiles as the daemon last said them when an agent asked.
       gate: nil,
+      # The call whose Always allow is asking where its rule goes (`w`): this workspace
+      # or everywhere, one more key on the box.
+      always: nil,
+      # An artifact attached to a window's message before it is sent, by window path:
+      # `%{id, title, version}`, picked on `/artifacts` with `a`.
+      attached: %{},
       audience: nil,
       observer: nil,
       sessions: nil,
@@ -2018,6 +2029,19 @@ defmodule Troupe.UI.TUI.Server do
   defp approval_error(:unknown_call), do: "that request is no longer outstanding"
   defp approval_error(reason), do: to_message(reason)
 
+  # Always allow: the person's rule for the whole tool, written by the
+  # server where `scope` says, and the call allowed. A refusal (managed rules only, a
+  # workspace not trusted, a pod) is the server's sentence; the request keeps waiting.
+  defp always_allow(state, item, scope) do
+    case Client.approve(state.session_id, item.call_id, :allow_always, %{"scope" => scope}) do
+      :ok -> notice(follow(state), "always allowed #{item.name} #{always_where(scope)}")
+      {:error, reason} -> notice(follow(state), "not always allowed: " <> approval_error(reason))
+    end
+  end
+
+  defp always_where("workspace"), do: "in this workspace (.troupe/config.local.yaml)"
+  defp always_where(_everywhere), do: "everywhere (your config.yaml)"
+
   ## Project brief
 
   # `/memory` is the client's answer, shown on the notice line either way.
@@ -3682,19 +3706,46 @@ defmodule Troupe.UI.TUI.Server do
 
   ## The person's own things: artifacts and memory
 
-  defp open_artifacts(state, opts \\ []),
-    do: %{
+  # `/artifacts` from a window whose server fetches an artifact by name
+  # is also the picker for the window's message: `a` attaches the one on the cursor, and the
+  # page goes back to the window.
+  defp open_artifacts(state, opts \\ []) do
+    opts =
+      case state.focus do
+        {:window, path} ->
+          if Model.attach_artifact?(state.model), do: Keyword.put(opts, :attach, path), else: opts
+
+        _ ->
+          opts
+      end
+
+    %{
       put_cmd(state, "")
       | focus: :artifacts,
         artifacts_page: ArtifactsPage.open(state.session_id, state.workspace, opts)
     }
+  end
 
   defp artifacts_key(key, state) do
     case ArtifactsPage.key(state.artifacts_page, key) do
-      :close -> %{state | focus: :command, artifacts_page: nil}
-      {:ok, page} -> %{state | artifacts_page: page}
+      :close ->
+        %{state | focus: back_from_artifacts(state.artifacts_page), artifacts_page: nil}
+
+      {:ok, page} ->
+        %{state | artifacts_page: page}
+
+      {:attach, path, artifact} ->
+        %{
+          state
+          | focus: {:window, path},
+            artifacts_page: nil,
+            attached: Map.put(state.attached, path, artifact)
+        }
     end
   end
+
+  defp back_from_artifacts(%{attach: path}) when is_binary(path), do: {:window, path}
+  defp back_from_artifacts(_page), do: :command
 
   defp open_profiles(state, name),
     do: %{put_cmd(state, "") | focus: :profiles, profiles_page: ProfilesPage.open(nil, name)}
@@ -4111,6 +4162,11 @@ defmodule Troupe.UI.TUI.Server do
        when step != nil,
        do: clear_input(Map.put(state, :gate, %{draft | step: nil}))
 
+  # Always allow's question where is left with Esc: the approval waits
+  # with its answers as before.
+  defp window_key(%Key{code: "esc"}, _path, %{always: call_id} = state) when is_binary(call_id),
+    do: %{state | always: nil}
+
   # Esc clears a selection before it leaves the window, so a mis-drag can be
   # cancelled without losing the pane.
   defp window_key(%Key{code: "esc"}, _path, %{selection: %{}} = state),
@@ -4172,6 +4228,45 @@ defmodule Troupe.UI.TUI.Server do
        )
        when d in ?1..?9 and step in [:edit, :switch],
        do: gate_pick(state, path, d - ?0)
+
+  # Always allow: `w` on a call's approval asks where its rule goes, and
+  # `w` again writes it for this workspace, `g` for every session on this computer. Where
+  # the server does not name it (a pod, whose rules are its profile's) the box offers no
+  # `w`, and one pressed anyway is asked of the server, whose refusal is shown in its words.
+  defp window_key(%Key{code: code, modifiers: []}, path, %{win_text: "", always: call_id} = state)
+       when is_binary(call_id) and code in ["w", "g"] do
+    w = Map.fetch!(state.model.windows, path)
+
+    case answerable(w, state.pane.agent || path) do
+      %{call_id: ^call_id} = item ->
+        always_allow(%{state | always: nil}, item, @always_scopes[code])
+
+      _gone ->
+        %{state | always: nil}
+    end
+  end
+
+  defp window_key(%Key{code: "w", modifiers: []}, path, %{win_text: ""} = state) do
+    w = Map.fetch!(state.model.windows, path)
+
+    case answerable(w, state.pane.agent || path) do
+      nil ->
+        put_win(state, "w")
+
+      %{delegation: %{}} ->
+        put_win(state, "w")
+
+      %{publication: %{}} ->
+        put_win(state, "w")
+
+      item ->
+        cond do
+          Model.relayed?(state.model) -> notice(state, @once_only)
+          Model.always_allow?(state.model) -> %{state | always: item.call_id}
+          true -> always_allow(state, item, "workspace")
+        end
+    end
+  end
 
   defp window_key(%Key{code: code, modifiers: []}, path, %{win_text: ""} = state)
        when code in ["y", "n", "a"] do
@@ -4295,6 +4390,16 @@ defmodule Troupe.UI.TUI.Server do
   defp window_key(%Key{code: "enter"}, _path, %{win_text: text} = state) when text != "",
     do: window_line(state, text)
 
+  # An attached artifact goes with nothing typed too, and Backspace in the empty box takes
+  # it off the message.
+  defp window_key(%Key{code: "enter"}, path, %{win_text: "", attached: attached} = state)
+       when is_map_key(attached, path),
+       do: window_line(state, "")
+
+  defp window_key(%Key{code: "backspace"}, path, %{win_text: "", attached: attached} = state)
+       when is_map_key(attached, path),
+       do: %{state | attached: Map.delete(attached, path)}
+
   defp window_key(%Key{code: code, modifiers: mods} = key, _path, state)
        when mods in [[], ["shift"]] do
     if String.length(code) == 1,
@@ -4325,16 +4430,53 @@ defmodule Troupe.UI.TUI.Server do
       String.starts_with?(text, "/todo add ") ->
         Client.edit_todo(sid, path, {:add, String.trim_leading(text, "/todo add ")})
 
-      question = pending_of(w, state.pane.agent || path, [:question, :budget]) ->
+      question = text != "" && pending_of(w, state.pane.agent || path, [:question, :budget]) ->
         Client.answer(sid, question.call_id, text)
+
+      Map.has_key?(state.attached, path) ->
+        :attached
 
       true ->
         Client.send_input(sid, path, text)
     end
+    |> case do
+      :attached -> send_attached(state, path, text)
+      # Any Enter that reaches here either answered the question or replaced it
+      # with fresh input, so a half-built selection is stale either way.
+      _sent -> follow(%{put_win(state, "") | answer: nil})
+    end
+  end
 
-    # Any Enter that reaches here either answered the question or replaced it
-    # with fresh input, so a half-built selection is stale either way.
-    follow(%{put_win(state, "") | answer: nil})
+  # The message with its artifact: the session's server fetches the
+  # files from the plane first, and the message says where each landed, in `/upload`'s
+  # words, as the desktop app's does. A refusal keeps the text and the attachment, and
+  # says why in the server's words.
+  defp send_attached(state, path, text) do
+    sid = state.session_id
+    att = Map.fetch!(state.attached, path)
+
+    case Client.attach_artifact(sid, att.id, att.version) do
+      {:ok, answer} ->
+        landed =
+          for %{"path" => at} <- List.wrap(answer["files"]),
+              do:
+                "uploaded #{at} to #{if String.contains?(at, ":/"), do: at, else: "session:/" <> at}"
+
+        Client.send_input(sid, path, attached_message(text, landed))
+        follow(%{put_win(state, "") | answer: nil, attached: Map.delete(state.attached, path)})
+
+      {:error, reason} ->
+        notice(state, "“#{att.title}” not attached: #{to_message(reason)}")
+    end
+  end
+
+  defp attached_message(text, []), do: text
+
+  defp attached_message(text, landed) do
+    case String.trim_trailing(text) do
+      "" -> Enum.join(landed, "\n")
+      said -> said <> "\n\n" <> Enum.join(landed, "\n")
+    end
   end
 
   # y/n/a answers approvals — a delegated subagent raises them too, and its pending
@@ -4927,8 +5069,16 @@ defmodule Troupe.UI.TUI.Server do
   # capability is read once here so the first frame is honest too.
   defp remote(sid) do
     case Client.capability(sid) do
-      %{remote?: true} = capability -> capability
-      _ -> nil
+      %{remote?: true} = capability ->
+        capability
+
+      # A session on this computer: only what its daemon takes beyond the core (Always
+      # allow, an artifact by name), which a `:remote_status` would bring later.
+      %{always_allow?: always, attach_artifact?: attach} when always or attach ->
+        %{plane_url: nil, always_allow?: always, attach_artifact?: attach}
+
+      _ ->
+        nil
     end
   end
 
