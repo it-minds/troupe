@@ -100,6 +100,40 @@ describe("the command palette", () => {
     await waitFor(() => palette() === null, "the palette to close");
   });
 
+  // A section's header is the screen's eyebrow, in its own colour, not the commands'; a row
+  // is the command and its one line, with no area cell taking the detail's width; the
+  // detail's head names the area instead (troupe #926).
+  it("draws its headers as eyebrows, its rows as a command and a line, and names the area in the detail", async () => {
+    const composer = await openSession();
+    key(composer, "/");
+    const dialog = await waitFor(palette, "the palette");
+    await waitFor(() => rowNames().length === SHOWN, "the list");
+
+    const headers = [...dialog.querySelectorAll(".section")];
+    expect(headers.length).toBeGreaterThan(0);
+    for (const h of headers) expect(h.classList.contains("screen")).toBe(true);
+    expect(css).toMatch(/\.palette \.row \.name \{\s*font: var\(--t-code\);\s*color: var\(--text-primary\);/);
+    expect(css).not.toMatch(/\.palette \.section \{[^}]*color:/);
+
+    for (const row of dialog.querySelectorAll(".row")) {
+      expect([...row.children].map((c) => c.className)).toEqual(["name", "summary"]);
+    }
+    expect(dialog.querySelector(".row .kind")).toBeNull();
+    expect(css).toMatch(/\.palette \.row \{[^}]*grid-template-columns: 12ch minmax\(0, 1fr\);/);
+    // From 1024px the list is the narrower column and the detail the wider.
+    expect(css).toMatch(/\.palette \{\s*width: min\(960px, 100%\);\s*display: grid;\s*grid-template-columns: minmax\(min\(16rem, 40%\), 2fr\) minmax\(0, 3fr\);/);
+
+    const input = dialog.querySelector<HTMLInputElement>("input")!;
+    const head = (): string => [...dialog.querySelectorAll(".detail > .usage, .detail > .area")].map((el) => el.textContent).join("");
+    type(input, "audit");
+    await waitFor(() => selected() === "/audit", "/audit selected");
+    expect(head()).toBe("/audit · repository");
+    expect(dialog.querySelector(".detail")!.classList.contains("kind-repository")).toBe(true);
+    type(input, "goal");
+    await waitFor(() => selected() === "/goal", "/goal selected");
+    expect(head()).toBe("/goal [text | clear] · session");
+  });
+
   it("narrows as you type, by name, alias and summary, and Enter runs the row", async () => {
     await openSession();
     key(window, "k", { ctrlKey: true });

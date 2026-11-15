@@ -255,6 +255,16 @@ function kindOf(entry: CommandEntry): Kind {
   }
 }
 
+function sectionName(section: string): string {
+  return SECTION_NAMES[section] ?? section;
+}
+
+/** What the detail's head names beside the command: whose it is, or for one of Troupe's own, the section it sits under. */
+function areaOf(entry: CommandEntry): string {
+  const kind = kindOf(entry);
+  return kind === "command" ? sectionName(entry.section).toLowerCase() : kind;
+}
+
 /** Where an agent comes from, in as few letters as say it. */
 function layerBadge(layer: AgentLayer | undefined): string | null {
   switch (layer) {
@@ -588,7 +598,7 @@ export function CommandPalette({
 
           {grouped.map((group) => (
             <div key={group.section}>
-              <div className="section">{SECTION_NAMES[group.section] ?? group.section}</div>
+              <div className="section screen">{sectionName(group.section)}</div>
               {group.rows.map(({ row, index }) => {
                 const kind = kindOf(row.entry);
                 const agent = kind === "agent" ? agents.get(row.entry.name) : undefined;
@@ -603,7 +613,6 @@ export function CommandPalette({
                     onClick={() => void run(row)}
                   >
                     <span className="name">/{row.entry.name}</span>
-                    <span className="kind">{kind}</span>
                     <span className="summary">
                       {agent && <span className="badges">{agentBadges(agent).join(" · ")}</span>}
                       {row.entry.summary}
@@ -617,8 +626,9 @@ export function CommandPalette({
         </div>
 
         {selected && (
-          <div className="detail">
+          <div className={`detail kind-${kindOf(selected.entry)}`}>
             <span className="usage">{selected.entry.usage}</span>
+            <span className="area"> · {areaOf(selected.entry)}</span>
             {selected.entry.aliases.length > 0 && <span className="micro muted"> also {selected.entry.aliases.map((a) => `/${a}`).join(", ")}</span>}
             <p>{selected.entry.detail}</p>
             {selected.entry.source === "agent" && <AgentAbout name={selected.entry.name} agent={agents.get(selected.entry.name)} manager={Boolean(actions.agents)} switches={selected.reason === null} />}

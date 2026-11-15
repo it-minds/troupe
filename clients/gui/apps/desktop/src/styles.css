@@ -1341,10 +1341,12 @@ main {
 }
 /* `--transcript-min`: the room the transcript keeps above the panels (`.stream`).
    `--column`: the chat's one column, which the transcript, the cards under it and the
-   composer share, centred in the track; `--gutter` is the space either side of it. */
+   composer share, centred in the track; `--gutter` is the space either side of it. The
+   column is 760px on a laptop (1280 wide) and widens with the window to 1200px by about
+   1900 wide, where it stops; a track narrower than the column keeps the gutter's floor. */
 .conversation {
   --transcript-min: min(9rem, 22vh);
-  --column: 760px;
+  --column: clamp(760px, 71vw - 149px, 1200px);
   --gutter: max(var(--space-5), calc((100% - var(--column)) / 2));
   flex: 3 1 420px;
   min-width: 0;
@@ -4691,20 +4693,17 @@ pre.instruction {
 .palette .rows .note {
   margin: var(--space-2) var(--space-4);
 }
+/* A section's header is the screen's eyebrow (`.screen`: the face, tracked, the cyan), so
+   the list reads as groups; the commands under it are in the text's own colour. */
 .palette .section {
   padding: var(--space-3) var(--space-4) var(--space-1);
-  font: var(--t-screen);
-  letter-spacing: var(--tracking-screen);
-  text-transform: uppercase;
-  color: var(--running-fg);
 }
-.palette .section::before {
-  content: "// ";
-}
+/* A row is the command and its one line: its area is the header it sits under, and the
+   detail's head names it. */
 .palette .row {
   min-height: 0;
   display: grid;
-  grid-template-columns: 12ch 11ch 1fr;
+  grid-template-columns: 12ch minmax(0, 1fr);
   gap: var(--space-3);
   align-items: baseline;
   padding: var(--space-2) var(--space-4) var(--space-2) calc(var(--space-4) - var(--bw-marker));
@@ -4712,25 +4711,26 @@ pre.instruction {
 }
 .palette .row .name {
   font: var(--t-code);
-  color: var(--running-fg);
+  color: var(--text-primary);
 }
 .palette .row .summary {
   font: var(--t-note);
   color: var(--text-secondary);
+  overflow-wrap: anywhere;
 }
-/* Three kinds of row, each drawn as what it is (troupe #565): Troupe's own commands
-   muted, an agent in the accent, a file's command in the colour of whose it is. */
-.palette .row .kind {
-  font: var(--t-code-small);
-  color: var(--text-muted);
-}
-.palette .row.kind-agent .kind {
+/* Three kinds of row, each drawn as what it is (troupe #565): Troupe's own commands in
+   the text's colour, an agent in the accent, a file's command in the colour of whose it
+   is; the detail's head names the kind in the same colour. */
+.palette .row.kind-agent .name,
+.palette .detail.kind-agent .area {
   color: var(--accent);
 }
-.palette .row.kind-repository .kind {
+.palette .row.kind-repository .name,
+.palette .detail.kind-repository .area {
   color: var(--p-agent);
 }
-.palette .row.kind-yours .kind {
+.palette .row.kind-yours .name,
+.palette .detail.kind-yours .area {
   color: var(--p-self);
 }
 .palette .row .badges {
@@ -4743,7 +4743,6 @@ pre.instruction {
   border-left-color: var(--accent);
 }
 .palette .row.unavailable .name,
-.palette .row.unavailable .kind,
 .palette .row.unavailable .badges,
 .palette .row.unavailable .summary {
   color: var(--text-muted);
@@ -4761,6 +4760,10 @@ pre.instruction {
 .palette .detail .usage {
   font: var(--t-code);
   color: var(--text-primary);
+}
+.palette .detail .area {
+  font: var(--t-code-small);
+  color: var(--text-muted);
 }
 .palette .detail p {
   margin: var(--space-1) 0 0;
@@ -4788,7 +4791,8 @@ pre.instruction {
 /* The list keeps its room whatever the chosen command's detail says: eight rows at least,
    scrolling inside itself, and the detail (a file's prompt can be long) scrolls in a box of
    its own and takes no rows from it. From 1024px the detail stands beside the list, each
-   scrolling on its own; narrower it stacks under the list, held to a share of the height. */
+   scrolling on its own, the list the narrower column and the palette wider to hold both;
+   narrower it stacks under the list, held to a share of the height. */
 .palette .rows {
   min-height: min(18rem, 40vh);
 }
@@ -4807,8 +4811,9 @@ pre.instruction {
 }
 @media (min-width: 1024px) {
   .palette {
+    width: min(960px, 100%);
     display: grid;
-    grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+    grid-template-columns: minmax(min(16rem, 40%), 2fr) minmax(0, 3fr);
     grid-template-rows: auto minmax(0, 1fr) auto auto;
     height: min(80vh, 600px);
   }

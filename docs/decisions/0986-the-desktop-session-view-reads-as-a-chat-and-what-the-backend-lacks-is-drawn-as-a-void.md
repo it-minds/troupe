@@ -24,7 +24,7 @@ symbols:
   - SessionMenu
   - contextStatus
   - ALLOW_ALWAYS
-gist: "Session = chat comp: one-line head, 760px column, cards at its foot, one-box composer; backstage/scratchpad under ⋯; goal via /goal; voids say why and wait on #920"
+gist: "Session = chat comp: one-line head, a column 760px to 1200px, cards at its foot, one-box composer; backstage/scratchpad under ⋯; goal via /goal; voids say why and wait on #920"
 ---
 
 Issue #919. The maintainer redrew the desktop app's session screen as a chat
@@ -33,7 +33,7 @@ that comp, and nothing the old screen did was dropped to make it so.
 
 **The shape.** One line of head: back, the mask, the title, the session's setup as mono
 tags (where it runs, the plane profile, the agent this window runs), who is here, the
-status, Invite and ⋯. The transcript is one column of 760 px centred in its track: a
+status, Invite and ⋯. The transcript is one column centred in its track, 760 px on a laptop and widening with the window to 1200 px (#926): a
 person's words a block on the right, the troupe's reply beside the mask with its working
 folded into the strip (Decision 877's strip, unchanged), and under the reply, on hover or
 focus, Copy, Retry, Publish and the turn's cost line. The cards that wait on the person
