@@ -370,6 +370,20 @@ export interface CurtainLine {
   facts: string;
 }
 
+/**
+ * The divider over a session's first event: "CURTAIN UP", and the local time the session
+ * began beside it where the event carries one ("CURTAIN UP · 18:54"), with the day in
+ * front when it was not today, as the list says a time.
+ */
+export function curtainUp(startedAt: number | undefined, now: Date = new Date()): string {
+  if (startedAt === undefined) return "CURTAIN UP";
+  const at = new Date(startedAt);
+  if (Number.isNaN(at.getTime())) return "CURTAIN UP";
+  const time = `${String(at.getHours()).padStart(2, "0")}:${String(at.getMinutes()).padStart(2, "0")}`;
+  const today = at.toDateString() === now.toDateString();
+  return `CURTAIN UP · ${today ? time : `${at.toLocaleDateString(undefined, { day: "numeric", month: "short" })} ${time}`}`;
+}
+
 /** `mm:ss`, as the terminal client says how long something has gone on. */
 export function clock(ms: number): string {
   const s = Math.floor(Math.max(ms, 0) / 1000);

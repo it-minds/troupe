@@ -288,7 +288,8 @@ export interface CommandArg {
  * older than it. `summary` and `detail` are words true in any client; `summaries` and
  * `details`, where a row has them, hold a client's own (`tui`, `desktop`), which that
  * client shows instead. `availability` `tui` is the terminal client's alone, and another
- * client leaves the row out.
+ * client leaves the row out; `availabilities`, on such a row, holds a client's own
+ * requirement (`/merge`'s `{ tui: "local" }`), which that client judges instead.
  */
 export interface CommandEntry {
   name: string;
@@ -304,6 +305,7 @@ export interface CommandEntry {
   body?: string;
   summaries?: Record<string, string>;
   details?: Record<string, string>;
+  availabilities?: Record<string, string>;
   [k: string]: unknown;
 }
 

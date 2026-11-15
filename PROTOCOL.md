@@ -1655,7 +1655,7 @@ same method, read from the file at the switch.
 {"session_id": "s-9f"}
 ```
 → `{"commands": [{"name", "aliases", "section", "summary", "usage", "args", "availability",
-"source", "detail", "example", "summaries"?, "details"?}]}`
+"source", "detail", "example", "summaries"?, "details"?, "availabilities"?}]}`
 
 The slash commands a client may offer for the session — the one table behind every
 client's palette, so `/help` in the terminal and the desktop app show the same list and
@@ -1689,8 +1689,11 @@ own for any of them.
 hide the row: `always`; `window` (acts on a window — the activated one, or one named
 as an argument); `local` (a session on this machine: a pod has no checkout, watcher or
 project brief of the person's to act on); `plane` (needs a plane); `tui` (the terminal
-client's alone, such as `/quit`: any other client leaves the row out). A client runs what
-it can and shows the rest greyed with the reason. Reading the table wakes nothing.
+client's alone, such as `/quit`, `/merge` or `/observer`: any other client leaves the row
+out). A `tui` row whose command needs more there also carries `availabilities`, a map
+from a client's name to its own `availability` (`/merge`'s `{"tui": "local"}`), which
+that client judges instead. A client runs what it can and shows the rest greyed with the
+reason. Reading the table wakes nothing.
 
 `summary` and `detail` are words true in any client. A row that a client runs
 differently enough to need its own also carries `summaries` and `details`, maps from a

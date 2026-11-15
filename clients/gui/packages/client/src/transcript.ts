@@ -300,6 +300,12 @@ export interface TranscriptState {
   profile: string | undefined;
   bundleVersion: string | undefined;
   lastSeq: number;
+  /**
+   * When the session began: the `ts` its first event (seq 1) was written at, in
+   * milliseconds, which the curtain's divider says; undefined until that event is folded,
+   * or where it carries no time (a replay with none).
+   */
+  startedAt: number | undefined;
   /** The last `llm_error`, cleared by the next successful response. */
   error: string | undefined;
   /** Set once the root agent reports it has finished; its `agent_done.reason`. */
@@ -459,6 +465,7 @@ export const emptyTranscript: TranscriptState = {
   profile: undefined,
   bundleVersion: undefined,
   lastSeq: 0,
+  startedAt: undefined,
   error: undefined,
   doneReason: undefined,
   failed: undefined,
@@ -1043,7 +1050,7 @@ export function fold(state: TranscriptState, e: TroupeEvent, options: FoldOption
   if (!isDurable(e)) return foldEphemeral(state, e, now);
 
   const d = e;
-  const next: TranscriptState = { ...state, lastSeq: Math.max(state.lastSeq, d.seq) };
+  const next: TranscriptState = { ...state, lastSeq: Math.max(state.lastSeq, d.seq), ...(d.seq === 1 ? { startedAt: writtenAt(d) } : {}) };
   const base = { seq: d.seq, agent: d.agent };
 
   switch (d.type) {
