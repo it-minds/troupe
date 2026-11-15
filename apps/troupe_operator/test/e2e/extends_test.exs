@@ -54,7 +54,7 @@ defmodule Troupe.E2E.ExtendsTest do
     {:ok, _subscription} = Client.subscribe(client, "session:" <> id, level: :detail, from_seq: 0)
 
     assert {:error, refused} = shell(client, id, "touch troupe-e2e-denied")
-    assert inspect(refused) =~ "the worker profile #{context.profile}"
+    assert inspect(refused) =~ "from the profile #{context.profile}"
     assert inspect(refused) =~ "deny shell(touch troupe-e2e-denied)"
 
     # The rule matched that command and no other: the shell is there.
