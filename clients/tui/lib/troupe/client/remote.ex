@@ -1032,6 +1032,8 @@ defmodule Troupe.Client.Remote do
       id: session["id"],
       title: session["title"] || session["id"],
       owner: session["owner"],
+      # The owner's name, where the plane has one (#931); a view shows the subject without it.
+      owner_name: session["owner_name"],
       team: session["team"],
       profile: session["profile"],
       state: Worker.session_state(session["state"]) || :dormant,

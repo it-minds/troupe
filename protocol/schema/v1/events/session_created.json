@@ -21,6 +21,9 @@
     "owner": {
       "type": "string"
     },
+    "owner_name": {
+      "type": "string"
+    },
     "parent": {
       "type": "string"
     },

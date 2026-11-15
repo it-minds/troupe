@@ -41,6 +41,8 @@ describe("sessions", () => {
     await sees("dan@example.com", pinned);
     await sees("dormant", pinned);
     await sees("pinned by dan@example.com", pinned);
+    // The owner by name, as the plane's identity record has it, the subject on hover.
+    expect(pinned.querySelector("td[title='dan@example.com']")?.textContent).toBe("Dan");
     await sees("171.7 MiB", () => row("s-7f3a9c21"));
     await sees("Metadata only");
   });

@@ -266,7 +266,7 @@ Persisted, replayable, and totally ordered per session.
 | `seq` | monotonic from 1, no gaps, per session |
 | `prev_hash` | `sha256:` of the previous event's canonical JSON; `null` at `seq` 1 |
 | `ts` | RFC 3339 UTC, microsecond precision |
-| `actor` | who caused it; `{"kind": "system"}` when nobody did; `"via": "plane"` beside a person who did it from another device, through the plane ([Steering from another device](#steering-from-another-device)) |
+| `actor` | who caused it; `{"kind": "system"}` when nobody did; `display_name` beside a person's `subject` where the connection knew their name ([People by name](#people-by-name)); `"via": "plane"` beside a person who did it from another device, through the plane ([Steering from another device](#steering-from-another-device)) |
 | `agent` | agent path from the root, e.g. `["root"]` or `["root", "explore#1"]` |
 | `type` | see the table below |
 | `v` | schema version of `data`, starting at 1 |
@@ -276,6 +276,25 @@ Persisted, replayable, and totally ordered per session.
 insignificant whitespace, numbers in shortest round-trip form. The hash covers the
 event *without* its own `prev_hash` field. This makes the log independently
 verifiable: walk it and recompute.
+
+### People by name
+
+Wherever an event or a row names a person by `subject`, it carries their name beside it,
+so a client shows initials and a name rather than an id or an email. In an event, the
+`actor` has `display_name`: on a pod, the name the plane signed into the connection's
+token from its identity record (`name` beside `sub`); on a laptop, the linked person's, or
+the operating system's user where nobody is linked. `session_created` has `owner_name`
+beside `owner` where the writer knew it (a laptop's linked person; a pod is told no
+owner). The events whose `data` names a person carry `display_name` beside `subject`
+(`session_invited`, `session_uninvited`, `acl_granted`, `acl_revoked`, `session_tainted`,
+`presence`), and `by_name` beside `by`. In the plane's answers, a session row
+(`sessions.list`, `session.get` and every method that answers a session, and
+`admin.sessions.list`) has `owner_name` beside `owner`, an audit row (`admin.audit.list`)
+`actor_name` beside `actor`, and an offer or an invitation `owner_name` and
+`invited_by_name`, all filled from the plane's identity record when it answers. A person
+the writer or the plane has no name for, or whose name is only their subject again, has
+the field left out, and a client shows the subject as it did before there was one; a
+plane or daemon from before this sends none.
 
 ### Ephemeral events
 
@@ -297,7 +316,7 @@ Durable:
 
 | type | `data` |
 | --- | --- |
-| `session_created` | `workspace`, `profile`, `visibility`, `bundle_version`, `kind` (`team`/`local`/`private`), `owner`, `entitlements` (the agent, skill and MCP server names the grant resolved to; absent for no restriction), `agent_rule` (the worker profile's `spec.agents` rule, `allow` and `deny`, which the pod applied to every definition, subagents included; absent where the profile has none), `origin`, `parent` |
+| `session_created` | `workspace`, `profile`, `visibility`, `bundle_version`, `kind` (`team`/`local`/`private`), `owner`, `owner_name`, `entitlements` (the agent, skill and MCP server names the grant resolved to; absent for no restriction), `agent_rule` (the worker profile's `spec.agents` rule, `allow` and `deny`, which the pod applied to every definition, subagents included; absent where the profile has none), `origin`, `parent` |
 | `session_forked` | `parent` (the id, the `seq` forked at and the parent's head hash there), `reason` — a fork's first event; the parent gets nothing |
 | `agent_started` | `profile`, `mode`, `bundle_version` |
 | `agent_restarted` | `replayed_events`, `interrupted`, `incomplete_calls` (the calls the restart closed) |
@@ -353,7 +372,7 @@ Durable:
 | `fs_changed` | `path`, `hash`, `size` |
 | `file_ready` | `path`, `size`, `hash`, `title`, `local_path` — a file the agent made for the person: `write_file` with `deliverable: true` (Decision 956). `path` is in the session's workspace, as `fs.read` takes it, and `hash` the one that read answers; `local_path`, on a session that runs on the person's machine, is where it already is there. A client offers to save it: the desktop app's **Save…** on the line (the bytes through `fs.read`, then a save dialog), the TUI the path on a laptop and `/save <path> [to]` from a pod; a headless run prints it |
 | `scratch_updated` | `name`, `path`, `kind`, `title`, `size`, `hash`, `version`, `call_id` — a document the `show` tool wrote to the session's scratchpad, or replaced (Decision 870), or the `patch` tool revised in place: a plan, report, comparison, diagram or table the agent shows the person beside the chat instead of printing it there. `path` is where `fs.read` reads it (`scratch:/<name>`), `kind` how to show it (`markdown`, `mermaid`, `json`, `csv` or `text`), `hash` the same `sha256:…` `fs.read` answers, `version` the writes of that name in the session from 1, and `call_id` the `show` or `patch` call that wrote it, so a client puts a card where the call was rather than the call's `content`. `scratch.list` lists the documents |
-| `acl_granted` / `acl_revoked` | `subject`, `role` |
+| `acl_granted` / `acl_revoked` | `subject`, `role`, `display_name` |
 | `session_invited` / `session_uninvited` | `subject`, `role` (invited only), `by`, `display_name`, `by_name` — a person invited into the session by name, to follow it (`observe`) or steer it (`control`), or the invitation taken back (Decision 949): written by the pod holding a pod session when the plane tells it, and by the daemon sealing a private one when its owner invites from there. A private session's daemon reads who it has invited from these, and puts a new key only in the slots of people they name |
 | `mounts_resolved` | `mounts` — the volumes a pod session's working tree was given, as the session started |
 | `published` | `source`, `destination`, `hash`, `bytes`, `direction` — a file the `publish` tool copied to or from a shared volume |
@@ -3077,7 +3096,7 @@ that team.
 | `admin.team.enable` | platform | makes an IdP group a team; a name another team has is `conflict` unless `link` is true, which links the group into that team |
 | `admin.team.update` | either | budget, retention, default visibility, volume, and `github` (`repositories`, `max_pushes`, `max_runs`, `max_attempts`; [github.md](docs/admin/github.md#9-how-far-a-run-may-go)); `allow_unenforced_workers` a platform admin's; keys it does not declare, a team's name and group among them, are left alone; `github` is `managed_by_gitops` in gitops mode, where the `GitHubApp` resource holds it |
 | `admin.team.grant` / `admin.team.revoke` | platform | a team's access to a profile |
-| `admin.sessions.list` | either | session *metadata*, never content: with the `repository` it was created with and `github`, what it did there (as `admin.runs.list` has it), and `memory`: for a session running on a pod that has had a turn, `current` where that turn read the memory in force for it and `behind` where it read an older version (Decision 947), absent otherwise; `filter.team` narrows to one team, another team's name `not_found` for a team admin |
+| `admin.sessions.list` | either | session *metadata*, never content: `owner` and, where the plane has a name for them, `owner_name`; with the `repository` it was created with and `github`, what it did there (as `admin.runs.list` has it), and `memory`: for a session running on a pod that has had a turn, `current` where that turn read the memory in force for it and `behind` where it read an older version (Decision 947), absent otherwise; `filter.team` narrows to one team, another team's name `not_found` for a team admin |
 | `admin.session.erase` | either | erases one, for authorised roles |
 | `admin.bundles.list` | either | every version of a channel, each with its `summary` (names of agents, skills and MCP servers) |
 | `admin.bundle.get` | either | one version in full: the document, its `detail` (agents with mode and skills, skills with files and `agents`, MCP servers with the Secret to create), and adoption per profile |
@@ -3085,7 +3104,7 @@ that team.
 | `admin.agent.check` | platform | one agent's definition (`name`, `definition`) checked as a bundle's agent is: `{ok, errors, warnings}`, each `{field, message}` in the words `agents.validate` answers, what the console's agent builder shows at each field (#594) |
 | `admin.bundle.publish` / `admin.bundle.retire` | platform | publish a version — refused as `invalid_params` with `data.errors`, one sentence per problem, when the document is malformed or names an MCP host outside `allowedEgress` — or retire one |
 | `admin.mcp.check` | either | `{host, allowed}`: whether the cluster policy lets a pod reach an MCP server's host |
-| `admin.audit.list` | either | who changed what, with diffs, each change keyed by its path (`spec.llm.model`); a team admin's is the rows about their teams (the team, its triggers, principals and sessions) |
+| `admin.audit.list` | either | who changed what (`actor`, and `actor_name` where the plane has a name for them), with diffs, each change keyed by its path (`spec.llm.model`); a team admin's is the rows about their teams (the team, its triggers, principals and sessions) |
 | `admin.profile.choices` | either | `{provider_types, size_classes}`: every provider type `llm.provider` may name, as the protocol's one list carries it (`{name, label, summary, url, default_url, url_example, key, key_var}`), and every size class `{name, sessions_per_worker, summary}`. What a form offers instead of free text. And `models`, each `{name, why}`: what the plane knows a provider serves, from the profile's own model, the models the organisation gives people's machines, the models sessions have been charged for and the models its bundle's agents name (with `profile`, that profile's; without, the organisation's and every session's). The plane never asks a provider for its list; the console's agent builder picks a model from these (#594) |
 | `admin.profile.agents` | platform | `{profile, channel, agents, skills, builtins, teams, rule, unmatched}`: a profile's agents as its bundle in effect has them, each `{name, mode, description, model, delegate, max_turns, skills, loads, permissions, from, channel, builtin, definition, teams: [{team, may}], offered}`. `skills` on a row is its own frontmatter's; `loads` is the bundle's skills it may load, those its `skills` opens and those whose `agents` names it or says `all`, before a team's grant narrows them, and an agent that loads none has no `skill` tool on the profile's pods; the answer's `skills` is every skill the bundle in effect carries, by name. `offered` is whether the profile's `spec.agents` rule in effect (`rule`) lets it exist there, a subagent it excludes being in no `delegate`; `unmatched` the rule's names that are no agent the profile has today. `delegate` is the bundle's subagents for a primary holding the `delegate` tool, else `null`; `builtin` marks a primary Troupe ships that the profile offers because its bundle has none of that name; `may` is the team's grant resolved for that agent. `channel` is the one the profile follows in effect, `builtins` every agent Troupe ships with its file, to copy from, `teams` the teams granted the profile. The console's profile-first builder (#594) |
 | `admin.provisioning.mode` | either | `direct` or `gitops`: whether the plane writes profiles to the cluster, or reads them and the triggers from resources a repository holds and refuses to write them |
@@ -3366,7 +3385,7 @@ until all are gone.
 A session's JSON carries `agent`, the agent it was created as or its pod last reported
 it switched to (`null` where none was named and the profile's default ran; a session that
 waited for a place starts as it), `created_at`, `kind` and, for a private one, the
-`device` that last sealed it, and `bundle_version` — the configuration it was pinned to when it was created,
+`device` that last sealed it, `owner_name` beside `owner` (see [People by name](#people-by-name)), and `bundle_version` — the configuration it was pinned to when it was created,
 which does not move when a newer version is published. A session whose agent
 definitions changed underneath it would be a different session halfway through.
  `sessions.list` takes `kind` (`team` or `private`) alongside its other filters, so one

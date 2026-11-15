@@ -9,6 +9,7 @@
 
 import { useState } from "react";
 import type { JSX } from "react";
+import { nameOrSubject } from "@troupe/client";
 import type { AuditIntegrity } from "@troupe/client";
 import { useConsole, useLoad } from "../console";
 import { DetailList, Empty, Failure, Field, Loaded, Loading, Region, Status, when } from "./bits";
@@ -81,7 +82,7 @@ export function Audit(): JSX.Element {
       </div>
       <Loaded load={load} what="the audit" retry={reload} slow>
         {(rows) => {
-          const shown = rows.filter((r) => !q || JSON.stringify([r.actor, r.action, r.subject_id, r.detail]).toLowerCase().includes(q));
+          const shown = rows.filter((r) => !q || JSON.stringify([r.actor, r.actor_name ?? "", r.action, r.subject_id, r.detail]).toLowerCase().includes(q));
           if (rows.length === 0) {
             return (
               <Empty title={asked["actor"] || asked["kind"] || asked["subject_id"] ? "Nothing recorded that matches" : "Nothing recorded yet"}>
@@ -109,7 +110,7 @@ export function Audit(): JSX.Element {
                       {shown.map((r, i) => (
                         <tr key={`${r.occurred_at}:${r.action}:${r.subject_id ?? ""}:${i}`}>
                           <td className="nowrap">{when(r.occurred_at)}</td>
-                          <td className="mono">{r.actor}</td>
+                          <td title={r.actor} className={r.actor_name ? undefined : "mono"}>{nameOrSubject(r.actor, r.actor_name)}</td>
                           <td>
                             <code>{r.action}</code>
                           </td>

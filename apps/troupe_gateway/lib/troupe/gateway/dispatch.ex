@@ -2843,14 +2843,22 @@ defmodule Troupe.Gateway.Dispatch do
   end
 
   # A person steering from another device through the plane is written as such, so the
-  # transcript says who did what and from where.
+  # transcript says who did what and from where. Each is written with their name where the
+  # connection carries one; a name that is only the subject again, which a token without a
+  # name claim gives, is no name, so a client falls back to the subject as it would.
   defp actor(%Context{principal: %{"via" => "plane"} = principal}) do
-    Event.Actor.remote(principal["subject"], principal["display_name"])
+    Event.Actor.remote(principal["subject"], name_of(principal))
   end
 
   defp actor(%Context{principal: principal}) do
-    Event.Actor.user(principal["subject"], principal["display_name"])
+    Event.Actor.user(principal["subject"], name_of(principal))
   end
+
+  defp name_of(%{"subject" => subject, "display_name" => name})
+       when is_binary(name) and name not in ["", subject],
+       do: name
+
+  defp name_of(_principal), do: nil
 
   defp session_json(session) do
     %{

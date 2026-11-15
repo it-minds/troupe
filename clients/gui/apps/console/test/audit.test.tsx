@@ -32,8 +32,20 @@ describe("the audit", () => {
     await sees("clients.put", rows()[0]!);
     await sees("2026-10-11 09:30 UTC", rows()[0]!);
     const update = rows().find((r) => says("team.update", r))!;
-    await sees("dan@example.com", update);
+    // Who by name, as the plane's identity record has it, the subject beside it on hover.
+    await sees("Dan", update);
+    expect(says("dan@example.com", update)).toBe(false);
+    expect(update.querySelector("td[title='dan@example.com']")?.textContent).toBe("Dan");
     await sees("idle_timeout_seconds 1800 → 1200", update);
+  });
+
+  it("shows an actor the plane has no name for by subject", async () => {
+    fake.admin.audit.push({ actor: "svc:core/nightly", action: "trigger.run", subject_kind: "trigger", subject_id: "nightly", detail: {}, occurred_at: "2026-10-12T08:00:00Z" });
+    await signedInAs(fake, PEOPLE.alice);
+    unmount = render(<App />).unmount;
+    await waitFor(() => rows().length === 8, "the trail");
+    const run = rows().find((r) => says("trigger.run", r))!;
+    expect(run.querySelector("td.mono")?.textContent).toBe("svc:core/nightly");
   });
 
   it("narrows by actor, kind and subject at the plane, and searches what came back", async () => {

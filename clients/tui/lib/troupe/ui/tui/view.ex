@@ -883,7 +883,7 @@ defmodule Troupe.UI.TUI.View do
        field("origin", origin_label(entry.origin)),
        field("workspace", entry.workspace || "on the worker"),
        field("last event", "#{age(entry.updated_at, state.now)} · #{stamp(entry.updated_at)}"),
-       field("owner", entry.owner || "you"),
+       field("owner", Map.get(entry, :owner_name) || entry.owner || "you"),
        field("profile", entry.profile || "—"),
        field("branches", "#{length(branches)}")
      ] ++ private_block(entry) ++ branch_block(branches, width))

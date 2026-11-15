@@ -64,7 +64,7 @@ defmodule Troupe.Plane.Admin do
   alias Troupe.Plane.Gitops.TriggerCopies
   alias Troupe.Plane.Gitops.Triggers, as: GitopsTriggers
   alias Troupe.Plane.Identity.ServicePrincipal
-  alias Troupe.Plane.{KMSCheck, OIDC, Principals, Provision, Reach, Sessions, Settings, Triggers}
+  alias Troupe.Plane.{KMSCheck, Names, OIDC, Principals, Provision, Reach, Sessions, Settings, Triggers}
   alias Troupe.Plane.SCIM.Connector
   alias Troupe.Plane.Settings.Ladder
   alias Troupe.Plane.Triggers.{Notify, Revision, Trigger}
@@ -2004,7 +2004,10 @@ defmodule Troupe.Plane.Admin do
       # Whether each running pod session's last turn read the memory in force for it now.
       standing = Memory.standing(sessions)
 
-      {:ok, Enum.map(sessions, &Map.put(session_summary(&1), :memory, standing[&1.id]))}
+      {:ok,
+       sessions
+       |> Enum.map(&Map.put(session_summary(&1), :memory, standing[&1.id]))
+       |> Names.decorate(owner: :owner_name)}
     end
   end
 
@@ -4902,7 +4905,7 @@ defmodule Troupe.Plane.Admin do
           do: Keyword.delete(opts, :teams),
           else: Keyword.put(opts, :teams, visible_teams(actor))
 
-      {:ok, opts |> Audit.list() |> Enum.map(&audit_summary/1)}
+      {:ok, opts |> Audit.list() |> Enum.map(&audit_summary/1) |> Names.decorate(actor: :actor_name)}
     end
   end
 

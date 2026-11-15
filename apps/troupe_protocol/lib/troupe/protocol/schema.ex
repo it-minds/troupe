@@ -46,6 +46,8 @@ defmodule Troupe.Protocol.Schema do
         # the agent, skill and MCP server names the grant resolved to, or absent for no
         # restriction, which is what a local session and an unnarrowed grant both mean.
         "owner" => optional(:string),
+        # The owner's name, where whoever wrote the event knew one: a laptop's linked person.
+        "owner_name" => optional(:string),
         "entitlements" => optional(:object),
         # The worker profile's rule on which agents exist on it (`allow`, `deny`), which
         # the pod applied to every definition, subagents included; absent where the
@@ -631,7 +633,12 @@ defmodule Troupe.Protocol.Schema do
         "audience" => optional(:string)
       },
       "share_revoked" => %{"id" => required(:string), "reason" => optional(:string)},
-      "acl_granted" => %{"subject" => required(:string), "role" => required(:string)},
+      # Whom, by subject and by name where the writer knew one.
+      "acl_granted" => %{
+        "subject" => required(:string),
+        "role" => required(:string),
+        "display_name" => optional(:string)
+      },
       # A person invited into this session by name, or the invitation taken back (#765):
       # whom, at which role (`observe` or `control`), and by whom. Durable, for the reason
       # a share is: who was let in to read what was said is part of what happened.
@@ -648,7 +655,11 @@ defmodule Troupe.Protocol.Schema do
         "display_name" => optional(:string),
         "by_name" => optional(:string)
       },
-      "acl_revoked" => %{"subject" => required(:string), "role" => required(:string)},
+      "acl_revoked" => %{
+        "subject" => required(:string),
+        "role" => required(:string),
+        "display_name" => optional(:string)
+      },
       # Client-hosted tools. Durable, all three, because a tool that ran on somebody's
       # laptop is part of what happened in this session and a replay that did not say so
       # would be a transcript with a hole in it.
