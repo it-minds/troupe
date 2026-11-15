@@ -24,6 +24,9 @@
     "reason": {
       "type": "string"
     },
+    "scope": {
+      "type": "string"
+    },
     "session_id": {
       "type": "string"
     },

@@ -22,6 +22,7 @@ defmodule Troupe.Config.Settings do
 
   alias Troupe.Config
   alias Troupe.Config.{Explain, Issue, Layers, Migrate, Permissions, Schema, Trust}
+  alias Troupe.Protocol.PermissionRule
 
   @scopes ~w(user project local)
   # The writer's own, which no client sets and no change is about.
@@ -215,6 +216,80 @@ defmodule Troupe.Config.Settings do
          {:ok, before} <- existing(file),
          :ok <- write(file, before, before |> Migrate.drop_spellings(path) |> put(path, value)) do
       {:ok, %{"key" => Enum.join(path, "."), "scope" => scope, "path" => shown(file)}}
+    end
+  end
+
+  @doc """
+  A person's lasting `allow` for one tool, from an approval's "Always allow": the rule for
+  the tool as a whole (`shell`, `write_file`, `mcp(github.create_issue)` for an MCP tool
+  however it is reached) added to `permissions.allow` in the file of `scope`: `everywhere`
+  is the user's `config.yaml`, `workspace` the workspace's `.troupe/config.local.yaml`,
+  which is the person's own and not the repository's. The same rule a person would write
+  by hand, read by every session that starts after it, and shown with its file where the
+  rules are listed. Answers `%{"rule", "scope", "path"}`; a rule the file already has is
+  answered as written, and nothing is written again.
+
+  Refused, with the reason: a scope that is neither; `workspace` in a workspace that is not
+  trusted, where a project's `allow` is held; a tool no rule can name; and a file that does
+  not parse.
+  """
+  @spec allow_rule(String.t(), String.t(), Path.t() | nil) ::
+          {:ok, %{String.t() => String.t()}} | {:error, String.t()}
+  def allow_rule(tool, scope, workspace) do
+    with {:ok, file_scope} <- rule_scope(scope, workspace),
+         {:ok, rule} <- rule_text(tool),
+         {:ok, file} <- path_for(file_scope, workspace),
+         {:ok, before} <- existing(file),
+         {:ok, map} <- with_allow(before, rule),
+         :ok <- valid(["permissions"], map["permissions"], file_scope),
+         :ok <- write(file, before, map) do
+      {:ok, %{"rule" => rule, "scope" => scope, "path" => shown(file)}}
+    end
+  end
+
+  defp rule_scope("everywhere", _workspace), do: {:ok, "user"}
+
+  defp rule_scope("workspace", workspace) when is_binary(workspace) and workspace != "" do
+    if Config.trusted?(workspace),
+      do: {:ok, "local"},
+      else:
+        {:error,
+         "#{shown(workspace)} is not a trusted workspace, so an allow written for it would be held; " <>
+           "`#{Trust.command(workspace)}` trusts it, or allow it everywhere"}
+  end
+
+  defp rule_scope("workspace", _workspace), do: {:error, "the session has no workspace to keep a rule in"}
+
+  defp rule_scope(other, _workspace),
+    do: {:error, "scope must be workspace or everywhere, not #{inspect(other)}"}
+
+  # A tool of an MCP server is one rule whoever hosts the server, the workspace, the pod or
+  # the person's client: `mcp(server.tool)`.
+  defp rule_text("mcp." <> rest), do: checked_rule("mcp(#{rest})")
+  defp rule_text("client." <> rest), do: checked_rule("mcp(#{rest})")
+  defp rule_text(tool) when is_binary(tool) and tool != "", do: checked_rule(tool)
+  defp rule_text(_tool), do: {:error, "the approval names no tool to keep a rule for"}
+
+  defp checked_rule(text) do
+    case PermissionRule.parse(text) do
+      {:ok, _rule} -> {:ok, text}
+      {:error, sentence} -> {:error, sentence}
+    end
+  end
+
+  defp with_allow(map, rule) do
+    permissions = Map.get(map, "permissions") || %{}
+
+    case permissions do
+      %{} ->
+        allow = List.wrap(permissions["allow"])
+
+        if rule in allow,
+          do: {:ok, map},
+          else: {:ok, Map.put(map, "permissions", Map.put(permissions, "allow", allow ++ [rule]))}
+
+      _other ->
+        {:error, "permissions in that file is not a block of deny, ask and allow lists; fix it first"}
     end
   end
 
