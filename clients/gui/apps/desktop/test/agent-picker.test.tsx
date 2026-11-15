@@ -109,7 +109,7 @@ describe("the agent picker", () => {
     const row = await waitFor(() => [...document.querySelectorAll<HTMLButtonElement>("button.row")].find((b) => b.textContent?.includes(REPO)), "the session in the list");
     row.click();
     const head = await waitFor(() => document.querySelector<HTMLElement>(".session-head"), "the session");
-    (await waitFor(() => head.querySelector<HTMLButtonElement>('button[aria-label="Agent"]'), "the agent switch")).click();
+    (await waitFor(() => document.querySelector<HTMLButtonElement>('.composer button[aria-label="Agent"]'), "the agent switch")).click();
     // It opens in a dialog over the screen, so the head keeps its height.
     const box = await waitFor(() => document.querySelector<HTMLElement>('[role="dialog"][aria-label="The agent this session runs"]'), "the agent's dialog");
     expect(head.contains(box)).toBe(false);
@@ -141,6 +141,6 @@ describe("the agent picker", () => {
     (await enabled(picker, "Start a session on plan")).click();
     await waitFor(() => daemon.calls.some((c) => c.method === "session.create" && c.params["profile"] === "plan"), "a session started on plan");
     expect(daemon.calls.find((c) => c.method === "session.create" && c.params["profile"] === "plan")?.params).toMatchObject({ workspace: REPO });
-    await waitFor(() => document.querySelector(".session-head button[aria-label=\"Agent\"]")?.textContent === "Agent plan", "the new session open, on plan");
+    await waitFor(() => document.querySelector('.composer button[aria-label="Agent"] .mono')?.textContent === "plan", "the new session open, on plan");
   });
 });

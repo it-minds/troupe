@@ -115,7 +115,7 @@ async function settled(): Promise<void> {
 
 function palette(command: string): Promise<void> {
   return (async () => {
-    button("/ Commands")!.click();
+    document.querySelector<HTMLButtonElement>('.composer button[aria-label="Commands"]')!.click();
     const field = await waitFor(() => document.querySelector<HTMLInputElement>('.palette input[aria-label="Command"]'), "the palette");
     type(field, command);
     await waitFor(() => document.querySelector('.palette .row[aria-selected="true"] .name')?.textContent === `/${command.split(" ")[0]}`, `the /${command} row`);
@@ -217,7 +217,7 @@ describe("the levels", () => {
     expect(stream().textContent).not.toContain("Looking at the files first.");
 
     // /detail alone says the level, and one it does not know says how to use it.
-    button("/ Commands")!.click();
+    document.querySelector<HTMLButtonElement>('.composer button[aria-label="Commands"]')!.click();
     const field = await waitFor(() => document.querySelector<HTMLInputElement>('.palette input[aria-label="Command"]'), "the palette");
     type(field, "detail");
     await waitFor(() => document.querySelector('.palette .row[aria-selected="true"]:not(.unavailable) .name')?.textContent === "/detail", "the /detail row, runnable");

@@ -1,0 +1,532 @@
+<!DOCTYPE html>
+<!--
+  TROUPE · SESSION CHAT, redesign of the central session view
+
+  WHAT CHANGED AND WHY
+  - Reads like an AI chat. The transcript is one centred column of about
+    760px. The user's messages are right-aligned blocks. The troupe's replies
+    sit on the page, not in boxes, with the mask as avatar. Long answers
+    become readable instead of being a full-width wall of text.
+  - Tool use is one quiet line above the reply ("2 steps · search_web · 4s")
+    that expands to the steps. Token and cost numbers moved into a hover row
+    under each reply together with Copy and Retry. They're still there for
+    people who care, and out of the way for everyone else.
+  - Approvals are cards in the transcript with Allow and Deny. That's where
+    people look, rather than a separate panel.
+  - The header shrinks to one line: back, title, the session's setup as
+    chips (team · profile · agent), status and Invite. "Set a goal" is a
+    /goal command now, so it doesn't take up a header row.
+
+  THE COMPOSER
+  - One box holds the attachments, the text and a toolbar:
+    [+] opens Upload files / Add from artifacts / Add a folder (local only).
+    [/] opens commands, same as typing / at the start of the message.
+    The agent chip (build ▾) switches agent mid-session. The profile is
+    shown, not editable: a session keeps the profile it started with.
+    On the right: a ring showing how full the context is, and Send. Send turns
+    into Stop while the troupe works.
+  - Enter sends and Shift+Enter starts a new line. The hint lives in the
+    placeholder, not as a permanent label.
+  - Drag files anywhere onto the window to attach them.
+  - The composer grows with the text up to 40% of the window, then scrolls.
+
+  KEEP THE THEME, LOSE THE NOISE
+  Afterglow tokens, square corners, hard deep-blue shadows and VT323
+  eyebrows stay. Pink is kept for the mask's eye and the focus line on the
+  composer, and cyan for Send and live status. The yellow-green focus ring
+  from the old screen is gone.
+
+  OPEN DECISIONS
+  - Switching agent mid-session: make sure the backend allows it. If not,
+    the chip becomes a label like the profile.
+  - Folder attachments only make sense for local sessions. On the platform
+    the menu item is shown but disabled, with the reason in the label.
+  - The context ring needs the model's window size from the backend.
+
+  DEMO WIRING
+  Messages, steps and replies are mock data. Sending gets a canned reply
+  streamed word by word. Rendering patches the DOM in place (morph) so focus
+  and the textarea survive re-renders. The morph matches nodes by position,
+  so optional parts sit in always-present wrapper divs. Any framework does
+  this for you.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Skill load check · Troupe</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Figtree:wght@400;600;800;900&family=VT323&display=swap" rel="stylesheet">
+<style>
+:root{
+  --font-ui:'Figtree',-apple-system,BlinkMacSystemFont,sans-serif;
+  --font-mono:'DM Mono',ui-monospace,Menlo,monospace;
+  --font-screen:'VT323',monospace;
+  --void:#0b0b12; --pit:#12121c; --riser:#1c1c2b; --deepblue:#000353;
+  --cream:#F4ECDB; --cream-dim:#E8DFD0; --grey:#a3a3b8; --grey-dim:#8a8aa0;
+  --pink:#FF0080; --pink-text:#ff5aa8;
+  --cyan:oklch(0.72 0.19 195); --cyan-text:oklch(0.80 0.15 190); --cyan-line:oklch(0.55 0.12 195);
+  --amber-text:oklch(0.84 0.14 75); --amber-line:oklch(0.60 0.11 75);
+  --violet:#9C8BFF; --violet-line:#4A3F86;
+  --rule:rgba(232,223,208,.18); --rule-strong:rgba(232,223,208,.42);
+  --t-mono:500 12px/1.3 var(--font-mono);
+  --t-screen:400 19px/1.1 var(--font-screen);
+  --col:760px;
+  color-scheme:dark;
+}
+html,body{margin:0;padding:0;height:100%;background:var(--void);}
+body{font-family:var(--font-ui);color:var(--cream-dim);-webkit-font-smoothing:antialiased;}
+*{box-sizing:border-box;}
+button,input,textarea{font-family:inherit;}
+button{border:0;background:none;color:inherit;cursor:pointer;padding:0;}
+button:disabled{cursor:not-allowed;}
+:focus-visible{outline:2px solid var(--cyan);outline-offset:2px;}
+ul,ol{list-style:none;margin:0;padding:0;}
+code{font-family:var(--font-mono);font-size:.88em;color:var(--cream);background:var(--riser);padding:1px 5px;}
+.sr-only{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;}
+.mono{font:var(--t-mono);}
+
+#app{height:100%;}
+.shell{display:flex;flex-direction:column;height:100%;}
+
+/* header */
+.top{flex:0 0 auto;display:flex;align-items:center;gap:14px;padding:10px 20px;border-bottom:1px solid var(--rule);min-width:0;}
+.back{white-space:nowrap;font:var(--t-mono);color:var(--grey);min-height:32px;padding:0 6px;letter-spacing:.06em;}
+.back:hover{color:var(--cream);}
+.title{font-size:17px;font-weight:900;letter-spacing:-.01em;color:var(--cream);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;}
+.crumbs{display:flex;gap:6px;flex-wrap:wrap;}
+.tag{font:var(--t-mono);padding:3px 7px;border:1px solid var(--rule-strong);color:var(--grey);white-space:nowrap;}
+.tag.cyan{border-color:var(--cyan-line);color:var(--cyan-text);}
+.spacer{flex:1 1 auto;}
+.status{display:inline-flex;align-items:center;gap:7px;font:var(--t-mono);color:var(--grey);white-space:nowrap;}
+.status .d{width:8px;height:8px;border-radius:50%;background:var(--grey-dim);}
+.status.busy{color:var(--cyan-text);}
+.status.busy .d{background:var(--cyan);animation:pulse 1s ease-in-out infinite;}
+.status.wait{color:var(--amber-text);}
+.status.wait .d{background:var(--amber-text);}
+.hbtn{min-height:34px;padding:0 12px;border:1px solid var(--rule-strong);font-size:13.5px;font-weight:700;color:var(--cream-dim);}
+.hbtn:hover{border-color:var(--cream-dim);}
+@media (max-width:760px){.crumbs,.status span.lbl{display:none;}.top{padding:8px 12px;gap:8px;}}
+
+/* transcript */
+.scroll{flex:1 1 auto;overflow-y:auto;scroll-behavior:smooth;}
+.col{max-width:var(--col);margin:0 auto;padding:28px 20px 40px;}
+.msg{margin-bottom:30px;}
+.me{display:flex;justify-content:flex-end;}
+.me .bubble{max-width:85%;background:var(--riser);border:1px solid var(--rule);padding:12px 16px;font-size:15.5px;line-height:1.55;color:var(--cream);white-space:pre-wrap;}
+.me .files{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end;margin-bottom:6px;}
+.ai{display:grid;grid-template-columns:32px minmax(0,1fr);gap:12px;}
+.avatar{width:32px;height:32px;display:grid;place-items:center;border:1px solid var(--rule);background:var(--pit);}
+.who{font-size:14px;font-weight:800;color:var(--cream);line-height:32px;}
+.steps{display:inline-flex;align-items:center;gap:8px;margin:2px 0 10px;font:var(--t-mono);color:var(--grey);min-height:28px;}
+.steps:hover{color:var(--cream-dim);}
+.steplist{margin:-4px 0 12px;padding:8px 12px;border-left:2px solid var(--violet-line);font:var(--t-mono);color:var(--grey);display:flex;flex-direction:column;gap:6px;}
+.body{font-size:15.5px;line-height:1.7;color:var(--cream-dim);}
+.body p{margin:0 0 14px;}
+.body p:last-child{margin-bottom:0;}
+.body em{color:var(--cream);}
+.foot{display:flex;align-items:center;gap:4px;margin-top:8px;opacity:0;transition:opacity .12s ease;}
+.ai:hover .foot,.ai:focus-within .foot{opacity:1;}
+.fbtn{font:var(--t-mono);color:var(--grey);min-height:28px;padding:0 8px;}
+.fbtn:hover{color:var(--cream);background:var(--riser);}
+.meta{font:var(--t-mono);color:var(--grey-dim);margin-left:8px;}
+.caret{display:inline-block;width:8px;height:16px;background:var(--cyan);vertical-align:-2px;animation:pulse .9s ease-in-out infinite;margin-left:2px;}
+.thinking{font:var(--t-mono);color:var(--grey);display:flex;align-items:center;gap:8px;min-height:32px;}
+
+.approval{border:1px solid var(--amber-line);background:var(--pit);padding:14px 16px;box-shadow:4px 4px 0 var(--deepblue);}
+.approval h3{margin:0 0 4px;font-size:15px;font-weight:800;color:var(--amber-text);}
+.approval pre{margin:10px 0 12px;padding:10px 12px;background:var(--void);border:1px solid var(--rule);font-family:var(--font-mono);font-size:12.5px;line-height:1.5;color:var(--cream-dim);white-space:pre-wrap;}
+.approval .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center;}
+.b{min-height:38px;padding:0 16px;font-size:14px;font-weight:800;}
+.b.ok{background:var(--cyan);color:var(--void);}
+.b.no{border:1px solid var(--rule-strong);color:var(--cream-dim);font-weight:600;}
+.b:hover{filter:brightness(1.12);}
+
+.divider{display:flex;align-items:center;gap:12px;margin:8px 0 28px;font:var(--t-screen);color:var(--cyan-text);letter-spacing:.14em;}
+.divider::before,.divider::after{content:"";flex:1 1 auto;height:1px;background:var(--rule);}
+
+/* composer */
+.dock{flex:0 0 auto;padding:0 20px 18px;background:linear-gradient(to bottom,transparent,var(--void) 30%);}
+.composer{max-width:var(--col);margin:0 auto;border:1px solid var(--rule-strong);background:var(--pit);box-shadow:5px 5px 0 var(--deepblue);position:relative;}
+.composer:focus-within{border-color:var(--cream-dim);box-shadow:5px 5px 0 var(--deepblue),inset 0 2px 0 var(--pink);}
+.att{display:flex;gap:6px;flex-wrap:wrap;padding:10px 12px 0;}
+.file{display:inline-flex;align-items:center;gap:8px;max-width:240px;padding:5px 6px 5px 10px;border:1px solid var(--rule-strong);background:var(--void);font-size:13px;color:var(--cream-dim);}
+.file .n{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.file .s{font:var(--t-mono);color:var(--grey-dim);}
+.file button{width:22px;height:22px;color:var(--grey);}
+.file button:hover{color:var(--cream);background:var(--riser);}
+textarea.input{display:block;width:100%;min-height:52px;max-height:40vh;padding:14px 16px 6px;background:transparent;border:0;outline:0;resize:none;color:var(--cream);font-size:15.5px;line-height:1.55;}
+textarea.input::placeholder{color:var(--grey-dim);}
+.bar{display:flex;align-items:center;gap:4px;padding:6px 8px 8px;}
+.ib{width:36px;height:36px;display:grid;place-items:center;color:var(--grey);font-size:18px;}
+.ib:hover,.ib[aria-expanded="true"]{color:var(--cream);background:var(--riser);}
+.chip{display:inline-flex;align-items:center;gap:6px;min-height:30px;padding:0 9px;border:1px solid var(--rule);font:var(--t-mono);color:var(--grey);white-space:nowrap;}
+button.chip:hover,button.chip[aria-expanded="true"]{border-color:var(--rule-strong);color:var(--cream);}
+.chip .dot{width:7px;height:7px;border-radius:50%;}
+.ring{width:30px;height:30px;display:grid;place-items:center;}
+.send{width:38px;height:38px;display:grid;place-items:center;background:var(--cyan);color:var(--void);box-shadow:3px 3px 0 var(--deepblue);font-size:18px;font-weight:900;}
+.send:disabled{background:var(--riser);color:var(--grey-dim);box-shadow:none;}
+.send.stop{background:var(--cream-dim);}
+.send:hover:not(:disabled){filter:brightness(1.12);}
+@media (max-width:560px){.hide-sm{display:none !important;}.dock{padding:0 10px 10px;}.col{padding:20px 14px 32px;}}
+
+/* popovers */
+.pop{position:absolute;bottom:calc(100% + 8px);left:8px;min-width:280px;max-width:calc(100% - 16px);background:var(--pit);border:1px solid var(--rule-strong);box-shadow:5px 5px 0 var(--deepblue);padding:6px;z-index:5;}
+.pop h4{margin:4px 8px 6px;font:var(--t-screen);color:var(--cyan-text);letter-spacing:.12em;font-weight:400;}
+.item{display:flex;align-items:flex-start;gap:12px;width:100%;text-align:left;padding:9px 10px;}
+.item:hover:not(:disabled),.item[aria-selected="true"]{background:var(--riser);}
+.item:disabled{opacity:.5;}
+.item .ico{width:20px;flex:0 0 auto;text-align:center;color:var(--grey);font-family:var(--font-mono);}
+.item .t{display:block;font-size:14px;font-weight:700;color:var(--cream);}
+.item .d{display:block;font-size:12.5px;color:var(--grey);margin-top:1px;}
+.item .k{margin-left:auto;font:var(--t-mono);color:var(--grey-dim);align-self:center;}
+
+.drop{position:fixed;inset:0;display:grid;place-items:center;background:rgba(11,11,18,.82);z-index:20;pointer-events:none;}
+.drop div{padding:36px 48px;border:2px dashed var(--cyan);font-size:20px;font-weight:800;color:var(--cream);background:var(--pit);}
+
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
+@media (prefers-reduced-motion:reduce){*{transition:none !important;animation:none !important;scroll-behavior:auto !important;}}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<input type="file" id="picker" multiple class="sr-only" tabindex="-1" aria-hidden="true">
+
+<script>
+/* ---------- Brand ---------- */
+const MASK = (s) => `<svg width="${s}" height="${s}" viewBox="0 0 48 48" aria-hidden="true" style="display:block">
+  <path d="M9 15 Q9 7 24 7 Q39 7 39 15 L39 25 Q39 35 24 43 Q9 35 9 25 Z" fill="none" stroke="var(--cream)" stroke-width="3" stroke-linejoin="round"/>
+  <path d="M15.5 21 Q19 18.4 22.5 21 Q19 23.6 15.5 21 Z" fill="var(--cream)"/>
+  <path d="M25.5 21 Q29 18.4 32.5 21 Q29 23.6 25.5 21 Z" fill="var(--pink)"/></svg>`;
+const REHEARSAL = ['In rehearsal…', 'Checking the script…', 'Running lines…', 'Waiting for the cue…'];
+
+/* ---------- Mock session ---------- */
+const AGENTS = [
+  { id:'build', d:'Writes and changes things until the task is done.' },
+  { id:'plan', d:'Reads and thinks, then hands you a plan. Changes nothing.' },
+  { id:'orchestrate', d:'Splits the work across several agents.' }
+];
+const COMMANDS = [
+  { c:'/goal', d:'Set what this session is for' },
+  { c:'/plan', d:'Switch to the plan agent' },
+  { c:'/compact', d:'Summarise so far and free up context' },
+  { c:'/publish', d:'Publish the last answer as an artifact' },
+  { c:'/invite', d:'Let someone else open this session' },
+  { c:'/stop', d:'Stop what the troupe is doing' }
+];
+
+let uid = 0;
+const id = () => 'm' + (++uid);
+let state = {
+  status:'idle', agent:'build', menu:null, cmdIndex:0, drag:false,
+  text:'', files:[], ctx:23,
+  messages:[
+    { id:id(), role:'me', text:'Can you search the web now? Check what the search server lets you do.' },
+    { id:id(), role:'ai', steps:['mcp.search.search_web("troupe search server limits")', 'read server manifest'], time:'3s',
+      meta:'2 calls · 18.2k in · 412 out',
+      body:[
+        'Yes. Search works through the <code>search</code> server, and there are two things to know about it.',
+        'This session calls it as the system client <code>sys-troupe-dev</code>, on behalf of the organisation rather than you, and it’s capped at 30 calls a minute. Every query and URL goes into an audit log with the caller, so keep confidential data out of searches.',
+        '<code>web_fetch</code> and <code>fetch_page</code> only reach public addresses. The <code>english-prose</code> skill isn’t on the public web, so searching won’t find it. A shared volume path would.'
+      ] },
+    { id:id(), role:'me', text:'Use it to research something random and fun' },
+    { id:id(), role:'ai', steps:['mcp.search.search_web("origin of the danish pastry name")', 'mcp.search.fetch_page(en.wikipedia.org/wiki/Danish_pastry)'], time:'4s',
+      meta:'2 calls · 21.6k in · 598 out',
+      body:[
+        'The “Danish” is a pastry two countries have named after each other, and the story starts with a strike.',
+        'In Denmark you don’t order a Danish, you order <em>wienerbrød</em>, “Vienna bread”. The usual telling: around 1850 Danish bakers went on strike, the masters hired bakers from abroad, and the Austrians brought laminated <em>Plunderteig</em>. When the strike ended, the Danes kept the method and added more egg, more butter, cardamom and marzipan.',
+        'Austria calls it right back: <em>Kopenhagener Plunder</em>. Danes name it after Vienna, Austrians name it after Copenhagen, and neither claims it for their own city.'
+      ] },
+    { id:id(), role:'approval', tool:'severa.log_hours', who:'build',
+      why:'Log the 25 minutes spent on this research to your internal project?',
+      args:'project: "Intern tid · Troupe"\nphase:   "Udvikling"\nhours:   0.42' }
+  ],
+  openSteps:{}
+};
+let streamTimer = null;
+function setState(p) { state = { ...state, ...p }; render(); }
+
+/* ---------- Actions ---------- */
+function filesFrom(list) {
+  return Array.from(list).map((f) => ({ id:id(), name:f.name, size:fmtSize(f.size) }));
+}
+function fmtSize(b) { return b > 1e6 ? (b / 1e6).toFixed(1) + ' MB' : Math.max(1, Math.round(b / 1e3)) + ' KB'; }
+
+function send() {
+  const text = state.text.trim();
+  if (!text && !state.files.length) return;
+  if (state.status === 'busy') return;
+  if (text === '/plan') { setState({ agent:'plan', text:'', menu:null }); resetInput(); return; }
+  const me = { id:id(), role:'me', text, files:state.files };
+  const ai = { id:id(), role:'ai', live:true, steps:[], body:[], quip: REHEARSAL[Math.floor(Math.random() * REHEARSAL.length)] };
+  setState({ messages: state.messages.concat([me, ai]), text:'', files:[], menu:null, status:'busy' });
+  resetInput();
+  scrollDown();
+  fakeReply(ai.id, text);
+}
+function fakeReply(aid, text) {
+  const words = ('Here’s what I’d do with “' + text.slice(0, 60) + '”. I’d start by looking at what’s already in the session, then check the two servers you have connected, and come back with a short plan before changing anything. Say go and I’ll start.').split(' ');
+  let i = 0;
+  const upd = (fn) => { state.messages = state.messages.map((m) => m.id === aid ? fn(m) : m); render(); scrollDown(true); };
+  streamTimer = setTimeout(() => {
+    upd((m) => ({ ...m, steps:['read session history', 'mcp.search.search_web("' + text.slice(0, 30) + '")'], time:'2s' }));
+    const tick = () => {
+      i += 2;
+      upd((m) => ({ ...m, body:[words.slice(0, i).join(' ')] }));
+      if (i < words.length) streamTimer = setTimeout(tick, 55);
+      else finish(aid);
+    };
+    streamTimer = setTimeout(tick, 400);
+  }, 900);
+}
+function finish(aid) {
+  state.messages = state.messages.map((m) => m.id === aid ? { ...m, live:false, meta:'2 calls · 24.1k in · 87 out' } : m);
+  setState({ status: state.messages.some((m) => m.role === 'approval' && !m.done) ? 'wait' : 'idle', ctx: Math.min(95, state.ctx + 4) });
+}
+function stop() {
+  clearTimeout(streamTimer);
+  const live = state.messages.find((m) => m.live);
+  if (live) state.messages = state.messages.map((m) => m.live ? { ...m, live:false, stopped:true, body: m.body.length ? m.body : [''] } : m);
+  setState({ status:'idle' });
+}
+function answer(mid, ok) {
+  state.messages = state.messages.map((m) => m.id === mid ? { ...m, done: ok ? 'allowed' : 'denied' } : m);
+  setState({ status: state.status === 'wait' ? 'idle' : state.status });
+}
+function resetInput() { const t = document.getElementById('input'); if (t) { t.value = ''; autosize(t); t.focus(); } }
+function autosize(t) { t.style.height = 'auto'; t.style.height = Math.min(t.scrollHeight, window.innerHeight * 0.4) + 'px'; }
+function scrollDown(soft) {
+  requestAnimationFrame(() => {
+    const s = document.getElementById('scroll'); if (!s) return;
+    if (!soft || s.scrollHeight - s.scrollTop - s.clientHeight < 160) s.scrollTop = s.scrollHeight;
+  });
+}
+
+/* ---------- Views ---------- */
+const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
+let handlers = [];
+const on = (fn) => { handlers.push(fn); return handlers.length - 1; };
+
+function header() {
+  const st = { idle:['', 'Idle'], busy:['busy', 'Working'], wait:['wait', 'Needs you'] }[state.status];
+  return `
+  <header class="top">
+    <button type="button" class="back" aria-label="Back to sessions">←<span class="hide-sm"> SESSIONS</span></button>
+    <div style="display:flex;align-items:center;gap:10px;min-width:0">${MASK(22)}<span class="title">Skill load check</span></div>
+    <div class="crumbs">
+      <span class="tag">TEAM</span><span class="tag cyan">dev</span><span class="tag">${esc(state.agent)}</span>
+    </div>
+    <span class="spacer"></span>
+    <span class="status ${st[0]}" role="status"><span class="d" aria-hidden="true"></span><span class="lbl">${st[1]}</span></span>
+    <button type="button" class="hbtn">Invite</button>
+    <button type="button" class="ib" aria-label="More session actions">⋯</button>
+  </header>`;
+}
+
+function fileChip(f, removable) {
+  return `<span class="file"><span aria-hidden="true" class="mono" style="color:var(--violet)">▤</span><span class="n">${esc(f.name)}</span><span class="s">${esc(f.size)}</span>${removable ? `<button type="button" aria-label="Remove ${esc(f.name)}" data-click="${on(() => setState({ files: state.files.filter((x) => x.id !== f.id) }))}">✕</button>` : ''}</span>`;
+}
+
+function message(m) {
+  if (m.role === 'me') return `
+    <div class="msg me"><div style="max-width:85%;display:flex;flex-direction:column;align-items:flex-end">
+      ${m.files && m.files.length ? `<div class="files">${m.files.map((f) => fileChip(f, false)).join('')}</div>` : ''}
+      ${m.text ? `<div class="bubble" style="max-width:100%">${esc(m.text)}</div>` : ''}
+    </div></div>`;
+
+  if (m.role === 'approval') {
+    const done = m.done;
+    return `
+    <div class="msg ai">
+      <div class="avatar">${MASK(20)}</div>
+      <div>
+        <div class="approval" role="group" aria-label="Approval needed">
+          <h3>${done ? (done === 'allowed' ? '✓ Allowed' : '✕ Denied') : 'Wants to change something'} <span class="mono" style="color:var(--grey);font-weight:500">· ${esc(m.tool)}</span></h3>
+          <div style="font-size:14.5px;line-height:1.5;color:var(--cream-dim)">${esc(m.why)}</div>
+          <pre>${esc(m.args)}</pre>
+          ${done ? `<div class="mono" style="color:var(--grey)">You ${done} this. Anyone on the team could have answered.</div>` : `
+          <div class="row">
+            <button type="button" class="b ok" data-click="${on(() => answer(m.id, true))}">Allow once</button>
+            <button type="button" class="b no" data-click="${on(() => answer(m.id, true))}">Always allow log_hours</button>
+            <button type="button" class="b no" style="margin-left:auto;color:var(--pink-text);border-color:transparent" data-click="${on(() => answer(m.id, false))}">Deny</button>
+          </div>`}
+        </div>
+      </div>
+    </div>`;
+  }
+
+  const open = !!state.openSteps[m.id];
+  const steps = m.steps && m.steps.length ? `
+    <button type="button" class="steps" aria-expanded="${open}" data-click="${on(() => setState({ openSteps:{ ...state.openSteps, [m.id]: !open } }))}">
+      <span aria-hidden="true">${open ? '▾' : '▸'}</span>${m.steps.length} steps · ${esc(m.steps[0].split('(')[0])}${m.time ? ' · ' + esc(m.time) : ''}
+    </button>
+    ${open ? `<ol class="steplist">${m.steps.map((s, i) => `<li><span style="color:var(--violet)">${i + 1}</span> ${esc(s)}</li>`).join('')}</ol>` : ''}` : '';
+  const waiting = m.live && !m.body.length;
+  return `
+    <div class="msg ai">
+      <div class="avatar">${MASK(20)}</div>
+      <div style="min-width:0">
+        <div class="who">Troupe</div>
+        ${steps}
+        ${waiting ? `<div class="thinking"><span class="caret" aria-hidden="true"></span>${esc(m.quip)}</div>` : ''}
+        <div class="body">${m.body.map((p, i) => `<p>${p}${m.live && i === m.body.length - 1 ? '<span class="caret" aria-hidden="true"></span>' : ''}</p>`).join('')}</div>
+        ${m.stopped ? `<div class="mono" style="color:var(--amber-text);margin-top:6px">Stopped by you.</div>` : ''}
+        ${m.live ? '' : `
+        <div class="foot">
+          <button type="button" class="fbtn">Copy</button>
+          <button type="button" class="fbtn">Retry</button>
+          <button type="button" class="fbtn">Publish</button>
+          ${m.meta ? `<span class="meta">${esc(m.meta)}</span>` : ''}
+        </div>`}
+      </div>
+    </div>`;
+}
+
+function ring(p) {
+  const r = 11, c = 2 * Math.PI * r, col = p > 80 ? 'var(--amber-text)' : 'var(--cyan)';
+  return `<span class="ring hide-sm" title="Context ${p}% full" aria-label="Context ${p}% full" role="img">
+    <svg width="26" height="26" viewBox="0 0 26 26" aria-hidden="true"><circle cx="13" cy="13" r="${r}" fill="none" stroke="var(--riser)" stroke-width="3"/>
+    <circle cx="13" cy="13" r="${r}" fill="none" stroke="${col}" stroke-width="3" stroke-dasharray="${(c * p / 100).toFixed(1)} ${c.toFixed(1)}" transform="rotate(-90 13 13)"/></svg></span>`;
+}
+
+function popover() {
+  if (state.menu === 'plus') return `
+    <div class="pop" role="menu" aria-label="Add to message">
+      <button type="button" role="menuitem" class="item" data-click="${on(() => { setState({ menu:null }); document.getElementById('picker').click(); })}"><span class="ico">↑</span><span><span class="t">Upload files</span><span class="d">Or drop them anywhere on the window</span></span></button>
+      <button type="button" role="menuitem" class="item" data-click="${on(() => setState({ menu:null, files: state.files.concat([{ id:id(), name:'Tilbud til Kolding Kommune', size:'artifact' }]) }))}"><span class="ico">◇</span><span><span class="t">Add from artifacts</span><span class="d">Something your troupe has published</span></span></button>
+      <button type="button" role="menuitem" class="item" disabled><span class="ico">▣</span><span><span class="t">Add a folder</span><span class="d">Only for sessions on this computer</span></span></button>
+    </div>`;
+  if (state.menu === 'cmd') {
+    const q = state.text.startsWith('/') ? state.text.split(/\s/)[0] : '/';
+    const list = COMMANDS.filter((c) => c.c.startsWith(q));
+    if (!list.length) return '';
+    const sel = Math.min(state.cmdIndex, list.length - 1);
+    return `
+    <div class="pop" role="listbox" aria-label="Commands">
+      <h4>// COMMANDS</h4>
+      ${list.map((c, i) => `<button type="button" role="option" class="item" aria-selected="${i === sel}" data-click="${on(() => pickCommand(c.c))}"><span class="ico" style="color:var(--cyan-text)">/</span><span><span class="t" style="font-family:var(--font-mono);font-weight:500">${esc(c.c)}</span><span class="d">${esc(c.d)}</span></span>${i === sel ? '<span class="k">↵</span>' : ''}</button>`).join('')}
+    </div>`;
+  }
+  if (state.menu === 'agent') return `
+    <div class="pop" role="menu" aria-label="Agent" style="left:auto;right:56px">
+      <h4>// SWITCH AGENT</h4>
+      ${AGENTS.map((a) => `<button type="button" role="menuitemradio" aria-checked="${state.agent === a.id}" class="item" aria-selected="${state.agent === a.id}" data-click="${on(() => setState({ agent:a.id, menu:null }))}"><span class="ico" style="color:var(--violet)">${state.agent === a.id ? '●' : '○'}</span><span><span class="t">${a.id}</span><span class="d">${esc(a.d)}</span></span></button>`).join('')}
+    </div>`;
+  return '';
+}
+function pickCommand(c) {
+  const t = document.getElementById('input');
+  const text = c + ' ';
+  setState({ text, menu:null, cmdIndex:0 });
+  if (t) { t.value = text; t.focus(); autosize(t); }
+}
+
+function composer() {
+  const busy = state.status === 'busy';
+  const canSend = state.text.trim() || state.files.length;
+  return `
+  <div class="dock">
+    <form class="composer" data-submit="${on(send)}">
+      <div>${popover()}</div>
+      <div>${state.files.length ? `<div class="att">${state.files.map((f) => fileChip(f, true)).join('')}</div>` : ''}</div>
+      <label for="input" class="sr-only">Message to the troupe</label>
+      <textarea id="input" class="input" rows="1" placeholder="Write to the troupe. Enter sends, Shift+Enter for a new line."
+        data-input="${on(onType)}" data-keydown="${on(onKey)}">${esc(state.text)}</textarea>
+      <div class="bar">
+        <button type="button" class="ib" aria-label="Add files" aria-expanded="${state.menu === 'plus'}" data-click="${on(() => setState({ menu: state.menu === 'plus' ? null : 'plus' }))}">+</button>
+        <button type="button" class="ib" aria-label="Commands" aria-expanded="${state.menu === 'cmd'}" style="font-family:var(--font-mono);font-size:16px" data-click="${on(() => setState({ menu: state.menu === 'cmd' ? null : 'cmd', cmdIndex:0 }))}">/</button>
+        <span class="spacer"></span>
+        <span class="chip hide-sm" title="A session keeps the profile it started with"><span class="dot" style="background:var(--cyan)"></span>dev</span>
+        <button type="button" class="chip" aria-expanded="${state.menu === 'agent'}" aria-label="Agent: ${esc(state.agent)}. Change agent" data-click="${on(() => setState({ menu: state.menu === 'agent' ? null : 'agent' }))}"><span class="dot" style="background:var(--violet)"></span>${esc(state.agent)} ▾</button>
+        ${ring(state.ctx)}
+        ${busy
+          ? `<button type="button" class="send stop" aria-label="Stop" data-click="${on(stop)}">■</button>`
+          : `<button type="submit" class="send" aria-label="Send" ${canSend ? '' : 'disabled'}>↑</button>`}
+      </div>
+    </form>
+  </div>`;
+}
+
+function onType(e) {
+  const t = e.target; autosize(t);
+  const was = state.text;
+  state.text = t.value;
+  const wantCmd = /^\/\S*$/.test(t.value);
+  if (wantCmd !== (state.menu === 'cmd') || !!was.trim() !== !!t.value.trim() || wantCmd)
+    setState({ menu: wantCmd ? 'cmd' : (state.menu === 'cmd' ? null : state.menu), cmdIndex: wantCmd ? state.cmdIndex : 0 });
+}
+function onKey(e) {
+  if (state.menu === 'cmd') {
+    const q = state.text.split(/\s/)[0] || '/';
+    const list = COMMANDS.filter((c) => c.c.startsWith(q));
+    if (e.key === 'ArrowDown') { e.preventDefault(); setState({ cmdIndex: (state.cmdIndex + 1) % Math.max(1, list.length) }); return; }
+    if (e.key === 'ArrowUp') { e.preventDefault(); setState({ cmdIndex: (state.cmdIndex - 1 + list.length) % Math.max(1, list.length) }); return; }
+    if ((e.key === 'Enter' || e.key === 'Tab') && list.length) { e.preventDefault(); pickCommand(list[Math.min(state.cmdIndex, list.length - 1)].c); return; }
+  }
+  if (e.key === 'Escape' && state.menu) { setState({ menu:null }); return; }
+  if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); send(); }
+}
+
+/* ---------- Render with in-place DOM patching ---------- */
+function morph(a, b) {
+  if (a.nodeType !== b.nodeType || a.nodeName !== b.nodeName) { a.replaceWith(b); return; }
+  if (a.nodeType === 3 || a.nodeType === 8) { if (a.nodeValue !== b.nodeValue) a.nodeValue = b.nodeValue; return; }
+  for (const { name } of Array.from(a.attributes)) if (!b.hasAttribute(name) && !(name === 'style' && a.nodeName === 'TEXTAREA')) a.removeAttribute(name);
+  for (const { name, value } of Array.from(b.attributes)) if (a.getAttribute(name) !== value) a.setAttribute(name, value);
+  if (a.nodeName === 'BUTTON') a.disabled = b.hasAttribute('disabled');
+  if (a.nodeName === 'TEXTAREA') { if (a !== document.activeElement && a.value !== b.textContent) a.value = b.textContent; return; }
+  const ac = Array.from(a.childNodes), bc = Array.from(b.childNodes);
+  bc.forEach((n, i) => { if (ac[i]) morph(ac[i], n); else a.appendChild(n); });
+  for (let i = bc.length; i < ac.length; i++) ac[i].remove();
+}
+const root = document.getElementById('app');
+function render() {
+  handlers = [];
+  const next = document.createElement('div');
+  next.innerHTML = `
+    <div class="shell">
+      ${header()}
+      <main class="scroll" id="scroll" aria-label="Conversation">
+        <div class="col">
+          <div class="divider">CURTAIN UP · 18:54</div>
+          ${state.messages.map(message).join('')}
+        </div>
+      </main>
+      ${composer()}
+    </div>
+    ${state.drag ? '<div class="drop" aria-hidden="true"><div>Drop files to hand them to the troupe</div></div>' : ''}`;
+  const ac = Array.from(root.childNodes), bc = Array.from(next.childNodes);
+  bc.forEach((n, i) => { if (ac[i]) morph(ac[i], n); else root.appendChild(n); });
+  for (let i = bc.length; i < ac.length; i++) ac[i].remove();
+}
+
+/* ---------- Events ---------- */
+const fire = (attr) => (e) => {
+  const el = e.target.closest('[' + attr + ']');
+  if (!el || !root.contains(el)) return;
+  if (attr === 'data-submit') e.preventDefault();
+  const fn = handlers[+el.getAttribute(attr)];
+  if (fn) fn(e);
+};
+root.addEventListener('click', fire('data-click'));
+root.addEventListener('input', fire('data-input'));
+root.addEventListener('keydown', fire('data-keydown'));
+root.addEventListener('submit', fire('data-submit'));
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && state.menu) { setState({ menu:null }); const t = document.getElementById('input'); if (t) t.focus(); } });
+document.addEventListener('click', (e) => { if (state.menu && !e.target.closest('.composer')) setState({ menu:null }); });
+document.getElementById('picker').addEventListener('change', (e) => { setState({ files: state.files.concat(filesFrom(e.target.files)) }); e.target.value = ''; document.getElementById('input').focus(); });
+
+let dragDepth = 0;
+window.addEventListener('dragenter', (e) => { if (e.dataTransfer && Array.from(e.dataTransfer.types).includes('Files')) { dragDepth++; if (!state.drag) setState({ drag:true }); } });
+window.addEventListener('dragleave', () => { dragDepth = Math.max(0, dragDepth - 1); if (!dragDepth && state.drag) setState({ drag:false }); });
+window.addEventListener('dragover', (e) => e.preventDefault());
+window.addEventListener('drop', (e) => { e.preventDefault(); dragDepth = 0; setState({ drag:false, files: state.files.concat(filesFrom(e.dataTransfer.files)) }); });
+
+state.status = 'wait';
+render();
+scrollDown();
+document.getElementById('input').focus();
+</script>
+</body>
+</html>

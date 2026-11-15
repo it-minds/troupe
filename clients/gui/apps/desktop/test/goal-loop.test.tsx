@@ -21,9 +21,20 @@ globalThis.WebSocket = NodeWebSocket as unknown as typeof WebSocket;
 let daemon: FakeDaemon;
 let unmount: (() => void) | null = null;
 
-const head = (): HTMLElement => document.querySelector<HTMLElement>(".session-head")!;
-const goalText = (): HTMLButtonElement | null => document.querySelector<HTMLButtonElement>(".session-head .goal .text");
-const loopPill = (): string | null => [...head().querySelectorAll(".controls .pill")].map((p) => p.textContent ?? "").find((t) => t.startsWith("Loop")) ?? null;
+// The goal is one line under the session's head while there is one, with the loop beside it.
+const head = (): HTMLElement => document.querySelector<HTMLElement>(".goal-bar") ?? document.querySelector<HTMLElement>(".session-head")!;
+const goalText = (): HTMLButtonElement | null => document.querySelector<HTMLButtonElement>(".goal-bar .goal .text");
+const loopPill = (): string | null => [...document.querySelectorAll(".goal-bar .pill")].map((p) => p.textContent ?? "").find((t) => t.startsWith("Loop")) ?? null;
+
+/** Run a command from the composer's `/`, as a person types it there. */
+async function command(line: string): Promise<void> {
+  // The commands stay open on a sentence back (goal set: …), and take the next line.
+  if (!document.querySelector(".palette")) document.querySelector<HTMLButtonElement>('.composer button[aria-label="Commands"]')!.click();
+  const field = await waitFor(() => document.querySelector<HTMLInputElement>('.palette input[aria-label="Command"]'), "the commands");
+  type(field, line);
+  await waitFor(() => document.querySelector('.palette .row[aria-selected="true"] .name')?.textContent === `/${line.split(" ")[0]}`, `the /${line} row`);
+  field.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+}
 
 beforeEach(async () => {
   localStorage.clear();
@@ -55,18 +66,16 @@ async function open(workspace: string): Promise<void> {
   await waitFor(() => daemon.calls.some((c) => c.method === "session.loop.get"), "the screen attached");
 }
 
-describe("the goal in the session's head", () => {
-  it("is set and cleared from the head, clipped with the whole of it on hover and a click, and follows the events", async () => {
+describe("the goal under the session's head", () => {
+  it("is set with /goal and cleared from its line or /goal clear, clipped with the whole of it on hover and a click, and follows the events", async () => {
     const session = daemon.seed("/home/ada/release");
     await open("/home/ada/release");
 
-    // No goal: one link, and nothing pretending to be a goal.
+    // No goal: no line under the head, and nothing pretending to be a goal.
     expect(goalText()).toBeNull();
-    button("Set a goal", head())!.click();
-    const field = await waitFor(() => head().querySelector<HTMLInputElement>('input[aria-label="Goal"]'), "the goal field");
+    expect(document.querySelector(".goal-bar")).toBeNull();
     const long = "The release notes build on Windows from a clean checkout, with the changelog generated from the merged pull requests";
-    type(field, long);
-    button("Set", head())!.click();
+    await command(`goal ${long}`);
     await waitFor(() => daemon.calls.some((c) => c.method === "session.goal.set" && c.params["text"] === long), "session.goal.set");
 
     // Drawn from the event, not from what was typed: the whole goal is its title, and a
@@ -96,11 +105,18 @@ describe("the goal in the session's head", () => {
     button("Change", head())!.click();
     await waitFor(() => goalText()?.textContent === "The changelog and the notes", "the changed goal");
 
-    // Cleared from the head: back to the one link.
+    // Cleared from its line: the line goes.
     button("Clear", head())!.click();
     await waitFor(() => daemon.calls.some((c) => c.method === "session.goal.clear"), "session.goal.clear");
-    await waitFor(() => goalText() === null && button("Set a goal", head()) !== null, "the goal gone from the head");
+    await waitFor(() => goalText() === null && document.querySelector(".goal-bar") === null, "the goal gone from under the head");
     await sees("goal cleared");
+
+    // And with /goal clear.
+    await command("goal Only the notes");
+    await waitFor(() => goalText()?.textContent === "Only the notes", "the goal again");
+    await command("goal clear");
+    await waitFor(() => daemon.calls.filter((c) => c.method === "session.goal.clear").length === 2, "the second session.goal.clear");
+    await waitFor(() => document.querySelector(".goal-bar") === null, "the line gone again");
   });
 });
 

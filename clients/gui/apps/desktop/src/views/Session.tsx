@@ -1,9 +1,11 @@
-// One session: conversation, approval, composer — and the backstage beside them.
+// One session, read like a chat (docs/design/session-chat.dc.html): a one-line head, the
+// transcript in one centred column, the cards that wait on the person at its foot, and the
+// composer in one box under it. The backstage and the scratchpad are under the head's ⋯.
 //
 // The three primary things are the only ones guaranteed on screen at 380px, because
 // they are the only three a person ever *has* to do: read what happened, decide, and
-// reply. Tasks, files and who is working live in the backstage track, which stacks
-// below the conversation on a narrow screen.
+// reply. Tasks, files and who is working live in the backstage track, shown on asking,
+// which stacks below the conversation on a narrow screen.
 //
 // Nothing here is held that a reconnect could not rebuild. A message the person sends
 // renders as Queued until the server echoes it back — not inserted optimistically into
@@ -13,8 +15,10 @@
 import { Fragment, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { JSX } from "react";
 import {
+  ALLOW_ALWAYS,
   configKey,
   isBusy,
+  isRoot,
   needsYou,
   onThisComputer,
   openApprovals,
@@ -27,8 +31,10 @@ import {
   unseenSummary,
 } from "@troupe/client";
 import type {
+  Artifact,
   AttachStatus,
   AuthSession,
+  ContextFill,
   DaemonClient,
   Entry,
   FleetRow,
@@ -43,7 +49,8 @@ import { useSessionView, useStartQuestions } from "../hooks";
 import type { SessionHandle } from "../hooks";
 import { curtainLine, DEFAULT_DETAIL, isDetail, layout, waitingOn, waitingWords } from "../frames";
 import type { Detail, Drawn } from "../frames";
-import { saveFile } from "../shell";
+import { copyText } from "../clipboard";
+import { saveFile, shell } from "../shell";
 import { AgentSwitch, sessionAgents } from "./AgentSwitch";
 import { ApprovalPanel, DecisionRecord } from "./Approval";
 import type { Audiences } from "./Approval";
@@ -64,7 +71,8 @@ import { SessionServers } from "./SessionServers";
 import { onboardingNote, StartLine, StartPanel } from "./Onboard";
 import { inviteLine, RemoteLine, RemoteOfferControl } from "./Remote";
 import { InviteControl } from "./Invites";
-import { Cost, initials, Loading, personColour, Pill, Sync, When, Where } from "./bits";
+import { Cost, Dialog, initials, Loading, personColour, Pill, Sync, When, Where } from "./bits";
+import { Mask } from "./brand";
 
 /**
  * A backstage pane: the running order, the files, what the instructions are read from, the
@@ -120,14 +128,16 @@ export function Session({
   // otherwise a team session only where there is a team to have one.
   const kind = row?.kind ?? created ?? (auth ? "team" : "local");
   const view = useSessionView(auth, sessionId, { daemon, kind });
-  // On a phone the backstage stacks under the composer and the head keeps only the title
-  // and the status until it is shown, so it starts hidden there; wider, it starts shown.
-  const [backstage, setBackstage] = useState(() => !phoneWidth());
+  // The conversation is the screen: the backstage (tasks, files, instructions, memory,
+  // settings) is a press away under the head's ⋯, and starts hidden at every width.
+  const [backstage, setBackstage] = useState(false);
   const [pane, setPane] = useState<Pane>("tasks");
   // What `/memory refresh` or `/memory forget` asked of the memory pane, until it takes it.
   const [memoryAsk, setMemoryAsk] = useState<MemoryAsk | null>(null);
-  const [palette, setPalette] = useState(false);
-  const [publishing, setPublishing] = useState(false);
+  // The command palette: over the screen (Ctrl-K), or over the composer (its `/`).
+  const [palette, setPalette] = useState<"screen" | "composer" | null>(null);
+  // The publish dialog, empty, or with a reply's Markdown as its one file.
+  const [publishing, setPublishing] = useState<{ text?: string } | null>(null);
   // The scratchpad document open beside the conversation, by name; null while it is closed.
   const [scratch, setScratch] = useState<string | null>(null);
   useEffect(() => setScratch(null), [sessionId]);
@@ -208,84 +218,96 @@ export function Session({
     const onKey = (e: KeyboardEvent): void => {
       if ((e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === "k") {
         e.preventDefault();
-        setPalette(true);
+        setPalette("screen");
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
+  const current = agentOf(view.state, row);
+  // Whether the server writes a lasting rule from an approval (troupe #920): asked of what it
+  // said at `initialize`, so the answer appears the day it does.
+  const alwaysAllow = Boolean(sessionView?.capabilities[ALLOW_ALWAYS]);
+  // A reply's Retry sends the person's words again, as a new turn.
+  const retry = useCallback((text: string) => view.send(text), [view]);
+  const publishReply = useMemo(() => (daemon ? (text: string) => setPublishing({ text }) : undefined), [daemon]);
+
+  const commands = palette ? (
+    <CommandPalette
+      view={view}
+      local={here}
+      anchored={palette === "composer"}
+      onClose={() => setPalette(null)}
+      actions={{
+        go: (screen) => (screen === "sessions" ? onBack() : onGo?.(screen)),
+        showFiles: () => {
+          setBackstage(true);
+          setPane("files");
+        },
+        showMemory: (what) => {
+          setBackstage(true);
+          setPane("memory");
+          if (what) setMemoryAsk((a) => ({ what, n: (a?.n ?? 0) + 1 }));
+        },
+        transcript: () => transcriptText(view.state),
+        detail: detail.command,
+        ...(here && onAgents ? { agents: () => onAgents() } : {}),
+        ...(agentRows ? { agentRows } : {}),
+        ...(daemon ? { publish: () => setPublishing({}) } : {}),
+        ...(planeLinked ? { planeLinked } : {}),
+        ...(listAgents ? { sessionAgents: listAgents } : {}),
+        ...(readOnly ? {} : { switchAgent: async (name: string) => void (await view.switchProfile(name)) }),
+        currentAgent: current,
+      }}
+    />
+  ) : null;
+
   return (
     <section className="session">
-      {palette && (
-        <CommandPalette
-          view={view}
-          local={here}
-          onClose={() => setPalette(false)}
-          actions={{
-            go: (screen) => (screen === "sessions" ? onBack() : onGo?.(screen)),
-            showFiles: () => {
-              setBackstage(true);
-              setPane("files");
-            },
-            showMemory: (what) => {
-              setBackstage(true);
-              setPane("memory");
-              if (what) setMemoryAsk((a) => ({ what, n: (a?.n ?? 0) + 1 }));
-            },
-            transcript: () => transcriptText(view.state),
-            detail: detail.command,
-            ...(here && onAgents ? { agents: () => onAgents() } : {}),
-            ...(agentRows ? { agentRows } : {}),
-            ...(daemon ? { publish: () => setPublishing(true) } : {}),
-            ...(planeLinked ? { planeLinked } : {}),
-            ...(listAgents ? { sessionAgents: listAgents } : {}),
-            ...(readOnly ? {} : { switchAgent: async (name: string) => void (await view.switchProfile(name)) }),
-            currentAgent: agentOf(view.state, row),
-          }}
-        />
+      {palette === "screen" && commands}
+      {publishing && daemon && (
+        <Publish daemon={daemon} sessionId={here ? sessionId : undefined} reply={publishing.text} onClose={() => setPublishing(null)} />
       )}
-      {publishing && daemon && <Publish daemon={daemon} sessionId={here ? sessionId : undefined} onClose={() => setPublishing(false)} />}
 
       <Header
         row={row}
         sessionId={sessionId}
         state={view.state}
         self={self}
-        backstage={backstage}
+        agent={current}
         onBack={onBack}
-        onToggleBackstage={() => setBackstage((b) => !b)}
-        scratchpad={
-          view.state.scratch.length > 0
-            ? { open: scratch !== null, onToggle: () => setScratch((s) => (s === null ? latest(view.state.scratch) : null)) }
-            : null
-        }
-        loop={loop}
-        canChange={!readOnly}
-        view={view}
-        agent={
-          <AgentSwitch
-            view={view}
-            auth={auth}
-            daemon={daemon}
-            kind={kind}
-            workspace={switchWorkspace}
-            planeProfile={kind === "team" ? (row?.profile ?? null) : null}
-            current={agentOf(view.state, row)}
-            canChange={!readOnly}
-            onAbout={here ? onAgents : undefined}
-            onStarted={onStarted}
+        invites={row ? <InviteControl auth={auth} daemon={daemon} row={row} /> : null}
+        remoteLine={row?.kind === "remote" ? <RemoteLine row={row} /> : null}
+        menu={
+          <SessionMenu
+            sessionId={sessionId}
+            row={row}
+            backstage={backstage}
+            onToggleBackstage={() => setBackstage((b) => !b)}
+            scratchpad={
+              view.state.scratch.length > 0
+                ? { open: scratch !== null, onToggle: () => setScratch((s) => (s === null ? latest(view.state.scratch) : null)) }
+                : null
+            }
+            onAbout={here && onAgents && current ? () => onAgents(current) : undefined}
+            remote={
+              row && daemon && auth && (row.kind === "local" || row.kind === "private") ? (
+                <RemoteOfferControl daemon={daemon} row={row} presence={view.state.presence} />
+              ) : null
+            }
           />
         }
-        remote={
-          row && daemon && auth && (row.kind === "local" || row.kind === "private") ? (
-            <RemoteOfferControl daemon={daemon} row={row} presence={view.state.presence} />
-          ) : row?.kind === "remote" ? (
-            <RemoteLine row={row} />
-          ) : null
-        }
-        invites={row ? <InviteControl auth={auth} daemon={daemon} row={row} /> : null}
       />
+
+      {/* The goal, set with /goal and cleared with /goal clear, one line under the head while
+          there is one, and the loop that works towards it beside it. */}
+      {(view.state.goal || loop?.state === "running") && (
+        <div className="goal-bar">
+          <GoalLine goal={view.state.goal} loop={loop} canChange={!readOnly} onSet={view.setGoal} onClear={view.clearGoal} onStartLoop={view.startLoop} />
+          <LoopStatus loop={loop} canStop={!readOnly} onStop={view.stopLoop} />
+        </div>
+      )}
 
       <Banners status={view.status} detail={view.detail} dormant={dormant} readOnly={readOnly} error={view.error} />
       <OfferLine offer={view.offer} />
@@ -311,9 +333,12 @@ export function Session({
             onSetup={onGo ? () => onGo("setup") : undefined}
             onScratch={setScratch}
             onSave={saveReady}
+            onRetry={readOnly ? undefined : retry}
+            onPublish={publishReply}
           />
 
-          {/* Sticky, so scrolling up to read the context never loses the decision. */}
+          {/* Cards at the foot of the transcript, where the eye already is; sticky, so
+              scrolling up to read the context never loses the decision. */}
           {open.map((entry) => (
             <ApprovalPanel
               key={entry.callId}
@@ -323,6 +348,7 @@ export function Session({
               onAnswer={(d, a) => view.respond(entry.callId, d, a)}
               onDefinition={here ? onAgents : undefined}
               onceOnly={kind === "remote"}
+              alwaysAllow={alwaysAllow}
               audiences={audiences}
             />
           ))}
@@ -343,13 +369,31 @@ export function Session({
           ) : (
             <Composer
               view={view}
+              daemon={daemon}
+              here={here}
               dormant={dormant}
               busy={isBusy(view.state)}
               waiting={waiting}
               looping={loop?.state === "running"}
               live={view.status === "live"}
               others={others}
-              onCommands={() => setPalette(true)}
+              profile={kind === "team" ? (row?.profile ?? null) : null}
+              context={view.state.context}
+              agent={
+                <AgentSwitch
+                  view={view}
+                  auth={auth}
+                  daemon={daemon}
+                  kind={kind}
+                  workspace={switchWorkspace}
+                  planeProfile={kind === "team" ? (row?.profile ?? null) : null}
+                  current={current}
+                  canChange={!readOnly}
+                  onStarted={onStarted}
+                />
+              }
+              commands={palette === "composer" ? commands : null}
+              onCommands={() => setPalette((p) => (p === "composer" ? null : "composer"))}
               onSent={seenAway}
             />
           )}
@@ -365,6 +409,7 @@ export function Session({
             self={self}
             pane={pane}
             onPane={setPane}
+            onClose={() => setBackstage(false)}
             memory={
               daemon && here
                 ? {
@@ -545,15 +590,6 @@ function useDetail(
   return { level: choice ?? setting, command };
 }
 
-/** Whether the window is as narrow as a phone's, where every track stacks. Asked once, as a screen opens. */
-function phoneWidth(): boolean {
-  try {
-    return globalThis.matchMedia?.("(max-width: 719px)").matches ?? false;
-  } catch {
-    return false;
-  }
-}
-
 /** What was said, for `/copy`: the people's and the agent's words, not the tool traffic. */
 function transcriptText(state: TranscriptState): string {
   return state.entries
@@ -561,11 +597,6 @@ function transcriptText(state: TranscriptState): string {
     .join("\n\n");
 }
 
-/**
- * The head: where the session is, as a breadcrumb in mono, over its title and the goal
- * it works towards; who is here; and the controls, with the loop beside the status
- * while one runs.
- */
 /**
  * The agent a window runs: as its transcript says (`session_created`, then each
  * `profile_switched`), and until that has arrived, as a daemon's row says it. A plane's row
@@ -581,106 +612,78 @@ function workspaceOf(row: FleetRow | undefined): string | null {
   return typeof workspace === "string" && workspace ? workspace : null;
 }
 
+/**
+ * The head, one line: back, the mask and the title, the session's setup as tags (where it
+ * runs, its plane profile, the agent this window runs), then who is here, the status,
+ * Invite, and ⋯ for the rest. On a phone the tags give way and the title keeps what is left.
+ */
 function Header({
   row,
   sessionId,
   state,
   self,
-  backstage,
-  onBack,
-  onToggleBackstage,
-  scratchpad,
-  loop,
-  canChange,
-  view,
   agent,
-  remote,
+  onBack,
   invites,
+  remoteLine,
+  menu,
 }: {
   row: FleetRow | undefined;
   sessionId: string;
   state: TranscriptState;
   self: string | undefined;
-  backstage: boolean;
+  /** The agent this window runs. */
+  agent: string | null;
   onBack: () => void;
-  onToggleBackstage: () => void;
-  /** Whether the scratchpad is open, and the switch; null while it has no document. */
-  scratchpad: { open: boolean; onToggle: () => void } | null;
-  loop: LoopState | undefined;
-  /** Whether this person may set the goal and start or stop a loop: not a reader's. */
-  canChange: boolean;
-  view: SessionHandle;
-  /** The agent it runs, and the switch (`AgentSwitch`). */
-  agent: JSX.Element;
-  /** Steering from another device: this computer's offer, or whose laptop a relayed one is on. */
-  remote?: JSX.Element | null;
   /** Whom it is shared with by name, and for its owner the invitation (troupe #765). */
   invites?: JSX.Element | null;
+  /** Whose laptop a relayed session is on. */
+  remoteLine?: JSX.Element | null;
+  /** The ⋯ menu: the backstage, the scratchpad, steering from elsewhere, the session's facts. */
+  menu: JSX.Element;
 }): JSX.Element {
   const working = rootState(state);
   const here = presentMembers(state);
-  const role = row?.yourRole;
+  const title = row?.title ?? sessionId;
 
   return (
-    // `full` while the backstage is shown: at phone width the head is the title and the
-    // status alone until then, and everything else in it comes with the backstage.
-    <header className={`session-head${backstage ? " full" : ""}`}>
-      <div className="subject">
-        <div className="crumbs">
-          <button className="link" onClick={onBack} aria-label="Back to all sessions">
-            ← Sessions
-          </button>
-          <span className="sep" aria-hidden="true">
-            /
+    <header className="session-head">
+      <button type="button" className="back" onClick={onBack} aria-label="Back to all sessions">
+        ←<span className="wide"> Sessions</span>
+      </button>
+      <span className="head-mask" aria-hidden="true">
+        <Mask size={22} />
+      </span>
+      <h1 className="title" title={title}>
+        {title}
+      </h1>
+      <div className="crumbs">
+        {row && (
+          <>
+            <Where kind={row.kind} />
+            {/* How a private session's sealing stands here, as its row in the list says. */}
+            <Sync state={row.sync} device={row.device} />
+          </>
+        )}
+        {row?.kind === "team" && row.profile && (
+          <span className="tag" title="The plane profile this session runs on; a session keeps the one it started with">
+            {row.profile}
           </span>
-          {row && (
-            <>
-              <Where kind={row.kind} />
-              {/* How a private session's sealing stands here, as its row in the list says. */}
-              <Sync state={row.sync} device={row.device} />
-              <span className="sep" aria-hidden="true">
-                /
-              </span>
-            </>
-          )}
-          <span className="profile" title="The agent this window runs">
-            {agentOf(state, row) ?? "—"}
-          </span>
-          <span className="sep" aria-hidden="true">
-            /
-          </span>
-          <span className="id">{sessionId}</span>
-          {role && (
-            <>
-              <span className="sep" aria-hidden="true">
-                ·
-              </span>
-              <span>
-                you are {role === "owner" ? "the owner" : role === "collaborator" || role === "control" ? "a collaborator" : "a reader"}
-              </span>
-            </>
-          )}
-          {row?.invitation && (
-            <>
-              <span className="sep" aria-hidden="true">
-                ·
-              </span>
-              <span className="invited-by">{inviteLine(row.invitation)}</span>
-            </>
-          )}
-        </div>
-        <h1 className="title">{row?.title ?? sessionId}</h1>
-        <GoalLine goal={state.goal} loop={loop} canChange={canChange} onSet={view.setGoal} onClear={view.clearGoal} onStartLoop={view.startLoop} />
+        )}
+        <span className="tag profile" title="The agent this window runs">
+          {agent ?? "—"}
+        </span>
+        {remoteLine}
       </div>
-
-      {here.length > 0 && <Here members={here} self={self} />}
+      <span className="spacer" />
 
       <div className="controls">
+        {here.length > 0 && <Here members={here} self={self} />}
         {state.doneReason ? (
           <Pill status={state.doneReason === "budget_exhausted" ? "error" : "allowed"}>Finished</Pill>
         ) : state.failed ? (
-          // The root kept crashing and the session stopped on it (Decision 727): a failure,
-          // with what it raised, and not a rest.
+          // The root kept crashing and the session stopped on it: a failure, with what it
+          // raised, and not a rest.
           <Pill status="error" title={state.failed.detail}>
             Failed
           </Pill>
@@ -691,27 +694,105 @@ function Header({
         ) : (
           <Pill status="idle">Idle</Pill>
         )}
-
-        <LoopStatus loop={loop} canStop={canChange} onStop={view.stopLoop} />
-
-        {remote}
-
         {invites}
-
-        {/* The agent this window runs, and the switch to another from the next turn. */}
-        {agent}
-
-        {scratchpad && (
-          <button className="tab" onClick={scratchpad.onToggle} aria-pressed={scratchpad.open}>
-            {scratchpad.open ? "Hide scratchpad" : "Show scratchpad"}
-          </button>
-        )}
-
-        <button className="tab backstage-toggle" onClick={onToggleBackstage} aria-pressed={backstage}>
-          {backstage ? "Hide backstage" : "Show backstage"}
-        </button>
+        {menu}
       </div>
     </header>
+  );
+}
+
+/**
+ * The head's ⋯: the backstage and the scratchpad, shown and hidden; steering this session
+ * from another device; the agent in the agents manager; and the session's facts (its id,
+ * your part in it, who invited you). It stays mounted while shut, so a dialog opened from
+ * it outlives it.
+ */
+function SessionMenu({
+  sessionId,
+  row,
+  backstage,
+  onToggleBackstage,
+  scratchpad,
+  onAbout,
+  remote,
+}: {
+  sessionId: string;
+  row: FleetRow | undefined;
+  backstage: boolean;
+  onToggleBackstage: () => void;
+  /** Whether the scratchpad is open, and the switch; null while it has no document. */
+  scratchpad: { open: boolean; onToggle: () => void } | null;
+  /** Open the agent in the agents manager: a session on this computer's. */
+  onAbout?: (() => void) | undefined;
+  /** Steering from another device: this computer's offer. */
+  remote?: JSX.Element | null;
+}): JSX.Element {
+  const [open, setOpen] = useState(false);
+  const box = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const outside = (e: MouseEvent): void => {
+      if (!box.current?.contains(e.target as Node)) setOpen(false);
+    };
+    const escape = (e: KeyboardEvent): void => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("mousedown", outside);
+    document.addEventListener("keydown", escape);
+    return () => {
+      document.removeEventListener("mousedown", outside);
+      document.removeEventListener("keydown", escape);
+    };
+  }, [open]);
+  const role = row?.yourRole;
+  const then = (act: () => void) => () => {
+    act();
+    setOpen(false);
+  };
+
+  return (
+    <div className="session-menu" ref={box}>
+      <button type="button" className="ib" aria-label="More session actions" aria-haspopup="true" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
+        ⋯
+      </button>
+      <div className="menu-pop" hidden={!open} aria-label="This session">
+        <button type="button" className="item" aria-pressed={backstage} onClick={then(onToggleBackstage)}>
+          <span className="t">{backstage ? "Hide backstage" : "Show backstage"}</span>
+          <span className="d">Tasks, files, instructions{row && onThisComputer(row.kind) ? ", memory" : ""} and what this session costs</span>
+        </button>
+        {scratchpad && (
+          <button type="button" className="item" aria-pressed={scratchpad.open} onClick={then(scratchpad.onToggle)}>
+            <span className="t">{scratchpad.open ? "Hide scratchpad" : "Show scratchpad"}</span>
+            <span className="d">What the agents put there with show</span>
+          </button>
+        )}
+        {onAbout && (
+          <button type="button" className="item" onClick={then(onAbout)}>
+            <span className="t">About the agent</span>
+            <span className="d">Open it in the agents manager</span>
+          </button>
+        )}
+        {remote && <div className="menu-remote">{remote}</div>}
+        <dl className="menu-facts">
+          <dt>Session</dt>
+          <dd className="mono">{sessionId}</dd>
+          {role && (
+            <>
+              <dt>You</dt>
+              <dd>
+                you are {role === "owner" ? "the owner" : role === "collaborator" || role === "control" ? "a collaborator" : "a reader"}
+              </dd>
+            </>
+          )}
+          {row?.invitation && (
+            <>
+              <dt>Invited</dt>
+              <dd className="invited-by">{inviteLine(row.invitation)}</dd>
+            </>
+          )}
+        </dl>
+      </div>
+    </div>
   );
 }
 
@@ -824,6 +905,21 @@ function useLoopAnswer(view: SessionHandle["view"]): LoopInfo | null | undefined
   return answer;
 }
 
+/** What a turn's foot acts on: its answer's Markdown, and the person's words that began it. */
+interface TurnReply {
+  answer: string;
+  prompt: string | null;
+}
+
+/** The kinds that are the troupe speaking or working: drawn beside the mask, as a reply. */
+const REPLY_KINDS: ReadonlySet<Entry["kind"]> = new Set(["assistant", "reasoning", "tool", "scratch", "file", "brief", "delegation", "turn"]);
+
+/**
+ * The transcript as a chat, in one centred column: a turn's person's words on the right,
+ * then the troupe's reply beside the mask — its working folded into the strip, its answer
+ * on the page, and under it a row with Copy, Retry, Publish and what the turn cost. What
+ * the session says itself (started, switched, compacted) stands between, in mono.
+ */
 function Stream({
   seed,
   state,
@@ -836,6 +932,8 @@ function Stream({
   onSetup,
   onScratch,
   onSave,
+  onRetry,
+  onPublish,
 }: {
   /** What the curtain line's words are taken in the order of, with the turn: the session's id. */
   seed: string;
@@ -856,6 +954,10 @@ function Stream({
   onScratch: (name: string) => void;
   /** Save a file the agent made, by its path in the session's workspace: what was said of it. */
   onSave: (path: string) => Promise<string>;
+  /** Send the person's words again as a new turn; absent where they may only read. */
+  onRetry?: ((text: string) => Promise<void>) | undefined;
+  /** Open the publish dialog with a reply as its file; absent with no daemon to publish through. */
+  onPublish?: ((text: string) => void) | undefined;
 }): JSX.Element {
   // The turns a click on their strip opened (or shut, at `everything`), by key. Another
   // level draws every turn again, all of them as it says.
@@ -874,6 +976,7 @@ function Stream({
   // What streams belongs to the last turn, and is drawn at its level.
   const live = drawn.at(-1)?.level ?? detail;
   const line = curtainLine(state, now, seed);
+  const replies = useMemo(() => repliesOf(drawn, self), [drawn, self]);
 
   const bottom = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -881,53 +984,112 @@ function Stream({
     bottom.current?.scrollIntoView({ block: "end" });
   }, [state.entries.length, state.streaming, state.pending.length, notes.length, state.thinking === "", line === null]);
 
-  return (
-    <div className="stream" aria-live="polite">
-      {state.entries.length === 0 && <Loading what="Reading the session. The newest part arrives first." />}
+  // The turns as the chat draws them: the person's line that began each, then the rest.
+  const groups: Array<{ turn: string; person: Drawn | null; rest: Array<{ d: Drawn; next: number }> }> = [];
+  drawn.forEach((d, i) => {
+    const next = drawn[i + 1]?.entry.seq ?? Infinity;
+    const group = groups.at(-1);
+    if (!group || group.turn !== d.turn) {
+      const opens = d.entry.kind === "user" && isRoot(d.entry.agent);
+      groups.push({ turn: d.turn, person: opens ? d : null, rest: opens ? [] : [{ d, next }] });
+      if (opens) groups.at(-1)!.rest.push({ d: { ...d, hidden: true, strip: null }, next });
+    } else group.rest.push({ d, next });
+  });
 
-      <NotesAt notes={notes} from={-Infinity} to={state.entries[0]?.seq ?? Infinity} />
-      {drawn.map((d, i) => (
-        <Fragment key={`${d.entry.kind}-${d.entry.seq}`}>
-          {d.strip && <StripLine strip={d.strip} onToggle={() => toggle(d.turn)} />}
-          {!d.hidden && (
-            <StreamEntry
-              drawn={d}
-              words={startWords && startWords.seq === d.entry.seq ? startWords.text : null}
-              self={self}
-              local={local}
-              readBlob={readBlob}
-              onSetup={onSetup}
-              onScratch={onScratch}
-              onSave={onSave}
-            />
-          )}
-          <NotesAt notes={notes} from={d.entry.seq} to={drawn[i + 1]?.entry.seq ?? Infinity} />
-        </Fragment>
-      ))}
-
+  // What is under way now, in the last reply: reasoning as it comes, the answer as it is
+  // written, and the line that says what runs.
+  const working = Boolean((state.thinking && live !== "quiet") || state.streaming || line);
+  const liveParts = working ? (
+    <>
       {state.thinking && live !== "quiet" && (
         <ReasoningFrame text={state.thinking} ms={state.thinkingAt === undefined ? undefined : now - state.thinkingAt} open={live === "everything"} />
       )}
-
       {state.streaming && (
         <article className="turn agent">
-          <div className="byline">
-            <span className="name">Troupe</span>
-            <Pill status="running">Writing now</Pill>
-          </div>
           <div className="frame prose">
             <div className="md caret">{state.streaming}</div>
           </div>
         </article>
       )}
-
       {line && <Curtain line={line} />}
+    </>
+  ) : null;
+  // The last turn is still being answered while it has not said what it cost.
+  const lastOpen = drawn.at(-1)?.entry.kind !== "turn";
+
+  const entryOf = ({ d, next }: { d: Drawn; next: number }): JSX.Element => (
+    <Fragment key={`${d.entry.kind}-${d.entry.seq}`}>
+      {d.strip && <StripLine strip={d.strip} onToggle={() => toggle(d.turn)} />}
+      {!d.hidden && (
+        <StreamEntry
+          drawn={d}
+          words={startWords && startWords.seq === d.entry.seq ? startWords.text : null}
+          self={self}
+          local={local}
+          readBlob={readBlob}
+          onSetup={onSetup}
+          onScratch={onScratch}
+          onSave={onSave}
+          reply={d.entry.kind === "turn" ? replies.get(d.turn) : undefined}
+          onRetry={onRetry}
+          onPublish={onPublish}
+        />
+      )}
+      <NotesAt notes={notes} from={d.entry.seq} to={next} />
+    </Fragment>
+  );
+
+  return (
+    <div className="stream" aria-live="polite">
+      {state.entries.length === 0 && <Loading what="Reading the session. The newest part arrives first." />}
+      {state.entries[0]?.seq === 1 && (
+        <div className="divider" aria-hidden="true">
+          CURTAIN UP
+        </div>
+      )}
+
+      <NotesAt notes={notes} from={-Infinity} to={state.entries[0]?.seq ?? Infinity} />
+      {groups.map((g, gi) => {
+        const last = gi === groups.length - 1;
+        // A reply is the troupe's part of a turn; the session's own lines stand on their own.
+        const isReply = g.rest.some(({ d }) => REPLY_KINDS.has(d.entry.kind) && !(d.hidden && d.entry.kind === "user")) || (last && working);
+        return (
+          <Fragment key={g.turn}>
+            {g.person && <StreamEntry drawn={g.person} words={null} self={self} local={local} readBlob={readBlob} onScratch={onScratch} onSave={onSave} />}
+            {isReply ? (
+              <div className="reply">
+                <span className="avatar" aria-hidden="true">
+                  <Mask size={20} />
+                </span>
+                <div className="reply-body">
+                  <span className="who">Troupe</span>
+                  {g.rest.map(entryOf)}
+                  {last && lastOpen && liveParts}
+                </div>
+              </div>
+            ) : (
+              g.rest.map(entryOf)
+            )}
+          </Fragment>
+        );
+      })}
+      {/* Under way with nothing of the turn drawn yet, or after a turn that said its cost. */}
+      {working && (groups.length === 0 || !lastOpen) && (
+        <div className="reply">
+          <span className="avatar" aria-hidden="true">
+            <Mask size={20} />
+          </span>
+          <div className="reply-body">
+            <span className="who">Troupe</span>
+            {liveParts}
+          </div>
+        </div>
+      )}
 
       {/* Queued, not optimistic: it is not in the stream until the server says it is. */}
       {state.pending.map((p) => (
-        <article key={p.commandId} className="turn queued">
+        <article key={p.commandId} className="turn person self queued">
           <div className="byline">
-            <span className="name">You</span>
             <Pill status="queued">{p.queued ? "Queued" : "Sending"}</Pill>
           </div>
           <div className="body">{p.text}</div>
@@ -939,6 +1101,27 @@ function Stream({
   );
 }
 
+/**
+ * Each turn's answer and the person's words that began it, by turn: what its foot's Copy,
+ * Publish and Retry act on. The answer is the root's prose after its last call, or its last
+ * prose where it made none; the words are the person's own, not somebody else's.
+ */
+function repliesOf(drawn: Drawn[], self: string | undefined): Map<string, TurnReply> {
+  const acc = new Map<string, { answer: string; answered: boolean; prompt: string | null }>();
+  for (const d of drawn) {
+    const had = acc.get(d.turn) ?? { answer: "", answered: false, prompt: null };
+    const e = d.entry;
+    if (e.kind === "user" && isRoot(e.agent) && had.prompt === null && (e.author === undefined || e.author === self)) had.prompt = e.text;
+    else if (e.kind === "assistant" && isRoot(e.agent)) {
+      if (d.role === "answer") {
+        had.answer = had.answered ? `${had.answer}\n\n${e.text}` : e.text;
+        had.answered = true;
+      } else if (!had.answered) had.answer = e.text;
+    }
+    acc.set(d.turn, had);
+  }
+  return new Map([...acc].map(([turn, r]) => [turn, { answer: r.answer, prompt: r.prompt }]));
+}
 /**
  * A file the agent made for the person (troupe #765): its path, where it already is when the
  * session runs on this computer, and a Save… that reads it with `fs.read` from wherever the
@@ -992,6 +1175,10 @@ type EntryProps = {
   onSetup?: (() => void) | undefined;
   onScratch: (name: string) => void;
   onSave: (path: string) => Promise<string>;
+  /** For the line that says what a turn cost: what its foot acts on. */
+  reply?: TurnReply | undefined;
+  onRetry?: ((text: string) => Promise<void>) | undefined;
+  onPublish?: ((text: string) => void) | undefined;
 };
 
 /**
@@ -1009,7 +1196,11 @@ function sameEntry(a: EntryProps, b: EntryProps): boolean {
     a.readBlob === b.readBlob &&
     a.onSetup === b.onSetup &&
     a.onScratch === b.onScratch &&
-    a.onSave === b.onSave
+    a.onSave === b.onSave &&
+    a.reply?.answer === b.reply?.answer &&
+    a.reply?.prompt === b.reply?.prompt &&
+    a.onRetry === b.onRetry &&
+    a.onPublish === b.onPublish
   );
 }
 
@@ -1022,22 +1213,31 @@ const StreamEntry = memo(function StreamEntry({
   onSetup,
   onScratch,
   onSave,
+  reply,
+  onRetry,
+  onPublish,
 }: EntryProps): JSX.Element | null {
   const { entry, level } = drawn;
   switch (entry.kind) {
     case "user": {
       const mine = entry.author === self || entry.author === undefined;
       const name = mine ? "You" : (entry.author ?? entry.source);
+      // A person's words on the right; your own need no name, somebody else's carry theirs.
+      const said = [mine ? null : name, entry.source !== "user" ? `via ${entry.source}` : null, entry.via === "plane" ? "from another device" : null].filter(Boolean);
       return (
         <article className={`turn person ${mine ? "self" : ""}`} style={{ ["--author" as string]: personColour(entry.author, self) }}>
-          <div className="byline">
-            <span className="ring" aria-hidden="true">
-              {initials(name)}
-            </span>
-            <span className="name">{name}</span>
-            {entry.source !== "user" && <span className="micro muted">via {entry.source}</span>}
-            {entry.via === "plane" && <span className="micro muted">from another device</span>}
-          </div>
+          {said.length > 0 && (
+            <div className="byline">
+              {!mine && (
+                <span className="ring" aria-hidden="true">
+                  {initials(name)}
+                </span>
+              )}
+              {!mine && <span className="name">{name}</span>}
+              {entry.source !== "user" && <span className="micro muted">via {entry.source}</span>}
+              {entry.via === "plane" && <span className="micro muted">from another device</span>}
+            </div>
+          )}
           <div className="body">{entry.text}</div>
         </article>
       );
@@ -1048,10 +1248,11 @@ const StreamEntry = memo(function StreamEntry({
     case "assistant":
       return (
         <article className="turn agent">
-          <div className="byline">
-            <span className="name">Troupe</span>
-            {entry.agent.length > 1 && <span className="micro muted">{entry.agent.slice(1).join(" › ")}</span>}
-          </div>
+          {entry.agent.length > 1 && (
+            <div className="byline">
+              <span className="micro muted">{entry.agent.slice(1).join(" › ")}</span>
+            </div>
+          )}
           <ProseFrame text={entry.text} full={level === "everything"} />
         </article>
       );
@@ -1117,13 +1318,16 @@ const StreamEntry = memo(function StreamEntry({
 
     // What the turn cost, under it, in the client library's words (issue #389). A
     // subagent's says whose it is, as its answers do.
-    case "turn":
-      return (
+    case "turn": {
+      const cost = (
         <p className="note turn-cost">
           {entry.agent.length > 1 && `${entry.agent.slice(1).join(" › ")} · `}
           {entry.text}
         </p>
       );
+      // A subagent's line is its own; the root's ends the reply, with what can be done with it.
+      return entry.agent.length > 1 ? cost : <ReplyFoot reply={reply} onRetry={onRetry} onPublish={onPublish} cost={cost} />;
+    }
 
     case "system": {
       const step = local && entry.type === "llm_error" ? modelErrorStep(entry.text) : null;
@@ -1290,6 +1494,7 @@ function Backstage({
   self,
   pane,
   onPane,
+  onClose,
   memory,
   onOpenMemory,
   onProfile,
@@ -1301,6 +1506,8 @@ function Backstage({
   /** Which pane is up: the session's, so `/files` and `/memory` from the palette can open it. */
   pane: Pane;
   onPane: (pane: Pane) => void;
+  /** Hide it again, as the head's ⋯ does. */
+  onClose: () => void;
   /**
    * What the memory pane needs: a session on this computer's daemon, workspace, id and the
    * librarian its start began; null for a team session's.
@@ -1327,8 +1534,14 @@ function Backstage({
   const shown: Pane = (pane === "memory" && !memory) || (pane === "settings" && !team) ? "tasks" : pane;
 
   return (
-    <aside className="backstage">
+    <aside className="backstage" aria-label="Backstage">
       <section>
+        <div className="backstage-head">
+          <span className="screen">Backstage</span>
+          <button type="button" className="link" onClick={onClose}>
+            Close
+          </button>
+        </div>
         <div className="tabs">
           <button className="tab" aria-selected={shown === "tasks"} onClick={() => onPane("tasks")}>
             Tasks
@@ -1451,18 +1664,249 @@ function Backstage({
   );
 }
 
+/**
+ * Under a reply, on hover or focus: Copy (the answer's Markdown), Retry (the person's words
+ * again, as a new turn), Publish (the publish dialog, with the answer as its file), and what
+ * the turn cost. Retry and Publish say why where they cannot.
+ */
+function ReplyFoot({
+  reply,
+  onRetry,
+  onPublish,
+  cost,
+}: {
+  reply: TurnReply | undefined;
+  onRetry?: ((text: string) => Promise<void>) | undefined;
+  onPublish?: ((text: string) => void) | undefined;
+  cost: JSX.Element;
+}): JSX.Element {
+  const [said, setSaid] = useState<string | null>(null);
+  const answer = reply?.answer ?? "";
+  const prompt = reply?.prompt ?? null;
+  const act = (what: () => Promise<unknown>, done: string): void => {
+    what().then(
+      () => setSaid(done),
+      (e: unknown) => setSaid(e instanceof Error ? e.message : String(e)),
+    );
+  };
+  return (
+    <div className="foot">
+      <button type="button" className="fbtn" disabled={!answer} title={answer ? "Copy the answer as Markdown" : "This turn has no answer to copy"} onClick={() => act(() => copyText(answer), "copied")}>
+        Copy
+      </button>
+      <button
+        type="button"
+        className="fbtn"
+        disabled={!onRetry || prompt === null}
+        title={
+          !onRetry
+            ? "You can read this session but not add to it"
+            : prompt === null
+              ? "Not yet: the transcript does not say which message of yours began this turn"
+              : "Send your message again, as a new turn"
+        }
+        onClick={() => prompt !== null && onRetry && act(() => onRetry(prompt), "sent again")}
+      >
+        Retry
+      </button>
+      <button
+        type="button"
+        className="fbtn"
+        disabled={!onPublish || !answer}
+        title={!onPublish ? "Publishing goes through this computer's daemon, and there is none here" : "Publish the answer as an artifact"}
+        onClick={() => onPublish?.(answer)}
+      >
+        Publish
+      </button>
+      {cost}
+      {said && (
+        <span className="micro muted" role="status">
+          {said}
+        </span>
+      )}
+    </div>
+  );
+}
+
+/** A file, an artifact's file or a folder, attached to the message being written. */
+interface Attachment {
+  id: string;
+  kind: "file" | "folder";
+  /** The name it lands under, `session:/<name>`, or the folder's path. */
+  name: string;
+  /** Its text, for a file. */
+  content?: string;
+  /** What it is, in a few words: its size, or the artifact it came from. */
+  about: string;
+}
+
+let attached = 0;
+
+/** A size as the chip says it. */
+function sizeWords(bytes: number): string {
+  return bytes >= 1_000_000 ? `${(bytes / 1_000_000).toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1000))} KB`;
+}
+
+/** A token count as the ring says it: `24.1k`. */
+function tokens(n: number): string {
+  return n >= 1000 ? `${(n / 1000).toFixed(1).replace(/\.0$/, "")}k` : String(n);
+}
+
+/**
+ * A picked or dropped file as text: an upload carries text only, as the terminal client's
+ * `/upload` does, and one larger than the server takes in a message is refused unread.
+ */
+async function readAttachment(file: File, max: number | undefined): Promise<Attachment> {
+  // What a message carries around the file, kept clear of the server's limit.
+  if (max !== undefined && file.size > max - 4096) throw new Error(`${file.name} is larger than this session takes in one message (${sizeWords(max)})`);
+  let content: string;
+  try {
+    content = new TextDecoder("utf-8", { fatal: true }).decode(await file.arrayBuffer());
+  } catch {
+    throw new Error(`${file.name} is not UTF-8 text; an upload carries text only`);
+  }
+  return { id: `a${++attached}`, kind: "file", name: baseName(file.name), content, about: sizeWords(file.size) };
+}
+
+function baseName(path: string): string {
+  return path.split(/[\\/]/).pop() || path;
+}
+
+/**
+ * How full the context is, as a ring by the send button. With the window the harness plans
+ * compaction against (a `context_status` event, troupe #920) it is the share used; until a
+ * server sends that, an indeterminate arc whose label says the tokens in it and that the
+ * window is not reported.
+ */
+export function ContextRing({ fill }: { fill: ContextFill | undefined }): JSX.Element {
+  const r = 11;
+  const c = 2 * Math.PI * r;
+  const share = fill?.window ? Math.min(1, fill.used / fill.window) : null;
+  const label =
+    share !== null && fill
+      ? `Context ${Math.round(share * 100)}% full: ${tokens(fill.used)} of ${tokens(fill.window!)} tokens`
+      : fill
+        ? `Context: ${tokens(fill.used)} tokens in; the window size is not reported yet.`
+        : "Context: nothing sent yet; the window size is not reported yet.";
+  return (
+    <span className={`ring-context${share === null ? " unknown" : share > 0.8 ? " full" : ""}`} role="img" aria-label={label} title={label}>
+      <svg width="26" height="26" viewBox="0 0 26 26" aria-hidden="true">
+        <circle cx="13" cy="13" r={r} className="track" />
+        <circle cx="13" cy="13" r={r} className="arc" strokeDasharray={`${(c * (share ?? 0.25)).toFixed(1)} ${c.toFixed(1)}`} transform="rotate(-90 13 13)" />
+      </svg>
+    </span>
+  );
+}
+
+/**
+ * The person's artifacts on the plane, to attach one's files to the message: each file of
+ * its newest version read with `artifact.read`, and uploaded with the message as a picked
+ * file is. Through this computer's daemon, signed in to the plane.
+ */
+function ArtifactPicker({ daemon, onPick, onClose }: { daemon: DaemonClient; onPick: (files: Attachment[]) => void; onClose: () => void }): JSX.Element {
+  const [list, setList] = useState<Artifact[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+  useEffect(() => {
+    let live = true;
+    daemon.artifacts({}).then(
+      (l) => live && setList(l.artifacts),
+      (e: unknown) => live && setError(reasonOf(e)),
+    );
+    return () => {
+      live = false;
+    };
+  }, [daemon]);
+
+  const pick = async (a: Artifact): Promise<void> => {
+    setBusy(a.id);
+    setError(null);
+    try {
+      const detail = await daemon.artifact(a.id);
+      const n = detail.current ?? detail.version;
+      const version = detail.versions.find((v) => v.n === n) ?? detail.versions[0];
+      if (!version || version.files.length === 0) throw new Error(`${a.title} has no files to attach`);
+      const files = await Promise.all(
+        version.files.map(async (f) => {
+          const read = await daemon.readArtifact(a.id, f.path, version.n);
+          return { id: `a${++attached}`, kind: "file" as const, name: baseName(f.path), content: read.text, about: `from ${a.title}` };
+        }),
+      );
+      onPick(files);
+    } catch (e) {
+      setError(reasonOf(e));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  return (
+    <Dialog label="Add from artifacts" onClose={onClose} className="artifact-picker">
+      <h1>Add from artifacts</h1>
+      <p className="note">Each file of its newest version goes into the session's workspace with your message.</p>
+      {error && (
+        <p className="note error" role="alert">
+          {error}
+        </p>
+      )}
+      {list === null && !error && <Loading what="Reading your artifacts…" />}
+      {list && list.length === 0 && <p className="note">No artifacts yet.</p>}
+      {list && list.length > 0 && (
+        <ul className="picker-list">
+          {list.map((a) => (
+            <li key={a.id}>
+              <button type="button" className="item" disabled={busy !== null} onClick={() => void pick(a)}>
+                <span className="t">{a.title}</span>
+                <span className="d">{busy === a.id ? "Reading its files…" : `${a.kind}, version ${a.current ?? a.version}`}</span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+      <div className="actions">
+        <button type="button" onClick={onClose}>
+          Close
+        </button>
+      </div>
+    </Dialog>
+  );
+}
+
+function reasonOf(e: unknown): string {
+  const data = (e as { data?: { reason?: unknown } } | null)?.data;
+  if (data && typeof data.reason === "string") return data.reason;
+  return e instanceof Error ? e.message : String(e);
+}
+
+/**
+ * The composer, one box: what is attached as tags, the message, and a bar — `+` (upload
+ * files, add from artifacts, add a folder), `/` (the commands), the profile the session
+ * keeps, the agent chip, the context ring, and Send, which is Stop while the troupe works.
+ * Enter sends, Shift+Enter starts a line; it grows with the text to 40% of the window.
+ * Files dropped anywhere on the window attach. A file goes into the workspace at
+ * `session:/<name>` before the message, as `/upload` puts it, and the message names it.
+ */
 function Composer({
   view,
+  daemon,
+  here,
   dormant,
   busy,
   waiting,
   looping,
   live,
   others,
+  profile,
+  context,
+  agent,
+  commands,
   onCommands,
   onSent,
 }: {
   view: SessionHandle;
+  daemon: DaemonClient | null;
+  /** A session on this computer: a folder can be named, and artifacts read through its daemon. */
+  here: boolean;
   dormant: boolean;
   busy: boolean;
   /** A prompt or a request that has drawn nothing for a while, in words; null otherwise. */
@@ -1472,86 +1916,300 @@ function Composer({
   live: boolean;
   /** Everyone else here, who reads what is sent. */
   others: string[];
-  /** Open the command palette: `/` on an empty draft, or the button. */
+  /** The plane profile a team session keeps; null for one on this computer. */
+  profile: string | null;
+  context: ContextFill | undefined;
+  /** The agent chip (`AgentSwitch`). */
+  agent: JSX.Element;
+  /** The commands, while they are open over the composer. */
+  commands: JSX.Element | null;
+  /** Open or shut the commands over the composer: `/` on an empty message, or the button. */
   onCommands: () => void;
   onSent: () => void;
 }): JSX.Element {
   const [draft, setDraft] = useState("");
+  const [files, setFiles] = useState<Attachment[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [menu, setMenu] = useState(false);
+  const [artifacts, setArtifacts] = useState(false);
+  const [dragging, setDragging] = useState(false);
+  const [sending, setSending] = useState(false);
+  const text = useRef<HTMLTextAreaElement>(null);
+  const picker = useRef<HTMLInputElement>(null);
+  const plus = useRef<HTMLDivElement>(null);
+  const pickDirectory = shell()?.pickDirectory;
+
+  // The box grows with what is written, to 40% of the window, then scrolls.
+  useLayoutEffect(() => {
+    const t = text.current;
+    if (!t) return;
+    t.style.height = "auto";
+    t.style.height = `${Math.min(t.scrollHeight, Math.round(globalThis.innerHeight * 0.4))}px`;
+  }, [draft]);
+
+  const attach = useCallback(
+    async (list: FileList | File[]): Promise<void> => {
+      setError(null);
+      const read = await Promise.allSettled([...list].map((f) => readAttachment(f, view.view?.maxMessageBytes)));
+      const ok = read.flatMap((r) => (r.status === "fulfilled" ? [r.value] : []));
+      const refused = read.flatMap((r) => (r.status === "rejected" ? [reasonOf(r.reason)] : []));
+      if (ok.length > 0) setFiles((had) => [...had, ...ok]);
+      if (refused.length > 0) setError(refused.join("; "));
+    },
+    [view.view],
+  );
+
+  // Files dragged anywhere onto the window attach to the message.
+  useEffect(() => {
+    let depth = 0;
+    const carriesFiles = (e: DragEvent): boolean => Boolean(e.dataTransfer && [...e.dataTransfer.types].includes("Files"));
+    const enter = (e: DragEvent): void => {
+      if (!carriesFiles(e)) return;
+      depth += 1;
+      setDragging(true);
+    };
+    const leave = (): void => {
+      depth = Math.max(0, depth - 1);
+      if (depth === 0) setDragging(false);
+    };
+    const over = (e: DragEvent): void => {
+      if (carriesFiles(e)) e.preventDefault();
+    };
+    const drop = (e: DragEvent): void => {
+      if (!carriesFiles(e)) return;
+      e.preventDefault();
+      depth = 0;
+      setDragging(false);
+      if (e.dataTransfer?.files.length) void attach(e.dataTransfer.files);
+    };
+    globalThis.addEventListener("dragenter", enter);
+    globalThis.addEventListener("dragleave", leave);
+    globalThis.addEventListener("dragover", over);
+    globalThis.addEventListener("drop", drop);
+    return () => {
+      globalThis.removeEventListener("dragenter", enter);
+      globalThis.removeEventListener("dragleave", leave);
+      globalThis.removeEventListener("dragover", over);
+      globalThis.removeEventListener("drop", drop);
+    };
+  }, [attach]);
+
+  // The + menu shuts on a press outside it.
+  useEffect(() => {
+    if (!menu) return;
+    const outside = (e: MouseEvent): void => {
+      if (!plus.current?.contains(e.target as Node)) setMenu(false);
+    };
+    document.addEventListener("mousedown", outside);
+    return () => document.removeEventListener("mousedown", outside);
+  }, [menu]);
 
   const submit = async (): Promise<void> => {
-    const text = draft.trim();
-    if (!text) return;
-    setDraft("");
+    const words = draft.trim();
+    if ((!words && files.length === 0) || sending) return;
+    const v = view.view;
     setError(null);
+    setSending(true);
     try {
-      await view.send(text);
+      // Each file into the workspace first, where `/upload` puts it; the message then says
+      // where, in `/upload`'s words, and names a folder by its path.
+      const lines: string[] = [];
+      for (const f of files) {
+        if (f.kind === "folder") {
+          lines.push(`the folder ${f.name} on this computer`);
+          continue;
+        }
+        if (!v) throw new Error("not attached: the session is not open yet");
+        const target = `session:/${f.name}`;
+        await v.fsUpload(target, f.content ?? "");
+        lines.push(`uploaded ${f.name} to ${target}`);
+      }
+      const message = [words, lines.join("\n")].filter(Boolean).join("\n\n");
+      setDraft("");
+      setFiles([]);
+      await view.send(message);
       onSent();
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-      setDraft(text);
+      setError(reasonOf(e));
+      setDraft((d) => d || words);
+    } finally {
+      setSending(false);
     }
   };
 
+  const addFolder = async (): Promise<void> => {
+    setMenu(false);
+    const path = await pickDirectory?.();
+    if (path) setFiles((had) => [...had, { id: `a${++attached}`, kind: "folder", name: path, about: "folder" }]);
+  };
+
+  // What sending does right now, where it is more than Enter: said over the box.
+  const state = dormant
+    ? "This session is asleep. Sending wakes it, which takes about twenty seconds."
+    : looping
+      ? "A loop is working towards the goal. What you send goes between two of its iterations."
+      : waiting
+        ? waiting
+        : busy
+          ? "The session is working. What you send is queued and goes next."
+          : !live
+            ? "Not connected. What you send is held and goes when the connection comes back."
+            : null;
+  const canSend = (draft.trim() !== "" || files.length > 0) && !sending;
+  const artifactsWhy = !here ? "Not yet on the platform" : !daemon ? "Needs this computer's daemon" : null;
+  const folderWhy = !here ? "Only for sessions on this computer" : !pickDirectory ? "Needs the desktop app's folder chooser" : null;
+
   return (
-    <form
-      className="composer"
-      onSubmit={(e) => {
-        e.preventDefault();
-        void submit();
-      }}
-    >
-      <p className="hint">
-        {dormant
-          ? "This session is asleep. Sending wakes it, which takes about twenty seconds."
-          : looping
-            ? "A loop is working towards the goal. What you send goes between two of its iterations."
-            : waiting
-              ? waiting
-              : busy
-                ? "The session is working. What you send is queued and goes next."
-                : !live
-                  ? "Not connected. What you send is held and goes when the connection comes back."
-                  : "Enter sends, Shift+Enter starts a new line."}
-      </p>
-      <textarea
-        value={draft}
-        onChange={(e) => setDraft(e.target.value)}
-        aria-label="Message"
-        placeholder="Write to the troupe"
-        onKeyDown={(e) => {
-          if (e.key === "Enter" && !e.shiftKey) {
-            e.preventDefault();
-            void submit();
-          }
-          // A slash on an empty draft is a command, not a message: the palette says which.
-          if (e.key === "/" && draft === "") {
-            e.preventDefault();
-            onCommands();
-          }
+    <div className="dock">
+      {(state || others.length > 0) && (
+        <p className="hint">
+          {state}
+          {state && others.length > 0 ? " " : ""}
+          {others.length > 0 &&
+            (others.length === 1 ? `${others[0]} sees what you send.` : `${others.slice(0, -1).join(", ")} and ${others.at(-1)} see what you send.`)}
+        </p>
+      )}
+      <form
+        className="composer"
+        onSubmit={(e) => {
+          e.preventDefault();
+          void submit();
         }}
-      />
-      <div className="row">
-        {others.length > 0 && (
-          <span className="hint">
-            {others.length === 1 ? `${others[0]} sees what you send` : `${others.slice(0, -1).join(", ")} and ${others.at(-1)} see what you send`}
-          </span>
+      >
+        {commands}
+        {files.length > 0 && (
+          <div className="att" aria-label="Attached">
+            {files.map((f) => (
+              <span key={f.id} className="file">
+                <span className="glyph" aria-hidden="true">
+                  {f.kind === "folder" ? "▣" : "▤"}
+                </span>
+                <span className="n" title={f.name}>
+                  {f.name}
+                </span>
+                <span className="s">{f.about}</span>
+                <button type="button" aria-label={`Remove ${f.name}`} onClick={() => setFiles((had) => had.filter((x) => x.id !== f.id))}>
+                  ✕
+                </button>
+              </span>
+            ))}
+          </div>
         )}
-        <span className="spacer" />
-        <button type="button" onClick={onCommands} title="Every command, filtered as you type (Ctrl-K, or / on an empty line)">
-          / Commands
-        </button>
-        {busy && (
-          <button type="button" onClick={() => void view.cancel()}>
-            Stop
+        <textarea
+          ref={text}
+          rows={1}
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          aria-label="Message"
+          placeholder="Write to the troupe. Enter sends, Shift+Enter for a new line."
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+              e.preventDefault();
+              void submit();
+            }
+            // A slash on an empty message is a command, not a message: the commands say which.
+            if (e.key === "/" && draft === "") {
+              e.preventDefault();
+              onCommands();
+            }
+          }}
+        />
+        <div className="bar">
+          <div className="plus" ref={plus}>
+            <button type="button" className="ib" aria-label="Add files" aria-haspopup="true" aria-expanded={menu} onClick={() => setMenu((m) => !m)}>
+              +
+            </button>
+            {menu && (
+              <div className="pop" aria-label="Add to message">
+                <button
+                  type="button"
+                  className="item"
+                  onClick={() => {
+                    setMenu(false);
+                    picker.current?.click();
+                  }}
+                >
+                  <span className="ico">↑</span>
+                  <span>
+                    <span className="t">Upload files</span>
+                    <span className="d">Text files, into the workspace with your message. Or drop them anywhere on the window</span>
+                  </span>
+                </button>
+                {/* On a session on the platform the plane would have to put the files into
+                    its workspace itself: troupe #920, part 3. */}
+                <button
+                  type="button"
+                  className="item"
+                  disabled={artifactsWhy !== null}
+                  onClick={() => {
+                    setMenu(false);
+                    setArtifacts(true);
+                  }}
+                >
+                  <span className="ico">◇</span>
+                  <span>
+                    <span className="t">Add from artifacts</span>
+                    <span className="d">{artifactsWhy ?? "Something you or your troupe has published"}</span>
+                  </span>
+                </button>
+                <button type="button" className="item" disabled={folderWhy !== null} onClick={() => void addFolder()}>
+                  <span className="ico">▣</span>
+                  <span>
+                    <span className="t">Add a folder</span>
+                    <span className="d">{folderWhy ?? "Named in your message, by its path on this computer"}</span>
+                  </span>
+                </button>
+              </div>
+            )}
+          </div>
+          <button type="button" className="ib slash" aria-label="Commands" title="Every command, filtered as you type (/ on an empty message, or Ctrl-K)" data-palette-toggle onClick={onCommands}>
+            /
           </button>
-        )}
-        <button type="submit" className="send" disabled={!draft.trim()}>
-          {dormant ? "Wake and send" : busy ? "Queue" : "Send"}
-        </button>
-      </div>
-      {error && <p className="hint error">{error}</p>}
-    </form>
+          <span className="spacer" />
+          {profile && (
+            <span className="chip wide" title="A session keeps the profile it started with">
+              <span className="dot profile-dot" aria-hidden="true" />
+              {profile}
+            </span>
+          )}
+          {agent}
+          <ContextRing fill={context} />
+          {busy && (
+            <button type="button" className="send stop" onClick={() => void view.cancel().catch((e: unknown) => setError(reasonOf(e)))} title="Stop what the troupe is doing">
+              <span className="visually-hidden">Stop</span>
+              <span aria-hidden="true">■</span>
+            </button>
+          )}
+          {(!busy || canSend) && (
+            <button type="submit" className="send" disabled={!canSend} title={dormant ? "Wake the session and send" : busy ? "Queued: it goes next" : "Send"}>
+              <span className="visually-hidden">{dormant ? "Wake and send" : busy ? "Queue" : "Send"}</span>
+              <span aria-hidden="true">↑</span>
+            </button>
+          )}
+        </div>
+        <input
+          ref={picker}
+          type="file"
+          multiple
+          hidden
+          onChange={(e) => {
+            if (e.target.files?.length) void attach(e.target.files);
+            e.target.value = "";
+          }}
+        />
+      </form>
+      {error && (
+        <p className="hint error" role="alert">
+          {error}
+        </p>
+      )}
+      {artifacts && daemon && <ArtifactPicker daemon={daemon} onPick={(picked) => (setFiles((had) => [...had, ...picked]), setArtifacts(false))} onClose={() => setArtifacts(false)} />}
+      {dragging && (
+        <div className="drop" aria-hidden="true">
+          <div>Drop files to hand them to the troupe</div>
+        </div>
+      )}
+    </div>
   );
 }
 

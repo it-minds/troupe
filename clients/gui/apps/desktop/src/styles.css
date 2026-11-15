@@ -1009,63 +1009,81 @@ main {
   flex-direction: column;
 }
 
-/* The head: where the session is, in a mono breadcrumb, over its title in black; who
-   is here at the right, and the controls after them. `.subject` stacks the crumbs and
-   the title, and is where a goal line goes when the session has one. */
+/* The head, one line (docs/design/session-chat.dc.html): back, the mask and the title in
+   black, the session's setup as mono tags, then who is here, the status, Invite and ⋯. On
+   a phone the tags and the words beside the arrow give way; the title keeps what is left. */
 .session-head {
+  flex: none;
   display: flex;
   gap: var(--space-3);
   align-items: center;
-  flex-wrap: wrap;
-  padding: var(--space-4) var(--space-6);
+  min-width: 0;
+  padding: 10px var(--space-5);
   border-bottom: var(--bw-hairline) solid var(--border-hairline);
   background: var(--bg-canvas);
 }
-.session-head .subject {
-  flex: 1 1 260px;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-}
-.session-head .crumbs {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--space-2);
+.session-head .back {
+  flex: none;
+  min-height: 32px;
+  padding: 0 6px;
+  border: none;
+  background: none;
   font: var(--t-micro);
-  letter-spacing: 0.08em;
+  letter-spacing: var(--tracking-micro);
   text-transform: uppercase;
   color: var(--text-label);
+  white-space: nowrap;
 }
-.session-head .crumbs .sep {
-  color: var(--text-muted);
-}
-.session-head .crumbs .profile {
-  font: var(--t-code);
-  color: var(--running-fg);
-  text-transform: none;
-  letter-spacing: 0;
-}
-.session-head .crumbs .id {
-  color: var(--text-muted);
-  text-transform: none;
-}
-.session-head .crumbs button.link {
-  font: inherit;
-  letter-spacing: inherit;
-  text-transform: inherit;
-  color: var(--text-label);
-}
-.session-head .crumbs button.link:hover:not(:disabled) {
+.session-head .back:hover:not(:disabled) {
+  filter: none;
   color: var(--text-primary);
-  text-decoration: none;
+}
+.session-head .head-mask {
+  flex: none;
+  display: grid;
+  place-items: center;
 }
 .session-head .title {
-  font: var(--t-heading);
-  letter-spacing: var(--tracking-heading);
+  flex: 0 1 auto;
+  min-width: 0;
+  margin: 0;
+  font: var(--t-name);
+  font-size: 17px;
+  font-weight: 900;
   color: var(--text-primary);
-  overflow-wrap: break-word;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.session-head .crumbs {
+  flex: 0 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-wrap: nowrap;
+  overflow: hidden;
+  align-items: center;
+  gap: 6px;
+  font: var(--t-micro);
+}
+.session-head .tag {
+  padding: 3px 7px;
+  border: var(--bw-hairline) solid var(--border-strong);
+  font: var(--t-micro);
+  color: var(--text-label);
+  white-space: nowrap;
+}
+.session-head .tag.profile {
+  border-color: var(--running-bd);
+  color: var(--running-fg);
+}
+.session-head .spacer {
+  flex: 1 1 auto;
+}
+.session-head .controls {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
 }
 .session-head .here {
   display: flex;
@@ -1076,44 +1094,163 @@ main {
   margin-left: var(--space-1);
   color: var(--text-label);
 }
-.session-head .controls {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  flex-wrap: wrap;
+/* An icon button: the head's ⋯ and the composer's + and /. */
+.session .ib {
+  flex: none;
+  width: 36px;
+  min-width: 36px;
+  height: 36px;
+  min-height: 36px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  border: none;
+  background: none;
+  font-size: 18px;
+  color: var(--text-secondary);
 }
-.session-head select {
-  min-height: 32px;
-  padding: 4px 12px;
+.session .ib:hover:not(:disabled),
+.session .ib[aria-expanded="true"] {
+  filter: none;
+  color: var(--text-primary);
+  background: var(--bg-raised);
+}
+/* The ⋯ menu: a sheet under the head, its items as the composer's popovers draw them. */
+.session-menu {
+  position: relative;
+}
+.session-menu .menu-pop {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 30;
+  width: min(320px, calc(100vw - 24px));
+  padding: 6px;
+  background: var(--bg-panel);
+  border: var(--bw-hairline) solid var(--border-strong);
+  box-shadow: 5px 5px 0 var(--bg-shadow);
+  display: flex;
+  flex-direction: column;
+}
+.session-menu .menu-pop[hidden] {
+  display: none;
+}
+.session-menu .item {
+  flex-direction: column;
+  gap: 2px;
+}
+.session-menu .menu-remote {
+  padding: 8px 10px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+.session-menu .menu-facts {
+  margin: 4px 10px 6px;
+  padding-top: 8px;
+  border-top: var(--bw-hairline) solid var(--border-hairline);
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 4px 12px;
+  font: var(--t-ui-small);
+  color: var(--text-secondary);
+}
+.session-menu .menu-facts dt {
+  font: var(--t-micro);
+  letter-spacing: var(--tracking-micro);
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.session-menu .menu-facts dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+/* A menu's item, here and in the composer's popovers: a word in the name face over a line saying what it does. */
+.session .item {
+  width: 100%;
+  min-height: 0;
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 9px 10px;
+  border: none;
+  background: none;
+  text-align: left;
+}
+.session .item:hover:not(:disabled),
+.session .item[aria-pressed="true"] {
+  filter: none;
+  background: var(--bg-raised);
+}
+.session .item:disabled {
+  opacity: 0.55;
+}
+.session .item .ico {
+  flex: none;
+  width: 20px;
+  text-align: center;
   font: var(--t-code);
+  color: var(--text-label);
+}
+.session .item .t {
+  display: block;
+  font: var(--t-ui);
+  font-weight: 700;
+  color: var(--text-primary);
+}
+.session .item .d {
+  display: block;
+  margin-top: 1px;
+  font: var(--t-ui-small);
+  color: var(--text-secondary);
+}
+@media (max-width: 760px) {
+  .session-head {
+    gap: var(--space-2);
+    padding: 8px 12px;
+  }
+  .session-head .crumbs,
+  .session-head .back .wide,
+  .session-head .here .count {
+    display: none;
+  }
 }
 
-/* The goal, under the title: a mono caption in the machine's cyan, then the goal in the
-   reading face on one line, clipped, the whole of it on hover and a click away. What
-   can be done about it sits at the end in mono, quieter than the goal itself, and how
-   the last loop ended is a literal line under it. */
-.session-head .goal-block {
+/* The goal, one line under the head while there is one (set with /goal): a mono caption
+   in the machine's cyan, then the goal in the reading face, clipped, the whole of it on
+   hover and a click away; what can be done about it at the end, and the loop beside it. */
+.goal-bar {
+  flex: none;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-3);
+  padding: 6px var(--space-5);
+  border-bottom: var(--bw-hairline) solid var(--border-hairline);
+  background: var(--bg-canvas);
+}
+.goal-bar .goal-block {
+  flex: 1 1 260px;
   display: flex;
   flex-direction: column;
   gap: 2px;
   min-width: 0;
-  margin-top: 3px;
 }
-.session-head .goal {
+.goal-bar .goal {
   display: flex;
   flex-wrap: wrap;
   align-items: baseline;
   gap: var(--space-1) var(--space-3);
   min-width: 0;
 }
-.session-head .goal .label {
+.goal-bar .goal .label {
   flex: none;
   font: var(--t-micro);
   letter-spacing: var(--tracking-micro);
   text-transform: uppercase;
   color: var(--running-fg);
 }
-.session-head .goal .text {
+.goal-bar .goal .text {
   flex: 0 1 auto;
   min-width: 0;
   max-width: 100%;
@@ -1128,54 +1265,54 @@ main {
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.session-head .goal.shown {
+.goal-bar .goal.shown {
   flex-wrap: nowrap;
 }
-.session-head .goal.open .text {
+.goal-bar .goal.open .text {
   white-space: normal;
   overflow-wrap: anywhere;
 }
-.session-head .goal .text:hover:not(:disabled) {
+.goal-bar .goal .text:hover:not(:disabled) {
   filter: none;
   color: var(--text-primary);
 }
-.session-head .goal .actions {
+.goal-bar .goal .actions {
   flex: none;
   display: flex;
   gap: var(--space-3);
 }
-.session-head .goal button.link {
+.goal-bar .goal button.link {
   font: var(--t-micro);
   letter-spacing: var(--tracking-micro);
   text-transform: uppercase;
   color: var(--text-label);
 }
-.session-head .goal button.link:hover:not(:disabled) {
+.goal-bar .goal button.link:hover:not(:disabled) {
   color: var(--text-primary);
   text-decoration: none;
 }
-.session-head .goal input {
+.goal-bar .goal input {
   flex: 1 1 240px;
   min-width: 0;
   min-height: 32px;
   padding: 4px 10px;
   font: var(--t-note);
 }
-.session-head .goal label.inline {
+.goal-bar .goal label.inline {
   flex: none;
   font: var(--t-note);
   color: var(--text-secondary);
 }
-.session-head .goal label.inline input {
+.goal-bar .goal label.inline input {
   flex: none;
   width: 6em;
 }
-.session-head .goal-note {
+.goal-bar .goal-note {
   margin: 0;
   font: var(--t-code-small);
   color: var(--text-muted);
 }
-.session-head .goal-block .note.error {
+.goal-bar .goal-block .note.error {
   margin: 0;
 }
 
@@ -1190,9 +1327,13 @@ main {
   align-items: stretch;
   overflow: auto;
 }
-/* `--transcript-min`: the room the transcript keeps above the panels (`.stream`). */
+/* `--transcript-min`: the room the transcript keeps above the panels (`.stream`).
+   `--column`: the chat's one column, which the transcript, the cards under it and the
+   composer share, centred in the track; `--gutter` is the space either side of it. */
 .conversation {
   --transcript-min: min(9rem, 22vh);
+  --column: 760px;
+  --gutter: max(var(--space-5), calc((100% - var(--column)) / 2));
   flex: 3 1 420px;
   min-width: 0;
   display: flex;
@@ -1217,36 +1358,62 @@ main {
   }
 }
 
+/* With nothing beside it (no backstage, no scratchpad) the conversation is the screen at
+   every width, a phone's too: the transcript scrolls and the composer stays at the foot. */
+.stagearea:not(:has(> .backstage, > .scratchpad)) {
+  flex-wrap: nowrap;
+  overflow: hidden;
+}
+.stagearea:not(:has(> .backstage, > .scratchpad)) > .conversation {
+  min-height: 0;
+  overflow-y: auto;
+}
+
 /* The transcript keeps room for the last lines and the waiting line under them whatever
    the panels below it ask, so an approval never hides what it answers: the panels give
    way first, their bodies scrolling. On a very short window the minimum gives a little
-   too, so a panel's answers and the composer still fit. */
+   too, so a panel's answers and the composer still fit. The column is centred by the
+   padding, so the scrollbar stays at the track's edge. */
 .stream {
   flex: 1;
   min-height: var(--transcript-min);
   overflow: auto;
-  padding: var(--space-6);
+  scrollbar-gutter: stable;
+  padding: 28px var(--gutter) 32px;
   display: flex;
   flex-direction: column;
-  gap: var(--space-6);
+  gap: 26px;
 }
 /* The machine's own lines — started, switched, compacted — sit close together: a run
    of them is one aside, not a turn each. */
-.stream > .note {
+.stream .note {
   margin: 0;
 }
-.stream > .note + .note {
-  margin-top: calc(-1 * var(--space-4));
+.stream > .note + .note,
+.reply-body > .note + .note {
+  margin-top: -18px;
 }
-/* What a turn cost belongs to the turn, so it sits close under the answer. */
-.stream > .turn + .note.turn-cost {
-  margin-top: calc(-1 * var(--space-4));
+/* The start: a line in the screen face across the column. */
+.stream > .divider {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: -6px;
+  font: var(--t-screen);
+  letter-spacing: 0.14em;
+  color: var(--running-fg);
+}
+.stream > .divider::before,
+.stream > .divider::after {
+  content: "";
+  flex: 1 1 auto;
+  height: 1px;
+  background: var(--border-hairline);
 }
 
-/* A turn: who, over what they said. A person's words sit on the pit behind an edge in
-   their colour; the troupe's stand on the void with nothing around them. */
+/* A turn: who, over what they said. A person's words are a block on the right; the
+   troupe's reply stands on the page beside the mask, with nothing around it. */
 .turn {
-  max-width: var(--measure-reading);
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
@@ -1273,20 +1440,29 @@ main {
 .turn .body p:last-child {
   margin-bottom: 0;
 }
+.turn.person {
+  align-self: flex-end;
+  align-items: flex-end;
+  max-width: 85%;
+}
 .turn.person .byline .name,
 .turn.person .byline .ring {
   color: var(--author, var(--p-self));
 }
 .turn.person .body {
-  padding: var(--space-3) var(--space-4);
-  background: var(--bg-panel);
-  border-left: var(--bw-edge) solid var(--author, var(--p-self));
+  padding: 12px 16px;
+  background: var(--bg-raised);
+  border: var(--bw-hairline) solid var(--border-hairline);
+  color: var(--text-primary);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+/* Somebody else's words keep their colour along the edge, so the stream says who. */
+.turn.person:not(.self) .body {
+  border-right: var(--bw-edge) solid var(--author);
 }
 .turn.self {
   --author: var(--p-self);
-}
-.turn.agent .byline .name {
-  color: var(--p-agent);
 }
 /* A subagent's brief, from the agent that delegated it, its parts under their names
    (troupe Decision 852): the agent's colour, set off as a person's turn is. */
@@ -1303,14 +1479,86 @@ main {
   white-space: pre-wrap;
 }
 /* Held: not in the stream until the server says it is. Amber, and a dashed edge. */
-.turn.queued .byline .name {
+.turn.queued .body {
+  background: var(--bg-panel);
+  border: var(--bw-hairline) dashed var(--queued-bd);
   color: var(--text-secondary);
 }
-.turn.queued .body {
-  padding: var(--space-3) var(--space-4);
+
+/* The troupe's reply: the mask in a square, then "Troupe", the strip its working folds
+   into, the answer on the page, and the row under it. */
+.reply {
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr);
+  gap: 12px;
+}
+.reply .avatar {
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  border: var(--bw-hairline) solid var(--border-hairline);
   background: var(--bg-panel);
-  border-left: var(--bw-edge) dashed var(--queued-bd);
-  color: var(--text-secondary);
+}
+.reply-body {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+.reply-body > .who {
+  margin-bottom: -10px;
+  font: var(--t-name);
+  font-weight: 800;
+  line-height: 32px;
+  color: var(--text-primary);
+}
+/* Under a reply: Copy, Retry, Publish and what the turn cost, shown on hover or focus,
+   and always where nothing hovers. */
+.reply .foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  margin-top: -8px;
+  opacity: 0;
+  transition: opacity var(--dur-fast, 0.12s) ease;
+}
+.reply:hover .foot,
+.reply .foot:focus-within {
+  opacity: 1;
+}
+@media (hover: none) {
+  .reply .foot {
+    opacity: 1;
+  }
+}
+.reply .foot .fbtn {
+  min-height: 28px;
+  padding: 0 8px;
+  border: none;
+  background: none;
+  font: var(--t-micro);
+  letter-spacing: var(--tracking-micro);
+  text-transform: uppercase;
+  color: var(--text-label);
+}
+.reply .foot .fbtn:hover:not(:disabled) {
+  filter: none;
+  color: var(--text-primary);
+  background: var(--bg-raised);
+}
+.reply .foot .note.turn-cost {
+  margin-left: 8px;
+  color: var(--text-muted);
+}
+@media (max-width: 560px) {
+  .conversation {
+    --gutter: 14px;
+  }
+  .turn.person {
+    max-width: 92%;
+  }
 }
 
 /* The caret while the troupe writes: a block of the machine's cyan, blinking. */
@@ -1705,7 +1953,7 @@ details.advanced > summary {
 }
 
 /* A turn's working, one line where it began; a press opens the turn. */
-.stream > button.strip {
+.stream button.strip {
   flex: none;
   align-self: flex-start;
   max-width: var(--measure-reading);
@@ -1717,7 +1965,7 @@ details.advanced > summary {
   color: var(--text-muted);
   text-align: left;
 }
-.stream > button.strip:hover:not(:disabled) {
+.stream button.strip:hover:not(:disabled) {
   filter: none;
   color: var(--text-secondary);
 }
@@ -1725,11 +1973,11 @@ details.advanced > summary {
   color: var(--error-fg);
 }
 /* The working sits close together, under the line that stands for it. */
-.stream > .strip + .tool-frame,
-.stream > .strip + .reasoning-frame,
-.stream > .tool-frame + .tool-frame,
-.stream > .reasoning-frame + .tool-frame,
-.stream > .tool-frame + .reasoning-frame {
+.reply-body > .strip + .tool-frame,
+.reply-body > .strip + .reasoning-frame,
+.reply-body > .tool-frame + .tool-frame,
+.reply-body > .reasoning-frame + .tool-frame,
+.reply-body > .tool-frame + .reasoning-frame {
   margin-top: calc(-1 * var(--space-4));
 }
 
@@ -2021,9 +2269,11 @@ details.advanced > summary {
   color: var(--running-fg);
 }
 /* Said again for the conversation's column, where the onboarding panel also carries the
-   start screen's `.start`, whose `flex: 1` would have it grow like the transcript. */
+   start screen's `.start`, whose `flex: 1` would have it grow like the transcript. A card
+   at the transcript's foot, in the chat's column. */
 .conversation > .approval {
   flex: 0 1 auto;
+  margin-inline: var(--gutter);
 }
 @media (min-width: 720px) {
   .conversation > .approval {
@@ -2193,6 +2443,27 @@ details.advanced > summary {
   font: var(--t-note);
 }
 
+/* A call's approval is one row, as the session chat's comp draws it: Allow once, then the
+   two that allow more (for this session, and always, which waits on the server), and Deny
+   at the far end. They wrap at the phone's width, Deny with them. */
+.approval .answers .always {
+  flex: 0 1 auto;
+  min-height: var(--touch-target);
+  border-color: var(--border-hairline);
+  color: var(--text-secondary);
+  font: var(--t-note);
+}
+.approval .answers:has(> .always) > .scoped {
+  flex: 0 1 auto;
+}
+.approval .answers:has(> .always) > .deny {
+  flex: 0 1 auto;
+  margin-left: auto;
+  padding: 0 var(--space-4);
+  border-color: transparent;
+  color: var(--denied-fg);
+}
+
 /* A delegation at the gate (troupe Decision 850): what the subagent gets, as facts, and
    the brief's parts, each changed in place. */
 .approval .facts.gate,
@@ -2277,62 +2548,294 @@ details.advanced > summary {
 
 /* -- composer --------------------------------------------------------------- */
 
-/* On the pit, ruled, in the conversation's margin: a mono line saying what sending
-   does right now, the field, and who sees it beside the one button. */
-.composer {
-  /* Never squeezed by a long transcript: the stream above it takes the leftover. */
+/* One box in the chat's column (docs/design/session-chat.dc.html): what is attached as
+   tags, the message, and a bar — + and / on the left; the profile, the agent, the
+   context ring and Send on the right. It stands on the hard shadow; focused, a thin line
+   of the reserved pink along its top, and no ring. What sending does now, when it is more
+   than Enter, is a mono line over it. */
+.dock {
   flex: none;
-  margin: 0 var(--space-6) var(--space-6);
-  background: var(--bg-panel);
-  border: var(--bw-hairline) solid var(--border-strong);
-  padding: var(--space-3);
+  padding: 0 var(--gutter) 18px;
   display: flex;
   flex-direction: column;
-  gap: var(--space-2);
+  gap: 6px;
 }
-.composer .hint {
+.dock > .hint {
   margin: 0;
   font: var(--t-micro);
   letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--text-muted);
 }
-.composer .hint.error {
+.dock > .hint.error {
   text-transform: none;
   letter-spacing: 0;
   color: var(--error-fg);
 }
-.composer textarea {
-  min-height: var(--composer-min-height);
-  border-color: var(--border-hairline);
-  font: var(--t-body);
-  line-height: 1.6;
+.composer {
+  position: relative;
+  background: var(--bg-panel);
+  border: var(--bw-hairline) solid var(--border-strong);
+  box-shadow: 5px 5px 0 var(--bg-shadow);
 }
-.composer .row {
-  min-height: 0;
+.composer:focus-within {
+  border-color: var(--text-secondary);
+  box-shadow:
+    5px 5px 0 var(--bg-shadow),
+    inset 0 2px 0 var(--accent);
+}
+.composer textarea {
+  display: block;
+  width: 100%;
+  min-height: 52px;
+  max-height: 40vh;
+  padding: 14px 16px 6px;
+  border: none;
+  background: transparent;
+  resize: none;
+  overflow-y: auto;
+  font: var(--t-body);
+  line-height: 1.55;
+  color: var(--text-primary);
+}
+/* The box's own line is the focus mark: the field inside it draws none of its own. */
+.composer textarea:focus,
+.composer textarea:focus-visible {
+  outline: none;
+  box-shadow: none;
+}
+.composer textarea::placeholder {
+  color: var(--text-muted);
+}
+.composer .att {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 10px 12px 0;
+}
+.composer .file {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 260px;
+  padding: 4px 4px 4px 10px;
+  border: var(--bw-hairline) solid var(--border-strong);
+  background: var(--bg-canvas);
+  font: var(--t-ui-small);
+  color: var(--text-body);
+}
+.composer .file .glyph {
+  font: var(--t-code);
+  color: var(--p-agent);
+}
+.composer .file .n {
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.composer .file .s {
+  flex: none;
+  font: var(--t-micro);
+  color: var(--text-muted);
+}
+.composer .file button {
+  width: 24px;
+  min-width: 24px;
+  height: 24px;
+  min-height: 24px;
   padding: 0;
   border: none;
+  background: none;
+  color: var(--text-label);
+}
+.composer .bar {
   display: flex;
-  gap: var(--space-2);
   align-items: center;
-  flex-wrap: wrap;
+  gap: 4px;
+  padding: 6px 8px 8px;
 }
-.composer .row button {
-  min-height: 42px;
+.composer .bar .spacer {
+  flex: 1 1 auto;
 }
-/* The send is the ink itself: the body colour filled, the ground's colour on it. */
-.composer .row .send {
-  background: var(--text-body);
+.composer .ib.slash {
+  font: var(--t-code);
+  font-size: 16px;
+}
+.composer .plus {
+  position: relative;
+}
+/* The bar's chips: the profile, a fact, and the agent, a press away from switching. */
+.composer .chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 30px;
+  padding: 0 9px;
+  border: var(--bw-hairline) solid var(--border-hairline);
+  background: none;
+  font: var(--t-micro);
+  color: var(--text-label);
+  white-space: nowrap;
+}
+.composer button.chip:hover:not(:disabled),
+.composer button.chip[aria-expanded="true"] {
+  filter: none;
+  border-color: var(--border-strong);
+  color: var(--text-primary);
+}
+.composer .chip .dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+}
+.composer .chip .profile-dot {
+  background: var(--running-solid);
+}
+.composer .chip .agent-dot {
+  background: var(--p-agent);
+}
+.composer .agent-switch {
+  display: flex;
+}
+.composer .ring-context {
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+}
+.ring-context circle {
+  fill: none;
+  stroke-width: 3;
+}
+.ring-context .track {
+  stroke: var(--bg-raised);
+}
+.ring-context .arc {
+  stroke: var(--running-solid);
+}
+.ring-context.full .arc {
+  stroke: var(--queued-fg);
+}
+/* No window reported: a quarter arc turning slowly, which says "some" and not how much. */
+.ring-context.unknown svg {
+  animation: curtain-turn 3s linear infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .ring-context.unknown svg {
+    animation: none;
+  }
+}
+/* Send: the machine's cyan, square, on its shadow; Stop the ink in its place. */
+.composer .send {
+  flex: none;
+  width: 38px;
+  min-width: 38px;
+  height: 38px;
+  min-height: 38px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  border: none;
+  background: var(--running-solid);
   color: var(--text-inverse);
-  border-color: transparent;
+  box-shadow: 3px 3px 0 var(--bg-shadow);
+  font-size: 18px;
+  font-weight: 900;
+}
+.composer .send:disabled {
+  background: var(--bg-raised);
+  color: var(--text-muted);
+  box-shadow: none;
+}
+.composer .send.stop {
+  background: var(--text-body);
+}
+/* The composer's popovers: over the box, from its left edge. */
+.composer .pop {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 0;
+  z-index: 20;
+  min-width: 280px;
+  max-width: min(420px, calc(100vw - 24px));
+  padding: 6px;
+  background: var(--bg-panel);
+  border: var(--bw-hairline) solid var(--border-strong);
+  box-shadow: 5px 5px 0 var(--bg-shadow);
+}
+/* The commands, opened from the composer: over the box, as wide as it, the rows above the line the filter is typed on. */
+.composer .palette-pop {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 0;
+  right: 0;
+  z-index: 20;
+}
+.palette-pop .palette {
+  width: 100%;
+  max-height: min(60vh, 520px);
+  box-shadow: 5px 5px 0 var(--bg-shadow);
+}
+/* Files dragged over the window. */
+.dock .drop {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: grid;
+  place-items: center;
+  background: color-mix(in srgb, var(--bg-stage) 82%, transparent);
+  pointer-events: none;
+}
+.dock .drop > div {
+  padding: 36px 48px;
+  border: 2px dashed var(--running-solid);
+  background: var(--bg-panel);
+  font: var(--t-name);
+  font-size: 20px;
   font-weight: 800;
-  font-size: 14px;
-  padding: 0 var(--space-5);
+  color: var(--text-primary);
+}
+@media (max-width: 560px) {
+  .dock {
+    padding-bottom: 10px;
+  }
+  .composer .chip.wide,
+  .composer .ring-context {
+    display: none;
+  }
+}
+/* The artifact picker's list: one press attaches an artifact's files. */
+.artifact-picker .picker-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  max-height: 50vh;
+  overflow-y: auto;
+}
+.artifact-picker .picker-list .item {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  border: none;
+  background: none;
+  text-align: left;
+}
+.artifact-picker .picker-list .item .t {
+  font: var(--t-ui);
+  font-weight: 700;
+  color: var(--text-primary);
+}
+.artifact-picker .picker-list .item .d {
+  font: var(--t-ui-small);
+  color: var(--text-secondary);
 }
 
 /* A read-only session has no composer at all: a disabled box invites clicking at it. */
 .instead {
-  margin: 0 var(--space-6) var(--space-6);
+  margin: 0 var(--gutter) var(--space-6);
   border: var(--bw-hairline) solid var(--border-hairline);
   background: var(--bg-panel);
   padding: var(--space-4);
@@ -3609,18 +4112,10 @@ details.advanced > summary {
     margin-top: 0;
     min-height: var(--touch-target);
   }
-  /* The session head on a phone is one line under the way back: the title, the status,
-     and the backstage toggle. Who is here, the goal and the controls come with the
-     backstage, so the conversation keeps the screen. */
-  .session-head:not(.full) .crumbs > :not(button.link),
-  .session-head:not(.full) .goal-block,
-  .session-head:not(.full) .here,
-  .session-head:not(.full) .controls > :not(.pill):not(.backstage-toggle) {
+  /* The session head on a phone keeps the way back, the title, the status, Invite and ⋯;
+     who it is shared with by name is in Invite's dialog. */
+  .session-head .invites .shared {
     display: none;
-  }
-  .session-head:not(.full) {
-    padding-top: var(--space-2);
-    padding-bottom: var(--space-2);
   }
   .screen-head,
   .toolbar,
@@ -3654,12 +4149,10 @@ details.advanced > summary {
     padding-right: var(--space-4);
   }
   .approval,
-  .composer,
   .instead {
     margin-left: var(--space-4);
     margin-right: var(--space-4);
   }
-  .composer,
   .instead {
     margin-bottom: var(--space-4);
   }
@@ -4237,7 +4730,61 @@ pre.instruction {
   padding-bottom: var(--space-2);
   text-transform: uppercase;
 }
-@media (max-width: 480px) {
+/* The list keeps its room whatever the chosen command's detail says: eight rows at least,
+   scrolling inside itself, and the detail (a file's prompt can be long) scrolls in a box of
+   its own and takes no rows from it. From 1024px the detail stands beside the list, each
+   scrolling on its own; narrower it stacks under the list, held to a share of the height. */
+.palette .rows {
+  min-height: min(18rem, 40vh);
+}
+.palette .detail {
+  flex: 0 1 auto;
+  min-height: min(7rem, 16vh);
+  max-height: 30vh;
+  overflow-y: auto;
+}
+.palette .detail .sends pre {
+  max-height: none;
+  overflow-x: auto;
+}
+.palette-pop .palette {
+  max-height: calc(100vh - 220px);
+}
+@media (min-width: 1024px) {
+  .palette {
+    display: grid;
+    grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+    grid-template-rows: auto minmax(0, 1fr) auto auto;
+    height: min(80vh, 600px);
+  }
+  .palette-pop .palette {
+    height: min(calc(100vh - 220px), 560px);
+  }
+  .palette > input,
+  .palette > .notice,
+  .palette > .keys {
+    grid-column: 1 / -1;
+  }
+  .palette > .rows {
+    grid-column: 1;
+    grid-row: 2;
+    min-height: 0;
+  }
+  .palette > .detail {
+    grid-column: 2;
+    grid-row: 2;
+    min-height: 0;
+    max-height: none;
+    border-top: none;
+    border-left: var(--bw-hairline) solid var(--border-hairline);
+  }
+  .palette > .notice {
+    grid-row: 3;
+  }
+  .palette > .keys {
+    grid-row: 4;
+  }
+}@media (max-width: 480px) {
   .palette .row {
     grid-template-columns: 1fr;
     gap: var(--space-half);

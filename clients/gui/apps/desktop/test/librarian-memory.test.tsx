@@ -19,7 +19,7 @@ import { FakeDaemon, exampleFacts, exampleOnboarding } from "../../../packages/c
 import type { FakeFact } from "../../../packages/client/test/support/daemon.js";
 import { startHarness } from "../../../packages/client/test/support/harness.js";
 import type { Harness } from "../../../packages/client/test/support/harness.js";
-import { button, render, says, sleep, startOnTheList, type, waitFor } from "./support";
+import { button, render, says, showBackstage, sleep, startOnTheList, type, waitFor } from "./support";
 
 Element.prototype.scrollIntoView = function scrollIntoView() {};
 globalThis.WebSocket = NodeWebSocket as unknown as typeof WebSocket;
@@ -291,7 +291,7 @@ describe("the memory view", () => {
     daemon.memory[REPO] = { status: "absent", facts: [] };
     await startIn(REPO);
     await waitFor(() => daemon.librarians.length === 1, "the start's librarian");
-    button("Memory", document.querySelector<HTMLElement>(".backstage")!)!.click();
+    button("Memory", await showBackstage())!.click();
     await waitFor(() => memoryPane()?.textContent?.includes("No facts yet."), "the memory as it was");
     daemon.memory[REPO]!.facts!.push(docsFact());
     daemon.sessions.get(daemon.librarians[0]!.sessionId)!.log.append("agent_done", { reason: "finished" });
@@ -318,7 +318,7 @@ describe("the memory view", () => {
     daemon.memoryAutoRefresh = false;
     daemon.memory[REPO] = { status: "fresh", facts: exampleFacts() };
     await startIn(REPO);
-    button("Memory", document.querySelector<HTMLElement>(".backstage")!)!.click();
+    button("Memory", await showBackstage())!.click();
     await waitFor(() => memoryPane()?.querySelector(".fact"), "the facts");
     button("Refresh", memoryPane())!.click();
     await waitFor(() => daemon.librarians.length === 1, "the librarian, asked for");
@@ -352,7 +352,7 @@ describe("the memory view", () => {
   it("shows the brief's text from a daemon whose memory.get has no facts", async () => {
     daemon.memory[REPO] = { status: "fresh", text: "# Project brief\n\n## Commands\n- make test" };
     await startIn(REPO);
-    button("Memory", document.querySelector<HTMLElement>(".backstage")!)!.click();
+    button("Memory", await showBackstage())!.click();
     const text = await waitFor(() => document.querySelector(".backstage .memory .brief-text"), "the brief's text");
     expect(text.textContent).toBe("# Project brief\n\n## Commands\n- make test");
     expect(document.querySelector(".backstage .memory .fact")).toBeNull();
@@ -382,7 +382,7 @@ describe("a team session", () => {
     unmount = render(<App />).unmount;
     const row = await waitFor(() => [...document.querySelectorAll<HTMLButtonElement>("button.row")].find((b) => b.textContent?.includes("Plan the release")), "the team session's row");
     row.click();
-    await waitFor(() => document.querySelector(".backstage"), "the session");
+    await showBackstage();
     await sleep(300);
     expect(daemon.librarians).toEqual([]);
     expect(daemon.calls.filter((c) => c.method.startsWith("memory.") || c.method === "worktree.list")).toEqual([]);

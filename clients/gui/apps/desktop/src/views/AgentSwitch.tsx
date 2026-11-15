@@ -42,8 +42,10 @@ export function sessionAgents(view: SessionView, daemon: DaemonClient | null, lo
             .filter((c) => c.section === "agents" && c.source === "agent")
             .map((c) => ({ name: c.name, description: c.summary, source: "bundle", layer: "bundle" as const })),
         );
-  return view
-    .agents()
+  // Asked inside a promise: a view between sockets throws as it is asked, and that is a
+  // refusal to say, not a crash of the screen.
+  return Promise.resolve()
+    .then(() => view.agents())
     .then((r) => r.agents)
     .catch(() => older());
 }
@@ -89,7 +91,6 @@ export function AgentSwitch({
   planeProfile,
   current,
   canChange,
-  onAbout,
   onStarted,
 }: {
   view: SessionHandle;
@@ -103,8 +104,6 @@ export function AgentSwitch({
   planeProfile?: string | null;
   current: string | null;
   canChange: boolean;
-  /** Open the agent in the agents manager, where the session is this computer's. */
-  onAbout?: ((name: string) => void) | undefined;
   /** A session started from the picker, to open. */
   onStarted?: ((id: string, kind: SessionKind, workspace?: string) => void) | undefined;
 }): JSX.Element | null {
@@ -141,22 +140,21 @@ export function AgentSwitch({
 
   return (
     <div className="agent-switch">
+      {/* A chip in the composer: the agent, which the next turn runs, and a press away the
+          dialog that switches it, starts another session on one, or edits one. */}
       <button
         type="button"
-        className="agent-current"
+        className="agent-current chip"
         aria-haspopup="dialog"
         aria-expanded={open}
         aria-label="Agent"
-        title="The agent this session runs: switch it, start another session on one, or edit one."
+        title="The agent this session runs: switch it from the next turn, start another session on one, or edit one."
         onClick={() => setOpen((o) => !o)}
       >
-        Agent <span className="mono">{current ?? "—"}</span>
+        <span className="dot agent-dot" aria-hidden="true" />
+        <span className="mono">{current ?? "—"}</span>
+        <span aria-hidden="true"> ▾</span>
       </button>
-      {onAbout && current && (
-        <button type="button" className="link" onClick={() => onAbout(current)}>
-          About
-        </button>
-      )}
       {open && (
         <Dialog label="The agent this session runs" onClose={() => setOpen(false)} className="agent-dialog">
           <h1>Agent</h1>

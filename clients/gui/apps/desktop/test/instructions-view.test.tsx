@@ -13,7 +13,7 @@ import { App } from "../src/App";
 import { FakeDaemon } from "../../../packages/client/test/support/daemon.js";
 import { startHarness } from "../../../packages/client/test/support/harness.js";
 import type { Harness } from "../../../packages/client/test/support/harness.js";
-import { button, render, sees, seesButton, startOnTheList, waitFor } from "./support";
+import { button, render, sees, seesButton, showBackstage, startOnTheList, waitFor } from "./support";
 
 Element.prototype.scrollIntoView = function scrollIntoView() {};
 globalThis.WebSocket = NodeWebSocket as unknown as typeof WebSocket;
@@ -77,7 +77,7 @@ describe("a session on this computer", () => {
       "the session's row",
     );
     row.click();
-    (await waitFor(() => document.querySelector(".backstage") && button("Instructions", backstage()), "the Instructions tab")).click();
+    (await showBackstage(), await waitFor(() => button("Instructions", backstage()), "the Instructions tab")).click();
 
     await sees("the organisation's memory");
     expect(rows()).toEqual([
@@ -118,7 +118,7 @@ describe("your own memory", () => {
       "the session's row",
     );
     row.click();
-    (await waitFor(() => document.querySelector(".backstage") && button("Instructions", backstage()), "the Instructions tab")).click();
+    (await showBackstage(), await waitFor(() => button("Instructions", backstage()), "the Instructions tab")).click();
 
     await sees("your own memory");
     expect(rows()[1]).toBe("Your memory | your own memory | https://plane.example.test, fetched 2026-10-23T09:00:00Z | version 2");
@@ -143,7 +143,7 @@ describe("a team session", () => {
       "the team session's row",
     );
     row.click();
-    (await waitFor(() => document.querySelector(".backstage") && button("Instructions", backstage()), "the Instructions tab")).click();
+    (await showBackstage(), await waitFor(() => button("Instructions", backstage()), "the Instructions tab")).click();
 
     await sees("the profile dev's memory");
     expect(rows()).toEqual([

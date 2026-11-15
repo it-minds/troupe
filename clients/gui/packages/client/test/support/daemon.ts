@@ -524,6 +524,12 @@ function commandQuestion(callId: string, name: string, text: string): Record<str
   };
 }
 
+/** The text files a test gave an artifact (`files: [{path, text}]`), which its versions list and `artifact.read` answers. */
+function artifactFiles(artifact: Record<string, unknown>): Array<{ path: string; text: string }> {
+  const files = artifact["files"];
+  return Array.isArray(files) ? (files as Array<{ path: string; text: string }>) : [];
+}
+
 export class FakeDaemon {
   /** The token it serves with now; a `restart` draws a new one, as a daemon does. */
   token: string;
@@ -578,6 +584,8 @@ export class FakeDaemon {
   servers: FakeServer[] = [];
   /** Files of the sessions' workspaces `fs.read` answers, by path, beside the scratchpad's. */
   readonly files = new Map<string, string>();
+  /** What `fs.upload` was handed, by session, in order: the path as sent and the text. */
+  readonly uploads: Array<{ session: string; path: string; content: string }> = [];
   /** Sign-ins by server name (troupe-remote Decision 741); a server with `oauth` and no entry is signed out. */
   signIns: Record<string, FakeAuth> = {};
   /** What the provider says to a sign-out, by server name: 
@@ -1673,6 +1681,17 @@ evoked where nothing is set and there was a sign-in. */
         return doc ? reply(ws, id, doc) : reply(ws, id, null, { code: -32005, message: "not_found" });
       }
 
+      // A file put into the workspace, at `session:/`: kept, and `fs.read` reads it back.
+      case "fs.upload": {
+        if (!session) return reply(ws, id, null, { code: -32005, message: "not_found" });
+        const path = String(params["path"] ?? "");
+        const content = String(params["content"] ?? "");
+        this.uploads.push({ session: sessionId, path, content });
+        const relative = path.replace(/^session:\//, "");
+        this.files.set(relative, content);
+        return reply(ws, id, { path: relative, bytes: new TextEncoder().encode(content).length });
+      }
+
       case "commands.list":
         if (!session) return reply(ws, id, null, { code: -32005, message: "not_found", data: { kind: "session", id: sessionId } });
         return reply(ws, id, { commands: this.commands });
@@ -1948,6 +1967,7 @@ evoked where nothing is set and there was a sign-in. */
       case "artifact.rollback":
       case "artifact.pin":
       case "artifact.transfer":
+      case "artifact.read":
       case "artifact.put": {
         const mine = this.artifacts;
         // Refused under Local only as the daemon refuses every one of them: an artifact is
@@ -1969,9 +1989,15 @@ evoked where nothing is set and there was a sign-in. */
           this.artifactCalls.push({ method, params });
           const found = mine.find((a) => a["id"] === params["id"]);
           if (!found) return reply(ws, id, null, { code: -32005, message: "not_found", data: { id: params["id"] } });
-          const versions = Array.from({ length: Number(found["version"]) }, (_, i) => Number(found["version"]) - i).map((n) => ({ n, note: n === 1 ? null : `Version ${n}'s note`, published_at: "2026-10-26T08:00:00Z", url: `https://artifacts.example.test/a/${String(found["id"])}/v${n}/`, files: [], hash: `sha256:${n}`, bytes: 10, published_by: { subject: "ada@example.test" } }));
+          const versions = Array.from({ length: Number(found["version"]) }, (_, i) => Number(found["version"]) - i).map((n) => ({ n, note: n === 1 ? null : `Version ${n}'s note`, published_at: "2026-10-26T08:00:00Z", url: `https://artifacts.example.test/a/${String(found["id"])}/v${n}/`, files: artifactFiles(found).map((f) => ({ path: f.path, sha256: "sha256:fake", content_type: "text/markdown", bytes: f.text.length })), hash: `sha256:${n}`, bytes: 10, published_by: { subject: "ada@example.test" } }));
           const owner = found["mine"] === true;
           switch (method) {
+            // A version's text file, from the files the test gave the artifact.
+            case "artifact.read": {
+              const file = artifactFiles(found).find((f) => f.path === params["path"]);
+              if (!file) return reply(ws, id, null, { code: -32005, message: "not_found", data: { path: params["path"] } });
+              return reply(ws, id, { id: found["id"], version: Number(params["version"] ?? found["version"]), path: file.path, content_type: "text/markdown", text: file.text });
+            }
             case "artifact.get":
               return reply(ws, id, { ...found, versions, ...(owner ? { shares: this.artifactShares.filter((s) => s["artifact"] === found["id"]) } : {}) });
             case "artifact.open":

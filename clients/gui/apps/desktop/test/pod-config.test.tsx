@@ -14,7 +14,7 @@ import { PodConfig } from "../src/views/PodConfig";
 import { FakeDaemon } from "../../../packages/client/test/support/daemon.js";
 import { startHarness } from "../../../packages/client/test/support/harness.js";
 import type { Harness } from "../../../packages/client/test/support/harness.js";
-import { button, render, sees, startOnTheList, waitFor } from "./support";
+import { button, render, sees, showBackstage, startOnTheList, waitFor } from "./support";
 
 Element.prototype.scrollIntoView = function scrollIntoView() {};
 globalThis.WebSocket = NodeWebSocket as unknown as typeof WebSocket;
@@ -56,7 +56,7 @@ describe("a team session's settings", () => {
       "the team session's row",
     );
     row.click();
-    (await waitFor(() => document.querySelector(".backstage") && button("Settings", backstage()), "the Settings tab")).click();
+    (await showBackstage(), await waitFor(() => button("Settings", backstage()), "the Settings tab")).click();
 
     await sees("In force in this session on the platform");
     const pane = (): HTMLElement => backstage();
@@ -111,7 +111,8 @@ describe("a session on this computer", () => {
       "the session's row",
     );
     row.click();
-    await waitFor(() => document.querySelector(".backstage") && button("Files", backstage()), "the session's panes");
+    await showBackstage();
+    await waitFor(() => button("Files", backstage()), "the session's panes");
     expect(button("Settings", backstage())).toBeNull();
   });
 });
@@ -132,6 +133,7 @@ describe("the backstage's configuration row", () => {
     unmount = render(<App />).unmount;
     const row = await waitFor(() => [...document.querySelectorAll<HTMLButtonElement>("button.row")].find((b) => b.textContent?.includes("Bundled")), "the team session's row");
     row.click();
+    await showBackstage();
     await waitFor(() => fact("Configuration"), "the configuration row");
     expect(fact("Configuration")).toBe("Bundle 3");
   });
@@ -145,6 +147,7 @@ describe("the backstage's configuration row", () => {
       "the session's row",
     );
     row.click();
+    await showBackstage();
     await waitFor(() => fact("Owner"), "the session's facts");
     expect(fact("Configuration")).toBeNull();
     expect(document.querySelector(".backstage")?.textContent).not.toMatch(/\bbundle\b/i);

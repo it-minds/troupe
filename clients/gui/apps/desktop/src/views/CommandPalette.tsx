@@ -286,7 +286,7 @@ function agentBadges(agent: AgentRow): string[] {
 }
 
 /** How many of a command's lines its detail shows before it counts the rest. */
-const BODY_LINES = 8;
+const BODY_LINES = 12;
 
 /**
  * What a command a file defines sends, as its file has it (troupe Decision 814): its
@@ -356,13 +356,32 @@ export function CommandPalette({
   local,
   actions,
   onClose,
+  anchored = false,
 }: {
   view: SessionHandle;
   /** A session on this computer, whose branches and files are here. */
   local: boolean;
   actions: PaletteActions;
   onClose: () => void;
+  /**
+   * Opened from the composer (its `/` button, or `/` typed on an empty message): drawn as
+   * a popover over the composer rather than over the screen, and shut by a press anywhere
+   * outside it. Ctrl-K opens it over the screen.
+   */
+  anchored?: boolean;
 }): JSX.Element {
+  const box = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!anchored) return;
+    const outside = (e: MouseEvent): void => {
+      const target = e.target as Node | null;
+      if (!target || box.current?.contains(target)) return;
+      if (target instanceof Element && target.closest("[data-palette-toggle]")) return;
+      onClose();
+    };
+    document.addEventListener("mousedown", outside);
+    return () => document.removeEventListener("mousedown", outside);
+  }, [anchored, onClose]);
   const [commands, setCommands] = useState<CommandEntry[] | null>(null);
   const [agents, setAgents] = useState<Map<string, AgentRow>>(new Map());
   const [error, setError] = useState<string | null>(null);
@@ -544,8 +563,11 @@ export function CommandPalette({
   });
 
   return (
-    <div className="palette-scrim" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div className="palette" role="dialog" aria-label="Commands" onKeyDown={onKey}>
+    <div
+      className={anchored ? "palette-pop" : "palette-scrim"}
+      onMouseDown={(e) => !anchored && e.target === e.currentTarget && onClose()}
+    >
+      <div ref={box} className="palette" role="dialog" aria-label="Commands" onKeyDown={onKey}>
         <input
           ref={input}
           value={query}

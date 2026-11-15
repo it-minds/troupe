@@ -12,11 +12,11 @@
 import { useEffect, useRef, useState } from "react";
 import type { JSX } from "react";
 import { BRIEF_PARTS, callConsequence as consequence, callEvidence, callHeadline as headline, callScopedLabel as scopedLabel, ruleScope, visibilityWords } from "@troupe/client";
-import type { DelegationGate, Entry, GateAnswer, PublicationGate } from "@troupe/client";
+import type { ApprovalDecision, DelegationGate, Entry, GateAnswer, PublicationGate } from "@troupe/client";
 import { Pill } from "./bits";
 import { Mask } from "./brand";
 
-export type Decision = "allow" | "deny" | "allow_session";
+export type Decision = ApprovalDecision;
 type Approval = Extract<Entry, { kind: "approval" }>;
 
 /** The audiences a person may publish for: their teams and the profiles they are covered by, as the plane names them. */
@@ -70,6 +70,7 @@ export function ApprovalPanel({
   onAnswer,
   onDefinition,
   onceOnly = false,
+  alwaysAllow = false,
   audiences,
 }: {
   entry: Approval;
@@ -85,6 +86,12 @@ export function ApprovalPanel({
    * once, and allowing it for the rest of the session is the laptop's person's to do there.
    */
   onceOnly?: boolean;
+  /**
+   * Whether the server takes `allow_always` (it named `approval_allow_always` at
+   * `initialize`): a lasting per-tool rule for the person, written from the approval. Until
+   * then the answer is drawn, and disabled with the reason.
+   */
+  alwaysAllow?: boolean;
   /** Whom a publication may be for: the person's teams and profiles, once the plane said them. */
   audiences?: Audiences | null | undefined;
 }): JSX.Element {
@@ -106,7 +113,7 @@ export function ApprovalPanel({
       />
     );
   }
-  return <ToolApproval entry={entry} canAnswer={canAnswer} others={others} onAnswer={onAnswer} onceOnly={onceOnly} />;
+  return <ToolApproval entry={entry} canAnswer={canAnswer} others={others} onAnswer={onAnswer} onceOnly={onceOnly} alwaysAllow={alwaysAllow} />;
 }
 
 function ToolApproval({
@@ -115,12 +122,14 @@ function ToolApproval({
   others,
   onAnswer,
   onceOnly,
+  alwaysAllow,
 }: {
   entry: Approval;
   canAnswer: boolean;
   others: string[];
   onAnswer: (decision: Decision) => Promise<void>;
   onceOnly: boolean;
+  alwaysAllow: boolean;
 }): JSX.Element {
   const [busy, setBusy] = useState<Decision | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -205,16 +214,29 @@ function ToolApproval({
       {canAnswer ? (
         <div className="answers">
           <button ref={allow} className="allow" onClick={() => void answer("allow")} disabled={busy !== null}>
-            {busy === "allow" ? "Allowing…" : onceOnly ? "Allow once" : "Allow"}
-          </button>
-          <button className="deny" onClick={() => void answer("deny")} disabled={busy !== null}>
-            {busy === "deny" ? "Denying…" : "Deny"}
+            {busy === "allow" ? "Allowing…" : "Allow once"}
           </button>
           {!onceOnly && (
             <button className="scoped" onClick={() => void answer("allow_session")} disabled={busy !== null}>
               {scopedLabel(entry.tool)}
             </button>
           )}
+          {/* A lasting rule from the approval needs the server's `allow_always` (troupe
+              #920): until it names the capability the answer is here, with the one that
+              works today beside it. */}
+          {!onceOnly &&
+            (alwaysAllow ? (
+              <button className="always" onClick={() => void answer("allow_always")} disabled={busy !== null} title="A rule of yours: every call like this runs unasked from now on">
+                {busy === "allow_always" ? "Allowing…" : `Always allow ${entry.tool}`}
+              </button>
+            ) : (
+              <button className="always" disabled title="Not yet: allow it for this session instead">
+                Always allow (not yet: allow it for this session instead)
+              </button>
+            ))}
+          <button className="deny" onClick={() => void answer("deny")} disabled={busy !== null}>
+            {busy === "deny" ? "Denying…" : "Deny"}
+          </button>
         </div>
       ) : (
         <p className="also">You can read this session but not answer for it.</p>
@@ -624,7 +646,7 @@ function PublishPanel({
 export function DecisionRecord({ entry, self }: { entry: Approval; self: string | undefined }): JSX.Element {
   const by = entry.resolvedBy ?? self;
   const mine = by === undefined || by === self;
-  const verb = entry.decision === "deny" ? "Denied" : entry.decision === "allow_session" ? "Allowed for this session" : "Allowed";
+  const verb = entry.decision === "deny" ? "Denied" : entry.decision === "allow_session" ? "Allowed for this session" : entry.decision === "allow_always" ? "Always allowed" : "Allowed";
   const said = entry.answered;
   // A delegation's answer says what it changed: where it went, which parts, the word back.
   // A publication's says whom it went to and whose it is.

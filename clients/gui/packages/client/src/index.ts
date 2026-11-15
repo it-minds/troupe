@@ -36,8 +36,8 @@ export {
   whoCanOpen,
 } from "./newSession.js";
 export type { AutoPick, MessageTokens, NewSessionWhere, ProfileRoom, ProfileRoomRow, TokenNames } from "./newSession.js";
-export { SessionView, createLocalSession, turnCompleted } from "./session.js";
-export type { SessionViewHooks, TurnResult } from "./session.js";
+export { ALLOW_ALWAYS, SessionView, createLocalSession, turnCompleted } from "./session.js";
+export type { ApprovalDecision, SessionViewHooks, TurnResult } from "./session.js";
 export { AuthSession, PlaneUnreachableError, memoryReachedMarks, memoryTokenStore, webReachedMarks, webTokenStore, currentOrigin } from "./auth.js";
 export type { AuthSessionOptions, ReachedMarks, SignInProgress, TokenStore, UnreachableContext } from "./auth.js";
 export { beginRedirect, completeRedirect, hasRedirectAnswer, scrubRedirect, idpMetadata, pkcePair } from "./pkce.js";
@@ -97,6 +97,7 @@ export {
   openQuestions,
   presentMembers,
   loopEnding,
+  contextStatus,
   settleLoop,
   onboardingFiles,
   turnLine,
@@ -123,6 +124,7 @@ export type {
   LoopState,
   OnboardingSuggested,
   TokenUsage,
+  ContextFill,
   TurnCost,
   CurtainPhase,
   CurtainState,

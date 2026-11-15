@@ -4,6 +4,7 @@
 // composer opens it with its sections and a description per row, typing narrows it,
 // Enter runs the row, Esc closes it, and Ctrl-K opens it from anywhere.
 
+import { readFileSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { WebSocket as NodeWebSocket } from "ws";
 import { App } from "../src/App";
@@ -15,6 +16,10 @@ Element.prototype.scrollIntoView = function scrollIntoView() {};
 globalThis.WebSocket = NodeWebSocket as unknown as typeof WebSocket;
 
 /** The rows this app lists: the table less the terminal client's own. */
+// A name in a variable, so the bundler reads it as a file to open and not as an asset.
+const sheet = "../src/styles.css";
+const css = readFileSync(new URL(sheet, import.meta.url), "utf8");
+
 const SHOWN = COMMANDS.filter((c) => c.availability !== "tui").length;
 
 let daemon: FakeDaemon;
@@ -189,11 +194,19 @@ describe("the command palette", () => {
     await waitFor(() => selected() === "/review", "/review selected");
     expect(sends()).toBe("Review the change on this branch. Look hardest at $ARGUMENTS.");
 
-    // Twelve lines: eight shown, and the rest counted.
+    // Forty lines: twelve shown, and the rest counted.
     type(input, "audit");
     await waitFor(() => selected() === "/audit", "/audit selected");
-    expect(sends()?.split("\n")).toEqual(["Audit the dependencies, one at a time:", ...[1, 2, 3, 4, 5, 6, 7].map((n) => `${n}. check package ${n}`)]);
-    expect(dialog.querySelector(".detail .sends")?.textContent).toContain("… 4 more lines in the file");
+    expect(sends()?.split("\n")).toEqual(["Audit the dependencies, one at a time:", ...Array.from({ length: 11 }, (_, i) => `${i + 1}. check package ${i + 1}`)]);
+    expect(dialog.querySelector(".detail .sends")?.textContent).toContain("… 28 more lines in the file");
+    // The detail is a box of its own beside or under the list, never inside it, and the
+    // sheet keeps the list eight rows tall at least and gives the detail its own scroll:
+    // a long prompt takes no rows from the list (troupe #919). The pane measurements are
+    // in the pull request; jsdom lays nothing out.
+    expect(dialog.querySelector(".rows .detail")).toBeNull();
+    expect(css).toMatch(/\.palette \.rows \{\s*min-height: min\(18rem, 40vh\);/);
+    expect(css).toMatch(/\.palette \.detail \{[^}]*min-height: min\(7rem, 16vh\);[^}]*max-height: 30vh;[^}]*overflow-y: auto;/);
+    expect(css).toMatch(/\.palette > \.detail \{\s*grid-column: 2;/);
 
     // A built-in sends no prompt of its own, and says nothing of one.
     type(input, "goal");
