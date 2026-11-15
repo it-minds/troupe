@@ -732,6 +732,14 @@ ul.attention li:last-child {
   margin-top: var(--space-2);
 }
 
+/* Client versions: one button for every component's recommended version, above the policies. */
+section.recommend,
+p.recommend {
+  margin-bottom: var(--space-5);
+}
+.recommend-row + .recommend-row {
+  margin-top: var(--space-4);
+}
 .card {
   margin-bottom: var(--space-5);
   padding: var(--space-4) var(--space-5);

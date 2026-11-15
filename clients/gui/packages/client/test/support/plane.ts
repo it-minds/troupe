@@ -122,6 +122,8 @@ export interface PlaneOptions {
   breakglass?: string;
   /** Seconds a break-glass plane token is good for; short, for a test of its expiry. */
   breakglassLifetime?: number;
+  /** The plane's own build version, which discovery says as `plane.build.version`. None is a plane whose discovery names no build. */
+  version?: string;
 }
 
 /** A file of an artifact's version, with what it holds, which no answer carries. */
@@ -1013,7 +1015,7 @@ export class FakePlane {
         device_authorization_endpoint: this.opts.idp.deviceAuthorizationEndpoint,
         token_endpoint: this.opts.idp.tokenEndpoint,
         scopes: ["openid", "profile", "email", "offline_access", "groups"],
-        plane: { name: "fake", rpc: "/rpc", jwks: "/.well-known/jwks.json", protocol_version: "1" },
+        plane: { name: "fake", rpc: "/rpc", jwks: "/.well-known/jwks.json", protocol_version: "1", ...(this.opts.version ? { build: { version: this.opts.version } } : {}) },
         breakglass: typeof this.opts.breakglass === "string",
       });
     }

@@ -521,6 +521,58 @@ export interface ClientPolicyPut extends ClientPolicy {
   affected?: ClientCounts;
 }
 
+const RELEASE_VERSION = /^v?(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?(?:\+[0-9A-Za-z.-]+)?$/;
+
+/**
+ * A version as a policy names it, the way releases are numbered (`0.38.0-beta`, a leading
+ * `v` dropped), or `null` for one SemVer cannot read, which the plane refuses in a policy.
+ */
+export function releaseVersion(version: string): string | null {
+  const m = RELEASE_VERSION.exec(version.trim());
+  return m ? `${m[1]}.${m[2]}.${m[3]}${m[4] ? `-${m[4]}` : ""}` : null;
+}
+
+/**
+ * Whether `a` comes before `b` as SemVer orders them, as the plane orders a policy's
+ * versions: the numbers, then a pre-release before none (`0.38.0-beta` before `0.38.0`).
+ * False where either is not a version SemVer reads.
+ */
+export function versionOlder(a: string, b: string): boolean {
+  const x = RELEASE_VERSION.exec(a.trim());
+  const y = RELEASE_VERSION.exec(b.trim());
+  if (!x || !y) return false;
+  for (let i = 1; i <= 3; i += 1) {
+    if (Number(x[i]) !== Number(y[i])) return Number(x[i]) < Number(y[i]);
+  }
+  const [p, q] = [x[4], y[4]];
+  if (p === q) return false;
+  if (!p) return false;
+  if (!q) return true;
+  const ps = p.split(".");
+  const qs = q.split(".");
+  for (let i = 0; i < Math.min(ps.length, qs.length); i += 1) {
+    const [s, t] = [ps[i]!, qs[i]!];
+    if (s === t) continue;
+    const [sn, tn] = [/^\d+$/.test(s), /^\d+$/.test(t)];
+    if (sn && tn) return Number(s) < Number(t);
+    if (sn !== tn) return sn;
+    return s < t;
+  }
+  return ps.length < qs.length;
+}
+
+/**
+ * How a client's version stands against a policy, as the plane judges it at `initialize`:
+ * refused on a blocked version or below the minimum, behind below the recommended one,
+ * else current. A version SemVer cannot read is judged against `blocked` alone.
+ */
+export function clientStanding(policy: Pick<ClientPolicy, "recommended" | "minimum" | "blocked">, version: string): ClientStanding {
+  if (policy.blocked.includes(version)) return "refused";
+  if (policy.minimum && versionOlder(version, policy.minimum)) return "refused";
+  if (policy.recommended && versionOlder(version, policy.recommended)) return "behind";
+  return "current";
+}
+
 /**
  * A key an organisation may enforce on people's own machines, as the plane lists it on
  * the `client_enforced` setting: what enforcing it means (`kind`, and `order` from the
