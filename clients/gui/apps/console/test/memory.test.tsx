@@ -202,6 +202,10 @@ describe("company memory", () => {
     await sees("v1 · behind", readers);
     await sees("laptop-9b1d (a person's machine)", readers);
     await sees("on a person's machine hears at its daemon's next poll", readers);
+    // Each owner by name, as the plane's identity record has them, the subject on hover.
+    const owner = [...readers()!.querySelectorAll("tr")].find((tr) => tr.textContent?.includes("s-7f3a9c21"))!.cells[1]!;
+    expect(owner.textContent).toBe("Alice");
+    expect(owner.getAttribute("title")).toBe("alice@example.com");
 
     (await seesButton("Nudge s-7f3a9c21", readers()!)).click();
     await sees("Told s-7f3a9c21 again; it reads version 2 at its next turn.", readers);

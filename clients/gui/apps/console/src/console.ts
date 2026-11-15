@@ -14,7 +14,8 @@ export interface Signed {
   role: Role;
   /** The teams a team admin administers; every team, for a platform admin, is not listed here. */
   teams: string[];
-  plane: { url: string; name: string; version: string | null };
+  /** `dryRun`: the admin writes the plane's discovery says take `dry_run: true`; none from a plane before it. */
+  plane: { url: string; name: string; version: string | null; dryRun: string[] };
   signOut: () => void;
   /** A short line at the corner of the screen once something has been done. */
   notify: (text: string) => void;
@@ -122,11 +123,12 @@ export async function recorded(admin: AdminApi, actor: string, action: string, s
 }
 
 export function planeOf(auth: AuthSession, discovery: Discovery | null): Signed["plane"] {
-  const plane = (discovery?.plane ?? {}) as { name?: unknown; build?: { version?: unknown } };
+  const plane = (discovery?.plane ?? {}) as { name?: unknown; build?: { version?: unknown }; dry_run?: unknown };
   return {
     url: auth.planeUrl,
     name: typeof plane.name === "string" ? plane.name : new URL(auth.planeUrl).host,
     version: typeof plane.build?.version === "string" ? plane.build.version : null,
+    dryRun: Array.isArray(plane.dry_run) ? plane.dry_run.filter((m): m is string => typeof m === "string") : [],
   };
 }
 
@@ -179,6 +181,8 @@ export function describeError(e: unknown): string {
     // ceiling as `limit`), and the console's preview says the same sentence. A plane from
     // before said only the key and the numbers.
     if (data["limit"] !== undefined && typeof data["reason"] === "string") return String(data["reason"]);
+    // A refusal with the ceiling in a unit and no sentence: the console words it from them.
+    if (data["limit"] !== undefined && typeof data["unit"] === "string") return limitWords(data["limit"], data["unit"]);
     if (data["ceiling"] !== undefined && typeof data["field"] === "string") {
       return `${data["field"]}: ${show(data["asked"])} is wider than ${show(data["ceiling"])}, which the ${String(data["decided_by"])} decided. A lower rung may only narrow.`;
     }
@@ -191,6 +195,27 @@ export function describeError(e: unknown): string {
     return e.message;
   }
   return e instanceof Error ? e.message : String(e);
+}
+
+/**
+ * A limit refusal's ceiling in the unit beside it, as a sentence: `minutes` and `days` as
+ * the setting reads them (#939's units), `seconds` from a plane that said the field's own.
+ */
+export function limitWords(limit: unknown, unit: string): string {
+  if (unit === "switch") return limit === false ? "The platform does not allow it; a team may not turn it on." : "The platform allows it.";
+  const n = Number(limit);
+  if (!Number.isFinite(n)) return `The platform allows at most ${show(limit)}.`;
+  const seconds = unit === "minutes" ? n * 60 : unit === "seconds" ? n : null;
+  if (seconds !== null) {
+    const total = Math.round(seconds);
+    const words = [Math.floor(total / 3600), Math.floor((total % 3600) / 60), total % 60]
+      .map((v, i) => (v ? `${v} ${["h", "min", "s"][i]}` : ""))
+      .filter(Boolean)
+      .join(" ");
+    return `The platform allows at most ${words || "0 s"}.`;
+  }
+  if (unit === "days") return `The platform allows at most ${n === 1 ? "1 day" : `${n} days`}.`;
+  return `The platform allows at most ${n} ${unit}.`;
 }
 
 const UNAUTHENTICATED = -32003;

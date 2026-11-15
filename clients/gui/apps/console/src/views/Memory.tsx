@@ -10,7 +10,7 @@
 
 import { useState } from "react";
 import type { JSX } from "react";
-import { besideRows, writtenBy } from "@troupe/client";
+import { besideRows, nameOrSubject, writtenBy } from "@troupe/client";
 import type { MemoryDocument, MemoryInherited, MemoryPreview, MemoryReader, MemoryReaders, MemoryScope, MemorySaved } from "@troupe/client";
 import { describeError, useConsole, useLoad } from "../console";
 import { AuditNote, Empty, Field, Loaded, Preview, Region, TextDiff, count, useChange, when } from "./bits";
@@ -246,7 +246,9 @@ function Readers({ doc, readers }: { doc: MemoryDocument; readers: MemoryReaders
                       {r.session_id}
                       {r.where === "machine" ? " (a person's machine)" : ""}
                     </td>
-                    <td>{r.owner ?? "—"}</td>
+                    <td title={r.owner ?? undefined} className={r.owner_name || !r.owner ? undefined : "mono"}>
+                      {r.owner ? nameOrSubject(r.owner, r.owner_name) : "—"}
+                    </td>
                     <td>{r.profile ?? "—"}</td>
                     <td>
                       {r.version === 0 ? "none" : `v${r.version}`}

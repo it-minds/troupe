@@ -102,10 +102,13 @@ defmodule Troupe.Plane.ClientVersions do
   list. Every version must be one SemVer reads, the minimum may not be newer than the
   recommended version, and the recommended version may not be blocked: each refusal says
   which, and nothing is written. Answers the policy as it now stands, and the one before.
+
+  With `dry_run: true`, every check is made and nothing is written: the answer is the
+  policy as the put would leave it, and the one before.
   """
-  @spec put(String.t(), map(), String.t()) ::
+  @spec put(String.t(), map(), String.t(), keyword()) ::
           {:ok, %{before: map(), now: map()}} | {:error, map()}
-  def put(component, attrs, by) do
+  def put(component, attrs, by, opts \\ []) do
     with :ok <- known(component),
          {:ok, changes} <- read(attrs) do
       row = Repo.get(__MODULE__, component) || %__MODULE__{component: component}
@@ -117,11 +120,15 @@ defmodule Troupe.Plane.ClientVersions do
         |> put_change(:updated_by, by)
 
       with :ok <- coherent(Map.merge(Map.from_struct(row), changes)) do
-        stored = Repo.insert_or_update!(changeset)
+        stored = store(changeset, Keyword.get(opts, :dry_run, false))
         {:ok, %{before: before, now: describe(stored, component)}}
       end
     end
   end
+
+  # A dry run's row is the changeset applied, written nowhere.
+  defp store(changeset, true), do: apply_changes(changeset)
+  defp store(changeset, _write), do: Repo.insert_or_update!(changeset)
 
   defp known(component) do
     if component in components(),

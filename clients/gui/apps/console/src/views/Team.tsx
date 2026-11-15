@@ -715,13 +715,28 @@ function limitOf(field: string): Limit {
   return LIMITS.find((l) => l.field === field)!;
 }
 
+/**
+ * A `team.update` row's diff as this page says it: each limit by its label, each value in
+ * its unit, from the plane's own values. A field that is not a limit here is kept as it was.
+ */
+export function teamChangesInUnit(detail: Record<string, unknown>): Record<string, unknown> {
+  return Object.fromEntries(
+    Object.entries(detail).map(([field, value]) => {
+      const limit = LIMITS.find((l) => l.field === field);
+      const moved = value as { from?: unknown; to?: unknown } | null;
+      if (!limit || typeof moved !== "object" || moved === null || !("from" in moved) || !("to" in moved)) return [field, value];
+      return [limit.label, { from: valueWords(limit, moved.from), to: valueWords(limit, moved.to) }];
+    }),
+  );
+}
+
 /** What a limit's field says beside it: its unit, and the ceiling the rungs above allow. */
 function hintFor(limit: Limit, laddered: LadderValue | undefined): string | undefined {
   const unit =
     limit.kind === "money"
       ? "In dollars; 0 is no ceiling."
       : limit.kind === "seconds"
-        ? "In seconds."
+        ? "In minutes."
         : limit.kind === "days"
           ? "In days."
           : limit.kind === "mebibytes"
@@ -767,6 +782,8 @@ function toForm(limit: Limit, value: unknown): string {
   if (value === null || value === undefined) return "";
   if (limit.kind === "money") return String(Number(value) / 1_000_000);
   if (limit.kind === "mebibytes") return String(Number(value) / MIB);
+  // Asked in minutes, the unit the platform's setting is read in, and kept in seconds.
+  if (limit.kind === "seconds") return String(Math.round((Number(value) / 60) * 1_000_000) / 1_000_000);
   return String(value);
 }
 
@@ -778,7 +795,8 @@ function fromForm(limit: Limit, text: string): unknown {
   if (t === "") return null;
   if (limit.kind === "money") return Number.isFinite(Number(t)) ? Math.round(Number(t) * 1_000_000) : t;
   if (limit.kind === "mebibytes") return Number.isFinite(Number(t)) ? Math.round(Number(t) * MIB) : t;
-  if (limit.kind === "seconds" || limit.kind === "days") return /^\d+$/.test(t) ? Number(t) : t;
+  if (limit.kind === "seconds") return /^\d+(\.\d+)?$/.test(t) ? Math.round(Number(t) * 60) : t;
+  if (limit.kind === "days") return /^\d+$/.test(t) ? Number(t) : t;
   return t;
 }
 

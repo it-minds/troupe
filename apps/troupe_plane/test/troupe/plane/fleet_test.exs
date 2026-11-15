@@ -9,7 +9,7 @@ defmodule Troupe.Plane.FleetTest do
 
   use Troupe.Plane.DataCase, async: false
 
-  alias Troupe.Plane.{Admin, Fleet, Sessions}
+  alias Troupe.Plane.{Admin, Fleet, Harness, Sessions}
   alias Troupe.Plane.Fleet.{Sweeper, Worker}
 
   defp pod(profile, ordinal, opts \\ []) do
@@ -221,6 +221,28 @@ defmodule Troupe.Plane.FleetTest do
       assert pods["dev-1"].gone
       assert DateTime.compare(pods["dev-1"].last_seen_at, DateTime.utc_now()) == :lt
       refute pods["dev-0"].gone
+    end
+
+    # `profiles.list`, what the desktop and the terminal read, says so too, and counts the
+    # gone pod nowhere: not as room, not as a healthy pod, whatever its flags last said.
+    test "is listed as gone to a person choosing a profile, and offers no room", context do
+      _team = team_with_grant("engineering", "dev", name: "engineering")
+      ada = person("ada@example.test", ["engineering"])
+      # Its last flags healthy and not draining, as a row could be left: gone wins.
+      Repo.update_all(from(w in Worker, where: w.id == ^context.removed.id),
+        set: [healthy: true, draining: false]
+      )
+
+      silence(context.removed, Fleet.lease_timeout_ms() + 1_000)
+
+      assert {:ok, %{"profiles" => [dev]}} =
+               Harness.call("profiles.list", %{}, %{user: ada, platform_admin?: false})
+
+      pods = Map.new(dev["pods"], &{&1["pod"], &1})
+      assert pods["dev-1"]["gone"] == true
+      assert pods["dev-0"]["gone"] == false
+      assert dev["capacity"] == 4
+      assert dev["healthy_pods"] == 1
     end
 
     test "of a profile the plane no longer has is gone too" do

@@ -117,6 +117,28 @@ describe("a profile", () => {
 });
 
 describe("the editor", () => {
+  // #957: a ceiling above what the pods could ever run is saved, and the preview says so with both numbers.
+  it("says where the most sessions at once is above what the profile's pods can run, and saves it anyway", async () => {
+    await open("#/profiles/dev");
+    (await waitFor(() => button("Change dev"), "dev")).click();
+    type(await waitFor(() => field("Most sessions at once"), "the editor"), "40");
+    button("Preview")!.click();
+    await waitFor(() => says("What will happen"), "the preview");
+    await sees("dev allows 40 sessions at once, and its pods can run 16 at once (the cluster policy's most replicas): saved as a limit, not a promise, so no more than 16 run.");
+    button("Apply")!.click();
+    await waitFor(() => fake.admin.profiles.find((p) => p.name === "dev")?.max_sessions === 40, "the ceiling saved");
+  });
+
+  it("says nothing of it where nothing bounds the pods", async () => {
+    fake.admin.policy.maxReplicas = null;
+    await open("#/profiles/dev");
+    (await waitFor(() => button("Change dev"), "dev")).click();
+    type(await waitFor(() => field("Most sessions at once"), "the editor"), "40");
+    button("Preview")!.click();
+    await waitFor(() => says("What will happen"), "the preview");
+    expect(says("its pods can run")).toBe(false);
+  });
+
   it("changes what it has fields for and keeps every part of the spec it has none for", async () => {
     await open("#/profiles/dev");
     (await waitFor(() => button("Change dev"), "dev")).click();

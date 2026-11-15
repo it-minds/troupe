@@ -66,7 +66,7 @@ defmodule Troupe.Plane.Fleet.Scaler do
   use GenServer
 
   alias Troupe.Plane.{ClusterPolicy, Fleet, Harness, Provision, Sessions, Singleton}
-  alias Troupe.Plane.Fleet.{Profile, Provisioner, ScaleDown, SizeClass, Upgrade}
+  alias Troupe.Plane.Fleet.{Hosts, Profile, Provisioner, ScaleDown, SizeClass, Upgrade}
 
   require Logger
 
@@ -137,6 +137,41 @@ defmodule Troupe.Plane.Fleet.Scaler do
   """
   @spec ceiling(Profile.t()) :: pos_integer() | nil
   def ceiling(%Profile{max_sessions: max}), do: max
+
+  @doc """
+  The most sessions this profile's pods could run at once, as far as the plane knows it,
+  and what bounds it: `%{sessions: n, by: :hosts}` for a profile on registered hosts (the
+  hosts enabled for it, each running its size class's sessions), `%{sessions: n, by:
+  :policy}` where the cluster admin's `TroupePolicy` caps the replicas a profile may ask
+  for, and `%{sessions: nil, by: nil}` where nothing does, since the scaler then adds pods
+  up to `max_sessions` itself.
+
+  Not the replicas running now: the scaler moves those with demand, down to none for a
+  profile nobody uses, and a `max_sessions` above what an idle profile runs is the
+  ordinary case, not a mistake. What a ceiling can exceed is what the pods could ever
+  become. `policy` is passed by a caller that read it once for several profiles.
+  """
+  @spec at_once(Profile.t() | map(), map() | nil | :read) :: %{
+          sessions: non_neg_integer() | nil,
+          by: :hosts | :policy | nil
+        }
+  def at_once(profile, policy \\ :read) do
+    per_pod = SizeClass.sessions_per_pod(Map.get(profile, :size_class) || "standard")
+
+    if Provisioner.for(Map.get(profile, :provisioner)) == Provisioner.SSH,
+      do: %{sessions: enabled_hosts(Map.get(profile, :name)) * per_pod, by: :hosts},
+      else: by_policy(if(policy == :read, do: ClusterPolicy.current(), else: policy), per_pod)
+  end
+
+  defp enabled_hosts(name) when is_binary(name),
+    do: name |> Hosts.for_profile() |> Enum.count(& &1.enabled)
+
+  defp enabled_hosts(_name), do: 0
+
+  defp by_policy(%{max_replicas: max}, per_pod) when is_integer(max) and max > 0,
+    do: %{sessions: max * per_pod, by: :policy}
+
+  defp by_policy(_none, _per_pod), do: %{sessions: nil, by: nil}
 
   @doc """
   Whether this profile is within the ceiling somebody set for it.

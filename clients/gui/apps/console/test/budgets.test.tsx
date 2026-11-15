@@ -74,4 +74,13 @@ describe("connections", () => {
     await sees("s-7f3a9c21");
     await sees("Nobody here can read or remove a person's credential");
   });
+
+  // #957: the owner a session's calls go out as, by name, the subject on hover, as every other row.
+  it("names each session's owner as the identity record has them", async () => {
+    await open("#/connections");
+    const row = await waitFor(() => [...document.querySelectorAll("tr")].find((r) => r.cells[0]?.textContent === "s-7f3a9c21"), "the session");
+    const owner = row.cells[3]!;
+    expect(owner.textContent).toBe("Alice");
+    expect(owner.getAttribute("title")).toBe("alice@example.com");
+  });
 });
