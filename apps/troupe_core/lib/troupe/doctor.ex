@@ -428,7 +428,10 @@ defmodule Troupe.Doctor do
           provider: adapter,
           type: ProviderType.atom(target.provider),
           api_version: target.api_version,
-          timeout_ms: timeout_ms,
+          # The transport waits at least the default: the answer budget is kept by the wait
+          # below, which stops the stream itself, so a slow connect under load is reported
+          # as the model sending nothing, not as the connection failing (#889).
+          timeout_ms: max(timeout_ms, @answer_timeout_ms),
           first_byte_ms: timeout_ms,
           # One try: what the line says is what one request got, now.
           max_retries: 0,
