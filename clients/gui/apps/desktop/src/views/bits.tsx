@@ -9,8 +9,8 @@
 import { useEffect, useRef, useState } from "react";
 import type { JSX, ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { hasUnseen, moneyWords, syncWords, unseenSummary } from "@troupe/client";
-import type { FleetRow, SessionKind, SyncState } from "@troupe/client";
+import { firstLine, hasUnseen, moneyWords, syncWords, unseenSummary } from "@troupe/client";
+import type { FleetRow, LineKind, SessionKind, SyncState } from "@troupe/client";
 import { Eye } from "./brand";
 
 /**
@@ -228,11 +228,16 @@ export function initials(name: string): string {
   return ((parts[0]?.[0] ?? "") + (parts[1]?.[0] ?? "")).toUpperCase() || name.slice(0, 2).toUpperCase();
 }
 
-/** Loading says what is coming and in what order. No fake percentage. */
-export function Loading({ what }: { what: string }): JSX.Element {
+/**
+ * Loading says what is coming and in what order. No fake percentage. A status line from
+ * docs/design/lines.json goes in front, as frames.md section 7 has every loading state say
+ * one, taken for what is loading so the same wait opens the same way; the facts follow it.
+ * A wait of its own kind (the first run's) names its list and the seed it is taken for.
+ */
+export function Loading({ what, line = "loading", seed = what }: { what: string; line?: LineKind; seed?: string }): JSX.Element {
   return (
     <p className="note" aria-busy="true">
-      {what}
+      <span className="flourish">{firstLine(line, seed)}</span> — {what}
     </p>
   );
 }

@@ -4,7 +4,8 @@
 // runs the row, Esc closes. A command this app cannot run is greyed with the reason
 // rather than hidden, because the list is how somebody learns the tool; a row the table
 // marks as the terminal client's alone (`availability` `tui`: leaving it, reading a file
-// from where it started) is left out, since there is nothing here for it to do. Each row
+// from where it started, a branch's worktree, a window, the agent tree) is left out, since
+// there is nothing here for it to do. Each row
 // says what it does in this app's words where the table has some for it (`summaries`,
 // `details`), and in the words true in any client where it has none.
 //
@@ -151,12 +152,7 @@ const ASKS_ITSELF = new Set(["publish"]);
 /** Why a built-in has no runner here: said on its row, not hidden. */
 const NOT_HERE: Record<string, string> = {
   compact: "a session on this computer compacts by itself",
-  merge: "branches and worktrees are the terminal client's: merge there, or in the repository",
-  discard: "branches and worktrees are the terminal client's",
-  dismiss: "there are no windows to dismiss here",
-  observer: "not in the desktop app yet",
   watch: "on This computer, under this session's controls",
-  worktree: "start a branch from the terminal client, or a new session from the list",
 };
 
 interface Row {
@@ -204,6 +200,7 @@ function inThisApp(entry: CommandEntry): CommandEntry {
     ...entry,
     summary: entry.summaries?.["desktop"] ?? entry.summary,
     detail: entry.details?.["desktop"] ?? entry.detail,
+    availability: entry.availabilities?.["desktop"] ?? entry.availability,
     ...(windowed
       ? { usage: entry.usage.replace(/\s*\[window\]/, ""), args: entry.args.filter((a) => a.kind !== "window"), example: null }
       : {}),
@@ -414,7 +411,7 @@ export function CommandPalette({
       return;
     }
     v.commands()
-      .then((r) => live && setCommands(r.commands.filter((c) => c.availability !== "tui").map(inThisApp)))
+      .then((r) => live && setCommands(r.commands.map(inThisApp).filter((c) => c.availability !== "tui")))
       .catch((e: unknown) => live && setError(e instanceof Error ? e.message : String(e)));
     input.current?.focus();
     return () => {

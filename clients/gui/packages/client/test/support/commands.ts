@@ -1,6 +1,8 @@
 // The command table the fakes answer `commands.list` with: a slice of the harness's
 // (`Troupe.Commands`), enough for a palette to have sections, aliases, a command that
-// needs an argument, one a pod cannot run, the terminal client's own (`/upload`, `/quit`),
+// needs an argument, one a pod cannot run, one the desktop app has no runner for
+// (`/watch`), the terminal client's own (`/upload`, `/quit`, and `/merge`, whose own
+// requirement there is a session on that machine),
 // one with the terminal's words beside the neutral ones (`/cancel`), an agent, `/goal` with the `/loop` whose
 // summary names the goal too, `/memory`, which opens the desktop app's memory view, and a
 // command a repository's `.troupe/commands/review.md` defines, which the fakes run as
@@ -48,7 +50,8 @@ export const COMMANDS: CommandEntry[] = [
     summary: "Land a worktree branch on the checkout",
     usage: "/merge [window]",
     args: [arg("window", false, "window")],
-    availability: "local",
+    availability: "tui",
+    availabilities: { tui: "local" },
     source: "builtin",
     detail: "Commits what the branch left uncommitted and merges its branch into the checkout.",
     example: "/merge 2",
@@ -139,6 +142,18 @@ export const COMMANDS: CommandEntry[] = [
     source: "builtin",
     detail: "The file is read on this machine and published on your Troupe plane as an artifact.",
     example: "/publish report.html profile:dev",
+  },
+  {
+    name: "watch",
+    aliases: [],
+    section: "workspace",
+    summary: "Toggle watch mode: act on AI! and AI? comments",
+    usage: "/watch",
+    args: [],
+    availability: "local",
+    source: "builtin",
+    detail: "A comment ending in AI! starts a quick branch in this checkout and AI? an answer one.",
+    example: null,
   },
   {
     name: "settings",

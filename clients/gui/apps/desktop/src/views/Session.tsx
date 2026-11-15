@@ -47,7 +47,7 @@ import type {
 } from "@troupe/client";
 import { useSessionView, useStartQuestions } from "../hooks";
 import type { SessionHandle } from "../hooks";
-import { curtainLine, DEFAULT_DETAIL, isDetail, layout, waitingOn, waitingWords } from "../frames";
+import { curtainLine, curtainUp, DEFAULT_DETAIL, isDetail, layout, waitingOn, waitingWords } from "../frames";
 import type { Detail, Drawn } from "../frames";
 import { copyText } from "../clipboard";
 import { saveFile, shell } from "../shell";
@@ -1044,7 +1044,7 @@ function Stream({
       {state.entries.length === 0 && <Loading what="Reading the session. The newest part arrives first." />}
       {state.entries[0]?.seq === 1 && (
         <div className="divider" aria-hidden="true">
-          CURTAIN UP
+          {curtainUp(state.startedAt)}
         </div>
       )}
 
