@@ -66,6 +66,25 @@ describe("workers and pods", () => {
     expect(says("other pods that can take them")).toBe(false);
   });
 
+  it("says a pod a scale-down removed is gone, since when, offers it nothing and counts it nowhere (troupe #883)", async () => {
+    // The fake's ux-1 was retired a month ago. Its flags here are as the pod last reported
+    // them, healthy and not draining, and it is still gone and no place for sessions to go.
+    const ux = fake.admin.profiles.find((p) => p.name === "ux")!;
+    Object.assign(ux.pods[1]!, { healthy: true, draining: false });
+    await open("#/pods");
+    await waitFor(() => row("troupe-w-ux-1"), "ux's pods");
+    await sees("gone 2026-09-14 10:02 UTC", () => row("troupe-w-ux-1")!.cells[1]!);
+    // at once: the row is drawn whole once its state is
+    const state = row("troupe-w-ux-1")!.cells[1]!.textContent ?? "";
+    expect(state.includes("draining") || state.includes("healthy")).toBe(false);
+    expect(button("Drain", row("troupe-w-ux-1")!)).toBeNull();
+
+    button("Drain", row("troupe-w-ux-0")!)!.click();
+    await waitFor(() => says("Its 2 sessions are interrupted and sealed"), "the preview");
+    await sees("No other pod can take them; they will wait for one.");
+    expect(says("opened again on troupe-w-ux-1")).toBe(false);
+  });
+
   it("says a pod in the singular, an image that is not there in words, and an ssh host as a machine", async () => {
     await open("#/pods");
     const section = (name: string) => document.querySelector<HTMLElement>(`section[aria-label="${name}"]`);

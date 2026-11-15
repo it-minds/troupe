@@ -73,7 +73,7 @@ export function Overview(): JSX.Element {
       <Loaded load={load} what="the overview" retry={reload}>
         {([overview, unread, clients]) => {
           const items = attention(overview, unread?.length ?? 0, role === "platform_admin", clients);
-          const pods = overview.profiles.flatMap((p) => p.pods);
+          const pods = overview.profiles.flatMap(livePods);
           const healthy = pods.filter((p) => podState(p) === "healthy").length;
           const spent = overview.teams.reduce((n, t) => n + t.spent_micros, 0);
           const committed = overview.teams.reduce((n, t) => n + (t.budget_micros ?? 0), 0);
@@ -243,10 +243,16 @@ function podState(pod: AdminPod): State {
   return "healthy";
 }
 
+/** A profile's pods but the ones a scale-down removed, which the plane forgets on its own and are nobody's to look at. */
+function livePods(profile: AdminProfile): AdminPod[] {
+  return profile.pods.filter((p) => !p.gone);
+}
+
 export function profileState(profile: AdminProfile): State {
-  if (profile.replicas !== null && profile.pods.length < profile.replicas) return "degraded";
-  if (profile.pods.length === 0) return "unknown";
-  return profile.pods.map(podState).sort((a, b) => STATES[a].rank - STATES[b].rank)[0] ?? "healthy";
+  const pods = livePods(profile);
+  if (profile.replicas !== null && pods.length < profile.replicas) return "degraded";
+  if (pods.length === 0) return "unknown";
+  return pods.map(podState).sort((a, b) => STATES[a].rank - STATES[b].rank)[0] ?? "healthy";
 }
 
 // A pod is looked at where its pods are, which is a platform admin's area; a team admin is
@@ -255,7 +261,7 @@ function attention(overview: FleetOverview, unread: number, platform: boolean, c
   const items: Item[] = [];
   for (const profile of overview.profiles) {
     const workers = platform ? href({ page: "pods" }) : href({ page: "profiles", path: [profile.name] });
-    for (const pod of profile.pods) {
+    for (const pod of livePods(profile)) {
       const state = podState(pod);
       if (state === "healthy") continue;
       const what =
@@ -266,10 +272,10 @@ function attention(overview: FleetOverview, unread: number, platform: boolean, c
             : `${pod.pod} on ${profile.name} is draining: ${count(pod.active_sessions, "session")} still on it.`;
       items.push({ state, what, where: workers, action: `Look at ${profile.name}` });
     }
-    if (profile.replicas !== null && profile.pods.length < profile.replicas) {
+    if (profile.replicas !== null && livePods(profile).length < profile.replicas) {
       items.push({
         state: "degraded",
-        what: `${profile.name} asked for ${count(profile.replicas, "pod")} and has ${profile.pods.length}.`,
+        what: `${profile.name} asked for ${count(profile.replicas, "pod")} and has ${livePods(profile).length}.`,
         where: workers,
         action: `Look at ${profile.name}`,
       });

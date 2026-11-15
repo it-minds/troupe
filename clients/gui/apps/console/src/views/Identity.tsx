@@ -446,7 +446,9 @@ function TeamPrincipals({ team }: { team: AdminTeam }): JSX.Element {
                       <td>{show(p.sponsor)}</td>
                       <td>{p.last_used_at ? when(p.last_used_at) : "never"}</td>
                       <td className="row-actions">
-                        {!busy && p.state !== "disabled" && p.enabled !== false && (
+                        {/* One Disable, whichever way the row is: a principal that still works
+                            rotates and disables; one held for want of a sponsor only disables. */}
+                        {busy ? null : p.state !== "disabled" && p.enabled !== false ? (
                           <>
                             <button type="button" onClick={() => setActing({ kind: "rotate", principal: p })}>
                               Rotate
@@ -456,12 +458,11 @@ function TeamPrincipals({ team }: { team: AdminTeam }): JSX.Element {
                               Disable
                             </button>
                           </>
-                        )}
-                        {!busy && p.state === "needs_sponsor" && (
+                        ) : p.state === "needs_sponsor" ? (
                           <button type="button" className="danger" onClick={() => setActing({ kind: "disable", principal: p })}>
                             Disable
                           </button>
-                        )}
+                        ) : null}
                       </td>
                     </tr>
                   ))}

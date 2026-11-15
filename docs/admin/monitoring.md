@@ -97,7 +97,7 @@ long as it hears that, up to a ceiling of the timeout, 120 s a session and 30 s 
 11.5 min for three busy sessions. A pod that goes quiet for 150 s (and at least the timeout
 and 30 s) or reaches the ceiling is given up on: its sessions are marked dormant at their
 last seal, and the audit has a `pod.drain.gave_up` row saying which, why, the ceiling and
-how long the plane waited. Once the plane records a pod behind on an upgrade drained, the
+how long the plane waited. A pod the scale-down removed is listed *gone* once it is quiet past its lease, and the sweep forgets its row once it is quiet past the drain timeout and holds no active session. Once the plane records a pod behind on an upgrade drained, the
 operator replaces it within seconds, if the pod has stopped being Ready.
 
 ## 7. If something does not work

@@ -96,6 +96,14 @@ defmodule Troupe.Plane.PolicyLadderTest do
       assert error.data.ceiling == 30
       assert error.data.decided_by == :platform
 
+      # And in the words a person reads, the ceiling with its unit beside them, which the
+      # console's preview words the same way.
+      assert error.data.limit == 30
+      assert error.data.unit == "days"
+
+      assert error.data.reason ==
+               "The platform allows at most 30 days before a session is erased; 90 days is more than that."
+
       # Refused, not clamped. A form that accepted ninety over a system running thirty
       # would be a system that knew better and said nothing.
       assert Identity.get_team("engineering").erase_after_days == 365
@@ -109,6 +117,25 @@ defmodule Troupe.Plane.PolicyLadderTest do
 
       assert error.data.field == "pins_allowed"
       assert error.data.ceiling == false
+      assert error.data.unit == "switch"
+
+      assert error.data.reason ==
+               "The platform does not let members pin a session; a team may not turn it on."
+    end
+
+    test "says an idle limit as a length of time, never the field and its seconds", context do
+      {:ok, _} = Settings.put("default_idle_timeout_seconds", "1800", context.root.subject)
+
+      assert {:error, error} =
+               Admin.team_update(context.root, "engineering", %{"idle_timeout_seconds" => 7200})
+
+      assert error.data.limit == 1800
+      assert error.data.unit == "seconds"
+
+      assert error.data.reason ==
+               "The platform allows at most 30 min idle; 2 h is more than that."
+
+      refute error.data.reason =~ "idle_timeout_seconds"
     end
 
     test "may still narrow, which is the whole point of having its own rung", context do
