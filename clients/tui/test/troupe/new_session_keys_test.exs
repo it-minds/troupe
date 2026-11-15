@@ -186,8 +186,8 @@ defmodule Troupe.NewSessionKeysTest do
       refute NewSessionPage.footer(casting) =~ "place frees"
       assert NewSessionPage.footer(casting) =~ "Esc goes back to the form"
 
-      assert NewSessionPage.footer(NewSessionPage.waiting(casting)) ==
-               " casting — Esc goes back; the session starts by itself when a place frees "
+      assert NewSessionPage.footer(NewSessionPage.waiting(casting)) =~
+               "— Esc goes back; it starts when a place frees "
     end
 
     test "goes back to the form with the one start going on; Enter there starts no second, and the session opens once placed" do
@@ -262,7 +262,7 @@ defmodule Troupe.NewSessionKeysTest do
     eventually(fn -> screen_text(pid, session) =~ "waiting for a free place in code" end)
 
     assert NewSessionPage.footer(user_state(pid).new_page) =~
-             "Esc goes back; the session starts by itself when a place frees"
+             "Esc goes back; it starts when a place frees"
 
     {remote, pid, session}
   end

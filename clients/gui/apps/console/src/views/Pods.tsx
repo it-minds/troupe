@@ -41,11 +41,31 @@ function podStatus(pod: AdminPod): JSX.Element {
   );
 }
 
+/** What a profile's workers are called: a registered ssh host is a machine, as Hosts names it; anything else is a pod. */
+function unitOf(profile: AdminProfile): { one: string; many: string } {
+  return profile.provisioner === "ssh" ? { one: "machine", many: "machines" } : { one: "pod", many: "pods" };
+}
+
+/**
+ * Where a drained pod's sessions go, as the preview says it: only a pod of the same profile
+ * that is healthy and not draining itself can take them, and where none can they wait.
+ */
+function whereTheyGo(profile: AdminProfile, pod: AdminPod): string {
+  const held = pod.active_sessions;
+  if (!held) return "It holds no session, so nothing is moved.";
+  const unit = unitOf(profile);
+  const takers = profile.pods.filter((p) => p.worker_id !== pod.worker_id && p.healthy && !p.draining).map((p) => p.pod);
+  const its = `Its ${count(held, "session")} ${held === 1 ? "is" : "are"}`;
+  if (takers.length === 0) return `${its} interrupted and sealed, and a turn in flight is cancelled. No other ${unit.one} can take them; they will wait for one.`;
+  const where = takers.length === 1 ? takers[0] : `one of ${takers.length} other ${unit.many} that can take them`;
+  return `${its} moved: each is interrupted, sealed and opened again on ${where}, and a turn in flight is cancelled.`;
+}
+
 export function Pods(): JSX.Element {
   const { admin } = useConsole();
   const [load, reload] = useLoad(() => admin.profiles(), [admin]);
   const { done, apply } = useChange(reload);
-  const [draining, setDraining] = useState<{ profile: string; pod: AdminPod } | null>(null);
+  const [draining, setDraining] = useState<{ profile: AdminProfile; pod: AdminPod } | null>(null);
   const [drained, setDrained] = useState<PodDrained | null>(null);
 
   return (
@@ -65,7 +85,7 @@ export function Pods(): JSX.Element {
           ) : (
             <>
               {profiles.map((p) => (
-                <ProfilePods key={p.name} profile={p} busy={draining !== null} onDrain={(pod) => setDraining({ profile: p.name, pod })} />
+                <ProfilePods key={p.name} profile={p} busy={draining !== null} onDrain={(pod) => setDraining({ profile: p, pod })} />
               ))}
             </>
           )
@@ -73,14 +93,12 @@ export function Pods(): JSX.Element {
       </Loaded>
       {draining && (
         <Preview
-          title={`pod/${draining.pod.pod}`}
+          title={`${unitOf(draining.profile).one}/${draining.pod.pod}`}
           lines={[{ field: "draining", from: false, to: true }]}
           effects={[
             `${draining.pod.pod} takes no new session from now on.`,
-            draining.pod.active_sessions
-              ? `Its ${count(draining.pod.active_sessions, "session")} ${draining.pod.active_sessions === 1 ? "is" : "are"} moved: each is interrupted, sealed and opened again on another pod, and a turn in flight is cancelled.`
-              : "It holds no session, so nothing is moved.",
-            "The plane checks its own record before it agrees the pod is empty.",
+            whereTheyGo(draining.profile, draining.pod),
+            `The plane checks its own record before it agrees the ${unitOf(draining.profile).one} is empty.`,
           ]}
           verb="Drain"
           typeToConfirm={draining.pod.pod}
@@ -102,23 +120,39 @@ export function Pods(): JSX.Element {
 }
 
 function ProfilePods({ profile, busy, onDrain }: { profile: AdminProfile; busy: boolean; onDrain: (pod: AdminPod) => void }): JSX.Element {
+  const unit = unitOf(profile);
+  const name = <a href={href({ page: "profiles", path: [profile.name] })}>{profile.name}</a>;
   return (
-    <section aria-label={`${profile.name}'s pods`}>
+    <section aria-label={`${profile.name}'s ${unit.many}`}>
       <Region>
-        {profile.name} · {profile.pods.length} / {show(profile.replicas)} pods
+        {profile.name} · {profile.pods.length} of {show(profile.replicas)} {profile.replicas === 1 ? unit.one : unit.many}
       </Region>
       <p className="note">
-        <a href={href({ page: "profiles", path: [profile.name] })}>{profile.name}</a> runs <span className="mono">{show(profile.image)}</span>, following the{" "}
-        {show(profile.channel)} channel; {profile.active_sessions} of {profile.capacity} sessions in use.
+        {profile.image ? (
+          <>
+            {name} runs <span className="mono">{profile.image}</span>, following the {show(profile.channel)} channel
+          </>
+        ) : (
+          <>
+            {name} has no image yet, following the {show(profile.channel)} channel
+          </>
+        )}
+        ; {profile.active_sessions} of {count(profile.capacity, "session")} in use.
       </p>
       {profile.pods.length === 0 ? (
-        <Empty title="No pod">Nothing is running for it; one starts when a session asks.</Empty>
+        unit.one === "machine" ? (
+          <Empty title="No machine">
+            None has enrolled for it yet; one is registered under <a href={href({ page: "hosts" })}>Hosts</a>.
+          </Empty>
+        ) : (
+          <Empty title="No pod">Nothing is running for it; one starts when a session asks.</Empty>
+        )
       ) : (
         <div className="scroll">
           <table>
             <thead>
               <tr>
-                <th>Pod</th>
+                <th>{unit.one === "machine" ? "Machine" : "Pod"}</th>
                 <th>State</th>
                 <th>Release</th>
                 <th>Bundle</th>

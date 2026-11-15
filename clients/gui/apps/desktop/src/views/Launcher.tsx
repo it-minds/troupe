@@ -14,7 +14,7 @@ import { awaitingYou, onThisComputer } from "@troupe/client";
 import type { AuthSession, FleetRow } from "@troupe/client";
 import { capabilities, prefs } from "../shell";
 import { Mask } from "./brand";
-import { failedTitle, relative, statusOf, Unread } from "./bits";
+import { failedTitle, hostOf, relative, statusOf, Unread } from "./bits";
 import type { DaemonState } from "./Local";
 
 /** The one word for where a row runs, as the list's pill says it. */
@@ -200,10 +200,3 @@ export function Launcher({
   );
 }
 
-function hostOf(url: string): string {
-  try {
-    return new URL(url).host;
-  } catch {
-    return url;
-  }
-}

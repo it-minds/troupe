@@ -31,7 +31,18 @@ export function wentWrong(row: Pick<FleetRow, "failed" | "doneReason">): boolean
 export function ended(row: Pick<FleetRow, "failed" | "doneReason" | "status">): string {
   if (row.failed) return `Failed: ${words(row.failed.reason)}`;
   if (row.doneReason) return words(row.doneReason);
-  return row.status ? words(row.status) : "still going";
+  // Idle, thinking or waiting is a session that has not ended: its status is not an end.
+  return row.status === "done" || row.status === "interrupted" ? words(row.status) : "still open";
+}
+
+/**
+ * When a trigger fired the session: the run's own time where the runs are readable, else
+ * the session's making, which the firing was. Null for a session nothing fired.
+ */
+export function firedAt(row: Pick<FleetRow, "origin" | "raw">, run: Pick<TriggerRun, "fired_at"> | undefined): string | null | undefined {
+  if (row.origin?.kind !== "trigger") return undefined;
+  const made = (row.raw as { created_at?: unknown } | null)?.created_at;
+  return run?.fired_at ?? (typeof made === "string" ? made : null);
 }
 
 export function Review({
@@ -214,6 +225,7 @@ function Run({
   onAnswered: () => void;
 }): JSX.Element {
   const [showEvent, setShowEvent] = useState(false);
+  const fired = firedAt(row, run);
 
   return (
     <li>
@@ -230,11 +242,15 @@ function Run({
 
       <div className="run">
         <dl className="facts">
-          <dt>Fired</dt>
-          <dd>
-            <When iso={run?.fired_at ?? null} />
-            {run?.fired_by ? ` by ${run.fired_by}` : ""}
-          </dd>
+          {fired !== undefined && (
+            <>
+              <dt>Fired</dt>
+              <dd>
+                {fired ? <When iso={fired} /> : <span className="when">not yet</span>}
+                {run?.fired_by ? ` by ${run.fired_by}` : ""}
+              </dd>
+            </>
+          )}
           <dt>Ended</dt>
           <dd>{ended(row)}</dd>
           {run && (

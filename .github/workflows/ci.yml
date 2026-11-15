@@ -148,10 +148,12 @@ jobs:
             tui:
               - clients/tui/**
               - clients/gui/docs/design/themes/**
+              - docs/design/lines.json
               - docs/user/cli-reference.md
               - scripts/locks-agree.exs
             gui:
               - clients/gui/**
+              - docs/design/lines.json
               - scripts/version.exs
             gui_e2e:
               - clients/gui/packages/client/**
@@ -847,6 +849,11 @@ jobs:
       # `pnpm tokens` would otherwise reach a deployment as a file nobody regenerated.
       - name: The committed design tokens match the design file
         run: pnpm tokens:check
+
+      # The status lines are one file for the terminal client, the desktop app and the
+      # console; this reader and its order fixture are generated from it and committed.
+      - name: The committed status lines match docs/design/lines.json
+        run: pnpm lines:check
 
       # The bundler needs the desktop app's icons as files, so they are committed too,
       # generated from the same design file. After the tokens, so that a stale `mark.ts`

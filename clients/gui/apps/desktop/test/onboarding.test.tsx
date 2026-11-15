@@ -6,6 +6,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { WebSocket as NodeWebSocket } from "ws";
+import { LINES } from "@troupe/client";
 import type { DaemonClient, SetupFlow, SetupStepName } from "@troupe/client";
 import { App } from "../src/App";
 import { Daemon } from "../src/views/Onboarding/Daemon";
@@ -13,6 +14,7 @@ import { Finish } from "../src/views/Onboarding/Finish";
 import { Key } from "../src/views/Onboarding/Key";
 import { PickModels } from "../src/views/Onboarding/PickModels";
 import { Provider } from "../src/views/Onboarding/Provider";
+import { SetupFlowView } from "../src/views/Onboarding/Setup";
 import { Where } from "../src/views/Onboarding/Where";
 import { Workspace } from "../src/views/Onboarding/Workspace";
 import { FakeDaemon } from "../../../packages/client/test/support/daemon.js";
@@ -254,6 +256,17 @@ const idle = { busy: false, error: null, onBack: null };
 
 /** The page once it says `text`: a render, and a click's re-render, are asynchronous. */
 const shown = (text: string): Promise<true> => waitFor(() => says(text) || null, text);
+
+describe("the wait for the daemon's answer", () => {
+  it("says a line from the first run's set before what it asks, in the facts' lower case", async () => {
+    const setup = { flow: null, error: null, busy: false, unsupported: false, answer: vi.fn(), reread: vi.fn() };
+    unmount = render(<SetupFlowView client={{} as DaemonClient} setup={setup} onDone={vi.fn()} />).unmount;
+    const line = await waitFor(() => document.querySelector("p.note[aria-busy]")?.textContent ?? null, "the wait");
+    const [flourish, facts] = line.split(" — ");
+    expect(LINES.first_run as readonly string[]).toContain(flourish);
+    expect(facts).toBe("asking the daemon where the setup stands…");
+  });
+});
 
 describe("each screen", () => {
   it("Where: two ways, this machine pressed, and the plane's address only for a plane", async () => {

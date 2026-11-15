@@ -96,6 +96,34 @@ describe("a trigger", () => {
     expect(made.source).toEqual({ kind: "schedule", cron: "0 6 * * 1", tz: "UTC" });
   });
 
+  it("says beside a held-back Preview what the form still needs, as each is given", async () => {
+    await open("#/triggers/core");
+    (await waitFor(() => button("New trigger"), "core's triggers")).click();
+    await waitFor(() => field("Name"), "the form");
+    const needs = () => document.querySelector("form .actions .hint")?.textContent ?? "";
+    expect((await seesButton("Preview")).disabled).toBe(true);
+    await waitFor(() => needs() === "Needs a name, a principal to run as, a profile and a schedule.", "everything wanted");
+
+    type(field("Name")!, "weekly-audit");
+    await waitFor(() => needs() === "Needs a principal to run as, a profile and a schedule.", "the name given");
+    const principal = await waitFor(() => (field("Runs as") as HTMLSelectElement | null)?.querySelector('option[value="svc:core/nightly"]') && field("Runs as"), "the principals");
+    type(principal, "svc:core/nightly");
+    type(field("Profile")!, "dev");
+    await waitFor(() => needs() === "Needs a schedule.", "one left");
+    type(field("Schedule")!, "0 6 * * 1");
+    type(field("What each session is asked to do")!, "Audit the week's changes.");
+    await waitFor(() => !button("Preview")!.disabled, "the form complete");
+    expect(needs()).toBe("");
+  });
+
+  it("says a team granted no profile is granted none, and where one is granted", async () => {
+    await open("#/triggers/research");
+    (await waitFor(() => button("New trigger"), "research's triggers")).click();
+    await waitFor(() => says("No profile is granted to research yet: grant one under Access."), "the profile's hint");
+    expect(says("one research is granted")).toBe(false);
+    expect(link("Access")!.getAttribute("href")).toBe("#/teams/research/access");
+  });
+
   it("is changed by sending only what moved, so what the form does not show is left as it was", async () => {
     await open("#/triggers/core/nightly-deps");
     (await waitFor(() => button("Change nightly-deps"), "nightly-deps")).click();

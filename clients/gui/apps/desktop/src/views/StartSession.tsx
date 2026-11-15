@@ -30,7 +30,9 @@ import {
   ceilingSentence,
   cleanMessage,
   defaultProfileAgent,
+  firstLine,
   fullHouseSentence,
+  pickLine,
   messageTokens,
   profileRoom,
   stripTokens,
@@ -53,17 +55,8 @@ const LAST_PROFILE = "newSession.profile";
 /** How long the casting screen waits for the first turn to start before it opens the session anyway. */
 export const castingTiming = { firstTurnMs: 1500, retryFloorMs: 250 };
 
-// Decoration: one per page load, so it does not flicker while typing. Every line that
-// says something stays plain beside it.
-const QUIPS = [
-  "The stage is set. Give them the plot and step into the wings.",
-  "No auditions today. Everyone already knows their lines.",
-  "Break a leg. Or a build. Preferably not production.",
-  "Every good run starts with a cue line.",
-  "The house lights are down. What’s the scene?",
-];
-const CURTAINS = ["Curtain up.", "Places, everyone.", "Lights, cues, action."];
-const pickOne = (xs: string[]): string => xs[Math.floor(Math.random() * xs.length)] ?? xs[0]!;
+// Decoration: one per page load, so it does not flicker while typing; the lines are
+// docs/design/lines.json's, taken for a seed. Every line that says something stays plain beside it.
 
 export function StartSession({
   auth,
@@ -93,8 +86,9 @@ export function StartSession({
   /** Open the page saying what a profile gives a session. */
   onProfile?: ((name: string) => void) | undefined;
 }): JSX.Element {
-  const [quip] = useState(() => pickOne(QUIPS));
-  const [curtain] = useState(() => pickOne(CURTAINS));
+  const [seed] = useState(() => String(Date.now()));
+  const quip = firstLine("start_screen", seed);
+  const curtain = firstLine("curtain_up", seed);
   const { profiles, error: profilesError } = useProfiles(auth);
   const localReady = daemon !== null && daemonStatus === "connected";
 
@@ -116,7 +110,7 @@ export function StartSession({
   const me = auth?.me?.subject ?? null;
   const lastUsed = useMemo(() => {
     const mine = rows
-      .filter((r) => r.kind === "team" && r.profile && (me === null || r.owner === null || r.owner === me))
+      .filter((r) => r.kind === "team" && r.profile && startedByThem(r, me))
       .sort((a, b) => (b.lastActiveAt ?? "").localeCompare(a.lastActiveAt ?? ""));
     return mine[0]?.profile ?? (prefs.get(LAST_PROFILE) || null);
   }, [rows, me]);
@@ -126,7 +120,10 @@ export function StartSession({
   const chosenWhere: NewSessionWhere = whereChip ?? (auth ? "platform" : "local");
   const localAgents = useWorkspaceAgents(daemon, chosenWhere === "local" || text.includes("/local") ? folder.trim() : "");
   const profileNames = profiles.map((p) => p.name);
-  const preProfile = profiles.find((p) => p.name === (profileChip ?? auto.name));
+  // The agents a `#agent` token may name are the profile in force's: an `@profile` in the
+  // message, read first, else the chip, else the pick.
+  const tokenProfile = messageTokens(text, { profiles: profileNames, agents: [] }).profile;
+  const preProfile = profiles.find((p) => p.name === (tokenProfile ?? profileChip ?? auto.name));
   const agentNames = [...(preProfile?.agents ?? []), ...(localAgents.rows ?? []).filter((r) => (r.mode ?? "primary") === "primary").map((r) => r.name)];
   const names = { profiles: profileNames, agents: agentNames };
 
@@ -263,6 +260,7 @@ export function StartSession({
       <CastingScreen
         casting={casting}
         curtain={curtain}
+        seed={seed}
         rows={rows}
         onRoute={(c) => onCreated(c.id!, c.kind!, c.workspace ?? undefined)}
         onBack={() => {
@@ -456,15 +454,16 @@ export function StartSession({
                   setTitle(e.target.value);
                   setTitleTouched(true);
                 }}
-                placeholder="Named from your first line"
+                placeholder="Named from the first line"
                 aria-label="What to call it"
               />
             </label>
             <span className="ns-chord" aria-hidden="true">
               Ctrl ↵ · curtain up
             </span>
-            <button type="submit" className={full ? "ns-start queue" : "ns-start"} disabled={blocked}>
-              {full ? "Queue it" : cleaned ? "Start" : "Start empty"}
+            {/* As wide as its widest words, so the row holds still while the label changes. */}
+            <button type="submit" className={full ? "ns-start queue" : "ns-start"} disabled={blocked} data-widest="Start empty">
+              <span>{full ? "Queue it" : cleaned ? "Start" : "Start empty"}</span>
             </button>
           </div>
         </form>
@@ -690,6 +689,16 @@ interface Recent {
 }
 
 /**
+ * A platform session the person started themselves: theirs, and begun by a person, not by a
+ * trigger or a GitHub run that only ran under their name. A row from before origins were
+ * kept carries none, and counts as theirs.
+ */
+function startedByThem(r: FleetRow, me: string | null): boolean {
+  const kind = r.origin?.kind;
+  return (me === null || r.owner === null || r.owner === me) && (kind === undefined || kind === "user");
+}
+
+/**
  * The newest sessions to start another like: the person's own on the platform and those on
  * this computer, not a branch. A plane row's agent is the one it runs as; a daemon row's
  * `profile` is its agent, and its folder its workspace.
@@ -698,7 +707,7 @@ function recentSessions(rows: FleetRow[], me: string | null): Recent[] {
   return rows
     .filter((r) => r.kind === "team" || r.kind === "local" || r.kind === "private")
     .filter((r) => !(r.raw as { parent?: unknown } | null)?.parent)
-    .filter((r) => r.kind !== "team" || me === null || r.owner === null || r.owner === me)
+    .filter((r) => r.kind !== "team" || startedByThem(r, me))
     .sort((a, b) => (b.lastActiveAt ?? "").localeCompare(a.lastActiveAt ?? ""))
     .map((r) => {
       const raw = (r.raw ?? {}) as { workspace?: unknown; agent?: unknown };
@@ -835,12 +844,15 @@ function refusal(e: unknown): string {
 function CastingScreen({
   casting: c,
   curtain,
+  seed,
   rows,
   onRoute,
   onBack,
 }: {
   casting: Casting;
   curtain: string;
+  /** What the step lines are taken in the order of. */
+  seed: string;
   rows: FleetRow[];
   onRoute: (c: Casting) => void;
   onBack: () => void;
@@ -866,9 +878,9 @@ function CastingScreen({
   }, [ready, c, onRoute]);
 
   const steps: Array<[string, string]> = [
-    [c.where === "local" ? `Opening ${c.folder} on this computer` : "Finding a machine on the platform", "building the set"],
-    [c.queued ? `Waiting for a free place in ${c.profile}` : `Setting up ${c.where === "local" ? c.agent : `${c.profile} as ${c.agent}`}`, c.queued ? "waiting in the wings" : "handing out scripts"],
-    [c.hasText ? "Handing over your instruction" : "Ready for your first message", "cue line"],
+    [c.where === "local" ? `Opening ${c.folder} on this computer` : "Finding a machine on the platform", pickLine("casting", seed, 1)!],
+    [c.queued ? `Waiting for a free place in ${c.profile}` : `Setting up ${c.where === "local" ? c.agent : `${c.profile} as ${c.agent}`}`, c.queued ? firstLine("waiting_for_a_place", seed) : pickLine("casting", seed, 2)!],
+    [c.hasText ? "Handing over your instruction" : "Ready for your first message", pickLine("casting", seed, 3)!],
   ];
 
   return (

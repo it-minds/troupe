@@ -7,7 +7,7 @@ defmodule Troupe.Gateway.AgentsApiTest do
   writer, and refuses with every error, writing nothing; `agents.delete` takes a copy
   away and never a built-in; `agents.validate` checks without writing; `agents.list`'s
   rows say what decides whether a person wants one; `profile.switch` refuses what it
-  cannot switch to. On a pod every write refuses, pointing at the console. Its own config
+  cannot switch to. On a pod every write refuses, saying the agents are the bundle's. Its own config
   directory, so the suite's is not the one written.
   """
 
@@ -490,7 +490,7 @@ defmodule Troupe.Gateway.AgentsApiTest do
       }
     end
 
-    test "every write refuses, pointing at the console, and a read says it is not editable here",
+    test "every write refuses, saying the agents are the bundle's, and a read says it is not editable here",
          context do
       refute Process.whereis(Daemon)
 
@@ -506,7 +506,7 @@ defmodule Troupe.Gateway.AgentsApiTest do
                  context.dispatch
                )
 
-      assert reason =~ "console"
+      assert reason =~ "come from the profile's bundle and are read-only here."
 
       assert {:error, %Error{message: "forbidden", data: %{reason: ^reason}}} =
                Dispatch.call(
@@ -524,7 +524,7 @@ defmodule Troupe.Gateway.AgentsApiTest do
                  context.dispatch
                )
 
-      assert why =~ "console"
+      assert why == reason
     end
   end
 end

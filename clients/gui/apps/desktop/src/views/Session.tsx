@@ -288,6 +288,7 @@ export function Session({
         <div className="conversation" ref={column}>
           <Stream
             key={sessionId}
+            seed={sessionId}
             state={view.state}
             notes={notes}
             startWords={startWords}
@@ -812,6 +813,7 @@ function useLoopAnswer(view: SessionHandle["view"]): LoopInfo | null | undefined
 }
 
 function Stream({
+  seed,
   state,
   notes,
   startWords,
@@ -823,6 +825,8 @@ function Stream({
   onScratch,
   onSave,
 }: {
+  /** What the curtain line's words are taken in the order of, with the turn: the session's id. */
+  seed: string;
   state: TranscriptState;
   /** This app's own lines, each after the event it was said at. */
   notes: Note[];
@@ -857,7 +861,7 @@ function Stream({
   const drawn = useMemo(() => layout(state.entries, { detail, opened, now }), [state.entries, detail, opened, now]);
   // What streams belongs to the last turn, and is drawn at its level.
   const live = drawn.at(-1)?.level ?? detail;
-  const line = curtainLine(state, now);
+  const line = curtainLine(state, now, seed);
 
   const bottom = useRef<HTMLDivElement>(null);
   useEffect(() => {

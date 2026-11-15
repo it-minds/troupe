@@ -14,10 +14,11 @@
 
 import { useCallback, useState } from "react";
 import type { JSX } from "react";
+import { firstLine } from "@troupe/client";
 import type { AuthSession, DaemonClient, DaemonEndpoint, DaemonIdentity, RecentWorkspace, Worktree } from "@troupe/client";
 import { useAdminQuery } from "../hooks";
 import type { MachineUser } from "../hooks";
-import { Confirm, Failed, Loading, Pill, Table, When } from "./bits";
+import { Confirm, Failed, hostOf, Loading, Pill, Table, When } from "./bits";
 import { Models } from "./Models";
 import { Rules } from "./Rules";
 
@@ -147,7 +148,7 @@ function Connect({ daemon }: { daemon: DaemonState }): JSX.Element {
         <>
           <p className="copy">
             {daemon.status === "searching"
-              ? "Looking for the daemon this computer is running…"
+              ? `${firstLine("daemon_starting", "local")} — Looking for the daemon this computer is running…`
               : daemon.status === "absent"
                 ? "Nothing is running here yet. Starting it takes a second, and it keeps running after this window closes."
                 : "The daemon did not answer. It may have stopped since it last published where it was."}
@@ -249,7 +250,7 @@ function WhoAmI({
         <>
           <p className="copy">
             Sessions started here are recorded as <strong>{identity.display_name ?? identity.subject}</strong>
-            {identity.plane_url ? <> , signed in at {identity.plane_url}</> : null}. That name travels: a session synced to the platform is
+            {identity.plane_url ? `, signed in to ${hostOf(identity.plane_url)}` : ""}. That name travels: a session synced to the platform is
             yours on any machine you sign in from.
           </p>
           <button onClick={() => void act(false)} disabled={busy}>

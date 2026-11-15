@@ -631,7 +631,7 @@ function AgentDetail({
 
       {def.editable_reason && (
         <p className="note">
-          {def.editable_reason}.
+          {/\.$/.test(def.editable_reason) ? def.editable_reason : `${def.editable_reason}.`}
           {layer === "bundle" && planeUrl && (
             <>
               {" "}

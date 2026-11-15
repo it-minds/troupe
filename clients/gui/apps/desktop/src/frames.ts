@@ -8,8 +8,8 @@
 // the strip, every header's grammar and the curtain line's written set are functions of
 // the transcript, the level and the time.
 
-import { bytes, counted, isBlobRef, isBusy, isRoot, needsYou, rootState, toolGlyph as glyph, toolOutcome as outcome, toolTarget as target } from "@troupe/client";
-import type { BlobRef, CurtainPhase, Entry, TranscriptState } from "@troupe/client";
+import { bytes, counted, firstLine, isBlobRef, isBusy, isRoot, needsYou, pickLine, rootState, toolGlyph as glyph, toolOutcome as outcome, toolTarget as target } from "@troupe/client";
+import type { BlobRef, CurtainPhase, Entry, LineKind, TranscriptState } from "@troupe/client";
 
 // A call's glyph, target and outcome are the client's, so the console's tool lines say the same.
 export { bytes, counted, glyph, outcome, target };
@@ -346,20 +346,21 @@ function jsonTable(text: string): { columns: string[]; rows: string[][] } | null
 // -- the curtain line ---------------------------------------------------------------------
 
 /**
- * The curtain line's written set (docs/design/frames.md §7), by what it is said over. The
- * n-th time the agent does that in a turn takes the n-th line; past the end of a list the
- * line is its facts alone. Theatre, dry, never sorry and never a person.
+ * The curtain line's words are docs/design/lines.json's (docs/design/frames.md §7), by what
+ * they are said over, taken in an order shuffled from the turn's seed: the n-th time the
+ * agent does that in a turn takes the n-th line taken; past the end of a list the line is
+ * its facts alone. Theatre, dry, never sorry and never a person. A turn past five minutes
+ * says it is a long one in place of the phase's line.
  */
-export const CURTAIN = {
-  starting: ["the house lights go down"],
-  thinking: ["the actors are powdering their nose", "running lines in the wings", "the prompter finds the page"],
-  acting: ["fetching props", "shifting the scenery", "the stagehands are at it"],
-  reading: ["reading the script", "checking the prompt book", "rereading the second act"],
-  compacting: ["cutting the second act", "trimming for time"],
-} as const;
+export const LONG_TURN_MS = 300_000;
 
 /** The calls that only read, which have their own list. */
 export const READS: ReadonlySet<string> = new Set(["read_file", "grep", "glob", "list_files", "git_read", "read_branch", "read_output", "recall", "web_fetch"]);
+
+/** The seed a turn's lines are taken in the order of: the session's id, else a counter, and the turn's number. */
+export function curtainSeed(state: TranscriptState, session = ""): string {
+  return `${session}/${state.curtain.turn}`;
+}
 
 /** The line while a turn works: the flourish, or none, then the facts, which are always there. */
 export interface CurtainLine {
@@ -415,7 +416,7 @@ export function waitingWords(state: TranscriptState, now: number): string | null
  * rests. What runs, how many and for how long are always said; a few words from the set
  * go before them, chosen by how many times this turn it has done what it does now.
  */
-export function curtainLine(state: TranscriptState, now: number): CurtainLine | null {
+export function curtainLine(state: TranscriptState, now: number, seed = ""): CurtainLine | null {
   if (needsYou(state)) return { waiting: true, flourish: null, facts: "waiting for you" };
   if (!isBusy(state)) return null;
 
@@ -437,15 +438,17 @@ export function curtainLine(state: TranscriptState, now: number): CurtainLine | 
 
   const n = state.curtain.phases[doing as CurtainPhase] ?? 1;
   const names = running.map((r) => r.split(" ")[0]!);
-  const list: readonly string[] | null =
+  const kind: LineKind | null =
     doing === "thinking"
-      ? CURTAIN.thinking
+      ? "thinking"
       : doing === "compacting"
-        ? CURTAIN.compacting
+        ? "compacting"
         : doing === "acting"
           ? names.length > 0 && names.every((name) => READS.has(name))
-            ? CURTAIN.reading
-            : CURTAIN.acting
+            ? "reading"
+            : "acting"
           : null;
-  return { waiting: false, flourish: list?.[n - 1] ?? null, facts };
+  const turnSeed = curtainSeed(state, seed);
+  const long = state.curtain.turnAt !== undefined && now - state.curtain.turnAt >= LONG_TURN_MS && kind !== null;
+  return { waiting: false, flourish: long ? firstLine("long_turn", turnSeed) : kind ? pickLine(kind, turnSeed, n) : null, facts };
 }

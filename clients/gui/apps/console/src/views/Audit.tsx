@@ -79,7 +79,7 @@ export function Audit(): JSX.Element {
       <div className="toolbar">
         <input aria-label="Search the audit" placeholder="search what came back: an action, a subject, a value…" value={query} onChange={(e) => setQuery(e.target.value)} />
       </div>
-      <Loaded load={load} what="the audit" retry={reload}>
+      <Loaded load={load} what="the audit" retry={reload} slow>
         {(rows) => {
           const shown = rows.filter((r) => !q || JSON.stringify([r.actor, r.action, r.subject_id, r.detail]).toLowerCase().includes(q));
           if (rows.length === 0) {
@@ -160,7 +160,7 @@ function Integrity(): JSX.Element {
         Every row carries a digest of its own content and of the row before it. The plane recomputes both from what is stored and stops at the first one
         that does not match. It changes nothing.
       </p>
-      {check.state === "running" && <Loading what="the whole trail, row by row" />}
+      {check.state === "running" && <Loading what="the whole trail, row by row" slow />}
       {check.state === "failed" && <Failure error={check.error} what="the chain's check" retry={run} />}
       {check.state === "done" && <Verdict answer={check.answer} />}
       {check.state !== "running" && (

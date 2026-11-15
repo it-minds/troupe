@@ -33,16 +33,8 @@ defmodule Troupe.UI.TUI.NewSessionPage do
   alias ExRatatui.Text.{Line, Span}
   alias ExRatatui.Widgets.{Block, Paragraph}
   alias Troupe.Client
-  alias Troupe.UI.NewSession
+  alias Troupe.UI.{Lines, NewSession}
   alias Troupe.UI.TUI.{Input, Model, Theme}
-
-  @quips [
-    "The stage is set. Give them the plot and step into the wings.",
-    "No auditions today. Everyone already knows their lines.",
-    "Break a leg. Or a build. Preferably not production.",
-    "Every good run starts with a cue line.",
-    "The house lights are down. What's the scene?"
-  ]
 
   @typedoc "The screen's state: a plain map, as HQ's is."
   @type t :: map()
@@ -61,6 +53,7 @@ defmodule Troupe.UI.TUI.NewSessionPage do
     workspace = Keyword.fetch!(opts, :workspace)
     {profiles, sessions, plane_error} = plane_rows(origin)
     agents = local_agents(workspace)
+    seed = Keyword.get_lazy(opts, :seed, fn -> System.os_time(:millisecond) end)
 
     %{
       origin: origin,
@@ -90,7 +83,8 @@ defmodule Troupe.UI.TUI.NewSessionPage do
       last_used: last_used(sessions),
       daemon_up: Keyword.get_lazy(opts, :daemon_up, &Client.daemon_up?/0),
       ceiling: %{},
-      quip: Enum.random(@quips),
+      seed: seed,
+      quip: Lines.first(:start_screen, seed),
       casting: nil,
       # The start left running when Esc went back to the form: its casting, until the
       # server says it finished.
@@ -692,11 +686,14 @@ defmodule Troupe.UI.TUI.NewSessionPage do
   def footer(%{casting: %{failed: f}}) when is_binary(f),
     do: " casting — Enter or Esc back to the form "
 
-  # The place frees by itself only where the plane answered that the start waits for one.
-  def footer(%{casting: %{waiting: true}}),
-    do: " casting — Esc goes back; the session starts by itself when a place frees "
+  # The place frees by itself only where the plane answered that the start waits for one;
+  # Esc goes back to the form, and the start goes on either way.
+  def footer(%{casting: %{waiting: true}} = page),
+    do:
+      " #{Lines.first(:waiting_for_a_place, page.seed)} — Esc goes back; it starts when a place frees "
 
-  def footer(%{casting: %{}}), do: " casting — Esc goes back to the form; the start goes on "
+  def footer(%{casting: %{}} = page),
+    do: " #{Lines.first(:casting, page.seed)} — Esc goes back to the form; the start goes on "
 
   def footer(%{open: open}) when open != nil, do: " ↑↓ move · Enter picks · Esc closes "
 
