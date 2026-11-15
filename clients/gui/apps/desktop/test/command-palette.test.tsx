@@ -119,9 +119,9 @@ describe("the command palette", () => {
       expect([...row.children].map((c) => c.className)).toEqual(["name", "summary"]);
     }
     expect(dialog.querySelector(".row .kind")).toBeNull();
-    expect(css).toMatch(/\.palette \.row \{[^}]*grid-template-columns: 12ch 1fr;/);
+    expect(css).toMatch(/\.palette \.row \{[^}]*grid-template-columns: 12ch minmax\(0, 1fr\);/);
     // From 1024px the list is the narrower column and the detail the wider.
-    expect(css).toMatch(/grid-template-columns: minmax\(min\(16rem, 40%\), 2fr\) minmax\(0, 3fr\);/);
+    expect(css).toMatch(/\.palette \{\s*width: min\(960px, 100%\);\s*display: grid;\s*grid-template-columns: minmax\(min\(16rem, 40%\), 2fr\) minmax\(0, 3fr\);/);
 
     const input = dialog.querySelector<HTMLInputElement>("input")!;
     const head = (): string => [...dialog.querySelectorAll(".detail > .usage, .detail > .area")].map((el) => el.textContent).join("");

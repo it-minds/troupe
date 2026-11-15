@@ -4648,7 +4648,7 @@ pre.instruction {
 .palette .row {
   min-height: 0;
   display: grid;
-  grid-template-columns: 12ch 1fr;
+  grid-template-columns: 12ch minmax(0, 1fr);
   gap: var(--space-3);
   align-items: baseline;
   padding: var(--space-2) var(--space-4) var(--space-2) calc(var(--space-4) - var(--bw-marker));
@@ -4661,6 +4661,7 @@ pre.instruction {
 .palette .row .summary {
   font: var(--t-note);
   color: var(--text-secondary);
+  overflow-wrap: anywhere;
 }
 /* Three kinds of row, each drawn as what it is (troupe #565): Troupe's own commands in
    the text's colour, an agent in the accent, a file's command in the colour of whose it
@@ -4735,7 +4736,8 @@ pre.instruction {
 /* The list keeps its room whatever the chosen command's detail says: eight rows at least,
    scrolling inside itself, and the detail (a file's prompt can be long) scrolls in a box of
    its own and takes no rows from it. From 1024px the detail stands beside the list, each
-   scrolling on its own; narrower it stacks under the list, held to a share of the height. */
+   scrolling on its own, the list the narrower column and the palette wider to hold both;
+   narrower it stacks under the list, held to a share of the height. */
 .palette .rows {
   min-height: min(18rem, 40vh);
 }
@@ -4754,6 +4756,7 @@ pre.instruction {
 }
 @media (min-width: 1024px) {
   .palette {
+    width: min(960px, 100%);
     display: grid;
     grid-template-columns: minmax(min(16rem, 40%), 2fr) minmax(0, 3fr);
     grid-template-rows: auto minmax(0, 1fr) auto auto;
