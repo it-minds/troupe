@@ -831,6 +831,9 @@ defmodule Troupe.CLITest do
 
     try do
       File.write!(Path.join(ws, "go"), "")
+      # The shell call's end and the harness saying the budget ran out are the agent's
+      # turn, which a loaded runner takes its time over; the printer's line comes after it.
+      assert %{data: %{call_id: _}} = await_event("root", :budget_ask_started, 60_000)
       eventually(fn -> contents(io) =~ "headless mode stops here" end, 15_000)
       # Answered once anything the printer sent as it said so has reached the daemon.
       :sys.get_state(printer)

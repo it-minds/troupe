@@ -69,8 +69,20 @@ const windowsFake = [
   "",
 ].join("\r\n");
 
+// On Windows a VS Code that has just exited can hold a handle in its user data a moment
+// longer, and removing the directory fails with EPERM after the tests passed. Retry a few
+// times, then leave what is left and say so: the run goes on over it, and a CI runner is
+// thrown away.
+function remove(dir: string) {
+  try {
+    fs.rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 300 });
+  } catch (error) {
+    console.warn(`could not remove ${dir}, going on over it: ${(error as Error).message}`);
+  }
+}
+
 async function main() {
-  fs.rmSync(work, { recursive: true, force: true });
+  remove(work);
   const folders = ["alpha", "beta", "gamma", "delta"].map((name) => path.join(work, name));
 
   for (const folder of folders) {
@@ -162,7 +174,7 @@ async function main() {
   // extensions directories, running `suite` from this directory with `env`.
   const session = (open: string, data: string, settings: object, suite: string, env: Record<string, string> = {}) => {
     const userData = path.join(base, data);
-    fs.rmSync(userData, { recursive: true, force: true });
+    remove(userData);
     fs.mkdirSync(path.join(userData, "User"), { recursive: true });
     fs.writeFileSync(
       path.join(userData, "User", "settings.json"),
@@ -212,7 +224,9 @@ async function main() {
   const on = { "troupe.openOnFolderOpen": true };
 
   await session(epsilon, "v", on, "startup.js", { TROUPE_TEST_STARTUP: "opens" });
-  await session(epsilon, "v", on, "startup.js", { TROUPE_TEST_STARTUP: "reload" });
+  // A user data directory of its own: the one before it may still be held by the VS Code
+  // that just exited, and the two share nothing (the terminal is the test's own).
+  await session(epsilon, "r", on, "startup.js", { TROUPE_TEST_STARTUP: "reload" });
 }
 
 main().catch((error) => {
