@@ -5,7 +5,7 @@
 // The three primary things are the only ones guaranteed on screen at 380px, because
 // they are the only three a person ever *has* to do: read what happened, decide, and
 // reply. Tasks, files and who is working live in the backstage track, shown on asking,
-// which stacks below the conversation on a narrow screen.
+// which on a phone is a sheet over the whole screen.
 //
 // Nothing here is held that a reconnect could not rebuild. A message the person sends
 // renders as Queued until the server echoes it back — not inserted optimistically into
@@ -46,6 +46,7 @@ import type {
   TranscriptState,
 } from "@troupe/client";
 import { useSessionView, useStartQuestions } from "../hooks";
+import { useNarrow } from "../narrow";
 import type { SessionHandle } from "../hooks";
 import { curtainLine, DEFAULT_DETAIL, isDetail, layout, waitingOn, waitingWords } from "../frames";
 import type { Detail, Drawn } from "../frames";
@@ -141,6 +142,17 @@ export function Session({
   // The scratchpad document open beside the conversation, by name; null while it is closed.
   const [scratch, setScratch] = useState<string | null>(null);
   useEffect(() => setScratch(null), [sessionId]);
+  // On a phone the backstage and the scratchpad are sheets over the whole screen, one at a
+  // time: opening one shuts the other. Beside the conversation both may be open.
+  const narrow = useNarrow();
+  const showBackstage = (on: boolean): void => {
+    setBackstage(on);
+    if (on && narrow) setScratch(null);
+  };
+  const showScratch = (name: string | null): void => {
+    setScratch(name);
+    if (name !== null && narrow) setBackstage(false);
+  };
   // On this computer, through its daemon; a team session and a laptop's relayed one are
   // reached through the plane, and the person is who the plane says.
   const here = onThisComputer(kind);
@@ -242,11 +254,11 @@ export function Session({
       actions={{
         go: (screen) => (screen === "sessions" ? onBack() : onGo?.(screen)),
         showFiles: () => {
-          setBackstage(true);
+          showBackstage(true);
           setPane("files");
         },
         showMemory: (what) => {
-          setBackstage(true);
+          showBackstage(true);
           setPane("memory");
           if (what) setMemoryAsk((a) => ({ what, n: (a?.n ?? 0) + 1 }));
         },
@@ -284,10 +296,10 @@ export function Session({
             sessionId={sessionId}
             row={row}
             backstage={backstage}
-            onToggleBackstage={() => setBackstage((b) => !b)}
+            onToggleBackstage={() => showBackstage(!backstage)}
             scratchpad={
               view.state.scratch.length > 0
-                ? { open: scratch !== null, onToggle: () => setScratch((s) => (s === null ? latest(view.state.scratch) : null)) }
+                ? { open: scratch !== null, onToggle: () => showScratch(scratch === null ? latest(view.state.scratch) : null) }
                 : null
             }
             onAbout={here && onAgents && current ? () => onAgents(current) : undefined}
@@ -331,7 +343,7 @@ export function Session({
             detail={detail.level}
             readBlob={view.readBlob}
             onSetup={onGo ? () => onGo("setup") : undefined}
-            onScratch={setScratch}
+            onScratch={showScratch}
             onSave={saveReady}
             onRetry={readOnly ? undefined : retry}
             onPublish={publishReply}
@@ -399,7 +411,7 @@ export function Session({
           )}
         </div>
 
-        {scratch !== null && <Scratchpad view={view.view} docs={view.state.scratch} open={scratch} onOpen={setScratch} onClose={() => setScratch(null)} />}
+        {scratch !== null && <Scratchpad view={view.view} docs={view.state.scratch} open={scratch} onOpen={showScratch}onClose={() => setScratch(null)} />}
 
         {backstage && (
           <Backstage

@@ -127,11 +127,11 @@ Rules:
 
 ## 4. Layout
 
-A single fluid column system with wrapping flex tracks — no fixed breakpoint jumps in the markup. Regions declare a flex basis and the browser decides when to stack. The client is a React app rendered in the browser, and a layout that depends on measured widths re-renders on every resize; the tracks make that the browser's job.
+A single fluid column system with wrapping flex tracks — no fixed breakpoint jumps in the markup but one, the phone's (§10). Regions declare a flex basis and the browser decides when to stack. The client is a React app rendered in the browser, and a layout that depends on measured widths re-renders on every resize; the tracks make that the browser's job.
 
 **Session screen (`session-chat.dc.html`, Decision 986).** A chat, not a dashboard: one column of 760px centred in the conversation track. A person's words are a block on the right; the troupe's reply stands on the page beside the mask, its working one strip above it, and Copy, Retry, Publish and what the turn cost in a row under it on hover or focus. The cards that wait on a person sit at the column's foot, sticky, their answers always on screen. The composer is one box under them: attachments as tags, the message, `+` and `/` on the left; the profile, the agent chip, the context ring and Send (Stop while it works) on the right. It grows with the text to 40% of the window, and files dropped on the window attach.
 
-The backstage (tasks, files, instructions, memory, settings) and the scratchpad are tracks beside the conversation, opened from the head's ⋯ and hidden until then at every width; on a narrow screen (<720px) they stack under it. With neither open the conversation is the whole screen, on a phone too: the transcript scrolls and the composer stays at the foot.
+The backstage (tasks, files, instructions, memory, settings) and the scratchpad are tracks beside the conversation, opened from the head's ⋯ and hidden until then at every width; on a phone (<720px) each is a sheet over the whole screen, one at a time. With neither open the conversation is the whole screen, on a phone too: the transcript scrolls and the composer stays at the foot.
 
 What the backend does not support yet is drawn with its reason rather than left out (the context window, Always allow, artifacts on the platform: troupe #920), the one place §8's remove-don't-disable gives way, because the comp promises them.
 ### What is primary, secondary, collapsed — and why
@@ -139,7 +139,7 @@ What the backend does not support yet is drawn with its reason rather than left 
 | | Element | Rationale |
 |---|---|---|
 | **Primary** | Conversation, approval, composer | The only three things a non-developer ever *has* to do: read what happened, decide, reply. They are the only elements guaranteed on screen at 380px. |
-| **Secondary** | Task list, files | Answer "how far along is this" and "what came out of it". Useful, glanceable, but never blocking. They live in the backstage column and fall below the fold on a phone. |
+| **Secondary** | Task list, files | Answer "how far along is this" and "what came out of it". Useful, glanceable, but never blocking. They live in the backstage column, a sheet on a phone. |
 | **Tertiary** | Agent tree, presence | The agent tree is the most *impressive* part of the product and the least *useful* to this audience — a project manager does not act on the existence of a proofreading subagent. It is a compact status list, not a diagram, and it is last. Presence collapses to three avatars plus a sentence in the header. |
 | **Collapsed by default** | Tool activity | Every tool call is one mono line: verb, target, duration. Expandable to a payload. Collapsed by default because a session produces hundreds of these and none of them is the point. |
 
@@ -279,6 +279,7 @@ Non-negotiable, because people use this all day.
 - **Motion** — `prefers-reduced-motion: reduce` collapses all durations to ~0 and replaces pulsing dots with static ones. No animation carries information on its own.
 - **Targets** — 44px minimum for anything tappable, approvals included.
 - **380px** — the hard floor. No horizontal page scroll; only diff and command blocks scroll sideways, inside themselves.
+- **A phone** (<720px) gives the conversation the screen. The rail is not drawn: a top bar one line high (at most 56px) holds the mark, the screen's name and a menu, which carries the "waiting for you" count in the reserved colour and opens the rail's list as a full-height sheet, who you are and Sign out at its foot. No bottom tab bar: one pattern. A session's head is one line (back, title, status, ⋯), the goal under it only while there is one, the composer at the foot growing to 40% of the visible height and kept above the keyboard (`100dvh`, `interactive-widget=resizes-content`); the transcript keeps at least 60% of the screen. The backstage and the scratchpad are sheets from ⋯, one at a time; the palette and dialogs fill the width inside 16px gutters; every control is 44px tall.
 - **Language** — `lang` must be set correctly per document; Danish and English text may sit in the same stream, so mark message-level language when it is known.
 
 ---
