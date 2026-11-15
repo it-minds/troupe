@@ -50,6 +50,10 @@ tauri-plugin-single-instance = "~2.5"
 # release's signed manifest. `~2.14`, the minor that goes with tauri 2.12; it is driven
 # from Rust alone, so it has no JavaScript half to keep in step.
 tauri-plugin-updater = "~2.14"
+# The main window opens at the size and place it was closed at (src/window.rs). `~2.4`,
+# the minor that goes with tauri 2.12; driven from Rust alone, so it has no JavaScript
+# half, and the page is granted none of its commands.
+tauri-plugin-window-state = "~2.4"
 # The manifest's check: minisign's format, the one the updater itself verifies with, and
 # sha256 for each file it names; versions as SemVer orders them. The daemon's release is a
 # `.tar.gz`, unpacked beside the one it replaces. All of them already in the lock through
