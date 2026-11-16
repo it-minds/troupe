@@ -19,6 +19,8 @@ paths:
   - clients/tui/lib/troupe/ui/tui/new_session_page.ex
   - clients/tui/lib/troupe/ui/tui/server.ex
   - clients/tui/lib/troupe/client/team_choice.ex
+  - clients/tui/lib/troupe/client.ex
+  - clients/tui/test/troupe/profiles_screen_test.exs
   - clients/tui/lib/troupe/client/remote.ex
   - clients/tui/lib/troupe/cli.ex
   - clients/tui/lib/troupe/cli/run_target.ex
