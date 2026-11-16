@@ -25,7 +25,9 @@ defmodule Troupe.Plane.Artifacts.Shares do
   alias Troupe.Plane.Identity.User
   alias Troupe.Protocol.Error
 
-  @roles ~w(view edit)
+  alias Troupe.Plane.Artifacts.People
+
+  @roles People.roles()
 
   # A public link is a bearer anybody may forward; it does not outlive a quarter.
   @max_public_days 90
@@ -72,7 +74,7 @@ defmodule Troupe.Plane.Artifacts.Shares do
   end
 
   defp role(role) when role in @roles, do: {:ok, role}
-  defp role(other), do: {:error, invalid("a link's role is view or edit, not #{inspect(other)}")}
+  defp role(other), do: {:error, invalid("a link's role is view, comment or edit, not #{inspect(other)}")}
 
   defp expires(nil), do: {:ok, nil}
 
@@ -146,9 +148,12 @@ defmodule Troupe.Plane.Artifacts.Shares do
         where: u.share_id in subquery(shares) and p.subject == ^subject and is_nil(u.revoked_at)
       )
 
-    case Repo.update_all(query, set: [revoked_at: DateTime.utc_now()]) do
-      {0, _} -> {:error, Error.new(:not_found, %{person: subject})}
-      {_n, _} -> revoked(owner, artifact, %{"person" => subject})
+    # Their grant by name goes too: "they no longer hold this" means every way they held it.
+    {links, _} = Repo.update_all(query, set: [revoked_at: DateTime.utc_now()])
+
+    case links + People.revoke(artifact, subject) do
+      0 -> {:error, Error.new(:not_found, %{person: subject})}
+      _n -> revoked(owner, artifact, %{"person" => subject})
     end
   end
 
@@ -254,24 +259,31 @@ defmodule Troupe.Plane.Artifacts.Shares do
     )
   end
 
-  @doc "The ids of the artifacts a link gives `user` a role on now, as a query."
+  @doc """
+  The ids of the artifacts a link, or the owner's naming them, gives `user` a role on now,
+  as a query.
+  """
   @spec shared_with(User.t()) :: Ecto.Query.t()
-  def shared_with(%User{id: id}) when is_binary(id),
-    do: from([u, s] in live_uses(id), select: s.artifact_id)
+  def shared_with(%User{id: id} = user) when is_binary(id),
+    do: from([u, s] in live_uses(id), select: s.artifact_id, union: ^People.granted_to(user))
 
   @doc "The role a link gives `user` on `artifact` now: `edit`, `view` or `nil`."
   @spec role(Artifact.t(), User.t()) :: String.t() | nil
   def role(%Artifact{id: id}, user), do: Map.get(roles([id], user), id)
 
-  @doc "The roles links give `user` on each of `ids`, `edit` above `view`."
+  @doc """
+  The roles links, and the owner's naming them, give `user` on each of `ids`: the strongest
+  of them, `edit` above `comment` above `view`.
+  """
   @spec roles([String.t()], User.t()) :: %{String.t() => String.t()}
   def roles([], _user), do: %{}
 
-  def roles(ids, %User{id: user_id}) when is_binary(user_id) do
+  def roles(ids, %User{id: user_id} = user) when is_binary(user_id) do
     from([u, s] in live_uses(user_id), where: s.artifact_id in ^ids, select: {s.artifact_id, s.role})
     |> Repo.all()
+    |> Enum.concat(People.roles(ids, user))
     |> Enum.reduce(%{}, fn {id, role}, acc ->
-      Map.update(acc, id, role, &if(&1 == "edit" or role == "edit", do: "edit", else: "view"))
+      Map.update(acc, id, role, &People.stronger(&1, role))
     end)
   end
 

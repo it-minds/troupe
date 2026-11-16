@@ -219,6 +219,9 @@ defmodule Troupe.Plane.Harness do
     "artifact.share" => :control,
     "artifact.unshare" => :control,
     "artifact.public" => :control,
+    # Its thread: read by whoever may open it, written by whoever holds comment or above.
+    "artifact.comments" => :observe,
+    "artifact.comment" => :control,
     # As `session.redeem`: its caller is not yet anybody on this artifact, and what the link
     # gives them was decided when it was made.
     "artifact.redeem" => :observe
@@ -603,6 +606,12 @@ defmodule Troupe.Plane.Harness do
        when is_boolean(enabled),
        do: Artifacts.public_links(id, enabled, user, platform_admin?: admin?(context))
 
+  defp handle("artifact.comments", %{"id" => id}, %{user: user} = context),
+    do: Artifacts.comments(id, user, platform_admin?: admin?(context))
+
+  defp handle("artifact.comment", %{"id" => id} = params, %{user: user} = context),
+    do: Artifacts.comment(id, user, params["body"], platform_admin?: admin?(context))
+
   defp handle("artifact.redeem", %{"token" => token}, %{user: user}) when is_binary(token),
     do: Artifacts.redeem_link(token, user)
 
@@ -638,7 +647,7 @@ defmodule Troupe.Plane.Harness do
   defp handle(method, _params, _context)
        when method in ~w(artifact.get artifact.open artifact.delete artifact.rollback artifact.pin
                          artifact.read artifact.preview artifact.share artifact.unshare
-                         artifact.transfer),
+                         artifact.transfer artifact.comments artifact.comment),
        do: {:error, Error.new(:invalid_params, %{reason: "#{method} takes an artifact's id"})}
 
   # Which version each of the caller's own clients last ran, and how that stands against

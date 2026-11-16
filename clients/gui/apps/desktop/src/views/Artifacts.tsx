@@ -17,7 +17,7 @@
 import { useCallback, useEffect, useState } from "react";
 import type { JSX } from "react";
 import { appLink, audienceName, audienceOf, teamOwned, visibilityWords } from "@troupe/client";
-import type { Artifact, ArtifactAudience, ArtifactDetail, ArtifactList, DaemonClient, OwnPlane } from "@troupe/client";
+import type { Artifact, ArtifactAudience, ArtifactDetail, ArtifactList, ArtifactShareRole, ArtifactThread, DaemonClient, OwnPlane, Person } from "@troupe/client";
 import { copyText } from "../clipboard";
 import { shell } from "../shell";
 import { Loading, relative, unreachedWords } from "./bits";
@@ -87,6 +87,24 @@ function whose(a: Artifact): string {
   return teamOwned(a) ? `Team ${a.owner_team}` : who(a.owner, a.mine);
 }
 
+/** What a role shared with somebody lets them do, as a sentence's start. */
+function mayWords(role: string | null | undefined): string {
+  if (role === "edit") return "You can open it, comment on it and publish new versions of it";
+  if (role === "comment") return "You can open it and comment on it";
+  return "You can open it";
+}
+
+/** The roles an owner gives somebody, in the words the share control offers. */
+const ROLES: Array<{ role: ArtifactShareRole; label: string }> = [
+  { role: "view", label: "Can view" },
+  { role: "comment", label: "Can comment" },
+  { role: "edit", label: "Can edit" },
+];
+
+function roleLabel(role: string): string {
+  return ROLES.find((r) => r.role === role)?.label ?? role;
+}
+
 /** Who can see it, in a sentence, and what that means. A team's is its members' whatever it is for. */
 function audienceWords(a: Artifact, audience: ArtifactAudience): { long: string; note: string } {
   const name = audienceName(a);
@@ -99,11 +117,11 @@ function audienceWords(a: Artifact, audience: ArtifactAudience): { long: string;
         ? { long: `The ${name} profile's people`, note: `People granted the ${name} profile can open it. Nobody else can find it.${members}` }
         : { long: `Everyone on ${name}`, note: `Members of ${name} can open it. People outside the team cannot find it.${a.owner_team && a.owner_team !== name ? members : ""}` };
     case "shared":
-      return { long: "Shared with you by a link", note: `${whose(a)} made a link to it, and you opened it; you keep what the link gives you until it is revoked.` };
+      return { long: "Shared with you", note: `${whose(a)} shared it with you, by name or by a link you opened. ${mayWords(a.role)} until they take it back.` };
     case "private":
       return teamOwned(a)
-        ? { long: `Only the ${a.owner_team} team`, note: `Members of ${a.owner_team}, whose it is, can find and open it; nobody else can. Make a link when you are ready to share it.` }
-        : { long: "Only you", note: "Nobody else can find or open it. Make a link when you are ready to share it." };
+        ? { long: `Only the ${a.owner_team} team`, note: `Members of ${a.owner_team}, whose it is, can find and open it; nobody else can. Share it with somebody by name, or make a link, when you are ready.` }
+        : { long: "Only you", note: "Nobody else can find or open it. Share it with somebody by name, or make a link, when you are ready." };
   }
 }
 
@@ -149,6 +167,7 @@ export function Artifacts({
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<Filter>("all");
+  const [kind, setKind] = useState<"all" | Artifact["kind"]>("all");
   const [selected, setSelected] = useState<string | null>(open ?? null);
   const [seen, setSeen] = useState(seenVersions);
   const [asked, setAsked] = useState(0);
@@ -203,7 +222,7 @@ export function Artifacts({
 
   const q = query.trim().toLowerCase();
   const matches = (a: Artifact): boolean => !q || [a.title, whose(a), who(a.owner, a.mine), a.owner?.subject ?? "", a.origin?.session_id ?? ""].join(" ").toLowerCase().includes(q);
-  const searched = list.artifacts.filter(matches);
+  const searched = list.artifacts.filter((a) => matches(a) && (kind === "all" || a.kind === kind));
   const shown = searched.filter((a) => filter === "all" || audienceOf(a) === filter);
   const count = (f: Filter): number => searched.filter((a) => f === "all" || audienceOf(a) === f).length;
   const current = list.artifacts.find((a) => a.id === selected) ?? null;
@@ -226,6 +245,15 @@ export function Artifacts({
             <span className="n">{count(f)}</span>
           </button>
         ))}
+        <label className="kind-filter micro">
+          <span className="visually-hidden">Kind</span>
+          <select value={kind} onChange={(e) => setKind(e.target.value as typeof kind)} aria-label="Kind">
+            <option value="all">Every kind</option>
+            <option value="html">Pages</option>
+            <option value="markdown">Documents</option>
+            <option value="file">Files</option>
+          </select>
+        </label>
         <span className="order micro">NEWEST FIRST</span>
       </nav>
       {!list.enabled && <p className="note">An administrator has switched artifacts off on this plane, so there are none to show.</p>}
@@ -263,6 +291,7 @@ export function Artifacts({
                             {AUDIENCE[audience].glyph} {audience === "team" ? (audienceName(a) ?? "TEAM").toUpperCase() : AUDIENCE[audience].short}
                           </span>
                           <span className="kind micro">{KIND[a.kind] ?? a.kind.toUpperCase()}</span>
+                          {(a.comments ?? 0) > 0 && <span className="kind micro">{a.comments === 1 ? "1 COMMENT" : `${a.comments} COMMENTS`}</span>}
                         </span>
                       </span>
                     </button>
@@ -277,11 +306,12 @@ export function Artifacts({
               <p className="muted">{q ? "Try a person's name or the session it came from." : "When someone publishes for this audience, it appears here. Publish from any session with /publish."}</p>
               {/* Only where something narrows the list: with every audience shown and
                   nothing typed it would show what is already shown, which is nothing. */}
-              {(q || filter !== "all") && (
+              {(q || filter !== "all" || kind !== "all") && (
                 <button
                   type="button"
                   onClick={() => {
                     setFilter("all");
+                    setKind("all");
                     setQuery("");
                   }}
                 >
@@ -468,6 +498,7 @@ function Aside({
             </button>
           </div>
         )}
+        {owner && detail && <SharedWith via={via} artifact={artifact} detail={detail} onChanged={() => setAsked((n) => n + 1)} />}
       </section>
 
       <section>
@@ -586,6 +617,8 @@ function Aside({
         )}
       </section>
 
+      <Thread via={via} artifact={artifact} />
+
       {owner && detail && (
         <section>
           <h3 className="screen">Links</h3>
@@ -596,7 +629,7 @@ function Aside({
               {shares.map((s) => (
                 <li key={s.id}>
                   <span>
-                    {s.role === "edit" ? "Can edit" : "Can view"}
+                    {roleLabel(s.role)}
                     {s.used_by.length > 0 && ` · opened by ${s.used_by.map((u) => u.person.display_name || u.person.subject).join(", ")}`}
                   </span>
                   <button type="button" className="link" disabled={busy} onClick={() => void act(() => via.unshareArtifact(artifact.id, { share: s.id }), "Revoked: that link opens nothing now.")}>
@@ -621,5 +654,220 @@ function Aside({
         />
       )}
     </aside>
+  );
+}
+
+/**
+ * Who its owner shared it with by name, each at a role, and the picker that adds somebody:
+ * people whose name starts with what is typed, among those the plane lets the owner find, as
+ * the session's invitation picker has them. Naming somebody again changes their role.
+ */
+function SharedWith({ via, artifact, detail, onChanged }: { via: OwnPlane; artifact: Artifact; detail: ArtifactDetail; onChanged: () => void }): JSX.Element {
+  const [query, setQuery] = useState("");
+  const [found, setFound] = useState<Person[]>([]);
+  const [chosen, setChosen] = useState<Person | null>(null);
+  const [role, setRole] = useState<ArtifactShareRole>("view");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [said, setSaid] = useState<string | null>(null);
+  const people = detail.people ?? [];
+
+  useEffect(() => {
+    const q = query.trim();
+    if (q === "" || chosen) return setFound([]);
+    let live = true;
+    const t = setTimeout(() => {
+      via.searchPeople(q).then(
+        (r) => live && setFound(r.people.filter((p) => !people.some((s) => s.subject === p.subject))),
+        () => live && setFound([]),
+      );
+    }, 150);
+    return () => {
+      live = false;
+      clearTimeout(t);
+    };
+  }, [via, query, chosen, people.length]);
+
+  const act = async (what: () => Promise<unknown>, done: string): Promise<void> => {
+    setBusy(true);
+    setError(null);
+    setSaid(null);
+    try {
+      await what();
+      setSaid(done);
+      setQuery("");
+      setChosen(null);
+      onChanged();
+    } catch (e) {
+      setError(sentence(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const name = (p: { subject: string; display_name?: string | null }): string => p.display_name || p.subject;
+
+  return (
+    <div className="shared-with">
+      <h4 className="micro">SHARED WITH</h4>
+      {people.length === 0 ? (
+        <p className="muted">Nobody by name. Pick somebody below, or make a link.</p>
+      ) : (
+        <ul className="links" aria-label="Shared with">
+          {people.map((p) => (
+            <li key={p.subject}>
+              <span>
+                {name(p)} · {roleLabel(p.role)}
+              </span>
+              <button type="button" className="link" disabled={busy} aria-label={`Remove ${name(p)}`} onClick={() => void act(() => via.unshareArtifact(artifact.id, { person: p.subject }), `Removed: ${name(p)} cannot open ${artifact.title} now, unless it is for somebody they are.`)}>
+                Remove
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+      <form
+        className="move-visibility"
+        onSubmit={(e) => {
+          e.preventDefault();
+          if (chosen) void act(() => via.sharePersonArtifact(artifact.id, chosen.subject, role), `Shared: ${name(chosen)} finds ${artifact.title} under Shared with you, and ${roleLabel(role).toLowerCase()}.`);
+        }}
+      >
+        <label>
+          Share with
+          <input
+            value={query}
+            disabled={busy}
+            onChange={(e) => {
+              setQuery(e.target.value);
+              setChosen(null);
+            }}
+            placeholder="A name or an email"
+          />
+        </label>
+        {found.length > 0 && (
+          <ul className="people" aria-label="People">
+            {found.map((p) => (
+              <li key={p.subject}>
+                <button
+                  type="button"
+                  className="tab"
+                  onClick={() => {
+                    setChosen(p);
+                    setQuery(name(p));
+                  }}
+                >
+                  {name(p)}
+                  {p.email && p.email !== name(p) ? ` · ${p.email}` : ""}
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+        <label>
+          They may
+          <select value={role} disabled={busy} onChange={(e) => setRole(e.target.value as ArtifactShareRole)}>
+            {ROLES.map((r) => (
+              <option key={r.role} value={r.role}>
+                {r.label.replace(/^Can /, "")}
+              </option>
+            ))}
+          </select>
+        </label>
+        <button type="submit" disabled={busy || !chosen}>
+          Share
+        </button>
+      </form>
+      {query.trim() !== "" && !chosen && found.length === 0 && <p className="muted micro">Nobody you can share with has a name that starts with that.</p>}
+      {error && <p className="note error">{error}</p>}
+      {said && <p className="note" role="status">{said}</p>}
+    </div>
+  );
+}
+
+/**
+ * The artifact's thread, oldest first, each comment with who wrote it and when; a box to
+ * write one for whoever the plane says may (its owners, and anybody given comment or edit).
+ * The session it came from is told of each, so whoever steers it can ask its agent to act.
+ */
+function Thread({ via, artifact }: { via: OwnPlane; artifact: Artifact }): JSX.Element {
+  const [thread, setThread] = useState<ArtifactThread | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [draft, setDraft] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [asked, setAsked] = useState(0);
+  const [absent, setAbsent] = useState(false);
+
+  useEffect(() => {
+    let live = true;
+    via.artifactComments(artifact.id).then(
+      (t) => live && setThread(t),
+      (e: unknown) => {
+        if (!live) return;
+        // A plane from before comments has no thread to show, which is no fault.
+        if ((e as { code?: unknown } | null)?.code === -32601) setAbsent(true);
+        else setError(sentence(e));
+      },
+    );
+    return () => {
+      live = false;
+    };
+  }, [via, artifact.id, asked]);
+
+  if (absent) return <></>;
+
+  const send = async (): Promise<void> => {
+    setBusy(true);
+    setError(null);
+    try {
+      await via.commentArtifact(artifact.id, draft);
+      setDraft("");
+      setAsked((n) => n + 1);
+    } catch (e) {
+      setError(`Not posted: ${sentence(e)}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const comments = thread?.comments ?? [];
+  return (
+    <section aria-label="Comments">
+      <h3 className="screen">Comments</h3>
+      {!thread && !error && <Loading what="Reading its comments…" />}
+      {thread && comments.length === 0 && <p className="muted">No comments yet.{thread.may_comment ? " Its owners and editors, and the session it came from, see what you write here." : ""}</p>}
+      {comments.length > 0 && (
+        <ol className="comments">
+          {comments.map((c) => (
+            <li key={c.id}>
+              <p className="micro">
+                <span className="author">{c.author.display_name || c.author.subject}</span> ·{" "}
+                <span title={c.created_at}>{relative(Date.parse(c.created_at))}</span>
+              </p>
+              <p className="comment-body">{c.body}</p>
+            </li>
+          ))}
+        </ol>
+      )}
+      {thread?.may_comment && (
+        <form
+          className="comment-form"
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (draft.trim() !== "") void send();
+          }}
+        >
+          <label>
+            <span className="visually-hidden">Write a comment</span>
+            <textarea value={draft} maxLength={thread.max_length} disabled={busy} onChange={(e) => setDraft(e.target.value)} placeholder="Write a comment" rows={3} />
+          </label>
+          <button type="submit" disabled={busy || draft.trim() === ""}>
+            Comment
+          </button>
+        </form>
+      )}
+      {thread && !thread.may_comment && <p className="muted micro">You can read the comments. Its owner decides who may write them.</p>}
+      {error && <p className="note error">{error}</p>}
+    </section>
   );
 }

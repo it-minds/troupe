@@ -61,7 +61,7 @@ function sentence(e: unknown): string {
 export function VisibilityOptions({ teams, profiles }: { teams?: string[] | undefined; profiles?: string[] | undefined }): JSX.Element {
   return (
     <>
-      <option value="private">Only you, until you share a link</option>
+      <option value="private">Only you, until you share it</option>
       <option value="organisation">The whole organisation</option>
       {(teams ?? []).map((t) => (
         <option key={`team:${t}`} value={`team:${t}`}>

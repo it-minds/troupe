@@ -2,7 +2,7 @@
 // and revoke a link or one person.
 //
 // A link honours the plane's sign-in: whoever opens it is signed in at the plane first, and
-// only then holds its role on this one artifact, `view` or `edit`. It widens nothing for
+// only then holds its role on this one artifact, `view`, `comment` or `edit`. It widens nothing for
 // anybody who does not hold it. Its address is shown once, when it is made; the plane keeps
 // only a hash of it. A public link, which opens without a sign-in, can be made only where an
 // administrator turned public links on, is view only and always expires; the owner can
@@ -11,11 +11,11 @@
 import { useState } from "react";
 import type { JSX } from "react";
 import { appLink } from "@troupe/client";
-import type { ArtifactApi, ArtifactDetail, ArtifactNewLink, ArtifactShare } from "@troupe/client";
+import type { ArtifactApi, ArtifactDetail, ArtifactNewLink, ArtifactShare, ArtifactShareRole } from "@troupe/client";
 import { describeError, useConsole } from "../console";
 import { Field, Region, ShownOnce, when } from "./bits";
 
-const ROLE: Record<string, string> = { view: "View", edit: "Edit: may publish new versions" };
+const ROLE: Record<string, string> = { view: "View", comment: "Comment: may write in its comments", edit: "Edit: may publish new versions" };
 
 /** A date input's day as the end of that day, in ISO 8601: what a link's expiry is sent as. */
 function endOfDay(day: string): string | undefined {
@@ -26,7 +26,7 @@ function endOfDay(day: string): string | undefined {
 
 export function ArtifactLinks({ artifact: a, api, reload }: { artifact: ArtifactDetail; api: ArtifactApi; reload: () => void }): JSX.Element {
   const { notify, plane } = useConsole();
-  const [role, setRole] = useState<"view" | "edit">("view");
+  const [role, setRole] = useState<ArtifactShareRole>("view");
   const [expires, setExpires] = useState("");
   const [pub, setPub] = useState(false);
   const [made, setMade] = useState<ArtifactNewLink | null>(null);
@@ -100,8 +100,9 @@ export function ArtifactLinks({ artifact: a, api, reload }: { artifact: Artifact
       >
         <Field label="Role">
           {(p) => (
-            <select {...p} value={pub ? "view" : role} disabled={pub} onChange={(e) => setRole(e.target.value === "edit" ? "edit" : "view")}>
+            <select {...p} value={pub ? "view" : role} disabled={pub} onChange={(e) => setRole(e.target.value === "edit" || e.target.value === "comment" ? e.target.value : "view")}>
               <option value="view">{ROLE.view}</option>
+              <option value="comment">{ROLE.comment}</option>
               <option value="edit">{ROLE.edit}</option>
             </select>
           )}

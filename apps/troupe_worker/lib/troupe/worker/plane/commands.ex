@@ -297,6 +297,35 @@ defmodule Troupe.Worker.Plane.Commands do
     end
   end
 
+  # A comment written on an artifact this session published (#62). The pod's part is the
+  # log's line, so whoever steers the session reads it beside the work and may ask the
+  # agent to act on it; never input, since a comment is somebody else's words. Best
+  # effort, as a share's news is: the artifact's thread on the plane is the record.
+  defp dispatch("artifact.commented", params) do
+    session_id = params["session_id"]
+
+    with :ok <- shaped(session_id),
+         %{"id" => id} = artifact when is_binary(id) <- params["artifact"],
+         %{"body" => body} = comment when is_binary(body) <- params["comment"] do
+      case running_at(session_id, params["epoch"]) do
+        {:ok, _tree} ->
+          data = %{
+            "artifact" => Map.take(artifact, ["id", "title"]),
+            "comment" => Map.take(comment, ["id", "author", "body", "created_at"])
+          }
+
+          {:ok, seq} = Log.append(session_id, [], "artifact_commented", data)
+          {:ok, %{"session_id" => session_id, "recorded" => true, "seq" => seq}}
+
+        _not_here ->
+          {:ok, %{"session_id" => session_id, "recorded" => false, "reason" => "not running here"}}
+      end
+    else
+      {:error, _} = error -> error
+      _shape -> {:error, Error.new(:invalid_params, %{field: "artifact"})}
+    end
+  end
+
   # This pod's part of an erasure: the session's copy here and its objects. The key is the
   # plane's, which destroys it before it asks (Decision 811); this pod's credential may
   # destroy none (`Troupe.KMS.Policy.worker/2`), and once the key is gone nothing under the

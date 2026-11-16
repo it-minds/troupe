@@ -109,6 +109,14 @@ daemon.artifacts = [
   artifact({ id: "art-interviews", title: "Field interview guide", kind: "file", visibility: "profile:ux", shared: true, role: "view", published_at: day(4) }),
   artifact({ id: "art-mine", title: "Placement loop benchmarks", mine: true, role: "owner", owner: { subject: "alice@example.com", display_name: "Alice" }, version: 2, current: 2, published_at: day(12), may_delete: true }),
 ];
+// Who the share picker finds, and a thread on one artifact (troupe #62).
+const findable = [
+  { subject: "bob@example.com", display_name: "Bob Example", email: "bob@example.com" },
+  { subject: "carol@example.com", display_name: "Carol Example", email: "carol@example.com" },
+];
+plane.people = findable;
+daemon.people = findable;
+daemon.artifactComments.set("art-weekly", [{ id: "c-1", author: { subject: "bob@example.com", display_name: "Bob Example" }, body: "fast-json moved to MIT: does legal need to know?", created_at: day(1) }]);
 // A pod fetches an artifact into a session from the plane, which keeps the daemon's here.
 worker.artifactSource = (_subject, id, version) => {
   const a = daemon.artifacts?.find((x) => x["id"] === id);

@@ -1535,6 +1535,26 @@ pre.manifest {
   width: auto;
 }
 
+/* Its thread, oldest first, and who it is shared with by name. */
+.artifact-comments,
+.artifact-people {
+  margin: 0 0 var(--space-3);
+  padding: 0;
+  list-style: none;
+}
+
+.artifact-comments > li,
+.artifact-people > li {
+  padding: var(--space-2) 0;
+  border-bottom: 1px solid var(--border-hairline);
+}
+
+.artifact-comments .comment-body {
+  margin: var(--space-1) 0 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 /* The editor: the text beside the artifacts host's own preview of it, framed. */
 .artifact-edit-panes {
   display: grid;

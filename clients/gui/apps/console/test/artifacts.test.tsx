@@ -138,7 +138,7 @@ describe("artifacts", () => {
     // An empty Shared with you says what a link is and how one arrives, not how to publish.
     (await seesLink("Shared with you", document.querySelector('nav[aria-label="Whose artifacts"]')!)).click();
     await sees("Nothing is shared with you yet");
-    await sees("Somebody shares an artifact with you by sending its link; once you have opened it, it shows here.");
+    await sees("Somebody shares an artifact with you by name, and it shows here at once; or by sending its link, and it shows here once you have opened it.");
     expect(document.body.textContent).not.toContain("publish_artifact");
     expect(document.body.textContent).not.toContain("Nobody has given you a link");
     unmount!();

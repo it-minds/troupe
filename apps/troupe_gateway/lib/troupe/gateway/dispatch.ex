@@ -242,6 +242,11 @@ defmodule Troupe.Gateway.Dispatch do
     "artifact.read" => :observe,
     "artifact.share" => :control,
     "artifact.unshare" => :control,
+    # The thread: read as the artifact is, written as a share is.
+    "artifact.comments" => :observe,
+    "artifact.comment" => :control,
+    # Finding a person to share one with, which names nobody it does not find.
+    "people.search" => :observe,
     "artifact.rollback" => :control,
     "artifact.pin" => :control,
     # A put over a version that sends no files: the owner moving who may open it.
@@ -321,7 +326,7 @@ defmodule Troupe.Gateway.Dispatch do
   # and after a create, whose session there was no id for before.
   @work ~w(input.send commands.run session.goal.set session.loop.start)
   @invites ~w(session.invite session.uninvite session.invites session.read_sealed)
-  @forwarded_artifacts ~w(artifact.get artifact.open artifact.read artifact.share artifact.unshare artifact.rollback artifact.pin artifact.put artifact.transfer)
+  @forwarded_artifacts ~w(artifact.get artifact.open artifact.read artifact.share artifact.unshare artifact.comments artifact.comment people.search artifact.rollback artifact.pin artifact.put artifact.transfer)
 
   defp local_only("remote.offer", params, context) do
     cond do
@@ -371,7 +376,8 @@ defmodule Troupe.Gateway.Dispatch do
 
   # An artifact is published on the plane and listed from it, so a client in Local only, or
   # a session under it, publishes and lists nothing.
-  defp local_only("artifact." <> _ = method, params, context) do
+  defp local_only(method, params, context)
+       when binary_part(method, 0, 9) == "artifact." or method == "people.search" do
     if context.local_only or LocalOnly.session?(params["session_id"]),
       do:
         refuse_local_only(
@@ -1632,7 +1638,7 @@ defmodule Troupe.Gateway.Dispatch do
 
   # The desktop app's viewer, each the plane's method of the same name (`Artifacts.forward/2`):
   # its answer with `plane_url`, its refusal with the plane's own code. Signed out, a sentence.
-  defp handle("artifact." <> _ = method, params, _context) when method in @forwarded_artifacts,
+  defp handle(method, params, _context) when method in @forwarded_artifacts,
     do: forwarded(method, Artifacts.forward(method, params))
 
   # The person's own memory's history and a rollback, for the desktop app's Memory view.

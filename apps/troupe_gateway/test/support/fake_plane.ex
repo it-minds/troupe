@@ -758,6 +758,43 @@ defmodule Troupe.Gateway.FakePlane do
          "text" => "# Weekly"
        }}
 
+  # Shared with a person by name: no link, the person and their role.
+  defp dispatch(_state, "artifact.share", %{"id" => id, "person" => subject, "role" => role}),
+    do: {:ok, %{"id" => id, "person" => %{"subject" => subject, "display_name" => nil, "role" => role}}}
+
+  defp dispatch(_state, "artifact.comments", %{"id" => id}),
+    do:
+      {:ok,
+       %{
+         "id" => id,
+         "may_comment" => true,
+         "max_length" => 4000,
+         "comments" => [
+           %{
+             "id" => "c-1",
+             "author" => %{"subject" => "cy@example.test", "display_name" => "Cy"},
+             "body" => "Looks good.",
+             "created_at" => "2026-11-16T09:00:00Z"
+           }
+         ]
+       }}
+
+  defp dispatch(_state, "artifact.comment", %{"id" => id, "body" => body}),
+    do:
+      {:ok,
+       %{
+         "id" => id,
+         "comment" => %{
+           "id" => "c-2",
+           "author" => %{"subject" => "ada@example.test", "display_name" => "Ada"},
+           "body" => body,
+           "created_at" => "2026-11-16T09:01:00Z"
+         }
+       }}
+
+  defp dispatch(_state, "people.search", %{"query" => _query}),
+    do: {:ok, %{"people" => [%{"subject" => "cy@example.test", "display_name" => "Cy", "email" => "cy@example.test"}]}}
+
   defp dispatch(_state, "artifact.share", %{"id" => _id, "role" => role}) do
     {:ok,
      %{

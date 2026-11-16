@@ -687,6 +687,23 @@ defmodule Troupe.RemoteTranslateTest do
     assert {:system, message} in folded([note]).transcript
   end
 
+  # Root issue #62: a comment on an artifact this session published, from the plane, as a
+  # line saying who wrote it, on which and what.
+  test "a comment on the session's artifact is a line with who, which and what" do
+    data = %{
+      "artifact" => %{"id" => "art-1", "title" => "Plan"},
+      "comment" => %{
+        "id" => "c-1",
+        "author" => %{"subject" => "cy@example.test", "display_name" => "Cy"},
+        "body" => "Can you add last quarter?"
+      }
+    }
+
+    [note] = translate(durable("artifact_commented", data))
+    assert note.type == :remote_note
+    assert note.data.text == "Cy commented on “Plan”: Can you add last quarter?"
+  end
+
   # troupe issue #668: a person's own tools offered to the session, as
   # `Troupe.Session.ClientTools` writes it. It was matched by a type nobody writes, so it
   # was drawn as the raw event and logged as one this client did not know.

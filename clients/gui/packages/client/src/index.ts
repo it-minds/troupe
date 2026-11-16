@@ -172,6 +172,7 @@ export type {
 export { ArtifactApi, audienceName, audienceOf, ownerWords, teamOwned, textBytes, visibilityWords } from "./artifacts.js";
 export { besideRows, renderEntries, replacedBy, topicKey, writtenBy } from "./entries.js";
 export type { EntryDraft, EntryLevel, InEffect, MemoryEntry, MemoryInEffect } from "./entries.js";
+export type { ArtifactComment, ArtifactPersonShare, ArtifactShareRole, ArtifactThread } from "./artifacts.js";
 export type { Artifact, ArtifactAudience, ArtifactDetail, ArtifactFile, ArtifactFilter, ArtifactKind, ArtifactLinkUse, ArtifactList, ArtifactNewLink, ArtifactOrigin, ArtifactOwner, ArtifactPerson, ArtifactPublish, ArtifactPut, ArtifactRole, ArtifactScope, ArtifactShare, ArtifactText, ArtifactTicket, ArtifactTransferTo, ArtifactUpload, ArtifactVersion } from "./artifacts.js";
 export { openRemote, remoteRefusal, watchRemote, watchUrl, when as remoteWhen } from "./remote.js";
 export type { RemoteListRow, RemoteWatch, RemoteWatchOptions } from "./remote.js";

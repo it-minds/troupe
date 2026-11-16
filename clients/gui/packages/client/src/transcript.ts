@@ -909,6 +909,15 @@ function spent(base: { seq: number; agent: string[] }, d: DurableEvent): Entry[]
   return [{ kind: "turn", ...base, turn, text: turnLine(turn) }];
 }
 
+/** A comment on an artifact this session published, as one line: who, on which, and what. */
+function commentedText(d: DurableEvent): string {
+  const artifact = (d.data["artifact"] ?? {}) as Record<string, unknown>;
+  const comment = (d.data["comment"] ?? {}) as Record<string, unknown>;
+  const author = (comment["author"] ?? {}) as Record<string, unknown>;
+  const who = str(author["display_name"]) || str(author["subject"]) || "Somebody";
+  return `${who} commented on “${str(artifact["title"]) || "an artifact"}”: ${str(comment["body"])}`;
+}
+
 function systemText(d: DurableEvent): string {
   switch (d.type) {
     case "session_created":
@@ -1483,6 +1492,11 @@ export function fold(state: TranscriptState, e: TroupeEvent, options: FoldOption
     // plane reached it, and this turn read the new versions. The harness's own sentence.
     case "memory_changed":
       return { ...next, entries: [...state.entries, { kind: "system", ...base, type: d.type, text: str(d.data["message"], "the organisation's memory changed") }] };
+
+    // Somebody wrote a comment on an artifact this session published (troupe #62): said once,
+    // with who, which artifact and what, for whoever steers the session to act on. Never input.
+    case "artifact_commented":
+      return { ...next, entries: [...state.entries, { kind: "system", ...base, type: d.type, text: commentedText(d) }] };
 
     // A reply the output cap cut, or one with nothing in it (troupe-remote Decision 659).
     case "truncated":

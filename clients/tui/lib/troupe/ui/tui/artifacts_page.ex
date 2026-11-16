@@ -2,7 +2,8 @@ defmodule Troupe.UI.TUI.ArtifactsPage do
   @moduledoc """
   `/artifacts` (root #62): the person's artifacts on the plane, by who can
   see them, in the desktop app's words and glyphs — All, ◉ Everyone at the organisation,
-  ◎ Your teams (a team's and a profile's), ◐ Shared with you (through a link), ○ Only you —
+  ◎ Your teams (a team's and a profile's), ◐ Shared with you (by name or through a link),
+  ○ Only you —
   each row its title, kind, version, whose it is (`team finance` for a team's, which every
   member of the team owns; `you`; or who published it) and when, with *new* on a version
   the person has not opened on this machine.
@@ -570,7 +571,8 @@ defmodule Troupe.UI.TUI.ArtifactsPage do
   end
 
   defp empty(:shared),
-    do: "Nothing shared with you yet: a link someone sends you lands here once you open it."
+    do:
+      "Nothing shared with you yet: what someone shares with you by name lands here, and a link they send you once you open it."
 
   defp empty(:private),
     do: "Nothing only yours yet: p publishes a file of this workspace for you alone."
@@ -603,6 +605,10 @@ defmodule Troupe.UI.TUI.ArtifactsPage do
         ]
     )
   end
+
+  # One shared with the person, by a link or by name: what it lets them do beyond reading.
+  defp where(%{"scope" => "shared", "role" => role}) when role in ["comment", "edit"],
+    do: "you may " <> role
 
   defp where(%{"visibility" => "team:" <> team}), do: team
   defp where(%{"visibility" => "profile:" <> profile}), do: "profile " <> profile
