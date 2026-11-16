@@ -1,8 +1,8 @@
 defmodule Troupe.Plane.Artifacts.Comment do
   @moduledoc """
   One comment in an artifact's thread (`Troupe.Plane.Artifacts.Comments`): who wrote it,
-  the text and when. The author's subject is kept beside the person, so a thread still says
-  who wrote a comment after its author's record is gone.
+  the text and when, and when its author last edited it. The author's subject is kept beside
+  the person, so a thread still says who wrote a comment after its author's record is gone.
   """
 
   use Ecto.Schema
@@ -15,6 +15,7 @@ defmodule Troupe.Plane.Artifacts.Comment do
     belongs_to(:author, Troupe.Plane.Identity.User)
     field(:author_subject, :string)
     field(:body, :string)
+    field(:edited_at, :utc_datetime_usec)
 
     timestamps(type: :utc_datetime_usec, updated_at: false)
   end
