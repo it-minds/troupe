@@ -392,7 +392,7 @@ describe("input after the agent is done", () => {
     seq = 0;
     const state = foldAll([
       durable("agent_started", { mode: "build" }),
-      durable("budget_warning", { dimension: "wall", used: 1_440_000, limit: 1_800_000, fraction: 0.8, detail: "wall clock 24m/30m (80%)" }),
+      durable("budget_warning", { dimension: "wall", used: 1_440_000, limit: 1_800_000, fraction: 0.8, detail: "working time 24m/30m (80%)" }),
       durable("agent_done", { reason: "budget_exhausted", limit: "wall_clock" }),
       durable("budget_exhausted", { limit: "wall_clock" }),
       durable("input_after_done", { source: "user" }),

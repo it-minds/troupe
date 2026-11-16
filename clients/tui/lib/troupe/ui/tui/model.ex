@@ -1954,7 +1954,7 @@ defmodule Troupe.UI.TUI.Model do
   defp dimension_label(:turns), do: "turns"
   defp dimension_label(:input), do: "input tokens"
   defp dimension_label(:output), do: "output tokens"
-  defp dimension_label(:wall), do: "wall clock"
+  defp dimension_label(:wall), do: "working time"
   defp dimension_label(:context), do: "context window"
   defp dimension_label(other), do: to_string(other)
 

@@ -89,7 +89,7 @@ defmodule Troupe.RemoteUITest do
         "used" => 1_440_000,
         "limit" => 1_800_000,
         "fraction" => 0.8,
-        "detail" => "wall clock 24m/30m (80%)"
+        "detail" => "working time 24m/30m (80%)"
       })
 
       FakeRemote.emit(remote, "s-ui", "agent_done", %{

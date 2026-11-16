@@ -52,7 +52,7 @@ const retry = (): HTMLButtonElement | undefined => [...document.querySelectorAll
 const notes = (): HTMLElement[] => [...document.querySelectorAll<HTMLElement>(".stream .note")];
 
 function spend(session: Session): void {
-  session.log.append("budget_warning", { dimension: "wall", used: 1_440_000, limit: 1_800_000, fraction: 0.8, detail: "wall clock 24m/30m (80%)" });
+  session.log.append("budget_warning", { dimension: "wall", used: 1_440_000, limit: 1_800_000, fraction: 0.8, detail: "working time 24m/30m (80%)" });
   session.log.append("agent_done", { reason: "budget_exhausted", limit: "wall_clock" });
   session.log.append("budget_exhausted", { limit: "wall_clock" });
 }
