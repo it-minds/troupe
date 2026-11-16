@@ -101,11 +101,18 @@ defmodule Troupe.Worker.ArtifactsTest do
 
     # A new version keeps its owner: the `owner` a republish carries is dropped before the
     # plane, which refuses one, sees it.
-    assert {:ok, %{"version" => 2}} =
+    # The picture for its card crosses with the version, and is kept beside its files.
+    png = <<0x89, "PNG", 0x0D, 0x0A, 0x1A, 0x0A, "pixels">>
+    picture = %{"content_type" => "image/png", "bytes" => Base.encode64(png)}
+
+    assert {:ok, %{"version" => 2, "thumbnail_url" => "https://artifacts.example.test/t/" <> _}} =
              Artifacts.publish(
-               Map.merge(params, %{"id" => artifact["id"], "note" => "again"}),
+               Map.merge(params, %{"id" => artifact["id"], "note" => "again", "thumbnail" => picture}),
                %{session_id: context.session_id, agent_path: ["root"]}
              )
+
+    assert {:ok, ^png} =
+             ObjectStore.get(ObjectStore.from_env(), "artifacts/#{artifact["id"]}/thumbnails/2")
 
     # A session this pod does not hold is not one it can publish for.
     assert {:error, reason} =

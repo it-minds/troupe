@@ -30,8 +30,9 @@ defmodule Troupe.Gateway.Artifacts do
   alias Troupe.Session.Log
 
   # `owner`, `me` or `team`, is whose a new team publication is; the plane makes it the
-  # team's unless told `me`.
-  @keys ~w(title kind visibility owner files id note session_id agent)
+  # team's unless told `me`. `thumbnail`, a picture for the version's card, rides inline
+  # beside the files or the upload handle: at most 256 KiB, it never needs one of its own.
+  @keys ~w(title kind visibility owner files id note session_id agent thumbnail)
 
   # What one call carries inline at most, in base64: under the plane's door with room for the
   # rest of the request.

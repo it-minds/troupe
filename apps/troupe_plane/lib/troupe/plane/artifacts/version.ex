@@ -22,6 +22,9 @@ defmodule Troupe.Plane.Artifacts.Version do
     field(:note, :string)
     # The version a rollback republished, or nil.
     field(:rolled_back_to, :integer)
+    # The picture its publisher sent of it for a gallery's card, or nil: `content_type`,
+    # `bytes`, `sha256`, and `stored_in` where it is an earlier version's object.
+    field(:thumbnail, :map)
   end
 
   @type t :: %__MODULE__{}

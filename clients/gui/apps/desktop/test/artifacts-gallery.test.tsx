@@ -133,10 +133,40 @@ describe("the gallery", () => {
     (await seesButton("Show everything", gallery())).click();
     await waitFor(() => titles().length === 4, "all four again");
 
-    // Titles and kinds only: no page, frame or picture of any artifact in the app.
+    // Titles and kinds only, where no publisher sent a picture: no page, frame or picture of any artifact in the app.
     expect(gallery().querySelector("iframe")).toBeNull();
     expect(externalResources().filter((u) => u.includes("artifacts.example.test"))).toEqual([]);
     expect(network!.requests.filter((r) => r.url.includes("artifacts.example.test"))).toEqual([]);
+  });
+
+  it("draws the picture a publisher sent at the start of its card, titled, and the placeholder where none was", async () => {
+    const picture = "https://artifacts.example.test/t/signed-for-alice";
+    daemon.artifacts![0] = { ...daemon.artifacts![0], thumbnail_url: picture };
+    await signedIn();
+    await openGallery();
+    await waitFor(() => titles().length === 4, "four cards");
+    const card = (title: string): HTMLElement => [...gallery().querySelectorAll<HTMLElement>(".card")].find((c) => c.textContent?.includes(title))!;
+
+    const img = card("Weekly figures").querySelector<HTMLImageElement>(".placeholder img")!;
+    expect(img.getAttribute("src")).toBe(picture);
+    expect(img.alt).toBe("Weekly figures");
+    expect(card("Weekly figures").firstElementChild!.firstElementChild).toBe(img);
+    // The kind and size stay on it, and nothing else of the artifact is in the app.
+    expect(card("Weekly figures").textContent).toContain("html · 1.2 KB");
+    expect(gallery().querySelector("iframe")).toBeNull();
+    expect(externalResources().filter((u) => u.includes("artifacts.example.test"))).toEqual([picture]);
+
+    // One without a picture is the placeholder it was, its kind and size.
+    expect(card("Core runbook").querySelector("img")).toBeNull();
+    expect(card("Core runbook").querySelector(".placeholder")!.getAttribute("aria-hidden")).toBe("true");
+
+    // A picture that does not load leaves the placeholder. The card on screen now: a list read
+    // again may have drawn it anew since.
+    await waitFor(() => {
+      const shown = card("Weekly figures").querySelector("img");
+      shown?.dispatchEvent(new Event("error"));
+      return shown === null;
+    }, "the placeholder again");
   });
 
   it("opens one from its host in a window of the shell's, at a fresh one-time address, and it is new to you until then", async () => {

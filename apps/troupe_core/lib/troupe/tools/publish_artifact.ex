@@ -8,7 +8,9 @@ defmodule Troupe.Tools.PublishArtifact do
   Confined as `remember`'s anchors are: every file a regular file inside the workspace, read
   as it is now. The files keep their paths below the directory they share, so a page's
   relative links to its stylesheet and scripts still resolve. `id` republishes one of the
-  person's own: the next version at the same address.
+  person's own: the next version at the same address. `thumbnail`, a picture in the
+  workspace (a screenshot the agent already took), goes with the version for its gallery
+  card; none is none, and the card shows the kind instead.
 
   Whom it is for is the person's to say, not the model's. A call that names a `visibility`
   the person asked for is asked about by default, because what it publishes is read by
@@ -33,6 +35,7 @@ defmodule Troupe.Tools.PublishArtifact do
   @owners ~w(me team)
   @max_file_bytes 16 * 1024 * 1024
   @max_version_bytes 64 * 1024 * 1024
+  @max_thumbnail_bytes 256 * 1024
 
   @impl Troupe.Tool
   def name, do: "publish_artifact"
@@ -43,6 +46,8 @@ defmodule Troupe.Tools.PublishArtifact do
     Publish a report or page from the workspace for people to read in their organisation's gallery: `html` (a page and its CSS, JS and images), `markdown` (a document, rendered with code highlighting and Mermaid flowcharts), or `file` (one file, as a PDF or an image).
 
     `files`: workspace paths; they keep their paths below the directory they share, so relative links still work. A page opens `index.html`; a document `index.md` or `README.md`. Pages run sandboxed: scripts only from the artifact's own .js files (no inline script), and nothing outside the artifact can be fetched. Keep it to a few megabytes.
+
+    `thumbnail`: optional, a workspace PNG, JPEG or WebP of at most 256 KiB shown on the gallery card; send one only if you already have a screenshot of the page. Never required.
 
     `visibility`: whom it is for, which is the person's to decide, not yours: `private` (the person alone, until they share a link), `organisation`, `team:<name>` for a team's members, or `profile:<name>` for a profile's people. Set it only to what the person asked for; when they did not say, leave it out and they choose at the approval. `owner`: `me` or `team`, whose the artifact is, for a new one; a team publication is the team's unless `owner` is `me`, and a new version keeps its owner. `id`: one of yours, or one you were given an edit link to, to publish as the next version at the same address, with `note` saying what changed; the earlier versions are kept.
     """
@@ -77,6 +82,10 @@ defmodule Troupe.Tools.PublishArtifact do
         "note" => %{
           "type" => "string",
           "description" => "What changed in this version, in a line."
+        },
+        "thumbnail" => %{
+          "type" => "string",
+          "description" => "Optional: a workspace path to a picture of the page for its card (PNG, JPEG or WebP, at most 256 KiB)."
         }
       },
       "required" => ["title", "kind", "files"]
@@ -138,13 +147,15 @@ defmodule Troupe.Tools.PublishArtifact do
          {:ok, visibility} <- visibility(args),
          {:ok, owner} <- owner(args),
          {:ok, paths} <- paths(args),
-         {:ok, files} <- read(ctx, paths) do
+         {:ok, files} <- read(ctx, paths),
+         {:ok, thumbnail} <- thumbnail(ctx, args["thumbnail"]) do
       params =
         %{"title" => title, "kind" => kind, "files" => Enum.map(files, &wire/1)}
         |> put_visibility(visibility)
         |> put_owner(owner, args["id"])
         |> put_id(args["id"])
         |> put_note(args["note"])
+        |> put_thumbnail(thumbnail)
 
       case Artifacts.publish(params, ctx) do
         {:ok, artifact} ->
@@ -216,6 +227,43 @@ defmodule Troupe.Tools.PublishArtifact do
     do: Map.put(params, "note", note)
 
   defp put_note(params, _note), do: params
+
+  defp put_thumbnail(params, nil), do: params
+  defp put_thumbnail(params, thumbnail), do: Map.put(params, "thumbnail", thumbnail)
+
+  # The card's picture: a file in the workspace, confined as the files are, its type from its
+  # name; the plane checks its bytes say the same.
+  defp thumbnail(_ctx, none) when none in [nil, ""], do: {:ok, nil}
+
+  defp thumbnail(ctx, path) when is_binary(path) do
+    with {:ok, type} <- picture_type(path),
+         {:ok, [found]} <- resolve_all(ctx, [path]) do
+      case File.read(found.real) do
+        {:ok, body} when byte_size(body) > @max_thumbnail_bytes ->
+          {:error,
+           "#{found.relative} is #{byte_size(body)} bytes, past the #{@max_thumbnail_bytes} a thumbnail may be: " <>
+             "send a smaller picture, or none"}
+
+        {:ok, body} ->
+          {:ok, %{"content_type" => type, "bytes" => Base.encode64(body)}}
+
+        {:error, reason} ->
+          {:error, "#{found.relative} could not be read (#{reason})"}
+      end
+    end
+  end
+
+  defp thumbnail(_ctx, other),
+    do: {:error, {:invalid_args, "thumbnail is a workspace path, not #{inspect(other)}"}}
+
+  defp picture_type(path) do
+    case path |> Path.extname() |> String.downcase() do
+      ".png" -> {:ok, "image/png"}
+      ext when ext in [".jpg", ".jpeg"] -> {:ok, "image/jpeg"}
+      ".webp" -> {:ok, "image/webp"}
+      _other -> {:error, "#{path} is not a .png, .jpg or .webp picture, which is what a thumbnail is: not published"}
+    end
+  end
 
   # Each a regular file inside the workspace, read now; their paths below the directory
   # they share, as the artifact keeps them.

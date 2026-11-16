@@ -67,7 +67,9 @@ Giving and taking back are in the audit trail, with where the artifact came from
 it and the workspace files. It asks you first unless a [permission rule](configuration.md)
 allows it. The files keep their paths below the directory they share, so a page's links to
 its stylesheet still work. To publish a new version, the agent names the artifact's `id`, and
-may say what changed in a `note`.
+may say what changed in a `note`. An agent that has a screenshot of the page may send it as a
+`thumbnail` (a PNG, JPEG or WebP of at most 256 KiB) for the gallery card; **Publish…** in the
+desktop app takes one too.
 
 An agent names an audience only when you told it one; otherwise the approval asks you whom the artifact is for (you alone, the organisation, a team or a profile) and, for a new team artifact, whether it is the team's or yours, and nothing in your permission rules or `--auto-approve` answers that for you.
 
@@ -196,7 +198,8 @@ The console's **Artifacts** has a tab for your own (your private ones among them
 those shared with you, one for the organisation's, one for your teams' (each card names its
 team) and one for each profile you are granted. Which tab an artifact is under is the plane's
 to say, so every client tabs them alike. A card shows the title and the kind, never the page
-itself. Open one and it shows who published which version and when, the
+itself, and the picture its publisher sent with that version, if they sent one.
+Open one and it shows who published which version and when, the
 session it came from, and **Open**, which opens the artifact in a new tab.
 
 In the terminal client, `/artifacts` lists them by who can see them and opens one in your

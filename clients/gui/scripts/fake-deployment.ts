@@ -10,7 +10,7 @@
 import { FakeDaemon, exampleFacts, exampleOnboarding } from "../packages/client/test/support/daemon.js";
 import { FakeIdp } from "../packages/client/test/support/idp.js";
 import { keptBy } from "../packages/client/test/support/kept.js";
-import { FakePlane, GATEWAY_DEFAULTS } from "../packages/client/test/support/plane.js";
+import { FakePlane, GATEWAY_DEFAULTS, SAMPLE_PICTURE } from "../packages/client/test/support/plane.js";
 import { FakeWorker } from "../packages/client/test/support/worker.js";
 
 const origins = process.env["ORIGINS"]?.split(",") ?? ["http://localhost:5173", "http://127.0.0.1:5173"];
@@ -115,6 +115,10 @@ daemon.artifacts = [
   artifact({ id: "art-interviews", title: "Field interview guide", kind: "file", visibility: "profile:ux", shared: true, role: "view", published_at: day(4) }),
   artifact({ id: "art-mine", title: "Placement loop benchmarks", mine: true, role: "owner", owner: { subject: "alice@example.com", display_name: "Alice" }, version: 2, current: 2, published_at: day(12), may_delete: true }),
 ];
+// A picture its publisher sent for one card (troupe #977), served by the fake plane as the
+// artifacts host would serve it; the others keep the placeholder.
+plane.pictures.set("art-ledger", SAMPLE_PICTURE);
+daemon.artifacts![1]!["thumbnail_url"] = `${plane.baseUrl}/t/art-ledger/1`;
 // RETENTION=1 is a plane whose administrator set both artifact retention periods (#981):
 // 90 days for old versions, 60 for one nobody opens. Unset, both are off and nothing new is shown.
 if (process.env["RETENTION"]) {

@@ -7,7 +7,9 @@
 // the owning person gives one of theirs to a team, or the team's admin takes it back.
 //
 // Nothing of an artifact's content is drawn here: a card is its title, its kind and its
-// size, and opening one shows it from the artifacts host in a window of the shell's own,
+// size, and the picture its publisher sent of it where there is one (an image the artifacts
+// host serves at the row's `thumbnail_url`, never the page), and opening one shows it from
+// the artifacts host in a window of the shell's own,
 // granted nothing, at the one-time address `artifact.open` answers (a browser build opens a
 // tab of its own instead). The app's own origin never fetches an artifact's files.
 //
@@ -127,6 +129,17 @@ function who(person: { subject: string; display_name?: string | null } | undefin
 /** Whose it is, for a card's byline: the team that owns it, or the person. */
 function whose(a: Artifact): string {
   return teamOwned(a) ? `Team ${a.owner_team}` : who(a.owner, a.mine);
+}
+
+/**
+ * A card's picture, from the artifacts host: an image and nothing that runs. One that does not
+ * load (its address past its hour or two, the artifact gone) leaves the striped placeholder.
+ */
+function Picture({ src, alt }: { src: string; alt: string }): JSX.Element | null {
+  const [failed, setFailed] = useState(false);
+  useEffect(() => setFailed(false), [src]);
+  if (failed) return null;
+  return <img className="picture" src={src} alt={alt} loading="lazy" referrerPolicy="no-referrer" onError={() => setFailed(true)} />;
 }
 
 /** What a role shared with somebody lets them do, as a sentence's start. */
@@ -351,11 +364,16 @@ export function Artifacts({
                   const fresh = !a.mine && (seen[a.id] ?? 0) < a.version;
                   return (
                     <button key={a.id} type="button" className="card" aria-current={a.id === selected ? "true" : undefined} onClick={() => setSelected(a.id)}>
-                      <span className="placeholder" aria-hidden="true">
-                        <span className="what">
+                      <span className={a.thumbnail_url ? "placeholder has-picture" : "placeholder"} aria-hidden={a.thumbnail_url ? undefined : "true"}>
+                        {a.thumbnail_url && <Picture src={a.thumbnail_url} alt={a.title} />}
+                        <span className="what" aria-hidden="true">
                           {a.kind} · {size(a.bytes)}
                         </span>
-                        {fresh && <span className="fresh">NEW TO YOU</span>}
+                        {fresh && (
+                          <span className="fresh" aria-hidden="true">
+                            NEW TO YOU
+                          </span>
+                        )}
                       </span>
                       <span className="body">
                         <span className="title">{a.title}</span>

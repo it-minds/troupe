@@ -115,6 +115,51 @@ defmodule Troupe.Tools.PublishArtifactTest do
     assert said =~ "the whole organisation"
   end
 
+  test "sends a picture of the page for its card when given one, and refuses one that is not a picture",
+       context do
+    test = self()
+
+    Troupe.Artifacts.install(fn params, _ctx ->
+      send(test, {:published, params})
+      {:ok, published(params)}
+    end)
+
+    png = <<0x89, "PNG", 0x0D, 0x0A, 0x1A, 0x0A, "rest">>
+    File.mkdir_p!(Path.join(context.workspace, "out"))
+    File.write!(Path.join(context.workspace, "out/index.html"), "<h1>Weekly</h1>")
+    File.write!(Path.join(context.workspace, "shot.PNG"), png)
+    File.write!(Path.join(context.workspace, "shot.gif"), "GIF89a")
+    File.write!(Path.join(context.workspace, "big.webp"), :binary.copy("x", 256 * 1024 + 1))
+    %{session: session} = start_session(context, steps: [])
+
+    args = %{"title" => "Weekly", "kind" => "html", "visibility" => "private", "files" => ["out/index.html"]}
+
+    assert {:ok, _said, _} = PublishArtifact.run(Map.put(args, "thumbnail", "shot.PNG"), ctx(session, context))
+    assert_received {:published, %{"thumbnail" => %{"content_type" => "image/png", "bytes" => bytes}} = params}
+    assert Base.decode64!(bytes) == png
+    # The picture is not one of the page's files.
+    assert Enum.map(params["files"], & &1["path"]) == ["index.html"]
+
+    assert {:ok, _said, _} = PublishArtifact.run(args, ctx(session, context))
+    assert_received {:published, params}
+    refute Map.has_key?(params, "thumbnail")
+
+    assert {:error, reason} = PublishArtifact.run(Map.put(args, "thumbnail", "shot.gif"), ctx(session, context))
+    assert reason =~ "not a .png, .jpg or .webp picture"
+    assert {:error, reason} = PublishArtifact.run(Map.put(args, "thumbnail", "big.webp"), ctx(session, context))
+    assert reason =~ "past the 262144 a thumbnail may be"
+    outside = Path.join(System.tmp_dir!(), "troupe-thumbnail-outside-#{System.unique_integer([:positive])}.png")
+    File.write!(outside, png)
+    on_exit(fn -> File.rm(outside) end)
+    assert {:error, reason} = PublishArtifact.run(Map.put(args, "thumbnail", outside), ctx(session, context))
+    assert reason =~ "not published"
+    refute_received {:published, _}
+
+    assert PublishArtifact.schema()["properties"]["thumbnail"]["type"] == "string"
+    assert PublishArtifact.description() =~ "`thumbnail`"
+    refute "thumbnail" in PublishArtifact.schema()["required"]
+  end
+
   test "publishes nothing from outside the workspace, nor what is not a file", context do
     Troupe.Artifacts.install(fn _params, _ctx -> flunk("nothing should be sent") end)
     %{session: session} = start_session(context, steps: [])

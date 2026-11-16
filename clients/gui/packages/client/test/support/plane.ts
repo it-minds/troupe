@@ -159,6 +159,21 @@ export interface FakeArtifactVersion {
   published_at: string;
   note?: string | null;
   rolled_back_to?: number | null;
+  /** The picture its publisher sent for its card, in base64 (a PNG here), or none. */
+  thumbnail?: string | null;
+}
+
+/** The smallest PNG there is, one pixel, for a fake artifact's card picture. */
+export const TINY_PNG = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=";
+
+/** A small picture with something to see in it (a 16 by 9 gradient PNG), for `pnpm fake`'s gallery. */
+export const SAMPLE_PICTURE =
+  "iVBORw0KGgoAAAANSUhEUgAAABAAAAAJCAIAAAC0SDtlAAABTklEQVR4nAXBIQ6AIBQAUI7jCUxWMsFCJbMxg6N9G6P8QKCwH3+SWZ3R5jiAJ/AGnkDfE58bXicfp26nL2cOZ1c3kwN0cXFpcsU4Ht0m3d67s3NNfH54vXy8ur2+vDm8Xf1MHtDHxafJF+N59Jv0e+/PzjfxwfCCfEDdoC8wB9gVZgJAiAukCYoBHmGTsPdwdtDEF4Y3yCeoO+grmCPYNcwUAENcQppCMYHHsMmw9+HsQhMfDi/KB9WN+kJzoF1xJgTEuGCasBjkETeJe49nh018eXizfLK6s76yObJd80wZMMclpykXk3nMm8x7n88uN/HR8JJ8SN2kLzIH2ZVmIkCKC6WJiiEeaZO093R21MTHw8vyYXWzvtgcbFeeiQE5LpwmLoZ55E3y3vPZcRNfHd4qn6ruqq9qjmrXOlMFrHGpaarFVB7rJuve17Or7QfK5Or5y20MWAAAAABJRU5ErkJggg==";
+
+/** The picture a publish sent for its card (`thumbnail: {content_type, bytes}`), or none. */
+function sentPicture(params: Record<string, unknown>): string | null {
+  const t = params["thumbnail"] as { bytes?: unknown } | undefined;
+  return t && typeof t.bytes === "string" ? t.bytes : null;
 }
 
 /** A link to an artifact as the fake keeps it, token and all. */
@@ -335,6 +350,8 @@ export class FakePlane {
   readonly own = new Map<string, OwnMemory>();
   /** The artifacts published to it, by id. */
   readonly artifacts = new Map<string, FakeArtifact>();
+  /** Card pictures this fake serves at `/t/<id>/<n>` for artifacts a keeper answers for, in base64 by id. */
+  readonly pictures = new Map<string, string>();
   /** Every `artifact.open` asked, in order, with the link it answered. */
   readonly opened: Array<{ subject: string; id: string; version: number | null; url: string }> = [];
   /** The artifacts each person keeps at the top of their own gallery, by subject. */
@@ -884,7 +901,7 @@ export class FakePlane {
       if (!a || !this.mayRead(a, subject)) return { error: { code: -32005, message: "not_found" } };
       if (!["owner", "edit"].includes(this.roleOf(a, subject) ?? "")) return { error: { code: -32004, message: "forbidden" } };
       if (params["owner"] !== undefined && params["owner"] !== null) return { error: { code: -32602, message: "invalid_params", data: { reason: "whose an artifact is does not change with a version; artifact.transfer moves it" } } };
-      this.publish(a, subject, files, { note: typeof params["note"] === "string" ? params["note"] : null });
+      this.publish(a, subject, files, { note: typeof params["note"] === "string" ? params["note"] : null, thumbnail: sentPicture(params) });
       return { result: this.artifactJson(a, subject) };
     }
     const admin = this.opts.admin?.role(subject) === "platform_admin";
@@ -914,7 +931,7 @@ export class FakePlane {
       origin: { session_id: typeof params["session_id"] === "string" ? params["session_id"] : null, profile: null, agent: null, where: "person" },
       team: ownerTeam ?? forTeam ?? this.teamsOf(subject)[0] ?? null,
       created_at: "2026-10-25T10:00:00Z",
-      versions: [{ n: 1, files, published_by: { subject, display_name: name }, published_at: "2026-10-25T10:00:00Z", note: typeof params["note"] === "string" ? params["note"] : null }],
+      versions: [{ n: 1, files, published_by: { subject, display_name: name }, published_at: "2026-10-25T10:00:00Z", note: typeof params["note"] === "string" ? params["note"] : null, thumbnail: sentPicture(params) }],
     };
     this.artifacts.set(id, a);
     return { result: this.artifactJson(a, subject) };
@@ -1002,9 +1019,16 @@ export class FakePlane {
       kept: this.kept.get(subject)?.has(a.id) ?? false,
       bytes: latest.files.reduce((n, f) => n + new TextEncoder().encode(f.content).length, 0),
       url: `https://artifacts.example.test/a/${a.id}/`,
+      // The served version's picture, which this fake serves itself, standing in for the artifacts host.
+      thumbnail_url: this.pictureOf(a) ? `${this.baseUrl}/t/${a.id}/${a.pinned ?? latest.n}` : null,
       published_at: latest.published_at,
       may_delete: this.owns(a, subject) || this.opts.admin?.role(subject) === "platform_admin" || this.administers(a, subject),
     };
+  }
+
+  /** The picture of the version an artifact's address serves, in base64, or none. */
+  private pictureOf(a: FakeArtifact, n: number = a.pinned ?? a.versions[a.versions.length - 1]!.n): string | null {
+    return a.versions.find((v) => v.n === n)?.thumbnail ?? null;
   }
 
   /** When the unopened period removes it, as the plane says it: from the later of its last open and its newest version. */
@@ -1130,6 +1154,19 @@ export class FakePlane {
         },
         breakglass: typeof this.opts.breakglass === "string",
       });
+    }
+
+    // A card's picture, as the artifacts host serves one: an image and nothing else, to anybody
+    // here (the real host checks who the signed address names).
+    const picture = /^\/t\/([^/]+)\/(\d+)$/.exec(path);
+    if (picture && req.method === "GET") {
+      const id = decodeURIComponent(picture[1]!);
+      const a = this.artifacts.get(id);
+      const png = this.pictures.get(id) ?? (a ? this.pictureOf(a, Number(picture[2])) : null);
+      if (!png) return json(404, { error: "not_found" });
+      res.writeHead(200, { "content-type": "image/png", "cache-control": "private, max-age=3600" });
+      res.end(Buffer.from(png, "base64"));
+      return;
     }
 
     if (path === "/.well-known/troupe-signing-key") {

@@ -1231,7 +1231,8 @@ defmodule Troupe.Protocol.Schema do
       # the daemon's sign-in: `files` each `{path, bytes}` (base64) and an optional
       # `content_type`; `id` republishes one of theirs; `session_id` names where it came from.
       # No `visibility` is `private`, the owner's alone, for a new one, and as it was for a
-      # republish.
+      # republish. `thumbnail`, `{content_type, bytes}`, is a picture of the version for its
+      # gallery card: PNG, JPEG or WebP, at most 256 KiB.
       "artifact.publish" => %{
         "command_id" => required(:string),
         "title" => required(:string),
@@ -1241,7 +1242,8 @@ defmodule Troupe.Protocol.Schema do
         "files" => required(:array),
         "id" => optional(:string),
         "note" => optional(:string),
-        "session_id" => optional(:string)
+        "session_id" => optional(:string),
+        "thumbnail" => optional(:object)
       },
       # The person's own artifacts on the plane (#62), for a client's "Publish a new version
       # of…": `mine`, `shared`, `teams` or `visibility` narrows it, as the plane's

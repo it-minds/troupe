@@ -12,7 +12,7 @@
 import { useEffect, useState } from "react";
 import type { JSX } from "react";
 import { visibilityWords } from "@troupe/client";
-import type { Artifact, ArtifactKind, ArtifactList, ArtifactUpload, DaemonClient } from "@troupe/client";
+import type { Artifact, ArtifactKind, ArtifactList, ArtifactThumbnail, ArtifactUpload, DaemonClient } from "@troupe/client";
 import { shell } from "../shell";
 
 /** The person's real browser where there is a shell; a webview does nothing useful with a new window. */
@@ -102,6 +102,8 @@ export function Publish({
   // Whether one published for a team is the team's: on unless the person says otherwise.
   const [teamOwned, setTeamOwned] = useState(true);
   const [note, setNote] = useState("");
+  // A picture of it for its gallery card, which the plane keeps with this version alone.
+  const [picture, setPicture] = useState<File | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState<Artifact | null>(null);
@@ -138,6 +140,7 @@ export function Publish({
         ...(chosen ? { id: chosen.id } : {}),
         ...(chosen && note.trim() ? { note: note.trim() } : {}),
         ...(sessionId ? { session_id: sessionId } : {}),
+        ...(picture ? { thumbnail: { content_type: picture.type as ArtifactThumbnail["content_type"], bytes: base64Of(await picture.arrayBuffer()) } } : {}),
       });
       setDone(published);
     } catch (e) {
@@ -201,6 +204,10 @@ export function Publish({
               <input type="file" multiple onChange={(e) => setFiles([...(e.target.files ?? [])])} />
             </label>
             {files.length > 0 && <p className="hint">{kind === "html" ? "A page" : kind === "markdown" ? "A Markdown document" : "A file"}: {paths.join(", ")}</p>}
+            <label>
+              A picture of it for its card, if you have one (PNG, JPEG or WebP, at most 256 KB)
+              <input type="file" accept="image/png,image/jpeg,image/webp" onChange={(e) => setPicture(e.target.files?.[0] ?? null)} />
+            </label>
             {mode === "new" && (
               <>
                 <label>

@@ -28,7 +28,7 @@
 import { readFileSync } from "node:fs";
 import { exampleAdmin } from "../packages/client/test/support/admin.js";
 import { FakeIdp } from "../packages/client/test/support/idp.js";
-import { FakePlane, artifact } from "../packages/client/test/support/plane.js";
+import { FakePlane, SAMPLE_PICTURE, artifact } from "../packages/client/test/support/plane.js";
 import { FakeWorker } from "../packages/client/test/support/worker.js";
 
 const PEOPLE: Record<string, { subject: string; displayName: string }> = {
@@ -82,7 +82,8 @@ const plane = await FakePlane.start({
       team: "core",
       versions: [
         { n: 1, files: [{ path: "index.html", content_type: "text/html", content: "<h1>Week 42</h1>" }], published_by: { subject: as.subject, display_name: as.displayName }, published_at: "2026-10-24T12:00:00Z" },
-        { n: 2, files: [{ path: "index.html", content_type: "text/html", content: "<h1>Week 43</h1>" }, { path: "chart.svg", content_type: "image/svg+xml", content: "<svg/>" }], published_by: { subject: as.subject, display_name: as.displayName }, published_at: "2026-10-25T12:00:00Z" },
+        // Sent with a picture for its card (troupe #977), which the fake plane serves.
+        { n: 2, files: [{ path: "index.html", content_type: "text/html", content: "<h1>Week 43</h1>" }, { path: "chart.svg", content_type: "image/svg+xml", content: "<svg/>" }], published_by: { subject: as.subject, display_name: as.displayName }, published_at: "2026-10-25T12:00:00Z", thumbnail: SAMPLE_PICTURE },
       ],
     }),
     // A document of the person's own, to edit, roll back and share.
