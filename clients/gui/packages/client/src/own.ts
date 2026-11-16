@@ -43,12 +43,18 @@ export interface OwnPlane {
   moveArtifact(id: string, base: number, visibility: string): Promise<ArtifactDetail>;
   pinArtifact(id: string, version: number | null): Promise<ArtifactDetail>;
   transferArtifact(id: string, to: ArtifactTransferTo): Promise<ArtifactDetail>;
+  /** Keep it at the top of the person's own gallery, or let it go: theirs, on the plane. */
+  keepArtifact(id: string, on: boolean): Promise<ArtifactDetail>;
   /** Share it with one person by name at `role`, no link made. The owner's. */
   sharePersonArtifact(id: string, person: string, role: ArtifactShareRole): Promise<{ id: string; person: ArtifactPersonShare }>;
   /** Its thread, oldest first, and whether the caller may write in it. */
   artifactComments(id: string): Promise<ArtifactThread>;
   /** A comment in its thread. */
   commentArtifact(id: string, body: string): Promise<{ id: string; comment: ArtifactComment }>;
+  /** A comment deleted from its thread, by its author, an owner or whoever may take the artifact down. */
+  deleteArtifactComment(id: string, comment: string): Promise<{ id: string; comment: string; deleted: boolean }>;
+  /** A comment's text replaced by its author, marked edited. */
+  editArtifactComment(id: string, comment: string, body: string): Promise<{ id: string; comment: ArtifactComment }>;
   /** The share picker's search: people whose name, email or subject starts with `query`. */
   searchPeople(query: string): Promise<{ people: Person[] }>;
 }
@@ -165,6 +171,10 @@ export class PlaneOwn implements OwnPlane {
     return this.ask<ArtifactDetail>("artifact.transfer", { id, to });
   }
 
+  keepArtifact(id: string, on: boolean): Promise<ArtifactDetail> {
+    return this.ask<ArtifactDetail>("artifact.keep", { id, on });
+  }
+
   sharePersonArtifact(id: string, person: string, role: ArtifactShareRole): Promise<{ id: string; person: ArtifactPersonShare }> {
     return this.ask<{ id: string; person: ArtifactPersonShare }>("artifact.share", { id, person, role });
   }
@@ -175,6 +185,14 @@ export class PlaneOwn implements OwnPlane {
 
   commentArtifact(id: string, body: string): Promise<{ id: string; comment: ArtifactComment }> {
     return this.ask<{ id: string; comment: ArtifactComment }>("artifact.comment", { id, body });
+  }
+
+  deleteArtifactComment(id: string, comment: string): Promise<{ id: string; comment: string; deleted: boolean }> {
+    return this.ask<{ id: string; comment: string; deleted: boolean }>("artifact.comment.delete", { id, comment });
+  }
+
+  editArtifactComment(id: string, comment: string, body: string): Promise<{ id: string; comment: ArtifactComment }> {
+    return this.ask<{ id: string; comment: ArtifactComment }>("artifact.comment.edit", { id, comment, body });
   }
 
   searchPeople(query: string): Promise<{ people: Person[] }> {

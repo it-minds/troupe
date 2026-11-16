@@ -18,6 +18,7 @@ defmodule Troupe.Client.Remote do
   alias Troupe.Config
   alias Troupe.Protocol.ClientUpdate
   alias Troupe.Remote.{Capability, Credentials, Discovery, Journal, Plane, RPC, Tokens, Worker}
+  alias Troupe.UI.NewSession
 
   ## Session-scoped
 
@@ -580,7 +581,12 @@ defmodule Troupe.Client.Remote do
         {:error, "unexpected session.create answer: #{inspect(other)}"}
 
       {:error, reason} ->
-        {:error, message(reason)}
+        # More than one of the person's teams may use the profile and none was named: the
+        # names go to the caller whole, to ask which, never flattened into a sentence.
+        case NewSession.teams_to_choose(reason) do
+          nil -> {:error, message(reason)}
+          teams -> {:error, {:choose_team, teams}}
+        end
     end
   end
 

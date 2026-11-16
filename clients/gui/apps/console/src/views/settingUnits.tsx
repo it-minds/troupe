@@ -54,6 +54,8 @@ export function inUnit(u: Unit, value: unknown): string {
       return Number.isFinite(n) ? duration(n) : show(value);
     case "days":
       return Number.isFinite(n) ? (n === 1 ? "1 day" : `${n} days`) : show(value);
+    case "days_or_off":
+      return Number.isFinite(n) ? (n === 0 ? "off" : n === 1 ? "1 day" : `${n} days`) : show(value);
     case "bytes":
       return Number.isFinite(n) ? bytes(n) : show(value);
     case "switch":
@@ -76,6 +78,8 @@ export function unitHint(u: Unit): string {
       return "In seconds.";
     case "days":
       return "In days.";
+    case "days_or_off":
+      return "In days; 0 or off keeps everything.";
     case "bytes":
       return "In bytes.";
     case "count":
@@ -115,6 +119,9 @@ export function fromDraft(u: Unit, text: string): { value: string } | { error: s
     case "bytes":
     case "count":
       return /^\d+$/.test(t) ? { value: t } : { error: "A whole number." };
+    case "days_or_off":
+      if (t === "" || t.toLowerCase() === "off") return { value: "0" };
+      return /^\d+$/.test(t) ? { value: t } : { error: "A whole number of days, or 0 or off to keep everything." };
     default:
       return { value: text };
   }
@@ -174,7 +181,7 @@ export function UnitControl({
       </select>
     );
   }
-  const numeric = ["dollars", "minutes", "seconds", "days", "bytes", "count"].includes(unit.unit);
+  const numeric = ["dollars", "minutes", "seconds", "days", "days_or_off", "bytes", "count"].includes(unit.unit);
   return (
     <input
       {...control}

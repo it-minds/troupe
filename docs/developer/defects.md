@@ -35,7 +35,6 @@ row, and on a page past 400 lines; a full page is closed and the next one,
 | [D23](defects/d008.md#d23---small-leftovers-low) | Small leftovers | low |
 | [D26](defects/d008.md#d26---small-state-leftovers-in-the-gui-a2a-and-headless-runs-low) | Small state leftovers in the GUI, A2A and headless runs | low |
 | [D30](defects/d008.md#d30---two-sources-for-the-brands-assets-low) | Two sources for the brand's assets | low |
-| [D32](defects/d008.md#d32---small-leftovers-from-the-060-work-low) | Small leftovers from the 0.6.0 work | low |
 | [D36](defects/d008.md#d36---tui-leftovers-after-the-attention-fix-low) | TUI leftovers after the attention fix | low |
 | [D37](defects/d008.md#d37---small-leftovers-from-the-061-work-low) | Small leftovers from the 0.6.1 work | low |
 | [D41](defects/d008.md#d41---a-click-in-windows-notification-centre-unconfirmed) | A click in Windows' notification centre | unconfirmed |

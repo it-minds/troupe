@@ -46,6 +46,7 @@ defmodule Troupe.CLI do
           agent: String.t(),
           agent_given: boolean(),
           profile: String.t() | nil,
+          team: String.t() | nil,
           title: String.t() | nil,
           task: String.t() | nil,
           headless: boolean(),
@@ -131,6 +132,7 @@ defmodule Troupe.CLI do
     status: :boolean,
     blame: :boolean,
     profile: :string,
+    team: :string,
     title: :string
   ]
 
@@ -155,11 +157,16 @@ defmodule Troupe.CLI do
     {~s(troupe run [AGENT] "task" [--headless] [--worktree] [--auto-approve] [--full-send] [--private] [--workspace DIR]),
      "one task: in the TUI, or with --headless printed line by line until the agent rests",
      [["run", "task"], ["run", "plan", "task", "--headless", "--workspace", "."]]},
-    {~s(troupe run [AGENT] "task" --profile NAME [--title "TITLE"] [--headless]),
+    {~s(troupe run [AGENT] "task" --profile NAME [--team TEAM] [--title "TITLE"] [--headless]),
      "the task on the platform, on that plane profile, as the TUI's /new would start it; " <>
        "a full profile is waited on, a line a wait; @profile #agent /local /platform in " <>
-       "the task set those and are taken out of it",
-     [["run", "task", "--profile", "dev", "--headless"], ["run", "task", "--title", "Called"]]},
+       "the task set those and are taken out of it; --team names whose session it is where " <>
+       "more than one of your teams may use the profile",
+     [
+       ["run", "task", "--profile", "dev", "--headless"],
+       ["run", "task", "--title", "Called"],
+       ["run", "task", "--profile", "dev", "--team", "core"]
+     ]},
     {"troupe resume [SESSION_ID | latest] [--private]",
      "no id: the newest session here, picker open; latest, or --private for the newest private one: " <>
        "straight in (troupe --resume is the same)",
@@ -443,6 +450,9 @@ defmodule Troupe.CLI do
       agent_given: false,
       # `troupe run --profile`: a plane profile, which puts the run on the platform.
       profile: Keyword.get(opts, :profile),
+      # `troupe run --team`: whose session it is, where more than one of the person's teams
+      # may use the profile and the plane asks.
+      team: Keyword.get(opts, :team),
       title: Keyword.get(opts, :title),
       task: nil,
       headless: Keyword.get(opts, :headless, false),

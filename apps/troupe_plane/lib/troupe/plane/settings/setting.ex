@@ -26,6 +26,8 @@ defmodule Troupe.Plane.Settings.Setting do
   """
   @type unit ::
           :days
+          # Days, where 0 is off: a retention period nobody set.
+          | :days_or_off
           | :minutes
           | :seconds
           | :dollars
@@ -39,7 +41,7 @@ defmodule Troupe.Plane.Settings.Setting do
   @doc "Every unit a setting may be read in."
   @spec units() :: [unit()]
   def units,
-    do: [:days, :minutes, :seconds, :dollars, :bytes, :count, :switch, :text, :choice, :url]
+    do: [:days, :days_or_off, :minutes, :seconds, :dollars, :bytes, :count, :switch, :text, :choice, :url]
 
   @type t :: %__MODULE__{
           key: String.t(),

@@ -34,7 +34,7 @@ defmodule Troupe.Agent.Headroom do
       turns: entry(b.turns, b.max_turns),
       input: entry(b.input_tokens, b.max_input_tokens),
       output: entry(b.output_tokens, b.max_output_tokens),
-      wall: entry(elapsed(b), b.wall_clock_ms),
+      wall: entry(Budget.elapsed(b), b.wall_clock_ms),
       context: entry(prompt_tokens, window)
     }
   end
@@ -45,9 +45,6 @@ defmodule Troupe.Agent.Headroom do
   end
 
   defp entry(used, _limit), do: %{used: max(used, 0), limit: 1, fraction: 0.0}
-
-  defp elapsed(%Budget{started_at: nil}), do: 0
-  defp elapsed(%Budget{started_at: at}), do: max(System.monotonic_time(:millisecond) - at, 0)
 
   @doc "The dimension a `Budget.exhaustion/0` names, so the question can say `turns 40/40`."
   @spec dimension(Budget.exhaustion()) :: atom()
@@ -92,7 +89,7 @@ defmodule Troupe.Agent.Headroom do
   def label(:turns), do: "turns"
   def label(:input), do: "input tokens"
   def label(:output), do: "output tokens"
-  def label(:wall), do: "wall clock"
+  def label(:wall), do: "working time"
   def label(:context), do: "context window"
   def label(other), do: to_string(other)
 

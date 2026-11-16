@@ -13,6 +13,7 @@ import {
   FINISH_PARTS,
   fold,
   isBusy,
+  limitWords,
   loopEnding,
   needsYou,
   openApprovals,
@@ -21,8 +22,10 @@ import {
   presentMembers,
   rootState,
   settleLoop,
+  stoppedSentence,
 } from "../src/index.js";
 import type { DurableEvent, Entry, TranscriptState, TroupeEvent } from "../src/index.js";
+import { changedText } from "../src/transcript.js";
 
 let seq = 0;
 function durable(type: string, data: Record<string, unknown> = {}, agent = ["root"], subject = "alice"): DurableEvent {
@@ -122,6 +125,38 @@ describe("the transcript fold", () => {
       ["unverified", "the tests"],
     ]);
     assert.deepEqual(partsOf({ agent: "explore", task: "old" }, BRIEF_PARTS), []);
+  });
+
+  // The summary beside a finish's report ends its changed line on the read_branch call the
+  // delegating agent reads the diff with (troupe #968): the finish frame says the count in
+  // the person's words, and no tool call.
+  it("gives a finish frame its report's count of what changed, without the model's read_branch call", () => {
+    seq = 0;
+    const summary =
+      'add.py adds now\n\nchanged: 1 file, +2 -0; the full diff: read_branch(session_id: "s-branch", diff: true)\n  add.py +2 -0 (written whole)\nran: none\npassed: none\nunverified: none\nneeds: none';
+    const report = {
+      summary: "add.py adds now",
+      ran: "none",
+      passed: "none",
+      unverified: "none",
+      needs: "none",
+      changed: { files: [{ path: "add.py", added: 2, removed: 0, whole: true }], added: 2, removed: 0, commands: 1, session_id: "s-branch", agent: ["root"], said: "the README too" },
+    };
+    const state = foldAll([
+      durable("tool_call_started", { call_id: "f", name: "finish", args: { summary: "add.py adds now", ran: "none", passed: "none", unverified: "none", needs: "none", changed: "the README too" } }),
+      durable("tool_call_completed", { call_id: "f", name: "finish", ok: true, content: "reported" }),
+      durable("agent_done", { reason: "finished", summary, report }),
+    ]);
+
+    const finish = state.entries.find((e) => e.kind === "tool") as Extract<Entry, { kind: "tool" }>;
+    assert.equal(finish.changed, "1 file, +2 −0\nadd.py +2 −0 (written whole)\nnot counted: what its 1 command changed\nit says: the README too");
+    assert.ok(state.entries.every((e) => !JSON.stringify(e).includes("read_branch(")), "no entry carries the read_branch call");
+
+    // A summary alone, from before the parts, leaves the frame as it was.
+    const old = foldAll([durable("tool_call_started", { call_id: "g", name: "finish", args: { summary: "found it" } }), durable("agent_done", { reason: "finished", summary: "found it" })]);
+    assert.equal((old.entries[0] as Extract<Entry, { kind: "tool" }>).changed, undefined);
+    assert.equal(changedText({ files: [], commands: 0 }), "nothing");
+    assert.equal(changedText(undefined), "not reported");
   });
 
   // A delegation a person asked to see first (troupe Decision 850) asks with what the gate
@@ -378,6 +413,75 @@ describe("the transcript fold", () => {
     // A subagent starting afterwards does not take it back; the root starting again does.
     assert.equal(fold(finished, durable("agent_started", { mode: "explore" }, ["root", "explore-3"])).doneReason, "finished");
     assert.equal(fold(finished, durable("agent_started", { mode: "build" })).doneReason, undefined);
+  });
+});
+
+// After a budget stop the harness drops what is sent and writes `input_after_done`; only a
+// root that finished is woken, with `agent_woken` (troupe #987). The two read as what they are.
+describe("input after the agent is done", () => {
+  const texts = (s: TranscriptState) => s.entries.map((e) => (e.kind === "system" ? e.text : e.kind));
+
+  it("says a message sent after a budget stop was not taken, why, and what to do", () => {
+    seq = 0;
+    const state = foldAll([
+      durable("agent_started", { mode: "build" }),
+      durable("budget_warning", { dimension: "wall", used: 1_440_000, limit: 1_800_000, fraction: 0.8, detail: "working time 24m/30m (80%)" }),
+      durable("agent_done", { reason: "budget_exhausted", limit: "wall_clock" }),
+      durable("budget_exhausted", { limit: "wall_clock" }),
+      durable("input_after_done", { source: "user" }),
+    ]);
+    const last = state.entries.at(-1)!;
+    assert.equal(last.kind === "system" && last.type, "input_after_done");
+    assert.equal(
+      last.kind === "system" && last.text,
+      "Your message was not taken: the session had stopped (its 30-minute working limit is spent). Start a new session to continue.",
+    );
+    assert.ok(!texts(state).some((t) => /picked/.test(String(t))));
+    assert.equal(stoppedSentence(state), "This session has stopped: its 30-minute working limit is spent. Start a new session to continue.");
+  });
+
+  it("names the limit from the budget_exhausted after an agent_done that did not, without a number it never heard", () => {
+    seq = 0;
+    const state = foldAll([
+      durable("agent_done", { reason: "budget_exhausted" }),
+      durable("budget_exhausted", { limit: "max_turns" }),
+      durable("input_after_done", { source: "user" }),
+    ]);
+    const last = state.entries.at(-1)!;
+    assert.equal(
+      last.kind === "system" && last.text,
+      "Your message was not taken: the session had stopped (its turn limit is spent). Start a new session to continue.",
+    );
+  });
+
+  it("says the size of each limit where the session said it", () => {
+    assert.equal(limitWords("wall_clock", { wall: 1_800_000 }), "its 30-minute working limit");
+    assert.equal(limitWords("wall_clock", { wall: 7_200_000 }), "its 2-hour working limit");
+    assert.equal(limitWords("max_turns", { turns: 40 }), "its 40-turn limit");
+    assert.equal(limitWords("max_input_tokens", { input: 6_000_000 }), "its 6M input-token limit");
+    assert.equal(limitWords("max_output_tokens", { output: 200_000 }), "its 200k output-token limit");
+    assert.equal(limitWords("turns", {}), "its turn limit");
+    assert.equal(limitWords(undefined, {}), "its budget");
+  });
+
+  it("says a finished agent picked the conversation back up on agent_woken, and takes input", () => {
+    seq = 0;
+    const done = foldAll([durable("agent_started", { mode: "build" }), durable("agent_done", { reason: "finished" })]);
+    assert.equal(stoppedSentence(done), undefined);
+    const woken = fold(done, durable("agent_woken", { from: "finished", source: "user" }));
+    const last = woken.entries.at(-1)!;
+    assert.equal(last.kind === "system" && last.type, "agent_woken");
+    assert.equal(last.kind === "system" && last.text, "the agent had finished; new input picked the conversation back up");
+    assert.equal(woken.doneReason, undefined);
+  });
+
+  it("leaves input open after a root's model error, and stops it after a refusal", () => {
+    seq = 0;
+    assert.equal(stoppedSentence(foldAll([durable("agent_done", { reason: "llm_error" })])), undefined);
+    assert.equal(
+      stoppedSentence(foldAll([durable("agent_done", { reason: "refused" })])),
+      "This session has stopped: the model refused to go on. Start a new session to continue.",
+    );
   });
 });
 

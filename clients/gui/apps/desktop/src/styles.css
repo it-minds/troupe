@@ -5140,6 +5140,20 @@ pre.instruction {
   margin-left: auto;
   color: var(--text-muted);
 }
+/* Which of the person's teams, inside Your teams, where there is more than one to choose. */
+.audiences.teams-row {
+  padding-top: var(--space-2);
+}
+/* Published since … until …, beside the kind. */
+.audiences .published-range {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+.audiences .published-range input {
+  min-height: var(--touch-target);
+}
 
 .repertoire-body {
   display: flex;
@@ -5458,6 +5472,16 @@ pre.instruction {
 }
 .repertoire-aside .comment-form button {
   align-self: flex-end;
+}
+/* A comment's own Edit and Delete, and Save beside Cancel while it is edited. */
+.repertoire-aside .comments .comment-actions {
+  margin: var(--space-1) 0 0;
+}
+.repertoire-aside .comment-edit-actions {
+  display: flex;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: var(--space-2);
 }
 .audiences .kind-filter select {
   min-height: var(--touch-target);

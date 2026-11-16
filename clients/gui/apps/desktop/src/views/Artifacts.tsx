@@ -15,11 +15,14 @@
 //
 // Local only keeps the app off the plane, so the gallery asks nothing and says so. "New to
 // you" is a version this device has not opened yet, kept in this device's storage alone.
+// What the person keeps at the top is theirs on the plane (`artifact.keep`), so it follows
+// them to every device; the team chips and the published range are this view's, reset with it.
 
 import { useCallback, useEffect, useState } from "react";
 import type { JSX } from "react";
 import { appLink, audienceName, audienceOf, teamOwned, visibilityWords } from "@troupe/client";
 import type { Artifact, ArtifactAudience, ArtifactDetail, ArtifactList, ArtifactShareRole, ArtifactThread, DaemonClient, OwnPlane, Person } from "@troupe/client";
+import { goesLine, goesSentence, versionGoes, versionsSentence } from "@troupe/client";
 import { copyText } from "../clipboard";
 import { shell } from "../shell";
 import { Loading, relative, unreachedWords } from "./bits";
@@ -78,6 +81,45 @@ export function dayOf(iso: string | undefined, now = new Date()): "Today" | "Thi
   if (at.toDateString() === now.toDateString()) return "Today";
   return now.getTime() - at.getTime() < 7 * 24 * 3600 * 1000 ? "This week" : "Earlier";
 }
+
+/** The local calendar day an instant falls on, as a date field says it (`YYYY-MM-DD`); "" for none. */
+export function localDay(iso: string | undefined): string {
+  const at = iso ? new Date(iso) : null;
+  if (!at || Number.isNaN(at.getTime())) return "";
+  const two = (n: number): string => String(n).padStart(2, "0");
+  return `${at.getFullYear()}-${two(at.getMonth() + 1)}-${two(at.getDate())}`;
+}
+
+const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+
+/** A date field's day in words: "3 November 2026". */
+function dayWords(day: string): string {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(day);
+  return m ? `${Number(m[3])} ${MONTHS[Number(m[2]) - 1] ?? m[2]} ${m[1]}` : day;
+}
+
+/** Published since … until …, in words, for the empty state: "" for no range. */
+export function rangeWords(since: string, until: string): string {
+  if (since && until) return since === until ? `on ${dayWords(since)}` : `between ${dayWords(since)} and ${dayWords(until)}`;
+  if (since) return `since ${dayWords(since)}`;
+  if (until) return `until ${dayWords(until)}`;
+  return "";
+}
+
+/** Whether it was published inside the range, each end a day and both included; an empty end is open. */
+function inRange(a: Artifact, since: string, until: string): boolean {
+  if (!since && !until) return true;
+  const day = localDay(a.published_at);
+  return (!since || day >= since) && (!until || day <= until);
+}
+
+/** Which team or profile an artifact under Your teams is for, as its chip names it. */
+function teamLabel(visibility: string): string {
+  if (visibility.startsWith("profile:")) return `${visibility.slice("profile:".length)} profile`;
+  return visibility.startsWith("team:") ? visibility.slice("team:".length) : visibility;
+}
+
+const KINDS: Record<string, string> = { html: "pages", markdown: "documents", file: "files" };
 
 function who(person: { subject: string; display_name?: string | null } | undefined | null, mine: boolean): string {
   if (mine) return "You";
@@ -181,6 +223,11 @@ export function Artifacts({
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<Filter>("all");
   const [kind, setKind] = useState<"all" | Artifact["kind"]>("all");
+  // Inside Your teams, one team's (its visibility), or all of them.
+  const [team, setTeam] = useState("all");
+  // Published since … until …, each a day or "" for open; this device's for as long as the app runs.
+  const [since, setSince] = useState("");
+  const [until, setUntil] = useState("");
   const [selected, setSelected] = useState<string | null>(open ?? null);
   const [seen, setSeen] = useState(seenVersions);
   const [asked, setAsked] = useState(0);
@@ -235,11 +282,23 @@ export function Artifacts({
 
   const q = query.trim().toLowerCase();
   const matches = (a: Artifact): boolean => !q || [a.title, whose(a), who(a.owner, a.mine), a.owner?.subject ?? "", a.origin?.session_id ?? ""].join(" ").toLowerCase().includes(q);
-  const searched = list.artifacts.filter((a) => matches(a) && (kind === "all" || a.kind === kind));
-  const shown = searched.filter((a) => filter === "all" || audienceOf(a) === filter);
+  const searched = list.artifacts.filter((a) => matches(a) && (kind === "all" || a.kind === kind) && inRange(a, since, until));
+  const audienced = searched.filter((a) => filter === "all" || audienceOf(a) === filter);
+  // The teams (and profiles) of what Your teams shows: a choice only where there are two or more.
+  const teamsShown = filter === "team" ? [...new Set(audienced.map((a) => a.visibility))].sort((x, y) => teamLabel(x).localeCompare(teamLabel(y))) : [];
+  const byTeam = teamsShown.length > 1 && teamsShown.includes(team) ? team : "all";
+  const shown = audienced.filter((a) => byTeam === "all" || a.visibility === byTeam);
   const count = (f: Filter): number => searched.filter((a) => f === "all" || audienceOf(a) === f).length;
   const current = list.artifacts.find((a) => a.id === selected) ?? null;
-  const groups = (["Today", "This week", "Earlier"] as const).map((day) => ({ day, items: shown.filter((a) => dayOf(a.published_at) === day) })).filter((g) => g.items.length > 0);
+  // The ones the person keeps at the top form a group above the days; the rest go by when.
+  const groups = [
+    { day: "Kept at the top", items: shown.filter((a) => a.kept === true) },
+    ...(["Today", "This week", "Earlier"] as const).map((day) => ({ day, items: shown.filter((a) => a.kept !== true && dayOf(a.published_at) === day) })),
+  ].filter((g) => g.items.length > 0);
+  const range = rangeWords(since, until);
+  // What narrows the list beside the search, in the empty state's one sentence.
+  const narrowedBy = [kind !== "all" ? `among ${KINDS[kind] ?? kind}` : "", byTeam !== "all" ? `for ${teamLabel(byTeam)}` : "", range ? `published ${range}` : ""].filter(Boolean).join(" ");
+  const widen = [range ? "wider dates" : "", kind !== "all" ? "every kind" : "", byTeam !== "all" ? "all of your teams" : ""].filter(Boolean);
 
   return (
     <div className="repertoire">
@@ -267,8 +326,26 @@ export function Artifacts({
             <option value="file">Files</option>
           </select>
         </label>
+        <span className="published-range micro">
+          <label>
+            Published since <input type="date" value={since} max={until || undefined} onChange={(e) => setSince(e.target.value)} aria-label="Published since" />
+          </label>
+          <label>
+            until <input type="date" value={until} min={since || undefined} onChange={(e) => setUntil(e.target.value)} aria-label="Published until" />
+          </label>
+        </span>
         <span className="order micro">NEWEST FIRST</span>
       </nav>
+      {teamsShown.length > 1 && (
+        <nav className="audiences teams-row" aria-label="Which of your teams">
+          {["all", ...teamsShown].map((t) => (
+            <button key={t} type="button" className="audience is-team" aria-pressed={byTeam === t} onClick={() => setTeam(t)}>
+              <span>{t === "all" ? "All of them" : teamLabel(t)}</span>
+              <span className="n">{audienced.filter((a) => t === "all" || a.visibility === t).length}</span>
+            </button>
+          ))}
+        </nav>
+      )}
       {!list.enabled && <p className="note">An administrator has switched artifacts off on this plane, so there are none to show.</p>}
       {open && selected === open && !current && list.enabled && (
         <p className="note">The artifact the link named is not one published for you here. A link someone shared opens it in a browser first, which gives you its role.</p>
@@ -311,6 +388,7 @@ export function Artifacts({
                           <span className="kind micro">{KIND[a.kind] ?? a.kind.toUpperCase()}</span>
                           {(a.comments ?? 0) > 0 && <span className="kind micro">{a.comments === 1 ? "1 COMMENT" : `${a.comments} COMMENTS`}</span>}
                         </span>
+                        {a.goes_at && <span className="byline goes">{goesLine(a)}</span>}
                       </span>
                     </button>
                   );
@@ -320,16 +398,25 @@ export function Artifacts({
           ))}
           {shown.length === 0 && (
             <div className="empty">
-              <p className="title">{q ? `Nothing matches “${query.trim()}”` : "Nothing here yet"}</p>
-              <p className="muted">{q ? "Try a person's name or the session it came from." : "When someone publishes for this audience, it appears here. Publish from any session with /publish."}</p>
+              <p className="title">{q ? `Nothing matches “${query.trim()}”${narrowedBy ? ` ${narrowedBy}` : ""}` : narrowedBy ? `Nothing here ${narrowedBy}` : "Nothing here yet"}</p>
+              <p className="muted">
+                {q
+                  ? "Try a person's name or the session it came from."
+                  : widen.length > 0
+                    ? `Try ${widen.join(" or ")}.`
+                    : "When someone publishes for this audience, it appears here. Publish from any session with /publish."}
+              </p>
               {/* Only where something narrows the list: with every audience shown and
                   nothing typed it would show what is already shown, which is nothing. */}
-              {(q || filter !== "all" || kind !== "all") && (
+              {(q || filter !== "all" || kind !== "all" || range) && (
                 <button
                   type="button"
                   onClick={() => {
                     setFilter("all");
                     setKind("all");
+                    setTeam("all");
+                    setSince("");
+                    setUntil("");
                     setQuery("");
                   }}
                 >
@@ -484,9 +571,26 @@ function Aside({
         <button type="button" onClick={browse}>
           Open in browser
         </button>
+        {/* The person's own gallery's: on the plane, so every device and app of theirs shows
+            it at the top. A plane that does not say `kept` keeps none, so there is no choice. */}
+        {artifact.kept !== undefined && (
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() =>
+              void act(
+                () => via.keepArtifact(artifact.id, !artifact.kept),
+                artifact.kept ? "Let go: it is back under when it was published." : "Kept at the top of your gallery, on every device you sign in on.",
+              )
+            }
+          >
+            {artifact.kept ? "Let go from the top" : "Keep at the top"}
+          </button>
+        )}
       </div>
       {error && <p className="note error">{error}</p>}
       {said && <p className="note" role="status">{said}</p>}
+      {(detail ?? artifact).goes_at && <p className="muted goes">{goesSentence(detail ?? artifact)}</p>}
 
       <section>
         <h3 className="screen">Who can see it</h3>
@@ -591,6 +695,7 @@ function Aside({
         <h3 className="screen">Versions</h3>
         {!detail && !error && <Loading what="Reading its versions…" />}
         {pinned !== null && <p className="muted micro">Its address serves version {pinned}, pinned by its owner.</p>}
+        {detail && versionsSentence(detail) && <p className="muted micro">{versionsSentence(detail)}</p>}
         <ol className="versions">
           {versions.map((v, i) => (
             <li key={v.n} className={i === 0 ? "newest" : undefined}>
@@ -599,6 +704,7 @@ function Aside({
               <span className="micro" title={v.published_at}>
                 {relative(Date.parse(v.published_at))}
               </span>
+              {v.goes_at && <span className="micro goes">{versionGoes(v)}</span>}
               <span className="version-actions">
                 <button type="button" className="link" onClick={() => open(v.n)} aria-label={`Open version ${v.n}`}>
                   Open
@@ -807,6 +913,8 @@ function SharedWith({ via, artifact, detail, onChanged }: { via: OwnPlane; artif
  * The artifact's thread, oldest first, each comment with who wrote it and when; a box to
  * write one for whoever the plane says may (its owners, and anybody given comment or edit).
  * The session it came from is told of each, so whoever steers it can ask its agent to act.
+ * Its author edits a comment (marked edited) and deletes it; an owner, or whoever may take
+ * the artifact down, deletes any. Each control is there only for whoever may use it.
  */
 function Thread({ via, artifact }: { via: OwnPlane; artifact: Artifact }): JSX.Element {
   const [thread, setThread] = useState<ArtifactThread | null>(null);
@@ -815,6 +923,9 @@ function Thread({ via, artifact }: { via: OwnPlane; artifact: Artifact }): JSX.E
   const [busy, setBusy] = useState(false);
   const [asked, setAsked] = useState(0);
   const [absent, setAbsent] = useState(false);
+  const [editing, setEditing] = useState<string | null>(null);
+  const [editDraft, setEditDraft] = useState("");
+  const [confirming, setConfirming] = useState<string | null>(null);
 
   useEffect(() => {
     let live = true;
@@ -848,6 +959,37 @@ function Thread({ via, artifact }: { via: OwnPlane; artifact: Artifact }): JSX.E
     }
   };
 
+  // A comment's own controls, offered only where the plane says this person may: their own
+  // to edit, and their own (or any, for an owner or whoever may take the artifact down) to
+  // delete. Deleting asks once, saying what it does.
+  const remove = async (comment: string): Promise<void> => {
+    setBusy(true);
+    setError(null);
+    try {
+      await via.deleteArtifactComment(artifact.id, comment);
+      setConfirming(null);
+      setAsked((n) => n + 1);
+    } catch (e) {
+      setError(`Not deleted: ${sentence(e)}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const save = async (comment: string): Promise<void> => {
+    setBusy(true);
+    setError(null);
+    try {
+      await via.editArtifactComment(artifact.id, comment, editDraft);
+      setEditing(null);
+      setAsked((n) => n + 1);
+    } catch (e) {
+      setError(`Not saved: ${sentence(e)}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const comments = thread?.comments ?? [];
   return (
     <section aria-label="Comments">
@@ -861,8 +1003,72 @@ function Thread({ via, artifact }: { via: OwnPlane; artifact: Artifact }): JSX.E
               <p className="micro">
                 <span className="author">{c.author.display_name || c.author.subject}</span> ·{" "}
                 <span title={c.created_at}>{relative(Date.parse(c.created_at))}</span>
+                {c.edited_at && (
+                  <>
+                    {" "}
+                    · <span title={c.edited_at}>edited {relative(Date.parse(c.edited_at))}</span>
+                  </>
+                )}
               </p>
-              <p className="comment-body">{c.body}</p>
+              {editing === c.id ? (
+                <form
+                  className="comment-form"
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    if (editDraft.trim() !== "") void save(c.id);
+                  }}
+                >
+                  <label>
+                    <span className="visually-hidden">Edit your comment</span>
+                    <textarea value={editDraft} maxLength={thread?.max_length} disabled={busy} onChange={(e) => setEditDraft(e.target.value)} rows={3} />
+                  </label>
+                  <div className="comment-edit-actions">
+                    <button type="submit" disabled={busy || editDraft.trim() === ""}>
+                      Save
+                    </button>
+                    <button type="button" className="link" disabled={busy} onClick={() => setEditing(null)}>
+                      Cancel
+                    </button>
+                  </div>
+                </form>
+              ) : (
+                <p className="comment-body">{c.body}</p>
+              )}
+              {confirming === c.id ? (
+                <p className="micro" role="group" aria-label="Delete this comment?">
+                  It goes from the thread for everybody, and cannot be brought back.{" "}
+                  <button type="button" className="danger" disabled={busy} onClick={() => void remove(c.id)}>
+                    Delete
+                  </button>{" "}
+                  <button type="button" className="link" disabled={busy} onClick={() => setConfirming(null)}>
+                    Keep it
+                  </button>
+                </p>
+              ) : (
+                editing !== c.id &&
+                (c.may_edit || c.may_delete) && (
+                  <p className="micro comment-actions">
+                    {c.may_edit && (
+                      <button
+                        type="button"
+                        className="link"
+                        disabled={busy}
+                        onClick={() => {
+                          setEditing(c.id);
+                          setEditDraft(c.body);
+                        }}
+                      >
+                        Edit
+                      </button>
+                    )}{" "}
+                    {c.may_delete && (
+                      <button type="button" className="link" disabled={busy} onClick={() => setConfirming(c.id)}>
+                        Delete
+                      </button>
+                    )}
+                  </p>
+                )
+              )}
             </li>
           ))}
         </ol>

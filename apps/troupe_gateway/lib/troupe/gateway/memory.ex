@@ -18,8 +18,10 @@ defmodule Troupe.Gateway.Memory do
   Every ask carries what each session running here read at its last turn (`sessions`, each
   document's scope, name, version and hash and when the turn began), which the plane keeps
   so its console sees which sessions are behind: a field on the poll the daemon makes anyway,
-  not a call of its own. `status/1` says where this machine stands, for `troupe memory
-  --status`.
+  not a call of its own. It carries where the comments on the person's artifacts were last
+  heard, too, and the answer the comments written since, which `Troupe.Gateway.Artifacts`
+  tells the sessions here they came from (`artifact_commented`). `status/1` says where this
+  machine stands, for `troupe memory --status`.
 
   **Local only** (`Troupe.Gateway.LocalOnly`): a session under it is left out of that
   report, and an agent's entry from it is refused; it reads the copy kept here. While every
@@ -45,7 +47,7 @@ defmodule Troupe.Gateway.Memory do
 
   use GenServer
 
-  alias Troupe.Gateway.{Connections, LocalOnly, Plane}
+  alias Troupe.Gateway.{Artifacts, Connections, LocalOnly, Plane}
   alias Troupe.PlaneKeys
   alias Troupe.PlaneMemory
   alias Troupe.Protocol.Memory, as: Shape
@@ -80,9 +82,12 @@ defmodule Troupe.Gateway.Memory do
   # turn, by session id, when the turn began, and each document's scope, name, version and
   # hash, never its text, so the console sees who is behind. Nothing else of a session, and
   # nothing of one under Local only, whose client promised that nothing of it leaves here.
+  #
+  # And where the comments on the person's artifacts its sessions published were last heard
+  # (`Artifacts.comments_ask/1`): the plane answers those written since, beside the memory.
   defp asked do
     reads = Enum.reject(Troupe.Session.PlaneMemory.reads(), &LocalOnly.session?(&1["session_id"]))
-    %{"sessions" => reads}
+    %{"sessions" => reads, "artifact_comments" => Artifacts.comments_ask(Plane.url())}
   end
 
   @doc """
@@ -176,6 +181,8 @@ defmodule Troupe.Gateway.Memory do
       changes = PlaneMemory.changes(before, kept["documents"])
       if changes != [], do: announce(changes)
       :ok = tell_decided(body["proposals"])
+      # Beside the signed body, not in it: the comments are no part of the memory kept.
+      :ok = Artifacts.heard(plane_url, answer["artifact_comments"])
 
       {:ok,
        %{

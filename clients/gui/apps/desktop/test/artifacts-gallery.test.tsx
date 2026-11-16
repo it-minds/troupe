@@ -10,7 +10,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { WebSocket as NodeWebSocket } from "ws";
 import { webTokenStore } from "@troupe/client";
 import { App } from "../src/App";
-import { dayOf } from "../src/views/Artifacts";
+import { dayOf, localDay, rangeWords } from "../src/views/Artifacts";
 import { FakeDaemon } from "../../../packages/client/test/support/daemon.js";
 import { startHarness } from "../../../packages/client/test/support/harness.js";
 import { keptBy } from "../../../packages/client/test/support/kept.js";
@@ -193,6 +193,36 @@ describe("the gallery", () => {
     expect(network!.requests.filter((r) => r.url.includes("artifacts.example.test"))).toEqual([]);
   });
 
+  it("says when one goes on its card and its page, only where the plane says it will", async () => {
+    Object.assign(daemon.artifacts![1]!, {
+      goes_at: "2027-03-04T09:00:00Z",
+      retention: { versions_days: 90, unopened_days: 60 },
+      version_goes_at: { "1": "2027-02-01T09:00:00Z", "2": "2027-02-11T09:00:00Z" },
+    });
+    await signedIn();
+    await openGallery();
+    const card = (title: string) => waitFor(() => [...gallery().querySelectorAll<HTMLButtonElement>(".card")].find((c) => c.textContent?.includes(title)), title);
+    // Beside its pieces, not among them; and on no card the plane gave no date.
+    expect((await card("Core runbook")).querySelector(".goes")?.textContent).toMatch(/^Goes 4 Mar( 2027)? unless opened$/);
+    expect((await card("Weekly figures")).querySelector(".goes")).toBeNull();
+    expect(gallery().querySelectorAll(".card .goes")).toHaveLength(1);
+
+    (await card("Core runbook")).click();
+    const details = await waitFor(aside, "the aside");
+    await sees("It goes on 4 Mar");
+    await sees("Artifacts nobody opens for 60 days are removed, and opening it starts the 60 days again.");
+    await sees("Versions older than the newest are removed 90 days after they were published; the newest, and a pinned one, are kept. 2 of these go on the days they show.");
+    await waitFor(() => details.querySelectorAll(".versions li").length === 3, "three versions");
+    expect([...details.querySelectorAll(".versions li")].map((li) => li.querySelector(".goes")?.textContent ?? null)).toEqual([null, expect.stringMatching(/^goes 11 Feb/), expect.stringMatching(/^goes 1 Feb/)]);
+
+    // One the plane gives no date says nothing of going.
+    (await card("Weekly figures")).click();
+    await waitFor(() => aside()?.textContent?.includes("Weekly figures") ?? false, "its aside");
+    await waitFor(() => (aside()?.querySelectorAll(".versions li").length ?? 0) === 1, "its version");
+    expect(aside()!.textContent).not.toContain("It goes on");
+    expect(aside()!.textContent).not.toContain("Versions older than");
+  });
+
   it("gives its owner a view link, a version, a pin, a rollback and a revoke", async () => {
     await signedIn();
     await openGallery();
@@ -319,6 +349,54 @@ describe("the gallery", () => {
     await sees("Its owner decides who may write them.");
   });
 
+  // A comment taken back or edited (#979): its author edits it, marked edited, and deletes
+  // it; an owner deletes anybody's; nobody is offered a control they may not use.
+  it("offers Edit and Delete on a comment only to whoever may, and each does it", async () => {
+    await signedIn();
+    daemon.artifacts!.push(row({ id: "art-named", title: "Hiring plan", visibility: "private", scope: "shared", role: "comment", may_comment: true, comments: 2 }));
+    daemon.artifactComments.set("art-named", [
+      { id: "c-1", author: { subject: "bo@example.test", display_name: "Bo" }, body: "The second table is wrong.", created_at: lastWeek },
+      { id: "c-2", author: { subject: "alice@example.com", display_name: "Alice" }, body: "Row 3?", created_at: lastWeek },
+    ]);
+    daemon.artifactComments.set("art-mine", [{ id: "c-1", author: { subject: "bo@example.test", display_name: "Bo" }, body: "Off topic.", created_at: lastWeek }]);
+    await openGallery();
+    (await waitFor(() => [...gallery().querySelectorAll<HTMLButtonElement>(".card")].find((c) => c.textContent?.includes("Hiring plan")), "the shared card")).click();
+    const items = (): HTMLLIElement[] => [...(aside()?.querySelectorAll<HTMLLIElement>(".comments li") ?? [])];
+    const buttons = (li: HTMLElement): string[] => [...li.querySelectorAll("button")].map((b) => b.textContent ?? "");
+    await waitFor(() => items().length === 2, "the thread");
+
+    // Bo's: nothing for a commenter who did not write it. Hers: both.
+    expect(buttons(items()[0]!)).toEqual([]);
+    expect(buttons(items()[1]!)).toEqual(["Edit", "Delete"]);
+
+    [...items()[1]!.querySelectorAll("button")].find((b) => b.textContent === "Edit")!.click();
+    const box = await waitFor(() => items()[1]!.querySelector<HTMLTextAreaElement>("textarea"), "her comment in a box");
+    expect(box.value).toBe("Row 3?");
+    type(box, "Row 4, not row 3.");
+    (await seesButton("Save", items()[1]!)).click();
+    await waitFor(() => items()[1]?.querySelector(".comment-body")?.textContent === "Row 4, not row 3.", "the edited comment");
+    expect(items()[1]!.textContent).toContain("edited");
+    expect(daemon.artifactCalls.find((c) => c.method === "artifact.comment.edit")?.params).toMatchObject({ id: "art-named", comment: "c-2", body: "Row 4, not row 3." });
+
+    // Deleting asks once, saying what it does, and Keep it keeps it.
+    [...items()[1]!.querySelectorAll("button")].find((b) => b.textContent === "Delete")!.click();
+    await sees("It goes from the thread for everybody, and cannot be brought back.");
+    [...items()[1]!.querySelectorAll("button")].find((b) => b.textContent === "Keep it")!.click();
+    await waitFor(() => buttons(items()[1]!).join() === "Edit,Delete", "kept");
+    [...items()[1]!.querySelectorAll("button")].find((b) => b.textContent === "Delete")!.click();
+    (await waitFor(() => [...items()[1]!.querySelectorAll<HTMLButtonElement>("button.danger")].find((b) => b.textContent === "Delete"), "Delete, said once more")).click();
+    await waitFor(() => items().length === 1, "her comment gone");
+    expect(daemon.artifactCalls.find((c) => c.method === "artifact.comment.delete")?.params).toMatchObject({ id: "art-named", comment: "c-2" });
+
+    // Her own artifact: she deletes Bo's comment, and edits nobody's but her own.
+    (await waitFor(() => [...gallery().querySelectorAll<HTMLButtonElement>(".card")].find((c) => c.textContent?.includes("My notes")), "her card")).click();
+    await waitFor(() => items()[0]?.textContent?.includes("Off topic."), "Bo's comment on hers");
+    expect(buttons(items()[0]!)).toEqual(["Delete"]);
+    items()[0]!.querySelector("button")!.click();
+    (await waitFor(() => items()[0]?.querySelector<HTMLButtonElement>("button.danger"), "Delete, said once more")).click();
+    await waitFor(() => items().length === 0, "Bo's comment gone");
+  });
+
   it("narrows the cards by kind", async () => {
     await signedIn();
     daemon.artifacts!.push(row({ id: "art-doc", title: "Style guide", kind: "markdown", scope: "organisation" }));
@@ -327,9 +405,77 @@ describe("the gallery", () => {
     choose(gallery().querySelector<HTMLSelectElement>('select[aria-label="Kind"]')!, "markdown");
     await waitFor(() => titles().join() === "Style guide", "the document alone");
     choose(gallery().querySelector<HTMLSelectElement>('select[aria-label="Kind"]')!, "file");
-    await sees("Nothing here yet");
+    // The empty state says what narrowed it.
+    await sees("Nothing here among files");
+    await sees("Try every kind.");
     (await seesButton("Show everything", gallery())).click();
     await waitFor(() => titles().length === 5, "all five again");
+  });
+
+  // #978: kept at the top, the person's on the plane; one row of team chips where there is a
+  // choice; a published range that narrows the groups, said in the empty state.
+  it("keeps one at the top of the person's own gallery, on the plane, and lets it go", async () => {
+    await signedIn();
+    await openGallery();
+    await waitFor(() => titles().length === 4, "four cards");
+    expect([...gallery().querySelectorAll(".day h2")].map((h) => h.textContent)).toEqual(["Today2", "This week1", "Earlier1"]);
+    (await waitFor(() => [...gallery().querySelectorAll<HTMLButtonElement>(".card")].find((c) => c.textContent?.includes("Field interviews")), "the oldest card")).click();
+    const details = await waitFor(aside, "the aside");
+    (await seesButton("Keep at the top", details)).click();
+    await waitFor(() => gallery().querySelector(".day h2")?.textContent === "Kept at the top1", "a group above the days");
+    expect([...gallery().querySelectorAll(".day h2")].map((h) => h.textContent)).toEqual(["Kept at the top1", "Today2", "This week1"]);
+    expect(gallery().querySelector('.day[aria-label="Kept at the top"] .card .title')?.textContent).toBe("Field interviews");
+    await sees("Kept at the top of your gallery, on every device you sign in on.");
+    // The plane holds it, not this device: another device's list says so too.
+    expect(daemon.artifacts!.find((a) => a["id"] === "art-link")!["kept"]).toBe(true);
+    expect(daemon.artifactCalls.filter((c) => c.method === "artifact.keep").map((c) => c.params)).toEqual([{ id: "art-link", on: true }]);
+
+    (await seesButton("Let go from the top", details)).click();
+    await waitFor(() => [...gallery().querySelectorAll(".day h2")].map((h) => h.textContent).join() === "Today2,This week1,Earlier1", "back under when it was published");
+    expect(daemon.artifacts!.find((a) => a["id"] === "art-link")!["kept"]).toBe(false);
+  });
+
+  it("names the teams in Your teams as chips where there are two, and not with one", async () => {
+    await signedIn();
+    daemon.artifacts!.push(row({ id: "art-design", title: "Design review", visibility: "team:design", scope: "team:design", published_at: now }));
+    await openGallery();
+    await waitFor(() => titles().length === 5, "five cards");
+    // Only inside Your teams.
+    expect(gallery().querySelector('[aria-label="Which of your teams"]')).toBeNull();
+    chip("Your teams").click();
+    const teams = await waitFor(() => gallery().querySelector<HTMLElement>('[aria-label="Which of your teams"]'), "the team chips");
+    expect([...teams.querySelectorAll("button")].map((b) => b.textContent)).toEqual(["All of them2", "design1", "dev profile1"]);
+    [...teams.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent?.startsWith("design"))!.click();
+    await waitFor(() => titles().join() === "Design review", "design's alone");
+    [...teams.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent?.startsWith("All of them"))!.click();
+    await waitFor(() => titles().length === 2, "both teams' again");
+
+    // Narrowed to one team's (by when it was published), there is nothing to choose: no chips.
+    type(gallery().querySelector<HTMLInputElement>('input[aria-label="Published until"]')!, localDay(lastWeek));
+    await waitFor(() => titles().join() === "Core runbook", "the one team's");
+    expect(gallery().querySelector('[aria-label="Which of your teams"]')).toBeNull();
+  });
+
+  it("narrows the groups to a published range, and the empty state names the range", async () => {
+    await signedIn();
+    await openGallery();
+    await waitFor(() => titles().length === 4, "four cards");
+    const since = gallery().querySelector<HTMLInputElement>('input[aria-label="Published since"]')!;
+    const until = gallery().querySelector<HTMLInputElement>('input[aria-label="Published until"]')!;
+    type(since, localDay(lastWeek));
+    await waitFor(() => titles().length === 3, "this week's and today's");
+    expect([...gallery().querySelectorAll(".day h2")].map((h) => h.textContent)).toEqual(["Today2", "This week1"]);
+    type(until, localDay(lastWeek));
+    await waitFor(() => titles().join() === "Core runbook", "that day's alone");
+    type(since, "2025-01-01");
+    type(until, "2025-01-31");
+    await sees("Nothing here published between 1 January 2025 and 31 January 2025");
+    await sees("Try wider dates.");
+    (await seesButton("Show everything", gallery())).click();
+    await waitFor(() => titles().length === 4, "all four again");
+    expect(since.value).toBe("");
+    expect(rangeWords("2026-11-03", "")).toBe("since 3 November 2026");
+    expect(rangeWords("", "2026-11-03")).toBe("until 3 November 2026");
   });
 
   it("says the plane's refusal of a move in its own words", async () => {

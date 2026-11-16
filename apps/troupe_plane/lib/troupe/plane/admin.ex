@@ -2328,10 +2328,24 @@ defmodule Troupe.Plane.Admin do
          changes: Audit.diff(comparable(current), as_written(current, attrs)),
          mode: Provision.mode(),
          extended_by: if(is_binary(name), do: effects_below(name, attrs), else: []),
-         capacity: capacity_preview(name, current, attrs)
+         capacity: capacity_preview(name, current, attrs),
+         problems: preview_problems(attrs)
        }}
     end
   end
+
+  # What resolving the write against its parent has to say, as the effective view says it
+  # once saved: a parent's restriction holding over what the write sets, a key not
+  # inherited, a server's name clash. None refuses the write.
+  defp preview_problems(%{"name" => name, "extends" => parent, "own" => own})
+       when is_binary(name) and is_binary(parent) do
+    case Extends.resolve(name, %{name => %{extends: parent, written: own}}) do
+      {:ok, resolved} -> resolved.problems
+      {:error, reason} -> [reason]
+    end
+  end
+
+  defp preview_problems(_attrs), do: []
 
   # The ceiling the write leaves against the most its pods could run at once: saved
   # either way, since it is a limit and not a promise, and said so where it is higher.

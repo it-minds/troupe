@@ -614,6 +614,22 @@ const SETTINGS: Setting[] = [
     summary: "Whether an artifact's owner may make a public link, which opens it for anybody who has it, signed in or not.",
     consequence: "Off, none is made and every one made already stops opening; links that honour sign-in work either way.",
   },
+  {
+    key: "artifacts_keep_versions_days",
+    group: "artifacts",
+    type: "integer",
+    fallback: 0,
+    summary: "How many days a version older than the newest is kept before it is removed, its files with it. 0 is off: every version is kept.",
+    consequence: "Checked every hour. The newest version and the one an owner pinned are never removed. Each removal is in the audit trail.",
+  },
+  {
+    key: "artifacts_keep_unopened_days",
+    group: "artifacts",
+    type: "integer",
+    fallback: 0,
+    summary: "How many days an artifact is kept after it was last opened, published or changed, before it is removed whole. 0 is off: it is kept.",
+    consequence: "Checked every hour; opening it starts the count again. It goes as a delete would, in the audit trail.",
+  },
   { key: "issuer", group: "sign_in", type: "string", summary: "The identity provider's issuer URL.", consequence: "Wrong, and nobody signs in. Saved behind a check; reset puts the deployment's back." },
   { key: "client_id", group: "sign_in", type: "string", summary: "This plane's client id at the provider.", consequence: "The provider refuses a sign-in for a client it does not know." },
   { key: "client_secret", group: "sign_in", type: "string", secret: true, summary: "The client's secret, for the console's code exchange.", consequence: "Never shown. A blank field keeps it." },
@@ -694,6 +710,8 @@ const NAMING: Record<string, { label: string; unit: string; choices?: Array<{ va
     ],
   },
   artifacts_public_links: { label: "Public links to artifacts", unit: "switch" },
+  artifacts_keep_versions_days: { label: "Old versions of an artifact kept", unit: "days_or_off" },
+  artifacts_keep_unopened_days: { label: "An artifact nobody opens kept", unit: "days_or_off" },
   issuer: { label: "Identity provider's issuer", unit: "url" },
   client_id: { label: "Client ID", unit: "text" },
   client_secret: { label: "Client secret", unit: "text" },
@@ -1481,7 +1499,7 @@ export class FakeAdmin {
             size_class: typeof sentAttrs["size_class"] === "string" ? sentAttrs["size_class"] : (before?.size_class ?? "standard"),
           });
           const capacity = { max_sessions: max, at_once: atOnce, above: typeof max === "number" && atOnce.sessions !== null && max > atOnce.sessions };
-          return { result: { policy: this.verdict(attrs), changes: diff(was, { ...was, ...sent }), mode: this.mode, extended_by: below, capacity } };
+          return { result: { policy: this.verdict(attrs), changes: diff(was, { ...was, ...sent }), mode: this.mode, extended_by: below, capacity, problems: effect.problems ?? [] } };
         }
         const held = this.heldByRepository(subject, "profile.put", name, "WorkerProfile");
         if (held) return held;
@@ -2894,7 +2912,7 @@ export class FakeAdmin {
    * The write as the plane reads it: resolved where it names a parent, and for a profile
    * that stops naming one, what it had in effect with the write laid over it.
    */
-  private inEffect(name: string, sent: Record<string, unknown>, parent: string | null, before: FakeProfile | null): { attrs: Record<string, unknown>; own: Record<string, unknown> | null } | string {
+  private inEffect(name: string, sent: Record<string, unknown>, parent: string | null, before: FakeProfile | null): { attrs: Record<string, unknown>; own: Record<string, unknown> | null; problems?: string[] } | string {
     const own = { ...(before?.extends ? (before.own ?? {}) : {}), ...Object.fromEntries(WRITTEN_KEYS.filter((k) => k in sent).map((k) => [k, sent[k]])) };
     const via = parent ?? before?.extends ?? null;
     if (!via) return { attrs: sent, own: null };
@@ -2913,7 +2931,7 @@ export class FakeAdmin {
       return `${name} has a monthly budget of ${dollars} from ${String(source)}, and a profile that extends another can only lower its budget: set ${name}'s at or below ${dollars}, or raise ${String(source)}'s`;
     }
     const { channel: _channel, ...row } = rowOf(resolved);
-    return { attrs: { ...row, name }, own: parent ? own : null };
+    return { attrs: { ...row, name }, own: parent ? own : null, problems: parent ? resolved.problems : [] };
   }
 
   /** Each profile below `name` as this write would leave it: its diff, the policy's verdict, and what would refuse the write. */

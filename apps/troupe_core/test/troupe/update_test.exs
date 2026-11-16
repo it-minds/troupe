@@ -725,6 +725,101 @@ defmodule Troupe.UpdateTest do
            )
   end
 
+  # An install whose programs are not in the default place owns what is in its two
+  # directories (#969): the desktop app's setup found through its HKCU entry is the default
+  # install's, listed as that and never run from here.
+  test "an install elsewhere leaves the Windows desktop app to the default install, and says so",
+       ctx do
+    url = release!(ctx, "1.1.0", desktop: :setup)
+    default = Path.join(ctx.root, "AppData/Local/Programs/troupe")
+
+    run = fn
+      ["reg", "query", _key, "/v", "DisplayVersion"] ->
+        {:ok, "    DisplayVersion    REG_SZ    1.0.0\r\n", 0}
+
+      ["reg", "query", _key, "/v", "DisplayIcon"] ->
+        {:ok, ~s[    DisplayIcon    REG_SZ    "#{Path.join(ctx.root, "AppData/Local/Troupe/troupe-desktop.exe")}",0\r\n], 0}
+
+      [_setup, "/S"] ->
+        flunk("the default install's desktop app was set up from an install elsewhere")
+    end
+
+    elsewhere =
+      opts(ctx, url,
+        desktop: %{kind: :windows_setup, path: nil},
+        windows?: true,
+        default_bin: default,
+        run: run
+      )
+
+    assert Update.run(:check, elsewhere) == 0
+    out = lines()
+
+    assert "  the desktop app  1.0.0  the default install's, not this one's: troupe update run from #{default} updates it" in out
+
+    assert "troupe update would install 1.1.0 over troupe-daemon 1.0.0 and troupe 1.0.0." in out
+
+    assert Update.run(:update, elsewhere) == 0
+    out = lines()
+
+    assert "  the desktop app 1.0.0 is left as it is: the default install's, not this one's: troupe update run from #{default} updates it" in out
+
+    refute Enum.any?(out, &(&1 =~ "the desktop app 1.1.0"))
+    assert File.read!(ctx.tui) == "troupe 1.1.0\n"
+
+    # The default install lists it as its own, as before.
+    assert Update.run(:check, opts(ctx, url, desktop: %{kind: :windows_setup, path: nil}, windows?: true, run: run)) == 0
+
+    assert Enum.any?(
+             lines(),
+             &(&1 =~ ~r/^troupe update would install 1\.1\.0 over .* and the desktop app 1\.0\.0\.$/)
+           )
+  end
+
+  test "an install elsewhere owns a desktop app whose program is in its directories", ctx do
+    url = release!(ctx, "1.1.0", desktop: :setup)
+    exe = Path.join(Path.dirname(ctx.tui), "Troupe/troupe-desktop.exe")
+
+    run = fn
+      ["reg", "query", _key, "/v", "DisplayVersion"] -> {:ok, "    DisplayVersion    REG_SZ    1.0.0\r\n", 0}
+      ["reg", "query", _key, "/v", "DisplayIcon"] -> {:ok, "    DisplayIcon    REG_SZ    #{exe}\r\n", 0}
+    end
+
+    opts =
+      opts(ctx, url,
+        desktop: %{kind: :windows_setup, path: nil},
+        windows?: true,
+        default_bin: Path.join(ctx.root, "elsewhere"),
+        run: run
+      )
+
+    assert Update.run(:check, opts) == 0
+    assert Enum.any?(lines(), &(&1 =~ "and the desktop app 1.0.0."))
+  end
+
+  test "on Linux an install elsewhere updates its own AppImage, and never the default's or its menu entry",
+       ctx do
+    url = release!(ctx, "1.1.0", desktop: :appimage)
+    # The AppImage in this install's directory is its own; the menu entry starts another.
+    desktop = appimage!(ctx, "1.0.0")
+    File.write!(desktop.entry, "[Desktop Entry]\nComment=The Troupe desktop app, release 1.0.0\nExec=/home/ada/.local/bin/troupe-desktop\n")
+    opts = opts(ctx, url, desktop: desktop, default_bin: Path.join(ctx.root, "elsewhere"))
+
+    assert Update.run(:update, opts) == 0
+    assert File.read!(desktop.path) == "desktop 1.1.0\n"
+    assert File.read!(desktop.entry) =~ "release 1.0.0\n"
+
+    # One in the default place is the default install's.
+    shared = %{desktop | path: Path.join(ctx.root, "default/troupe-desktop")}
+    File.mkdir_p!(Path.dirname(shared.path))
+    File.write!(shared.path, "desktop 1.0.0\n")
+    opts = opts(ctx, release!(ctx, "1.2.0", desktop: :appimage), desktop: shared, default_bin: Path.dirname(shared.path))
+
+    assert Update.run(:update, opts) == 0
+    assert Enum.any?(lines(), &(&1 =~ "the desktop app 1.0.0 is left as it is: the default install's"))
+    assert File.read!(shared.path) == "desktop 1.0.0\n"
+  end
+
   test "--rollback with nothing to go back to says so", ctx do
     assert Update.run(:rollback, opts(ctx, nil)) == 1
     assert Enum.any?(lines(), &(&1 =~ "nothing to roll back to"))
@@ -773,6 +868,8 @@ defmodule Troupe.UpdateTest do
         target: "linux_x86_64",
         tui: ctx.tui,
         lib: ctx.lib,
+        # The scratch install is the default one unless a test moves the default elsewhere.
+        default_bin: Path.dirname(ctx.tui),
         # Never this machine's desktop app or VS Code: a test names its own or none.
         desktop: nil,
         vscode: nil,

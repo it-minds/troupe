@@ -347,6 +347,18 @@ defmodule Troupe.Gateway.LocalOnlyTest do
     end
   end
 
+  test "a Local-only client is refused keeping an artifact at the top of its gallery, which is the plane's",
+       ctx do
+    assert {:error, %{message: "forbidden", data: %{"reason" => reason}}} =
+             Client.call(ctx.local, "artifact.keep", %{
+               "command_id" => Client.command_id(),
+               "id" => "art-1",
+               "on" => true
+             })
+
+    assert reason =~ "Local only"
+  end
+
   test "a Local-only client publishes and lists no artifact, and its session's agent publishes none",
        ctx do
     publish = %{
@@ -366,7 +378,7 @@ defmodule Troupe.Gateway.LocalOnlyTest do
 
     # Nor the desktop app's gallery and viewer, which go to the plane through the daemon.
     for method <- ~w(artifact.get artifact.open artifact.read artifact.share artifact.unshare artifact.rollback artifact.pin
-                     artifact.comments artifact.comment) do
+                     artifact.comments artifact.comment artifact.comment.delete artifact.comment.edit) do
       assert {:error, %{message: "forbidden", data: %{"reason" => why}}} =
                Client.call(ctx.local, method, %{"command_id" => Client.command_id(), "id" => "art-1"})
 

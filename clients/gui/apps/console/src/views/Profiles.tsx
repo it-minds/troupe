@@ -322,7 +322,19 @@ const READ_HERE = [
   "orgMount",
   "repositoryOverridesBundle",
   "personalTools",
+  "memoryProposals",
 ];
+
+/**
+ * Whether the profile's sessions may propose to a team's or the organisation's memory, in
+ * words, naming the profile it extends where the refusal is that one's: a parent's refusal
+ * holds whatever this one says.
+ */
+function proposalsWords(name: string, spec: Record<string, unknown>, fields: EffectiveProfile["fields"] | null): string {
+  if (spec["memoryProposals"] !== false) return "as the platform setting says";
+  const from = fields?.find((f) => f.path === "spec.memoryProposals")?.from;
+  return from && from !== name ? `refused for its sessions, as ${from} says` : "refused for its sessions";
+}
 
 /**
  * The profile's rule on which agents exist on it (`spec.agents`: `allow`, `deny`), in words. Shown,
@@ -553,6 +565,7 @@ function ProfileReading({ detail, granted }: { detail: ProfileDetail; granted: s
           ["Org volume", spec["orgMount"] ? "mounted, read-only" : "not mounted"],
           ["A repository's agents and skills", spec["repositoryOverridesBundle"] ? "replace the bundle's" : "lose to the bundle's"],
           ["People's own signed-in tools", spec["personalTools"] === "forbid" ? "kept off these pods" : "allowed"],
+          ["Agents may propose memory", proposalsWords(p.name, spec, parent ? (effective?.fields ?? null) : null)],
           ["Agents", agentsWords(spec["agents"])],
         ]}
       />
@@ -840,6 +853,7 @@ const FORM_PATHS = [
   ["orgMount"],
   ["repositoryOverridesBundle"],
   ["personalTools"],
+  ["memoryProposals"],
   ["github", "allowPublic"],
   ["github", "denyPaths"],
   ["github", "maxPushes"],
@@ -941,6 +955,8 @@ interface Form {
   orgMount: boolean | null;
   repositoryOverridesBundle: boolean | null;
   forbidPersonalTools: boolean | null;
+  /** Whether its sessions may propose to a team's or the organisation's memory; false refuses them. */
+  memoryProposals: boolean | null;
   /** The fix loop's policy on GitHub: public repositories, paths a push never carries, its caps. */
   allowPublic: boolean | null;
   denyPaths: string;
@@ -980,6 +996,7 @@ function formOf(detail: ProfileDetail | null): Form {
     orgMount: own("orgMount", spec["orgMount"] === true),
     repositoryOverridesBundle: own("repositoryOverridesBundle", spec["repositoryOverridesBundle"] === true),
     forbidPersonalTools: own("personalTools", spec["personalTools"] === "forbid"),
+    memoryProposals: own("memoryProposals", spec["memoryProposals"] !== false),
     allowPublic: parent && at(spec, "github.allowPublic") === undefined ? null : at(spec, "github.allowPublic") === true,
     denyPaths: lines(at(spec, "github.denyPaths")),
     maxPushes: text(at(spec, "github.maxPushes")),
@@ -1012,6 +1029,8 @@ export function draftOf(form: Form, servers: Plain[], kept: Plain, rules: RuleLi
     orgMount: form.orgMount ?? undefined,
     repositoryOverridesBundle: form.repositoryOverridesBundle ?? undefined,
     personalTools: form.forbidPersonalTools === null ? undefined : form.forbidPersonalTools ? "forbid" : "allow",
+    // Absent is the platform setting deciding, so true is sent only where it is the profile's own choice under a parent.
+    memoryProposals: form.memoryProposals === false ? false : form.memoryProposals === true && form.extends.trim() ? true : undefined,
     github: compact({
       // Absent is false, so false is sent only where a parent's true would otherwise hold.
       allowPublic: form.allowPublic === true ? true : form.allowPublic === false && form.extends.trim() ? false : undefined,
@@ -1156,6 +1175,7 @@ export function ProfileEditor({
               effects: [
                 ...effectsOf(answer.policy, answer.mode, draft, detail, lines),
                 ...capacityEffects(draft.name, answer.capacity),
+                ...(answer.problems ?? []).map((p) => `${p}.`),
                 ...ruleEffects(draft.name, parent, had, rulesOfDraft(rules)),
                 ...belowEffects(draft.name, below),
               ],
@@ -1448,6 +1468,18 @@ export function ProfileEditor({
           </select>
         )}
       </Field>
+      <Field
+        label="Agents may propose memory"
+        hint={`Whether an agent of a session here may propose an entry for its team's or the organisation's memory, for an administrator to accept or decline. Refused, each proposal is refused in words and nothing is kept; the platform setting of the same name switches them off everywhere.${parent ? ` If ${parent}'s are refused, so are this one's, whatever it says.` : ""}`}
+      >
+        {(p) => (
+          <select {...p} value={tri(form.memoryProposals)} onChange={(e) => set({ memoryProposals: untri(e.target.value) })}>
+            {parent && <option value="">{parent}'s</option>}
+            <option value="true">as the platform setting says</option>
+            <option value="false">refused for its sessions</option>
+          </select>
+        )}
+      </Field>
 
       {Object.keys(kept).length > 0 && (
         <p className="note kept">
@@ -1504,10 +1536,11 @@ function extendsChange(parent: string, form: Form, creating: boolean): Partial<F
       orgMount: form.orgMount ?? false,
       repositoryOverridesBundle: form.repositoryOverridesBundle ?? false,
       forbidPersonalTools: form.forbidPersonalTools ?? false,
+      memoryProposals: form.memoryProposals ?? true,
       allowPublic: form.allowPublic ?? false,
     };
   }
-  return creating && form.extends === "" ? { extends: parent, sizeClass: "", orgMount: null, repositoryOverridesBundle: null, forbidPersonalTools: null, allowPublic: null } : { extends: parent };
+  return creating && form.extends === "" ? { extends: parent, sizeClass: "", orgMount: null, repositoryOverridesBundle: null, forbidPersonalTools: null, memoryProposals: null, allowPublic: null } : { extends: parent };
 }
 
 /** A switch as a select's value: empty is the parent's. */

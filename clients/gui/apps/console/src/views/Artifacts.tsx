@@ -30,6 +30,7 @@ import type { JSX } from "react";
 import { ArtifactApi, TroupeRpcError, appLink, ownerWords, teamOwned, visibilityWords as audienceWords } from "@troupe/client";
 import { OpenInApp } from "./AppBanner";
 import type { Artifact, ArtifactDetail, ArtifactFilter, ArtifactList, ArtifactPerson } from "@troupe/client";
+import { goesLine, goesSentence, versionGoes, versionsSentence } from "@troupe/client";
 import { describeError, useConsole, useLoad } from "../console";
 import { go, href } from "../route";
 import type { Route } from "../route";
@@ -200,6 +201,7 @@ function Card({ artifact: a }: { artifact: Artifact }): JSX.Element {
           {[a.public ? "public link" : null, a.pinned ? `pinned to version ${a.pinned}` : null, a.role === "edit" ? "you may edit it" : null].filter(Boolean).join(" · ")}
         </p>
       )}
+      {a.goes_at && <p className="card-meta">{goesLine(a)}</p>}
       <p className="card-meta">
         <OpenInApp link={appLink({ kind: "artifact", id: a.id, plane: plane.url })} />
       </p>
@@ -318,6 +320,7 @@ function Detail({ artifact: a, reload }: { artifact: ArtifactDetail; reload: () 
           ["First published", when(a.created_at)],
         ]}
       />
+      {a.goes_at && <p className="muted">{goesSentence(a)}</p>}
       <Region>Where it came from</Region>
       <Origin artifact={a} />
       <div className="actions">
@@ -416,6 +419,7 @@ function Detail({ artifact: a, reload }: { artifact: ArtifactDetail; reload: () 
       )}
       <section aria-label="Versions">
         <Region>Versions</Region>
+        {versionsSentence(a) && <p className="muted">{versionsSentence(a)}</p>}
         <ol className="artifact-versions">
           {versions.map((v) => (
             <li key={v.n} aria-label={`Version ${v.n}`}>
@@ -424,6 +428,7 @@ function Detail({ artifact: a, reload }: { artifact: ArtifactDetail; reload: () 
                 <span className="muted">
                   {" "}
                   · published by {personWords(v.published_by)} · {when(v.published_at)} · {bytes(v.bytes)}
+                  {v.goes_at && ` · ${versionGoes(v)}`}
                 </span>
                 <span className="version-actions">
                   <button type="button" disabled={opening !== null} onClick={() => open(v.n)}>

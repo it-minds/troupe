@@ -25,12 +25,15 @@ export {
   andList,
   autoPickProfile,
   ceilingSentence,
+  chosenTeam,
   cleanMessage,
   defaultProfileAgent,
   fullHouseSentence,
   messageTokens,
   profileRoom,
   stripTokens,
+  teamQuestion,
+  teamsToChoose,
   titleFromMessage,
   tokensSentence,
   whoCanOpen,
@@ -104,6 +107,9 @@ export {
   onboardingFiles,
   turnLine,
   partsOf,
+  limitWords,
+  stoppedBecause,
+  stoppedSentence,
   BRIEF_PARTS,
   FINISH_PARTS,
   LEGACY_BUDGET_OPTIONS,
@@ -174,6 +180,8 @@ export { besideRows, renderEntries, replacedBy, topicKey, writtenBy } from "./en
 export type { EntryDraft, EntryLevel, InEffect, MemoryEntry, MemoryInEffect } from "./entries.js";
 export type { ArtifactComment, ArtifactPersonShare, ArtifactShareRole, ArtifactThread } from "./artifacts.js";
 export type { ArtifactThumbnail } from "./artifacts.js";
+export type { ArtifactRetention } from "./artifacts.js";
+export { goesDate, goesLine, goesSentence, versionGoes, versionsSentence } from "./retention.js";
 export type { Artifact, ArtifactAudience, ArtifactDetail, ArtifactFile, ArtifactFilter, ArtifactKind, ArtifactLinkUse, ArtifactList, ArtifactNewLink, ArtifactOrigin, ArtifactOwner, ArtifactPerson, ArtifactPublish, ArtifactPut, ArtifactRole, ArtifactScope, ArtifactShare, ArtifactText, ArtifactTicket, ArtifactTransferTo, ArtifactUpload, ArtifactVersion } from "./artifacts.js";
 export { openRemote, remoteRefusal, watchRemote, watchUrl, when as remoteWhen } from "./remote.js";
 export type { RemoteListRow, RemoteWatch, RemoteWatchOptions } from "./remote.js";

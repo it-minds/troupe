@@ -497,6 +497,17 @@ function LargeResult({ reference, readBlob, full }: { reference: BlobRef; readBl
 }
 
 /** A brief's or a finish's parts under their names (troupe Decision 847). */
+/**
+ * A finish's parts with Troupe's count as its `changed`, once its agent is done: what the
+ * agent itself said changed is in that count, under "it says".
+ */
+function withCounted(parts: Array<[string, string]>, changed: string | undefined): Array<[string, string]> {
+  if (changed === undefined) return parts;
+  const rest = parts.filter(([name]) => name !== "changed" && name !== "summary");
+  const summary = parts.filter(([name]) => name === "summary");
+  return [...summary, ["changed", changed], ...rest];
+}
+
 function Parts({ parts }: { parts: Array<[string, string]> }): JSX.Element {
   return (
     <dl className="facts wide parts">
@@ -577,7 +588,7 @@ export function ToolFrame({ entry, level, readBlob }: { entry: ToolEntry; level:
   const full = level === "everything";
   const state = entry.ok === undefined ? "running" : entry.ok ? "ok" : "failed";
   const shape = entry.name === "delegate" ? BRIEF_PARTS : entry.name === "finish" ? FINISH_PARTS : null;
-  const parts = shape ? partsOf(entry.args, shape) : [];
+  const parts = shape ? withCounted(partsOf(entry.args, shape), entry.changed) : [];
   const result = <Result entry={entry} readBlob={readBlob} full={full} />;
   const hasResult = entry.content !== undefined && (isBlobRef(entry.content) || !saidInHead(entry));
 

@@ -325,6 +325,12 @@ export interface ProfilePreview {
   extended_by?: ProfileBelow[];
   /** The ceiling the write leaves against the most its pods could run at once; absent from a plane before it. */
   capacity?: { max_sessions: number | null; at_once: AtOnce; above: boolean };
+  /**
+   * What resolving the write against the profile it extends has to say, none of it refusing
+   * the write: a parent's restriction holding over what it sets, a key not inherited. Absent
+   * from a plane before it.
+   */
+  problems?: string[];
 }
 
 /**
@@ -894,7 +900,7 @@ export interface TriggerRun {
  * How a person reads and types a setting's value. Not the value's own unit: a `dollars`
  * value is millionths of a dollar and a `minutes` one seconds, on the wire both ways.
  */
-export type SettingUnit = "days" | "minutes" | "seconds" | "dollars" | "bytes" | "count" | "switch" | "text" | "choice" | "url";
+export type SettingUnit = "days" | "days_or_off" | "minutes" | "seconds" | "dollars" | "bytes" | "count" | "switch" | "text" | "choice" | "url";
 
 /** A setting's name and unit, as `admin.settings.list` and `admin.setting.effective` carry them; absent from a plane from before them. */
 export interface SettingNaming {
@@ -1335,6 +1341,8 @@ export interface AdminArtifact {
   total_bytes: number;
   created_at: string;
   published_at: string;
+  /** When the retention period for artifacts nobody opens removes it; null or absent while none is set. */
+  goes_at?: string | null;
   may_take_down: boolean;
 }
 

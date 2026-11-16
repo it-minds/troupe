@@ -88,7 +88,8 @@ On a plane's pod, the session's own person publishes it.
 ## Versions
 
 Every publish of an artifact that is already there is its next version at the same address;
-nothing is overwritten, and every version stays until the artifact is deleted. An artifact's
+nothing is overwritten, and every version stays until the artifact is deleted, unless an
+administrator set [how long they are kept](#how-long-it-is-kept). An artifact's
 page in the console lists them newest first, each with who published it, when, and its note.
 
 - **Open any version.** The version switcher beside **Open** opens the one you pick, at its own
@@ -102,6 +103,17 @@ page in the console lists them newest first, each with who published it, when, a
 Who may publish a version: the owner, and anybody the owner gave an [edit link](#links). Only
 the owner pins one, changes who it is for, deletes it, or makes and revokes links. Where a
 [team owns it](#a-teams-artifact), every member is its owner.
+
+## How long it is kept
+
+Until its owner deletes it, unless an administrator sets a retention period (Decision 1019).
+There are two, and either may be off. One removes a version older than the newest some days
+after it was published: the newest version and a pinned one are always kept, and the page
+lists, beside each version that will go, the day it goes. The other removes an artifact
+nobody has opened, republished or changed for some days, every version with it: each card
+then says the day it goes, and the artifact's page says so too. **Opening it keeps it**: the
+count starts again whenever anybody opens it, in the app, the console, the terminal or by a
+link. With neither set, nothing is removed and nothing about it is shown.
 
 ## Editing in the console
 
@@ -168,10 +180,17 @@ them. Its owners write them, and so does anybody a link or a share by name gave 
 the thread and writes in it once an owner gives them a role. A comment is at most 4000
 characters. Its writing is in the audit trail, never its text.
 
-The session the artifact came from, where that is a pod's and it is running, hears each
-comment: its transcript shows it, so whoever steers the session can ask the agent to act on
-it. A comment never reaches an agent on its own. The gallery's cards say how many comments an
-artifact has.
+Whoever wrote a comment can **Edit** it, which marks it edited, and **Delete** it. The
+artifact's owners delete anybody's, and so do whoever may take the artifact down: a platform
+administrator, and the administrator of the team it is for. A deleted comment is gone from
+the thread for everybody. Each edit and deletion is in the audit trail, never the text; you
+see the buttons only on the comments you may change.
+
+The session the artifact came from hears each comment while it is running: its transcript
+shows it, so whoever steers the session can ask the agent to act on it. A session on a pod
+hears it at once; a session on your own computer hears it when your daemon next asks the
+plane, within five minutes, and not while your app is in Local only. A comment never reaches
+an agent on its own. The gallery's cards say how many comments an artifact has.
 
 ## Reading
 
@@ -199,12 +218,20 @@ sign in first, and it brings you straight back to the artifact.
 **In the desktop app**, *Artifacts* in the rail is the same gallery, read from the plane the
 app is signed in to, or through this computer's daemon and its sign-in when the app is not:
 cards grouped by when, chips for who each is for (everyone, your teams and
-profiles, shared with you, only you), a choice of kind (pages, documents, files) and a search by
-title, person or session. A card new to you is one whose
-newest version this computer has not opened. The one you choose shows its versions, where it
-came from and who can see it; **Open** shows it in a window of its own, from its own host,
+profiles, shared with you, only you), a choice of kind (pages, documents, files), a range of
+days it was published in (*Published since … until …*) and a search by title, person or
+session. Under *Your teams*, when what it shows comes from more than one of your teams or
+profiles, a second row of chips picks one of them. The range and the team are this window's
+choice and are cleared when the app starts again; an empty gallery says what narrowed it. A
+card new to you is one whose newest version this computer has not opened. The one you choose
+shows its versions, where it came from and who can see it; **Open** shows it in a window of its own, from its own host,
 and each version opens the same way. **Copy link** copies a view link for your own and the
 address for anybody else's. On your own you can also pin or roll back to a version, revoke a
 link and publish a new version (that one through the daemon, which sends the files from
 this computer). The app never loads an artifact into itself. Under *Local
 only* the gallery asks the plane nothing.
+
+**Keep at the top**, on the one you choose, puts it in a group of its own above *Today*;
+**Let go from the top** puts it back under when it was published. It is yours alone and kept
+on the plane, so the desktop app shows it there on every computer you sign in on, and nobody
+else, its owner included, sees what you keep.

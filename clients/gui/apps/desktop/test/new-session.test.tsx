@@ -297,6 +297,103 @@ describe("the new-session screen", () => {
   });
 });
 
+// troupe #992: a profile two of the person's teams may use. Whose budget pays and who can
+// open it follow from the team, so the plane asks; the screen asks the person, before
+// sending where the listing says so, and on the plane's refusal where it did not yet.
+describe("a profile more than one of the person's teams may use", () => {
+  const teamPicker = (): HTMLElement | null => document.querySelector<HTMLElement>('.ns-picker[aria-label="which team it is for"]');
+  const teamOption = (name: string): HTMLButtonElement | undefined => [...(teamPicker()?.querySelectorAll<HTMLButtonElement>("button.ns-opt") ?? [])].find((b) => b.querySelector(".ns-opt-label")?.textContent === name);
+  const esc = (): void => {
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+  };
+
+  it("shows the team only where it is a choice", async () => {
+    await signedIn({ profiles: ["dev"] });
+    const s = await openStart();
+    await waitFor(() => sentence(s).includes("with dev"), "the sentence");
+    expect(chip(s, "Which team it is for")).toBeNull();
+    expect(sentence(s)).toBe("Runs on the platform with dev as build · everyone on core can open it");
+  });
+
+  it("asks which team before sending, sends the create with the one picked, and remembers it for the profile", async () => {
+    const h = await signedIn({ profiles: ["dev"], teams: ["core", "design"] });
+    let s = await openStart();
+    await waitFor(() => chip(s, "Which team it is for") !== null, "the team chip");
+    expect(sentence(s)).toBe("Runs on the platform with dev as build · everyone on which team? can open it");
+    expect(why(s)).toBe("core and design can both use dev. Choose the team it is for: its budget pays, and everyone on it can open it.");
+
+    type(ask(s), "Tidy the ledger");
+    ctrlEnter(ask(s));
+    await waitFor(() => teamPicker(), "the question");
+    expect(h.plane.rows.size).toBe(0);
+    expect(teamOption("core")?.textContent).toContain("core’s budget pays for it, and everyone on core can open it.");
+    teamOption("design")!.click();
+
+    await waitFor(() => document.querySelector('textarea[aria-label="Message"]'), "the session, opened by itself");
+    expect(h.plane.createdFor).toEqual(["design"]);
+    expect([...h.plane.rows.values()].map((r) => r.title)).toEqual(["Tidy the ledger"]);
+    expect(localStorage.getItem(`troupe.pref.newSession.team.${h.plane.baseUrl}|dev`)).toBe("design");
+    unmount?.();
+
+    // Asked once: the next start on dev is for design, said on the sentence, and changeable there.
+    s = await openStart();
+    await waitFor(() => sentence(s).includes("everyone on design can open it"), "the remembered team");
+    expect(why(s)).not.toContain("Choose the team");
+    chip(s, "Which team it is for")!.click();
+    (await waitFor(() => teamOption("core"), "the team picker")).click();
+    await waitFor(() => sentence(s).includes("everyone on core can open it"), "the team changed");
+    expect(teamPicker()).toBeNull();
+    expect(h.plane.rows.size).toBe(1);
+    expect(localStorage.getItem(`troupe.pref.newSession.team.${h.plane.baseUrl}|dev`)).toBe("core");
+  });
+
+  it("drops a remembered team that may no longer use the profile, and asks again", async () => {
+    const h = await signedIn({ profiles: ["dev"], teams: ["core", "design"] });
+    localStorage.setItem(`troupe.pref.newSession.team.${h.plane.baseUrl}|dev`, "ops");
+    const s = await openStart();
+    await waitFor(() => chip(s, "Which team it is for") !== null, "the team chip");
+    expect(sentence(s)).toContain("everyone on which team? can open it");
+  });
+
+  it("answers the plane's refusal with the team remembered for the profile, without asking again", async () => {
+    const h = await signedIn({ profiles: ["dev"], teams: ["core", "design"], listsOneTeam: true });
+    localStorage.setItem(`troupe.pref.newSession.team.${h.plane.baseUrl}|dev`, "design");
+    const s = await openStart();
+    await waitFor(() => sentence(s).includes("everyone on core can open it"), "one team, as the listing says");
+    (await startButton(s)).click();
+    await waitFor(() => h.plane.createdFor.length === 1, "the create, sent again with the remembered team");
+    expect(h.plane.createdFor).toEqual(["design"]);
+    expect(teamPicker()).toBeNull();
+  });
+
+  it("asks on the plane's refusal when the listing named one team, and Esc goes back without a session", async () => {
+    const h = await signedIn({ profiles: ["dev"], teams: ["core", "design"], listsOneTeam: true });
+    const s = await openStart();
+    await waitFor(() => sentence(s).includes("everyone on core can open it"), "one team, as the listing says");
+    expect(chip(s, "Which team it is for")).toBeNull();
+
+    (await startButton(s)).click();
+    await waitFor(() => teamPicker(), "the question, from the refusal's names");
+    const form = await screen();
+    expect(form.classList.contains("casting")).toBe(false);
+    expect(why(form)).toBe("core and design can both use dev. Choose the team it is for: its budget pays, and everyone on it can open it.");
+    expect(document.body.textContent).not.toContain("Could not start");
+    expect(h.plane.rows.size).toBe(0);
+
+    esc();
+    await waitFor(() => teamPicker() === null, "the question closed");
+    expect(h.plane.rows.size).toBe(0);
+    expect(document.querySelector("section.new-session")).not.toBeNull();
+
+    // Start again asks again, and the pick sends the create with the team.
+    (await startButton(form)).click();
+    await waitFor(() => teamPicker(), "the question again");
+    teamOption("core")!.click();
+    await waitFor(() => h.plane.createdFor.length === 1, "the create, sent again");
+    expect(h.plane.createdFor).toEqual(["core"]);
+  });
+});
+
 describe("On this computer", () => {
   let client: DaemonClient;
   let setReady: (ready: boolean) => void = () => undefined;

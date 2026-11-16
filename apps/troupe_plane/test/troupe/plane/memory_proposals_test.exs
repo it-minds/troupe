@@ -115,6 +115,50 @@ defmodule Troupe.Plane.MemoryProposalsTest do
       assert Repo.aggregate(Proposal, :count) == 0
       assert {:ok, %{enabled: false, proposals: []}} = Admin.memory_proposals(context.root)
     end
+
+    # #965: a profile switches them off for its own sessions, in the setting's words naming
+    # the profile; and a profile that extends it cannot switch them back on, which the
+    # preview says before the save.
+    test "is refused in words on a profile whose memoryProposals is false, and on its child", context do
+      worker = enrolled(context.port, "dev-token", "troupe-w-dev-0")
+      answer_index(worker, [])
+      [pod] = Fleet.list_workers("dev")
+
+      {:ok, _} = Fleet.put_profile(%{name: "dev", spec: %{"memoryProposals" => false}})
+      session(context.ada, "s-quiet", pod, context.engineering)
+
+      assert {:error, %{"message" => "forbidden", "data" => %{"reason" => reason}}} =
+               call(worker, "session.memory.propose", %{"session_id" => "s-quiet", "scope" => "team", "append" => "x"})
+
+      assert reason =~ "switched off for the sessions of the profile dev (its memoryProposals is false)"
+      # The setting's sentence, with what switched them off named in place of the setting.
+      [_, instead] = String.split(Proposals.off_reason(), "; ", parts: 2)
+      assert String.ends_with?(reason, instead)
+
+      quiet = %{"name" => "quiet", "image" => "ghcr.io/troupe/worker:1", "spec" => %{"memoryProposals" => false}}
+      {:ok, _} = Admin.profile_put(context.root, quiet)
+      child = %{"name" => "quiet-child", "extends" => "quiet", "spec" => %{"memoryProposals" => true}}
+
+      assert {:ok, %{problems: problems}} = Admin.preview(context.root, child)
+
+      assert Enum.any?(
+               problems,
+               &(&1 =~ "quiet-child sets memoryProposals to true, and quiet's false holds")
+             ),
+             inspect(problems)
+
+      assert {:ok, _} = Admin.profile_put(context.root, child)
+      assert Fleet.get_profile("quiet-child").spec["memoryProposals"] == false
+      assert Fleet.get_profile("quiet-child").own["spec"]["memoryProposals"] == true
+
+      session(context.ada, "s-child", pod, context.engineering, "quiet-child")
+
+      assert {:error, %{"message" => "forbidden", "data" => %{"reason" => reason}}} =
+               call(worker, "session.memory.propose", %{"session_id" => "s-child", "scope" => "organisation", "append" => "x"})
+
+      assert reason =~ "the profile quiet-child"
+      assert Repo.aggregate(Proposal, :count) == 0
+    end
   end
 
   describe "a person's machine proposes through me.memory.propose" do
@@ -271,9 +315,9 @@ defmodule Troupe.Plane.MemoryProposalsTest do
     end
   end
 
-  defp session(user, id, pod, team) do
+  defp session(user, id, pod, team, profile \\ "dev") do
     {:ok, _} =
-      Sessions.create(%{id: id, owner_subject: user.subject, owner_id: user.id, profile: "dev", team_id: team && team.id})
+      Sessions.create(%{id: id, owner_subject: user.subject, owner_id: user.id, profile: profile, team_id: team && team.id})
 
     {:ok, _} = Sessions.place(id, pod)
   end

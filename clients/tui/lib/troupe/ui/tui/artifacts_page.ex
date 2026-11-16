@@ -519,7 +519,8 @@ defmodule Troupe.UI.TUI.ArtifactsPage do
             get_in(version, ["published_by", "subject"]) || ""
 
         note = if version["note"], do: " · " <> Model.one_line(version["note"]), else: ""
-        "#{v(version["n"])}  #{who}  #{ago(version["published_at"])}#{note}"
+        going = version["goes_at"] |> goes() |> then(&if(&1, do: " · " <> &1, else: ""))
+        "#{v(version["n"])}  #{who}  #{ago(version["published_at"])}#{note}#{going}"
       end)
 
     %List{
@@ -602,8 +603,16 @@ defmodule Troupe.UI.TUI.ArtifactsPage do
         [
           Span.new(String.pad_trailing(title, title_w + 1)),
           Span.new(rest, style: Theme.style(:muted))
-        ]
+        ] ++ going(row)
     )
+  end
+
+  # When a retention period removes it, beside the row's other pieces; nothing where none is set.
+  defp going(row) do
+    case goes(row["goes_at"]) do
+      nil -> []
+      day -> [Span.new("  " <> day <> " unless opened", style: Theme.style(:muted))]
+    end
   end
 
   # One shared with the person, by a link or by name: what it lets them do beyond reading.
@@ -642,4 +651,24 @@ defmodule Troupe.UI.TUI.ArtifactsPage do
   @doc "When, as a person says it: `Troupe.Client.ago/1`."
   @spec ago(String.t() | nil) :: String.t()
   def ago(at), do: Client.ago(at)
+
+  @doc """
+  The day a retention period removes it, as the apps say it ("goes 3 Dec", the year when it
+  is not this one, in UTC), or `nil` where the plane gives no date: no period is set.
+  """
+  @spec goes(String.t() | nil, DateTime.t()) :: String.t() | nil
+  def goes(at, now \\ DateTime.utc_now())
+
+  def goes(at, now) when is_binary(at) do
+    case DateTime.from_iso8601(at) do
+      {:ok, day, _offset} ->
+        format = if day.year == now.year, do: "%-d %b", else: "%-d %b %Y"
+        "goes " <> Calendar.strftime(day, format)
+
+      _not_a_time ->
+        nil
+    end
+  end
+
+  def goes(_at, _now), do: nil
 end

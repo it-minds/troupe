@@ -160,22 +160,32 @@ before the migration ([backup-restore.md](backup-restore.md#a-bad-migration)).
 
 ## 6. Backups
 
-Everything is in named volumes of the compose project `troupe-light`, on the box's disk:
+Everything is in the ten named volumes of the compose project `troupe-light`, on the box's
+disk:
 
-| volume | holds | and without it |
+| volume | holds | a restore without it |
 | --- | --- | --- |
-| `postgres-data` | the session index, teams, grants, principals, the audit trail, settings | the index comes back from object storage; nothing else does |
+| `postgres-data` | the session index, teams, grants, principals, profiles, registered machines, the audit trail, settings | the index comes back from object storage; nothing else does |
 | `minio-data` | every sealed session: the primary copy | the sessions are gone |
-| `openbao-data`, `openbao-keys` | the session keys, the signing key; the unseal key and root token | **every sealed session is unreadable forever** |
-| `worker-state` | live working copies and caches | at most the last minute of a live session |
+| `openbao-data` | the session keys, the plane's signing key, the plane's and the worker's tokens | **every sealed session is unreadable forever**, and clients that pinned the plane's key refuse its new one |
+| `openbao-keys` | the unseal key and the root token | **OpenBao never unseals again**, so the same as losing `openbao-data` |
+| `control-tls` | the control port's CA and certificate | a new CA is made at start, and the worker, which pinned the old one, cannot reach the plane until it is enrolled again (below) |
+| `host-enrolment` | this box's registration secret and the control CA, as the bootstrap wrote them | nothing: the bootstrap finds the secret gone and rotates it, with the CA the plane has now |
+| `bao-tokens` | the files the plane and the worker read their OpenBao tokens from | nothing: OpenBao's start makes a token for each file that is missing |
+| `dex-config` | Dex's configuration, rendered from `dex/config.yaml` and `.env` | nothing: it is rendered again at every start |
 | `dex-data` | Dex's refresh tokens and device codes | everybody signs in again |
+| `worker-state` | live working copies and caches | at most the last minute of a live session |
 
-A backup is the first four, taken together and often, with `docker compose stop` first or
+A backup is the first five, taken together and often, with `docker compose stop` first or
 with the tools each store has: `pg_dump` for PostgreSQL, `mc mirror` for MinIO, and for
-OpenBao a copy of both volumes while it is stopped, since the file backend has no
-snapshot. [backup-restore.md](backup-restore.md) says what a restore of each means and in
+OpenBao and `control-tls` a copy of the volume while the stack is stopped, since the file
+backend has no snapshot. The other five are made again by `docker compose up -d`. A
+restore without `control-tls` needs one step more: remove `host-enrolment` too
+(`docker volume rm troupe-light_host-enrolment`) before `up -d`, so the bootstrap rotates
+the box's secret and writes the new CA where the worker reads it.
+[backup-restore.md](backup-restore.md) says what a restore of each means and in
 which order; what it says of OpenBao's Raft volume holds for the file backend here, with
-the unseal key in the second volume rather than outside. Nothing in the stack schedules a
+the unseal key in `openbao-keys` rather than outside. Nothing in the stack schedules a
 backup for you, as nothing in the chart does.
 
 `scripts/plane-light reset` removes every volume, keys included, and asks you to type the

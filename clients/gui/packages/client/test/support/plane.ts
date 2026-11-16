@@ -79,6 +79,12 @@ export interface PlaneOptions {
    */
   memberOf?: Record<string, string[]>;
   /**
+   * `profiles.list` names only the first of the person's teams on each profile, as a
+   * listing read before a second team was granted it would: the create then meets the
+   * plane's "choose a team" without the screen having asked first.
+   */
+  listsOneTeam?: boolean;
+  /**
    * What `me.client_defaults` answers. Defaults to an organisation that routes through
    * its own gateway; `{ configured: false }` is one whose administrator has set nothing.
    */
@@ -114,6 +120,8 @@ export interface PlaneOptions {
   publishOrganisation?: "everyone" | "platform_admins";
   /** Whether an administrator allows public links (`artifacts_public_links`). */
   publicLinks?: boolean;
+  /** The administrator's retention periods in days (`artifacts_keep_versions_days`, `artifacts_keep_unopened_days`); none is both off. */
+  retention?: { versions_days?: number | null; unopened_days?: number | null };
   /**
    * The break-glass token the plane holds, which `POST /auth/breakglass` exchanges for a
    * plane token of the break-glass subject, a platform admin with no teams. None is a
@@ -201,6 +209,8 @@ export interface FakeArtifact {
   pinned?: number | null;
   /** The owner's switch for its public links. */
   public_links?: boolean;
+  /** When somebody last opened it; none is never, and its count runs from its newest version. */
+  opened_at?: string | null;
 }
 
 /** An artifact with the plane's shape: one version of one HTML page, unless told otherwise. */
@@ -344,12 +354,14 @@ export class FakePlane {
   readonly pictures = new Map<string, string>();
   /** Every `artifact.open` asked, in order, with the link it answered. */
   readonly opened: Array<{ subject: string; id: string; version: number | null; url: string }> = [];
+  /** The artifacts each person keeps at the top of their own gallery, by subject. */
+  readonly kept = new Map<string, Set<string>>();
   /** The links made to artifacts, by id. */
   readonly shares = new Map<string, FakeArtifactShare>();
   /** Who each artifact is shared with by name, by artifact and then by person. */
   readonly named = new Map<string, Map<string, { role: "view" | "comment" | "edit"; granted_by: string; granted_at: string }>>();
   /** Each artifact's thread, oldest first. */
-  readonly comments = new Map<string, Array<{ id: string; author: { subject: string; display_name: string | null }; body: string; created_at: string }>>();
+  readonly comments = new Map<string, Array<{ id: string; author: { subject: string; display_name: string | null }; body: string; created_at: string; edited_at?: string | null }>>();
   /** Every `artifact.preview` asked, in order, with what it showed and the address it answered. */
   readonly previews: Array<{ subject: string; id: string; base: number; path: string; text: string; url: string }> = [];
   /**
@@ -669,6 +681,9 @@ export class FakePlane {
   /** What a waiting session holds to start with, by id. */
   private readonly heldPrompts = new Map<string, string>();
 
+  /** The teams creates named, in order: whose each session was started for. */
+  readonly createdFor: string[] = [];
+
   private agentsOf(profile: string, subject: string): string[] {
     const set = this.opts.agents?.[profile];
     if (set) return set;
@@ -983,9 +998,10 @@ export class FakePlane {
   /** An artifact as `artifact.list` answers it to this person: never a file's content. */
   private artifactJson(a: FakeArtifact, subject: string): Record<string, unknown> {
     const latest = a.versions[a.versions.length - 1]!;
-    const { versions: _versions, ...shown } = a;
+    const { versions: _versions, opened_at: _opened, ...shown } = a;
     return {
       ...shown,
+      goes_at: this.goesAt(a),
       owner_team: a.owner_team ?? null,
       mine: this.owns(a, subject),
       may_transfer: this.mayTransfer(a, subject),
@@ -1000,6 +1016,7 @@ export class FakePlane {
       commented_at: this.comments.get(a.id)?.at(-1)?.created_at ?? null,
       public_links: a.public_links !== false,
       public: this.isPublic(a),
+      kept: this.kept.get(subject)?.has(a.id) ?? false,
       bytes: latest.files.reduce((n, f) => n + new TextEncoder().encode(f.content).length, 0),
       url: `https://artifacts.example.test/a/${a.id}/`,
       // The served version's picture, which this fake serves itself, standing in for the artifacts host.
@@ -1012,6 +1029,22 @@ export class FakePlane {
   /** The picture of the version an artifact's address serves, in base64, or none. */
   private pictureOf(a: FakeArtifact, n: number = a.pinned ?? a.versions[a.versions.length - 1]!.n): string | null {
     return a.versions.find((v) => v.n === n)?.thumbnail ?? null;
+  }
+
+  /** When the unopened period removes it, as the plane says it: from the later of its last open and its newest version. */
+  private goesAt(a: FakeArtifact): string | null {
+    const days = this.opts.retention?.unopened_days;
+    if (!days) return null;
+    const last = Math.max(Date.parse(a.versions[a.versions.length - 1]!.published_at), a.opened_at ? Date.parse(a.opened_at) : 0);
+    return new Date(last + days * 86_400_000).toISOString();
+  }
+
+  /** When a version goes for its age: never the newest or the pinned one, nor any while that period is off. */
+  private versionGoesAt(a: FakeArtifact, v: FakeArtifactVersion): string | null {
+    const days = this.opts.retention?.versions_days;
+    const newest = a.versions[a.versions.length - 1]!.n;
+    if (!days || v.n === newest || v.n === a.pinned) return null;
+    return new Date(Date.parse(v.published_at) + days * 86_400_000).toISOString();
   }
 
   /** Its versions, newest first, each with its files described and none of what they hold. */
@@ -1029,6 +1062,7 @@ export class FakePlane {
           published_at: v.published_at,
           note: v.note ?? null,
           rolled_back_to: v.rolled_back_to ?? null,
+          goes_at: this.versionGoesAt(a, v),
           url: `https://artifacts.example.test/a/${a.id}/v${v.n}/`,
         };
       });
@@ -1297,7 +1331,7 @@ export class FakePlane {
               active_sessions: this.roomOf(p).active,
               healthy_pods: 1,
               max_sessions: this.roomOf(p).max_sessions ?? null,
-              teams: this.teamsOf(subject),
+              teams: this.opts.listsOneTeam ? this.teamsOf(subject).slice(0, 1) : this.teamsOf(subject),
               channel: "stable",
               bundle_version: "3",
               bundle_hash: "sha256:abc",
@@ -1346,6 +1380,13 @@ export class FakePlane {
       case "session.create": {
         const profile = String(params["profile"] ?? "");
         if (!profiles.includes(profile)) return { error: { code: -32002, message: "invalid_params", data: { profiles } } };
+        // Whose it is: the only team of theirs, or the one named. With several and none
+        // named the plane asks rather than guess, since the answer is whose budget pays.
+        const mayUse = this.teamsOf(subject);
+        const team = params["team"] === undefined || params["team"] === null ? undefined : String(params["team"]);
+        if (team !== undefined && !mayUse.includes(team)) return { error: { code: -32004, message: "forbidden", data: { reason: `no team of yours may use ${profile}` } } };
+        if (team === undefined && mayUse.length > 1) return { error: { code: -32602, message: "invalid_params", data: { reason: "choose a team", teams: mayUse } } };
+        if (team !== undefined) this.createdFor.push(team);
         // The agent named, or the profile's default (`build` where offered, else the first),
         // kept on the row; one the profile lacks, or a profile offering none, is refused.
         const offered = this.agentsOf(profile, subject);
@@ -1544,7 +1585,8 @@ export class FakePlane {
         if (!a || !this.mayRead(a, subject)) return { error: { code: -32005, message: "not_found" } };
         const people = [...(this.named.get(a.id) ?? new Map()).entries()].map(([s, g]) => ({ subject: s, display_name: this.nameOf(s), email: this.people.find((p) => p.subject === s)?.email ?? null, ...g }));
         const shares = this.owns(a, subject) ? { shares: [...this.shares.values()].filter((sh) => sh.artifact === a.id).map((sh) => this.shareJson(sh)), people, public_links_allowed: this.opts.publicLinks ?? false } : {};
-        return { result: { ...this.artifactJson(a, subject), versions: this.artifactVersions(a), ...shares } };
+        const retention = { versions_days: this.opts.retention?.versions_days || null, unopened_days: this.opts.retention?.unopened_days || null };
+        return { result: { ...this.artifactJson(a, subject), versions: this.artifactVersions(a), retention, ...shares } };
       }
 
       case "artifact.publish":
@@ -1588,6 +1630,18 @@ export class FakePlane {
         if (!a || !this.mayRead(a, subject)) return { error: { code: -32005, message: "not_found" } };
         if (!this.owns(a, subject)) return { error: { code: -32004, message: "forbidden", data: { reason: "only its owner pins a version of an artifact" } } };
         a.pinned = typeof params["version"] === "number" ? params["version"] : null;
+        return { result: { ...this.artifactJson(a, subject), versions: this.artifactVersions(a) } };
+      }
+
+      // Kept at the top of the person's own gallery, or let go: anybody who may open it, for themselves alone.
+      case "artifact.keep": {
+        const a = this.artifacts.get(String(params["id"] ?? ""));
+        if (!a || !this.mayRead(a, subject)) return { error: { code: -32005, message: "not_found" } };
+        if (typeof params["on"] !== "boolean") return { error: { code: -32602, message: "invalid_params", data: { reason: "on is true, to keep it at the top of your gallery, or false, to let it go" } } };
+        const theirs = this.kept.get(subject) ?? new Set<string>();
+        if (params["on"]) theirs.add(a.id);
+        else theirs.delete(a.id);
+        this.kept.set(subject, theirs);
         return { result: { ...this.artifactJson(a, subject), versions: this.artifactVersions(a) } };
       }
 
@@ -1664,7 +1718,39 @@ export class FakePlane {
       case "artifact.comments": {
         const a = this.artifacts.get(String(params["id"] ?? ""));
         if (!a || !this.mayRead(a, subject)) return { error: { code: -32005, message: "not_found" } };
-        return { result: { id: a.id, may_comment: ["owner", "edit", "comment"].includes(this.roleOf(a, subject) ?? ""), max_length: 4000, comments: this.comments.get(a.id) ?? [] } };
+        const writes = ["owner", "edit", "comment"].includes(this.roleOf(a, subject) ?? "");
+        // Each says what this person may do with it: their own they edit while they may write,
+        // and delete; an owner, or whoever may take the artifact down, deletes any.
+        const takesDown = this.owns(a, subject) || this.opts.admin?.role(subject) === "platform_admin" || this.administers(a, subject);
+        const comments = (this.comments.get(a.id) ?? []).map((c) => ({ ...c, may_edit: c.author.subject === subject && writes, may_delete: c.author.subject === subject || takesDown }));
+        return { result: { id: a.id, may_comment: writes, max_length: 4000, comments } };
+      }
+
+      // A comment taken back: its author's, an owner's, or a takedown by whoever may take the
+      // artifact down; its author's edit, marked edited.
+      case "artifact.comment.delete":
+      case "artifact.comment.edit": {
+        const a = this.artifacts.get(String(params["id"] ?? ""));
+        if (!a || !this.mayRead(a, subject)) return { error: { code: -32005, message: "not_found" } };
+        const thread = this.comments.get(a.id) ?? [];
+        const c = thread.find((x) => x.id === params["comment"]);
+        if (!c) return { error: { code: -32005, message: "not_found", data: { comment: params["comment"] } } };
+        const own = c.author.subject === subject;
+        if (method === "artifact.comment.delete") {
+          const takesDown = this.owns(a, subject) || this.opts.admin?.role(subject) === "platform_admin" || this.administers(a, subject);
+          if (!own && !takesDown) return { error: { code: -32004, message: "forbidden", data: { reason: "only whoever wrote a comment, the artifact's owners, or whoever may take the artifact down deletes it" } } };
+          this.comments.set(a.id, thread.filter((x) => x !== c));
+          return { result: { id: a.id, comment: c.id, deleted: true } };
+        }
+        if (!own) return { error: { code: -32004, message: "forbidden", data: { reason: "only whoever wrote a comment edits it" } } };
+        if (!["owner", "edit", "comment"].includes(this.roleOf(a, subject) ?? "")) {
+          return { error: { code: -32004, message: "forbidden", data: { reason: "you may read this artifact's comments; its owner gives the people who may write in them comment or edit" } } };
+        }
+        const body = typeof params["body"] === "string" ? params["body"].trim() : "";
+        if (body === "") return { error: { code: -32602, message: "invalid_params", data: { reason: "a comment needs some text" } } };
+        const edited = { ...c, body, edited_at: new Date(Date.parse("2026-10-25T12:00:00Z") + ++this.counter * 60_000).toISOString() };
+        this.comments.set(a.id, thread.map((x) => (x === c ? edited : x)));
+        return { result: { id: a.id, comment: edited } };
       }
 
       case "artifact.comment": {
@@ -1703,6 +1789,8 @@ export class FakePlane {
         if (version !== null && !a.versions.some((v) => v.n === version)) return { error: { code: -32005, message: "not_found" } };
         const url = `https://artifacts.example.test/enter?ticket=t-${++this.counter}`;
         this.opened.push({ subject, id: a.id, version, url });
+        // Opening it starts the unopened period's count again.
+        a.opened_at = new Date().toISOString();
         return { result: { url, expires_in: 60 } };
       }
 

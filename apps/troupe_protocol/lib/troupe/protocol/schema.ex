@@ -1283,6 +1283,19 @@ defmodule Troupe.Protocol.Schema do
         "id" => required(:string),
         "body" => required(:string)
       },
+      # A comment taken back by its author, an owner or whoever may take the artifact down;
+      # and its author's edit, marked edited.
+      "artifact.comment.delete" => %{
+        "command_id" => required(:string),
+        "id" => required(:string),
+        "comment" => required(:string)
+      },
+      "artifact.comment.edit" => %{
+        "command_id" => required(:string),
+        "id" => required(:string),
+        "comment" => required(:string),
+        "body" => required(:string)
+      },
       # The share picker's search: people whose name, email or subject starts with `query`,
       # among those the plane lets the person find, as its `people.search`.
       "people.search" => %{"query" => required(:string), "limit" => optional(:integer)},
@@ -1308,6 +1321,13 @@ defmodule Troupe.Protocol.Schema do
         "command_id" => required(:string),
         "id" => required(:string),
         "to" => required(:string)
+      },
+      # One kept at the top of the person's own gallery (`on: true`), or let go (`false`):
+      # the person's view of their gallery, kept on the plane.
+      "artifact.keep" => %{
+        "command_id" => required(:string),
+        "id" => required(:string),
+        "on" => required(:boolean)
       },
       # Who may open it moved by its owner, or its title: a version over `base` carrying
       # every file of it, no files sent.
