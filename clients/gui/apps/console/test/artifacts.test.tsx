@@ -12,7 +12,7 @@ import { openInNewTab } from "../src/console";
 import { PEOPLE, button, freshBrowser, link, recordCalls, render, says, sees, seesButton, seesField, seesLink, signedInAs, startFake, type, visit, waitFor } from "./support";
 import type { FakeDeployment } from "./support";
 import { exampleAdmin } from "../../../packages/client/test/support/admin.js";
-import { artifact } from "../../../packages/client/test/support/plane.js";
+import { TINY_PNG, artifact } from "../../../packages/client/test/support/plane.js";
 import type { FakeArtifact, PlaneOptions } from "../../../packages/client/test/support/plane.js";
 
 const MIB = 1024 * 1024;
@@ -125,6 +125,34 @@ describe("artifacts", () => {
     expect(methods).toEqual(expect.arrayContaining(["artifact.list"]));
     // `admin.teams.list` is how the console finds a member administers nothing; nothing after it is administrative.
     expect(methods.filter((m) => m.startsWith("admin.") && m !== "admin.teams.list")).toEqual([]);
+  });
+
+  it("starts a card with the picture its publisher sent, titled, and keeps the title and kind where none was", async () => {
+    const pictured = fake.plane.artifacts.get("art-carol-weekly")!;
+    pictured.versions[1]!.thumbnail = TINY_PNG;
+    await open("#/artifacts/organisation", PEOPLE.carol);
+    await sees("Carol's weekly", cards);
+    const card = (title: string): HTMLElement => [...cards()!.querySelectorAll<HTMLElement>(".artifact-card")].find((c) => c.textContent?.includes(title))!;
+
+    const img = card("Carol's weekly").querySelector<HTMLImageElement>(".thumb img")!;
+    expect(img.getAttribute("src")).toBe(`${fake.plane.baseUrl}/t/art-carol-weekly/2`);
+    expect(img.alt).toBe("Carol's weekly");
+    expect(card("Carol's weekly").querySelector(".thumb")!.firstElementChild).toBe(img);
+    expect(card("Carol's weekly").textContent).toContain("HTML page");
+    // Still nothing of the page itself.
+    expect(document.querySelector("iframe, object, embed")).toBeNull();
+    expect(document.body.innerHTML).not.toContain("Week forty-three in full");
+
+    // One without a picture is its title and its kind, as before.
+    expect(card("<b>Bold claims</b>").querySelector("img")).toBeNull();
+
+    // A picture that does not load leaves the title and the kind.
+    await waitFor(() => {
+      const shown = card("Carol's weekly").querySelector("img");
+      shown?.dispatchEvent(new Event("error"));
+      return shown === null;
+    }, "no picture");
+    expect(card("Carol's weekly").textContent).toContain("HTML page");
   });
 
   it("says how to publish one where a tab has none, and that an administrator switched them off where one did", async () => {

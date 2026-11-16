@@ -90,6 +90,12 @@ export interface Artifact {
   pinned?: number | null;
   bytes: number;
   url: string;
+  /**
+   * The picture its publisher sent of the version its address serves, on the artifacts host,
+   * for this caller alone and for an hour or two: a card draws it, never the page. Null or
+   * absent where none was sent, or from a plane from before thumbnails.
+   */
+  thumbnail_url?: string | null;
   created_at: string;
   published_at: string;
   /** Whether this caller may delete it: its owner, or a platform admin taking it down. */
@@ -271,6 +277,14 @@ export interface ArtifactPublish {
   id?: string;
   note?: string;
   session_id?: string;
+  /** A picture of this version for its gallery card: PNG, JPEG or WebP, at most 256 KiB. */
+  thumbnail?: ArtifactThumbnail;
+}
+
+/** A card's picture as a publish sends it, its bytes in base64. */
+export interface ArtifactThumbnail {
+  content_type: "image/png" | "image/jpeg" | "image/webp";
+  bytes: string;
 }
 
 /** One text file of a version, for an editor. */

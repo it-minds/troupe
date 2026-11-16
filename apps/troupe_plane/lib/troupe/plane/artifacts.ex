@@ -38,7 +38,9 @@ defmodule Troupe.Plane.Artifacts do
 
   **What it may hold.** A file is at most 16 MiB and a version 64 MiB, and a team's artifacts
   together at most its `artifact_quota_bytes`, every version counted (zero is no quota). What
-  one call can carry is less than that: the door's own limit on a body.
+  one call can carry is less than that: the door's own limit on a body. A version may come
+  with a picture of itself for its gallery card (`thumbnail`, a PNG, JPEG or WebP of at most
+  256 KiB), kept beside its files and counted as one; the plane draws none itself.
 
   **Where it is read.** Never on the plane's host. The artifacts host
   (`Troupe.Plane.Web.Artifacts`) serves it, on an origin of its own, to a viewer who came
@@ -62,6 +64,14 @@ defmodule Troupe.Plane.Artifacts do
   @max_path 512
   @max_segment 255
   @max_note 500
+  # A card's picture, which the publisher sends with a version: small enough to ride beside
+  # the files in one call, and one of the three kinds every browser draws. The plane checks
+  # that the bytes start as that kind does, and neither decodes nor resizes them.
+  @max_thumbnail_bytes 256 * 1024
+  @thumbnail_types ~w(image/png image/jpeg image/webp)
+  # A card's picture address names the person it was made for and lasts an hour or two: it
+  # is made again at every list, the same within one hour, so a browser keeps the picture.
+  @thumbnail_seconds 7200
 
   # A ticket is a link the console opens at once: a minute is long enough to load a tab and
   # short enough that one copied out of a history is dead by the time anybody reads it.
@@ -138,6 +148,7 @@ defmodule Troupe.Plane.Artifacts do
          :ok <- may_publish(user, visibility, admin?),
          {:ok, owner_team} <- owner_for(user, params["owner"], visibility, admin?),
          {:ok, note} <- note(params["note"]),
+         {:ok, thumbnail} <- sent_thumbnail(params["thumbnail"]),
          {:ok, files} <- incoming(params, user),
          {:ok, _entry} <- entry(kind, files),
          {:ok, team_id} <- team_for(user, visibility, opts[:session]) do
@@ -146,6 +157,7 @@ defmodule Troupe.Plane.Artifacts do
         kind: kind,
         visibility: visibility,
         files: files,
+        thumbnail: thumbnail,
         team_id: team_id,
         owner_team_id: owner_team && owner_team.id,
         origin: origin(opts),
@@ -176,6 +188,7 @@ defmodule Troupe.Plane.Artifacts do
          {:ok, visibility} <- visibility(params["visibility"] || artifact.visibility),
          :ok <- may_move(artifact, visibility, role, user, admin?),
          {:ok, note} <- note(params["note"]),
+         {:ok, thumbnail} <- sent_thumbnail(params["thumbnail"]),
          {:ok, base} <- base(artifact, params["base"]),
          {:ok, sent} <- incoming_over(base, params, user),
          files = carry(base, sent),
@@ -186,6 +199,7 @@ defmodule Troupe.Plane.Artifacts do
         kind: artifact.kind,
         visibility: visibility,
         files: files,
+        thumbnail: thumbnail || same_page_thumbnail(base, sent),
         team_id: team_id,
         note: note,
         role: role,
@@ -222,6 +236,7 @@ defmodule Troupe.Plane.Artifacts do
         kind: artifact.kind,
         visibility: artifact.visibility,
         files: Enum.map(old.files, &carried(&1, old.n)),
+        thumbnail: carried_thumbnail(old.thumbnail, old.n),
         team_id: team_id,
         note: "rolled back to v#{old.n}",
         rolled_back_to: old.n,
@@ -249,7 +264,9 @@ defmodule Troupe.Plane.Artifacts do
       serves = version_of(artifact, n || artifact.version)
 
       artifact =
-        artifact |> Ecto.Changeset.change(pinned: n, bytes: serves.bytes) |> Repo.update!()
+        artifact
+        |> Ecto.Changeset.change(pinned: n, bytes: serves.bytes, thumbnail: serves.thumbnail)
+        |> Repo.update!()
 
       {:ok, _event} =
         Audit.record(user.subject, "artifact.pin", artifact.id, %{"pinned" => n, "newest" => artifact.version})
@@ -866,6 +883,82 @@ defmodule Troupe.Plane.Artifacts do
     }
   end
 
+  # The picture a version is sent with, for its card: `{content_type, bytes}` in base64, a
+  # PNG, JPEG or WebP of at most 256 KiB whose bytes begin as that kind's do. None is none.
+  defp sent_thumbnail(nil), do: {:ok, nil}
+
+  defp sent_thumbnail(%{"content_type" => type, "bytes" => encoded}) when is_binary(type) and is_binary(encoded) do
+    type = type |> String.trim() |> String.downcase()
+
+    with :ok <- thumbnail_type(type),
+         {:ok, body} <- thumbnail_body(encoded),
+         :ok <- thumbnail_size(body),
+         :ok <- thumbnail_kind(type, body) do
+      {:ok, %{body: body, content_type: type, sha256: sha256(body), bytes: byte_size(body)}}
+    end
+  end
+
+  defp sent_thumbnail(_other),
+    do:
+      {:error,
+       invalid(
+         "thumbnail is {content_type, bytes}: a PNG, JPEG or WebP picture of the page, " <>
+           "at most #{@max_thumbnail_bytes} bytes, in base64"
+       )}
+
+  defp thumbnail_type(type) when type in @thumbnail_types, do: :ok
+
+  defp thumbnail_type(type),
+    do: {:error, invalid("a thumbnail is image/png, image/jpeg or image/webp, not #{inspect(type)}")}
+
+  defp thumbnail_body(encoded) do
+    case Base.decode64(encoded, ignore: :whitespace) do
+      {:ok, ""} -> {:error, invalid("the thumbnail is empty")}
+      {:ok, body} -> {:ok, body}
+      :error -> {:error, invalid("the thumbnail's bytes are not base64")}
+    end
+  end
+
+  defp thumbnail_size(body) when byte_size(body) > @max_thumbnail_bytes,
+    do:
+      {:error,
+       invalid(
+         "the thumbnail is #{byte_size(body)} bytes, past the #{@max_thumbnail_bytes} a thumbnail may be; " <>
+           "send a smaller picture"
+       )}
+
+  defp thumbnail_size(_body), do: :ok
+
+  # Only the first bytes, which say what a file is: enough to refuse a page or a script
+  # sent as a picture, without reading the picture itself.
+  defp thumbnail_kind("image/png", <<0x89, "PNG", 0x0D, 0x0A, 0x1A, 0x0A, _::binary>>), do: :ok
+  defp thumbnail_kind("image/jpeg", <<0xFF, 0xD8, 0xFF, _::binary>>), do: :ok
+  defp thumbnail_kind("image/webp", <<"RIFF", _size::binary-size(4), "WEBP", _::binary>>), do: :ok
+
+  defp thumbnail_kind(type, _body),
+    do: {:error, invalid("the thumbnail's bytes are not a #{picture_kind(type)} picture, as its content_type says")}
+
+  defp picture_kind("image/png"), do: "PNG"
+  defp picture_kind("image/jpeg"), do: "JPEG"
+  defp picture_kind("image/webp"), do: "WebP"
+
+  # A version that sends no file of its own is the page its base was, so it keeps the base's
+  # picture; one that sends any file is another page, and has only the picture sent with it.
+  defp same_page_thumbnail(%Version{thumbnail: thumbnail, n: n}, []), do: carried_thumbnail(thumbnail, n)
+  defp same_page_thumbnail(_base, _sent), do: nil
+
+  # Version `n`'s picture in a later version: its object stays where it is.
+  defp carried_thumbnail(%{} = thumbnail, n) do
+    %{
+      content_type: thumbnail["content_type"],
+      sha256: thumbnail["sha256"],
+      bytes: thumbnail["bytes"],
+      stored_in: thumbnail["stored_in"] || n
+    }
+  end
+
+  defp carried_thumbnail(_none, _n), do: nil
+
   # The files a call carries: inline, or in the object store under an upload handle.
   defp incoming(%{"upload" => handle}, user) when is_binary(handle),
     do: Uploads.take(handle, user, store(), &checked_file/3)
@@ -916,6 +1009,9 @@ defmodule Troupe.Plane.Artifacts do
   defp write(user, existing, attrs) do
     bytes = attrs.files |> Enum.map(& &1.bytes) |> Enum.sum()
     new_bytes = attrs.files |> Enum.filter(&Map.has_key?(&1, :body)) |> Enum.map(& &1.bytes) |> Enum.sum()
+    # A picture sent with the version is stored as a file is, and counts as one.
+    thumbnail = attrs[:thumbnail]
+    new_bytes = new_bytes + ((thumbnail && Map.has_key?(thumbnail, :body) && thumbnail.bytes) || 0)
     moved = moved_bytes(existing, attrs.team_id)
     hash = version_hash(attrs.files)
     now = DateTime.utc_now()
@@ -927,7 +1023,8 @@ defmodule Troupe.Plane.Artifacts do
       with :ok <- republishable(existing, attrs),
            :ok <- within_version(bytes),
            :ok <- within_quota(attrs.team_id, new_bytes + moved, existing),
-           :ok <- put_objects(artifact.id, n, attrs.files) do
+           :ok <- put_objects(artifact.id, n, attrs.files),
+           :ok <- put_thumbnail(artifact.id, n, thumbnail, attrs.files) do
         try do
           Repo.insert!(%Version{
             artifact_id: artifact.id,
@@ -938,7 +1035,8 @@ defmodule Troupe.Plane.Artifacts do
             published_by: user.subject,
             published_at: now,
             note: attrs[:note],
-            rolled_back_to: attrs[:rolled_back_to]
+            rolled_back_to: attrs[:rolled_back_to],
+            thumbnail: thumbnail_json(thumbnail)
           })
 
           artifact =
@@ -949,6 +1047,7 @@ defmodule Troupe.Plane.Artifacts do
               team_id: attrs.team_id,
               version: n,
               bytes: if(artifact.pinned, do: artifact.bytes, else: bytes),
+              thumbnail: if(artifact.pinned, do: artifact.thumbnail, else: thumbnail_json(thumbnail)),
               total_bytes: artifact.total_bytes + new_bytes,
               updated_at: now
             })
@@ -961,6 +1060,7 @@ defmodule Troupe.Plane.Artifacts do
         rescue
           exception ->
             take_back(artifact.id, n, attrs.files)
+            take_back_thumbnail(artifact.id, n, thumbnail)
             reraise exception, __STACKTRACE__
         end
       else
@@ -1070,6 +1170,41 @@ defmodule Troupe.Plane.Artifacts do
 
     :ok
   end
+
+  # The picture sent with a version, into the object store beside its files; refused, it
+  # takes the files back too, so the version leaves nothing. A carried one is stored already.
+  defp put_thumbnail(id, n, %{body: body, content_type: type}, files) do
+    case ObjectStore.put(store(), thumbnail_key(id, n), body, content_type: type) do
+      {:ok, _put} ->
+        :ok
+
+      {:error, reason} ->
+        take_back(id, n, files)
+
+        {:error,
+         Error.new(:unavailable, %{reason: "the object store refused the thumbnail: #{inspect(reason)}"})}
+    end
+  end
+
+  defp put_thumbnail(_id, _n, _carried_or_none, _files), do: :ok
+
+  defp take_back_thumbnail(id, n, %{body: _}), do: ObjectStore.delete(store(), thumbnail_key(id, n))
+  defp take_back_thumbnail(_id, _n, _carried_or_none), do: :ok
+
+  defp thumbnail_json(nil), do: nil
+
+  defp thumbnail_json(thumbnail) do
+    %{
+      "content_type" => thumbnail.content_type,
+      "sha256" => thumbnail.sha256,
+      "bytes" => thumbnail.bytes
+    }
+    |> then(&if(thumbnail[:stored_in], do: Map.put(&1, "stored_in", thumbnail.stored_in), else: &1))
+  end
+
+  # Beside the version's files, never among them: a path is `artifacts/<id>/<n>/…`, and no
+  # version is called `thumbnails`.
+  defp thumbnail_key(id, n), do: "artifacts/#{id}/thumbnails/#{n}"
 
   defp audit_detail(artifact, existing, n, hash, bytes, attrs) do
     detail =
@@ -2120,6 +2255,46 @@ defmodule Troupe.Plane.Artifacts do
 
   def viewer(_cookie), do: :error
 
+  @thumbnail_salt "troupe artifact thumbnail"
+
+  # A card's picture address: signed for `user` and the version in force, under a salt of
+  # its own, and dated to the start of the hour so a gallery listed twice in one hour asks
+  # for the same address. An `<img>` sends no cookie of the artifacts host's, which a
+  # gallery has not been given, so the address is the key; who it names is read again when
+  # it is fetched.
+  defp thumbnail_url(%Artifact{thumbnail: %{}} = artifact, %User{subject: subject}) when is_binary(subject) do
+    with host when is_binary(host) <- host_url() do
+      hour = div(System.os_time(:second), 3600) * 3600
+      claims = %{"s" => subject, "a" => artifact.id, "v" => current(artifact)}
+      "#{host}/t/#{Plug.Crypto.sign(secret(), @thumbnail_salt, claims, signed_at: hour)}"
+    end
+  end
+
+  defp thumbnail_url(_artifact, _user), do: nil
+
+  @doc """
+  The picture a card's address (`thumbnail_url` on a row) names, for the artifacts host: its
+  content type and bytes, while the person it was made for is active and may still see the
+  artifact, read now. `:error` for an address that is forged or past two hours, a person who
+  may no longer see it, and a version without one.
+  """
+  @spec thumbnail(String.t()) :: {:ok, %{content_type: String.t(), body: binary()}} | :error
+  def thumbnail(token) when is_binary(token) do
+    with {:ok, %{"s" => subject, "a" => id, "v" => n}} when is_integer(n) <-
+           Plug.Crypto.verify(secret(), @thumbnail_salt, token, max_age: @thumbnail_seconds),
+         %User{} = user <- Identity.get_user(subject),
+         true <- user.active != false,
+         {:ok, artifact} <- visible(id, user, platform_admin?(user)),
+         %Version{thumbnail: %{} = picture} <- version_of(artifact, n),
+         {:ok, body} <- ObjectStore.get(store(), thumbnail_key(id, picture["stored_in"] || n)) do
+      {:ok, %{content_type: picture["content_type"], body: body}}
+    else
+      _no -> :error
+    end
+  end
+
+  def thumbnail(_token), do: :error
+
   defp nonce, do: 16 |> :crypto.strong_rand_bytes() |> Base.url_encode64(padding: false)
 
   # The plane's own secret, with salts of these two alone, so neither a ticket nor the
@@ -2159,6 +2334,9 @@ defmodule Troupe.Plane.Artifacts do
       "pinned" => artifact.pinned,
       "bytes" => artifact.bytes,
       "url" => url(artifact.id),
+      # The picture its publisher sent of the version in force, on the artifacts host, for
+      # the caller alone; null where none was sent.
+      "thumbnail_url" => thumbnail_url(artifact, user),
       "created_at" => artifact.inserted_at,
       "published_at" => artifact.updated_at,
       "may_delete" => mine or admin? or meta.administers,

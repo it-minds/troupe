@@ -189,6 +189,44 @@ defmodule Troupe.Gateway.ArtifactsTest do
              )
   end
 
+  test "a picture for the card goes with the version, inline beside the files or the upload handle",
+       ctx do
+    assert {:ok, %{"linked" => true}} = link(ctx)
+    picture = %{"content_type" => "image/png", "bytes" => Base.encode64(<<0x89, "PNG", 0x0D, 0x0A, 0x1A, 0x0A>>)}
+
+    on_exit(fn ->
+      Troupe.ObjectStore.delete_prefix(Troupe.ObjectStore.from_env(), "artifact-uploads/")
+    end)
+
+    assert {:ok, _artifact} = publish(ctx, %{"thumbnail" => picture})
+
+    {"artifact.publish", sent} =
+      Enum.find(FakePlane.calls(ctx.plane.state), &match?({"artifact.publish", _}, &1))
+
+    assert sent["thumbnail"] == picture
+    assert [%{"path" => "index.html"}] = sent["files"]
+
+    big = :binary.copy("x", 3 * 1024 * 1024)
+
+    assert {:ok, _artifact} =
+             publish(ctx, %{
+               "thumbnail" => picture,
+               "files" => [
+                 %{"path" => "index.html", "bytes" => Base.encode64("<h1>Big</h1>")},
+                 %{"path" => "data.bin", "bytes" => Base.encode64(big)}
+               ]
+             })
+
+    calls = FakePlane.calls(ctx.plane.state)
+    {"artifact.upload.begin", begun} = Enum.find(calls, &match?({"artifact.upload.begin", _}, &1))
+    # The handle is for the page's files alone; the picture is not one of them.
+    assert Enum.map(begun["files"], & &1["path"]) |> Enum.sort() == ["data.bin", "index.html"]
+
+    {"artifact.publish", sent} = calls |> Enum.filter(&match?({"artifact.publish", _}, &1)) |> List.last()
+    assert "up-fake" <> _ = sent["upload"]
+    assert sent["thumbnail"] == picture
+  end
+
   test "the person's own artifacts are listed through the daemon, with the gallery", ctx do
     assert {:error, %{message: "unavailable"}} =
              Client.call(ctx.client, "artifact.list", %{"mine" => true})
