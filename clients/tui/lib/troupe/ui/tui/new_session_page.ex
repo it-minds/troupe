@@ -12,6 +12,12 @@ defmodule Troupe.UI.TUI.NewSessionPage do
   is a token, not a path to complete, and `/local` is a token, since the box is not the
   command line. CALLED is the first line until it is edited (Tab again).
 
+  Where more than one of the person's teams may use the profile, the sentence ends
+  "everyone on [team] can open it" and the team is a fourth chip: the one this machine
+  remembers for the profile (`Troupe.Client.TeamChoice`), else "which team?", and Enter
+  then opens its picker first, whose pick starts. The plane's own "choose a team" refusal
+  opens the same question on the names it gave (`choose_team/2`).
+
   Enter starts, as Enter sends on the command line; Ctrl-J is a new line, as it is there,
   and so is Shift, Alt or Ctrl on Enter where the terminal tells them from Enter. Without
   a keyboard protocol most do not (Windows Terminal sends Shift+Enter as Enter and keeps
@@ -75,6 +81,13 @@ defmodule Troupe.UI.TUI.NewSessionPage do
       private: Keyword.get(opts, :private, false),
       # The team HQ had selected, which the plane charges and opens the session to.
       team: Keyword.get(opts, :team),
+      # Where more than one of the person's teams may use a profile: the team picked for
+      # each profile here, the one this machine remembers for it, the teams a refusal named
+      # for one since the listing was read, and whether a pick starts (Enter asked first).
+      team_picks: %{},
+      remembered: Keyword.get_lazy(opts, :remembered, fn -> remembered(origin) end),
+      teams_asked: %{},
+      start_on_team: false,
       folder: workspace,
       folders: recent_folders(workspace),
       profiles: profiles,
@@ -110,6 +123,8 @@ defmodule Troupe.UI.TUI.NewSessionPage do
 
   defp rows_or_error({:ok, rows}), do: {rows, nil}
   defp rows_or_error({:error, reason}), do: {[], reason}
+
+  defp remembered(origin), do: Client.remembered_teams(origin)
 
   defp local_agents(workspace) do
     case Client.profiles({:local, workspace}) do
@@ -217,6 +232,23 @@ defmodule Troupe.UI.TUI.NewSessionPage do
         true -> default_agent || "its default"
       end
 
+    # Whose session it is, where more than one of the person's teams may use the profile:
+    # the listing's teams, or the ones the plane's refusal named since, which are newer. A
+    # chip on the sentence only then; with one team the plane takes it and nothing shows.
+    candidates =
+      if where == :platform and profile != nil,
+        do: page.teams_asked[name] || List.wrap(profile["teams"]),
+        else: []
+
+    team_choice = length(candidates) > 1
+
+    team =
+      NewSession.chosen_team(
+        candidates,
+        page.team_picks[name] || page.team,
+        page.remembered[name]
+      )
+
     cleaned = NewSession.clean(text, names)
     local_down = where == :local and not page.daemon_up
     no_plane = page.origin == nil and page.where == :platform
@@ -247,6 +279,9 @@ defmodule Troupe.UI.TUI.NewSessionPage do
 
         full ->
           {:warn, NewSession.full_house(name, room.capacity)}
+
+        team_choice and team == nil ->
+          {:plain, NewSession.team_question(name, candidates)}
 
         sentence = NewSession.tokens_sentence(tokens) ->
           {:plain, sentence}
@@ -282,7 +317,11 @@ defmodule Troupe.UI.TUI.NewSessionPage do
       title: title_of(page, cleaned),
       local_down: local_down,
       why: why,
-      who: NewSession.who(where, profile && profile["teams"], page.private),
+      who:
+        NewSession.who(where, if(team, do: [team], else: profile && profile["teams"]), page.private),
+      team_candidates: candidates,
+      team_choice: team_choice,
+      team: team,
       blocked: if(where == :local, do: local_down, else: profile == nil or at_ceiling)
     }
   end
@@ -336,7 +375,10 @@ defmodule Troupe.UI.TUI.NewSessionPage do
 
   defp step(%{casting: %{}} = page, _key), do: {:ok, page}
 
-  defp step(%{open: open} = page, %{code: "esc"}) when open != nil, do: {:ok, %{page | open: nil}}
+  # Esc on the team question goes back to the form, and nothing starts.
+  defp step(%{open: open} = page, %{code: "esc"}) when open != nil,
+    do: {:ok, %{page | open: nil, start_on_team: false}}
+
   defp step(_page, %{code: "esc"}), do: :close
 
   defp step(%{open: open} = page, %{code: code}) when open != nil and code in ["up", "k"],
@@ -354,7 +396,7 @@ defmodule Troupe.UI.TUI.NewSessionPage do
     do: {:ok, %{page | chip: max(page.chip - 1, 0)}}
 
   defp step(%{field: :chips} = page, %{code: code}) when code in ["right", "l"],
-    do: {:ok, %{page | chip: min(page.chip + 1, 2)}}
+    do: {:ok, %{page | chip: min(page.chip + 1, length(chips(page)) - 1)}}
 
   defp step(%{field: :chips} = page, %{code: "enter"}), do: open_chip(page)
 
@@ -427,9 +469,13 @@ defmodule Troupe.UI.TUI.NewSessionPage do
   end
 
   defp chips(page) do
-    if resolved(page).where == :local,
-      do: [:where, :folder, :agent],
-      else: [:where, :profile, :agent]
+    r = resolved(page)
+
+    cond do
+      r.where == :local -> [:where, :folder, :agent]
+      r.team_choice -> [:where, :profile, :agent, :team]
+      true -> [:where, :profile, :agent]
+    end
   end
 
   # The agent chip with nothing to pick says why instead of opening an empty picker.
@@ -512,6 +558,11 @@ defmodule Troupe.UI.TUI.NewSessionPage do
         do: {name, name, if(name == default, do: "its default", else: ""), true}
   end
 
+  def options(%{open: :team} = page) do
+    for name <- resolved(page).team_candidates,
+        do: {name, name, "#{name}'s budget pays; everyone on #{name} can open it", true}
+  end
+
   def options(_page), do: []
 
   # A chip's option picked: it holds, and the token of its kind leaves the message.
@@ -519,6 +570,9 @@ defmodule Troupe.UI.TUI.NewSessionPage do
     case Enum.at(options(page), page.cursor) do
       {_value, _label, _detail, false} ->
         {:ok, page}
+
+      {value, _label, _detail, true} when page.open == :team ->
+        pick_team(page, value)
 
       {value, _label, _detail, true} ->
         {kind, page} =
@@ -534,6 +588,55 @@ defmodule Troupe.UI.TUI.NewSessionPage do
       nil ->
         {:ok, %{page | open: nil}}
     end
+  end
+
+  # A team picked for the profile: it holds, this machine remembers it for the profile, and
+  # an Enter that asked for it goes on to start.
+  defp pick_team(page, team) do
+    name = resolved(page).profile_name
+
+    :ok = Client.remember_team(page.origin, name, team)
+
+    page = %{
+      page
+      | team_picks: Map.put(page.team_picks, name, team),
+        remembered: Map.put(page.remembered, name, team),
+        open: nil
+    }
+
+    if page.start_on_team,
+      do: start(%{page | start_on_team: false}),
+      else: {:ok, page}
+  end
+
+  @doc """
+  The plane asked which team: more than one of the person's teams may use the profile, which
+  the listing had not said. Back to the form with the question open on the names it gave;
+  the pick sends the create again, and Esc leaves the form as it was, nothing started. A
+  team this machine remembers for the profile, and one of those named, is the answer: the
+  create goes again at once (`{:start, …}`, as a key's), without the question.
+  """
+  @spec choose_team(t(), [String.t()]) :: {:ok, t()} | {:start, t(), Client.origin(), map()}
+  def choose_team(page, teams) do
+    c = page.casting || page.pending
+    profile = (c && c.profile) || resolved(page).profile_name
+
+    page = %{
+      page
+      | casting: nil,
+        pending: nil,
+        teams_asked: Map.put(page.teams_asked, profile, teams)
+    }
+
+    if page.remembered[profile] in teams,
+      do: start(page),
+      else: {:ok, ask_team(page)}
+  end
+
+  # The question: the team chip's picker, open, its pick starting.
+  defp ask_team(page) do
+    at = Enum.find_index(chips(page), &(&1 == :team)) || 0
+    %{page | open: :team, cursor: 0, field: :chips, chip: at, start_on_team: true}
   end
 
   @doc "The agent chosen in the agent picker, as a chip pick."
@@ -577,6 +680,11 @@ defmodule Troupe.UI.TUI.NewSessionPage do
       r.blocked ->
         {:ok, page}
 
+      # Whose budget pays is the person's to say: with no team chosen the question opens,
+      # and the pick starts it.
+      r.team_choice and r.team == nil ->
+        {:ok, ask_team(page)}
+
       true ->
         cast(page, r)
     end
@@ -618,7 +726,7 @@ defmodule Troupe.UI.TUI.NewSessionPage do
            agent: r.sent_agent,
            prompt: r.cleaned,
            title: title,
-           team: page.team
+           team: r.team || page.team
          }}
     end
   end
@@ -694,6 +802,9 @@ defmodule Troupe.UI.TUI.NewSessionPage do
 
   def footer(%{casting: %{}} = page),
     do: " #{Lines.first(:casting, page.seed)} — Esc goes back to the form; the start goes on "
+
+  def footer(%{open: :team, start_on_team: true}),
+    do: " ↑↓ move · Enter picks the team and starts · Esc goes back without starting "
 
   def footer(%{open: open}) when open != nil, do: " ↑↓ move · Enter picks · Esc closes "
 
@@ -913,10 +1024,21 @@ defmodule Troupe.UI.TUI.NewSessionPage do
       Span.new(middle_word),
       middle,
       Span.new(" as "),
-      chip.(2, r.agent_label, nil),
-      Span.new(" · " <> r.who)
+      chip.(2, r.agent_label, nil)
+      | who_spans(r, chip)
     ])
   end
+
+  # Whose it is: a chip where more than one of the person's teams may use the profile, the
+  # sentence's end as it was where one may.
+  defp who_spans(%{where: :platform, team_choice: true} = r, chip),
+    do: [
+      Span.new(" · everyone on "),
+      chip.(3, r.team || "which team?", if(r.team, do: nil, else: :stale)),
+      Span.new(" can open it")
+    ]
+
+  defp who_spans(r, _chip), do: [Span.new(" · " <> r.who)]
 
   defp why_line(%{why: nil}), do: []
 
@@ -933,7 +1055,8 @@ defmodule Troupe.UI.TUI.NewSessionPage do
       where: "WHERE IT RUNS  /local · /platform",
       folder: "WHICH FOLDER  recent",
       profile: "WHAT IT CAN REACH  @profile",
-      agent: "HOW IT STARTS  #agent"
+      agent: "HOW IT STARTS  #agent",
+      team: "WHICH TEAM IT IS FOR  its budget pays"
     }
 
     rows =

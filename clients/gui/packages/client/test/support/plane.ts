@@ -79,6 +79,12 @@ export interface PlaneOptions {
    */
   memberOf?: Record<string, string[]>;
   /**
+   * `profiles.list` names only the first of the person's teams on each profile, as a
+   * listing read before a second team was granted it would: the create then meets the
+   * plane's "choose a team" without the screen having asked first.
+   */
+  listsOneTeam?: boolean;
+  /**
    * What `me.client_defaults` answers. Defaults to an organisation that routes through
    * its own gateway; `{ configured: false }` is one whose administrator has set nothing.
    */
@@ -653,6 +659,9 @@ export class FakePlane {
 
   /** What a waiting session holds to start with, by id. */
   private readonly heldPrompts = new Map<string, string>();
+
+  /** The teams creates named, in order: whose each session was started for. */
+  readonly createdFor: string[] = [];
 
   private agentsOf(profile: string, subject: string): string[] {
     const set = this.opts.agents?.[profile];
@@ -1263,7 +1272,7 @@ export class FakePlane {
               active_sessions: this.roomOf(p).active,
               healthy_pods: 1,
               max_sessions: this.roomOf(p).max_sessions ?? null,
-              teams: this.teamsOf(subject),
+              teams: this.opts.listsOneTeam ? this.teamsOf(subject).slice(0, 1) : this.teamsOf(subject),
               channel: "stable",
               bundle_version: "3",
               bundle_hash: "sha256:abc",
@@ -1312,6 +1321,13 @@ export class FakePlane {
       case "session.create": {
         const profile = String(params["profile"] ?? "");
         if (!profiles.includes(profile)) return { error: { code: -32002, message: "invalid_params", data: { profiles } } };
+        // Whose it is: the only team of theirs, or the one named. With several and none
+        // named the plane asks rather than guess, since the answer is whose budget pays.
+        const mayUse = this.teamsOf(subject);
+        const team = params["team"] === undefined || params["team"] === null ? undefined : String(params["team"]);
+        if (team !== undefined && !mayUse.includes(team)) return { error: { code: -32004, message: "forbidden", data: { reason: `no team of yours may use ${profile}` } } };
+        if (team === undefined && mayUse.length > 1) return { error: { code: -32602, message: "invalid_params", data: { reason: "choose a team", teams: mayUse } } };
+        if (team !== undefined) this.createdFor.push(team);
         // The agent named, or the profile's default (`build` where offered, else the first),
         // kept on the row; one the profile lacks, or a profile offering none, is refused.
         const offered = this.agentsOf(profile, subject);

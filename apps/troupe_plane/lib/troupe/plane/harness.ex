@@ -2368,7 +2368,13 @@ defmodule Troupe.Plane.Harness do
 
       several ->
         # Several teams could pay for this. Asking is better than guessing, because the
-        # answer decides whose budget and whose volume the session gets.
+        # answer decides whose budget and whose volume the session gets. Said in the log,
+        # so an operator asked why a person could not start a session finds the line.
+        Logger.info(
+          "troupe plane: session.create by #{user.subject} on #{profile} asked which team: " <>
+            "#{length(several)} of theirs may use it and none was named"
+        )
+
         {:error,
          Error.new(:invalid_params, %{
            reason: "choose a team",

@@ -28,6 +28,7 @@ import {
   andList,
   autoPickProfile,
   ceilingSentence,
+  chosenTeam,
   cleanMessage,
   defaultProfileAgent,
   firstLine,
@@ -36,6 +37,8 @@ import {
   messageTokens,
   profileRoom,
   stripTokens,
+  teamQuestion,
+  teamsToChoose,
   titleFromMessage,
   tokensSentence,
   whoCanOpen,
@@ -48,10 +51,17 @@ import { relative } from "./bits";
 import { Mask } from "./brand";
 
 type DaemonStatus = "unsupported" | "searching" | "absent" | "connected" | "error";
-type Picker = "where" | "folder" | "profile" | "agent";
+type Picker = "where" | "folder" | "profile" | "agent" | "team";
 
 /** The pref the last profile chosen is kept under, which the auto-pick starts from before any session exists. */
 const LAST_PROFILE = "newSession.profile";
+
+/**
+ * The pref the team a profile's sessions were last for is kept under, on this plane: where
+ * more than one of the person's teams may use the profile it is asked once, then shown on
+ * the sentence and changeable there.
+ */
+export const teamPref = (plane: string, profile: string): string => `newSession.team.${plane}|${profile}`;
 
 /** How long the casting screen waits for the first turn to start before it opens the session anyway. */
 export const castingTiming = { firstTurnMs: 1500, retryFloorMs: 250 };
@@ -106,6 +116,11 @@ export function StartSession({
   const [open, setOpen] = useState<Picker | null>(null);
   const [ceilingSaid, setCeilingSaid] = useState<Record<string, string>>({});
   const [casting, setCasting] = useState<Casting | null>(null);
+  // The team picked for each profile on this screen, the teams a refusal named for one,
+  // and whether a pick should start: Start with no team chosen asks first.
+  const [teamPicks, setTeamPicks] = useState<Record<string, string>>({});
+  const [teamsAsked, setTeamsAsked] = useState<Record<string, string[]>>({});
+  const [startOnTeam, setStartOnTeam] = useState(false);
   const recentFolders = useRecentFolders(daemon);
 
   const me = auth?.me?.subject ?? null;
@@ -151,12 +166,19 @@ export function StartSession({
   // A plane answers its teams as rows with a name, though the credential types them as
   // names: either way they are said by name, never as "[object Object]".
   const myTeams = (auth?.me?.teams ?? []).map((t: unknown) => (typeof t === "string" ? t : String((t as { name?: unknown } | null)?.name ?? ""))).filter(Boolean);
-  const who = whoCanOpen(where, { teams: prof?.teams ?? myTeams, private: privately });
+  // Whose session it is, where more than one of the person's teams may use the profile:
+  // the listing's teams, or the ones the plane's refusal named since, which are newer. It
+  // is a chip on the sentence only then; with one team the plane takes it and nothing shows.
+  const teamCandidates = !local && prof ? (teamsAsked[prof.name] ?? prof.teams ?? []) : [];
+  const teamChoice = teamCandidates.length > 1;
+  const team = prof && auth ? chosenTeam(teamCandidates, teamPicks[prof.name], prefs.get(teamPref(auth.planeUrl, prof.name)) || null) : null;
+  const who = whoCanOpen(where, { teams: team ? [team] : (prof?.teams ?? myTeams), private: privately });
 
   let why = "";
   let warn = false;
   if (!local && !profileChip && !tokens.profile) why = auto.why;
   why = tokensSentence(tokens) ?? why;
+  if (teamChoice && !team && prof) why = teamQuestion(prof.name, teamCandidates);
   if (full && prof) {
     why = fullHouseSentence(prof.name, prof.capacity);
     warn = true;
@@ -183,13 +205,19 @@ export function StartSession({
   // Escape closes an open picker.
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
-      if (e.key === "Escape") setOpen(null);
+      if (e.key === "Escape") {
+        setOpen(null);
+        setStartOnTeam(false);
+      }
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
   }, []);
 
-  const toggle = (k: Picker): void => setOpen(shownPicker === k ? null : k);
+  const toggle = (k: Picker): void => {
+    setOpen(shownPicker === k ? null : k);
+    setStartOnTeam(false);
+  };
 
   // Which start is the one on show: a step of an earlier one, or of one the person went
   // back from, changes nothing.
@@ -214,8 +242,27 @@ export function StartSession({
     setOpen(null);
   };
 
-  const start = (as: string | null = namedAgent): void => {
+  /** A team picked for the profile: it holds, it is remembered, and a Start that asked for it goes on. */
+  const chooseTeam = (name: string): void => {
+    if (!prof || !auth) return;
+    setTeamPicks((p) => ({ ...p, [prof.name]: name }));
+    prefs.set(teamPref(auth.planeUrl, prof.name), name);
+    setOpen(null);
+    if (startOnTeam) {
+      setStartOnTeam(false);
+      start(namedAgent, name);
+    }
+  };
+
+  const start = (as: string | null = namedAgent, forTeam: string | null = team): void => {
     if (blocked) return;
+    // Whose budget pays is the person's to say: with no team chosen the question opens, and
+    // the pick starts it.
+    if (teamChoice && !forTeam) {
+      setOpen("team");
+      setStartOnTeam(true);
+      return;
+    }
     const startedTitle = shownTitle.trim();
     const base: Casting = {
       title: startedTitle || "Untitled session",
@@ -242,7 +289,24 @@ export function StartSession({
     };
     if (!local && prof) {
       prefs.set(LAST_PROFILE, prof.name);
-      void castOnPlatform(auth!, prof, { agent: as ?? platformDefault, title: startedTitle, prompt: cleaned }, set, alive, (reason) => setCeilingSaid((c) => ({ ...c, [prof.name]: reason })));
+      // A refusal that asks which team is answered on the form, from the names it carries:
+      // back to it with the question open, and the pick sends the create again.
+      const askTeam = (teams: string[]): void => {
+        if (!alive()) return;
+        setTeamsAsked((a) => ({ ...a, [prof.name]: teams }));
+        // Asked once: a team this app remembers for the profile, and one of those named,
+        // is the answer, and the create goes again without a question.
+        const remembered = prefs.get(teamPref(auth!.planeUrl, prof.name));
+        if (remembered && teams.includes(remembered)) {
+          start(as, remembered);
+          return;
+        }
+        run.current += 1;
+        setCasting(null);
+        setOpen("team");
+        setStartOnTeam(true);
+      };
+      void castOnPlatform(auth!, prof, { agent: as ?? platformDefault, title: startedTitle, prompt: cleaned, team: forTeam }, set, alive, (reason) => setCeilingSaid((c) => ({ ...c, [prof.name]: reason })), askTeam);
     } else if (daemon) {
       void castHere(daemon, { workspace: folder.trim(), agent: as, worktree, watch, privately, title: startedTitle, prompt: cleaned }, set);
     }
@@ -341,7 +405,17 @@ export function StartSession({
             <Chip label="Which agent" expanded={shownPicker === "agent"} onClick={() => toggle("agent")}>
               {agent}
             </Chip>{" "}
-            <span>· {who}</span>
+            {teamChoice ? (
+              <span>
+                · everyone on{" "}
+                <Chip label="Which team it is for" expanded={shownPicker === "team"} onClick={() => toggle("team")} tone={team ? undefined : "queued"}>
+                  {team ?? "which team?"}
+                </Chip>{" "}
+                can open it
+              </span>
+            ) : (
+              <span>· {who}</span>
+            )}
           </div>
 
           {why && (
@@ -419,6 +493,15 @@ export function StartSession({
                   What {prof.name} can reach
                 </button>
               )}
+            </PickerPanel>
+          )}
+
+          {shownPicker === "team" && teamChoice && prof && (
+            <PickerPanel title="WHICH TEAM IT IS FOR" hint="ITS BUDGET PAYS">
+              {teamCandidates.map((name) => (
+                <Option key={name} label={name} pressed={name === team} detail={`${name}’s budget pays for it, and everyone on ${name} can open it.`} onClick={() => chooseTeam(name)} />
+              ))}
+              {startOnTeam && <p className="note">Pick one and it starts. Esc goes back without starting.</p>}
             </PickerPanel>
           )}
 
@@ -758,10 +841,11 @@ interface PlaneCreate {
 async function castOnPlatform(
   auth: AuthSession,
   prof: ProfileOffering,
-  ask: { agent: string | null; title: string; prompt: string },
+  ask: { agent: string | null; title: string; prompt: string; team: string | null },
   set: SetCasting,
   alive: () => boolean,
   onCeiling: (reason: string) => void,
+  onChooseTeam: (teams: string[]) => void,
 ): Promise<void> {
   let answer: PlaneCreate;
   try {
@@ -769,11 +853,18 @@ async function castOnPlatform(
       profile: prof.name,
       // The sentence says everyone on the profile's team can open it, so it is a team's.
       visibility: "team",
+      // Named only where the person chose: with one team of theirs the plane takes it.
+      ...(ask.team ? { team: ask.team } : {}),
       ...(ask.agent ? { agent: ask.agent } : {}),
       ...(ask.title ? { title: ask.title } : {}),
       ...(ask.prompt ? { prompt: ask.prompt } : {}),
     });
   } catch (e) {
+    const teams = teamsToChoose(e);
+    if (teams) {
+      onChooseTeam(teams);
+      return;
+    }
     const reason = refusal(e);
     // `capacity` (-32008): the administrator's ceiling, in the plane's own sentence.
     if (e instanceof TroupeRpcError && e.code === -32008 && typeof e.data?.["reason"] === "string") onCeiling(e.data["reason"]);

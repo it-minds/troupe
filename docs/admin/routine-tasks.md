@@ -135,8 +135,9 @@ it this way, from wherever it keeps its own values.
 - **Remove**: `admin.team.disable.preview` says what goes with it — grants, admins,
   principals, triggers and group links — and what stays: people, groups, and the sessions,
   which lose their team and become read-only. Then `admin.team.disable`.
-- **Grant a profile**: `admin.team.grant`, effective for sessions started afterwards.
-  `admin.team.revoke` makes the team's sessions on it read-only: the running ones are put
+- **Grant a profile**: `admin.team.grant`, effective for sessions started afterwards. A
+  person in two teams that hold it is asked which team a new session is for, once per
+  profile on each app, since it decides whose budget pays. `admin.team.revoke` makes the team's sessions on it read-only: the running ones are put
   to sleep on their pods, and the ones waiting for a worker are never started.
 - **Team admins**: `admin.team.admin.add` / `remove`, by subject — the string the provider
   issues as the person.

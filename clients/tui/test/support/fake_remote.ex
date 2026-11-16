@@ -138,7 +138,9 @@ defmodule Troupe.FakeRemote do
         },
         "limits" => %{"sessions_per_pod" => 4, "max_sessions" => 3},
         "budgets" => %{"profile" => 50_000_000, "team" => 200_000_000},
-        "teams" => ["core", "design"]
+        # One team of the caller's: a create needs no team named. A test of a profile two of
+        # their teams may use gives it two, and the create is then refused until it names one.
+        "teams" => ["core"]
       },
       %{
         "name" => "docs",
@@ -929,37 +931,23 @@ defmodule Troupe.FakeRemote do
     id = "s-" <> Base.encode16(:crypto.strong_rand_bytes(3), case: :lower)
     profile = Enum.find(state.profiles, &(&1["name"] == (params["profile"] || "code")))
     {free, max, running} = room_of(profile, state)
+    teams = List.wrap(profile["teams"])
 
-    if max && running >= max do
-      reason = "#{profile["name"]} allows #{max} session(s) at once, and they are running"
+    cond do
+      # Whose it is: with more than one of the person's teams on the profile and none named,
+      # the plane asks rather than guess whose budget pays.
+      params["team"] == nil and length(teams) > 1 ->
+        {{:error, -32_602, "invalid_params", %{"reason" => "choose a team", "teams" => teams}},
+         state}
 
-      {{:error, -32_008, "capacity",
-        %{"profile" => profile["name"], "max_sessions" => max, "reason" => reason}}, state}
-    else
-      waits? = free == 0
+      max && running >= max ->
+        reason = "#{profile["name"]} allows #{max} session(s) at once, and they are running"
 
-      session =
-        session(
-          id: id,
-          title: params["title"] || params["prompt"] || "new session",
-          team: params["team"] || "core",
-          profile: params["profile"] || "code",
-          state: if(waits?, do: "pending", else: "active")
-        )
-        |> normalise()
-        |> Map.put(:agent, params["agent"])
+        {{:error, -32_008, "capacity",
+          %{"profile" => profile["name"], "max_sessions" => max, "reason" => reason}}, state}
 
-      state = put_in(state.sessions[id], session)
-
-      if waits?,
-        do: {{:ok, waiting_for(id, session.profile)}, state},
-        else:
-          {{:ok,
-            %{
-              "session_id" => id,
-              "endpoint" => endpoint(state, session.worker),
-              "token" => token(id)
-            }}, state}
+      true ->
+        create(state, id, params, free)
     end
   end
 
@@ -1972,6 +1960,34 @@ defmodule Troupe.FakeRemote do
       "cost" => session.cost,
       "updated_at" => session.updated_at
     }
+  end
+
+  # A create the plane takes: the session made, placed or waiting for a place.
+  defp create(state, id, params, free) do
+    waits? = free == 0
+
+    session =
+      session(
+        id: id,
+        title: params["title"] || params["prompt"] || "new session",
+        team: params["team"] || "core",
+        profile: params["profile"] || "code",
+        state: if(waits?, do: "pending", else: "active")
+      )
+      |> normalise()
+      |> Map.put(:agent, params["agent"])
+
+    state = put_in(state.sessions[id], session)
+
+    if waits?,
+      do: {{:ok, waiting_for(id, session.profile)}, state},
+      else:
+        {{:ok,
+          %{
+            "session_id" => id,
+            "endpoint" => endpoint(state, session.worker),
+            "token" => token(id)
+          }}, state}
   end
 
   # The live plane's rows: pods and micros rather than a verdict and a price,

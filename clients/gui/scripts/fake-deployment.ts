@@ -29,6 +29,10 @@ const plane = await FakePlane.start({
   corsOrigins: origins,
   podTokenLifetime: 900,
   clientDefaults: process.env["NO_CLIENT_DEFAULTS"] ? { configured: false } : GATEWAY_DEFAULTS,
+  // TEAMS=core,design puts everybody in both, so a new session asks which team it is for;
+  // LISTS_ONE_TEAM=1 has the listing name only the first, so the plane's refusal asks instead.
+  ...(process.env["TEAMS"] ? { teams: process.env["TEAMS"].split(",") } : {}),
+  ...(process.env["LISTS_ONE_TEAM"] ? { listsOneTeam: true } : {}),
   // The person's memory and artifacts are the ones the daemon below keeps, so the app shows
   // the same signed in, when it asks the plane, and offline, when it asks the daemon.
   keeper: (method, params) => keptBy(daemon)(method, params),

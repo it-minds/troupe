@@ -16,7 +16,11 @@ defmodule Troupe.ProfilesScreenTest do
   alias Troupe.FakeRemote
 
   defp on_screen do
-    {remote, url} = start_remote!(transport: :http, profiles: FakeRemote.profile_fixtures())
+    # `code` for two of the person's teams, so its page says the team is the one a session
+    # is started under.
+    [code | rest] = FakeRemote.profile_fixtures()
+    profiles = [Map.put(code, "teams", ["core", "design"]) | rest]
+    {remote, url} = start_remote!(transport: :http, profiles: profiles)
     login!(remote, url)
     {sid, _, _} = start_session!(script: [])
     # Tall enough that the whole of a page is on one screen.
