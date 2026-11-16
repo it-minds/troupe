@@ -16,6 +16,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { JSX } from "react";
 import { emptyTranscript, fold, inviteRefusal, personName, removedSentence, roleWords } from "@troupe/client";
 import type { AuthSession, DaemonClient, FleetRow, Invitee, InviteRole, Person, TranscriptState, TroupeEvent } from "@troupe/client";
+import { copyText } from "../clipboard";
+import { sessionLinkText } from "../links";
 import { inviteLine } from "./Remote";
 import { Dialog } from "./bits";
 
@@ -144,6 +146,7 @@ export function InviteControl({
           Invite
         </button>
       )}
+      {auth && <CopySessionLink auth={auth} row={row} />}
       {owner &&
         invites.map((i) => (
           <button key={i.subject} className="tab" onClick={() => void act(() => reach.uninvite(i.subject))} disabled={busy} aria-label={`Remove ${personName(i)}`}>
@@ -219,6 +222,30 @@ export function InviteControl({
 
       {!open && refused}
     </div>
+  );
+}
+
+/**
+ * The link to send with an invitation: the session's `troupe://` link, and under it the
+ * console's page for it where it has one (`sessionLinkText`). Neither carries a token; each
+ * opens the session for somebody who signs in and was invited.
+ */
+function CopySessionLink({ auth, row }: { auth: AuthSession; row: FleetRow }): JSX.Element {
+  const [said, setSaid] = useState<string | null>(null);
+  const copy = async (): Promise<void> => {
+    try {
+      const discovery = await auth.discover().catch(() => null);
+      const console = typeof discovery?.plane?.["console"] === "string" ? (discovery.plane["console"] as string) : null;
+      await copyText(sessionLinkText(row.id, auth.planeUrl, console, row.kind === "private"));
+      setSaid("Link copied");
+    } catch (e) {
+      setSaid(`Not copied: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  };
+  return (
+    <button className="tab" onClick={() => void copy()} title="The session's link in the app, to send with an invitation">
+      {said ?? "Copy link"}
+    </button>
   );
 }
 

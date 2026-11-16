@@ -304,6 +304,38 @@ label code {
 .banner.refused p {
   margin: 0;
 }
+/* The desktop app, offered on every screen: one line, the page's own colours, a link. */
+.banner.app-banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2) var(--space-4);
+  margin-bottom: var(--space-4);
+  padding: var(--space-2) var(--space-4);
+  border: var(--bw-hairline) solid var(--border-hairline);
+  border-left-width: var(--bw-marker);
+  color: var(--text-body);
+}
+.banner.app-banner p {
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.banner.app-banner .also {
+  font: var(--t-ui-small);
+  color: var(--text-secondary);
+}
+.banner-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+}
+.banner-actions .link-like,
+.open-in-app {
+  font-weight: 700;
+}
 
 .wordmark {
   display: inline-flex;
@@ -993,6 +1025,23 @@ ul.plain li {
 }
 .memory.card {
   margin-bottom: var(--space-5);
+}
+/* What agents proposed for a team's or the organisation's memory, waiting for review. */
+.proposal-list {
+  list-style: none;
+  margin: 0 0 var(--space-5);
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+.proposal.card .entry {
+  margin: var(--space-2) 0;
+  padding: var(--space-2) var(--space-3);
+  border-left: var(--bw-marker) solid var(--border-strong);
+  background: var(--bg-sunken);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 /* Two versions side by side: each column its own lines as written, a line with no partner blank. */
 .memory-version .side-by-side {

@@ -8,7 +8,8 @@
 // pods than it asked for, or a Secret its pods mount missing from its namespace; no
 // namespace the ingress controller may reach the workers from; a team at or near its
 // ceiling; runs started with nobody watching
-// that nobody has looked at since. An empty list says so in a sentence, because an empty
+// that nobody has looked at since; entries agents proposed for a memory the person may
+// change, waiting on Company memory. An empty list says so in a sentence, because an empty
 // region and one that has not loaded look the same. Clients behind the recommended version
 // are one line there, linked to Client versions, where there are any (#657). Read again
 // every few seconds, keeping what is on the screen until the new answer replaces it.
@@ -59,6 +60,8 @@ export function Overview(): JSX.Element {
         admin.sessions({ needs_review: true }).catch(() => null),
         // Which clients are behind; a plane that cannot say takes nothing else away.
         admin.clients().catch(() => null),
+        // What agents proposed for the memory you may change; likewise.
+        admin.memoryProposals().catch(() => null),
       ]),
     [admin],
   );
@@ -71,8 +74,8 @@ export function Overview(): JSX.Element {
   return (
     <div className="page">
       <Loaded load={load} what="the overview" retry={reload}>
-        {([overview, unread, clients]) => {
-          const items = attention(overview, unread?.length ?? 0, role === "platform_admin", clients);
+        {([overview, unread, clients, proposals]) => {
+          const items = attention(overview, unread?.length ?? 0, role === "platform_admin", clients, proposals?.proposals.length ?? 0);
           const pods = overview.profiles.flatMap(livePods);
           const healthy = pods.filter((p) => podState(p) === "healthy").length;
           const spent = overview.teams.reduce((n, t) => n + t.spent_micros, 0);
@@ -257,7 +260,7 @@ export function profileState(profile: AdminProfile): State {
 
 // A pod is looked at where its pods are, which is a platform admin's area; a team admin is
 // sent to the profile instead.
-function attention(overview: FleetOverview, unread: number, platform: boolean, clients: ClientVersions | null): Item[] {
+function attention(overview: FleetOverview, unread: number, platform: boolean, clients: ClientVersions | null, proposed = 0): Item[] {
   const items: Item[] = [];
   for (const profile of overview.profiles) {
     const workers = platform ? href({ page: "pods" }) : href({ page: "profiles", path: [profile.name] });
@@ -312,6 +315,16 @@ function attention(overview: FleetOverview, unread: number, platform: boolean, c
       what: `${count(unread, "session")} an unattended run started ${unread === 1 ? "is" : "are"} waiting for a person to look at ${unread === 1 ? "it" : "them"}.`,
       where: href({ page: "runs" }),
       action: "Runs and review",
+    });
+  }
+  // An entry an agent proposed for a team's or the organisation's memory is in no session's
+  // until somebody who may change that level accepts it.
+  if (proposed > 0) {
+    items.push({
+      state: "waiting",
+      what: `${count(proposed, "memory proposal")} from agents ${proposed === 1 ? "is" : "are"} waiting for you to accept or decline.`,
+      where: href({ page: "memory" }),
+      action: "Company memory",
     });
   }
   const fleet = Object.values(clients?.fleet ?? {});

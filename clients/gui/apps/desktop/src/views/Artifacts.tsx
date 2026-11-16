@@ -16,7 +16,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import type { JSX } from "react";
-import { audienceName, audienceOf, teamOwned, visibilityWords } from "@troupe/client";
+import { appLink, audienceName, audienceOf, teamOwned, visibilityWords } from "@troupe/client";
 import type { Artifact, ArtifactAudience, ArtifactDetail, ArtifactList, ArtifactShareRole, ArtifactThread, DaemonClient, OwnPlane, Person } from "@troupe/client";
 import { copyText } from "../clipboard";
 import { shell } from "../shell";
@@ -147,12 +147,15 @@ async function openExternal(url: string): Promise<void> {
  * this computer.
  */
 export function Artifacts({
+  open,
   via,
   daemon,
   daemonState,
   localOnly,
   onOpenSession,
 }: {
+  /** The artifact a `troupe://artifact/` link named, chosen as the gallery opens. */
+  open?: string | undefined;
   via: OwnPlane | null;
   daemon: DaemonClient | null;
   daemonState: { status: "unsupported" | "searching" | "absent" | "connected" | "error"; error: string | null };
@@ -160,12 +163,12 @@ export function Artifacts({
   /** A session the artifact came from, opened in the app where it is one of the list's. */
   onOpenSession?: ((id: string) => void) | undefined;
 }): JSX.Element {
-  const [list, setList] = useState<ArtifactList | null>(null);
+  const [list, setList] = useState<(ArtifactList & { plane_url?: string }) | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<Filter>("all");
   const [kind, setKind] = useState<"all" | Artifact["kind"]>("all");
-  const [selected, setSelected] = useState<string | null>(null);
+  const [selected, setSelected] = useState<string | null>(open ?? null);
   const [seen, setSeen] = useState(seenVersions);
   const [asked, setAsked] = useState(0);
 
@@ -254,6 +257,9 @@ export function Artifacts({
         <span className="order micro">NEWEST FIRST</span>
       </nav>
       {!list.enabled && <p className="note">An administrator has switched artifacts off on this plane, so there are none to show.</p>}
+      {open && selected === open && !current && list.enabled && (
+        <p className="note">The artifact the link named is not one published for you here. A link someone shared opens it in a browser first, which gives you its role.</p>
+      )}
       <div className="repertoire-body">
         <div className="repertoire-main">
           {groups.map((g) => (
@@ -330,6 +336,7 @@ export function Artifacts({
             }}
             onChanged={reload}
             onOpenSession={onOpenSession}
+            planeUrl={list.plane_url ?? null}
           />
         )}
       </div>
@@ -348,9 +355,12 @@ function Aside({
   onOpened,
   onChanged,
   onOpenSession,
+  planeUrl = null,
 }: {
   via: OwnPlane;
   daemon: DaemonClient | null;
+  /** The plane the artifact is on, for the `troupe://` line under its link. */
+  planeUrl?: string | null;
   artifact: Artifact;
   audience: ArtifactAudience;
   teams: string[] | undefined;
@@ -411,11 +421,13 @@ function Aside({
   };
 
   // Its owner's link is a view link made now, shown once; anybody else's is its address, which signs them in.
+  // Under it, the app's own link to the same artifact, which carries no part of the link's
+  // key: it opens the artifact in the app for whoever may see it already.
   const copy = async (): Promise<void> => {
     setError(null);
     try {
       const url = owner ? (await via.shareArtifact(artifact.id, "view")).url : artifact.url;
-      await copyText(url);
+      await copyText(planeUrl ? `${url}\n${appLink({ kind: "artifact", id: artifact.id, plane: planeUrl })}` : url);
       setCopied(true);
       if (owner) setAsked((n) => n + 1);
     } catch (e) {

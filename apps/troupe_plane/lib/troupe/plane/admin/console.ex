@@ -172,7 +172,11 @@ defmodule Troupe.Plane.Admin.Console do
     memory_preview: {:area, :memory},
     memory_put: {:area, :memory},
     memory_rollback: {:area, :memory},
-    memory_nudge: {:area, :memory}
+    memory_nudge: {:area, :memory},
+    # What agents proposed waits on Company memory, counted on the Overview.
+    memory_proposals: {:area, :memory},
+    memory_accept: {:area, :memory},
+    memory_decline: {:area, :memory}
   }
 
   @doc """

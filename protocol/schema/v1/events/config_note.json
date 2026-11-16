@@ -18,6 +18,9 @@
     "model": {
       "type": "string"
     },
+    "proposal": {
+      "type": "string"
+    },
     "source": {
       "type": "string"
     },

@@ -116,7 +116,7 @@ defmodule Troupe.Plane.Settings do
       summary:
         "Where the profiles and triggers come from in gitops mode, as a person should read it: a repository and a path.",
       consequence:
-        "Shown beside Locked to gitops, so whoever wants to change a profile or a trigger knows where to go. Display only: the plane neither reads nor writes that repository. Deployment only.",
+        "Shown beside Held in a repository, so whoever wants to change a profile or a trigger knows where to go. Display only: the plane neither reads nor writes that repository. Deployment only.",
       effect: :restart
     },
     %Setting{
@@ -263,6 +263,21 @@ defmodule Troupe.Plane.Settings do
       summary: "The longest a team may keep its sessions before they are erased.",
       consequence:
         "A ceiling as well as a default: a team may shorten its retention and not lengthen it, which is the direction a retention policy has to be enforceable in. Erasure is irreversible.",
+      effect: :immediate
+    },
+    # What an agent may write back above its person's own memory (#55): a proposal for a
+    # team's or the organisation's, which an administrator accepts or declines.
+    %Setting{
+      key: "memory_proposals",
+      label: "Agents may propose memory",
+      unit: :switch,
+      group: :sessions,
+      type: :boolean,
+      fallback: true,
+      summary:
+        "Whether an agent's remember may propose an entry for a team's or the organisation's memory, for an administrator to accept or decline.",
+      consequence:
+        "Off, every proposal is refused with a sentence the agent relays, and nothing waits for review; proposals already waiting stay to be decided. A person's own memory and the repository's are not affected.",
       effect: :immediate
     },
     %Setting{

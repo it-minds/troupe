@@ -326,7 +326,7 @@ the profile editor refuse such an endpoint on a profile whose workers are pods, 
 `invalid_params` naming each, its channel's bundle's servers included, and a bundle publish
 that would give one to such a profile is refused the same way (Decision 749). What a
 repository holds cannot be refused, so the operator reports it as `EndpointUnreachable`
-(on the console's **Workers** page), as it does for a profile saved before. Give the
+(on the console's **Profiles** page), as it does for a profile saved before. Give the
 endpoint as a pod reaches it: by name, at another address, or as its Service
 (`<service>.<namespace>.svc`). An MCP identity's token endpoint (`tokenUrl`) is refused and
 named as a server is. A git host at such an address gets no rule either, but is neither

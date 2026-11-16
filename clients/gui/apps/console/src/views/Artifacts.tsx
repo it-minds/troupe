@@ -26,7 +26,8 @@
 
 import { useEffect, useState } from "react";
 import type { JSX } from "react";
-import { ArtifactApi, TroupeRpcError, ownerWords, teamOwned, visibilityWords as audienceWords } from "@troupe/client";
+import { ArtifactApi, TroupeRpcError, appLink, ownerWords, teamOwned, visibilityWords as audienceWords } from "@troupe/client";
+import { OpenInApp } from "./AppBanner";
 import type { Artifact, ArtifactDetail, ArtifactFilter, ArtifactList, ArtifactPerson } from "@troupe/client";
 import { describeError, useConsole, useLoad } from "../console";
 import { go, href } from "../route";
@@ -172,6 +173,7 @@ function Gallery({ tab, list }: { tab: ArtifactTab; list: ArtifactList }): JSX.E
 
 /** A card: the title and the kind where a thumbnail would be, and what it is beneath. Never its content. */
 function Card({ artifact: a }: { artifact: Artifact }): JSX.Element {
+  const { plane } = useConsole();
   return (
     <li className="artifact-card">
       <a className="thumb" href={href({ page: "artifacts", path: [a.id] })}>
@@ -189,6 +191,9 @@ function Card({ artifact: a }: { artifact: Artifact }): JSX.Element {
           {[a.public ? "public link" : null, a.pinned ? `pinned to version ${a.pinned}` : null, a.role === "edit" ? "you may edit it" : null].filter(Boolean).join(" · ")}
         </p>
       )}
+      <p className="card-meta">
+        <OpenInApp link={appLink({ kind: "artifact", id: a.id, plane: plane.url })} />
+      </p>
     </li>
   );
 }
@@ -225,7 +230,7 @@ export function ArtifactPage({ id }: { id: string }): JSX.Element {
 }
 
 function Detail({ artifact: a, reload }: { artifact: ArtifactDetail; reload: () => void }): JSX.Element {
-  const { me, notify, reserveTab } = useConsole();
+  const { me, notify, reserveTab, plane } = useConsole();
   const api = useArtifacts();
   const [opening, setOpening] = useState<string | null>(null);
   const [error, setError] = useState<unknown>(null);
@@ -322,6 +327,7 @@ function Detail({ artifact: a, reload }: { artifact: ArtifactDetail; reload: () 
         <button type="button" disabled={opening !== null} onClick={() => open(switched === "current" ? undefined : Number(switched))}>
           Open that version
         </button>
+        <OpenInApp link={appLink({ kind: "artifact", id: a.id, plane: plane.url })} />
         {editable && !editing && (
           <button type="button" onClick={() => setEditing(true)}>
             Edit

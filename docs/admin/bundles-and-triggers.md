@@ -179,7 +179,7 @@ under the caps as a new firing is, a
 run with a session is handed it and a fresh token, and one still making its session is waited
 for, up to five seconds, after which the answer is `409` naming the run. `event` is capped at
 16 KiB.
-`admin.trigger.run` fires one by hand, as the console's **Run now** on a trigger's page does;
+`admin.trigger.run` fires one by hand, as the console's **Run** on a trigger's page does (its confirmation, **Run** *the trigger's name* **now**);
 a second click or a retry by the same person less than a minute after the first is the run
 the first one made, whatever minute the clock has turned to between them.
 
@@ -289,7 +289,7 @@ firing. The reasons are in the log once, in `admin.triggers.list` (each trigger 
 platform admin with `team` null where it names no team the plane has), and on the
 console's Triggers page.
 
-**Locked.** The Triggers page is marked **Locked to gitops**, with no form, no switch and
+**Locked.** The Triggers page is marked **Held in a repository**, with no form, no switch and
 no delete, and `admin.trigger.put` (switching one on or off included) and
 `admin.trigger.delete` are refused as `managed_by_gitops` and audited with
 `outcome: refused`. Switching a trigger off is a commit that sets `enabled: false`. In a

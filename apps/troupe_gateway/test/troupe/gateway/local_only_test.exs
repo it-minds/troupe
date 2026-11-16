@@ -141,6 +141,18 @@ defmodule Troupe.Gateway.LocalOnlyTest do
            )
   end
 
+  # A proposal for a team's memory (#55) leaves the machine as an entry does: refused for a
+  # session under Local only, sending nothing.
+  test "a Local-only client's session refuses remember level team, naming Local only", ctx do
+    %{session: kept} = session(ctx, [{:tools, [{"remember", %{"level" => "team", "claim" => "Use tokens."}}]}, {:text, "ok"}])
+    turn(ctx.local, kept.id, "propose that")
+
+    refused = completed(kept.id)
+    assert refused =~ "not proposed"
+    assert refused =~ "Local only"
+    refute Enum.any?(FakePlane.calls(ctx.plane.state), &match?({"me.memory.propose", _}, &1))
+  end
+
   # A create with a prompt starts the first turn inside the create: the session is under
   # its client's Local only before it starts, not after the create answers.
   test "a session a Local-only client creates with its prompt is under Local only from its first turn",

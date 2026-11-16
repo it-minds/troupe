@@ -26,8 +26,10 @@ import {
   onThisComputer,
   openApprovals,
   openQuestions,
+  named,
   nameOrSubject,
   presentMembers,
+  severalSteer,
   rootState,
   scratchSize,
   scratchVersion,
@@ -431,6 +433,7 @@ export function Session({
             daemon={daemon}
             row={row}
             self={self}
+            selfName={named(auth?.me?.display_name, auth?.me?.subject)}
             pane={pane}
             onPane={setPane}
             onClose={() => setBackstage(false)}
@@ -1001,6 +1004,8 @@ function Stream({
   const live = drawn.at(-1)?.level ?? detail;
   const line = curtainLine(state, now, seed);
   const replies = useMemo(() => repliesOf(drawn, self), [drawn, self]);
+  // Where two or more people steer, an answered question names who answered it.
+  const several = severalSteer(state, self);
 
   const bottom = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -1049,6 +1054,7 @@ function Stream({
           drawn={d}
           words={startWords && startWords.seq === d.entry.seq ? startWords.text : null}
           self={self}
+          several={several}
           local={local}
           readBlob={readBlob}
           onSetup={onSetup}
@@ -1194,6 +1200,8 @@ type EntryProps = {
   /** What this app says for the entry instead of its text, where it words it itself. */
   words: string | null;
   self: string | undefined;
+  /** Two or more people steer the session, so an answer says whose it was. */
+  several?: boolean;
   local: boolean;
   readBlob: (blob: string) => Promise<string>;
   onSetup?: (() => void) | undefined;
@@ -1216,6 +1224,7 @@ function sameEntry(a: EntryProps, b: EntryProps): boolean {
     a.drawn.level === b.drawn.level &&
     a.words === b.words &&
     a.self === b.self &&
+    a.several === b.several &&
     a.local === b.local &&
     a.readBlob === b.readBlob &&
     a.onSetup === b.onSetup &&
@@ -1232,6 +1241,7 @@ const StreamEntry = memo(function StreamEntry({
   drawn,
   words,
   self,
+  several = false,
   local,
   readBlob,
   onSetup,
@@ -1339,7 +1349,7 @@ const StreamEntry = memo(function StreamEntry({
       return entry.decision ? <DecisionRecord entry={entry} self={self} /> : null;
 
     case "question":
-      return entry.answer === undefined ? null : <AnswerRecord entry={entry} />;
+      return entry.answer === undefined ? null : <AnswerRecord entry={entry} self={self} several={several} />;
 
     // What the turn cost, under it, in the client library's words (issue #389). A
     // subagent's says whose it is, as its answers do.
@@ -1517,6 +1527,7 @@ function Backstage({
   daemon,
   row,
   self,
+  selfName,
   pane,
   onPane,
   onClose,
@@ -1528,6 +1539,8 @@ function Backstage({
   daemon: DaemonClient | null;
   row: FleetRow | undefined;
   self: string | undefined;
+  /** The signed-in person's name, where the plane knows one; undefined signed out. */
+  selfName?: string | undefined;
   /** Which pane is up: the session's, so `/files` and `/memory` from the palette can open it. */
   pane: Pane;
   onPane: (pane: Pane) => void;
@@ -1673,8 +1686,17 @@ function Backstage({
           </dd>
           <dt>Owner</dt>
           {/* A session on this computer with no owner on record is this computer's user's,
-              which is the person looking at it. */}
-          <dd>{row?.owner === self || (row && onThisComputer(row.kind) && !row.owner) ? "you" : row?.owner ? nameOrSubject(row.owner, row.ownerName) : "—"}</dd>
+              which is the person looking at it: by the name they are signed in under where
+              there is one, as the platform's rows name a person, and "you" signed out. */}
+          <dd>
+            {row && onThisComputer(row.kind) && (!row.owner || row.owner === self)
+              ? (selfName ?? "you")
+              : row?.owner === self
+                ? "you"
+                : row?.owner
+                  ? nameOrSubject(row.owner, row.ownerName)
+                  : "—"}
+          </dd>
           {/* The bundle is what the platform loaded the session's agents from: a session on
               this computer has none, so it has no row rather than a dash. */}
           {view.state.bundleVersion && !(row && onThisComputer(row.kind)) && (

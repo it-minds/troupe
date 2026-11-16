@@ -1,6 +1,6 @@
 # Troupe GUI — design
 
-The browser client for Troupe. This document is the reasoning behind the token files and `example.dc.html`, and the rules for anyone building a new screen.
+The browser client for Troupe. This document is the reasoning behind the token files and `example.dc.html`, and the rules for anyone building a new screen. It is the desktop app's design and the system both web apps share; the console's screens apply it in [the console's design](../../../../docs/design/admin/DESIGN.md), which says where the two differ.
 
 Files:
 
@@ -201,7 +201,7 @@ What it deliberately does *not* do: no modal, no dimming, no sound, no red, no c
 - *File diff* — path, `+n`/`−n` counts, then hunks with a coloured left marker per line and a `+`/`−` glyph. Colour is never the only signal, which also means the diff survives red-green colour blindness. The body scrolls horizontally in its own container so long lines never widen the page.
 - *Shell command* — the command in mono with a `$` prompt, wrapped rather than truncated, plus the working folder and a sentence saying what it does in ordinary words. Always states that it runs on the platform, not on the user's computer. This audience has no mental model of a remote worker, and telling them is cheaper than teaching them.
 
-**Answered confidently.** A call's answers, always in the same order and always the same words, in one row: **Allow once**, **Allow … for this session**, **Always allow …** (where the server takes it, Decision 989) and **Deny** at the far end. Allow once is the only filled button; the two that allow more are secondary, because they are the ones people regret. A delegation and a publication keep their own answers. Keyboard: `A` and `D` when focus is not in a text field; the buttons are also plain focusable buttons in DOM order. Hit areas are 44px, and at 380px the row wraps, Allow once first.
+**Answered confidently.** A call's answers, always in the same order and always the same words, in one row: **Allow once**, **Allow … for this session**, **Always allow …** (where the server takes it, Decision 989, asking once under the row whether the rule is for **This workspace**, the default, or **Everywhere**, Decision 1003) and **Deny** at the far end. Allow once is the only filled button; the two that allow more are secondary, because they are the ones people regret. A delegation and a publication keep their own answers. Keyboard: `A` and `D` when focus is not in a text field; the buttons are also plain focusable buttons in DOM order. Hit areas are 44px, and at 380px the row wraps, Allow once first.
 
 **Someone else answered first.** First answer wins, and this will happen while you are reading. The panel does not vanish — that would leave the user wondering whether they pressed something. It is replaced in place by a calm record: the amber goes, the state pill becomes "✓ Allowed", and the text names the person, the action, and the fact that nothing is waiting for you now. It is `aria-live="assertive"` because the interactive thing under the user's finger has just changed. Offering "Follow the work" gives them somewhere to go.
 

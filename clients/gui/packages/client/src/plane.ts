@@ -149,6 +149,8 @@ export interface WorkerPod {
   endpoint: string;
   healthy: boolean;
   draining: boolean;
+  /** A pod the operator removed and that has gone quiet, kept until the plane forgets it: no room, no health. Absent from a plane before it. */
+  gone?: boolean;
   capacity: number;
   active_sessions: number;
   disk_used_bytes?: number;

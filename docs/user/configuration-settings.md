@@ -69,8 +69,8 @@ TUI's `/settings` in a pod session, and the desktop app's **Settings** pane besi
 session, show the same and change none of it. A session that is asleep has nothing in
 force: open it, and ask again.
 
-Secrets are masked everywhere. `troupe-daemon config` takes the same arguments but `pull`
-and `--session`, and one more: `import-opencode` copies opencode's providers and default
+Secrets are masked everywhere. `troupe-daemon config` takes the same arguments but `pull`,
+`key` and `--session`, and one more: `import-opencode` copies opencode's providers and default
 model into `config.yaml` once, since Troupe does not read opencode's settings
 ([from opencode](configuration/providers.md#from-opencode)).
 

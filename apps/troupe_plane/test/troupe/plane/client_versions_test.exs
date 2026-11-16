@@ -77,6 +77,46 @@ defmodule Troupe.Plane.ClientVersionsTest do
       assert entry.detail["recommended"]["to"] == "0.13.1-beta"
     end
 
+    test "a dry run answers what the put would do and changes and audits nothing", context do
+      put!(context.root, "tui", %{"recommended" => "0.13.0-beta"})
+      audited = length(Audit.list(kind: "clients"))
+
+      assert %{"result" => answer} =
+               rpc(context.root, "admin.clients.put", %{
+                 "component" => "tui",
+                 "policy" => %{"recommended" => "0.14.0-beta"},
+                 "dry_run" => true
+               })
+
+      assert answer["dry_run"] == true
+      assert answer["recommended"] == "0.14.0-beta"
+      assert answer["changes"]["recommended"] == %{"from" => "0.13.0-beta", "to" => "0.14.0-beta"}
+      assert %{"current" => _, "behind" => _, "refused" => _} = answer["affected"]
+
+      assert %{"result" => %{"clients" => clients}} = rpc(context.root, "admin.clients.get", %{})
+      assert clients["tui"]["recommended"] == "0.13.0-beta"
+      assert length(Audit.list(kind: "clients")) == audited
+
+      # Refused as the put would be, with nothing written either way.
+      assert %{"error" => %{"message" => "invalid_params"}} =
+               rpc(context.root, "admin.clients.put", %{
+                 "component" => "tui",
+                 "policy" => %{"recommended" => "0.14.0-beta", "blocked" => ["0.14.0-beta"]},
+                 "dry_run" => true
+               })
+
+      # A put without it still writes, and says it was no dry run.
+      assert %{"result" => %{"dry_run" => false}} =
+               rpc(context.root, "admin.clients.put", %{"component" => "tui", "policy" => %{"recommended" => "0.14.0-beta"}})
+    end
+
+    # A plane from before ignores an argument it does not know and would write, so the
+    # plane names the writes that take a dry run where a console reads before it asks.
+    test "discovery names the writes that take a dry run" do
+      discovery = build_conn() |> get("/.well-known/troupe") |> Map.fetch!(:resp_body) |> Jason.decode!()
+      assert "admin.clients.put" in discovery["plane"]["dry_run"]
+    end
+
     test "a put changes only the fields it sends, and null clears one", context do
       put!(context.root, "daemon", %{"recommended" => "0.13.1-beta", "minimum" => "0.13.0-beta"})
       put!(context.root, "daemon", %{"minimum" => nil})

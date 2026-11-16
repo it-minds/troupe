@@ -961,6 +961,49 @@ export function lineDiff(before: string, now: string): Array<{ op: "same" | "del
   return out;
 }
 
+/** A proposal as the plane's `Memory.Proposals.json/1` answers it. */
+export interface FakeProposal {
+  id: string;
+  scope: "team" | "organisation";
+  team: string | null;
+  topic: string;
+  entry: string;
+  session_id: string | null;
+  agent: string | null;
+  where: "pod" | "machine";
+  by: string;
+  state: "pending" | "accepted" | "declined";
+  at: string;
+  decided_by: string | null;
+  decided_at: string | null;
+  reason: string | null;
+  version: number | null;
+  message: string;
+}
+
+/** The line a proposal's session is told, in the plane's words (`Memory.Proposals.line/1`). */
+export function proposalLine(p: Omit<FakeProposal, "message">): string {
+  const level = p.scope === "team" ? `the team ${p.team}'s memory` : "the organisation's memory";
+  if (p.state === "accepted") return `Your proposal for ${level} under ${p.topic} was accepted by ${p.decided_by}: "${p.entry}" is in it from version ${p.version}, read from the next turn.`;
+  if (p.state === "declined") return `Your proposal for ${level} under ${p.topic} ("${p.entry}") was declined by ${p.decided_by}: ${p.reason}`;
+  return `Your proposal for ${level} under ${p.topic} is awaiting review.`;
+}
+
+/** An entry added under its topic's section, made at the end where there is none, as `Memory.append_entry/5` adds one. */
+export function appendEntry(text: string, topic: string, entry: string): string {
+  if (text === "") return `## ${topic}\n\n- ${entry}`;
+  const lines = text.split("\n");
+  const key = (t: string) => t.trim().toLowerCase().split(/\s+/).join(" ");
+  const at = lines.findIndex((l) => l.startsWith("## ") && key(l.slice(3)) === key(topic));
+  if (at < 0) return `${text}\n\n## ${topic}\n\n- ${entry}`;
+  let end = lines.findIndex((l, i) => i > at && l.startsWith("## "));
+  if (end < 0) end = lines.length;
+  let last = end - 1;
+  while (last > at && lines[last]!.trim() === "") last--;
+  const added = last === at ? ["", `- ${entry}`] : [`- ${entry}`];
+  return [...lines.slice(0, last + 1), ...added, ...lines.slice(last + 1)].join("\n");
+}
+
 /** Who wrote each line of a document up to version `upto`, as the plane's `Memory.blame/2` derives it: each version's lines against the one before. */
 export function memoryBlame(
   versions: Array<{ version: number; text: string; changed_by: string; changed_at: string }>,
@@ -1034,9 +1077,11 @@ export class FakeAdmin {
   readonly runRows: FakeRun[] = [];
   readonly entitlements: FakeEntitlement[] = [];
   /** The cluster policy, as far as a profile and a bundle are checked against it. */
-  readonly policy = {
+  readonly policy: { imageRepositories: string[]; egress: string[]; maxReplicas: number | null } = {
     imageRepositories: ["registry.example.com/troupe"],
     egress: ["llm-gw.example.com", "mcp.example.com", "wiki.example.com", "github.example.com", "hooks.example.com"],
+    // The most replicas a profile may ask for, as a `TroupePolicy`'s `maxReplicas`; null for none.
+    maxReplicas: 4,
   };
   /** The plane's GitHub App, as `admin.github.put` left it. */
   readonly github: {
@@ -1063,6 +1108,10 @@ export class FakeAdmin {
   readonly memoryStanding = new Map<string, "current" | "behind">();
   /** The sessions an administrator nudged, in order. */
   readonly memoryNudged: string[] = [];
+  /** What agents proposed for a team's or the organisation's memory, oldest first, as `Memory.Proposals` keeps them. */
+  readonly memoryProposals: FakeProposal[] = [];
+  /** The setting `memory_proposals`: whether the plane takes proposals now. */
+  memoryProposalsOn = true;
   /** Service principals beyond their subjects, by subject. */
   readonly principalRows = new Map<string, FakePrincipal>();
   /** People who look held twice, as `Identity.lookalikes/0` would set them out. */
@@ -1189,8 +1238,9 @@ export class FakeAdmin {
               asked,
               ceiling,
               decided_by: this.stored.has(key) ? "platform" : "deployment",
-              limit: ceiling,
-              unit: spec.field === "idle_timeout_seconds" ? "seconds" : spec.field.endsWith("_days") ? "days" : "switch",
+              // In the unit the platform's setting is read in, as the plane's table names it.
+              limit: NAMING[key]?.unit === "minutes" && typeof ceiling === "number" ? Math.round((ceiling / 60) * 1_000_000) / 1_000_000 : ceiling,
+              unit: NAMING[key]?.unit ?? "switch",
               reason: limitRefusal(spec.field, asked, ceiling),
             });
           }
@@ -1424,7 +1474,14 @@ export class FakeAdmin {
           // the write does not send stays as it is, and the name says which profile.
           const was = this.comparable_profile(before);
           const { name: _name, ...sent } = this.comparable_attrs({ ...attrs, extends: parent });
-          return { result: { policy: this.verdict(attrs), changes: diff(was, { ...was, ...sent }), mode: this.mode, extended_by: below } };
+          const max = "max_sessions" in sentAttrs ? ((sentAttrs["max_sessions"] as number | null) ?? null) : (before?.max_sessions ?? null);
+          const atOnce = this.atOnce({
+            name,
+            provisioner: typeof sentAttrs["provisioner"] === "string" ? sentAttrs["provisioner"] : (before?.provisioner ?? "kubernetes"),
+            size_class: typeof sentAttrs["size_class"] === "string" ? sentAttrs["size_class"] : (before?.size_class ?? "standard"),
+          });
+          const capacity = { max_sessions: max, at_once: atOnce, above: typeof max === "number" && atOnce.sessions !== null && max > atOnce.sessions };
+          return { result: { policy: this.verdict(attrs), changes: diff(was, { ...was, ...sent }), mode: this.mode, extended_by: below, capacity } };
         }
         const held = this.heldByRepository(subject, "profile.put", name, "WorkerProfile");
         if (held) return held;
@@ -2006,6 +2063,44 @@ export class FakeAdmin {
         return { result: { document: memorySummary(now), changes } };
       }
 
+      case "admin.memory.proposals": {
+        if (!admin) return notAdmin;
+        const mine = this.memoryProposals.filter((p) => p.state === "pending" && this.decides(subject, p));
+        return { result: { enabled: this.memoryProposalsOn, proposals: mine } };
+      }
+
+      case "admin.memory.accept":
+      case "admin.memory.decline": {
+        if (!admin) return notAdmin;
+        const p = this.memoryProposals.find((x) => x.id === params["id"]);
+        if (!p || (!this.decides(subject, p) && p.scope === "team")) return refuse(NOT_FOUND, "not_found", { proposal: params["id"] });
+        if (!this.decides(subject, p)) return refuse(FORBIDDEN, "forbidden", { required_role: "platform_admin", reason: "only a platform administrator changes the organisation's memory" });
+        if (p.state !== "pending") return refuse(CONFLICT, "conflict", { reason: `somebody decided this proposal first: it was ${p.state} by ${p.decided_by}`, state: p.state });
+        const where = p.scope === "team" ? `team/${p.team}` : "organisation";
+        const detail: Record<string, unknown> = { proposal: p.id, topic: p.topic, by: p.by, ...(p.session_id ? { session: p.session_id } : {}) };
+        if (method === "admin.memory.decline") {
+          const reason = typeof params["reason"] === "string" ? params["reason"].trim().split(/\s+/).join(" ") : "";
+          if (reason === "") return refuse(INVALID_PARAMS, "invalid_params", { reason: "a proposal is declined with a sentence saying why, which the session is told" });
+          Object.assign(p, { state: "declined", decided_by: subject, decided_at: new Date().toISOString(), reason });
+          p.message = proposalLine(p);
+          this.record(subject, "memory.proposal.decline", where, { ...detail, reason });
+          return { result: p };
+        }
+        const versions = this.memory.get(where) ?? [];
+        const current = versions.at(-1) ?? null;
+        const text = appendEntry(current?.text ?? "", p.topic, p.entry);
+        if (new TextEncoder().encode(text).length > MEMORY_LIMIT) {
+          return refuse(INVALID_PARAMS, "invalid_params", { full: true, reason: `${p.team ?? "the organisation"}'s memory is full: make room first` });
+        }
+        const now = { version: (current?.version ?? 0) + 1, text, changed_by: subject, changed_at: new Date().toISOString() };
+        this.memory.set(where, [...versions, now]);
+        this.record(subject, "memory.put", where, { "version": { from: current?.version ?? 0, to: now.version }, ...(p.session_id ? { session: p.session_id } : {}), ...(p.agent ? { agent: p.agent } : {}), proposal: p.id });
+        Object.assign(p, { state: "accepted", decided_by: subject, decided_at: now.changed_at, version: now.version });
+        p.message = proposalLine(p);
+        this.record(subject, "memory.proposal.accept", where, { ...detail, version: now.version });
+        return { result: p };
+      }
+
       case "admin.provisioners.list":
         return admin ? { result: PROVISIONERS } : notAdmin;
 
@@ -2097,7 +2192,7 @@ export class FakeAdmin {
             })),
             sessions: this.sessions
               .filter((x) => x.state !== "erased" && x.team !== null && teams.some((t) => t.name === x.team) && carried.has(x.profile))
-              .map((x) => ({ id: x.id, profile: x.profile, team: x.team, owner: x.owner, state: x.state })),
+              .map((x) => ({ id: x.id, profile: x.profile, team: x.team, owner: x.owner, ...this.ownerName(x.owner), state: x.state })),
             credentials_readable: false,
           },
         };
@@ -2406,6 +2501,7 @@ export class FakeAdmin {
             result: {
               session_id: id,
               owner: session.owner,
+              ...this.ownerName(session.owner),
               profile: session.profile,
               object_bytes: session.object_bytes,
               workspace_bytes: session.workspace_bytes,
@@ -2522,10 +2618,12 @@ export class FakeAdmin {
         }
         const fields = (p: Policy) => ({ recommended: p.recommended, minimum: p.minimum, blocked: p.blocked });
         const changes = diff(fields(current), fields(next));
-        this.policies[component] = { ...next, updated_by: subject, updated_at: new Date().toISOString() };
         const affected = counts(this.seen.filter((s) => s.component === component).map((s) => standing(next, s.version)));
+        // A dry run makes every check and answers the same, and writes and audits nothing.
+        if (params["dry_run"] === true) return { result: { component, ...next, updated_by: subject, changes, affected, dry_run: true } };
+        this.policies[component] = { ...next, updated_by: subject, updated_at: new Date().toISOString() };
         this.record(subject, "clients.put", component, { ...changes, affected });
-        return { result: { component, ...this.policies[component], changes, affected } };
+        return { result: { component, ...this.policies[component], changes, affected, dry_run: false } };
       }
 
       case "admin.audit.list": {
@@ -2574,6 +2672,33 @@ export class FakeAdmin {
     return refuse(INVALID_PARAMS, "invalid_params", { field: "scope", reason: "scope is one of organisation, team, profile", scope });
   }
 
+  /** Whether the subject may decide a proposal: a platform admin any, a team admin their team's. */
+  private decides(subject: string, p: FakeProposal): boolean {
+    const role = this.role(subject);
+    if (role === "platform_admin") return true;
+    return p.scope === "team" && this.visible(subject).some((t) => t.name === p.team);
+  }
+
+  /** An agent's proposal, as `Memory.Proposals.propose/5` keeps it: what a test or the fake's example starts with. */
+  propose(p: Pick<FakeProposal, "scope" | "team" | "topic" | "entry" | "by"> & Partial<FakeProposal>): FakeProposal {
+    const base: Omit<FakeProposal, "message"> = {
+      id: p.id ?? `p-${this.memoryProposals.length + 1}`,
+      session_id: null,
+      agent: null,
+      where: "pod",
+      state: "pending",
+      at: new Date().toISOString(),
+      decided_by: null,
+      decided_at: null,
+      reason: null,
+      version: null,
+      ...p,
+    };
+    const made = { ...base, message: proposalLine(base) };
+    this.memoryProposals.push(made);
+    return made;
+  }
+
   /** What a profile's sessions read before its own: the documents of the profiles it extends, the one that extends nothing first. */
   private memoryInherited(name: string): Array<Record<string, unknown>> {
     const chain: string[] = [];
@@ -2594,7 +2719,9 @@ export class FakeAdmin {
   private readersOf(subject: string): Record<string, unknown> {
     const current = (this.memory.get(subject) ?? []).at(-1) ?? null;
     const inForce = current && current.text !== "" ? current.version : 0;
-    const sessions = (this.memoryReaders.get(subject) ?? []).map((r) => ({ ...r, behind: r.version !== inForce })).sort((a, b) => a.session_id.localeCompare(b.session_id));
+    const sessions = (this.memoryReaders.get(subject) ?? [])
+      .map((r) => ({ ...r, ...this.ownerName(r.owner), behind: r.version !== inForce }))
+      .sort((a, b) => a.session_id.localeCompare(b.session_id));
     return { version: current?.version ?? 0, behind: sessions.filter((s) => s.behind).length, sessions };
   }
 
@@ -2822,6 +2949,7 @@ export class FakeAdmin {
       replicas: p.replicas,
       sessions_per_pod: p.sessions_per_pod,
       capacity_sessions: p.replicas * p.sessions_per_pod,
+      at_once: this.atOnce(p),
       channel: p.channel,
       image: p.image,
       provisioner: p.provisioner,
@@ -2840,6 +2968,22 @@ export class FakeAdmin {
     const member = [...this.teams.values()].flatMap((t) => t.members).find((m) => m.subject === subject);
     const name = member?.display_name ?? this.names[subject];
     return name && name !== subject ? name : undefined;
+  }
+
+  /**
+   * The most sessions a profile's pods could run at once, as `Scaler.at_once/2`: its hosts
+   * registered and enabled, or the policy's most replicas, times the size class's sessions.
+   */
+  atOnce(p: { name: string; provisioner?: string | null; size_class?: string | null }): { sessions: number | null; by: "hosts" | "policy" | null } {
+    const perPod = p.size_class === "heavy" ? 2 : 4;
+    if (p.provisioner === "ssh") return { sessions: this.hostRows.filter((h) => h.profile === p.name && h.enabled).length * perPod, by: "hosts" };
+    return this.policy.maxReplicas ? { sessions: this.policy.maxReplicas * perPod, by: "policy" } : { sessions: null, by: null };
+  }
+
+  /** `owner_name` beside an owner, as `Names.decorate` puts it: absent where there is no name. */
+  private ownerName(owner: string | null | undefined): { owner_name?: string } {
+    const name = owner ? this.nameOf(owner) : undefined;
+    return name ? { owner_name: name } : {};
   }
 
   private sessionJson(s: FakeSession): Record<string, unknown> {
@@ -4362,5 +4506,9 @@ export function exampleAdmin(): FakeAdmin {
   ]);
   admin.memoryStanding.set("s-7f3a9c21", "behind");
   admin.memoryStanding.set("s-7f3a9c23", "current");
+  // Two entries agents proposed and nobody has decided yet: one for core, from a pod's
+  // session, and one for the whole organisation, from a person's machine.
+  admin.propose({ id: "p-core-1", scope: "team", team: "core", topic: "Releases", entry: "Releases go out on Tuesdays after the freeze lifts.", by: "erin@example.com", session_id: "s-7f3a9c21", agent: "build", at: "2026-10-14T12:02:00Z" });
+  admin.propose({ id: "p-org-1", scope: "organisation", team: null, topic: "Tone", entry: "Write commit messages in the present tense.", by: "dan@example.com", session_id: "laptop-9b1d", agent: "root", where: "machine", at: "2026-10-14T12:30:00Z" });
   return admin;
 }

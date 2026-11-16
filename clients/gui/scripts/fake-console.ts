@@ -63,6 +63,14 @@ const plane = await FakePlane.start({
   corsOrigins: origins,
   admin,
   version,
+  // The desktop app the plane recommends, which the console's banner offers (#959).
+  downloads: {
+    version,
+    page: `https://github.com/it-minds/troupe/releases/tag/v${version}`,
+    windows: `https://github.com/it-minds/troupe/releases/download/v${version}/Troupe_${version.split("-")[0]}_x64-setup.exe`,
+    macos: `https://github.com/it-minds/troupe/releases/download/v${version}/Troupe_${version.split("-")[0]}_universal.dmg`,
+    linux: `https://github.com/it-minds/troupe/releases/download/v${version}/Troupe_${version.split("-")[0]}_amd64.AppImage`,
+  },
   memory: [{ scope: "organisation", name: null, version: 2, hash: "sha256:fake", updated_at: "2026-10-22T10:00:00Z", text: "We write British English.\nEvery change has a test." }],
   artifacts: [
     artifact("art-fake-weekly", { subject: as.subject, display_name: as.displayName }, {

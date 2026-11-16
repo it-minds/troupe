@@ -190,6 +190,25 @@ defmodule Troupe.Worker.Plane.Commands do
     end
   end
 
+  # An administrator accepted or declined what an agent of a session here proposed for a
+  # team's or the organisation's memory: the plane's sentence, a line in the session's log
+  # once. Best effort, as a share's news is: a session not up here is told nothing, and its
+  # person's app shows the decision anyway.
+  defp dispatch("memory.proposal.decided", params) do
+    session_id = params["session_id"]
+
+    with :ok <- shaped(session_id),
+         {proposal, message} when is_binary(proposal) and is_binary(message) <- {params["proposal"], params["message"]},
+         {:ok, _tree} <- running_at(session_id, params["epoch"]),
+         :ok <- Troupe.UserMemory.decided(session_id, proposal, message) do
+      {:ok, %{"session_id" => session_id, "recorded" => true}}
+    else
+      {:error, :not_running} -> {:error, Error.new(:not_found, %{reason: "the session is not up here"})}
+      {:error, _error} = refused -> refused
+      _unshaped -> {:error, Error.new(:invalid_params, %{reason: "proposal and message are text"})}
+    end
+  end
+
   defp dispatch("session.fence", params) do
     :ok = Sessions.fence(params["session_id"], params["epoch"])
     {:ok, %{"session_id" => params["session_id"], "fenced" => true}}

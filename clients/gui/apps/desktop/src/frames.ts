@@ -264,7 +264,7 @@ export type { BlobRef };
 
 /** What a fence holds, by its info string's first word, with a second word that looks like a path as its path. */
 export interface Fence {
-  kind: "code" | "diff" | "data";
+  kind: "code" | "diff" | "data" | "mermaid";
   /** The fence's first word, or `code` with none. */
   label: string;
   path: string | null;
@@ -276,6 +276,7 @@ export function fenceOf(info: string | undefined): Fence {
   const word = first.toLowerCase();
   if (word === "diff" || word === "patch") return { kind: "diff", label: "diff", path };
   if (word === "csv" || word === "tsv" || word === "json") return { kind: "data", label: word, path };
+  if (word === "mermaid") return { kind: "mermaid", label: "mermaid", path };
   return { kind: "code", label: first || "code", path };
 }
 

@@ -128,6 +128,60 @@ defmodule Troupe.Worker.PlaneMemoryTest do
     refute text =~ "the team design's memory"
   end
 
+  # Its worker profile came to extend another (#55): the plane tells the pod with the
+  # documents along the new chain, each profile's saying the chain, and the next turn reads
+  # them and says the chain changed.
+  test "a profile's extends changing reaches the running session at its next turn, and says so", context do
+    fake =
+      start_supervised!(
+        Supervisor.child_spec({Fake, steps: [{:text, "one"}, {:text, "two"}], default: {:text, "done"}},
+          id: {Fake, System.unique_integer([:positive])}
+        )
+      )
+
+    defaults = activation(context, fake: fake, config_overrides: [system_prompt: "per_turn"])
+    Application.put_env(:troupe_worker, :session_defaults, defaults)
+
+    own = %{"scope" => "profile", "name" => "fixing", "version" => 1, "hash" => "sha256:p", "text" => "Profile: fix one issue at a time.", "chain" => ["fixing"]}
+    assert {:ok, %{"activated" => true}} = Commands.handle("session.activate", Map.put(push(context), "memory", [own]))
+
+    Troupe.subscribe(context.session_id)
+    Troupe.send_input(context.session_id, "go")
+    await_turn(context.session_id)
+
+    base = %{"scope" => "profile", "name" => "base", "version" => 2, "hash" => "sha256:b", "text" => "Base: be brief.", "chain" => ["base", "fixing"]}
+    told = %{"session_id" => context.session_id, "epoch" => 1, "memory" => [base, %{own | "chain" => ["base", "fixing"]}]}
+    assert {:ok, %{"memory" => 2}} = Commands.handle("session.memory", told)
+
+    Troupe.send_input(context.session_id, "again")
+    await_turn(context.session_id)
+
+    [_first, second] = Fake.requests(fake)
+    assert second.system =~ "Base: be brief."
+
+    assert [changed] = Enum.filter(Troupe.events(context.session_id), &(&1.type == "memory_changed"))
+    assert changed.data["chain"] == %{"from" => ["fixing"], "to" => ["base", "fixing"]}
+    assert changed.data["message"] =~ "The profile fixing's chain changed: it is base → fixing now (it was fixing)"
+    assert changed.data["message"] =~ "the profile base's memory is new, version 2"
+  end
+
+  # What became of a proposal an agent of the session made (#55): the plane's sentence, a
+  # line in the session's log, once however often it is told.
+  test "a decided proposal is told to the running session as one line", context do
+    defaults = activation(context, config_overrides: [system_prompt: "per_turn"])
+    Application.put_env(:troupe_worker, :session_defaults, defaults)
+    assert {:ok, %{"activated" => true}} = Commands.handle("session.activate", push(context))
+
+    told = %{"session_id" => context.session_id, "epoch" => 1, "proposal" => "p-1", "state" => "declined", "message" => "Your proposal was declined by lead: not for everyone."}
+
+    assert {:error, %{data: %{reason: "stale epoch"}}} = Commands.handle("memory.proposal.decided", %{told | "epoch" => 2})
+    assert {:ok, %{"recorded" => true}} = Commands.handle("memory.proposal.decided", told)
+    assert {:ok, %{"recorded" => true}} = Commands.handle("memory.proposal.decided", told)
+
+    assert [%{data: %{"key" => "memory_proposals", "message" => "Your proposal was declined by lead: not for everyone."}}] =
+             Enum.filter(Troupe.events(context.session_id), &(&1.type == "config_note"))
+  end
+
   test "a session not up on the pod is said to be so", context do
     told = %{"session_id" => context.session_id, "epoch" => 1, "memory" => []}
     assert {:error, %{data: %{reason: "the session is not up on this pod"}}} = Commands.handle("session.memory", told)

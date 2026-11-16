@@ -21,9 +21,9 @@ export function keptBy(daemon: FakeDaemon): Keeper {
     try {
       const answer = await send(method, params);
       if (method !== "me.memory") return { result: answer };
-      const { documents, organisation, roles, plane_url: _url, ...user } = answer;
+      const { documents, organisation, roles, proposals, plane_url: _url, ...user } = answer;
       const teams = (documents as Array<{ scope: string; name: string | null }> | undefined)?.filter((d) => d.scope === "team").map((d) => d.name) ?? [];
-      return { result: { user, documents: documents ?? [], teams, organisation, ...(roles ? { roles } : {}) } };
+      return { result: { user, documents: documents ?? [], teams, organisation, ...(roles ? { roles } : {}), ...(proposals ? { proposals } : {}) } };
     } catch (e) {
       // The error's own word (`conflict`, `forbidden`), out of the sentence the client made of it.
       if (e instanceof TroupeRpcError) return { error: { code: e.code, message: /^\S+: (\S+) \(/.exec(e.message)?.[1] ?? e.message, ...(e.data ? { data: e.data } : {}) } };

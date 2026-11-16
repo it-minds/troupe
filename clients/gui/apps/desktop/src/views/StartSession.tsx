@@ -277,13 +277,8 @@ export function StartSession({
 
   return (
     <section className="start new-session" aria-label="Start a session" onKeyDown={onKeyDown}>
-      <div className="ns-brand">
-        <Mask size={28} label="Troupe" />
-        <span className="ns-word" aria-hidden="true">
-          troupe
-        </span>
-      </div>
-
+      {/* The brand is the rail's lockup (and the phone's top bar), once per screen: this
+          screen's head starts with the hero. */}
       <div className="body">
         <div className="ns-hero">
           <div className="ns-hero-mask">

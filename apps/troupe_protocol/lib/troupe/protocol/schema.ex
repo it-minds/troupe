@@ -249,10 +249,13 @@ defmodule Troupe.Protocol.Schema do
       # The organisation's memory documents an agent reads changed while the session ran
       # (#55): a save on the plane reached it, and its next turn read the new ones. Each
       # change is `scope`, `name`, `from` and `to`, the versions, `null` for none; `message`
-      # is the sentence a client shows as it is.
+      # is the sentence a client shows as it is. `chain`, `{from, to}`, each a list of
+      # profile names, the one that extends nothing first, where the session's worker
+      # profile came to extend another or none, which is why the documents moved.
       "memory_changed" => %{
         "changes" => required(:array),
-        "message" => required(:string)
+        "message" => required(:string),
+        "chain" => optional(:object)
       },
       # The session's goal, written by the root agent under whoever set or cleared it, and
       # carrying the `command_id` of the `session.goal.*` call that asked.
@@ -362,10 +365,14 @@ defmodule Troupe.Protocol.Schema do
       # session, under the root: `key` is the setting, `message` the sentence a client
       # shows as it is. The one there is: an organisation's enforced `max_tokens` (`limit`,
       # from `source`, the plane's URL or the managed file) shortened the thinking `model`'s
-      # `effort` asks for to `thinking` tokens, 0 where it left none (issue #644).
+      # `effort` asks for to `thinking` tokens, 0 where it left none (issue #644). Key
+      # `memory_proposals`: an administrator accepted or declined what an agent of the
+      # session proposed for a team's or the organisation's memory (#55); `proposal` is its
+      # id, and the message says which and why.
       "config_note" => %{
         "key" => required(:string),
         "message" => required(:string),
+        "proposal" => optional(:string),
         "source" => optional(:string),
         "limit" => optional(:integer),
         "model" => optional(:string),

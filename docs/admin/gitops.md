@@ -30,7 +30,7 @@ profile carries `gitops`: the source, the generation it was read at, and a `prob
 profile is listed with nothing running), and on the console's **Pods** and the
 profile's own page.
 
-The console shows every profile read-only, marked **Locked to gitops** with
+The console shows every profile read-only, marked **Held in a repository** with
 `plane.gitops.source`, and the Triggers page is locked too. `admin.profile.put` and
 `admin.profile.delete` are refused as `managed_by_gitops` and audited with
 `outcome: refused`. The plane writes its three fields (`spec.replicas`, `spec.teams`,

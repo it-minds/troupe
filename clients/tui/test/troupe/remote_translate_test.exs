@@ -195,6 +195,28 @@ defmodule Troupe.RemoteTranslateTest do
     assert message.data.model == "code-default"
   end
 
+  test "llm_response keeps its reasoning blocks for a replay to draw, but not a redacted or empty one (#659)" do
+    data = %{
+      "message" => %{
+        "role" => "assistant",
+        "content" => [
+          %{"type" => "reasoning", "provider" => "openai", "text" => "look first"},
+          %{"type" => "reasoning", "provider" => "anthropic", "text" => "", "redacted" => true},
+          %{"type" => "reasoning", "provider" => "openai", "text" => "  "},
+          %{"type" => "text", "text" => "Hello."}
+        ]
+      }
+    }
+
+    [message] = translate(durable("llm_response", data))
+
+    assert [%{type: :reasoning, text: "look first"}, %{type: :text, text: "Hello."}] =
+             message.data.content
+
+    assert Troupe.Client.Message.text(message.data.content) == "Hello."
+    assert Troupe.Client.Message.reasoning(message.data.content) == "look first"
+  end
+
   test "tool calls, approvals and todos in the worker's spelling" do
     [started] =
       translate(

@@ -111,6 +111,13 @@ export interface TroupeShell {
    * build is updated where it is served, and has none.
    */
   updater?: ShellUpdater;
+  /**
+   * Hear the app's own `troupe://` links (troupe #959): the one the app was started with,
+   * and each one after, every one handed over once as the text it came as. The page reads
+   * it (`parseAppLink`); the shell only checks the scheme. Returns the function that stops
+   * listening. A browser build has no scheme of its own, and none.
+   */
+  onLinks?: (listener: (links: string[]) => void) => () => void;
 }
 
 /** What a plane says may be installed, for the shell to hold an update to (Decision 868). */

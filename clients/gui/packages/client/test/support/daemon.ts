@@ -666,6 +666,8 @@ evoked where nothing is set and there was a sign-in. */
   readonly ownRollbacks: Array<Record<string, unknown>> = [];
   /** The levels above the person's own that `me.memory` answers beside it: the organisation's and their teams'. */
   ownAbove: Array<{ scope: string; name: string | null; version: number; text: string; by?: string }> = [];
+  /** What the person's agents proposed for a level above their own (troupe #55), which `me.memory` carries as `proposals`; null for a plane from before them. */
+  ownProposals: Array<Record<string, unknown>> | null = null;
   /**
    * The profiles the person may use as the plane answers `profile.get` for them, by name,
    * which this daemon sends on through its sign-in; null for a daemon signed in to none.
@@ -1901,7 +1903,7 @@ evoked where nothing is set and there was a sign-in. */
           const lines = params["blame"] === true ? own.text.split("\n").filter((l) => l !== "").map((text) => ({ text, version: own.version, by: "alice@example.com", at: "2026-10-26T08:00:00Z" })) : undefined;
           // Every document with its entries, as the plane answers them through the daemon.
           const documents = this.ownAbove.map((d) => ({ ...d, entries: entriesOf(d.text, d.version, d.by ?? (d.scope === "organisation" ? "root@example.com" : "lead@example.com")) }));
-          return reply(ws, id, { ...json(own), entries: entriesOf(own.text, own.version, "alice@example.com"), documents, organisation: { name: "Example" }, ...(this.memoryRoles ? { roles: this.memoryRoles } : {}), ...(lines ? { lines } : {}) });
+          return reply(ws, id, { ...json(own), entries: entriesOf(own.text, own.version, "alice@example.com"), documents, organisation: { name: "Example" }, ...(this.memoryRoles ? { roles: this.memoryRoles } : {}), ...(this.ownProposals ? { proposals: this.ownProposals } : {}), ...(lines ? { lines } : {}) });
         }
         if (method === "me.memory.history") {
           const of = (n: unknown): { version: number; text: string } | undefined => this.ownVersions.find((v) => v.version === n);
@@ -2303,6 +2305,13 @@ evoked where nothing is set and there was a sign-in. */
       changed = this.ui[key] !== (value ?? undefined);
       if (value === null) delete this.ui[key];
       else this.ui[key] = value;
+    } else if (key === "transcript.detail") {
+      if (value !== null && !["quiet", "tools", "everything"].includes(String(value))) {
+        return invalid(`transcript.detail must be one of quiet, tools, everything, not ${JSON.stringify(value)}`);
+      }
+      changed = this.transcript[key] !== (value ?? undefined);
+      if (value === null) delete this.transcript[key];
+      else this.transcript[key] = value;
     } else {
       return invalid(`${key} is not a setting Troupe knows; \`troupe config --explain\` lists them all`);
     }

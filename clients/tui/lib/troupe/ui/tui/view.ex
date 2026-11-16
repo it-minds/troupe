@@ -289,6 +289,10 @@ defmodule Troupe.UI.TUI.View do
           now: state.now,
           # A laptop's session steered through the plane answers an approval once.
           once_only: Model.relayed?(state.model),
+          # Always allow where the server writes the person's rule, and the call whose
+          # Always allow is asking where.
+          always_allow: Model.always_allow?(state.model),
+          always: Map.get(state, :always),
           # Whom a publication can be for: the person's teams and profiles, as the server
           # learnt them when the agent asked.
           audience: Map.get(state, :audience)
@@ -2620,6 +2624,12 @@ defmodule Troupe.UI.TUI.View do
         Enum.any?(w.pending, &(&1.kind in [:approval, :budget]))
 
     once? = Model.relayed?(state.model)
+    always? = approval? and Model.always_allow?(state.model)
+
+    asking? =
+      always? and Map.get(state, :always) != nil and
+        Enum.any?(w.pending, &(&1[:call_id] == Map.get(state, :always)))
+
     verb = if turn_open?(g), do: "closes", else: "opens"
     selection? = Map.get(state, :selection) != nil
 
@@ -2632,7 +2642,13 @@ defmodule Troupe.UI.TUI.View do
       {not selection?, ["drag selects · Ctrl-Y copies all", "drag · Ctrl-Y copy", nil]},
       # Through the plane an approval is answered once, so there is no `a` to offer.
       {approval? and once?, ["y/n approve once", "y/n", "y/n"]},
-      {approval? and not once?, ["y/n/a approve", "y/n/a", "y/n/a"]},
+      # Always allow where the server writes the rule, and, once `w` is
+      # pressed, the question where: `w` this workspace, `g` everywhere.
+      {asking?,
+       ["w this workspace · g everywhere · Esc back", "w workspace · g everywhere · Esc", "w/g"]},
+      {approval? and not once? and always? and not asking?,
+       ["y/n/a approve · w always", "y/n/a/w approve", "y/n/a/w"]},
+      {approval? and not once? and not always?, ["y/n/a approve", "y/n/a", "y/n/a"]},
       # A delegation at the gate (TUI Decision 157): run, edit, switch, deny, always.
       {delegation? and once?, ["y/e/s/n delegation", "y/e/s/n", "y/e/s/n"]},
       {delegation? and not once?, ["y/e/s/n/a delegation", "y/e/s/n/a", "y/e/s/n/a"]},
@@ -3096,6 +3112,16 @@ defmodule Troupe.UI.TUI.View do
     end
   end
 
+  @doc """
+  The window's box title while an artifact is attached to the message: what goes with it,
+  and how to send or drop it.
+  """
+  @spec attached_title(String.t(), map()) :: String.t()
+  def attached_title(path, att) do
+    version = if att[:version], do: " v#{att.version}", else: ""
+    " → #{path} + “#{att.title}”#{version} — Enter sends it with the message, Backspace drops it "
+  end
+
   @doc false
   @spec where_words(:worktree | :checkout) :: String.t()
   def where_words(:worktree), do: "a worktree of its own"
@@ -3131,6 +3157,10 @@ defmodule Troupe.UI.TUI.View do
 
               armed = armed_note(state, path) ->
                 armed
+
+              # An artifact attached to the message goes with it.
+              att = Map.get(Map.get(state, :attached, %{}), path) ->
+                attached_title(path, att)
 
               multiline?(state.win_text) ->
                 pasted_title(state.win_text)

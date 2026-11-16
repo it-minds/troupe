@@ -130,6 +130,12 @@ daemon.ownAbove = [
   { scope: "organisation", name: null, version: 4, text: "## Tone\n\nPlain English, short sentences, no exclamation marks.\n\n## Dates\n\nISO dates everywhere: 2026-10-26." },
   { scope: "team", name: "core", version: 2, text: "## Releases\n\nA release is cut from main on Tuesdays, never on a Friday." },
 ];
+// What an agent of the person's proposed for core's memory and the organisation's (troupe
+// #55): one awaiting review, and one a platform admin declined with a reason.
+daemon.ownProposals = [
+  { id: "p-core-1", scope: "team", team: "core", topic: "Releases", entry: "Tag the release before the changelog is written.", session_id: "s-parser", agent: "build", where: "machine", by: "alice@example.com", state: "pending", at: day(1), decided_by: null, decided_at: null, reason: null, version: null, message: "Your proposal for the team core's memory under Releases is awaiting review." },
+  { id: "p-org-1", scope: "organisation", team: null, topic: "Dates", entry: "Write dates as 26 October 2026.", session_id: "s-notes", agent: "root", where: "machine", by: "alice@example.com", state: "declined", at: day(3), decided_by: "root@example.com", decided_at: day(2), reason: "ISO dates stay: tools read them.", version: null, message: "Your proposal for the organisation's memory under Dates (\"Write dates as 26 October 2026.\") was declined by root@example.com: ISO dates stay: tools read them." },
+];
 const notes = daemon.seed("/home/ada/notes");
 // A scratchpad to look at (issue #472): a plan the agent showed and then wrote again, and
 // a table beside it.
@@ -173,6 +179,7 @@ const PARSER_ANSWER = [
   "@@ -1,3 +1,3 @@",
   " defmodule P do",
   "-  def parse(text), do: text |> String.split(\"\\n\") |> Enum.drop(-1)",
+  "+  # The last line is a line too: String.split/2 keeps what follows the final newline, and a caller that wants it gone trims it there, where it knows why.",
   "+  def parse(text), do: String.split(text, \"\\n\")",
   " end",
   "```",
@@ -181,6 +188,13 @@ const PARSER_ANSWER = [
   "test,before,after",
   "keeps the last line,fail,pass",
   "empty input,pass,pass",
+  "```",
+  "",
+  "How a line goes through it now:",
+  "",
+  "```mermaid",
+  "flowchart LR",
+  "  input[text] --> split[String.split] --> lines[every line, the last too]",
   "```",
 ].join("\n");
 
@@ -200,7 +214,19 @@ function rehearse(text: string, live: boolean): void {
     [0, now("agent_state", { state: "thinking" })],
     [900, now("llm_delta", { kind: "reasoning", text: "The test says the parser loses the last line of its input. " })],
     [1400, now("llm_delta", { kind: "reasoning", text: "Read the parser before touching it, then run the tests." })],
-    [1200, say("llm_response", { message: { role: "assistant", content: [{ type: "text", text: "Looking at the parser first." }] } })],
+    // The log keeps the reasoning in the reply (troupe #659), which a replay draws.
+    [
+      1200,
+      say("llm_response", {
+        message: {
+          role: "assistant",
+          content: [
+            { type: "reasoning", provider: "openai", text: "The test says the parser loses the last line of its input. Read the parser before touching it, then run the tests." },
+            { type: "text", text: "Looking at the parser first." },
+          ],
+        },
+      }),
+    ],
     [0, now("agent_state", { state: "acting" })],
     ...call(`ls-${tag}`, "list_files", { path: "lib" }, true, "lib/p.ex\nlib/q.ex\nlib/r.ex", 700),
     ...call(`nope-${tag}`, "read_file", { path: "nope.ex" }, false, "No such file: nope.ex", 300),

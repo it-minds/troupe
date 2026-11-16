@@ -29,8 +29,9 @@ something newer ([below](#recommended-or-latest)).
    `manifest.json.minisig` first. The manifest names every file of the release, with its
    size and its sha256, and the signature has to be by a key this build of troupe carries.
    A release with no manifest, no signature, or another key's, is refused, and so is a
-   manifest of another version than the one asked for. Releases before 0.13 and pre-releases
-   are not signed, so `troupe update` does not install them; their own installers do.
+   manifest of another version than the one asked for. Releases before 0.13 are not
+   signed, so `troupe update` does not install them; their own installers do. A beta is a
+   signed release like any other.
 3. **Downloads and checks each file.** The troupe and the troupe-daemon built for your
    machine, each next to what it replaces and each held to the manifest. One that is not as
    the manifest says stops the update before anything is replaced.
@@ -268,7 +269,7 @@ signed one, a manifest someone edited, or one signed by any other key, is refuse
   word comes over your signed-in connection to it, so this holds for as long as the plane
   itself is not the one holding you back;
 - anything about a release's build machine, or about what is already on your machine;
-- anything about a pre-release or a release before 0.13, which are not signed.
+- anything about a release before 0.13, which is not signed.
 
 The installers (`install.sh`, `install.ps1`) check the same signature when
 [minisign](https://jedisct1.github.io/minisign/) is installed. Without it they say they can

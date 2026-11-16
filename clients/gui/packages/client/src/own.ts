@@ -18,7 +18,7 @@ import type { Person } from "./invites.js";
 import type { MemoryDocument, MemoryPreview, MemorySaved } from "./admin.js";
 import { renderEntries } from "./entries.js";
 import type { MemoryEntry, MemoryInEffect } from "./entries.js";
-import type { OwnMemory, OwnMemoryHistory, OwnMemorySaved } from "./instructions.js";
+import type { MemoryProposal, OwnMemory, OwnMemoryHistory, OwnMemorySaved } from "./instructions.js";
 
 type Rpc = <T = unknown>(method: string, params?: unknown) => Promise<T>;
 type Scope = "organisation" | "team" | "profile";
@@ -74,6 +74,7 @@ interface PlaneMemory {
   teams?: string[];
   organisation?: { name: string } | null;
   roles?: { platform_admin?: unknown; team_admin?: unknown } | null;
+  proposals?: MemoryProposal[];
 }
 
 /**
@@ -203,6 +204,7 @@ function ownOf(answer: PlaneMemory, planeUrl: string): OwnMemory {
     documents,
     organisation: answer.organisation ?? null,
     roles: { platform_admin: roles.platform_admin === true, team_admin: Array.isArray(roles.team_admin) ? roles.team_admin.filter((t): t is string => typeof t === "string") : [] },
+    proposals: Array.isArray(answer.proposals) ? answer.proposals : [],
   };
 }
 

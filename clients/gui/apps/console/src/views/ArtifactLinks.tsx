@@ -10,6 +10,7 @@
 
 import { useState } from "react";
 import type { JSX } from "react";
+import { appLink } from "@troupe/client";
 import type { ArtifactApi, ArtifactDetail, ArtifactNewLink, ArtifactShare, ArtifactShareRole } from "@troupe/client";
 import { describeError, useConsole } from "../console";
 import { Field, Region, ShownOnce, when } from "./bits";
@@ -24,7 +25,7 @@ function endOfDay(day: string): string | undefined {
 }
 
 export function ArtifactLinks({ artifact: a, api, reload }: { artifact: ArtifactDetail; api: ArtifactApi; reload: () => void }): JSX.Element {
-  const { notify } = useConsole();
+  const { notify, plane } = useConsole();
   const [role, setRole] = useState<ArtifactShareRole>("view");
   const [expires, setExpires] = useState("");
   const [pub, setPub] = useState(false);
@@ -71,7 +72,11 @@ export function ArtifactLinks({ artifact: a, api, reload }: { artifact: Artifact
       <Region>Links</Region>
       <p className="lead">A link signs whoever opens it in at this plane first, and gives them its role on {a.title} alone. Nobody who does not hold it gains anything by it.</p>
       {made && (
-        <ShownOnce label={made.share.public ? "The public link" : "The link"} value={made.url}>
+        <ShownOnce label={made.share.public ? "The public link" : "The link"} value={made.share.public ? made.url : `${made.url}\n${appLink({ kind: "artifact", id: a.id, plane: plane.url })}`}>
+          {/* The app's own link carries nothing of the link's key: it opens the artifact for
+              whoever already holds a role on it, which the first line gives them. A public
+              link's reader may have no sign-in here, so it is not offered with one. */}
+          {!made.share.public && <p className="hint">The second line opens it in the Troupe app, once the first has been opened.</p>}
           <div className="actions">
             <button
               type="button"

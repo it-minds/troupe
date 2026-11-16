@@ -73,6 +73,13 @@ Each goes into **Settings → Environments → release → Environment secrets**
 | `AZURE_CLIENT_ID` | the app registration's client ID | step 6 |
 | `AZURE_CLIENT_SECRET` | the app registration's client secret | step 6 |
 
+Where they are read, all in `native.yml` and only with `sign: release`: the `signing` job
+reads whether each is set, never its value. The Apple six reach the macOS keychain step of
+`daemon` and `tui`, their notarise steps and the desktop's signed build; the job writes
+`APPLE_API_PRIVATE_KEY` to a file for tauri-action and removes it after the build. The
+Azure six reach the signed build steps of `daemon` and `tui`, the TUI's `Sign the binary`
+and the desktop's signed build.
+
 ## Once, before the first signed release
 
 - **Apple:** the organisation's Developer ID Application certificate exported with its key

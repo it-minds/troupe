@@ -1,0 +1,41 @@
+/* Every page of the site (mkdocs.yml, extra_css).
+
+   The type is the product's own Figtree, served from this site: `theme.font` is off, so
+   the theme fetches nothing from a font service, and a reader's browser asks no third party
+   for anything. The mono face is the system's. The files and their licence (SIL OFL 1.1)
+   are in assets/fonts/, copied from @fontsource/figtree, which the apps bundle. */
+
+@font-face {
+  font-family: "Figtree";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("fonts/figtree-latin-400-normal.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Figtree";
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url("fonts/figtree-latin-700-normal.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Figtree";
+  font-style: normal;
+  font-weight: 900;
+  font-display: swap;
+  src: url("fonts/figtree-latin-900-normal.woff2") format("woff2");
+}
+
+:root {
+  --md-text-font: "Figtree";
+}
+
+/* A picture drawn once per theme says which it is for as GitHub spells it, so the same
+   Markdown shows one picture on GitHub and on the site: here the theme's scheme picks. */
+[data-md-color-scheme="default"] img[src$="#gh-dark-mode-only"],
+[data-md-color-scheme="slate"] img[src$="#gh-light-mode-only"] {
+  display: none;
+}

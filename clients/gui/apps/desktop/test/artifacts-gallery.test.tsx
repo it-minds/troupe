@@ -157,7 +157,7 @@ describe("the gallery", () => {
     // Somebody else's: its address is the link, and none of the owner's controls is offered.
     (await seesButton("Copy link", details)).click();
     await waitFor(() => copied.length === 1, "the copied link");
-    expect(copied[0]).toBe("https://artifacts.example.test/a/art-weekly/");
+    expect(copied[0]).toBe(`https://artifacts.example.test/a/art-weekly/\ntroupe://artifact/art-weekly?plane=${encodeURIComponent(harness!.plane.baseUrl)}`);
     expect(button("Pin", details)).toBeNull();
     expect(button("Publish a new version", details)).toBeNull();
     expect(network!.requests.filter((r) => r.url.includes("artifacts.example.test"))).toEqual([]);
@@ -172,7 +172,8 @@ describe("the gallery", () => {
 
     (await seesButton("Copy link", details)).click();
     await waitFor(() => copied.length === 1, "the link copied");
-    expect(copied[0]).toBe("https://artifacts.example.test/s/tok-sh-1");
+    // Under the link, the app's own, which carries nothing of its key (#959).
+    expect(copied[0]).toBe(`https://artifacts.example.test/s/tok-sh-1\ntroupe://artifact/art-mine?plane=${encodeURIComponent(harness!.plane.baseUrl)}`);
     await sees("Can view");
 
     (await waitFor(() => details.querySelector<HTMLButtonElement>('button[aria-label="Open version 1"]'), "version 1's Open")).click();
