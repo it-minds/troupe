@@ -331,6 +331,25 @@ defmodule Troupe.Gateway.ArtifactsTest do
     end
   end
 
+  # The person's own gallery: an artifact kept at the top, or let go, on the plane, so every
+  # device and app of theirs shows it so.
+  test "keeping one at the top goes to the plane with only its id and on", ctx do
+    keep = %{"command_id" => Client.command_id(), "id" => "art-fakefakefakefake", "on" => true}
+
+    assert {:error, %{message: "unavailable"}} = Client.call(ctx.client, "artifact.keep", keep)
+    refute Enum.any?(FakePlane.calls(ctx.plane.state), &match?({"artifact.keep", _}, &1))
+
+    assert {:ok, %{"linked" => true}} = link(ctx)
+
+    assert {:ok, %{"id" => "art-fakefakefakefake", "kept" => true, "plane_url" => _}} =
+             Client.call(ctx.client, "artifact.keep", keep)
+
+    assert {"artifact.keep", %{"id" => "art-fakefakefakefake", "on" => true} = sent} =
+             Enum.find(FakePlane.calls(ctx.plane.state), &match?({"artifact.keep", _}, &1))
+
+    refute Map.has_key?(sent, "command_id")
+  end
+
   test "a session's agent publishes through the daemon, naming the session and itself", ctx do
     assert {:ok, %{"linked" => true}} = link(ctx)
     File.write!(Path.join(ctx.workspace, "report.md"), "# Findings")

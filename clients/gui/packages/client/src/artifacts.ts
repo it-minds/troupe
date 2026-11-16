@@ -105,6 +105,12 @@ export interface Artifact {
   public_links?: boolean;
   /** Whether a public link opens it now. */
   public?: boolean;
+  /**
+   * Whether the caller keeps it at the top of their own gallery: the person's view, kept on
+   * the plane so every device and app of theirs shows it so, and nobody else's. Absent from
+   * a plane from before it.
+   */
+  kept?: boolean;
 }
 
 export interface ArtifactFile {
@@ -412,5 +418,10 @@ export class ArtifactApi {
    */
   transfer(id: string, to: ArtifactTransferTo): Promise<ArtifactDetail> {
     return this.rpc<ArtifactDetail>("artifact.transfer", { id, to });
+  }
+
+  /** Keep it at the top of the caller's own gallery (`true`), or let it go (`false`): anybody who may open it, for themselves. */
+  keep(id: string, on: boolean): Promise<ArtifactDetail> {
+    return this.rpc<ArtifactDetail>("artifact.keep", { id, on });
   }
 }

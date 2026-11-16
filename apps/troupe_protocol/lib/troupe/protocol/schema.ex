@@ -1307,6 +1307,13 @@ defmodule Troupe.Protocol.Schema do
         "id" => required(:string),
         "to" => required(:string)
       },
+      # One kept at the top of the person's own gallery (`on: true`), or let go (`false`):
+      # the person's view of their gallery, kept on the plane.
+      "artifact.keep" => %{
+        "command_id" => required(:string),
+        "id" => required(:string),
+        "on" => required(:boolean)
+      },
       # Who may open it moved by its owner, or its title: a version over `base` carrying
       # every file of it, no files sent.
       "artifact.put" => %{

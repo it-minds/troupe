@@ -106,6 +106,8 @@ daemon.artifacts = [
     ],
   }),
   artifact({ id: "art-ledger", title: "Ledger migration plan", visibility: "profile:dev", published_at: day(2) }),
+  // A second of the person's teams under Your teams, so it offers a chip per team (#978).
+  artifact({ id: "art-oncall", title: "On-call handover", kind: "markdown", visibility: "team:core", published_at: day(5) }),
   artifact({ id: "art-interviews", title: "Field interview guide", kind: "file", visibility: "profile:ux", shared: true, role: "view", published_at: day(4) }),
   artifact({ id: "art-mine", title: "Placement loop benchmarks", mine: true, role: "owner", owner: { subject: "alice@example.com", display_name: "Alice" }, version: 2, current: 2, published_at: day(12), may_delete: true }),
 ];

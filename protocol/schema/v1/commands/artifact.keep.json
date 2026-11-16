@@ -1,0 +1,23 @@
+{
+  "$id": "https://troupe.dev/schema/v1/commands/artifact.keep.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "properties": {
+    "command_id": {
+      "type": "string"
+    },
+    "id": {
+      "type": "string"
+    },
+    "on": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "command_id",
+    "id",
+    "on"
+  ],
+  "title": "artifact.keep",
+  "type": "object"
+}

@@ -13,6 +13,7 @@
     "commands/artifact.comment.json",
     "commands/artifact.comments.json",
     "commands/artifact.get.json",
+    "commands/artifact.keep.json",
     "commands/artifact.list.json",
     "commands/artifact.open.json",
     "commands/artifact.pin.json",

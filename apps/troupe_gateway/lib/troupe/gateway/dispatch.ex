@@ -253,6 +253,8 @@ defmodule Troupe.Gateway.Dispatch do
     "artifact.put" => :control,
     # Whose it is: handed to a team, or taken back from one.
     "artifact.transfer" => :control,
+    # One kept at the top of the person's own gallery, or let go.
+    "artifact.keep" => :control,
     # Where this machine's copy of the plane's memory stands, and what each session here
     # last read: for the person's own debugging (`troupe memory --status`).
     "me.memory.status" => :observe,
@@ -1640,6 +1642,10 @@ defmodule Troupe.Gateway.Dispatch do
   # its answer with `plane_url`, its refusal with the plane's own code. Signed out, a sentence.
   defp handle(method, params, _context) when method in @forwarded_artifacts,
     do: forwarded(method, Artifacts.forward(method, params))
+
+  # One kept at the top of the person's own gallery, or let go, forwarded as those are.
+  defp handle("artifact.keep", params, _context),
+    do: forwarded("artifact.keep", Artifacts.forward("artifact.keep", params))
 
   # The person's own memory's history and a rollback, for the desktop app's Memory view.
   defp handle("me.memory.history", params, _context),

@@ -327,6 +327,8 @@ export class FakePlane {
   readonly artifacts = new Map<string, FakeArtifact>();
   /** Every `artifact.open` asked, in order, with the link it answered. */
   readonly opened: Array<{ subject: string; id: string; version: number | null; url: string }> = [];
+  /** The artifacts each person keeps at the top of their own gallery, by subject. */
+  readonly kept = new Map<string, Set<string>>();
   /** The links made to artifacts, by id. */
   readonly shares = new Map<string, FakeArtifactShare>();
   /** Who each artifact is shared with by name, by artifact and then by person. */
@@ -983,6 +985,7 @@ export class FakePlane {
       commented_at: this.comments.get(a.id)?.at(-1)?.created_at ?? null,
       public_links: a.public_links !== false,
       public: this.isPublic(a),
+      kept: this.kept.get(subject)?.has(a.id) ?? false,
       bytes: latest.files.reduce((n, f) => n + new TextEncoder().encode(f.content).length, 0),
       url: `https://artifacts.example.test/a/${a.id}/`,
       published_at: latest.published_at,
@@ -1551,6 +1554,18 @@ export class FakePlane {
         if (!a || !this.mayRead(a, subject)) return { error: { code: -32005, message: "not_found" } };
         if (!this.owns(a, subject)) return { error: { code: -32004, message: "forbidden", data: { reason: "only its owner pins a version of an artifact" } } };
         a.pinned = typeof params["version"] === "number" ? params["version"] : null;
+        return { result: { ...this.artifactJson(a, subject), versions: this.artifactVersions(a) } };
+      }
+
+      // Kept at the top of the person's own gallery, or let go: anybody who may open it, for themselves alone.
+      case "artifact.keep": {
+        const a = this.artifacts.get(String(params["id"] ?? ""));
+        if (!a || !this.mayRead(a, subject)) return { error: { code: -32005, message: "not_found" } };
+        if (typeof params["on"] !== "boolean") return { error: { code: -32602, message: "invalid_params", data: { reason: "on is true, to keep it at the top of your gallery, or false, to let it go" } } };
+        const theirs = this.kept.get(subject) ?? new Set<string>();
+        if (params["on"]) theirs.add(a.id);
+        else theirs.delete(a.id);
+        this.kept.set(subject, theirs);
         return { result: { ...this.artifactJson(a, subject), versions: this.artifactVersions(a) } };
       }
 

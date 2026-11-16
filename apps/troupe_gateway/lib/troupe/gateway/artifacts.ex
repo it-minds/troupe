@@ -171,7 +171,10 @@ defmodule Troupe.Gateway.Artifacts do
     "artifact.put" => ~w(id base visibility title note),
     # Whose it is: handed to a team the person is in, or taken back (`to: "me"`) by an admin
     # of that team or a platform admin; the plane decides, as for every method here.
-    "artifact.transfer" => ~w(id to)
+    "artifact.transfer" => ~w(id to),
+    # One kept at the top of the person's own gallery, or let go: theirs on the plane, so
+    # every device and app of theirs shows it.
+    "artifact.keep" => ~w(id on)
   }
 
   @doc "The methods `forward/2` sends to the plane."
