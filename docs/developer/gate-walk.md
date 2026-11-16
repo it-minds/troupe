@@ -98,7 +98,7 @@ covers.
 | row | what it checks | what still needs a person |
 | --- | --- | --- |
 | 1 | a repository whose `.troupe/config.yaml` turns approvals off and points the model elsewhere, whose `.troupe/mcp.json` starts a program, whose git config and hooks run programs, which carries programs named `git` and `rg` and another tool's `CLAUDE.md`: none of it holds or runs, until `troupe config trust` (which it also shows deciding), and a headless session there writes and runs nothing unasked | the questions and refusals as a person sees them, in both clients |
-| 3 | `troupe doctor --bench`: a turn of tool calls, a cut output, a compaction, a cancel, a replay and the onboarding scenarios, offline | a real account and a real session |
+| 3 | `troupe doctor --bench`: a turn of tool calls, a cut output, a compaction, a cancel, a replay and the onboarding scenarios, offline; then again with the temporary directory inside a repository whose `AGENTS.md` would reach the prompts if the bench read it | a real account and a real session |
 | 5 | `troupe update --check` finds the latest release and its manifest signed by the release key; a release signed by another key is refused with nothing installed | an update, on a plane's recommendation, of a real install |
 | 6 | an organisation's document with `max_turns` and `approvals` enforced: `troupe config --explain` holds a user file's higher value to it and names the organisation | the plane's console, `troupe config pull`, the managed file |
 | 7 | the installed `troupe --help` prints exactly the command table in the [command reference](../user/cli-reference.md), and the clone's `VERSION` is the installed version | reading the pages |

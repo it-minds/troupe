@@ -164,12 +164,12 @@ Nothing a pod says about itself is trusted for its identity.
 
 | Subject | Rules |
 |---|---|
-| plane (Role in `troupe-system`) | `workerprofiles`, `teamvolumes`: all verbs (in `gitops` mode `workerprofiles` only read and patch, and `triggers` read); `endpoints`, `pods`: read (libcluster) |
+| plane (Role in `troupe-system`) | `workerprofiles`, `teamvolumes`: all verbs, and `triggers` read (in `gitops` mode `workerprofiles` only read and patch, `workerprofiles/status` patch, and `triggers` and `githubapps` read); `endpoints`, `pods`: read (libcluster) |
 | plane (ClusterRoles) | `troupepolicies`: read; `system:auth-delegator` for `TokenReview` |
-| operator (ClusterRole) | `troupe.dev` resources read and status write; namespaces, service accounts, services, PVCs, PVs, ConfigMaps (a profile's `mcpIdentities`, none of it secret), StatefulSets, Ingresses, NetworkPolicies, PDBs, CiliumNetworkPolicies: CRUD; pods: read and delete; events; leases |
+| operator (ClusterRole) | `troupe.dev` resources read and status write; namespaces, service accounts, services, PVCs, PVs, ConfigMaps (a profile's `mcpIdentities`, none of it secret), Secrets by name only (get, create, patch, delete: the ones a worker namespace mounts, copied from `troupe-system`; no list or watch), StatefulSets, Ingresses, NetworkPolicies, PDBs, CiliumNetworkPolicies: CRUD; pods: read and delete; events; leases |
 | A2A | none; no token mounted |
 
-No subject has any verb on `secrets`: the plane never holds a secret value. The plane
+Neither the plane nor A2A has any verb on `secrets`: the plane never holds a secret value. The plane
 cannot write `TroupePolicy`, so a compromised plane can only submit profiles that must still
 pass admission and the operator.
 

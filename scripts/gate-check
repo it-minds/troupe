@@ -283,6 +283,18 @@ run "$W" TROUPE_PROVIDER=fake TROUPE_MODEL=fake-model -- doctor --bench
 bench=$(grep -E '^ok +bench +[0-9]+ of [0-9]+ passed' "$W/out" | sed -E 's/^ok +bench +([0-9]+ of [0-9]+) passed.*/\1/')
 if [ "$code" = 0 ] && [ -n "$bench" ]; then pass 3 "troupe doctor --bench: $bench offline scenarios passed"
 else fail 3 "troupe doctor --bench exited $code" "$W/all"; fi
+# Again with the temporary directory inside a repository, as a CI runner's workspace or a
+# build sandbox can be, whose AGENTS.md would put every scenario over its budget: the
+# bench's workspaces read no instruction file from outside themselves (#767). A .git is
+# all the harness looks for to find a repository's root.
+outer="$W/outer-repository"
+mkdir -p "$outer/.git" "$outer/tmp"
+awk 'BEGIN { for (i = 0; i < 200; i++) print "A rule of the repository the temporary directory is in." }' >"$outer/AGENTS.md"
+outer_tmp=$(nat "$outer/tmp")
+run "$W" TROUPE_PROVIDER=fake TROUPE_MODEL=fake-model "TMPDIR=$outer_tmp" "TEMP=$outer_tmp" "TMP=$outer_tmp" -- doctor --bench
+bench=$(grep -E '^ok +bench +[0-9]+ of [0-9]+ passed' "$W/out" | sed -E 's/^ok +bench +([0-9]+ of [0-9]+) passed.*/\1/')
+if [ "$code" = 0 ] && [ -n "$bench" ]; then pass 3 "the same with the temporary directory inside a repository: $bench, its AGENTS.md in no scenario's prompt"
+else fail 3 "troupe doctor --bench with the temporary directory inside a repository exited $code: its AGENTS.md reached the scenarios" "$W/all"; fi
 
 # ==== row 5: only what the release key signed ==============================================
 if [ "$offline" = 1 ]; then skip 5 "troupe update --check against the latest release (--offline)"

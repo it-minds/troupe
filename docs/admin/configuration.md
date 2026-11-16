@@ -19,8 +19,7 @@ A session also reads `config.yaml` files: a machine's and a workspace's (Part F)
   `test` the values come from `config/config.exs` (Postgres on `localhost:25432`, MinIO on
   `:29000`, OpenBao on `:28200` with root token `troupe-dev-root`).
 - Five `*_AUTOSTART` flags decide which supervision tree starts (operator, plane, worker,
-  daemon, A2A). The image runs `/app/bin/${RELEASE_NAME} start`, `RELEASE_NAME` baked in at
-  build time.
+  daemon, A2A). The image runs `/app/bin/${RELEASE_NAME} start`, `RELEASE_NAME` baked in.
 - Unset and `""` mean the same thing, because a blank Helm value renders as `""`.
 - The plane's database is configured whenever `DATABASE_URL` is set, outside the autostart
   gate, so the migration Job (`TROUPE_PLANE_AUTOSTART=false`) can reach it.
@@ -84,7 +83,7 @@ A session also reads `config.yaml` files: a machine's and a workspace's (Part F)
 | `TROUPE_SCIM_TOKEN` | unset | the deployment's SCIM bearer; the console can mint its own | `plane.scim.*` |
 | `TROUPE_PLANE_AUDIENCE` | `troupe-plane-api` | `aud` of plane tokens | none |
 | `TROUPE_PROVISIONING_MODE` | `direct` | `direct`: the console writes profiles to the cluster. `gitops`: a repository holds the `WorkerProfile`, `TroupePolicy`, `Trigger` and `GitHubApp` resources and something else applies them ([gitops.md](gitops.md)). Deployment only; in `gitops` the chart's Role drops `create` and `delete` on `WorkerProfile` and reads `Trigger` and `GitHubApp` | `plane.provisioningMode` |
-| `TROUPE_GITOPS_SOURCE` | unset | the repository and path the console shows beside "Locked to gitops". Display only; the plane never reads it | `plane.gitops.source` |
+| `TROUPE_GITOPS_SOURCE` | unset | the repository and path the console shows beside "Held in a repository". Display only; the plane never reads it | `plane.gitops.source` |
 | `TROUPE_KUBECONFIG` | unset | how the plane reaches Kubernetes to apply profiles and read the policy; unset, the in-pod ServiceAccount; with neither, profiles are saved and reported `not_applied` | none |
 | `TROUPE_WORKER_IMAGE` | unset | the image a profile whose image is `release` runs | `worker.image.*`, tag default `appVersion` |
 | `TROUPE_OIDC_ISSUER`, `TROUPE_OIDC_CLIENT_ID` | none | the identity provider and app registration (required) | `plane.oidc.issuer`, `clientId` |
@@ -167,6 +166,7 @@ upgrade. Values that only feed a variable in Part A are listed there; these are 
 |---|---|---|
 | `namespace` | `troupe-system` | the namespace, and the control host `troupe-plane-control.<namespace>.svc`. Keep the default: the plane reads and writes `WorkerProfile`s in `troupe-system` whatever it says |
 | `createNamespace` | `true` | the chart makes the namespace, marked to be kept on uninstall ([installing.md §2](installing.md#2-crds-then-the-chart)) |
+| `podSecurity.labels`, `podSecurity.level` | `true`, `""` | Pod Security admission labels (`enforce`, `audit`, `warn`): the operator labels each worker namespace with the lowest level its pods need (`privileged` with `worker.userNamespaces` or an `Unconfined` seccomp profile, `restricted` otherwise), and the chart labels the namespace it makes with `level`, empty meaning the lowest its own pods there need (`privileged` while `troupe-worker-profiles` runs). `labels: false` writes none and removes none |
 | `imagePullSecrets` | `[]` | pull secrets on plane, Job, operator, A2A, GUI, and (via the operator) workers |
 | `networkPolicy.enabled` | `true` | plane, operator, A2A and GUI NetworkPolicies |
 | `operator.image.*`, `plane.image.*`, `a2a.image.*`, `gui.image.*` | `ghcr.io/it-minds/troupe-<name>` (public), tag `appVersion` | the images |
@@ -227,8 +227,8 @@ and not editable; a stored value from before 0.7.0 is not read), **team defaults
 the budget, its period, the idle timeout and erase-after set here; cache eviction, pins,
 whether members may control sessions and a person's monthly ceiling hold for every team
 at once), **sessions** (managed permission rules and MCP servers only, the default
-bundle channel), **sign in** (issuer, client, endpoints, scopes — the console's **Identity
-provider** card — and `subject_claim`, shown there and not editable), **client defaults**
+bundle channel), **sign in** (issuer, client, endpoints, scopes — the **Single sign-on**
+card on the console's **Sign-in** page — and `subject_claim`, shown there and not editable), **client defaults**
 (the provider and models people's own machines take as their organisation's defaults,
 `client_key_help` and `client_key`, where a key comes from and one handed to everybody, and
 `client_enforced`, what those machines may not go past: [Part F](client-config.md#defaults-and-limits-for-peoples-machines)),

@@ -228,7 +228,7 @@ plane:
   provisioningMode: direct
   gitops:
     # Where the profiles and triggers come from, as a person should read it: a repository
-    # URL and a path, shown beside "Locked to gitops". Display only; the plane never
+    # URL and a path, shown beside "Held in a repository". Display only; the plane never
     # reads it.
     source: ""
   # The identity provider group whose members administer the platform. Membership is

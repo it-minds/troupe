@@ -221,13 +221,13 @@ reaches an enforced turn or time limit, the question that asks whether to go on 
 it past (#622).
 
 They hold against a mistake, not against the person. The daemon runs as the person, and a
-plane's settings reach it as `organisation.json` in their own state directory, which they
-can edit or delete. The strong form is the **managed file**, at a fixed path only an
+plane's settings reach it as `organisation.json` in their own state directory, signed by
+the plane: a copy edited there no longer matches the signature and is refused, but the
+person can delete it. The strong form is the **managed file**, at a fixed path only an
 administrator can write, which in a release no variable or flag moves (`Troupe.Config.Org`;
 on Windows it is found from the registry, never from `%ProgramData%`, which a person can
 set). Where both speak, the stricter limit holds. A person who runs a build of their own is
-bound by neither. #657 is the plan to sign what the plane sends, so that an edited copy is
-refused.
+bound by neither.
 
 ## 8. A person's own tools on a team's pods
 

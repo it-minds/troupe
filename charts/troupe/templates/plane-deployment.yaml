@@ -299,7 +299,7 @@ spec:
               value: {{ .Values.policy.namespacePrefix | quote }}
             - name: TROUPE_PROVISIONING_MODE
               value: {{ .Values.plane.provisioningMode | quote }}
-            # Shown beside "Locked to gitops"; the plane never reads the repository it names.
+            # Shown beside "Held in a repository"; the plane never reads the repository it names.
             - name: TROUPE_GITOPS_SOURCE
               value: {{ .Values.plane.gitops.source | quote }}
             # What a profile whose image is `release` runs: this release's worker, so an

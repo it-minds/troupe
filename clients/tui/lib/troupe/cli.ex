@@ -275,6 +275,7 @@ defmodule Troupe.CLI do
      [["doctor"], ["doctor", "--json"]]},
     {"troupe doctor --bench [--json]",
      "the same, then a turn of tool calls, a cut output, a compaction, a cancel, a replay, " <>
+       "thinking made before a prompt change, " <>
        "four onboarded repositories and a memory whose command's file changed against a " <>
        "scripted model: offline, in seconds",
      [["doctor", "--bench"], ["doctor", "--bench", "--json"]]},
