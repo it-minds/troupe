@@ -1,6 +1,6 @@
 # Troupe GUI — design
 
-The browser client for Troupe. This document is the reasoning behind the token files and `example.dc.html`, and the rules for anyone building a new screen.
+The browser client for Troupe. This document is the reasoning behind the token files and `example.dc.html`, and the rules for anyone building a new screen. It is the desktop app's design and the system both web apps share; the console's screens apply it in [the console's design](../../../../docs/design/admin/DESIGN.md), which says where the two differ.
 
 Files:
 
