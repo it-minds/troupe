@@ -12,11 +12,14 @@
 #
 # Every pull request, into `main`, a `development-*` chunk or anything else, and no path
 # filter: a workflow skipped by `paths:` leaves its check pending, and the answer is one
-# job of a couple of minutes.
+# job of a couple of minutes. And every night, called by `nightly.yml` on `main`: an
+# advisory published against a package already locked arrives with no pull request to
+# fail, and the night is when it is found.
 name: licences
 
 on:
   pull_request:
+  workflow_call:
 
 concurrency:
   group: licences-${{ github.ref }}
