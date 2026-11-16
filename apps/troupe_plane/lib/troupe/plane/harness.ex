@@ -138,6 +138,8 @@ defmodule Troupe.Plane.Harness do
     # Its history, for the person's own app: every version, two side by side, a rollback.
     "me.memory.history" => :observe,
     "me.memory.rollback" => :control,
+    # An agent of theirs proposing an entry for a team's or the organisation's memory.
+    "me.memory.propose" => :control,
     # What a new session of theirs in a team reads, as one list of topics.
     "memory.in_effect" => :observe,
     "me.clients" => :observe,
@@ -435,7 +437,15 @@ defmodule Troupe.Plane.Harness do
 
     documents = Memory.for_person(user)
 
-    answer = %{"documents" => documents, "user" => own, "organisation" => organisation()}
+    # The person's own proposals for a team's or the organisation's memory, pending or
+    # decided this week: the app shows a pending one under its level, and a daemon tells
+    # the session one came from what became of it.
+    answer = %{
+      "documents" => documents,
+      "user" => own,
+      "organisation" => organisation(),
+      "proposals" => Memory.Proposals.own(user)
+    }
 
     # With entries, every team of the caller's by name too, a team with no document among
     # them, so a client lists each as a level of its own.
@@ -497,6 +507,26 @@ defmodule Troupe.Plane.Harness do
     with :ok <- own_memory(user),
          {:ok, saved} <- save_own(user, params) do
       {:ok, own_saved(user, saved)}
+    end
+  end
+
+  # An agent of the person's, on their machine, proposing one entry for a team's memory or
+  # the organisation's (`remember` to `team` or `organisation`), through their daemon: kept
+  # for an administrator to accept or decline, written into no document. A team is one of
+  # theirs: the one named, or their only one; with several and none named, the refusal names
+  # them. `session` and `agent` say where it came from, which the person's own answer
+  # carries back so the daemon tells that session what became of it.
+  defp handle("me.memory.propose", params, %{user: user}) do
+    with :ok <- own_memory(user),
+         {:ok, scope, team} <- proposal_level(user, params["scope"], params["team"]) do
+      opts = [topic: params["topic"], where: "machine"] ++ written_from(params)
+
+      case Memory.Proposals.propose(user, scope, team, params["append"], opts) do
+        {:ok, proposal} -> {:ok, Memory.Proposals.json(proposal)}
+        {:error, :off} -> {:error, Error.new(:forbidden, %{reason: Memory.Proposals.off_reason()})}
+        {:error, :no_person} -> own_memory(nil)
+        {:error, reason} -> invalid(reason)
+      end
     end
   end
 
@@ -1831,6 +1861,37 @@ defmodule Troupe.Plane.Harness do
       end
     end
   end
+
+  # The level a person's machine proposes for: the organisation's, or one of their teams'.
+  defp proposal_level(_user, "organisation", _team), do: {:ok, "organisation", nil}
+
+  defp proposal_level(user, "team", name) do
+    teams = user |> Identity.teams_for() |> Enum.sort_by(& &1.name)
+
+    case {teams, name} do
+      {[], _name} ->
+        invalid("you are in no team, so there is no team's memory to propose for")
+
+      {[only], nil} ->
+        {:ok, "team", only}
+
+      {teams, nil} ->
+        invalid(
+          "you are in #{length(teams)} teams (#{Enum.map_join(teams, ", ", & &1.name)}): " <>
+            "name the one the proposal is for as team",
+          field: "team"
+        )
+
+      {teams, name} ->
+        case Enum.find(teams, &(&1.name == name)) do
+          nil -> invalid("you are not in a team called #{name}", field: "team")
+          team -> {:ok, "team", team}
+        end
+    end
+  end
+
+  defp proposal_level(_user, scope, _team),
+    do: invalid("a proposal is for team or organisation, not #{inspect(scope)}", field: "scope")
 
   defp written_from(params) do
     for {key, opt} <- [{"session", :session}, {"agent", :agent}],

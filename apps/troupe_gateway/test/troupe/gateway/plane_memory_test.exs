@@ -391,6 +391,46 @@ defmodule Troupe.Gateway.PlaneMemoryTest do
                other.id |> Troupe.events() |> Enum.filter(&(&1.type == "memory_changed"))
     end
 
+    # A proposal for a team's memory (#55): sent on as `me.memory.propose`, naming the
+    # session, answered as awaiting review; what became of it reaches the session as one
+    # line with a later poll, however many polls carry it.
+    test "remember with level team proposes through the daemon, and the decision is told to the session once",
+         ctx do
+      _fingerprint = FakePlane.sign(ctx.plane.state)
+      FakePlane.memory_with(ctx.plane.state, @documents)
+      FakePlane.keep_own(ctx.plane.state)
+      assert {:ok, %{"linked" => true}} = link(ctx)
+      assert eventually(fn -> match?({:ok, _}, PlaneMemory.read_cache()) end)
+
+      %{session: writer} =
+        session(ctx, [
+          {:tools, [{"remember", %{"level" => "team", "claim" => "Use the design tokens everywhere.", "topic" => "Tokens"}}]},
+          {:text, "Proposed."}
+        ])
+
+      turn(writer.id, "propose that for the team")
+
+      assert {"me.memory.propose", sent} =
+               Enum.find(FakePlane.calls(ctx.plane.state), &match?({"me.memory.propose", _}, &1))
+
+      assert %{"scope" => "team", "append" => "Use the design tokens everywhere.", "topic" => "Tokens", "session" => id} = sent
+      assert id == writer.id
+
+      assert Enum.any?(Troupe.events(writer.id), fn event ->
+               event.type == "tool_call_completed" and inspect(event.data) =~ "awaiting review and in nobody's memory yet"
+             end)
+
+      FakePlane.proposals_with(ctx.plane.state, [
+        %{"id" => "p-9", "session_id" => writer.id, "state" => "declined", "message" => "Your proposal was declined by lead: tokens are per product."}
+      ])
+
+      notes = fn -> writer.id |> Troupe.events() |> Enum.filter(&(&1.type == "config_note" and &1.data["proposal"] == "p-9")) end
+      assert eventually(fn -> notes.() != [] end)
+      # A few more polls carry it; it is said once.
+      Process.sleep(500)
+      assert [%{data: %{"message" => "Your proposal was declined by lead: tokens are per product."}}] = notes.()
+    end
+
     # Memory as entries: every document with its `## Topic` sections (read off the text here
     # where the plane answered none), a save of entries, what is in effect in a team, and the
     # levels of the organisation's the person administers, each the plane's as them.

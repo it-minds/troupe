@@ -22,9 +22,16 @@ defmodule Troupe.Tools.Remember do
   above the repository an agent may write, and only by adding one entry, which the plane
   puts at the end of its `topic`'s `## <topic>` section, `Notes` where none is named, below
   what is there (`Troupe.UserMemory`). The model names no
-  path and no document there either, only the sentence; the organisation's, a team's and a
-  profile's memory have no level here at all. Signed out, or with no plane, it is refused
-  with a sentence that offers the repository's memory.
+  path and no document there either, only the sentence. Signed out, or with no plane, it is
+  refused with a sentence that offers the repository's memory.
+
+  `level: "team"` and `level: "organisation"` propose an entry instead (#55): the plane keeps
+  it for an administrator who may change that level to accept, which writes it into the
+  document as an entry with this session and agent as its provenance, or decline with a
+  sentence the session is told (`Troupe.UserMemory.propose/4`). Nothing is in effect until
+  then, and the answer says so, so the agent does not say it is. A profile's memory has no
+  level here: it is the profile's administrator's alone. The plane refuses a proposal in words
+  where its setting switched them off.
   """
 
   @behaviour Troupe.Tool
@@ -34,7 +41,8 @@ defmodule Troupe.Tools.Remember do
   alias Troupe.{Tool, UserMemory, Workspace}
 
   @kinds ~w(command convention overview layout negative note)
-  @levels ~w(repository me)
+  @levels ~w(repository me team organisation)
+  @proposed ~w(team organisation)
   @old_form "remember no longer takes section and text: it writes one fact, with kind " <>
               "(command, convention, overview, layout, negative or note), claim (one or two " <>
               "sentences) and anchors (the files you read it in), as " <>
@@ -64,11 +72,15 @@ defmodule Troupe.Tools.Remember do
   # plane is not offered a level it cannot use, and its tool list stays as it was.
   @impl Troupe.Tool
   def describe(_ctx) do
-    if UserMemory.reachable?(),
-      do:
-        description() <>
-          "\n\n`level`: `repository` (the default), or `me` for the person's own memory, which every session of theirs reads on every machine: how they like to work, not facts about this code. With `me`, give only `claim` and a `topic` (a short heading such as `Tone`; `Notes` if none); it is added as one entry under it.",
-      else: description()
+    [
+      description(),
+      UserMemory.reachable?() &&
+        "`level`: `repository` (the default), or `me` for the person's own memory, which every session of theirs reads on every machine: how they like to work, not facts about this code. With `me`, give only `claim` and a `topic` (a short heading such as `Tone`; `Notes` if none); it is added as one entry under it.",
+      UserMemory.proposes?() &&
+        "`level` `team` or `organisation` proposes an entry for the team's memory (this session's team; name it as `team` where the person is in several) or the whole organisation's, the same way, `claim` and `topic`. A proposal is reviewed: an administrator accepts or declines it, and it is not in anybody's memory until then, so do not say it is. Propose only what every session of the team or the organisation should know."
+    ]
+    |> Enum.filter(&is_binary/1)
+    |> Enum.join("\n\n")
   end
 
   @impl Troupe.Tool
@@ -82,7 +94,8 @@ defmodule Troupe.Tools.Remember do
         "scope" => %{"type" => "string", "description" => "A glob; none is the whole repository."},
         "replaces" => %{"type" => "string"},
         "level" => %{"enum" => @levels},
-        "topic" => %{"type" => "string"}
+        "topic" => %{"type" => "string"},
+        "team" => %{"type" => "string"}
       }
     }
   end
@@ -99,8 +112,12 @@ defmodule Troupe.Tools.Remember do
 
   def run(%{"level" => "me"} = args, ctx), do: remember_for_person(args, ctx)
 
+  def run(%{"level" => level} = args, ctx) when level in @proposed, do: propose(level, args, ctx)
+
   def run(%{"level" => level}, _ctx) when level not in [nil | @levels],
-    do: {:error, "level is repository (the default) or me, not #{inspect(level)}; nothing was written"}
+    do:
+      {:error,
+       "level is repository (the default), me, team or organisation, not #{inspect(level)}; nothing was written"}
 
   def run(%{"replaces" => id} = args, ctx) when not is_map_key(args, "claim") do
     with {:ok, id} <- Tool.fetch_string(args, "replaces"),
@@ -167,6 +184,52 @@ defmodule Troupe.Tools.Remember do
     end
   end
 
+  ## A proposal for a team's or the organisation's memory
+
+  defp propose(level, args, ctx) do
+    with :ok <- only_claim(args, level),
+         :ok <- not_the_librarian(ctx),
+         {:ok, claim} <- claim(args),
+         {:ok, topic} <- topic(args),
+         {:ok, team} <- team(args, level) do
+      case UserMemory.propose(claim, ctx, level, %{"topic" => topic, "team" => team}) do
+        {:ok, kept} ->
+          {:ok,
+           "proposed for #{level_words(level, kept["team"] || team)} under " <>
+             "#{kept["topic"] || topic || "Notes"}: \"#{kept["entry"] || claim}\". It is " <>
+             "awaiting review and in nobody's memory yet: an administrator accepts or declines " <>
+             "it, and this session is told which. Do not say it is remembered"}
+
+        {:error, :signed_out} ->
+          {:error,
+           "not proposed: this session's person is not signed in to a Troupe plane here, so " <>
+             "there is no #{level_words(level, nil)} to propose for. Remember it for this " <>
+             "repository instead (level repository, the default)"}
+
+        {:error, reason} ->
+          {:error, "not proposed for #{level_words(level, team)}: #{reason_text(reason)}"}
+      end
+    end
+  end
+
+  defp level_words("team", team) when is_binary(team), do: "the team #{team}'s memory"
+  defp level_words("team", _none), do: "the team's memory"
+  defp level_words("organisation", _team), do: "the organisation's memory"
+
+  defp team(args, "team") do
+    case Map.get(args, "team") do
+      nil -> {:ok, nil}
+      team when is_binary(team) -> {:ok, if(String.trim(team) == "", do: nil, else: String.trim(team))}
+      _other -> {:error, "team is the team's name, as text; nothing was proposed"}
+    end
+  end
+
+  defp team(args, _organisation) do
+    if Map.has_key?(args, "team"),
+      do: {:error, "team is for level team; the organisation's memory has no team; nothing was proposed"},
+      else: {:ok, nil}
+  end
+
   # The `## <topic>` section of theirs the entry goes under; none is the plane's `Notes`.
   defp topic(args) do
     case Map.get(args, "topic") do
@@ -176,10 +239,10 @@ defmodule Troupe.Tools.Remember do
     end
   end
 
-  defp only_claim(args) do
+  defp only_claim(args, level \\ "me") do
     case Enum.filter(~w(anchors scope replaces), &Map.has_key?(args, &1)) do
       [] -> :ok
-      named -> {:error, "#{Enum.join(named, " and ")} are for the repository's facts; with level me give only claim"}
+      named -> {:error, "#{Enum.join(named, " and ")} are for the repository's facts; with level #{level} give only claim"}
     end
   end
 

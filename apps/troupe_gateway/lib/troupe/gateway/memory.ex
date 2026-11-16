@@ -175,6 +175,7 @@ defmodule Troupe.Gateway.Memory do
            PlaneMemory.save(plane_url, body, PlaneMemory.cache_path(), signature(signed?, answer)) do
       changes = PlaneMemory.changes(before, kept["documents"])
       if changes != [], do: announce(changes)
+      :ok = tell_decided(body["proposals"])
 
       {:ok,
        %{
@@ -188,6 +189,22 @@ defmodule Troupe.Gateway.Memory do
 
   def keep(_plane_url, _answer),
     do: {:error, "document must be the plane's me.memory answer, an object"}
+
+  # What became of the proposals agents of sessions here made for a team's or the
+  # organisation's memory, as the person's own answer carries them: each decided one told to
+  # the session it came from, if it runs here, once (`Troupe.UserMemory.decided/3` reads
+  # the session's log first), in the plane's words.
+  defp tell_decided(proposals) when is_list(proposals) do
+    for %{"state" => state, "session_id" => id, "id" => proposal, "message" => message} <- proposals,
+        state in ~w(accepted declined),
+        is_binary(id) and is_binary(proposal) and is_binary(message) do
+      Troupe.UserMemory.decided(id, proposal, message)
+    end
+
+    :ok
+  end
+
+  defp tell_decided(_none), do: :ok
 
   @doc """
   Drop this machine's copy, where it came from `plane_url` (any plane's, for `nil`), and
@@ -348,6 +365,32 @@ defmodule Troupe.Gateway.Memory do
     end
   end
 
+  @doc """
+  Where `remember` with `level: "team"` or `"organisation"` sends its proposal on this
+  machine (`Troupe.UserMemory.propose/4`): the plane's `me.memory.propose`, as this daemon's
+  person, naming the session and the agent so the decision can be told to it, and the team
+  where the agent named one. A session under Local only sends nothing, and says so.
+  """
+  @spec propose(String.t(), Troupe.Tool.Ctx.t(), String.t(), map()) ::
+          {:ok, map()} | {:error, :signed_out | String.t()}
+  def propose(entry, ctx, level, opts) do
+    if LocalOnly.session?(ctx.session_id) do
+      {:error, local_only()}
+    else
+      params =
+        %{"scope" => level, "append" => entry, "session" => ctx.session_id, "agent" => agent(ctx)}
+        |> Map.merge(Map.reject(Map.take(opts, ["topic", "team"]), fn {_key, value} -> is_nil(value) end))
+
+      with {:ok, _url} <- signed_in(),
+           {:ok, kept} <- plane_call("me.memory.propose", params) do
+        {:ok, Map.take(kept, ~w(id topic team entry state))}
+      else
+        {:error, :signed_out} -> {:error, :signed_out}
+        {:error, reason} -> {:error, sentence(reason)}
+      end
+    end
+  end
+
   defp agent(%{definition: %{name: name}}) when is_binary(name), do: name
   defp agent(%{agent_path: [_ | _] = path}), do: List.last(path)
   defp agent(_ctx), do: nil
@@ -412,7 +455,9 @@ defmodule Troupe.Gateway.Memory do
      |> Map.put("plane_url", url)
      |> Map.put("documents", above)
      |> Map.put("organisation", answer["organisation"])
-     |> Map.put("roles", roles(answer["roles"]))}
+     |> Map.put("roles", roles(answer["roles"]))
+     # The person's proposals for a level above their own: a pending one shows under it.
+     |> Map.put("proposals", Enum.filter(List.wrap(answer["proposals"]), &is_map/1))}
   end
 
   defp own_of(_answer, _url),
@@ -478,6 +523,7 @@ defmodule Troupe.Gateway.Memory do
   def init(opts) do
     # This daemon is where an agent's entry for its person's own memory goes.
     :ok = Troupe.UserMemory.install(&__MODULE__.append/3)
+    :ok = Troupe.UserMemory.install_proposer(&__MODULE__.propose/4)
 
     every =
       Keyword.get(opts, :poll_ms, Application.get_env(:troupe_gateway, :memory_poll_ms, @poll_ms))

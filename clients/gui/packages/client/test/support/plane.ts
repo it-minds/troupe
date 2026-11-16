@@ -1393,6 +1393,9 @@ export class FakePlane {
             teams: [...this.teamsOf(subject)].sort(),
             organisation: { name: "Example" },
             roles: { platform_admin: admin, team_admin: administers },
+            // What the person's agents proposed for a level above their own, as the plane
+            // keeps them: the shared admin fake's, so a console's decision shows here.
+            proposals: (this.opts.admin?.memoryProposals ?? []).filter((p) => p.by === subject).slice().reverse(),
           },
         };
       }

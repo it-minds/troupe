@@ -11,13 +11,16 @@
 import { useState } from "react";
 import type { JSX } from "react";
 import { besideRows, writtenBy } from "@troupe/client";
-import type { MemoryDocument, MemoryInherited, MemoryPreview, MemoryReader, MemoryReaders, MemoryScope, MemorySaved } from "@troupe/client";
+import type { MemoryDocument, MemoryInherited, MemoryPreview, MemoryProposal, MemoryReader, MemoryReaders, MemoryScope, MemorySaved } from "@troupe/client";
 import { describeError, useConsole, useLoad } from "../console";
+import { href } from "../route";
 import { AuditNote, Empty, Field, Loaded, Preview, Region, TextDiff, count, useChange, when } from "./bits";
 
 export function Memory(): JSX.Element {
   const { admin } = useConsole();
   const [load, reload] = useLoad(() => admin.memoryList(), [admin]);
+  // Bumped when a proposal is accepted, so the document it went into is read again.
+  const [accepted, setAccepted] = useState(0);
 
   return (
     <div className="page">
@@ -26,22 +29,170 @@ export function Memory(): JSX.Element {
           <>
             <p className="lead">
               What every agent in a scope starts from: the organisation's for every session, a team's for that team's sessions and its members' machines. Each reaches a
-              session as instructions from the organisation, before the person's own and the repository's, and no agent can change it. A profile's is on the
-              profile's page. Each document holds at most {list.limit} bytes.
+              session as instructions from the organisation, before the person's own and the repository's. No agent changes one: an agent may propose an entry, which
+              waits below until you accept or decline it. A profile's is on the profile's page. Each document holds at most {list.limit} bytes.
             </p>
+            <Proposals onAccepted={() => setAccepted((n) => n + 1)} />
             <Region>The organisation's</Region>
-            <MemoryEditor scope="organisation" name={null} title="The organisation's memory" />
+            <MemoryEditor key={`organisation:${accepted}`} scope="organisation" name={null} title="The organisation's memory" />
             <Region>Teams'</Region>
             {list.teams.length === 0 ? (
               <Empty title="No team of yours keeps memory here" />
             ) : (
-              list.teams.map((t) => <MemoryEditor key={t.subject} scope="team" name={t.name} title={`The ${t.name} team's memory`} />)
+              list.teams.map((t) => <MemoryEditor key={`${t.subject}:${accepted}`} scope="team" name={t.name} title={`The ${t.name} team's memory`} />)
             )}
           </>
         )}
       </Loaded>
     </div>
   );
+}
+
+/** Where a proposal would go, in a sentence: "the core team's memory", "the organisation's memory". */
+export function proposalLevel(p: MemoryProposal): string {
+  return p.scope === "team" ? `the ${p.team ?? "team"} team's memory` : "the organisation's memory";
+}
+
+/**
+ * What agents proposed for a team's or the organisation's memory and waits for whoever may
+ * change that level (troupe #55): each entry, where it would go, and where it came from.
+ * Accepting writes it as the next version, with the agent and its session as who wrote the
+ * line, previewed first as every save is; declining asks for a sentence, which the session
+ * is told. Nothing here is read by any session until it is accepted.
+ */
+function Proposals({ onAccepted }: { onAccepted: () => void }): JSX.Element | null {
+  const { admin } = useConsole();
+  const [load, reload] = useLoad(() => admin.memoryProposals(), [admin]);
+  const { done, apply } = useChange(reload);
+  const [accepting, setAccepting] = useState<MemoryProposal | null>(null);
+  const [declining, setDeclining] = useState<MemoryProposal | null>(null);
+  const [reason, setReason] = useState("");
+  const [error, setError] = useState<unknown>(null);
+
+  // A plane from before proposals has none to list; any other failure is said.
+  if (load.state === "loading" || (load.state === "error" && (load.error as { code?: unknown } | null)?.code === -32601)) return null;
+  if (load.state === "error") return <Loaded load={load} what="the proposals waiting for review" retry={reload}>{() => null}</Loaded>;
+  const { enabled, proposals } = load.data;
+  if (proposals.length === 0 && enabled && !done) return null;
+
+  const decline = async (p: MemoryProposal): Promise<void> => {
+    setError(null);
+    try {
+      await apply("memory.proposal.decline", subjectOf(p), () => admin.memoryDecline(p.id, reason), `The proposal for ${proposalLevel(p)} is declined; its session is told why.`);
+      setDeclining(null);
+      setReason("");
+    } catch (e) {
+      setError(e);
+    }
+  };
+
+  return (
+    <section className="proposals" aria-label="Waiting for review">
+      {proposals.length > 0 ? <Region tone="waiting">Waiting for review</Region> : <Region>Waiting for review</Region>}
+      {done && <AuditNote action={done.action} subject={done.subject} detail={done.detail} />}
+      {!enabled && (
+        <p className="note">
+          Agents' proposals are switched off (Agents may propose memory, on <a href={href({ page: "policy" })}>Policy and settings</a>): an agent's is refused, and what is here was proposed before.
+        </p>
+      )}
+      {proposals.length === 0 ? (
+        <p className="note">Nothing waits for review.</p>
+      ) : (
+        <ul className="proposal-list">
+          {proposals.map((p) => (
+            <li key={p.id} className="proposal card">
+              <p className="note">
+                For {proposalLevel(p)}, under <strong>{p.topic}</strong>
+              </p>
+              <blockquote className="entry">{p.entry}</blockquote>
+              <p className="note">
+                Proposed {when(p.at)} by {p.agent ? `the agent ${p.agent}` : "an agent"}
+                {p.session_id ? (
+                  <>
+                    {" "}
+                    in <span className="mono">{p.session_id}</span>
+                  </>
+                ) : null}
+                , {p.where === "machine" ? "on" : "for"} {p.by}
+                {p.where === "machine" ? "'s machine" : ", on a pod"}.
+              </p>
+              {accepting?.id === p.id ? (
+                <Preview
+                  title={subjectOf(p)}
+                  lines={[{ field: p.topic, from: null, to: `- ${p.entry}` }]}
+                  body={<TextDiff title={`${subjectOf(p)} · ## ${p.topic}`} lines={[{ op: "add", text: `- ${p.entry}` }]} />}
+                  effects={[
+                    `Saved as the next version of ${proposalLevel(p)}, by you, with ${p.agent ?? "the agent"}${p.session_id ? ` in ${p.session_id}` : ""} as who wrote the line.`,
+                    p.scope === "team" ? `The sessions of ${p.team} read it from their next turn, and its members' machines within five minutes.` : "Every session reads it from its next turn, and every signed-in machine within five minutes.",
+                    "The session it came from is told it was accepted.",
+                  ]}
+                  verb="Accept"
+                  onConfirm={async () => {
+                    await apply("memory.proposal.accept", subjectOf(p), () => admin.memoryAccept(p.id), `The proposal is in ${proposalLevel(p)} now; running sessions read it from their next turn.`);
+                    setAccepting(null);
+                    onAccepted();
+                  }}
+                  onCancel={() => setAccepting(null)}
+                />
+              ) : declining?.id === p.id ? (
+                <form
+                  className="edit"
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    void decline(p);
+                  }}
+                >
+                  <Field label="Why it is declined" hint="Its session is told this sentence as it is, and so is the person it came from.">
+                    {(f) => <textarea {...f} value={reason} onChange={(e) => setReason(e.target.value)} rows={2} />}
+                  </Field>
+                  {error !== null && (
+                    <p className="field-error" role="alert">
+                      {describeError(error)}
+                    </p>
+                  )}
+                  <div className="actions">
+                    <button type="submit" className="primary" disabled={reason.trim() === ""}>
+                      Decline
+                    </button>
+                    <button type="button" onClick={() => setDeclining(null)}>
+                      Cancel
+                    </button>
+                  </div>
+                </form>
+              ) : (
+                <div className="actions">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setDeclining(null);
+                      setAccepting(p);
+                    }}
+                  >
+                    Accept
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAccepting(null);
+                      setError(null);
+                      setReason("");
+                      setDeclining(p);
+                    }}
+                  >
+                    Decline
+                  </button>
+                </div>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
+
+function subjectOf(p: MemoryProposal): string {
+  return p.scope === "team" ? `team/${p.team}` : "organisation";
 }
 
 /**

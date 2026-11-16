@@ -133,6 +133,12 @@ defmodule Troupe.Gateway.FakePlane do
   @spec read_text_only(pid()) :: :ok
   def read_text_only(state), do: Agent.update(state, &Map.put(&1, :text_only, true))
 
+  @doc """
+  The person's proposals for a team's or the organisation's memory, which every `me.memory`
+  answer carries from now on, as the plane's does (#55).
+  """
+  def proposals_with(state, proposals), do: Agent.update(state, &Map.put(&1, :proposals, proposals))
+
   @doc "The person's teams, by name, which `me.memory` asked with `entries` names."
   @spec teams_with(pid(), [String.t()]) :: :ok
   def teams_with(state, teams), do: Agent.update(state, &Map.put(&1, :teams, teams))
@@ -461,6 +467,12 @@ defmodule Troupe.Gateway.FakePlane do
         do: Map.put(teams, "roles", roles),
         else: teams
 
+    teams =
+      case Agent.get(state, &Map.get(&1, :proposals)) do
+        proposals when is_list(proposals) -> Map.put(teams, "proposals", proposals)
+        _none -> teams
+      end
+
     case Agent.get(state, &{Map.get(&1, :memory), Map.get(&1, :own)}) do
       {nil, nil} ->
         {:rpc_error, -32_601, "method_not_found", %{"method" => "me.memory"}}
@@ -482,6 +494,20 @@ defmodule Troupe.Gateway.FakePlane do
            )
          )}
     end
+  end
+
+  # A proposal for a team's or the organisation's memory, kept as pending, as the plane does.
+  defp dispatch(_state, "me.memory.propose", params) do
+    {:ok,
+     %{
+       "id" => "p-" <> Integer.to_string(System.unique_integer([:positive])),
+       "scope" => params["scope"],
+       "team" => params["team"] || (params["scope"] == "team" && "design") || nil,
+       "topic" => params["topic"] || "Notes",
+       "entry" => params["append"],
+       "session_id" => params["session"],
+       "state" => "pending"
+     }}
   end
 
   defp dispatch(state, "me.memory.put", params) do

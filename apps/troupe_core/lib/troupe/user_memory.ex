@@ -37,6 +37,66 @@ defmodule Troupe.UserMemory do
     end
   end
 
+  @typedoc """
+  Where a proposal goes: the entry, the session's context, the level (`"team"` or
+  `"organisation"`) and `%{"topic" => ..., "team" => ...}`, either `nil`.
+  """
+  @type proposer :: (String.t(), Troupe.Tool.Ctx.t(), String.t(), map() -> {:ok, map()} | {:error, term()})
+
+  @doc """
+  Propose `entry` for a team's memory or the organisation's (`level`), for an administrator
+  to accept or decline: the plane keeps it and writes it into no document. `opts` is
+  `%{"topic" => ..., "team" => ...}`. `{:error, :signed_out}` where this host has no plane to
+  send it to; `{:error, sentence}` where the plane refused it. Answers what the plane kept:
+  the proposal's `id`, `topic`, `team` and `state`.
+  """
+  @spec propose(String.t(), Troupe.Tool.Ctx.t(), String.t(), map()) ::
+          {:ok, map()} | {:error, :signed_out | String.t()}
+  def propose(entry, ctx, level, opts \\ %{}) when is_binary(entry) and level in ~w(team organisation) do
+    case Application.get_env(:troupe_core, :memory_proposal) do
+      fun when is_function(fun, 4) -> fun.(entry, ctx, level, opts)
+      _none -> {:error, :signed_out}
+    end
+  end
+
+  @doc """
+  Tell a running session what became of a proposal one of its agents made: `message`, the
+  plane's sentence, as a `config_note` under its root (key `memory_proposals`, `proposal`
+  its id), once: a session whose log says it already is told nothing again, so a poll that
+  hears the same decision twice writes one line. `{:error, :not_running}` for a session not
+  running here.
+  """
+  @spec decided(String.t(), String.t(), String.t()) :: :ok | {:error, :not_running}
+  def decided(session_id, proposal, message)
+      when is_binary(session_id) and is_binary(proposal) and is_binary(message) do
+    said? =
+      session_id
+      |> Troupe.Session.Log.replay()
+      |> Enum.any?(&(&1.type == "config_note" and &1.data["proposal"] == proposal))
+
+    unless said? do
+      {:ok, _seq} =
+        Troupe.Session.Log.append(session_id, Troupe.Session.root_path(), :config_note, %{
+          "key" => "memory_proposals",
+          "message" => message,
+          "proposal" => proposal
+        })
+    end
+
+    :ok
+  catch
+    :exit, _not_running -> {:error, :not_running}
+  end
+
+  @doc "Whether this host installed somewhere for a proposal to go."
+  @spec proposes?() :: boolean()
+  def proposes?, do: is_function(Application.get_env(:troupe_core, :memory_proposal), 4)
+
+  @doc "Install `fun` as where proposals go, for the host that can reach the plane."
+  @spec install_proposer(proposer()) :: :ok
+  def install_proposer(fun) when is_function(fun, 4),
+    do: Application.put_env(:troupe_core, :memory_proposal, fun)
+
   @doc "Whether this host installed somewhere for an entry to go."
   @spec reachable?() :: boolean()
   def reachable? do

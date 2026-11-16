@@ -235,4 +235,26 @@ defmodule Troupe.PlaneMemoryTest do
              ]) =~ "The organisation's memory changed: "
     end
   end
+
+  # A worker profile that came to extend another, or none: the plane writes the chain on
+  # each profile's document, and the line says the chain moved as well as the documents.
+  describe "a profile's chain" do
+    test "a change of it is found and said, and nothing is said where it held or is not known" do
+      doc = fn name, chain -> %{"scope" => "profile", "name" => name, "version" => 1, "hash" => "h", "chain" => chain} end
+      before = [doc.("dev", ["dev"])]
+      now = [doc.("base", ["base", "dev"]), doc.("dev", ["base", "dev"])]
+
+      assert %{"from" => ["dev"], "to" => ["base", "dev"]} = chain = PlaneMemory.chain_change(before, now)
+      assert PlaneMemory.chain_change(now, now) == nil
+      # A plane from before it says no chain: nothing is said.
+      assert PlaneMemory.chain_change([Map.delete(doc.("dev", nil), "chain")], now) == nil
+
+      changes = PlaneMemory.changes(before, now)
+
+      assert PlaneMemory.change_line(changes, chain) ==
+               "The profile dev's chain changed: it is base → dev now (it was dev), so its sessions read the " <>
+                 "memory along it. The organisation's memory changed: the profile base's memory is new, version 1. " <>
+                 "Read from this turn on."
+    end
+  end
 end

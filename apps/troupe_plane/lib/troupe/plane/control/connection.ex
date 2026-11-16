@@ -8,8 +8,9 @@ defmodule Troupe.Plane.Control.Connection do
   as session input in captured control-channel traffic, and finding it would mean this
   file is wrong. Memory is not session content: the documents a session reads go down with
   its activation, and the one thing that comes back is an entry an agent was asked to keep
-  in its person's own memory (`session.memory.put`), which is that person's from then on.
-  Nor is an artifact an agent publishes for its person (`session.artifact.publish`): the
+  in its person's own memory (`session.memory.put`), which is that person's from then on,
+  or proposed for its team's or the organisation's (`session.memory.propose`), which waits
+  for an administrator to accept or decline it. Nor is an artifact an agent publishes for its person (`session.artifact.publish`): the
   page or file they asked to have published, and nothing else of the session's. The other
   way, an artifact a person attaches to a message goes down (`session.artifact.files`), as
   memory does: what they chose to put into their session.
@@ -739,7 +740,8 @@ defmodule Troupe.Plane.Control.Connection do
            reason:
              "an agent writes only its person's own memory: the organisation's, a team's and " <>
                "a profile's are read-only to agents: an administrator changes them on the " <>
-               "console's Govern → Company memory; ask one if you are not"
+               "console's Govern → Company memory, and an agent may propose an entry for a " <>
+               "team's or the organisation's (session.memory.propose) for one to review"
          }), state}
 
       :stale_epoch ->
@@ -750,6 +752,42 @@ defmodule Troupe.Plane.Control.Connection do
 
       {:owner, nil} ->
         {:error, Error.new(:forbidden, %{reason: "the session's owner has no memory of their own"}), state}
+
+      nil ->
+        {:error, Error.new(:not_found, %{session_id: params["session_id"]}), state}
+    end
+  end
+
+  # An agent of a session on this pod proposing one entry for its team's memory or the
+  # organisation's (`remember` to `team` or `organisation`): kept for an administrator to
+  # accept or decline, written into no document. The team is the session's own, read off its
+  # row as its owner is, so a pod proposes only for the team a session it holds runs in.
+  defp dispatch("session.memory.propose", params, state) do
+    with %Session{} = session <- session_of(params["session_id"], state.worker),
+         :ok <- at_epoch(session, params["epoch"]),
+         {:owner, %User{active: true} = owner} <- {:owner, Identity.get_user(session.owner_subject)},
+         {:ok, scope, team} <- proposal_level(params["scope"], session) do
+      opts = [session: session.id, topic: params["topic"], where: "pod"] ++ agent_of(params)
+
+      case Memory.Proposals.propose(owner, scope, team, params["append"], opts) do
+        {:ok, proposal} ->
+          {:ok, Memory.Proposals.json(proposal), state}
+
+        {:error, :off} ->
+          {:error, Error.new(:forbidden, %{reason: Memory.Proposals.off_reason()}), state}
+
+        {:error, reason} ->
+          {:error, Error.new(:invalid_params, %{reason: own_reason(reason)}), state}
+      end
+    else
+      {:error, %Error{} = error} ->
+        {:error, error, state}
+
+      :stale_epoch ->
+        {:error, Error.new(:conflict, %{reason: "stale epoch"}), state}
+
+      {:owner, _not_active} ->
+        {:error, Error.new(:forbidden, %{reason: "the session's owner cannot propose: they have no active account"}), state}
 
       nil ->
         {:error, Error.new(:not_found, %{session_id: params["session_id"]}), state}
@@ -1002,6 +1040,22 @@ defmodule Troupe.Plane.Control.Connection do
   defp at_epoch(_session, nil), do: :ok
   defp at_epoch(%Session{epoch: epoch}, epoch), do: :ok
   defp at_epoch(_session, _epoch), do: :stale_epoch
+
+  # The level a pod's session proposes for: its own team's, or the organisation's.
+  defp proposal_level("organisation", _session), do: {:ok, "organisation", nil}
+
+  defp proposal_level("team", %Session{team_id: id}) when not is_nil(id) do
+    case Identity.fetch_team(id) do
+      nil -> {:error, Error.new(:not_found, %{reason: "the session's team is gone"})}
+      team -> {:ok, "team", team}
+    end
+  end
+
+  defp proposal_level("team", _session),
+    do: {:error, Error.new(:invalid_params, %{reason: "this session runs in no team, so there is no team's memory to propose for"})}
+
+  defp proposal_level(scope, _session),
+    do: {:error, Error.new(:invalid_params, %{scope: scope, reason: "a proposal is for team or organisation"})}
 
   defp own_reason(:no_person), do: "the session's owner has no memory of their own"
   defp own_reason(reason) when is_binary(reason), do: reason

@@ -3094,6 +3094,100 @@ defmodule Troupe.Plane.Admin do
       "Every session on #{profile}'s pods, and on the pods of every profile that extends " <>
         "it, reads it from its next turn."
 
+  # -- what agents propose for the organisation's memory ----------------------
+
+  @doc """
+  The proposals waiting for the actor (`Troupe.Plane.Memory.Proposals`): every pending one
+  for a platform admin, their teams' for a team admin, oldest first, each with its entry and
+  topic, the level, the session, the agent and the person it came from. And whether the
+  plane takes proposals at all now (`enabled`, the setting `memory_proposals`).
+  """
+  @spec memory_proposals(actor()) :: result()
+  def memory_proposals(actor) do
+    with :ok <- require_admin(actor) do
+      {:ok, %{enabled: Memory.Proposals.enabled?(), proposals: Memory.Proposals.pending(actor)}}
+    end
+  end
+
+  @doc """
+  Accept a proposal: its entry written into its level's document under its topic, as the
+  next version, saved by the actor and with the session and agent it came from as the line's
+  provenance; the session is told. Audited as `memory.proposal.accept`, and the save as
+  `memory.put`. A team's is its admins' and the platform admins' to decide, the
+  organisation's a platform admin's.
+  """
+  @spec memory_accept(actor(), String.t() | nil) :: result()
+  def memory_accept(actor, id) do
+    with {:ok, proposal} <- memory_proposal(actor, id) do
+      case Memory.Proposals.accept(proposal, actor.subject) do
+        {:ok, accepted} -> {:ok, Memory.Proposals.json(accepted)}
+        {:error, reason} -> memory_decided(reason, proposal)
+      end
+    end
+  end
+
+  @doc """
+  Decline a proposal with `reason`, a sentence the session it came from is told as it is.
+  Nothing is written. Audited as `memory.proposal.decline`.
+  """
+  @spec memory_decline(actor(), String.t() | nil, String.t() | nil) :: result()
+  def memory_decline(actor, id, reason) do
+    with {:ok, proposal} <- memory_proposal(actor, id) do
+      case Memory.Proposals.decline(proposal, actor.subject, reason) do
+        {:ok, declined} -> {:ok, Memory.Proposals.json(declined)}
+        {:error, why} -> memory_decided(why, proposal)
+      end
+    end
+  end
+
+  # A proposal the actor may decide; another team's is not there, as its team is not.
+  defp memory_proposal(actor, id) do
+    with :ok <- require_admin(actor) do
+      case Memory.Proposals.get(id) do
+        nil ->
+          {:error, Error.new(:not_found, %{proposal: id})}
+
+        proposal ->
+          cond do
+            Memory.Proposals.decides?(actor, proposal) ->
+              {:ok, proposal}
+
+            proposal.scope == "organisation" ->
+              {:error, Error.new(:forbidden, %{required_role: "platform_admin", reason: memory_who("forbidden", "organisation", nil)})}
+
+            true ->
+              {:error, Error.new(:not_found, %{proposal: id})}
+          end
+      end
+    end
+  end
+
+  defp memory_decided(:decided, proposal) do
+    now = Memory.Proposals.get(proposal.id)
+
+    {:error,
+     Error.new(:conflict, %{
+       reason: "somebody decided this proposal first: it was #{now.state} by #{now.decided_by}",
+       state: now.state
+     })}
+  end
+
+  defp memory_decided({:full, bytes}, proposal) do
+    {:error,
+     Error.new(:invalid_params, %{
+       full: true,
+       reason:
+         "#{Memory.Proposals.json(proposal)["team"] || "the organisation"}'s memory is full: with this entry it " <>
+           "would be #{bytes} bytes, past the #{Troupe.Protocol.Memory.max_bytes()} a document holds; make room first"
+     })}
+  end
+
+  defp memory_decided({:conflict, version}, _proposal),
+    do: {:error, Error.new(:conflict, %{reason: "the document was saved by somebody else meanwhile; try again", version: version})}
+
+  defp memory_decided(reason, _proposal) when is_binary(reason),
+    do: {:error, Error.new(:invalid_params, %{reason: reason})}
+
   # -- the plane's GitHub App -------------------------------------------------
 
   @doc """
