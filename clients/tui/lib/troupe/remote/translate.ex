@@ -893,7 +893,10 @@ defmodule Troupe.Remote.Translate do
     under =
       shown ++
         if(length(files) > @listed, do: ["and #{length(files) - @listed} more"], else: []) ++
-        if(commands > 0, do: ["not counted: what its #{count(commands, "command")} changed"], else: []) ++
+        if(commands > 0,
+          do: ["not counted: what its #{count(commands, "command")} changed"],
+          else: []
+        ) ++
         if(is_binary(changed["said"]), do: ["it says: " <> changed["said"]], else: [])
 
     Enum.join([head | Enum.map(under, &("  " <> &1))], "\n")
