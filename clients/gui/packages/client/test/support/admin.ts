@@ -961,6 +961,49 @@ export function lineDiff(before: string, now: string): Array<{ op: "same" | "del
   return out;
 }
 
+/** A proposal as the plane's `Memory.Proposals.json/1` answers it. */
+export interface FakeProposal {
+  id: string;
+  scope: "team" | "organisation";
+  team: string | null;
+  topic: string;
+  entry: string;
+  session_id: string | null;
+  agent: string | null;
+  where: "pod" | "machine";
+  by: string;
+  state: "pending" | "accepted" | "declined";
+  at: string;
+  decided_by: string | null;
+  decided_at: string | null;
+  reason: string | null;
+  version: number | null;
+  message: string;
+}
+
+/** The line a proposal's session is told, in the plane's words (`Memory.Proposals.line/1`). */
+export function proposalLine(p: Omit<FakeProposal, "message">): string {
+  const level = p.scope === "team" ? `the team ${p.team}'s memory` : "the organisation's memory";
+  if (p.state === "accepted") return `Your proposal for ${level} under ${p.topic} was accepted by ${p.decided_by}: "${p.entry}" is in it from version ${p.version}, read from the next turn.`;
+  if (p.state === "declined") return `Your proposal for ${level} under ${p.topic} ("${p.entry}") was declined by ${p.decided_by}: ${p.reason}`;
+  return `Your proposal for ${level} under ${p.topic} is awaiting review.`;
+}
+
+/** An entry added under its topic's section, made at the end where there is none, as `Memory.append_entry/5` adds one. */
+export function appendEntry(text: string, topic: string, entry: string): string {
+  if (text === "") return `## ${topic}\n\n- ${entry}`;
+  const lines = text.split("\n");
+  const key = (t: string) => t.trim().toLowerCase().split(/\s+/).join(" ");
+  const at = lines.findIndex((l) => l.startsWith("## ") && key(l.slice(3)) === key(topic));
+  if (at < 0) return `${text}\n\n## ${topic}\n\n- ${entry}`;
+  let end = lines.findIndex((l, i) => i > at && l.startsWith("## "));
+  if (end < 0) end = lines.length;
+  let last = end - 1;
+  while (last > at && lines[last]!.trim() === "") last--;
+  const added = last === at ? ["", `- ${entry}`] : [`- ${entry}`];
+  return [...lines.slice(0, last + 1), ...added, ...lines.slice(last + 1)].join("\n");
+}
+
 /** Who wrote each line of a document up to version `upto`, as the plane's `Memory.blame/2` derives it: each version's lines against the one before. */
 export function memoryBlame(
   versions: Array<{ version: number; text: string; changed_by: string; changed_at: string }>,
@@ -1065,6 +1108,10 @@ export class FakeAdmin {
   readonly memoryStanding = new Map<string, "current" | "behind">();
   /** The sessions an administrator nudged, in order. */
   readonly memoryNudged: string[] = [];
+  /** What agents proposed for a team's or the organisation's memory, oldest first, as `Memory.Proposals` keeps them. */
+  readonly memoryProposals: FakeProposal[] = [];
+  /** The setting `memory_proposals`: whether the plane takes proposals now. */
+  memoryProposalsOn = true;
   /** Service principals beyond their subjects, by subject. */
   readonly principalRows = new Map<string, FakePrincipal>();
   /** People who look held twice, as `Identity.lookalikes/0` would set them out. */
@@ -2016,6 +2063,44 @@ export class FakeAdmin {
         return { result: { document: memorySummary(now), changes } };
       }
 
+      case "admin.memory.proposals": {
+        if (!admin) return notAdmin;
+        const mine = this.memoryProposals.filter((p) => p.state === "pending" && this.decides(subject, p));
+        return { result: { enabled: this.memoryProposalsOn, proposals: mine } };
+      }
+
+      case "admin.memory.accept":
+      case "admin.memory.decline": {
+        if (!admin) return notAdmin;
+        const p = this.memoryProposals.find((x) => x.id === params["id"]);
+        if (!p || (!this.decides(subject, p) && p.scope === "team")) return refuse(NOT_FOUND, "not_found", { proposal: params["id"] });
+        if (!this.decides(subject, p)) return refuse(FORBIDDEN, "forbidden", { required_role: "platform_admin", reason: "only a platform administrator changes the organisation's memory" });
+        if (p.state !== "pending") return refuse(CONFLICT, "conflict", { reason: `somebody decided this proposal first: it was ${p.state} by ${p.decided_by}`, state: p.state });
+        const where = p.scope === "team" ? `team/${p.team}` : "organisation";
+        const detail: Record<string, unknown> = { proposal: p.id, topic: p.topic, by: p.by, ...(p.session_id ? { session: p.session_id } : {}) };
+        if (method === "admin.memory.decline") {
+          const reason = typeof params["reason"] === "string" ? params["reason"].trim().split(/\s+/).join(" ") : "";
+          if (reason === "") return refuse(INVALID_PARAMS, "invalid_params", { reason: "a proposal is declined with a sentence saying why, which the session is told" });
+          Object.assign(p, { state: "declined", decided_by: subject, decided_at: new Date().toISOString(), reason });
+          p.message = proposalLine(p);
+          this.record(subject, "memory.proposal.decline", where, { ...detail, reason });
+          return { result: p };
+        }
+        const versions = this.memory.get(where) ?? [];
+        const current = versions.at(-1) ?? null;
+        const text = appendEntry(current?.text ?? "", p.topic, p.entry);
+        if (new TextEncoder().encode(text).length > MEMORY_LIMIT) {
+          return refuse(INVALID_PARAMS, "invalid_params", { full: true, reason: `${p.team ?? "the organisation"}'s memory is full: make room first` });
+        }
+        const now = { version: (current?.version ?? 0) + 1, text, changed_by: subject, changed_at: new Date().toISOString() };
+        this.memory.set(where, [...versions, now]);
+        this.record(subject, "memory.put", where, { "version": { from: current?.version ?? 0, to: now.version }, ...(p.session_id ? { session: p.session_id } : {}), ...(p.agent ? { agent: p.agent } : {}), proposal: p.id });
+        Object.assign(p, { state: "accepted", decided_by: subject, decided_at: now.changed_at, version: now.version });
+        p.message = proposalLine(p);
+        this.record(subject, "memory.proposal.accept", where, { ...detail, version: now.version });
+        return { result: p };
+      }
+
       case "admin.provisioners.list":
         return admin ? { result: PROVISIONERS } : notAdmin;
 
@@ -2585,6 +2670,33 @@ export class FakeAdmin {
       return { subject: `profile/${String(name)}`, editable: true };
     }
     return refuse(INVALID_PARAMS, "invalid_params", { field: "scope", reason: "scope is one of organisation, team, profile", scope });
+  }
+
+  /** Whether the subject may decide a proposal: a platform admin any, a team admin their team's. */
+  private decides(subject: string, p: FakeProposal): boolean {
+    const role = this.role(subject);
+    if (role === "platform_admin") return true;
+    return p.scope === "team" && this.visible(subject).some((t) => t.name === p.team);
+  }
+
+  /** An agent's proposal, as `Memory.Proposals.propose/5` keeps it: what a test or the fake's example starts with. */
+  propose(p: Pick<FakeProposal, "scope" | "team" | "topic" | "entry" | "by"> & Partial<FakeProposal>): FakeProposal {
+    const base: Omit<FakeProposal, "message"> = {
+      id: p.id ?? `p-${this.memoryProposals.length + 1}`,
+      session_id: null,
+      agent: null,
+      where: "pod",
+      state: "pending",
+      at: new Date().toISOString(),
+      decided_by: null,
+      decided_at: null,
+      reason: null,
+      version: null,
+      ...p,
+    };
+    const made = { ...base, message: proposalLine(base) };
+    this.memoryProposals.push(made);
+    return made;
   }
 
   /** What a profile's sessions read before its own: the documents of the profiles it extends, the one that extends nothing first. */
@@ -4394,5 +4506,9 @@ export function exampleAdmin(): FakeAdmin {
   ]);
   admin.memoryStanding.set("s-7f3a9c21", "behind");
   admin.memoryStanding.set("s-7f3a9c23", "current");
+  // Two entries agents proposed and nobody has decided yet: one for core, from a pod's
+  // session, and one for the whole organisation, from a person's machine.
+  admin.propose({ id: "p-core-1", scope: "team", team: "core", topic: "Releases", entry: "Releases go out on Tuesdays after the freeze lifts.", by: "erin@example.com", session_id: "s-7f3a9c21", agent: "build", at: "2026-10-14T12:02:00Z" });
+  admin.propose({ id: "p-org-1", scope: "organisation", team: null, topic: "Tone", entry: "Write commit messages in the present tense.", by: "dan@example.com", session_id: "laptop-9b1d", agent: "root", where: "machine", at: "2026-10-14T12:30:00Z" });
   return admin;
 }

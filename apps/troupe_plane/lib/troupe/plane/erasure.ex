@@ -93,6 +93,8 @@ defmodule Troupe.Plane.Erasure do
       Invites.forget(session.id)
       # What it last read of the memory goes too, rather than waiting a week in the readers.
       Memory.forget_read(session.id)
+      # And what its agents proposed and nobody accepted: an entry is the session's words.
+      Memory.Proposals.forget_session(session.id)
       # Off its pod, giving back its slot and its budget slice. The pod's `session.erase`
       # stops a running session without reporting it dormant, so nothing else would.
       Drain.park(session)

@@ -15,6 +15,7 @@
 
 import type { AgentCheck } from "./agents.js";
 import type { MemoryEntry } from "./entries.js";
+import type { MemoryProposal } from "./instructions.js";
 
 /**
  * A session as `admin.sessions.list` describes it: who owns it, where it runs, what state
@@ -1221,6 +1222,12 @@ export interface MemorySaved {
   changes: AuditChanges;
 }
 
+/** `admin.memory.proposals`: what waits for you to accept or decline, and whether proposals are taken now. */
+export interface MemoryProposals {
+  enabled: boolean;
+  proposals: MemoryProposal[];
+}
+
 /** One delivery the App's webhook took: GitHub's id, what it was, and what the plane did with it. Never its body. */
 export interface GitHubDelivery {
   id: string;
@@ -1669,6 +1676,21 @@ export class AdminApi {
   /** Save the next version over `version`, the one edited (0 for none); a save by somebody else since is a conflict. */
   memoryPut(scope: MemoryScope, name: string | null, text: string, version: number): Promise<MemorySaved> {
     return this.rpc<MemorySaved>("admin.memory.put", { scope, name, text, version });
+  }
+
+  /** What agents proposed for a team's or the organisation's memory and waits for you, oldest first; and whether the plane takes proposals now. */
+  memoryProposals(): Promise<MemoryProposals> {
+    return this.rpc<MemoryProposals>("admin.memory.proposals", {});
+  }
+
+  /** Accept a proposal: its entry written into its level's memory, with the session and agent it came from as who wrote it. */
+  memoryAccept(id: string): Promise<MemoryProposal> {
+    return this.rpc<MemoryProposal>("admin.memory.accept", { id });
+  }
+
+  /** Decline a proposal with a sentence its session is told; nothing is written. */
+  memoryDecline(id: string, reason: string): Promise<MemoryProposal> {
+    return this.rpc<MemoryProposal>("admin.memory.decline", { id, reason });
   }
 
   teams(): Promise<AdminTeam[]> {

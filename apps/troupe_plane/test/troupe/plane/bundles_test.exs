@@ -532,6 +532,8 @@ defmodule Troupe.Plane.BundlesTest do
       {:ok, _} = Fleet.put_profile(%{name: "standard", image: "ghcr.io/troupe/worker:1"})
       dev = Fleet.get_profile("dev")
       {:ok, _} = Fleet.put_profile(%{name: "dev", extends: "standard", own: %{}, spec: dev.spec})
+      # The chain moved, so the session is told at once, along the new chain.
+      assert_receive {:pushed, ^pod, "session.memory", %{"session_id" => ^id}}, 5_000
       {:ok, _} = Admin.memory_put(root, "profile", "dev", "On dev.", 0)
       assert_receive {:pushed, ^pod, "session.memory", %{"session_id" => ^id}}, 5_000
       {:ok, _} = Admin.memory_put(root, "profile", "standard", "On every standard pod.", 0)

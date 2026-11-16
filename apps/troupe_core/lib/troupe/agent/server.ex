@@ -2029,10 +2029,16 @@ defmodule Troupe.Agent.Server do
     state =
       with %{documents: documents} <- Troupe.Session.PlaneMemory.given(state.session_id),
            [_ | _] = changes <- Troupe.PlaneMemory.changes(state.config.plane_memory, documents) do
-        log(state, :memory_changed, %{
-          "changes" => changes,
-          "message" => Troupe.PlaneMemory.change_line(changes)
-        })
+        # A profile that came to extend another, or none, says so: the documents moved
+        # because the chain they are read along did.
+        chain = Troupe.PlaneMemory.chain_change(state.config.plane_memory, documents)
+
+        log(
+          state,
+          :memory_changed,
+          %{"changes" => changes, "message" => Troupe.PlaneMemory.change_line(changes, chain)}
+          |> then(&if(chain, do: Map.put(&1, "chain", chain), else: &1))
+        )
 
         instructions_due(%{state | config: %{state.config | plane_memory: documents}})
       else

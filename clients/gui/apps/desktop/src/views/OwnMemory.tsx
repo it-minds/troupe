@@ -28,7 +28,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { JSX } from "react";
 import { besideRows, replacedBy, topicKey, writtenBy } from "@troupe/client";
-import type { DaemonClient, EntryLevel, MemoryEntry, MemoryInEffect, MemoryStatus, OwnMemory, OwnMemoryHistory, OwnPlane } from "@troupe/client";
+import type { DaemonClient, EntryLevel, MemoryEntry, MemoryInEffect, MemoryProposal, MemoryStatus, OwnMemory, OwnMemoryHistory, OwnPlane } from "@troupe/client";
 import { Loading, relative, unreachedWords } from "./bits";
 
 type View = "effect" | string;
@@ -400,6 +400,12 @@ function lockOf(level: Level): string {
   return "Platform administrators can change a profile's memory.";
 }
 
+/** Who decides a proposal for a level, as the plane lets them: those who may change it. */
+function reviewerOf(level: Level): string {
+  if (level.level.scope === "team") return `In nobody's memory yet: ${level.label}'s team admins or a platform administrator accept or decline it.`;
+  return "In nobody's memory yet: a platform administrator accepts or declines it.";
+}
+
 /** Where a save goes and which new sessions start with it. */
 function scopeLineOf(level: Level): string {
   if (level.level.scope === "user") return "SAVES TO ONLY YOU · YOUR NEW SESSIONS IN ANY TEAM";
@@ -697,6 +703,49 @@ function LevelView({
           })}
         </ol>
       )}
+      <Proposed level={level} proposals={own.proposals ?? []} />
+    </section>
+  );
+}
+
+/**
+ * What the person's agents proposed for this level (troupe #55): each waiting one, which no
+ * session reads until an administrator who may change the level accepts it, and each
+ * declined this week with the reason given. An accepted one is among the entries above.
+ */
+function Proposed({ level, proposals }: { level: Level; proposals: MemoryProposal[] }): JSX.Element | null {
+  const here = proposals.filter(
+    (p) => p.state !== "accepted" && p.scope === level.level.scope && (p.scope !== "team" || p.team === level.level.name),
+  );
+  if (here.length === 0) return null;
+  return (
+    <section className="proposed" aria-label="Proposed by your agents">
+      <span className="micro proposed-head">PROPOSED BY YOUR AGENTS</span>
+      <ol className="entries">
+        {here.map((p) => (
+          <li key={p.id} className={`entry is-${level.level.scope} proposal is-${p.state}`}>
+            <div className="entry-body">
+              <div className="entry-top">
+                <span className="topic">{p.topic}</span>
+                <span className="proposal-state micro">{p.state === "pending" ? "AWAITING REVIEW" : "DECLINED"}</span>
+              </div>
+              <p>{p.entry}</p>
+              <div className="entry-meta">
+                <span className="micro">
+                  {(p.agent ?? "an agent").replace(/^agent:/, "").toUpperCase()} IN A SESSION · {relative(Date.parse(p.at)).toUpperCase()}
+                </span>
+              </div>
+              {p.state === "pending" ? (
+                <p className="muted">{reviewerOf(level)}</p>
+              ) : (
+                <p className="muted">
+                  Declined by {p.decided_by}: {p.reason}
+                </p>
+              )}
+            </div>
+          </li>
+        ))}
+      </ol>
     </section>
   );
 }

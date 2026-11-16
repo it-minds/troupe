@@ -99,15 +99,16 @@ defmodule Troupe.Tools.RememberMeTest do
 
     assert anchors =~ "with level me give only claim"
 
-    # No level reaches the organisation's memory.
-    for level <- ["organisation", "team", "profile", "user"] do
+    # No level writes a profile's memory, and none is called user; a team's and the
+    # organisation's are proposals (`remember_propose_test.exs`).
+    for level <- ["profile", "user"] do
       assert {:error, refused} =
                Remember.run(%{"level" => level, "claim" => "Everyone must."}, ctx)
 
-      assert refused =~ "level is repository (the default) or me"
+      assert refused =~ "level is repository (the default), me, team or organisation"
     end
 
-    assert Remember.schema()["properties"]["level"]["enum"] == ["repository", "me"]
+    assert Remember.schema()["properties"]["level"]["enum"] == ["repository", "me", "team", "organisation"]
   end
 
   test "a session's agent calls it as a tool, and its log keeps what was written", context do

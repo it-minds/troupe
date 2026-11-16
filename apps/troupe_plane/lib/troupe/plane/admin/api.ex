@@ -1594,6 +1594,40 @@ defmodule Troupe.Plane.Admin.API do
           ]
     },
     %Method{
+      name: "admin.memory.proposals",
+      function: :memory_proposals,
+      summary:
+        "The entries agents proposed for a team's or the organisation's memory and that wait for review: every one for a platform admin, their teams' for a team admin, oldest first. Each has id, scope (team or organisation), team, topic, entry, session_id, agent, where (pod or machine), by (the person whose session it came from) and at. A proposal is in no document and no session reads it until it is accepted. enabled says whether the plane takes proposals now (the setting memory_proposals).",
+      risk: :read,
+      arguments: []
+    },
+    %Method{
+      name: "admin.memory.accept",
+      function: :memory_accept,
+      summary:
+        "Accept a proposal: its entry is written into its level's memory under its topic as the next version, saved by you, with the session and agent it came from as who wrote the line, and the session is told. A team's is its team admins' and the platform admins' to decide, the organisation's a platform admin's. Refused as conflict where somebody decided it first, and where the document would pass its limit. Audited as memory.proposal.accept, and the save as memory.put.",
+      risk: :write,
+      arguments: [
+        %Argument{name: "id", type: :string, required: true, description: "The proposal, as admin.memory.proposals lists it."}
+      ]
+    },
+    %Method{
+      name: "admin.memory.decline",
+      function: :memory_decline,
+      summary:
+        "Decline a proposal with a sentence saying why, which the session it came from is told as it is. Nothing is written into the memory. Decided as admin.memory.accept is. Audited as memory.proposal.decline.",
+      risk: :write,
+      arguments: [
+        %Argument{name: "id", type: :string, required: true, description: "The proposal, as admin.memory.proposals lists it."},
+        %Argument{
+          name: "reason",
+          type: :string,
+          required: true,
+          description: "Why, in a sentence the agent and the person read: at most 1024 bytes."
+        }
+      ]
+    },
+    %Method{
       name: "admin.github.get",
       function: :github_get,
       summary:

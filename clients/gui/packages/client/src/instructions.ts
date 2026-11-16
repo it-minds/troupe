@@ -69,6 +69,38 @@ export interface OwnMemory {
    * lets nobody change them here. The plane still decides at every save.
    */
   roles?: { platform_admin: boolean; team_admin: string[] };
+  /**
+   * What agents of the person's proposed for a team's or the organisation's memory (troupe
+   * #55): every one awaiting review, and those decided this week. Absent from a plane from
+   * before proposals.
+   */
+  proposals?: MemoryProposal[];
+}
+
+/**
+ * An entry an agent proposed for a team's memory or the organisation's (troupe #55), as the
+ * plane keeps it: in no document until an administrator accepts it. `message` is the line
+ * its session is told; `reason` a decline's sentence; `version` the version an accepted one
+ * came in.
+ */
+export interface MemoryProposal {
+  id: string;
+  scope: "team" | "organisation";
+  team: string | null;
+  topic: string;
+  entry: string;
+  session_id: string | null;
+  agent: string | null;
+  where: "pod" | "machine";
+  /** Whose session it came from. */
+  by: string;
+  state: "pending" | "accepted" | "declined";
+  at: string;
+  decided_by: string | null;
+  decided_at: string | null;
+  reason: string | null;
+  version: number | null;
+  message: string;
 }
 
 /** The person's own memory's history (`me.memory.history`): every version, one beside another. */

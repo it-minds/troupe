@@ -268,6 +268,7 @@ export type {
   MemoryListing,
   MemoryNudged,
   MemoryPreview,
+  MemoryProposals,
   MemoryReader,
   MemoryReaders,
   MemoryRow,
@@ -400,7 +401,7 @@ export type {
 } from "./config.js";
 export { PATH_TOOLS, RULE_ACTIONS, checkRuleSet, parseRule, ruleKind, ruleParts } from "./rules.js";
 export { instructionLayers } from "./instructions.js";
-export type { InstructionFile, InstructionLayer, InstructionRow, InstructionsContext, MemoryStatus, OwnMemory, OwnMemoryHistory, OwnMemoryPreview, OwnMemorySaved } from "./instructions.js";
+export type { InstructionFile, InstructionLayer, InstructionRow, InstructionsContext, MemoryProposal, MemoryStatus, OwnMemory, OwnMemoryHistory, OwnMemoryPreview, OwnMemorySaved } from "./instructions.js";
 export type { ReadRule, RuleAction, RuleKind, RuleSet } from "./rules.js";
 export {
   APPROVAL_CHOICES,

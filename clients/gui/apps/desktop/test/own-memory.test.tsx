@@ -91,6 +91,31 @@ describe("the Memory view", () => {
     expect(entries(screen)[0]).toContain("USED IN 3 SESSIONS");
   });
 
+  // What an agent of theirs proposed for a level above their own (troupe #55): under that
+  // level, awaiting review and in nobody's memory yet, or declined with the reason given.
+  it("shows the person's agents' proposals under the level they are for, awaiting review or declined", async () => {
+    daemon.ownProposals = [
+      { id: "p-1", scope: "team", team: "core", topic: "Releases", entry: "Tag before the changelog.", session_id: "s-1", agent: "build", where: "machine", by: "alice@example.com", state: "pending", at: "2026-10-26T08:00:00Z", decided_by: null, decided_at: null, reason: null, version: null, message: "" },
+      { id: "p-2", scope: "organisation", team: null, topic: "Dates", entry: "Write dates in words.", session_id: "s-2", agent: "root", where: "machine", by: "alice@example.com", state: "declined", at: "2026-10-25T08:00:00Z", decided_by: "root@example.com", decided_at: "2026-10-25T09:00:00Z", reason: "ISO dates stay.", version: null, message: "" },
+    ];
+    const screen = await openMemory();
+    level(await waitFor(() => level(screen, "core") && screen, "the levels"), "core").click();
+
+    const proposed = await waitFor(() => screen.querySelector<HTMLElement>('[aria-label="Proposed by your agents"]'), "the core team's proposals");
+    expect(proposed.textContent).toContain("AWAITING REVIEW");
+    expect(proposed.textContent).toContain("Tag before the changelog.");
+    expect(proposed.textContent).toContain("In nobody's memory yet: core's team admins or a platform administrator accept or decline it.");
+    expect(proposed.textContent).not.toContain("Write dates in words.");
+
+    level(screen, "Everyone").click();
+    const declined = await waitFor(
+      () => [...screen.querySelectorAll<HTMLElement>('[aria-label="Proposed by your agents"]')].find((s) => s.textContent?.includes("DECLINED")),
+      "the organisation's proposals",
+    );
+    expect(declined.textContent).toContain("Declined by root@example.com: ISO dates stay.");
+    expect(declined.textContent).not.toContain("Tag before the changelog.");
+  });
+
   it("adds to, edits and forgets the person's own, saving the whole document over the version read", async () => {
     const screen = await openMemory();
     level(await waitFor(() => level(screen, "Only you") && screen, "the levels"), "Only you").click();
