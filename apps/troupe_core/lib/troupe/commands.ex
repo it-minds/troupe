@@ -38,8 +38,11 @@ defmodule Troupe.Commands do
   any of them. Where a client runs a command differently enough that the one sentence
   would name what that client has not got (a window, a directory), the row also carries
   `summaries` and `details`, maps from a client's name (`tui`, `desktop`) to its own
-  sentence, and that client shows its own. `for_client/2` makes the choice for a client,
-  of the words and of the `availability`.
+  sentence, and that client shows its own. A command a client takes with other arguments
+  than the table's `usage` (`/hq` names a plane only in the terminal client) carries
+  `usages` and `examples` the same way, an example `nil` where that client has none to
+  give. `for_client/2` makes the choice for a client, of the words, the usage and the
+  example, and of the `availability`.
   """
 
   alias Troupe.Agent.Definition
@@ -448,6 +451,9 @@ defmodule Troupe.Commands do
             "Opens the sessions list, where the plane's sessions you can see, by team and " <>
               "profile, are listed alongside this computer's own."
         },
+        # The desktop app is signed in to one plane and takes no address here.
+        usages: %{"desktop" => "/hq"},
+        examples: %{"desktop" => nil},
         example: "/hq https://troupe.example"
       ),
       entry("observer", "navigate", "The agent tree: every branch and subagent",
@@ -763,10 +769,12 @@ defmodule Troupe.Commands do
     do: text |> String.split("\n") |> Enum.map(&String.trim/1) |> Enum.find(&(&1 != ""))
 
   @doc """
-  The rows as `client` shows them: each row's `summary`, `detail` and `availability`
-  replaced by the client's own where `summaries`, `details` or `availabilities` has one
-  for it (`"tui"`, `"desktop"`), and the neutral one kept where it has none. A row from a harness before the maps, which
-  has neither, is as it was.
+  The rows as `client` shows them: each row's `summary`, `detail`, `usage`, `example` and
+  `availability` replaced by the client's own where `summaries`, `details`, `usages`,
+  `examples` or `availabilities` has one for it (`"tui"`, `"desktop"`), and the neutral
+  one kept where it has none. A client's own usage keeps only the `args` it names, and its
+  example may be `nil`, none. A row from a harness before the maps, which has neither, is
+  as it was.
   """
   @spec for_client([entry()], String.t()) :: [entry()]
   def for_client(entries, client) do
@@ -774,6 +782,8 @@ defmodule Troupe.Commands do
       entry
       |> own(client, "summaries", "summary")
       |> own(client, "details", "detail")
+      |> own_usage(client)
+      |> own_example(client)
       |> own(client, "availabilities", "availability")
     end)
   end
@@ -784,6 +794,31 @@ defmodule Troupe.Commands do
       _neutral -> entry
     end
   end
+
+  defp own_usage(%{"usages" => %{} = usages} = entry, client) do
+    case Map.fetch(usages, client) do
+      {:ok, usage} when is_binary(usage) ->
+        named? = &String.contains?(usage, &1["name"])
+        %{entry | "usage" => usage, "args" => Enum.filter(entry["args"], named?)}
+
+      _neutral ->
+        entry
+    end
+  end
+
+  defp own_usage(entry, _client), do: entry
+
+  defp own_example(%{"examples" => %{} = examples} = entry, client) do
+    case Map.fetch(examples, client) do
+      {:ok, example} when is_binary(example) or is_nil(example) ->
+        Map.put(entry, "example", example)
+
+      _neutral ->
+        entry
+    end
+  end
+
+  defp own_example(entry, _client), do: entry
 
   defp entry(name, section, summary, opts) do
     %{
@@ -800,6 +835,8 @@ defmodule Troupe.Commands do
     }
     |> put_given("summaries", Keyword.get(opts, :summaries))
     |> put_given("details", Keyword.get(opts, :details))
+    |> put_given("usages", Keyword.get(opts, :usages))
+    |> put_given("examples", Keyword.get(opts, :examples))
     |> put_given("availabilities", Keyword.get(opts, :availabilities))
   end
 

@@ -13,11 +13,12 @@
 import { TroupeRpcError } from "./connection.js";
 import { planeReadsOnlyText } from "./daemon.js";
 import type { EntriesOrText } from "./daemon.js";
-import type { ArtifactDetail, ArtifactFilter, ArtifactList, ArtifactNewLink, ArtifactTicket, ArtifactTransferTo } from "./artifacts.js";
+import type { ArtifactComment, ArtifactDetail, ArtifactFilter, ArtifactList, ArtifactNewLink, ArtifactPersonShare, ArtifactShareRole, ArtifactThread, ArtifactTicket, ArtifactTransferTo } from "./artifacts.js";
+import type { Person } from "./invites.js";
 import type { MemoryDocument, MemoryPreview, MemorySaved } from "./admin.js";
 import { renderEntries } from "./entries.js";
 import type { MemoryEntry, MemoryInEffect } from "./entries.js";
-import type { OwnMemory, OwnMemoryHistory, OwnMemorySaved } from "./instructions.js";
+import type { MemoryProposal, OwnMemory, OwnMemoryHistory, OwnMemorySaved } from "./instructions.js";
 
 type Rpc = <T = unknown>(method: string, params?: unknown) => Promise<T>;
 type Scope = "organisation" | "team" | "profile";
@@ -42,6 +43,14 @@ export interface OwnPlane {
   moveArtifact(id: string, base: number, visibility: string): Promise<ArtifactDetail>;
   pinArtifact(id: string, version: number | null): Promise<ArtifactDetail>;
   transferArtifact(id: string, to: ArtifactTransferTo): Promise<ArtifactDetail>;
+  /** Share it with one person by name at `role`, no link made. The owner's. */
+  sharePersonArtifact(id: string, person: string, role: ArtifactShareRole): Promise<{ id: string; person: ArtifactPersonShare }>;
+  /** Its thread, oldest first, and whether the caller may write in it. */
+  artifactComments(id: string): Promise<ArtifactThread>;
+  /** A comment in its thread. */
+  commentArtifact(id: string, body: string): Promise<{ id: string; comment: ArtifactComment }>;
+  /** The share picker's search: people whose name, email or subject starts with `query`. */
+  searchPeople(query: string): Promise<{ people: Person[] }>;
 }
 
 /** The order the levels come in, lowest first, as the plane and the daemon sort them. */
@@ -65,6 +74,7 @@ interface PlaneMemory {
   teams?: string[];
   organisation?: { name: string } | null;
   roles?: { platform_admin?: unknown; team_admin?: unknown } | null;
+  proposals?: MemoryProposal[];
 }
 
 /**
@@ -154,6 +164,22 @@ export class PlaneOwn implements OwnPlane {
   transferArtifact(id: string, to: ArtifactTransferTo): Promise<ArtifactDetail> {
     return this.ask<ArtifactDetail>("artifact.transfer", { id, to });
   }
+
+  sharePersonArtifact(id: string, person: string, role: ArtifactShareRole): Promise<{ id: string; person: ArtifactPersonShare }> {
+    return this.ask<{ id: string; person: ArtifactPersonShare }>("artifact.share", { id, person, role });
+  }
+
+  artifactComments(id: string): Promise<ArtifactThread> {
+    return this.ask<ArtifactThread>("artifact.comments", { id });
+  }
+
+  commentArtifact(id: string, body: string): Promise<{ id: string; comment: ArtifactComment }> {
+    return this.ask<{ id: string; comment: ArtifactComment }>("artifact.comment", { id, body });
+  }
+
+  searchPeople(query: string): Promise<{ people: Person[] }> {
+    return this.ask<{ people: Person[] }>("people.search", { query });
+  }
 }
 
 /**
@@ -178,6 +204,7 @@ function ownOf(answer: PlaneMemory, planeUrl: string): OwnMemory {
     documents,
     organisation: answer.organisation ?? null,
     roles: { platform_admin: roles.platform_admin === true, team_admin: Array.isArray(roles.team_admin) ? roles.team_admin.filter((t): t is string => typeof t === "string") : [] },
+    proposals: Array.isArray(answer.proposals) ? answer.proposals : [],
   };
 }
 

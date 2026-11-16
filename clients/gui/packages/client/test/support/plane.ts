@@ -62,7 +62,7 @@ export interface PlaneOptions {
    * below its ceiling answers `pending` until `placeWaiting` gives it a place; one at the
    * ceiling is refused with `capacity`, as the plane refuses it.
    */
-  room?: Record<string, { capacity: number; active: number; max_sessions?: number | null }>;
+  room?: Record<string, { capacity: number; active: number; max_sessions?: number | null; gone?: number }>;
   /**
    * The primaries each profile offers, by name, where they are not the default: the
    * primaries of the profile's composition for the person asking (`profileSpecs`, its
@@ -124,6 +124,16 @@ export interface PlaneOptions {
   breakglassLifetime?: number;
   /** The plane's own build version, which discovery says as `plane.build.version`. None is a plane whose discovery names no build. */
   version?: string;
+  /**
+   * What discovery says a web page offers to install, as `plane.downloads` (#959). None is
+   * a plane that recommends no desktop version: the latest release's page and no files.
+   */
+  downloads?: { version: string | null; page: string; windows: string | null; macos: string | null; linux: string | null };
+  /**
+   * The admin writes discovery says take `dry_run: true` (`plane.dry_run`); absent, the
+   * ones this fake does. An empty list is a plane from before, which would make the write.
+   */
+  dryRun?: string[];
 }
 
 /** A file of an artifact's version, with what it holds, which no answer carries. */
@@ -148,7 +158,7 @@ export interface FakeArtifactShare {
   id: string;
   artifact: string;
   token: string;
-  role: "view" | "edit";
+  role: "view" | "comment" | "edit";
   public: boolean;
   expires_at: string | null;
   revoked_at: string | null;
@@ -319,6 +329,10 @@ export class FakePlane {
   readonly opened: Array<{ subject: string; id: string; version: number | null; url: string }> = [];
   /** The links made to artifacts, by id. */
   readonly shares = new Map<string, FakeArtifactShare>();
+  /** Who each artifact is shared with by name, by artifact and then by person. */
+  readonly named = new Map<string, Map<string, { role: "view" | "comment" | "edit"; granted_by: string; granted_at: string }>>();
+  /** Each artifact's thread, oldest first. */
+  readonly comments = new Map<string, Array<{ id: string; author: { subject: string; display_name: string | null }; body: string; created_at: string }>>();
   /** Every `artifact.preview` asked, in order, with what it showed and the address it answered. */
   readonly previews: Array<{ subject: string; id: string; base: number; path: string; text: string; url: string }> = [];
   /**
@@ -620,7 +634,7 @@ export class FakePlane {
   readonly mints: string[] = [];
 
   /** Say how full a profile is from now on, as `room` does at the start. */
-  setRoom(profile: string, room: { capacity: number; active: number; max_sessions?: number | null }): void {
+  setRoom(profile: string, room: { capacity: number; active: number; max_sessions?: number | null; gone?: number }): void {
     this.opts.room = { ...(this.opts.room ?? {}), [profile]: room };
   }
 
@@ -647,7 +661,7 @@ export class FakePlane {
   }
 
   /** How full a profile is: what a test set, else 8 places and its own active sessions, which `profiles.list` and `profile.get` both answer. */
-  private roomOf(profile: string): { capacity: number; active: number; max_sessions?: number | null } {
+  private roomOf(profile: string): { capacity: number; active: number; max_sessions?: number | null; gone?: number } {
     return this.opts.room?.[profile] ?? { capacity: 8, active: [...this.rows.values()].filter((r) => r.profile === profile && r.state === "active").length };
   }
 
@@ -777,10 +791,10 @@ export class FakePlane {
   }
 
   /** What this person is to it: its owner, an edit link's holder, or one who may view it. */
-  private roleOf(a: FakeArtifact, subject: string): "owner" | "edit" | "view" | null {
+  private roleOf(a: FakeArtifact, subject: string): "owner" | "edit" | "comment" | "view" | null {
     if (this.owns(a, subject)) return "owner";
     const linked = this.linkRole(a, subject);
-    if (linked === "edit") return "edit";
+    if (linked === "edit" || linked === "comment") return linked;
     if (linked === "view" || this.forThem(a, subject)) return "view";
     return null;
   }
@@ -914,11 +928,13 @@ export class FakePlane {
     return !sh.revoked_at && (!sh.expires_at || Date.parse(sh.expires_at) > Date.now());
   }
 
-  private linkRole(a: FakeArtifact, subject: string): "edit" | "view" | null {
-    let role: "edit" | "view" | null = null;
+  /** The strongest role a link this person used, or the owner's naming them, gives: edit above comment above view. */
+  private linkRole(a: FakeArtifact, subject: string): "edit" | "comment" | "view" | null {
+    const rank = ["view", "comment", "edit"] as const;
+    let role: (typeof rank)[number] | null = this.named.get(a.id)?.get(subject)?.role ?? null;
     for (const sh of this.shares.values()) {
       if (sh.artifact !== a.id || !this.liveShare(sh) || !sh.uses.some((u) => u.subject === subject && !u.revoked)) continue;
-      role = sh.role === "edit" || role === "edit" ? "edit" : "view";
+      if (role === null || rank.indexOf(sh.role) > rank.indexOf(role)) role = sh.role;
     }
     return role;
   }
@@ -962,6 +978,9 @@ export class FakePlane {
       current: a.pinned ?? latest.n,
       pinned: a.pinned ?? null,
       may_edit: ["owner", "edit"].includes(this.roleOf(a, subject) ?? ""),
+      may_comment: ["owner", "edit", "comment"].includes(this.roleOf(a, subject) ?? ""),
+      comments: this.comments.get(a.id)?.length ?? 0,
+      commented_at: this.comments.get(a.id)?.at(-1)?.created_at ?? null,
       public_links: a.public_links !== false,
       public: this.isPublic(a),
       bytes: latest.files.reduce((n, f) => n + new TextEncoder().encode(f.content).length, 0),
@@ -1065,7 +1084,16 @@ export class FakePlane {
         device_authorization_endpoint: this.opts.idp.deviceAuthorizationEndpoint,
         token_endpoint: this.opts.idp.tokenEndpoint,
         scopes: ["openid", "profile", "email", "offline_access", "groups"],
-        plane: { name: "fake", rpc: "/rpc", jwks: "/.well-known/jwks.json", protocol_version: "1", ...(this.opts.version ? { build: { version: this.opts.version } } : {}) },
+        plane: {
+          name: "fake",
+          rpc: "/rpc",
+          jwks: "/.well-known/jwks.json",
+          protocol_version: "1",
+          console: null,
+          downloads: this.opts.downloads ?? { version: null, page: "https://github.com/it-minds/troupe/releases/latest", windows: null, macos: null, linux: null },
+          ...(this.opts.version ? { build: { version: this.opts.version } } : {}),
+          dry_run: this.opts.dryRun ?? ["admin.clients.put"],
+        },
         breakglass: typeof this.opts.breakglass === "string",
       });
     }
@@ -1223,7 +1251,11 @@ export class FakePlane {
           result: {
             profiles: profiles.map((p) => ({
               name: p,
-              pods: [{ pod: `${p}-0`, ordinal: 0, endpoint: worker.endpoint, healthy: true, draining: false, capacity: this.roomOf(p).capacity, active_sessions: this.roomOf(p).active }],
+              // A pod the operator removed is listed `gone` until the plane forgets it, and counts for nothing.
+              pods: [
+                { pod: `${p}-0`, ordinal: 0, endpoint: worker.endpoint, healthy: true, draining: false, gone: false, capacity: this.roomOf(p).capacity, active_sessions: this.roomOf(p).active },
+                ...Array.from({ length: this.roomOf(p).gone ?? 0 }, (_, i) => ({ pod: `${p}-${i + 1}`, ordinal: i + 1, endpoint: worker.endpoint, healthy: true, draining: false, gone: true, capacity: 4, active_sessions: 0 })),
+              ],
               capacity: this.roomOf(p).capacity,
               active_sessions: this.roomOf(p).active,
               healthy_pods: 1,
@@ -1393,6 +1425,9 @@ export class FakePlane {
             teams: [...this.teamsOf(subject)].sort(),
             organisation: { name: "Example" },
             roles: { platform_admin: admin, team_admin: administers },
+            // What the person's agents proposed for a level above their own, as the plane
+            // keeps them: the shared admin fake's, so a console's decision shows here.
+            proposals: (this.opts.admin?.memoryProposals ?? []).filter((p) => p.by === subject).slice().reverse(),
           },
         };
       }
@@ -1470,7 +1505,8 @@ export class FakePlane {
       case "artifact.get": {
         const a = this.artifacts.get(String(params["id"] ?? ""));
         if (!a || !this.mayRead(a, subject)) return { error: { code: -32005, message: "not_found" } };
-        const shares = this.owns(a, subject) ? { shares: [...this.shares.values()].filter((sh) => sh.artifact === a.id).map((sh) => this.shareJson(sh)), public_links_allowed: this.opts.publicLinks ?? false } : {};
+        const people = [...(this.named.get(a.id) ?? new Map()).entries()].map(([s, g]) => ({ subject: s, display_name: this.nameOf(s), email: this.people.find((p) => p.subject === s)?.email ?? null, ...g }));
+        const shares = this.owns(a, subject) ? { shares: [...this.shares.values()].filter((sh) => sh.artifact === a.id).map((sh) => this.shareJson(sh)), people, public_links_allowed: this.opts.publicLinks ?? false } : {};
         return { result: { ...this.artifactJson(a, subject), versions: this.artifactVersions(a), ...shares } };
       }
 
@@ -1541,6 +1577,17 @@ export class FakePlane {
         const a = this.artifacts.get(String(params["id"] ?? ""));
         if (!a || !this.mayRead(a, subject)) return { error: { code: -32005, message: "not_found" } };
         if (!this.owns(a, subject)) return { error: { code: -32004, message: "forbidden", data: { reason: "only its owner shares an artifact" } } };
+        const role = params["role"];
+        if (role !== "view" && role !== "comment" && role !== "edit") return { error: { code: -32602, message: "invalid_params", data: { reason: `a role is view, comment or edit, not ${JSON.stringify(role)}` } } };
+        // Shared with one person by name: no link, their role from now.
+        if (typeof params["person"] === "string") {
+          const person = params["person"];
+          if (person === subject) return { error: { code: -32602, message: "invalid_params", data: { reason: "you own it already; share it with somebody else" } } };
+          if (!this.people.some((p) => p.subject === person)) return { error: { code: -32005, message: "not_found", data: { person, reason: "nobody of that name is a person of this plane" } } };
+          const grant = { role, granted_by: subject, granted_at: "2026-10-25T12:00:00Z" };
+          this.named.set(a.id, (this.named.get(a.id) ?? new Map()).set(person, grant));
+          return { result: { id: a.id, person: { subject: person, display_name: this.nameOf(person), ...grant } } };
+        }
         const pub = params["public"] === true;
         if (pub && !this.opts.publicLinks) return { error: { code: -32004, message: "forbidden", data: { reason: "public links are switched off on this plane; an administrator turns them on with artifacts_public_links under Policy and settings" } } };
         if (pub && typeof params["expires"] !== "string") return { error: { code: -32602, message: "invalid_params", data: { reason: "a public link needs an expiry (expires), at most 90 days away" } } };
@@ -1549,7 +1596,7 @@ export class FakePlane {
           id: `share-${n}`,
           artifact: a.id,
           token: `token-${n}-abcdefghijklmnopqrstuvwxyz`,
-          role: params["role"] === "edit" ? "edit" : "view",
+          role,
           public: pub,
           expires_at: typeof params["expires"] === "string" ? params["expires"] : null,
           revoked_at: null,
@@ -1572,7 +1619,28 @@ export class FakePlane {
           return { result: { revoked: true, id: a.id, share: sh.id } };
         }
         for (const sh of this.shares.values()) if (sh.artifact === a.id) for (const u of sh.uses) if (u.subject === params["person"]) u.revoked = true;
+        this.named.get(a.id)?.delete(String(params["person"]));
         return { result: { revoked: true, id: a.id, person: params["person"] } };
+      }
+
+      // The thread: read by whoever may open it, written by an owner or somebody given comment or edit.
+      case "artifact.comments": {
+        const a = this.artifacts.get(String(params["id"] ?? ""));
+        if (!a || !this.mayRead(a, subject)) return { error: { code: -32005, message: "not_found" } };
+        return { result: { id: a.id, may_comment: ["owner", "edit", "comment"].includes(this.roleOf(a, subject) ?? ""), max_length: 4000, comments: this.comments.get(a.id) ?? [] } };
+      }
+
+      case "artifact.comment": {
+        const a = this.artifacts.get(String(params["id"] ?? ""));
+        if (!a || !this.mayRead(a, subject)) return { error: { code: -32005, message: "not_found" } };
+        if (!["owner", "edit", "comment"].includes(this.roleOf(a, subject) ?? "")) {
+          return { error: { code: -32004, message: "forbidden", data: { reason: "you may read this artifact's comments; its owner gives the people who may write in them comment or edit" } } };
+        }
+        const body = typeof params["body"] === "string" ? params["body"].trim() : "";
+        if (body === "") return { error: { code: -32602, message: "invalid_params", data: { reason: "a comment needs some text" } } };
+        const comment = { id: `comment-${++this.counter}`, author: { subject, display_name: name ?? this.nameOf(subject) }, body, created_at: new Date(Date.parse("2026-10-25T12:00:00Z") + this.counter * 60_000).toISOString() };
+        this.comments.set(a.id, [...(this.comments.get(a.id) ?? []), comment]);
+        return { result: { id: a.id, comment } };
       }
 
       case "artifact.redeem": {

@@ -1,0 +1,182 @@
+/* Generated from clients/gui/docs/design/themes/afterglow.tokens.json by
+   clients/gui/scripts/tokens.ts. Do not edit by hand: run `pnpm tokens` in clients/gui.
+   The product's default palette, for the site's front page (landing.css), under the
+   theme's two colour schemes. */
+
+[data-md-color-scheme="default"] {
+  --bg-stage: #E9E0CB;
+  --bg-canvas: #F4ECDB;
+  --bg-panel: #FAF5EA;
+  --bg-raised: #FFFCF4;
+  --bg-sunken: #ECE3CF;
+  --bg-hover: #ECE3CF;
+  --bg-selected: #E3D9C1;
+  --scrim: rgba(11,11,18,0.44);
+  --bg-shadow: #000353;
+
+  --text-primary: #0B0B12;
+  --text-body: #1C1C2B;
+  --text-secondary: #4A4A66;
+  --text-label: #5A5A76;
+  --text-muted: #5F5F78;
+  --text-inverse: #FBF7EE;
+  --link: #C4005F;
+  --link-hover: #A3004F;
+  --accent: #C4005F;
+
+  --border-hairline: rgba(11,11,18,0.18);
+  --border-strong: rgba(11,11,18,0.42);
+  --focus: #007A7C;
+  --divider: rgba(11,11,18,0.18);
+  --frame-accent: #007A7C;
+
+  --running-fg: #006466;
+  --running-bg: rgba(0,134,135,0.10);
+  --running-bd: #4FB0B1;
+  --running-solid: #007779;
+  --waiting-fg: #C4005F;
+  --waiting-bg: rgba(196,0,95,0.07);
+  --waiting-bd: #C4005F;
+  --waiting-solid: #C4005F;
+  --queued-fg: #7A4E00;
+  --queued-bg: transparent;
+  --queued-bd: #C48F3F;
+  --local-fg: #7A4E00;
+  --local-bg: rgba(163,119,52,0.10);
+  --local-bd: #C48F3F;
+  --allowed-fg: #006466;
+  --allowed-bg: rgba(0,134,135,0.10);
+  --allowed-bd: #4FB0B1;
+  --denied-fg: #8E2F1F;
+  --denied-bg: rgba(126,54,40,0.10);
+  --denied-bd: #C97A6A;
+  --dormant-fg: #4A3F86;
+  --dormant-bg: rgba(74,63,134,0.10);
+  --dormant-bd: #8C80C9;
+  --readonly-fg: #5A5A76;
+  --readonly-bg: rgba(90,90,118,0.08);
+  --readonly-bd: rgba(11,11,18,0.42);
+  --private-fg: #4A3F86;
+  --private-bg: rgba(74,63,134,0.10);
+  --private-bd: #8C80C9;
+  --error-fg: #A5261A;
+  --error-bg: rgba(165,38,26,0.10);
+  --error-bd: #D4877B;
+  --offline-fg: #5D4A1E;
+  --offline-bg: rgba(93,74,30,0.08);
+  --offline-bd: #B9A578;
+
+  --diff-add-bg: rgba(0,134,135,0.10);
+  --diff-add-fg: #006466;
+  --diff-add-mark: #4FB0B1;
+  --diff-del-bg: rgba(126,54,40,0.10);
+  --diff-del-fg: #8E2F1F;
+  --diff-del-mark: #C97A6A;
+  --diff-ctx: #4A4A66;
+  --diff-gutter-bg: #ECE3CF;
+  --diff-gutter-fg: #5F5F78;
+  --diff-hunk: #5A5A76;
+
+  --p1: #006466;
+  --p2: #4A3F86;
+  --p3: #7A4E00;
+  --p4: #8E2F1F;
+  --p5: #7A2E96;
+  --p6: #4E5B10;
+  --p-self: #5A5A76;
+  --p-agent: #0B0B12;
+
+  --sh-raise: 0 1px 2px rgba(11,11,18,0.12);
+  --sh-sheet: 0 -8px 28px rgba(11,11,18,0.16);
+  --sh-overlay: 0 16px 48px rgba(11,11,18,0.22);
+  --sh-footlight: 0 -14px 40px rgba(196,0,95,0.14);
+}
+
+[data-md-color-scheme="slate"] {
+  --bg-stage: #0B0B12;
+  --bg-canvas: #0B0B12;
+  --bg-panel: #12121C;
+  --bg-raised: #1C1C2B;
+  --bg-sunken: #06060B;
+  --bg-hover: #1C1C2B;
+  --bg-selected: #242436;
+  --scrim: rgba(11,11,18,0.72);
+  --bg-shadow: #000353;
+
+  --text-primary: #F4ECDB;
+  --text-body: #E8DFD0;
+  --text-secondary: #A3A3B8;
+  --text-label: #8A8AA0;
+  --text-muted: #7B7B94;
+  --text-inverse: #0B0B12;
+  --link: #FF0080;
+  --link-hover: #FF4DA6;
+  --accent: #FF0080;
+
+  --border-hairline: rgba(232,223,208,0.18);
+  --border-strong: rgba(232,223,208,0.42);
+  --focus: #00C6C9;
+  --divider: rgba(232,223,208,0.18);
+  --frame-accent: #00C6C9;
+
+  --running-fg: #00DBD3;
+  --running-bg: rgba(0,220,220,0.10);
+  --running-bd: #008687;
+  --running-solid: #00C6C9;
+  --waiting-fg: #FF0080;
+  --waiting-bg: rgba(255,0,128,0.07);
+  --waiting-bd: #FF0080;
+  --waiting-solid: #FF0080;
+  --queued-fg: #FFBC56;
+  --queued-bg: transparent;
+  --queued-bd: #A37734;
+  --local-fg: #FFBC56;
+  --local-bg: rgba(242,166,24,0.08);
+  --local-bd: #A37734;
+  --allowed-fg: #00DBD3;
+  --allowed-bg: rgba(0,220,220,0.10);
+  --allowed-bd: #008687;
+  --denied-fg: #FF7E6E;
+  --denied-bg: rgba(255,126,110,0.12);
+  --denied-bd: #7E3628;
+  --dormant-fg: #9C8BFF;
+  --dormant-bg: rgba(156,139,255,0.10);
+  --dormant-bd: #4A3F86;
+  --readonly-fg: #8A8AA0;
+  --readonly-bg: rgba(138,138,160,0.08);
+  --readonly-bd: rgba(232,223,208,0.42);
+  --private-fg: #9C8BFF;
+  --private-bg: rgba(156,139,255,0.10);
+  --private-bd: #4A3F86;
+  --error-fg: #FF6A55;
+  --error-bg: rgba(255,106,85,0.12);
+  --error-bd: #8A3A2E;
+  --offline-fg: #C9B27A;
+  --offline-bg: rgba(201,178,122,0.10);
+  --offline-bd: #7A6A40;
+
+  --diff-add-bg: rgba(0,220,220,0.10);
+  --diff-add-fg: #00DBD3;
+  --diff-add-mark: #008687;
+  --diff-del-bg: rgba(255,126,110,0.12);
+  --diff-del-fg: #FF7E6E;
+  --diff-del-mark: #7E3628;
+  --diff-ctx: #A3A3B8;
+  --diff-gutter-bg: #0B0B12;
+  --diff-gutter-fg: #6A6A82;
+  --diff-hunk: #8A8AA0;
+
+  --p1: #00DBD3;
+  --p2: #9C8BFF;
+  --p3: #FFBC56;
+  --p4: #FF7E6E;
+  --p5: #E29BFF;
+  --p6: #B6C36E;
+  --p-self: #8A8AA0;
+  --p-agent: #F4ECDB;
+
+  --sh-raise: 0 1px 2px rgba(0,0,0,0.55);
+  --sh-sheet: 0 -8px 28px rgba(0,0,0,0.6);
+  --sh-overlay: 0 16px 48px rgba(0,0,0,0.68);
+  --sh-footlight: 0 -14px 40px rgba(255,0,128,0.14);
+}

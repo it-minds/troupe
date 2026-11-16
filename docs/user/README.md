@@ -47,10 +47,10 @@ desktop app is recorded by the daemon, and plain `troupe` asks nothing then.
 `troupe doctor` checks the setup, one line each: the config files load, the default
 model's provider has a key, the key is accepted (a real request, the provider's model
 list), the model answers (the smallest request a turn makes, one token, through the same
-code a session uses, with the sentence a turn would end with when nothing comes), where
-the key is kept, that the helper every command runs under starts, whether a
-daemon is running, `troupe-daemon` and `troupe` on the `PATH`, and every plane you are
-signed in to. A line that says `FAIL` makes it exit 1; `warn` does not. `troupe-daemon
+code a session uses, with the sentence a turn would end with when nothing comes), what
+the requests tell the provider about Troupe (`identify`), where the key is kept, that the
+helper every command runs under starts, whether a daemon is running, `troupe-daemon` and
+`troupe` on the `PATH`, every plane you are signed in to, and whether `local_only` is on. A line that says `FAIL` makes it exit 1; `warn` does not. `troupe-daemon
 doctor` prints the same lines. `troupe doctor --bench` then says whether a session gets
 through the harness on this machine: a turn of thirty tool calls, a tool output too long
 to send whole, a compaction, a cancel, a replay of the session's log, thinking made before

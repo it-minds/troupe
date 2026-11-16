@@ -49,7 +49,7 @@ defmodule Troupe.Plane.Artifacts do
 
   alias Troupe.ObjectStore
   alias Troupe.Plane.{Admin, Audit, Identity, Repo, Settings}
-  alias Troupe.Plane.Artifacts.{Artifact, Previews, Shares, Uploads, Version}
+  alias Troupe.Plane.Artifacts.{Artifact, Comments, People, Previews, Shares, Uploads, Version}
   alias Troupe.Plane.Identity.User
   alias Troupe.Plane.Sessions.Session
   alias Troupe.Protocol.Error
@@ -1235,12 +1235,14 @@ defmodule Troupe.Plane.Artifacts do
       artifact = artifact |> Repo.preload([:owner, :owner_team, :team, :versions])
       json = to_json(artifact, user, admin?)
 
-      # Who holds a link to it is an owner's to read, and whether a public one may be made.
+      # Who holds a link to it, and who it is shared with by name, is an owner's to read, and
+      # whether a public one may be made.
       if json["role"] == "owner",
         do:
           {:ok,
            Map.merge(json, %{
              "shares" => Shares.list(artifact),
+             "people" => People.list(artifact),
              "public_links_allowed" => Shares.public_links?()
            })},
         else: {:ok, json}
@@ -1295,7 +1297,7 @@ defmodule Troupe.Plane.Artifacts do
 
   defp linked_role(artifact, user) do
     case Shares.role(artifact, user) do
-      "edit" -> "edit"
+      linked when linked in ["edit", "comment"] -> linked
       linked -> if(linked == "view" or for?(artifact, user), do: "view")
     end
   end
@@ -1315,8 +1317,10 @@ defmodule Troupe.Plane.Artifacts do
 
   # A list's roles in one query for its links, rather than one per artifact.
   defp with_roles(artifacts, user, admin?, audience) do
-    linked = Shares.roles(Enum.map(artifacts, & &1.id), user)
-    public = Shares.public_ids(Enum.map(artifacts, & &1.id))
+    ids = Enum.map(artifacts, & &1.id)
+    linked = Shares.roles(ids, user)
+    public = Shares.public_ids(ids)
+    comments = Comments.counts(ids)
 
     Enum.map(artifacts, fn artifact ->
       for? = for?(artifact, user, audience)
@@ -1325,7 +1329,7 @@ defmodule Troupe.Plane.Artifacts do
       role =
         cond do
           owns?(artifact, user, audience) -> "owner"
-          link == "edit" -> "edit"
+          link in ["edit", "comment"] -> link
           link == "view" or for? -> "view"
           true -> nil
         end
@@ -1333,6 +1337,7 @@ defmodule Troupe.Plane.Artifacts do
       {artifact,
        %{
          role: role,
+         comments: Map.get(comments, artifact.id, {0, nil}),
          public: MapSet.member?(public, artifact.id),
          scope: scope(artifact, role, for?, link),
          administers: administers?(artifact, user, audience.administered),
@@ -1353,7 +1358,7 @@ defmodule Troupe.Plane.Artifacts do
   defp scope(%Artifact{visibility: "private"}, "owner", _for?, _link), do: "private"
   defp scope(_artifact, "owner", _for?, _link), do: "mine"
   defp scope(artifact, _role, true, _link), do: artifact.visibility
-  defp scope(_artifact, _role, false, link) when link in ["view", "edit"], do: "shared"
+  defp scope(_artifact, _role, false, link) when link in ["view", "comment", "edit"], do: "shared"
   defp scope(artifact, _role, _for?, _link), do: artifact.visibility
 
   defp profiles_of(user),
@@ -1849,7 +1854,17 @@ defmodule Troupe.Plane.Artifacts do
   `expires`, and `public` for one that needs no sign-in, where an administrator allows them.
   """
   @spec share(String.t(), User.t(), map(), keyword()) :: {:ok, map()} | {:error, Error.t()}
-  def share(id, %User{} = user, params, opts \\ []) do
+  def share(id, user, params, opts \\ [])
+
+  # With `person`, no link: the artifact shared with that one person by name, at `role`.
+  def share(id, %User{} = user, %{"person" => subject} = params, opts) do
+    with :ok <- on(),
+         {:ok, artifact} <- owned(id, user, Keyword.get(opts, :platform_admin?, false), "shares") do
+      People.grant(artifact, user, subject, params["role"])
+    end
+  end
+
+  def share(id, %User{} = user, params, opts) do
     with :ok <- on(),
          {:ok, artifact} <- owned(id, user, Keyword.get(opts, :platform_admin?, false), "shares"),
          host when is_binary(host) <- host_url() || {:error, no_host()} do
@@ -1863,6 +1878,33 @@ defmodule Troupe.Plane.Artifacts do
     with :ok <- on(),
          {:ok, artifact} <- owned(id, user, Keyword.get(opts, :platform_admin?, false), "revokes a link to") do
       Shares.unshare(artifact, user, params)
+    end
+  end
+
+  # -- comments ---------------------------------------------------------------------
+
+  @doc "Artifact `id`'s thread, oldest first, for whoever may open it (`Comments`)."
+  @spec comments(String.t(), User.t(), keyword()) :: {:ok, map()} | {:error, Error.t()}
+  def comments(id, %User{} = user, opts \\ []) do
+    with {:ok, artifact} <- visible(id, user, Keyword.get(opts, :platform_admin?, false)) do
+      role = role(artifact, user)
+
+      {:ok,
+       %{
+         "id" => artifact.id,
+         "may_comment" => role in Comments.writers(),
+         "max_length" => Comments.max_body(),
+         "comments" => Comments.list(artifact)
+       }}
+    end
+  end
+
+  @doc "A comment `body` in artifact `id`'s thread, by whoever holds comment, edit or owner on it."
+  @spec comment(String.t(), User.t(), term(), keyword()) :: {:ok, map()} | {:error, Error.t()}
+  def comment(id, %User{} = user, body, opts \\ []) do
+    with :ok <- on(),
+         {:ok, artifact} <- visible(id, user, Keyword.get(opts, :platform_admin?, false)) do
+      Comments.add(artifact, user, role(artifact, user), body)
     end
   end
 
@@ -2121,6 +2163,10 @@ defmodule Troupe.Plane.Artifacts do
       "published_at" => artifact.updated_at,
       "may_delete" => mine or admin? or meta.administers,
       "may_edit" => meta.role in ["owner", "edit"],
+      # Whether the caller may write in its thread, and how long the thread is.
+      "may_comment" => meta.role in Comments.writers(),
+      "comments" => elem(meta.comments, 0),
+      "commented_at" => elem(meta.comments, 1),
       # Whether the caller could move whose it is with `artifact.transfer`.
       "may_transfer" => meta.may_transfer,
       # The owner's switch for its public links, and whether one opens now.

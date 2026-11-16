@@ -132,7 +132,7 @@ describe("an address the role may not open", () => {
     await waitFor(() => heading() === "Mine", "Mine");
     await sees("That page is for administrators.");
     expect(globalThis.location.hash).toBe("#/mine");
-    button("Dismiss")!.click();
+    button("Dismiss", document.querySelector<HTMLElement>('[aria-label="Not for your role"]')!)!.click();
     await waitFor(() => !says("That page is for administrators."), "the line dismissed");
   });
 

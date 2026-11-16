@@ -29,11 +29,24 @@ defmodule Troupe.Plane.Fleet do
   @spec put_profile(map()) :: {:ok, Profile.t()} | {:error, Ecto.Changeset.t()}
   def put_profile(attrs) do
     name = attrs[:name] || attrs["name"]
+    before = Repo.get(Profile, name)
 
-    (Repo.get(Profile, name) || %Profile{})
+    (before || %Profile{})
     |> Profile.changeset(attrs)
     |> Repo.insert_or_update()
+    |> chain_moved(before)
   end
+
+  # A profile that extends another now, or another one, or none: the memory its running
+  # sessions and its descendants' read comes from a chain that changed, so they are told at
+  # once, as a save of a document in it tells them, and read it from their next turn.
+  defp chain_moved({:ok, %Profile{extends: now} = profile} = saved, %Profile{extends: was})
+       when now != was do
+    _told = Memory.announce(profile.name)
+    saved
+  end
+
+  defp chain_moved(saved, _before), do: saved
 
   @doc """
   Record a profile as the cluster holds it, with the generation it was read at: GitOps
@@ -41,9 +54,12 @@ defmodule Troupe.Plane.Fleet do
   """
   @spec follow_profile(map()) :: {:ok, Profile.t()} | {:error, Ecto.Changeset.t()}
   def follow_profile(attrs) do
-    (Repo.get(Profile, attrs.name) || %Profile{})
+    before = Repo.get(Profile, attrs.name)
+
+    (before || %Profile{})
     |> Profile.cluster_changeset(attrs)
     |> Repo.insert_or_update()
+    |> chain_moved(before)
   end
 
   @doc "One profile, or `nil`."

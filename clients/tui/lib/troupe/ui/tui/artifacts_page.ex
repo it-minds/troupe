@@ -2,7 +2,8 @@ defmodule Troupe.UI.TUI.ArtifactsPage do
   @moduledoc """
   `/artifacts` (root #62): the person's artifacts on the plane, by who can
   see them, in the desktop app's words and glyphs — All, ◉ Everyone at the organisation,
-  ◎ Your teams (a team's and a profile's), ◐ Shared with you (through a link), ○ Only you —
+  ◎ Your teams (a team's and a profile's), ◐ Shared with you (by name or through a link),
+  ○ Only you —
   each row its title, kind, version, whose it is (`team finance` for a team's, which every
   member of the team owns; `you`; or who published it) and when, with *new* on a version
   the person has not opened on this machine.
@@ -41,6 +42,7 @@ defmodule Troupe.UI.TUI.ArtifactsPage do
           workspace: String.t(),
           local_only: boolean(),
           tab: atom(),
+          attach: String.t() | nil,
           rows: [map()],
           organisation: String.t() | nil,
           enabled: boolean(),
@@ -54,7 +56,10 @@ defmodule Troupe.UI.TUI.ArtifactsPage do
           status: String.t() | nil
         }
 
-  @doc "The page, read now; `tab:` opens it on one audience (HQ's line opens Shared with you)."
+  @doc """
+  The page, read now; `tab:` opens it on one audience (HQ's line opens Shared with you), and
+  `attach:` names the window whose message `a` attaches the artifact on the cursor to.
+  """
   @spec open(String.t(), String.t(), keyword()) :: t()
   def open(session_id, workspace, opts \\ []) do
     %{
@@ -62,6 +67,7 @@ defmodule Troupe.UI.TUI.ArtifactsPage do
       workspace: workspace,
       local_only: Client.local_only?(),
       tab: Keyword.get(opts, :tab, :all),
+      attach: Keyword.get(opts, :attach),
       rows: [],
       organisation: nil,
       enabled: true,
@@ -120,8 +126,11 @@ defmodule Troupe.UI.TUI.ArtifactsPage do
 
   ## Keys
 
-  @doc "Answers a key: `{:ok, page}`, or `:close` for Esc on the list."
-  @spec key(t(), map()) :: {:ok, t()} | :close
+  @doc """
+  Answers a key: `{:ok, page}`, `:close` for Esc on the list, or `{:attach, window, artifact}`
+  for `a` on a page opened to attach to a window's message.
+  """
+  @spec key(t(), map()) :: {:ok, t()} | :close | {:attach, String.t(), map()}
   def key(%{prompt: text} = page, key) when is_binary(text), do: prompt_key(page, key)
   def key(%{filtering: true} = page, key), do: filter_key(page, key)
   def key(%{frame: %{}} = page, key), do: frame_key(page, key)
@@ -146,6 +155,24 @@ defmodule Troupe.UI.TUI.ArtifactsPage do
   def key(page, %{code: "v"}), do: {:ok, versions(page)}
   def key(page, %{code: "m"}), do: {:ok, markdown(page, selected(page), nil)}
   def key(page, %{code: "l"}), do: {:ok, link(page)}
+
+  # The artifact on the cursor, attached to the message of the window the page was opened
+  # from; the server fetches it as the message goes.
+  def key(%{attach: path} = page, %{code: "a", modifiers: []}) when is_binary(path) do
+    case selected(page) do
+      nil ->
+        {:ok, page}
+
+      row ->
+        {:attach, path,
+         %{
+           id: row["id"],
+           title: row["title"] || row["id"],
+           version: row["current"] || row["version"]
+         }}
+    end
+  end
+
   def key(page, _key), do: {:ok, page}
 
   defp tab(page, step) do
@@ -422,6 +449,13 @@ defmodule Troupe.UI.TUI.ArtifactsPage do
       " artifacts — ←/→ or 1–5 who for · ↑↓ · Enter opens in the browser · v version · m read here · " <>
         "l link · / filter · r refresh · Esc back "
 
+  # Opened from a window whose server fetches an artifact by name: `a` attaches the one on
+  # the cursor to the window's message, and leads the line.
+  def footer(%{attach: path}) when is_binary(path),
+    do:
+      " attach to #{path} — a attaches it to the message · ←/→ who for · ↑↓ · Enter opens in the browser · " <>
+        "m read here · / filter · Esc back "
+
   def footer(_page),
     do:
       " artifacts — ←/→ or 1–5 who for · ↑↓ · Enter opens in the browser · v version · m read here · " <>
@@ -537,7 +571,8 @@ defmodule Troupe.UI.TUI.ArtifactsPage do
   end
 
   defp empty(:shared),
-    do: "Nothing shared with you yet: a link someone sends you lands here once you open it."
+    do:
+      "Nothing shared with you yet: what someone shares with you by name lands here, and a link they send you once you open it."
 
   defp empty(:private),
     do: "Nothing only yours yet: p publishes a file of this workspace for you alone."
@@ -570,6 +605,10 @@ defmodule Troupe.UI.TUI.ArtifactsPage do
         ]
     )
   end
+
+  # One shared with the person, by a link or by name: what it lets them do beyond reading.
+  defp where(%{"scope" => "shared", "role" => role}) when role in ["comment", "edit"],
+    do: "you may " <> role
 
   defp where(%{"visibility" => "team:" <> team}), do: team
   defp where(%{"visibility" => "profile:" <> profile}), do: "profile " <> profile

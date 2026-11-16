@@ -201,7 +201,9 @@ Nothing set serves every version.
 - **Move the fleet**: set `recommended`. `troupe update` on a machine signed in here installs
   that version, rather than the latest, and only if the release key signed it. After an
   upgrade, **Recommend this plane's version** on the screen sets all three to the version
-  the plane runs, showing first each one's change and how many clients it leaves behind.
+  the plane runs, showing first each one's change and how many clients it leaves behind, as
+  the plane counts them in a dry run that writes nothing. A plane too old to say which
+  version it runs gets one sentence saying so in place of the button.
 - **Retire a bad release**: put its version in `blocked`, and recommend a good one. A client
   on it is refused whatever its number. `troupe update` installs a newer recommended version
   by itself; to go back to an older one it names the `--version` and leaves the choice to

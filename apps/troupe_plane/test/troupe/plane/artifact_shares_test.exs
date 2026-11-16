@@ -79,7 +79,7 @@ defmodule Troupe.Plane.ArtifactSharesTest do
       assert {:error, %{message: "not_found"}} =
                call(context.cy, "artifact.share", %{"id" => context.page["id"], "role" => "view"})
 
-      assert {:error, %{message: "invalid_params"}} = share(context, %{"role" => "comment"})
+      assert {:error, %{message: "invalid_params"}} = share(context, %{"role" => "owner"})
 
       # The token is not kept, only what it hashes to.
       refute inspect(Repo.all(Share)) =~ token

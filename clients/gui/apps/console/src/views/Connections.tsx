@@ -8,6 +8,7 @@
 // driving.
 
 import type { JSX } from "react";
+import { nameOrSubject } from "@troupe/client";
 import type { Connections as ConnectionsAnswer } from "@troupe/client";
 import { useConsole, useLoad } from "../console";
 import { href } from "../route";
@@ -97,7 +98,9 @@ export function Connections(): JSX.Element {
                           <a href={href({ page: "teams", team: x.team, tab: "members" })}>{x.team}</a>
                         </td>
                         <td>{x.profile}</td>
-                        <td className="mono">{x.owner}</td>
+                        <td title={x.owner} className={x.owner_name ? undefined : "mono"}>
+                          {nameOrSubject(x.owner, x.owner_name)}
+                        </td>
                         <td><SessionState state={x.state} /></td>
                       </tr>
                     ))}

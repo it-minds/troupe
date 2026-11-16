@@ -138,6 +138,8 @@ defmodule Troupe.Plane.Harness do
     # Its history, for the person's own app: every version, two side by side, a rollback.
     "me.memory.history" => :observe,
     "me.memory.rollback" => :control,
+    # An agent of theirs proposing an entry for a team's or the organisation's memory.
+    "me.memory.propose" => :control,
     # What a new session of theirs in a team reads, as one list of topics.
     "memory.in_effect" => :observe,
     "me.clients" => :observe,
@@ -217,6 +219,9 @@ defmodule Troupe.Plane.Harness do
     "artifact.share" => :control,
     "artifact.unshare" => :control,
     "artifact.public" => :control,
+    # Its thread: read by whoever may open it, written by whoever holds comment or above.
+    "artifact.comments" => :observe,
+    "artifact.comment" => :control,
     # As `session.redeem`: its caller is not yet anybody on this artifact, and what the link
     # gives them was decided when it was made.
     "artifact.redeem" => :observe
@@ -435,7 +440,15 @@ defmodule Troupe.Plane.Harness do
 
     documents = Memory.for_person(user)
 
-    answer = %{"documents" => documents, "user" => own, "organisation" => organisation()}
+    # The person's own proposals for a team's or the organisation's memory, pending or
+    # decided this week: the app shows a pending one under its level, and a daemon tells
+    # the session one came from what became of it.
+    answer = %{
+      "documents" => documents,
+      "user" => own,
+      "organisation" => organisation(),
+      "proposals" => Memory.Proposals.own(user)
+    }
 
     # With entries, every team of the caller's by name too, a team with no document among
     # them, so a client lists each as a level of its own.
@@ -497,6 +510,26 @@ defmodule Troupe.Plane.Harness do
     with :ok <- own_memory(user),
          {:ok, saved} <- save_own(user, params) do
       {:ok, own_saved(user, saved)}
+    end
+  end
+
+  # An agent of the person's, on their machine, proposing one entry for a team's memory or
+  # the organisation's (`remember` to `team` or `organisation`), through their daemon: kept
+  # for an administrator to accept or decline, written into no document. A team is one of
+  # theirs: the one named, or their only one; with several and none named, the refusal names
+  # them. `session` and `agent` say where it came from, which the person's own answer
+  # carries back so the daemon tells that session what became of it.
+  defp handle("me.memory.propose", params, %{user: user}) do
+    with :ok <- own_memory(user),
+         {:ok, scope, team} <- proposal_level(user, params["scope"], params["team"]) do
+      opts = [topic: params["topic"], where: "machine"] ++ written_from(params)
+
+      case Memory.Proposals.propose(user, scope, team, params["append"], opts) do
+        {:ok, proposal} -> {:ok, Memory.Proposals.json(proposal)}
+        {:error, :off} -> {:error, Error.new(:forbidden, %{reason: Memory.Proposals.off_reason()})}
+        {:error, :no_person} -> own_memory(nil)
+        {:error, reason} -> invalid(reason)
+      end
     end
   end
 
@@ -573,6 +606,12 @@ defmodule Troupe.Plane.Harness do
        when is_boolean(enabled),
        do: Artifacts.public_links(id, enabled, user, platform_admin?: admin?(context))
 
+  defp handle("artifact.comments", %{"id" => id}, %{user: user} = context),
+    do: Artifacts.comments(id, user, platform_admin?: admin?(context))
+
+  defp handle("artifact.comment", %{"id" => id} = params, %{user: user} = context),
+    do: Artifacts.comment(id, user, params["body"], platform_admin?: admin?(context))
+
   defp handle("artifact.redeem", %{"token" => token}, %{user: user}) when is_binary(token),
     do: Artifacts.redeem_link(token, user)
 
@@ -608,7 +647,7 @@ defmodule Troupe.Plane.Harness do
   defp handle(method, _params, _context)
        when method in ~w(artifact.get artifact.open artifact.delete artifact.rollback artifact.pin
                          artifact.read artifact.preview artifact.share artifact.unshare
-                         artifact.transfer),
+                         artifact.transfer artifact.comments artifact.comment),
        do: {:error, Error.new(:invalid_params, %{reason: "#{method} takes an artifact's id"})}
 
   # Which version each of the caller's own clients last ran, and how that stands against
@@ -634,14 +673,17 @@ defmodule Troupe.Plane.Harness do
       |> granted_profiles()
       |> Enum.map(fn profile ->
         workers = Fleet.list_workers(profile)
+        row = Fleet.get_profile(profile)
+        # A pod the operator removed and that has gone quiet is listed `gone` until the
+        # sweep forgets it, and counts for nothing, whatever its last flags said.
+        gone = MapSet.new(Enum.filter(workers, &Fleet.gone?(&1, row)), & &1.id)
         # A draining pod is listed, so a person can see it, and counts for nothing: it
         # takes no session and is out of its Service, so it is neither room nor health.
-        placeable = Enum.reject(workers, & &1.draining)
-        row = Fleet.get_profile(profile)
+        placeable = Enum.reject(workers, &(&1.draining or MapSet.member?(gone, &1.id)))
 
         %{
           "name" => profile,
-          "pods" => Enum.map(workers, &worker_json/1),
+          "pods" => Enum.map(workers, &worker_json(&1, MapSet.member?(gone, &1.id))),
           "capacity" => Enum.sum(Enum.map(placeable, & &1.capacity)),
           "active_sessions" => Enum.sum(Enum.map(workers, & &1.active_sessions)),
           "healthy_pods" => Enum.count(placeable, & &1.healthy),
@@ -1832,6 +1874,37 @@ defmodule Troupe.Plane.Harness do
     end
   end
 
+  # The level a person's machine proposes for: the organisation's, or one of their teams'.
+  defp proposal_level(_user, "organisation", _team), do: {:ok, "organisation", nil}
+
+  defp proposal_level(user, "team", name) do
+    teams = user |> Identity.teams_for() |> Enum.sort_by(& &1.name)
+
+    case {teams, name} do
+      {[], _name} ->
+        invalid("you are in no team, so there is no team's memory to propose for")
+
+      {[only], nil} ->
+        {:ok, "team", only}
+
+      {teams, nil} ->
+        invalid(
+          "you are in #{length(teams)} teams (#{Enum.map_join(teams, ", ", & &1.name)}): " <>
+            "name the one the proposal is for as team",
+          field: "team"
+        )
+
+      {teams, name} ->
+        case Enum.find(teams, &(&1.name == name)) do
+          nil -> invalid("you are not in a team called #{name}", field: "team")
+          team -> {:ok, "team", team}
+        end
+    end
+  end
+
+  defp proposal_level(_user, scope, _team),
+    do: invalid("a proposal is for team or organisation, not #{inspect(scope)}", field: "scope")
+
   defp written_from(params) do
     for {key, opt} <- [{"session", :session}, {"agent", :agent}],
         value = params[key],
@@ -2356,6 +2429,34 @@ defmodule Troupe.Plane.Harness do
     })
   end
 
+  # Every pod full, in both numbers a person weighs it by: what the pods run at once now,
+  # and the most the profile allows, which may be more than its pods can run (a limit is
+  # not a promise). A profile with no ceiling says so rather than a number.
+  defp pods_full(profile_name) do
+    row = Fleet.get_profile(profile_name)
+
+    capacity =
+      profile_name
+      |> Fleet.list_workers()
+      |> Enum.reject(&(&1.draining or Fleet.gone?(&1, row)))
+      |> Enum.map(& &1.capacity)
+      |> Enum.sum()
+
+    max = row && row.max_sessions
+
+    allows =
+      if is_integer(max),
+        do: "#{profile_name} allows #{max} at once",
+        else: "#{profile_name} sets no ceiling of its own"
+
+    Error.new(:capacity, %{
+      profile: profile_name,
+      capacity: capacity,
+      max_sessions: max,
+      reason: "every pod is full: its pods run #{capacity} session(s) at once, and #{allows}"
+    })
+  end
+
   defp unwind(session) do
     Budget.release(session.team_id, session.id, answerable_for(session), session.profile)
     Sessions.delete(session.id)
@@ -2386,7 +2487,7 @@ defmodule Troupe.Plane.Harness do
 
       {:error, :at_capacity} ->
         if Keyword.get(opts, :unwind, false), do: Sessions.delete(session.id)
-        {:error, Error.new(:capacity, %{profile: session.profile, reason: "every pod is full"})}
+        {:error, pods_full(session.profile)}
 
       # Not full: not there. `capacity` says add replicas, which is useless advice when
       # the replicas exist and cannot start — and `unavailable` is the code whose whole
@@ -3729,13 +3830,14 @@ defmodule Troupe.Plane.Harness do
     end
   end
 
-  defp worker_json(worker) do
+  defp worker_json(worker, gone) do
     %{
       "pod" => worker.pod_name,
       "ordinal" => worker.ordinal,
       "endpoint" => worker.endpoint,
       "healthy" => worker.healthy,
       "draining" => worker.draining,
+      "gone" => gone,
       "capacity" => worker.capacity,
       "active_sessions" => worker.active_sessions,
       "disk_used_bytes" => worker.disk_used_bytes,

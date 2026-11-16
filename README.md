@@ -32,7 +32,7 @@ flowchart LR
   pods --> llm
 ```
 
-![The desktop app: a team's session on a plane, stopped to ask before it runs a command, with what it has cost so far](docs/assets/desktop-app.png)
+![The desktop app: a team's session, stopped to ask before it runs a command, with Allow once, Allow every command and Deny](docs/assets/desktop-app.png)
 
 What it is not:
 

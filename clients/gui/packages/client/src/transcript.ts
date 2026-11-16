@@ -66,10 +66,10 @@ export type Entry =
       endedAt: number | undefined;
     }
   /**
-   * What the model thought before it answered, as this client saw it stream, kept where the
-   * reply it came before lands (troupe #474). Live only, as in the terminal client (its
-   * Decision 36): a transcript replayed from the log has none. `ms` is how long it streamed,
-   * from its first delta to the reply, by this client's clock.
+   * What the model thought before it answered, kept where the reply it came before lands
+   * (troupe #474): as this client saw it stream, or, in a transcript replayed from the log,
+   * as the reply's reasoning blocks carry it (troupe #659). `ms` is how long it streamed,
+   * from its first delta to the reply, by this client's clock; a replay has no time to say.
    */
   | { kind: "reasoning"; seq: number; agent: string[]; text: string; ms: number | undefined }
   /**
@@ -201,6 +201,10 @@ export type Entry =
        * when nobody is there to ask.
        */
       answer: string | undefined;
+      /** Who answered it, the subject `question_answered`'s actor names; absent where it names nobody. */
+      answeredBy?: string;
+      /** Their name as the actor carries it; absent where it is only the subject again. */
+      answeredByName?: string;
       /** Set when it ended unanswered: a cancel reached it, or its call timed out while it waited. */
       closed: boolean;
     }
@@ -467,6 +471,23 @@ export function presentMembers(state: Pick<TranscriptState, "presence">): Presen
   return state.presence.filter((p) => p.subject && p.state !== "left");
 }
 
+/**
+ * Whether two or more people steer the session, as far as this transcript knows: everyone
+ * its presence has heard of, whoever wrote a message, answered an approval or a question,
+ * and the reader. One alone is the session most people have, where an answer needs no author.
+ */
+export function severalSteer(state: Pick<TranscriptState, "presence" | "entries">, self: string | undefined): boolean {
+  const people = new Set<string>();
+  if (self) people.add(self);
+  for (const p of state.presence) if (p.subject) people.add(p.subject);
+  for (const en of state.entries) {
+    if (en.kind === "user" && en.author) people.add(en.author);
+    if (en.kind === "approval" && en.decidedBy) people.add(en.decidedBy);
+    if (en.kind === "question" && en.answeredBy) people.add(en.answeredBy);
+  }
+  return people.size >= 2;
+}
+
 export const emptyTranscript: TranscriptState = {
   entries: [],
   streaming: "",
@@ -519,6 +540,21 @@ function textOf(message: unknown): string {
   // The model's thinking is not its answer, in either spelling (troupe-remote Decision 658).
   for (const block of content) if (typeof block.text === "string" && block.type !== "thinking" && block.type !== "reasoning") out += block.text;
   return out;
+}
+
+/**
+ * The reasoning a logged reply carries: its reasoning blocks' text, in either spelling, in
+ * order. A redacted block has no words to show.
+ */
+function reasoningOf(message: unknown): string {
+  const content = (message as { content?: Array<{ type?: string; text?: string; thinking?: string; redacted?: boolean }> } | undefined)?.content ?? [];
+  const parts: string[] = [];
+  for (const block of content) {
+    if ((block.type !== "reasoning" && block.type !== "thinking") || block.redacted === true) continue;
+    const text = typeof block.text === "string" ? block.text : typeof block.thinking === "string" ? block.thinking : "";
+    if (text.trim() !== "") parts.push(text);
+  }
+  return parts.join("\n\n");
 }
 
 /**
@@ -873,6 +909,15 @@ function spent(base: { seq: number; agent: string[] }, d: DurableEvent): Entry[]
   return [{ kind: "turn", ...base, turn, text: turnLine(turn) }];
 }
 
+/** A comment on an artifact this session published, as one line: who, on which, and what. */
+function commentedText(d: DurableEvent): string {
+  const artifact = (d.data["artifact"] ?? {}) as Record<string, unknown>;
+  const comment = (d.data["comment"] ?? {}) as Record<string, unknown>;
+  const author = (comment["author"] ?? {}) as Record<string, unknown>;
+  const who = str(author["display_name"]) || str(author["subject"]) || "Somebody";
+  return `${who} commented on “${str(artifact["title"]) || "an artifact"}”: ${str(comment["body"])}`;
+}
+
 function systemText(d: DurableEvent): string {
   switch (d.type) {
     case "session_created":
@@ -1186,12 +1231,17 @@ export function fold(state: TranscriptState, e: TroupeEvent, options: FoldOption
     case "llm_response": {
       const text = textOf(d.data["message"]);
       const cost = costOf(d.data["gateway"]);
-      // The reasoning this client saw stream before the reply is kept where the reply lands,
-      // ahead of it; a replay streamed none, and has none (troupe #474).
+      // The reasoning before the reply is kept where the reply lands, ahead of it: what this
+      // client saw stream, with how long it took, else what the log's reply carries in its
+      // reasoning blocks beside its text, which is all a replayed or
+      // late-attached session has, with no time to say (troupe #659).
+      const logged = isRoot(d.agent) && !state.thinking ? reasoningOf(d.data["message"]) : "";
       const thought: Entry[] =
         isRoot(d.agent) && state.thinking
           ? [{ kind: "reasoning", ...base, text: state.thinking, ms: state.thinkingAt === undefined ? undefined : Math.max(now() - state.thinkingAt, 0) }]
-          : [];
+          : logged
+            ? [{ kind: "reasoning", ...base, text: logged, ms: undefined }]
+            : [];
       const entries = [
         ...state.entries,
         ...thought,
@@ -1379,9 +1429,17 @@ export function fold(state: TranscriptState, e: TroupeEvent, options: FoldOption
     case "tool_failures_ask_answered": {
       const callId = str(d.data["call_id"]);
       const answer = str(d.data["text"] ?? d.data["decision"]);
+      // A person's answer names who gave it; the harness's own word names nobody.
+      const person = d.type === "question_answered" && d.actor?.kind === "user" ? d.actor : undefined;
+      const by = person?.subject;
+      const byName = person ? nameOf(person).authorName : undefined;
       return {
         ...next,
-        entries: state.entries.map((en) => (en.kind === "question" && en.callId === callId && en.answer === undefined ? { ...en, answer } : en)),
+        entries: state.entries.map((en) =>
+          en.kind === "question" && en.callId === callId && en.answer === undefined
+            ? { ...en, answer, ...(typeof by === "string" && by !== "" ? { answeredBy: by } : {}), ...(byName ? { answeredByName: byName } : {}) }
+            : en,
+        ),
       };
     }
 
@@ -1434,6 +1492,11 @@ export function fold(state: TranscriptState, e: TroupeEvent, options: FoldOption
     // plane reached it, and this turn read the new versions. The harness's own sentence.
     case "memory_changed":
       return { ...next, entries: [...state.entries, { kind: "system", ...base, type: d.type, text: str(d.data["message"], "the organisation's memory changed") }] };
+
+    // Somebody wrote a comment on an artifact this session published (troupe #62): said once,
+    // with who, which artifact and what, for whoever steers the session to act on. Never input.
+    case "artifact_commented":
+      return { ...next, entries: [...state.entries, { kind: "system", ...base, type: d.type, text: commentedText(d) }] };
 
     // A reply the output cap cut, or one with nothing in it (troupe-remote Decision 659).
     case "truncated":

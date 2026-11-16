@@ -133,6 +133,12 @@ defmodule Troupe.Gateway.FakePlane do
   @spec read_text_only(pid()) :: :ok
   def read_text_only(state), do: Agent.update(state, &Map.put(&1, :text_only, true))
 
+  @doc """
+  The person's proposals for a team's or the organisation's memory, which every `me.memory`
+  answer carries from now on, as the plane's does (#55).
+  """
+  def proposals_with(state, proposals), do: Agent.update(state, &Map.put(&1, :proposals, proposals))
+
   @doc "The person's teams, by name, which `me.memory` asked with `entries` names."
   @spec teams_with(pid(), [String.t()]) :: :ok
   def teams_with(state, teams), do: Agent.update(state, &Map.put(&1, :teams, teams))
@@ -461,6 +467,8 @@ defmodule Troupe.Gateway.FakePlane do
         do: Map.put(teams, "roles", roles),
         else: teams
 
+    teams = with_proposals(teams, Agent.get(state, &Map.get(&1, :proposals)))
+
     case Agent.get(state, &{Map.get(&1, :memory), Map.get(&1, :own)}) do
       {nil, nil} ->
         {:rpc_error, -32_601, "method_not_found", %{"method" => "me.memory"}}
@@ -482,6 +490,20 @@ defmodule Troupe.Gateway.FakePlane do
            )
          )}
     end
+  end
+
+  # A proposal for a team's or the organisation's memory, kept as pending, as the plane does.
+  defp dispatch(_state, "me.memory.propose", params) do
+    {:ok,
+     %{
+       "id" => "p-" <> Integer.to_string(System.unique_integer([:positive])),
+       "scope" => params["scope"],
+       "team" => params["team"] || (params["scope"] == "team" && "design") || nil,
+       "topic" => params["topic"] || "Notes",
+       "entry" => params["append"],
+       "session_id" => params["session"],
+       "state" => "pending"
+     }}
   end
 
   defp dispatch(state, "me.memory.put", params) do
@@ -735,6 +757,43 @@ defmodule Troupe.Gateway.FakePlane do
          "path" => params["path"] || "index.md",
          "text" => "# Weekly"
        }}
+
+  # Shared with a person by name: no link, the person and their role.
+  defp dispatch(_state, "artifact.share", %{"id" => id, "person" => subject, "role" => role}),
+    do: {:ok, %{"id" => id, "person" => %{"subject" => subject, "display_name" => nil, "role" => role}}}
+
+  defp dispatch(_state, "artifact.comments", %{"id" => id}),
+    do:
+      {:ok,
+       %{
+         "id" => id,
+         "may_comment" => true,
+         "max_length" => 4000,
+         "comments" => [
+           %{
+             "id" => "c-1",
+             "author" => %{"subject" => "cy@example.test", "display_name" => "Cy"},
+             "body" => "Looks good.",
+             "created_at" => "2026-11-16T09:00:00Z"
+           }
+         ]
+       }}
+
+  defp dispatch(_state, "artifact.comment", %{"id" => id, "body" => body}),
+    do:
+      {:ok,
+       %{
+         "id" => id,
+         "comment" => %{
+           "id" => "c-2",
+           "author" => %{"subject" => "ada@example.test", "display_name" => "Ada"},
+           "body" => body,
+           "created_at" => "2026-11-16T09:01:00Z"
+         }
+       }}
+
+  defp dispatch(_state, "people.search", %{"query" => _query}),
+    do: {:ok, %{"people" => [%{"subject" => "cy@example.test", "display_name" => "Cy", "email" => "cy@example.test"}]}}
 
   defp dispatch(_state, "artifact.share", %{"id" => _id, "role" => role}) do
     {:ok,
@@ -999,6 +1058,10 @@ defmodule Troupe.Gateway.FakePlane do
         "text" => own["text"]
       }
     ]
+
+  # The person's proposals, which every `me.memory` answer carries once a test set them.
+  defp with_proposals(answer, proposals) when is_list(proposals), do: Map.put(answer, "proposals", proposals)
+  defp with_proposals(answer, _none), do: answer
 
   defp own_json(own),
     do:

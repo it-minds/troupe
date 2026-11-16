@@ -26,12 +26,14 @@
 
 import { useEffect, useState } from "react";
 import type { JSX } from "react";
-import { ArtifactApi, TroupeRpcError, ownerWords, teamOwned, visibilityWords as audienceWords } from "@troupe/client";
+import { ArtifactApi, TroupeRpcError, appLink, ownerWords, teamOwned, visibilityWords as audienceWords } from "@troupe/client";
+import { OpenInApp } from "./AppBanner";
 import type { Artifact, ArtifactDetail, ArtifactFilter, ArtifactList, ArtifactPerson } from "@troupe/client";
 import { describeError, useConsole, useLoad } from "../console";
 import { go, href } from "../route";
 import type { Route } from "../route";
 import { ArtifactEditor, editableFiles } from "./ArtifactEditor";
+import { ArtifactComments, ArtifactPeople } from "./ArtifactComments";
 import { ArtifactLinks } from "./ArtifactLinks";
 import { Empty, Fields, Loaded, Preview, Region, Status, bytes, count, when } from "./bits";
 
@@ -155,7 +157,7 @@ function Gallery({ tab, list }: { tab: ArtifactTab; list: ArtifactList }): JSX.E
               You publish a page or a file with the desktop app's Publish…, the terminal's <code>{"/publish <file>"}</code>, or an agent of yours with its <code>publish_artifact</code> tool.
             </p>
           )}
-          {tab.kind === "shared" && <p>A link opens one artifact to whoever has it. Somebody shares an artifact with you by sending its link; once you have opened it, it shows here.</p>}
+          {tab.kind === "shared" && <p>Somebody shares an artifact with you by name, and it shows here at once; or by sending its link, and it shows here once you have opened it.</p>}
           {tab.kind === "organisation" && list.publish_organisation === "platform_admins" && <p>Only a platform admin may publish to the whole organisation here.</p>}
         </Empty>
       ) : (
@@ -171,6 +173,7 @@ function Gallery({ tab, list }: { tab: ArtifactTab; list: ArtifactList }): JSX.E
 
 /** A card: the title and the kind where a thumbnail would be, and what it is beneath. Never its content. */
 function Card({ artifact: a }: { artifact: Artifact }): JSX.Element {
+  const { plane } = useConsole();
   return (
     <li className="artifact-card">
       <a className="thumb" href={href({ page: "artifacts", path: [a.id] })}>
@@ -188,6 +191,9 @@ function Card({ artifact: a }: { artifact: Artifact }): JSX.Element {
           {[a.public ? "public link" : null, a.pinned ? `pinned to version ${a.pinned}` : null, a.role === "edit" ? "you may edit it" : null].filter(Boolean).join(" · ")}
         </p>
       )}
+      <p className="card-meta">
+        <OpenInApp link={appLink({ kind: "artifact", id: a.id, plane: plane.url })} />
+      </p>
     </li>
   );
 }
@@ -224,7 +230,7 @@ export function ArtifactPage({ id }: { id: string }): JSX.Element {
 }
 
 function Detail({ artifact: a, reload }: { artifact: ArtifactDetail; reload: () => void }): JSX.Element {
-  const { me, notify, reserveTab } = useConsole();
+  const { me, notify, reserveTab, plane } = useConsole();
   const api = useArtifacts();
   const [opening, setOpening] = useState<string | null>(null);
   const [error, setError] = useState<unknown>(null);
@@ -297,7 +303,7 @@ function Detail({ artifact: a, reload }: { artifact: ArtifactDetail; reload: () 
           ["Owner", ofTeam ? `${ownerWords(a)}; ${personWords(a.owner)} first published it` : a.mine ? `you, ${personWords(a.owner)}` : personWords(a.owner)],
           ["Team", a.team ?? "—"],
           ["Version", a.pinned ? `${current}, pinned by its owner; the newest is ${a.version}` : `${a.version} of ${count(versions.length, "version")}`],
-          ["You", a.mine ? (ofTeam ? `an owner, as every member of ${a.owner_team} is` : "its owner") : a.role === "edit" ? "may publish new versions, through a link" : "may open it"],
+          ["You", a.mine ? (ofTeam ? `an owner, as every member of ${a.owner_team} is` : "its owner") : a.role === "edit" ? "may comment and publish new versions, shared with you" : a.role === "comment" ? "may open it and comment on it, shared with you" : "may open it"],
           ["Size", bytes(a.bytes)],
           ["Published", when(a.published_at)],
           ["First published", when(a.created_at)],
@@ -321,6 +327,7 @@ function Detail({ artifact: a, reload }: { artifact: ArtifactDetail; reload: () 
         <button type="button" disabled={opening !== null} onClick={() => open(switched === "current" ? undefined : Number(switched))}>
           Open that version
         </button>
+        <OpenInApp link={appLink({ kind: "artifact", id: a.id, plane: plane.url })} />
         {editable && !editing && (
           <button type="button" onClick={() => setEditing(true)}>
             Edit
@@ -460,6 +467,8 @@ function Detail({ artifact: a, reload }: { artifact: ArtifactDetail; reload: () 
           ))}
         </ol>
       </section>
+      <ArtifactComments artifact={a} api={api} />
+      {a.mine && <ArtifactPeople artifact={a} api={api} reload={reload} />}
       {a.mine && <ArtifactLinks artifact={a} api={api} reload={reload} />}
     </>
   );

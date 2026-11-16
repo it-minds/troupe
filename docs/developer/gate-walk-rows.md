@@ -244,11 +244,12 @@ person's machine in one place; a machine follows them and cannot go past an enfo
 **Pass.** `--explain` shows `user 80 … ignored: held to 25 by your organisation (<plane>)`
 and `enforced 25 <plane> <- in effect`; a session that reaches 25 turns is offered no more.
 **Fail:** a value past an enforced one in effect, or the pull writing into `config.yaml`.
-It is a guardrail: a person can edit the plane's copy in their state directory, and only
-the managed file is out of their reach ([security.md §7](../admin/security.md#7-an-organisations-limits-are-a-guardrail-not-a-lock)).
+It is a guardrail: the plane's copy in a person's state directory is signed, so an edited
+one is refused, but they can delete it, and only the managed file is out of their reach
+([security.md §7](../admin/security.md#7-an-organisations-limits-are-a-guardrail-not-a-lock)).
 
-**Behind it:** Decision 869 and #122; #657 (a signed document, so an edited copy is
-refused) and #658 (provider types, per-tool rules, a cookbook) are what is left.
+**Behind it:** Decision 869, #122 and #657 (the signed document); #658 (provider types,
+per-tool rules, a cookbook) is what is left.
 
 ## 7. The docs describe what ships
 

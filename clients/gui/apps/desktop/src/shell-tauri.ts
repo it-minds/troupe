@@ -226,6 +226,33 @@ function updater(): ShellUpdater {
 }
 
 /**
+ * The app's own links (`src-tauri/src/deep_link.rs`): the shell keeps each one that comes
+ * and says so, and the page takes them, so one that came before the page was listening is
+ * taken at the start, and none twice.
+ */
+function onLinks(listener: (links: string[]) => void): () => void {
+  let stop: (() => void) | null = null;
+  let stopped = false;
+  const take = async (): Promise<void> => {
+    const { invoke } = await import("@tauri-apps/api/core");
+    const links = await invoke<string[]>("deep_link_take").catch(() => []);
+    if (!stopped && links.length > 0) listener(links);
+  };
+  void import("@tauri-apps/api/event")
+    .then(({ listen }) => listen("troupe://links-waiting", () => void take()))
+    .then((unlisten) => {
+      if (stopped) unlisten();
+      else stop = unlisten;
+      void take();
+    })
+    .catch(() => undefined);
+  return () => {
+    stopped = true;
+    stop?.();
+  };
+}
+
+/**
  * Install the shell on `window.troupe`, which is where `shell.ts` looks for it.
  * Called from `main.tsx` before the app renders, and only inside the shell.
  */
@@ -265,6 +292,7 @@ export async function installShell(): Promise<void> {
     saveFile,
     notifications: notifications(),
     updater: updater(),
+    onLinks,
   };
   (globalThis as { window?: Window }).window!.troupe = shell;
 }

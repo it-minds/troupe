@@ -195,6 +195,28 @@ defmodule Troupe.RemoteTranslateTest do
     assert message.data.model == "code-default"
   end
 
+  test "llm_response keeps its reasoning blocks for a replay to draw, but not a redacted or empty one (#659)" do
+    data = %{
+      "message" => %{
+        "role" => "assistant",
+        "content" => [
+          %{"type" => "reasoning", "provider" => "openai", "text" => "look first"},
+          %{"type" => "reasoning", "provider" => "anthropic", "text" => "", "redacted" => true},
+          %{"type" => "reasoning", "provider" => "openai", "text" => "  "},
+          %{"type" => "text", "text" => "Hello."}
+        ]
+      }
+    }
+
+    [message] = translate(durable("llm_response", data))
+
+    assert [%{type: :reasoning, text: "look first"}, %{type: :text, text: "Hello."}] =
+             message.data.content
+
+    assert Troupe.Client.Message.text(message.data.content) == "Hello."
+    assert Troupe.Client.Message.reasoning(message.data.content) == "look first"
+  end
+
   test "tool calls, approvals and todos in the worker's spelling" do
     [started] =
       translate(
@@ -663,6 +685,23 @@ defmodule Troupe.RemoteTranslateTest do
     assert note.type == :remote_note
     assert note.data.text == message
     assert {:system, message} in folded([note]).transcript
+  end
+
+  # Root issue #62: a comment on an artifact this session published, from the plane, as a
+  # line saying who wrote it, on which and what.
+  test "a comment on the session's artifact is a line with who, which and what" do
+    data = %{
+      "artifact" => %{"id" => "art-1", "title" => "Plan"},
+      "comment" => %{
+        "id" => "c-1",
+        "author" => %{"subject" => "cy@example.test", "display_name" => "Cy"},
+        "body" => "Can you add last quarter?"
+      }
+    }
+
+    [note] = translate(durable("artifact_commented", data))
+    assert note.type == :remote_note
+    assert note.data.text == "Cy commented on “Plan”: Can you add last quarter?"
   end
 
   # troupe issue #668: a person's own tools offered to the session, as

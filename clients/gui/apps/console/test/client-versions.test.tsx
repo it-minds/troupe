@@ -269,6 +269,46 @@ describe("client versions", () => {
       await waitFor(() => says("Recorded in the audit as clients.put on tui"), "the note of the one that was applied");
     });
 
+    // #957: the preview's counts are the plane's own, from a dry run of each put, which
+    // writes and audits nothing; a plane whose discovery names no dry run would make the
+    // write, so there the counts are the console's.
+    it("counts what each put would leave from the plane's dry run, writing nothing", async () => {
+      await onPlane("0.38.0-beta");
+      await signedInAs(fake, PEOPLE.alice);
+      unmount = render(<App />).unmount;
+      const recorded = fake.admin.audit.length;
+      const open = await seesButton("Recommend this plane's version");
+      // What the plane last saw changes under the console's copy: only the plane's answer knows.
+      fake.admin.seen.push({ component: "daemon", subject: "zed@example.com", display_name: "Zed", version: "0.38.0-beta", platform: "linux-x64", since: "2026-11-15T08:00:00Z", seen_at: "2026-11-15T08:00:00Z" });
+      open.click();
+      const preview = await waitFor(() => recommend()?.querySelector<HTMLElement>("section.preview"), "the preview");
+      const rows = [...preview.querySelectorAll(".recommend-row")].map((r) => r.textContent ?? "");
+      expect(rows[1]).toContain("Of 2 clients last seen: 1 current, 1 behind 0.38.0-beta.");
+      expect(fake.admin.audit).toHaveLength(recorded);
+      expect(fake.admin.policies["tui"]!.recommended).toBe("0.16.0-beta");
+    });
+
+    it("works the counts out itself on a plane whose discovery names no dry run", async () => {
+      await fake.stop();
+      fake = await startFake(exampleAdmin(), { version: "0.38.0-beta", dryRun: [] });
+      await signedInAs(fake, PEOPLE.alice);
+      unmount = render(<App />).unmount;
+      const recorded = fake.admin.audit.length;
+      (await seesButton("Recommend this plane's version")).click();
+      const preview = await waitFor(() => recommend()?.querySelector<HTMLElement>("section.preview"), "the preview");
+      await sees("Of 1 client last seen: 0 current, 1 behind 0.38.0-beta.", preview);
+      // Nothing was asked of the plane that could have written.
+      expect(fake.admin.audit).toHaveLength(recorded);
+      expect(fake.admin.policies["daemon"]!.recommended).toBeNull();
+    });
+
+    it("says in one sentence that a plane which reports no build is too old to recommend from", async () => {
+      await signedInAs(fake, PEOPLE.alice);
+      unmount = render(<App />).unmount;
+      await sees("This plane does not say which version it runs, so it is too old to recommend its own version from here.");
+      expect(button("Recommend this plane's version")).toBeNull(); // at once: the sentence is drawn in its place
+    });
+
     it("says where the plane's version is not one SemVer reads, with no button", async () => {
       await onPlane("dev");
       await signedInAs(fake, PEOPLE.alice);

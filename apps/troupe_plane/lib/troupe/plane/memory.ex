@@ -262,11 +262,22 @@ defmodule Troupe.Plane.Memory do
   """
   @spec for_session(Team.t() | nil, String.t() | nil, User.t() | nil) :: [Shape.document()]
   def for_session(team, profile, owner \\ nil) do
-    ([{:organisation, nil}, {team, team && team.name}] ++ Enum.map(chain(profile), &{&1, &1}))
+    chain = chain(profile)
+
+    ([{:organisation, nil}, {team, team && team.name}] ++ Enum.map(chain, &{&1, &1}))
     |> Enum.reject(fn {owner, _name} -> is_nil(owner) end)
-    |> Enum.flat_map(fn {owner, name} -> reaching(current(owner), name) end)
+    |> Enum.flat_map(fn {owner, name} -> owner |> current() |> reaching(name) |> chained(owner, chain) end)
     |> Kernel.++(own_reaching(owner))
   end
+
+  # A profile's document says the chain it was read along, the one that extends nothing
+  # first, so a session whose profile came to extend another, or none, can say so in the
+  # line that tells it its memory changed. Not part of a stamp: what a session runs under is
+  # the documents, and the chain is how they were reached.
+  defp chained(documents, profile, chain) when is_binary(profile),
+    do: Enum.map(documents, &Map.put(&1, "chain", chain))
+
+  defp chained(documents, _owner, _chain), do: documents
 
   @doc """
   The profiles whose documents a session on `profile` reads, the one that extends nothing
@@ -764,6 +775,58 @@ defmodule Troupe.Plane.Memory do
   end
 
   defp append(_user, _entry, _opts, _attempts), do: {:error, :no_person}
+
+  @doc """
+  Add one entry to the organisation's or a team's document, as an accepted proposal does
+  (`Troupe.Plane.Memory.Proposals`): a line `- <entry>` at the end of the section on `topic`,
+  made where there is none, as `append_own/3` adds one to a person's. Saved as `subject`, the
+  administrator who accepted it, and audited as `memory.put` with the session and the agent
+  it came from (`opts[:session]`, `opts[:agent]`), so `blame/2` names them for the line, and
+  `opts[:proposal]`. The sessions it reaches read it from their next turn. Read again and
+  tried over when somebody saved in between; `{:full, bytes}` where it would not fit.
+  """
+  @spec append_entry(:organisation | Team.t(), String.t(), String.t(), String.t(), keyword()) ::
+          {:ok, %{now: Document.t() | nil, changes: map()}}
+          | {:error, {:full, non_neg_integer()} | {:conflict, non_neg_integer()} | String.t()}
+  def append_entry(owner, entry, topic, subject, opts \\ []),
+    do: append_entry(owner, entry, topic, subject, opts, 3)
+
+  defp append_entry(owner, entry, topic, subject, opts, attempts) do
+    current = current(owner)
+    text = appended((current && current.text) || "", entry, topic)
+
+    with :ok <- room(text),
+         {:ok, saved} <- put(owner, text, subject, number(current)) do
+      {:ok, appended_entry(owner, current, saved, subject, opts)}
+    else
+      {:error, {:conflict, _}} when attempts > 1 -> append_entry(owner, entry, topic, subject, opts, attempts - 1)
+      error -> error
+    end
+  end
+
+  defp appended_entry(_owner, current, :unchanged, _subject, _opts), do: %{now: current, changes: %{}}
+
+  defp appended_entry(owner, _current, %{before: before, now: now}, subject, opts) do
+    changes = Audit.diff(fields(before), fields(now))
+
+    detail =
+      for {key, opt} <- [{"session", :session}, {"agent", :agent}, {"proposal", :proposal}],
+          opts[opt],
+          into: changes,
+          do: {key, opts[opt]}
+
+    {:ok, _} = Audit.record(subject, "memory.put", subject(owner), detail)
+    _told = announce(owner)
+    %{now: now, changes: changes}
+  end
+
+  @doc "An entry as one is kept: one line, white space folded, at most 1024 bytes; or why not."
+  @spec entry_text(term()) :: {:ok, String.t()} | {:error, String.t()}
+  def entry_text(entry), do: entry(entry)
+
+  @doc "The topic an entry goes under: one line of at most 128 bytes, `Notes` for none; or why not."
+  @spec topic_text(term()) :: {:ok, String.t()} | {:error, String.t()}
+  def topic_text(topic), do: topic(topic)
 
   defp entry(entry) when is_binary(entry) do
     folded = entry |> String.split() |> Enum.join(" ")

@@ -718,6 +718,18 @@ describe("questions, and what the daemon says about limits (troupe-remote Decisi
     assert.equal((state.entries[0] as Extract<Entry, { kind: "system" }>).text, message);
   });
 
+  it("says a comment on an artifact the session published, with who, which and what (troupe #62)", () => {
+    seq = 0;
+    const state = foldAll([
+      durable("artifact_commented", { artifact: { id: "art-1", title: "Plan" }, comment: { id: "c-1", author: { subject: "cy@example.test", display_name: "Cy" }, body: "Can you add last quarter?", created_at: "2026-11-16T09:00:00Z" } }),
+    ]);
+    assert.deepEqual(
+      state.entries.map((e) => e.kind),
+      ["system"],
+    );
+    assert.equal((state.entries[0] as Extract<Entry, { kind: "system" }>).text, "Cy commented on “Plan”: Can you add last quarter?");
+  });
+
   it("says the organisation's memory changed under a running session as the harness's sentence (troupe #55)", () => {
     seq = 0;
     const message = "The organisation's memory changed: the team design's memory is now version 6 (it was 5). Read from this turn on.";
@@ -738,7 +750,7 @@ describe("questions, and what the daemon says about limits (troupe-remote Decisi
     assert.equal(isBusy(fold(state, ephemeral("agent_state", { state: "waiting" }))), false);
   });
 
-  it("keeps the reasoning it saw stream where the reply lands, with how long it took, and a replay has none (troupe #474)", () => {
+  it("keeps the reasoning it saw stream where the reply lands, with how long it took, and a replay draws the logged reasoning (troupe #474, #659)", () => {
     seq = 0;
     const reply = durable("llm_response", {
       message: { role: "assistant", content: [{ type: "reasoning", provider: "openai", text: "the parser drops a line" }, { type: "text", text: "Fixed." }] },
@@ -757,11 +769,28 @@ describe("questions, and what the daemon says about limits (troupe-remote Decisi
     assert.equal(live.thinking, "");
     assert.equal(live.thinkingAt, undefined);
 
-    // The log's reply carries its reasoning block, but nothing streamed: no entry.
+    // The log's reply carries its reasoning block and nothing streamed: the block is the
+    // entry, with no time to say, as a replayed or late-attached session draws it.
     const replay = foldAll([durable("user_input", { text: "fix it", source: "user" }), reply]);
     assert.deepEqual(
       replay.entries.map((e) => e.kind),
-      ["user", "assistant"],
+      ["user", "reasoning", "assistant"],
+    );
+    const logged = replay.entries[1] as Extract<Entry, { kind: "reasoning" }>;
+    assert.equal(logged.text, "the parser drops a line");
+    assert.equal(logged.ms, undefined);
+  });
+
+  it("draws no reasoning on replay from a redacted block, an empty one or a subagent's reply (troupe #659)", () => {
+    seq = 0;
+    const redacted = durable("llm_response", {
+      message: { role: "assistant", content: [{ type: "reasoning", provider: "anthropic", text: "", redacted: true }, { type: "reasoning", provider: "openai", text: "  " }, { type: "text", text: "Done." }] },
+    });
+    const child = durable("llm_response", { message: { role: "assistant", content: [{ type: "reasoning", provider: "openai", text: "the child's thought" }, { type: "text", text: "child" }] } }, ["root", "child"]);
+    const replay = foldAll([durable("user_input", { text: "go", source: "user" }), redacted, child]);
+    assert.equal(
+      replay.entries.some((e) => e.kind === "reasoning"),
+      false,
     );
   });
 

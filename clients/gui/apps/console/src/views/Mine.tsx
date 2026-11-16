@@ -14,7 +14,9 @@
 
 import { useState } from "react";
 import type { JSX } from "react";
+import { appLink } from "@troupe/client";
 import type { OwnMemory, OwnMemoryPreview, OwnMemorySaved, SessionRow } from "@troupe/client";
+import { OpenInApp } from "./AppBanner";
 import { describeError, show, useConsole, useLoad } from "../console";
 import { href } from "../route";
 import { Empty, Field, Loaded, Preview, Region, SessionState, Status, TextDiff, count, when } from "./bits";
@@ -74,9 +76,9 @@ export function Mine(): JSX.Element {
  * member is asked nothing administrative, and sees the sentence alone.
  */
 function YourSessions(): JSX.Element {
-  const { auth, admin, me, role } = useConsole();
+  const { auth, admin, me, role, plane } = useConsole();
   const [load, reload] = useLoad(async () => {
-    const mine = await auth.rpc<{ sessions: SessionRow[] }>("sessions.list", {}).then((r) => r.sessions.filter((s) => s.owner === me.subject));
+    const mine =await auth.rpc<{ sessions: SessionRow[] }>("sessions.list", {}).then((r) => r.sessions.filter((s) => s.owner === me.subject));
     const seen = role === "member" || mine.length === 0 ? [] : await admin.sessions().catch(() => []);
     return { rows: mine, onSessions: new Set(seen.map((s) => s.id)) };
   }, [auth, admin, me.subject, role]);
@@ -112,7 +114,7 @@ function YourSessions(): JSX.Element {
                       </td>
                       <td>{when(s.last_active_at ?? null)}</td>
                       <td>
-                        Open it in the desktop app or the terminal.
+                        <OpenInApp link={appLink({ kind: "session", id: s.id, plane: plane.url })} />, or in the terminal.
                         {onSessions.has(s.id) && (
                           <>
                             {" "}

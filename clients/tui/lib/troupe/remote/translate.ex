@@ -207,6 +207,26 @@ defmodule Troupe.Remote.Translate do
 
   defp put_by(data, _event, _memory), do: data
 
+  # A person's answer: `by` by name where the actor carries one worth showing, else the
+  # subject, and `mine?` the person here. Nothing for the harness's own, nor while this
+  # client does not yet know who it is, so an answer is never drawn as another's by mistake.
+  defp answered_by(%{"actor" => %{"kind" => "user", "subject" => subject} = actor}, %{me: me})
+       when is_binary(me) and is_binary(subject) and subject != "" do
+    name = actor["display_name"]
+
+    %{
+      by:
+        if(is_binary(name) and String.trim(name) not in ["", subject],
+          do: String.trim(name),
+          else: subject
+        ),
+      by_subject: subject,
+      mine?: me == subject
+    }
+  end
+
+  defp answered_by(_event, _memory), do: %{}
+
   defp data(%{"data" => %{} = data}), do: data
   defp data(_event), do: %{}
 
@@ -458,9 +478,17 @@ defmodule Troupe.Remote.Translate do
            })
          ], memory}
 
+      # Who answered is the event's actor: `by` their name, or their
+      # subject, and `mine?` the person here, for a window several people steer.
       "question_answered" ->
         {[
-           emit.(:question_answered, %{call_id: call_id(data), text: to_string(data["text"] || "")})
+           emit.(
+             :question_answered,
+             Map.merge(
+               %{call_id: call_id(data), text: to_string(data["text"] || "")},
+               answered_by(event, memory)
+             )
+           )
          ], memory}
 
       # A workspace's command that asked first and was not sent: the harness's sentence
@@ -488,6 +516,11 @@ defmodule Troupe.Remote.Translate do
              text: to_string(data["message"] || "the organisation's memory changed")
            })
          ], memory}
+
+      # Somebody wrote a comment on an artifact this session published (root #62): one line,
+      # who, on which and what, for whoever steers the session to act on. Never input.
+      "artifact_commented" ->
+        {[emit.(:remote_note, %{text: commented(data)})], memory}
 
       # A saved `AI!` or `AI?` comment started a branch of this session (root Decision 844):
       # the branch's session, its agent, and the comments, as the daemon wrote them.
@@ -759,7 +792,9 @@ defmodule Troupe.Remote.Translate do
   defp scalar(v), do: inspect(v)
 
   # `llm_response` carries the whole assistant message — `{"role", "content": [blocks]}`
-  # — where the dotted vocabulary carried its text. Only the text is kept: the tool
+  # — where the dotted vocabulary carried its text. Its text is kept, and its reasoning,
+  # which the log keeps as a block of its own, so that a replayed or late-attached
+  # session, which saw none of it stream, draws its reasoning frame from it. The tool
   # calls in it arrive again as `tool_call_started`/`tool_call_completed`, which is what
   # the model draws a tool line from, and keeping both drew every call twice.
   defp message(data) do
@@ -780,6 +815,14 @@ defmodule Troupe.Remote.Translate do
 
   defp block(%{"type" => "text", "text" => text}) when is_binary(text),
     do: [Message.text_block(text)]
+
+  # A redacted block has no words to show, and an empty one nothing to draw.
+  defp block(%{"type" => type, "text" => text} = b)
+       when type in ["reasoning", "thinking"] and is_binary(text) do
+    if Map.get(b, "redacted") == true or String.trim(text) == "",
+      do: [],
+      else: [Message.reasoning_block(text)]
+  end
 
   defp block(_block), do: []
 
@@ -1202,6 +1245,19 @@ defmodule Troupe.Remote.Translate do
 
   defp where(%{isolation: :remote, profile: profile}) when is_binary(profile), do: profile
   defp where(_memory), do: nil
+
+  # A comment on an artifact this session published, as one line: who, on which, and what.
+  defp commented(data) do
+    artifact = if is_map(data["artifact"]), do: data["artifact"], else: %{}
+    comment = if is_map(data["comment"]), do: data["comment"], else: %{}
+    author = if is_map(comment["author"]), do: comment["author"], else: %{}
+    who = present(author["display_name"]) || present(author["subject"]) || "Somebody"
+    title = present(artifact["title"]) || "an artifact"
+    "#{who} commented on “#{title}”: #{comment["body"] || ""}"
+  end
+
+  defp present(value) when is_binary(value) and value != "", do: value
+  defp present(_value), do: nil
 
   # The server's `seq` travels with every event this one durable event becomes,
   # so the journal can tell a replay from something new whatever it unfolds into.

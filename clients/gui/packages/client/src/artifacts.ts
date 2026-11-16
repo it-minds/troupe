@@ -12,8 +12,15 @@ type Rpc = <T = unknown>(method: string, params?: unknown) => Promise<T>;
 
 export type ArtifactKind = "html" | "markdown" | "file";
 
-/** What a person is to an artifact: its owner, or what a link or who it is for gives them. */
-export type ArtifactRole = "owner" | "edit" | "view";
+/**
+ * What a person is to an artifact: its owner, or what a link, the owner's naming them or who
+ * it is for gives them. `comment` reads it and writes in its thread; `edit` also publishes
+ * new versions of it.
+ */
+export type ArtifactRole = "owner" | "edit" | "comment" | "view";
+
+/** The role a link or a person's share gives. */
+export type ArtifactShareRole = "view" | "comment" | "edit";
 
 /** Who owns an artifact, or published one of its versions. */
 export interface ArtifactPerson {
@@ -89,6 +96,11 @@ export interface Artifact {
   may_delete: boolean;
   /** Whether this caller may publish a new version of it: its owner, or an edit link's holder. */
   may_edit?: boolean;
+  /** Whether this caller may write in its thread: its owner, or somebody given comment or edit. */
+  may_comment?: boolean;
+  /** How many comments its thread has, and when the newest was written. Absent from a plane from before comments. */
+  comments?: number;
+  commented_at?: string | null;
   /** The owner's switch for its public links. */
   public_links?: boolean;
   /** Whether a public link opens it now. */
@@ -126,7 +138,7 @@ export interface ArtifactLinkUse {
 /** A link to an artifact, as its owner reads it: never its token, which is shown once. */
 export interface ArtifactShare {
   id: string;
-  role: "view" | "edit";
+  role: ArtifactShareRole;
   public: boolean;
   state: "live" | "expired" | "revoked" | "switched off";
   expires_at: string | null;
@@ -136,10 +148,38 @@ export interface ArtifactShare {
   used_by: ArtifactLinkUse[];
 }
 
-/** What `artifact.get` answers: the artifact, its versions newest first, and its links for its owner. */
+/** Somebody an owner shared an artifact with by name, and at what role. */
+export interface ArtifactPersonShare {
+  subject: string;
+  display_name?: string | null;
+  email?: string | null;
+  role: ArtifactShareRole;
+  granted_by: string;
+  granted_at: string;
+}
+
+/** One comment in an artifact's thread. */
+export interface ArtifactComment {
+  id: string;
+  author: ArtifactPerson;
+  body: string;
+  created_at: string;
+}
+
+/** What `artifact.comments` answers: the thread, oldest first, and whether the caller may write in it. */
+export interface ArtifactThread {
+  id: string;
+  may_comment: boolean;
+  max_length: number;
+  comments: ArtifactComment[];
+}
+
+/** What `artifact.get` answers: the artifact, its versions newest first, and its links and people for its owner. */
 export interface ArtifactDetail extends Artifact {
   versions: ArtifactVersion[];
   shares?: ArtifactShare[];
+  /** For its owner: who it is shared with by name. */
+  people?: ArtifactPersonShare[];
   /** For its owner: whether an administrator allows public links, so one may be made. */
   public_links_allowed?: boolean;
 }
@@ -266,8 +306,9 @@ export type ArtifactAudience = "everyone" | "team" | "shared" | "private";
  * `profile:<name>` or `shared`).
  */
 export function audienceOf(artifact: Artifact): ArtifactAudience {
-  if (artifact.visibility === "private") return "private";
+  // Shared first: a private one somebody shared with the caller is theirs to open, not "only you".
   if (artifact.scope === "shared") return "shared";
+  if (artifact.visibility === "private") return "private";
   if (artifact.visibility === "organisation") return "everyone";
   return "team";
 }
@@ -324,9 +365,24 @@ export class ArtifactApi {
     return this.rpc<ArtifactTicket>("artifact.preview", { id, base, path, text });
   }
 
-  /** A link: `view` or `edit`, an expiry, and `public` where an administrator allows them. */
-  share(id: string, link: { role: "view" | "edit"; expires?: string; public?: boolean }): Promise<ArtifactNewLink> {
+  /** A link: `view`, `comment` or `edit`, an expiry, and `public` where an administrator allows them. */
+  share(id: string, link: { role: ArtifactShareRole; expires?: string; public?: boolean }): Promise<ArtifactNewLink> {
     return this.rpc<ArtifactNewLink>("artifact.share", { id, ...link });
+  }
+
+  /** Share it with one person by name at `role`, no link made; naming them again changes the role. The owner's. */
+  sharePerson(id: string, person: string, role: ArtifactShareRole): Promise<{ id: string; person: ArtifactPersonShare }> {
+    return this.rpc<{ id: string; person: ArtifactPersonShare }>("artifact.share", { id, person, role });
+  }
+
+  /** Its thread, oldest first, for whoever may open it. */
+  comments(id: string): Promise<ArtifactThread> {
+    return this.rpc<ArtifactThread>("artifact.comments", { id });
+  }
+
+  /** A comment in its thread, by whoever holds comment, edit or owner on it. */
+  comment(id: string, body: string): Promise<{ id: string; comment: ArtifactComment }> {
+    return this.rpc<{ id: string; comment: ArtifactComment }>("artifact.comment", { id, body });
   }
 
   /** Revoke a link by its id, or one person from every link by their subject. */

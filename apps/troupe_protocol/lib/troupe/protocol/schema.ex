@@ -249,10 +249,13 @@ defmodule Troupe.Protocol.Schema do
       # The organisation's memory documents an agent reads changed while the session ran
       # (#55): a save on the plane reached it, and its next turn read the new ones. Each
       # change is `scope`, `name`, `from` and `to`, the versions, `null` for none; `message`
-      # is the sentence a client shows as it is.
+      # is the sentence a client shows as it is. `chain`, `{from, to}`, each a list of
+      # profile names, the one that extends nothing first, where the session's worker
+      # profile came to extend another or none, which is why the documents moved.
       "memory_changed" => %{
         "changes" => required(:array),
-        "message" => required(:string)
+        "message" => required(:string),
+        "chain" => optional(:object)
       },
       # The session's goal, written by the root agent under whoever set or cleared it, and
       # carrying the `command_id` of the `session.goal.*` call that asked.
@@ -362,10 +365,14 @@ defmodule Troupe.Protocol.Schema do
       # session, under the root: `key` is the setting, `message` the sentence a client
       # shows as it is. The one there is: an organisation's enforced `max_tokens` (`limit`,
       # from `source`, the plane's URL or the managed file) shortened the thinking `model`'s
-      # `effort` asks for to `thinking` tokens, 0 where it left none (issue #644).
+      # `effort` asks for to `thinking` tokens, 0 where it left none (issue #644). Key
+      # `memory_proposals`: an administrator accepted or declined what an agent of the
+      # session proposed for a team's or the organisation's memory (#55); `proposal` is its
+      # id, and the message says which and why.
       "config_note" => %{
         "key" => required(:string),
         "message" => required(:string),
+        "proposal" => optional(:string),
         "source" => optional(:string),
         "limit" => optional(:integer),
         "model" => optional(:string),
@@ -659,6 +666,12 @@ defmodule Troupe.Protocol.Schema do
         "by" => required(:string),
         "display_name" => optional(:string),
         "by_name" => optional(:string)
+      },
+      # A comment written on an artifact this session published, from the plane: the
+      # artifact, who wrote it and what. Somebody else's words, never input to an agent.
+      "artifact_commented" => %{
+        "artifact" => required(:object),
+        "comment" => required(:object)
       },
       "acl_revoked" => %{
         "subject" => required(:string),
@@ -1251,12 +1264,26 @@ defmodule Troupe.Protocol.Schema do
         "version" => optional(:integer),
         "path" => optional(:string)
       },
+      # A link (`role` view, comment or edit), or with `person` (a subject) the artifact
+      # shared with that person by name at `role`, no link made.
       "artifact.share" => %{
         "command_id" => required(:string),
         "id" => required(:string),
         "role" => required(:string),
-        "expires" => optional(:string)
+        "expires" => optional(:string),
+        "person" => optional(:string)
       },
+      # The artifact's thread, oldest first, for whoever may open it; and a comment written
+      # in it by whoever holds comment, edit or owner on it.
+      "artifact.comments" => %{"id" => required(:string)},
+      "artifact.comment" => %{
+        "command_id" => required(:string),
+        "id" => required(:string),
+        "body" => required(:string)
+      },
+      # The share picker's search: people whose name, email or subject starts with `query`,
+      # among those the plane lets the person find, as its `people.search`.
+      "people.search" => %{"query" => required(:string), "limit" => optional(:integer)},
       "artifact.unshare" => %{
         "command_id" => required(:string),
         "id" => required(:string),

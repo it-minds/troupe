@@ -331,7 +331,8 @@ defmodule Troupe.Plane.ControlTest do
 
         assert error["message"] == "forbidden"
         assert error["data"]["reason"] =~ "read-only to agents"
-        assert error["data"]["reason"] =~ "an administrator changes them on the console's Govern → Company memory; ask one if you are not"
+        assert error["data"]["reason"] =~ "an administrator changes them on the console's Govern → Company memory"
+        assert error["data"]["reason"] =~ "session.memory.propose"
       end
 
       assert {:error, %{"message" => "not_found"}} =

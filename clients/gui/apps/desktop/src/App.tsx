@@ -12,7 +12,7 @@
 
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { JSX } from "react";
-import { PlaneOwn, awaitingYou, onThisComputer } from "@troupe/client";
+import { PlaneOwn, awaitingYou, onThisComputer, planeAddress } from "@troupe/client";
 import type { AuthSession, FleetRow, OwnPlane, SessionKind } from "@troupe/client";
 import { useAdmin, useDaemon, useFleet } from "./hooks";
 import { useUpdates } from "./updates";
@@ -21,7 +21,9 @@ import { Agents } from "./views/Agents";
 import { chooseLocalOnly, storedLocalOnly } from "./mode";
 import type { AppMode } from "./mode";
 import { useNotifications } from "./notify";
-import { capabilities, likelyPlaneUrl, prefs } from "./shell";
+import { capabilities, likelyPlaneUrl, prefs, shell } from "./shell";
+import { signInSentence, stepFor } from "./links";
+import type { LinkPlace } from "./links";
 import { useSharedPrefs } from "./shared";
 import { firstRunLook, hasChosen, markChosen, useAppearance } from "./theme";
 import { Approvals } from "./views/Approvals";
@@ -49,7 +51,7 @@ type Where =
   | { screen: "sessions" }
   | { screen: "new" }
   | { screen: "approvals" }
-  | { screen: "artifacts" }
+  | { screen: "artifacts"; artifact?: string }
   | { screen: "memory" }
   | { screen: "review" }
   | { screen: "profiles"; profile?: string }
@@ -135,6 +137,8 @@ function placeOf(where: Where): string {
       return `agents ${where.workspace ?? ""} ${where.agent ?? ""}`;
     case "profiles":
       return `profiles ${where.profile ?? ""}`;
+    case "artifacts":
+      return `artifacts ${where.artifact ?? ""}`;
     default:
       return where.screen;
   }
@@ -309,6 +313,51 @@ export function App(): JSX.Element {
     setLookPicked(false);
   }, [firstSignIn, lookPicked, auth, setLookPicked]);
   const planeUrl = prefs.get("planeUrl", likelyPlaneUrl());
+
+  // The app's own `troupe://` links (links.ts). A link to a plane the app is not signed in
+  // to waits here while the sign-in screen asks, filled in with its address; signed in to
+  // another, the window asks before signing out of it; signed in there, it goes straight to
+  // the place. Anything else is one line, and nothing happens.
+  const [linked, setLinked] = useState<{ plane: string; sentence: string; then: LinkPlace; switching: boolean } | null>(null);
+  const [linkNote, setLinkNote] = useState<string | null>(null);
+  const linkContext = useRef({ signedIn: null as string | null, localOnly });
+  linkContext.current = { signedIn: planeAuth?.planeUrl ?? null, localOnly };
+  useEffect(() => {
+    const hear = shell()?.onLinks;
+    if (!hear) return;
+    return hear((links) => {
+      for (const text of links) {
+        const step = stepFor(text, linkContext.current);
+        if (step.do === "say") setLinkNote(step.sentence);
+        else if (step.do === "go") {
+          setLinked(null);
+          setWhere(step.to.screen === "session" ? { screen: "session", id: step.to.id } : { screen: "artifacts", artifact: step.to.artifact });
+        } else if (step.do === "sign-in" || step.do === "switch") {
+          setLinkNote(null);
+          setLinked({ plane: step.plane, sentence: step.sentence, then: step.then, switching: step.do === "switch" });
+          // Offline, the sign-in screen is behind the plane that does not answer; a link to a
+          // plane is a reason to show it again.
+          if (step.do === "sign-in") {
+            setOffline(false);
+            setExpired(false);
+          }
+        }
+      }
+    });
+  }, []);
+  // Signed in to the link's plane at last: on to the place it named.
+  useEffect(() => {
+    if (!linked || linked.switching || !planeAuth) return;
+    if ((planeAddress(planeAuth.planeUrl) ?? planeAuth.planeUrl) !== linked.plane) return;
+    const then = linked.then;
+    setLinked(null);
+    if (then) setWhere(then.screen === "session" ? { screen: "session", id: then.id } : { screen: "artifacts", artifact: then.artifact });
+  }, [linked, planeAuth]);
+  useEffect(() => {
+    if (!linkNote) return;
+    const t = setTimeout(() => setLinkNote(null), 8000);
+    return () => clearTimeout(t);
+  }, [linkNote]);
   // A fresh machine in local mode meets the first run's questions (Decision 705); the
   // daemon says whether they are needed, once per connection.
   const setup = useSetupNeeded(mode === "local" ? daemon.client : null);
@@ -379,6 +428,9 @@ export function App(): JSX.Element {
   if (mode === "plane" && !auth) {
     return (
       <SignIn
+        key={linked && !linked.switching ? linked.plane : ""}
+        linkFor={linked && !linked.switching ? { plane: linked.plane, sentence: linked.sentence } : null}
+        note={linkNote}
         signInNow={signInNow}
         onSignedIn={signedIn}
         onLocalOnly={() => setLocalOnly(true)}
@@ -455,6 +507,37 @@ export function App(): JSX.Element {
   const caps = capabilities();
   const local = snapshot.rows.filter((r) => onThisComputer(r.kind)).length;
 
+  // A link that was not followed, and one for another plane than the one signed in to.
+  const linkBanners = (
+    <>
+      {linkNote && (
+        <div className="banner offline" role="status">
+          <p>{linkNote}</p>
+          <button className="link" onClick={() => setLinkNote(null)}>
+            Dismiss
+          </button>
+        </div>
+      )}
+      {linked?.switching && planeAuth && (
+        <div className="banner ready" role="status">
+          <p>{linked.sentence}</p>
+          <button
+            className="link"
+            onClick={() => {
+              const going = linked;
+              void signOut().then(() => setLinked({ ...going, switching: false, sentence: signInSentence(going.plane) }));
+            }}
+          >
+            Sign out and sign in there
+          </button>
+          <button className="link" onClick={() => setLinked(null)}>
+            Stay here
+          </button>
+        </div>
+      )}
+    </>
+  );
+
   // The front of house: no rail, three tiles, and the same rows the list shows. The app
   // opens on it and the lockup in the rail opens it again; every tile leads into the shell.
   if (where.screen === "launcher") {
@@ -470,6 +553,7 @@ export function App(): JSX.Element {
           <>
             <UpdateBanner updates={updates} />
             <NotKept auth={planeAuth} />
+            {linkBanners}
           </>
         }
         onNew={() => setWhere({ screen: "new" })}
@@ -649,6 +733,8 @@ export function App(): JSX.Element {
 
         {readySinceShown && <DaemonReady onRefresh={refreshScreen} />}
 
+        {linkBanners}
+
         {/* Keyed so a refresh is a remount of the screen alone, never of the window. */}
         <Fragment key={entered.remount}>
           {where.screen === "sessions" && (
@@ -722,6 +808,8 @@ export function App(): JSX.Element {
 
           {where.screen === "artifacts" && (
             <Artifacts
+              key={where.artifact ?? ""}
+              open={where.artifact}
               via={own}
               daemon={daemon.client}
               daemonState={daemon}
@@ -732,7 +820,7 @@ export function App(): JSX.Element {
 
           {where.screen === "memory" && <MemoryScreen via={own} daemon={daemon.client} daemonState={daemon} localOnly={localOnly} teams={planeAuth?.me?.teams ?? []} />}
 
-          {where.screen === "appearance" && <AppearanceSettings {...appearance} />}
+          {where.screen === "appearance" && <AppearanceSettings {...appearance} daemon={daemon.client} />}
 
           {where.screen === "setup" && <SetupScreen client={daemon.client} opened={daemon.opened} onDone={setupDone} />}
 

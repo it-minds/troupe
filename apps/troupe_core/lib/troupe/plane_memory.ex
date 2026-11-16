@@ -267,11 +267,49 @@ defmodule Troupe.PlaneMemory do
   defp identity(document), do: {document["scope"], document["name"]}
 
   @doc """
+  Whether the worker profile chain the documents were read along changed between `before`
+  and `now`: `%{"from" => chain, "to" => chain}`, each the profiles' names, the one that
+  extends nothing first, or `nil` where it did not, or where either side does not say (a
+  plane from before it sends none, and a session with no profile's document has none to
+  say it with). The plane writes the chain on each profile's document it sends.
+  """
+  @spec chain_change([Shape.document()] | nil, [Shape.document()] | nil) :: map() | nil
+  def chain_change(before, now) do
+    with from when is_list(from) <- chain_of(before),
+         to when is_list(to) <- chain_of(now),
+         false <- from == to do
+      %{"from" => from, "to" => to}
+    else
+      _same_or_unsaid -> nil
+    end
+  end
+
+  defp chain_of(documents) do
+    documents
+    |> List.wrap()
+    |> Enum.filter(&(&1["scope"] == "profile" and is_list(&1["chain"])))
+    |> List.last()
+    |> case do
+      nil -> nil
+      document -> Enum.filter(document["chain"], &is_binary/1)
+    end
+  end
+
+  @doc """
   The line a session's log and its transcript say a change with: each document, what it
   became. `the team design's memory is now version 6 (it was 5)`.
   """
-  @spec change_line([map()]) :: String.t()
-  def change_line(changes) do
+  @spec change_line([map()], map() | nil) :: String.t()
+  def change_line(changes, chain \\ nil)
+
+  def change_line(changes, %{"from" => from, "to" => to}) do
+    profile = List.last(to)
+
+    "The profile #{profile}'s chain changed: it is #{Enum.join(to, " → ")} now (it was " <>
+      "#{Enum.join(from, " → ")}), so its sessions read the memory along it. " <> change_line(changes, nil)
+  end
+
+  def change_line(changes, nil) do
     said =
       Enum.map(changes, fn change ->
         label = label(change)

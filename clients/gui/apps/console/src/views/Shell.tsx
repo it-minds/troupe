@@ -20,7 +20,9 @@ import { href, useRoute } from "../route";
 import type { Route } from "../route";
 import { useConsole } from "../console";
 import { shownMode, useMode } from "../theme";
+import { appLink } from "@troupe/client";
 import { Wordmark } from "./brand";
+import { AppBanner } from "./AppBanner";
 import { ArtifactLink, ArtifactOpen, ArtifactPage, Artifacts, artifactPlace } from "./Artifacts";
 import { Audit } from "./Audit";
 import { Budgets } from "./Budgets";
@@ -174,6 +176,7 @@ export function Shell(): JSX.Element {
         </div>
       </nav>
       <main className="main">
+        <AppBanner link={appLinkFor(here, signed.plane.url)} downloads={signed.plane.downloads} />
         {signed.me.breakglass && <BreakGlassBanner until={signed.auth.me?.expires_at ?? null} />}
         {refused && (
           <section className="banner refused" role="status" aria-label="Not for your role">
@@ -191,6 +194,21 @@ export function Shell(): JSX.Element {
       </main>
     </div>
   );
+}
+
+/**
+ * The app's link for the screen on show: an artifact's page opens that artifact, a session
+ * of the person's opens that session, and anything else opens the app at this plane.
+ */
+export function appLinkFor(route: Route, plane: string): string {
+  const [first, second] = route.path ?? [];
+  if (route.page === "artifacts") {
+    const place = artifactPlace(route.path ?? []);
+    const id = "id" in place ? place.id : "open" in place ? place.open.id : null;
+    if (id) return appLink({ kind: "artifact", id, plane });
+  }
+  if (route.page === "mine" && (first === "invited" || first === "remote") && second) return appLink({ kind: "session", id: second, plane });
+  return appLink({ kind: "open", plane });
 }
 
 /** Why this person is a platform admin here, and until when. */

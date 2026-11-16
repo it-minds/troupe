@@ -152,12 +152,12 @@ describe("the gallery", () => {
     await waitFor(() => windows.length === 1, "the artifact's window");
     expect(windows[0]).toEqual({ url: "https://artifacts.example.test/enter?ticket=t-art-weekly", title: "Weekly figures", key: "art-weekly" });
     await waitFor(() => !card.textContent?.includes("NEW TO YOU"), "no longer new");
-    expect(daemon.artifactCalls.map((c) => c.method)).toEqual(["artifact.get", "artifact.open"]);
+    expect(daemon.artifactCalls.map((c) => c.method).filter((m) => m !== "artifact.comments")).toEqual(["artifact.get", "artifact.open"]);
 
     // Somebody else's: its address is the link, and none of the owner's controls is offered.
     (await seesButton("Copy link", details)).click();
     await waitFor(() => copied.length === 1, "the copied link");
-    expect(copied[0]).toBe("https://artifacts.example.test/a/art-weekly/");
+    expect(copied[0]).toBe(`https://artifacts.example.test/a/art-weekly/\ntroupe://artifact/art-weekly?plane=${encodeURIComponent(harness!.plane.baseUrl)}`);
     expect(button("Pin", details)).toBeNull();
     expect(button("Publish a new version", details)).toBeNull();
     expect(network!.requests.filter((r) => r.url.includes("artifacts.example.test"))).toEqual([]);
@@ -172,7 +172,8 @@ describe("the gallery", () => {
 
     (await seesButton("Copy link", details)).click();
     await waitFor(() => copied.length === 1, "the link copied");
-    expect(copied[0]).toBe("https://artifacts.example.test/s/tok-sh-1");
+    // Under the link, the app's own, which carries nothing of its key (#959).
+    expect(copied[0]).toBe(`https://artifacts.example.test/s/tok-sh-1\ntroupe://artifact/art-mine?plane=${encodeURIComponent(harness!.plane.baseUrl)}`);
     await sees("Can view");
 
     (await waitFor(() => details.querySelector<HTMLButtonElement>('button[aria-label="Open version 1"]'), "version 1's Open")).click();
@@ -187,7 +188,7 @@ describe("the gallery", () => {
     (await seesButton("Revoke", details)).click();
     await sees("Revoked: that link opens nothing now.");
 
-    expect(daemon.artifactCalls.filter((c) => c.method !== "artifact.get").map((c) => [c.method, c.params["version"] ?? c.params["role"] ?? c.params["share"]])).toEqual([
+    expect(daemon.artifactCalls.filter((c) => c.method !== "artifact.get" && c.method !== "artifact.comments").map((c) => [c.method, c.params["version"] ?? c.params["role"] ?? c.params["share"]])).toEqual([
       ["artifact.share", "view"],
       ["artifact.open", 1],
       ["artifact.pin", 1],
@@ -221,6 +222,84 @@ describe("the gallery", () => {
     (await waitFor(() => [...gallery().querySelectorAll<HTMLButtonElement>(".card")].find((c) => c.textContent?.includes("Weekly figures")), "another's card")).click();
     await waitFor(() => aside()?.textContent?.includes("Weekly figures"), "its aside");
     expect(button("Change who can see it", aside()!)).toBeNull();
+  });
+
+  // Shared with a picked person (troupe #62): the picker finds them by name among those the
+  // plane lets the owner find, the role is chosen, and they are listed and removed in place.
+  it("lets its owner share it with a picked person at a role, and take it back", async () => {
+    await signedIn();
+    const cy = { subject: "cy@example.test", display_name: "Cy Example", email: "cy@example.test" };
+    harness!.plane.people = [cy];
+    daemon.people = [cy];
+    await openGallery();
+    (await waitFor(() => [...gallery().querySelectorAll<HTMLButtonElement>(".card")].find((c) => c.textContent?.includes("My notes")), "the person's own card")).click();
+    const details = await waitFor(aside, "the aside");
+    await sees("Nobody by name.");
+
+    const input = await waitFor(() => details.querySelector<HTMLInputElement>(".shared-with input"), "the picker");
+    await waitFor(() => button("Share", details)?.disabled === true, "Share offered only once somebody is picked");
+    type(input, "cy");
+    (await seesButton("Cy Example · cy@example.test", details)).click();
+    const role = details.querySelector<HTMLSelectElement>(".shared-with select")!;
+    expect([...role.options].map((o) => o.value)).toEqual(["view", "comment", "edit"]);
+    choose(role, "comment");
+    (await seesButton("Share", details)).click();
+    await sees("Shared: Cy Example finds My notes under Shared with you, and can comment.");
+    expect(daemon.artifactCalls.find((c) => c.method === "artifact.share")?.params).toMatchObject({ id: "art-mine", person: "cy@example.test", role: "comment" });
+    await waitFor(() => details.querySelector('[aria-label="Shared with"]')?.textContent?.includes("Cy Example · Can comment"), "Cy listed at their role");
+
+    (await waitFor(() => details.querySelector<HTMLButtonElement>('button[aria-label="Remove Cy Example"]'), "Remove Cy")).click();
+    await sees("Removed: Cy Example cannot open My notes now");
+    expect(daemon.artifactCalls.find((c) => c.method === "artifact.unshare")?.params).toMatchObject({ id: "art-mine", person: "cy@example.test" });
+    await sees("Nobody by name.");
+
+    // Another's artifact has no share control.
+    (await waitFor(() => [...gallery().querySelectorAll<HTMLButtonElement>(".card")].find((c) => c.textContent?.includes("Weekly figures")), "another's card")).click();
+    await waitFor(() => aside()?.textContent?.includes("Weekly figures"), "its aside");
+    expect(aside()!.querySelector(".shared-with")).toBeNull();
+  });
+
+  // Its thread, beside its details: who wrote each comment and when, a box for whoever may
+  // write, and none for whoever may only read.
+  it("shows its comments with names and lets a role that comments write one", async () => {
+    await signedIn();
+    daemon.artifacts!.push(row({ id: "art-named", title: "Hiring plan", visibility: "private", scope: "shared", role: "comment", may_comment: true, comments: 1 }));
+    daemon.artifactComments.set("art-named", [{ id: "c-1", author: { subject: "bo@example.test", display_name: "Bo" }, body: "The second table is wrong.", created_at: lastWeek }]);
+    await openGallery();
+    const card = await waitFor(() => [...gallery().querySelectorAll<HTMLButtonElement>(".card")].find((c) => c.textContent?.includes("Hiring plan")), "the shared card");
+    expect(card.textContent).toContain("1 COMMENT");
+    card.click();
+    const details = await waitFor(aside, "the aside");
+    await sees("You can open it and comment on it until they take it back.");
+    const thread = await waitFor(() => details.querySelector<HTMLElement>('[aria-label="Comments"] .comments'), "the thread");
+    expect(thread.textContent).toContain("Bo");
+    expect(thread.textContent).toContain("The second table is wrong.");
+
+    const box = details.querySelector<HTMLTextAreaElement>(".comment-form textarea")!;
+    type(box, "Fixed in version 2.");
+    (await seesButton("Comment", details)).click();
+    await waitFor(() => details.querySelectorAll(".comments li").length === 2, "the new comment in the thread");
+    expect(details.querySelector(".comments li:last-child")?.textContent).toContain("Fixed in version 2.");
+    expect(daemon.artifactCalls.find((c) => c.method === "artifact.comment")?.params).toMatchObject({ id: "art-named", body: "Fixed in version 2." });
+
+    // One the person reads because of who it is for: the thread, and no box.
+    (await waitFor(() => [...gallery().querySelectorAll<HTMLButtonElement>(".card")].find((c) => c.textContent?.includes("Weekly figures")), "another's card")).click();
+    await waitFor(() => aside()?.textContent?.includes("No comments yet."), "an empty thread");
+    expect(aside()!.querySelector(".comment-form")).toBeNull();
+    await sees("Its owner decides who may write them.");
+  });
+
+  it("narrows the cards by kind", async () => {
+    await signedIn();
+    daemon.artifacts!.push(row({ id: "art-doc", title: "Style guide", kind: "markdown", scope: "organisation" }));
+    await openGallery();
+    await waitFor(() => titles().length === 5, "five cards");
+    choose(gallery().querySelector<HTMLSelectElement>('select[aria-label="Kind"]')!, "markdown");
+    await waitFor(() => titles().join() === "Style guide", "the document alone");
+    choose(gallery().querySelector<HTMLSelectElement>('select[aria-label="Kind"]')!, "file");
+    await sees("Nothing here yet");
+    (await seesButton("Show everything", gallery())).click();
+    await waitFor(() => titles().length === 5, "all five again");
   });
 
   it("says the plane's refusal of a move in its own words", async () => {

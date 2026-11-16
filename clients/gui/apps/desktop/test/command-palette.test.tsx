@@ -324,6 +324,21 @@ describe("the palette in this app's words", () => {
     expect(dialog.querySelector(".palette .detail")!.textContent).not.toMatch(/window|directory/);
   });
 
+  // troupe #956: this app is signed in to one plane, so /hq names none here, in its usage,
+  // its detail or its example; the row and the detail pane read the same strings.
+  it("says /hq as this app takes it: no plane address in its usage or example", async () => {
+    const composer = await openSession();
+    key(composer, "/");
+    const dialog = await waitFor(palette, "the palette");
+    type(dialog.querySelector<HTMLInputElement>("input")!, "hq");
+    await waitFor(() => selected() === "/hq", "/hq");
+    const detail = dialog.querySelector(".palette .detail")!;
+    expect(detail.querySelector(".usage")!.textContent).toBe("/hq");
+    expect(detail.textContent).not.toMatch(/URL|https:|\[plane\]|for example/);
+    expect(paletteRow("hq")!.textContent).toContain("Every session you can open");
+    expect(paletteRow("hq")!.textContent).not.toMatch(/\[plane\]|URL/);
+  });
+
   // A branch's /merge, a window's /dismiss and the agent tree have nothing here to act on,
   // so the table marks them the terminal client's (troupe #929); a row the table gives this
   // app a requirement of its own for is judged by that one.

@@ -232,6 +232,47 @@ defmodule Troupe.ArtifactsScreenTest do
     eventually(fn -> user_state(pid).focus == :command end)
   end
 
+  # Shared with the person by name (root #62): no link opened, the plane says `scope: shared`
+  # with the role the owner gave, and the row says what it lets them do.
+  test "one shared with the person by name is under Shared with you, saying they may comment" do
+    named = %{
+      "id" => "a-named",
+      "title" => "Hiring plan",
+      "kind" => "html",
+      "visibility" => "private",
+      "scope" => "shared",
+      "role" => "comment",
+      "may_comment" => true,
+      "version" => 1,
+      "owner" => %{"display_name" => "Dee"},
+      "published_at" => @now
+    }
+
+    signed_in(artifacts: [named])
+    {sid, _, _} = start_session!(script: [])
+    {pid, session} = start_tui(sid)
+    type(pid, "/artifacts")
+    press(pid, "enter")
+    eventually(fn -> user_state(pid).focus == :artifacts end)
+
+    press(pid, "4")
+    text = screen_text(pid, session)
+    assert text =~ "4 ◐ Shared with you 1"
+    assert text =~ ~r/◐  new Hiring plan\s+page\s+v1\s+Dee\s+2 h ago\s+you may comment/
+  end
+
+  test "Shared with you, empty, says where a share by name lands" do
+    signed_in(artifacts: [])
+    {sid, _, _} = start_session!(script: [])
+    {pid, session} = start_tui(sid)
+    type(pid, "/artifacts")
+    press(pid, "enter")
+    eventually(fn -> user_state(pid).focus == :artifacts end)
+
+    press(pid, "4")
+    assert screen_text(pid, session) =~ "what someone shares with you by name lands here"
+  end
+
   # An administrator has switched artifacts off: the page says so in the desktop app's words,
   # not the empty list's offer to publish, and p says only that (#894).
   test "artifacts switched off are said, and p publishes nothing" do

@@ -30,7 +30,7 @@ for its one team, section 3). Beyond that:
 | TLS | the ingress terminates it | **none**: the two published ports speak plain HTTP. A reverse proxy of your own in front of them is where the certificate goes; until then, treat the box's network as the trust boundary |
 | the artifacts host | its own hostname behind its own Ingress | its own port and a second hostname you supply (section 2), so a published page still runs in an origin that reaches nothing of the plane's |
 | replicas | the plane, the GUI and the proxy each run more than one | one of everything: a restart is a minute of nothing answering |
-| backups | managed PostgreSQL, a versioned bucket, OpenBao snapshots | five volumes on one disk, yours to copy (section 6) |
+| backups | managed PostgreSQL, a versioned bucket, OpenBao snapshots | named volumes on one disk, yours to copy (section 6) |
 | growing | the operator makes workers; machines are registered beside them | one worker, this box. More machines are [single-machine.md](single-machine.md) by hand, and whether a plane-light should grow into a fleet is an open question |
 | identity | the organisation's provider | a bundled Dex with static users; the organisation's provider goes in as a Dex connector, and `TROUPE_PLATFORM_ADMIN_GROUP` is still a group claim |
 
@@ -151,7 +151,7 @@ change to the stack, the images or the server apps.
 Change `TROUPE_VERSION` in `.env` and `docker compose up -d --wait` (or
 `scripts/plane-light up`). Compose pulls the three images, runs the release's migration
 before the plane serves, and replaces the plane, the worker and the GUI. A running session
-on the worker ends with it: drain first on **Workers** if that matters, as
+on the worker ends with it: drain first on **Pods** if that matters, as
 [upgrading.md](upgrading.md) says for a pod. The profile `local` follows, since its image
 is `release`. Going back is the previous `TROUPE_VERSION` and the database restored from
 before the migration ([backup-restore.md](backup-restore.md#a-bad-migration)).

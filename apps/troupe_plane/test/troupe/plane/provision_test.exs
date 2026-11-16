@@ -207,6 +207,40 @@ defmodule Troupe.Plane.ProvisionTest do
       assert verdict.violations == preview.policy.violations
     end
 
+    # A ceiling above what the pods could ever run is saved, since it is a limit and not
+    # a promise, and the preview says both numbers. The pods' most is the policy's replicas
+    # times the size class's sessions, not the replicas running now, which the scaler moves.
+    test "says where max_sessions is above what the profile's pods could run at once", context do
+      Application.put_env(:troupe_plane, :policy, policy())
+
+      assert {:ok, %{capacity: capacity}} = Admin.preview(context.actor, %{name: "dev", max_sessions: 40})
+      assert capacity.max_sessions == 40
+      assert capacity.at_once == %{sessions: 16, by: "policy"}
+      assert capacity.above
+
+      assert {:ok, %{capacity: %{above: false}}} = Admin.preview(context.actor, %{name: "dev", max_sessions: 16})
+
+      # Saved anyway, and listed with the same most.
+      assert {:ok, _} = Admin.profile_put(context.actor, %{name: "dev", max_sessions: 40, image: "ghcr.io/troupe/worker:1.2.3"})
+      assert {:ok, profiles} = Admin.profiles_list(context.actor)
+      dev = Enum.find(profiles, &(&1.name == "dev"))
+      assert dev.max_sessions == 40
+      assert dev.at_once == %{sessions: 16, by: "policy"}
+    end
+
+    test "says nothing of a most where no policy bounds the replicas", context do
+      assert {:ok, %{capacity: capacity}} = Admin.preview(context.actor, %{name: "dev", max_sessions: 400})
+      assert capacity.at_once == %{sessions: nil, by: nil}
+      refute capacity.above
+    end
+
+    test "counts a profile on hosts by the hosts registered and enabled for it", context do
+      {:ok, _} = Fleet.put_profile(%{name: "dev", provisioner: "ssh"})
+
+      assert {:ok, %{capacity: %{at_once: %{sessions: 0, by: "hosts"}, above: true}}} =
+               Admin.preview(context.actor, %{name: "dev", max_sessions: 4, provisioner: "ssh"})
+    end
+
     test "with no policy configured, nothing is refused", context do
       # A plane that has not been told the cluster policy must not invent one: admission
       # is authoritative and would refuse what this cannot see.

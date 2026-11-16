@@ -77,6 +77,7 @@ describe("the overview", () => {
     for (const t of fake.admin.teams.values()) t.budget_micros = 0;
     for (const s of fake.admin.sessions) s.reviewed = true;
     fake.admin.seen.splice(0);
+    fake.admin.memoryProposals.splice(0);
     await signedInAs(fake, PEOPLE.alice);
     unmount = render(<App />).unmount;
     await waitFor(() => says("Nothing needs attention"), "the empty list");

@@ -190,6 +190,25 @@ defmodule Troupe.Worker.Plane.Commands do
     end
   end
 
+  # An administrator accepted or declined what an agent of a session here proposed for a
+  # team's or the organisation's memory: the plane's sentence, a line in the session's log
+  # once. Best effort, as a share's news is: a session not up here is told nothing, and its
+  # person's app shows the decision anyway.
+  defp dispatch("memory.proposal.decided", params) do
+    session_id = params["session_id"]
+
+    with :ok <- shaped(session_id),
+         {proposal, message} when is_binary(proposal) and is_binary(message) <- {params["proposal"], params["message"]},
+         {:ok, _tree} <- running_at(session_id, params["epoch"]),
+         :ok <- Troupe.UserMemory.decided(session_id, proposal, message) do
+      {:ok, %{"session_id" => session_id, "recorded" => true}}
+    else
+      {:error, :not_running} -> {:error, Error.new(:not_found, %{reason: "the session is not up here"})}
+      {:error, _error} = refused -> refused
+      _unshaped -> {:error, Error.new(:invalid_params, %{reason: "proposal and message are text"})}
+    end
+  end
+
   defp dispatch("session.fence", params) do
     :ok = Sessions.fence(params["session_id"], params["epoch"])
     {:ok, %{"session_id" => params["session_id"], "fenced" => true}}
@@ -275,6 +294,35 @@ defmodule Troupe.Worker.Plane.Commands do
 
         {:ok, seq} = Log.append(session_id, [], type, data)
         {:ok, %{"session_id" => session_id, "recorded" => true, "seq" => seq}}
+    end
+  end
+
+  # A comment written on an artifact this session published (#62). The pod's part is the
+  # log's line, so whoever steers the session reads it beside the work and may ask the
+  # agent to act on it; never input, since a comment is somebody else's words. Best
+  # effort, as a share's news is: the artifact's thread on the plane is the record.
+  defp dispatch("artifact.commented", params) do
+    session_id = params["session_id"]
+
+    with :ok <- shaped(session_id),
+         %{"id" => id} = artifact when is_binary(id) <- params["artifact"],
+         %{"body" => body} = comment when is_binary(body) <- params["comment"] do
+      case running_at(session_id, params["epoch"]) do
+        {:ok, _tree} ->
+          data = %{
+            "artifact" => Map.take(artifact, ["id", "title"]),
+            "comment" => Map.take(comment, ["id", "author", "body", "created_at"])
+          }
+
+          {:ok, seq} = Log.append(session_id, [], "artifact_commented", data)
+          {:ok, %{"session_id" => session_id, "recorded" => true, "seq" => seq}}
+
+        _not_here ->
+          {:ok, %{"session_id" => session_id, "recorded" => false, "reason" => "not running here"}}
+      end
+    else
+      {:error, _} = error -> error
+      _shape -> {:error, Error.new(:invalid_params, %{field: "artifact"})}
     end
   end
 

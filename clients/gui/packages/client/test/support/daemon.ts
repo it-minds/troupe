@@ -666,6 +666,8 @@ evoked where nothing is set and there was a sign-in. */
   readonly ownRollbacks: Array<Record<string, unknown>> = [];
   /** The levels above the person's own that `me.memory` answers beside it: the organisation's and their teams'. */
   ownAbove: Array<{ scope: string; name: string | null; version: number; text: string; by?: string }> = [];
+  /** What the person's agents proposed for a level above their own (troupe #55), which `me.memory` carries as `proposals`; null for a plane from before them. */
+  ownProposals: Array<Record<string, unknown>> | null = null;
   /**
    * The profiles the person may use as the plane answers `profile.get` for them, by name,
    * which this daemon sends on through its sign-in; null for a daemon signed in to none.
@@ -707,6 +709,12 @@ evoked where nothing is set and there was a sign-in. */
   managedRulesOnly = false;
   /** The links made to the person's artifacts. */
   readonly artifactShares: Array<Record<string, unknown>> = [];
+  /** Who the person's artifacts are shared with by name, each at a role. */
+  artifactPeople: Array<{ artifact: string; subject: string; display_name: string; email: string; role: string; granted_by: string; granted_at: string }> = [];
+  /** Each artifact's thread, oldest first, by id. */
+  readonly artifactComments = new Map<string, Array<{ id: string; author: { subject: string; display_name: string }; body: string; created_at: string }>>();
+  /** Who the share picker's search (`people.search`, forwarded to the plane) finds. */
+  people: Array<{ subject: string; display_name: string; email: string }> = [];
   /**
    * The person's own artifacts on the plane, as this daemon lists them through its sign-in
    * (`artifact.list`, troupe #62); null for a daemon signed in to none.
@@ -1895,7 +1903,7 @@ evoked where nothing is set and there was a sign-in. */
           const lines = params["blame"] === true ? own.text.split("\n").filter((l) => l !== "").map((text) => ({ text, version: own.version, by: "alice@example.com", at: "2026-10-26T08:00:00Z" })) : undefined;
           // Every document with its entries, as the plane answers them through the daemon.
           const documents = this.ownAbove.map((d) => ({ ...d, entries: entriesOf(d.text, d.version, d.by ?? (d.scope === "organisation" ? "root@example.com" : "lead@example.com")) }));
-          return reply(ws, id, { ...json(own), entries: entriesOf(own.text, own.version, "alice@example.com"), documents, organisation: { name: "Example" }, ...(this.memoryRoles ? { roles: this.memoryRoles } : {}), ...(lines ? { lines } : {}) });
+          return reply(ws, id, { ...json(own), entries: entriesOf(own.text, own.version, "alice@example.com"), documents, organisation: { name: "Example" }, ...(this.memoryRoles ? { roles: this.memoryRoles } : {}), ...(this.ownProposals ? { proposals: this.ownProposals } : {}), ...(lines ? { lines } : {}) });
         }
         if (method === "me.memory.history") {
           const of = (n: unknown): { version: number; text: string } | undefined => this.ownVersions.find((v) => v.version === n);
@@ -1994,6 +2002,13 @@ evoked where nothing is set and there was a sign-in. */
 
       // An artifact published on the plane through this daemon's sign-in, and the person's
       // own listed there (troupe #62); signed out, a sentence.
+      // The share picker's search, forwarded to the plane as the person.
+      case "people.search": {
+        if (client.localOnly) return reply(ws, id, null, { code: -32004, message: "forbidden", data: { local_only: true, reason: "Local only is on for this client or this session, so nothing is published on the plane or listed from it (people.search)" } });
+        const q = String(params["query"] ?? "").toLowerCase();
+        return reply(ws, id, { people: this.people.filter((p) => [p.display_name, p.email, p.subject].some((s) => s.toLowerCase().startsWith(q))), plane_url: "https://plane.example.test" });
+      }
+
       case "artifact.list":
       case "artifact.publish":
       case "artifact.get":
@@ -2004,6 +2019,8 @@ evoked where nothing is set and there was a sign-in. */
       case "artifact.pin":
       case "artifact.transfer":
       case "artifact.read":
+      case "artifact.comments":
+      case "artifact.comment":
       case "artifact.put": {
         const mine = this.artifacts;
         // Refused under Local only as the daemon refuses every one of them: an artifact is
@@ -2035,16 +2052,46 @@ evoked where nothing is set and there was a sign-in. */
               return reply(ws, id, { id: found["id"], version: Number(params["version"] ?? found["version"]), path: file.path, content_type: "text/markdown", text: file.text });
             }
             case "artifact.get":
-              return reply(ws, id, { ...found, versions, ...(owner ? { shares: this.artifactShares.filter((s) => s["artifact"] === found["id"]) } : {}) });
+              return reply(ws, id, { ...found, versions, ...(owner ? { shares: this.artifactShares.filter((s) => s["artifact"] === found["id"]), people: this.artifactPeople.filter((p) => p.artifact === found["id"]).map(({ artifact: _a, ...p }) => p) } : {}) });
+            // Its thread: read by whoever sees it, written by an owner or a role that comments.
+            case "artifact.comments":
+              return reply(ws, id, { id: found["id"], may_comment: owner || ["edit", "comment"].includes(String(found["role"] ?? "")), max_length: 4000, comments: this.artifactComments.get(String(found["id"])) ?? [] });
+            case "artifact.comment": {
+              if (!owner && !["edit", "comment"].includes(String(found["role"] ?? ""))) {
+                return reply(ws, id, null, { code: -32004, message: "forbidden", data: { reason: "you may read this artifact's comments; its owner gives the people who may write in them comment or edit" } });
+              }
+              const body = String(params["body"] ?? "").trim();
+              if (body === "") return reply(ws, id, null, { code: -32602, message: "invalid_params", data: { reason: "a comment needs some text" } });
+              const thread = this.artifactComments.get(String(found["id"])) ?? [];
+              const comment = { id: `c-${thread.length + 1}`, author: { subject: "alice@example.com", display_name: "Alice" }, body, created_at: new Date().toISOString() };
+              this.artifactComments.set(String(found["id"]), [...thread, comment]);
+              return reply(ws, id, { id: found["id"], comment });
+            }
             case "artifact.open":
               return reply(ws, id, { url: `https://artifacts.example.test/enter?ticket=t-${String(found["id"])}${params["version"] === undefined ? "" : `-v${String(params["version"])}`}`, expires_in: 60 });
             case "artifact.share": {
               if (!owner) return reply(ws, id, null, { code: -32004, message: "forbidden", data: { reason: "only its owner makes a link to it" } });
+              // Shared with one person by name: no link, the person at their role.
+              if (typeof params["person"] === "string") {
+                const who = this.people.find((p) => p.subject === params["person"]);
+                if (!who) return reply(ws, id, null, { code: -32005, message: "not_found", data: { person: params["person"], reason: "nobody of that name is a person of this plane" } });
+                const grant = { artifact: String(found["id"]), subject: who.subject, display_name: who.display_name, email: who.email, role: String(params["role"]), granted_by: "alice@example.com", granted_at: "2026-10-26T09:00:00Z" };
+                const at = this.artifactPeople.findIndex((p) => p.artifact === grant.artifact && p.subject === grant.subject);
+                if (at >= 0) this.artifactPeople.splice(at, 1, grant);
+                else this.artifactPeople.push(grant);
+                const { artifact: _a, ...person } = grant;
+                return reply(ws, id, { id: found["id"], person });
+              }
               const share = { id: `sh-${this.artifactShares.length + 1}`, artifact: found["id"], role: params["role"], public: false, state: "live", expires_at: null, revoked_at: null, created_by: "ada@example.test", created_at: "2026-10-26T09:00:00Z", used_by: [] };
               this.artifactShares.push(share);
               return reply(ws, id, { token: "tok", url: `https://artifacts.example.test/s/tok-${share.id}`, share });
             }
             case "artifact.unshare": {
+              if (typeof params["person"] === "string") {
+                const before = this.artifactPeople.length;
+                this.artifactPeople = this.artifactPeople.filter((p) => !(p.artifact === found["id"] && p.subject === params["person"]));
+                return reply(ws, id, { revoked: this.artifactPeople.length < before, id: found["id"], person: params["person"] });
+              }
               const share = this.artifactShares.find((s) => s["id"] === params["share"]);
               if (share) share["state"] = "revoked";
               return reply(ws, id, { revoked: Boolean(share), id: found["id"], share: params["share"] });
@@ -2258,6 +2305,13 @@ evoked where nothing is set and there was a sign-in. */
       changed = this.ui[key] !== (value ?? undefined);
       if (value === null) delete this.ui[key];
       else this.ui[key] = value;
+    } else if (key === "transcript.detail") {
+      if (value !== null && !["quiet", "tools", "everything"].includes(String(value))) {
+        return invalid(`transcript.detail must be one of quiet, tools, everything, not ${JSON.stringify(value)}`);
+      }
+      changed = this.transcript[key] !== (value ?? undefined);
+      if (value === null) delete this.transcript[key];
+      else this.transcript[key] = value;
     } else {
       return invalid(`${key} is not a setting Troupe knows; \`troupe config --explain\` lists them all`);
     }

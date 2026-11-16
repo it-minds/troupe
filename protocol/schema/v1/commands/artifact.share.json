@@ -12,6 +12,9 @@
     "id": {
       "type": "string"
     },
+    "person": {
+      "type": "string"
+    },
     "role": {
       "type": "string"
     }

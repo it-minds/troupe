@@ -97,6 +97,7 @@ export {
   openApprovals,
   openQuestions,
   presentMembers,
+  severalSteer,
   loopEnding,
   contextStatus,
   settleLoop,
@@ -171,10 +172,11 @@ export type {
 export { ArtifactApi, audienceName, audienceOf, ownerWords, teamOwned, textBytes, visibilityWords } from "./artifacts.js";
 export { besideRows, renderEntries, replacedBy, topicKey, writtenBy } from "./entries.js";
 export type { EntryDraft, EntryLevel, InEffect, MemoryEntry, MemoryInEffect } from "./entries.js";
+export type { ArtifactComment, ArtifactPersonShare, ArtifactShareRole, ArtifactThread } from "./artifacts.js";
 export type { Artifact, ArtifactAudience, ArtifactDetail, ArtifactFile, ArtifactFilter, ArtifactKind, ArtifactLinkUse, ArtifactList, ArtifactNewLink, ArtifactOrigin, ArtifactOwner, ArtifactPerson, ArtifactPublish, ArtifactPut, ArtifactRole, ArtifactScope, ArtifactShare, ArtifactText, ArtifactTicket, ArtifactTransferTo, ArtifactUpload, ArtifactVersion } from "./artifacts.js";
 export { openRemote, remoteRefusal, watchRemote, watchUrl, when as remoteWhen } from "./remote.js";
 export type { RemoteListRow, RemoteWatch, RemoteWatchOptions } from "./remote.js";
-export { AdminApi, bundleErrors, clientStanding, releaseVersion, requiredRole, versionOlder } from "./admin.js";
+export { AdminApi, bundleErrors, ceilingAboveWords, clientStanding, releaseVersion, requiredRole, versionOlder } from "./admin.js";
 export type {
   AdminFilter,
   AdminPod,
@@ -207,6 +209,7 @@ export type {
   TeamUpdated,
   TeamDisableEffect,
   AuditRow,
+  AtOnce,
   BundleDetail,
   BundlePreview,
   BundleSummary,
@@ -266,6 +269,7 @@ export type {
   MemoryListing,
   MemoryNudged,
   MemoryPreview,
+  MemoryProposals,
   MemoryReader,
   MemoryReaders,
   MemoryRow,
@@ -398,7 +402,7 @@ export type {
 } from "./config.js";
 export { PATH_TOOLS, RULE_ACTIONS, checkRuleSet, parseRule, ruleKind, ruleParts } from "./rules.js";
 export { instructionLayers } from "./instructions.js";
-export type { InstructionFile, InstructionLayer, InstructionRow, InstructionsContext, MemoryStatus, OwnMemory, OwnMemoryHistory, OwnMemoryPreview, OwnMemorySaved } from "./instructions.js";
+export type { InstructionFile, InstructionLayer, InstructionRow, InstructionsContext, MemoryProposal, MemoryStatus, OwnMemory, OwnMemoryHistory, OwnMemoryPreview, OwnMemorySaved } from "./instructions.js";
 export type { ReadRule, RuleAction, RuleKind, RuleSet } from "./rules.js";
 export {
   APPROVAL_CHOICES,
@@ -427,3 +431,24 @@ export type {
   SetupStep,
   SetupStepName,
 } from "./setup.js";
+export {
+  BANNER_DISMISSED,
+  BANNER_WORDS,
+  LINK_SCHEME,
+  OPEN_WAIT_MS,
+  PLATFORM_NAME,
+  RELEASES_PAGE,
+  appLink,
+  bannerDismissed,
+  dismissBanner,
+  downloadsOf,
+  followAppLink,
+  inDesktopApp,
+  isRefused,
+  pageWatch,
+  parseAppLink,
+  planeAddress,
+  planeHost,
+  platformOf,
+} from "./deeplink.js";
+export type { AppDownloads, AppLink, BannerPlatform, OpenWatch, RefusedLink } from "./deeplink.js";

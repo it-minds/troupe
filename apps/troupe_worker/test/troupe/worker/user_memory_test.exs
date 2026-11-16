@@ -85,6 +85,40 @@ defmodule Troupe.Worker.UserMemoryTest do
     PlaneHelper.stop_plane()
   end
 
+  # `remember` to `team` or `organisation`: a proposal over the control link, for the
+  # session's own team, kept by the plane and written into no document.
+  test "a proposal from a session on this pod waits on the plane for review", context do
+    {:ok, ada} = Identity.upsert_user(%{subject: "ada@example.test", email: "ada@example.test"})
+    {:ok, group} = Identity.upsert_group(%{external_id: "core", display_name: "core"})
+    {:ok, team} = Identity.enable_team(group, %{name: "core"})
+
+    {:ok, _} =
+      PlaneSessions.create(%{
+        id: context.session_id,
+        owner_id: ada.id,
+        owner_subject: ada.subject,
+        profile: "dev",
+        team_id: team.id,
+        epoch: 1
+      })
+
+    [pod] = Fleet.list_workers("dev")
+    {:ok, _} = PlaneSessions.place(context.session_id, pod)
+
+    assert {:ok, %{"id" => id, "team" => "core", "topic" => "Releases", "state" => "pending"}} =
+             UserMemory.propose("Tuesdays.", %{session_id: context.session_id, agent_path: ["root"]}, "team", %{"topic" => "Releases"})
+
+    assert %{state: "pending", where: "pod", session_id: session_id} = Memory.Proposals.get(id)
+    assert session_id == context.session_id
+    assert Memory.current(team) == nil
+
+    assert {:error, reason} = UserMemory.propose("x", %{session_id: "s-elsewhere"}, "organisation", %{})
+    assert reason =~ "refused"
+
+    stop_supervised!(Link)
+    PlaneHelper.stop_plane()
+  end
+
   defp verify("dev-token") do
     {:ok,
      %{profile: "dev", namespace: "troupe-w-dev", pod_name: nil, service_account: "troupe-worker"}}
