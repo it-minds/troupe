@@ -13,7 +13,12 @@ agent picker, your artifacts, your memory and what a profile gives a session. In
   dismisses a finished one, keeping its worktree. Tab chooses the agent the window runs,
   each with its instruction beside it (`/plan` → Tab, `build` → "go" is plan-then-build;
   the title says which agent runs).
-- **Answering.** `y`/`n`/`a` answer an approval (allow / deny / allow for the session). An
+- **Answering.** `y`/`n`/`a` answer an approval (allow / deny / allow for the session).
+  Where the daemon writes your own rule, `w` is Always allow: it asks where, `w` again for
+  this workspace (`.troupe/config.local.yaml`) or `g` for everywhere (your `config.yaml`),
+  Esc back; a refusal (rules managed by the platform, a workspace not trusted, a pod, whose
+  rules are its profile's) is said in the daemon's words. Where two or more people steer
+  the session, an answered question says who answered it. An
   agent's `publish_artifact` asks whom the artifact is for: the window shows the publication
   (its title, kind and files, whom the agent proposed it for and whose) over the audiences
   you have — only you, everyone at the organisation, each of your teams as the team's and as
@@ -322,8 +327,11 @@ browser; `p` publishes a file of the workspace as `/publish` does, for you alone
 you name nobody, and a team's where you name a team unless `me` follows (`/publish
 report.html team:core me`); `l` copies a view link to one of yours, through the terminal (OSC 52)
 where it takes it, else the clipboard, and shows it either way; `r` reads the list again;
-Esc goes back. Under Local only the page says the plane is not asked, and asks it nothing.
-HQ has a line for what is shared with you, and one per invitation into a session.
+Esc goes back. Typed in a session's window, `/artifacts` is also the picker for its
+message: `a` attaches the one on the cursor, the window's box shows it until you send
+(Backspace in the empty box takes it off), and the session's server fetches its files from
+the plane as the message goes, which then says where each landed. Under Local only the page
+says the plane is not asked, and asks it nothing. HQ has a line for what is shared with you, and one per invitation into a session.
 `troupe artifacts list`, `open`, `show`, `publish` (`--owner me` keeps a team publication
 yours), `transfer` (hand one of yours to a team you are in with `--to team:<name>`, or take a
 team's back with `--to me` as its administrator; the listing says `transferable` where you

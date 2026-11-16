@@ -196,11 +196,18 @@ function inThisApp(entry: CommandEntry): CommandEntry {
   if (entry.source === "agent") {
     return { ...entry, usage: entry.usage.replace("<prompt>", "[message]"), args: entry.args.map((a) => ({ ...a, required: false })) };
   }
+  // A command typed here with other arguments than the terminal client's (`/hq` names no
+  // plane: this app is signed in to one) has its own usage, the arguments it names, and
+  // its own example or none.
+  const usage = entry.usages?.["desktop"];
+  const example = entry.examples && "desktop" in entry.examples ? (entry.examples["desktop"] ?? null) : entry.example;
   return {
     ...entry,
     summary: entry.summaries?.["desktop"] ?? entry.summary,
     detail: entry.details?.["desktop"] ?? entry.detail,
     availability: entry.availabilities?.["desktop"] ?? entry.availability,
+    ...(usage === undefined ? {} : { usage, args: entry.args.filter((a) => usage.includes(a.name)) }),
+    example,
     ...(windowed
       ? { usage: entry.usage.replace(/\s*\[window\]/, ""), args: entry.args.filter((a) => a.kind !== "window"), example: null }
       : {}),

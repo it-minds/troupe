@@ -201,6 +201,10 @@ export type Entry =
        * when nobody is there to ask.
        */
       answer: string | undefined;
+      /** Who answered it, the subject `question_answered`'s actor names; absent where it names nobody. */
+      answeredBy?: string;
+      /** Their name as the actor carries it; absent where it is only the subject again. */
+      answeredByName?: string;
       /** Set when it ended unanswered: a cancel reached it, or its call timed out while it waited. */
       closed: boolean;
     }
@@ -465,6 +469,23 @@ export interface PresenceMember {
 /** The people a session's presence says are there now: everybody heard of but those who left. */
 export function presentMembers(state: Pick<TranscriptState, "presence">): PresenceMember[] {
   return state.presence.filter((p) => p.subject && p.state !== "left");
+}
+
+/**
+ * Whether two or more people steer the session, as far as this transcript knows: everyone
+ * its presence has heard of, whoever wrote a message, answered an approval or a question,
+ * and the reader. One alone is the session most people have, where an answer needs no author.
+ */
+export function severalSteer(state: Pick<TranscriptState, "presence" | "entries">, self: string | undefined): boolean {
+  const people = new Set<string>();
+  if (self) people.add(self);
+  for (const p of state.presence) if (p.subject) people.add(p.subject);
+  for (const en of state.entries) {
+    if (en.kind === "user" && en.author) people.add(en.author);
+    if (en.kind === "approval" && en.decidedBy) people.add(en.decidedBy);
+    if (en.kind === "question" && en.answeredBy) people.add(en.answeredBy);
+  }
+  return people.size >= 2;
 }
 
 export const emptyTranscript: TranscriptState = {
@@ -1399,9 +1420,17 @@ export function fold(state: TranscriptState, e: TroupeEvent, options: FoldOption
     case "tool_failures_ask_answered": {
       const callId = str(d.data["call_id"]);
       const answer = str(d.data["text"] ?? d.data["decision"]);
+      // A person's answer names who gave it; the harness's own word names nobody.
+      const person = d.type === "question_answered" && d.actor?.kind === "user" ? d.actor : undefined;
+      const by = person?.subject;
+      const byName = person ? nameOf(person).authorName : undefined;
       return {
         ...next,
-        entries: state.entries.map((en) => (en.kind === "question" && en.callId === callId && en.answer === undefined ? { ...en, answer } : en)),
+        entries: state.entries.map((en) =>
+          en.kind === "question" && en.callId === callId && en.answer === undefined
+            ? { ...en, answer, ...(typeof by === "string" && by !== "" ? { answeredBy: by } : {}), ...(byName ? { answeredByName: byName } : {}) }
+            : en,
+        ),
       };
     }
 

@@ -19,7 +19,7 @@ defmodule Troupe.CommandsTest do
     assert length(entries) > 20
 
     for entry <- entries do
-      assert Enum.sort(Map.keys(entry) -- ~w(summaries details availabilities)) ==
+      assert Enum.sort(Map.keys(entry) -- ~w(summaries details usages examples availabilities)) ==
                Enum.sort(@fields),
              entry["name"]
 
@@ -31,6 +31,17 @@ defmodule Troupe.CommandsTest do
       for map <- ~w(summaries details), words = entry[map], words != nil do
         assert Map.keys(words) -- ~w(tui desktop) == [], entry["name"]
         assert Enum.all?(Map.values(words), &(is_binary(&1) and &1 != "")), entry["name"]
+      end
+
+      # A client's own usage is the same command's, and its example one of its own or none.
+      for {client, usage} <- entry["usages"] || %{} do
+        assert client in ~w(tui desktop), entry["name"]
+        assert String.starts_with?(usage, "/" <> entry["name"]), entry["name"]
+      end
+
+      for {client, example} <- entry["examples"] || %{} do
+        assert client in ~w(tui desktop), entry["name"]
+        assert is_nil(example) or String.starts_with?(example, "/" <> entry["name"]), entry["name"]
       end
 
       # A client's own requirement is one the others could have, never a second `tui`.
@@ -90,6 +101,26 @@ defmodule Troupe.CommandsTest do
     assert tui["hq"]["detail"] =~ "Names a plane by URL"
     refute Map.has_key?(neutral["hq"], "availabilities")
     assert neutral["hq"]["availability"] == "always"
+  end
+
+  # troupe #956: the desktop app is signed in to one plane, so /hq there takes no address,
+  # and its usage, arguments and example say so; the terminal client's still name one.
+  test "a row a client types with other arguments carries that client's usage and example" do
+    by_name = fn entries -> Map.new(entries, &{&1["name"], &1}) end
+    neutral = by_name.(Commands.builtins())
+    tui = by_name.(Commands.for_client(Commands.builtins(), "tui"))
+    desktop = by_name.(Commands.for_client(Commands.builtins(), "desktop"))
+
+    assert desktop["hq"]["usage"] == "/hq"
+    assert desktop["hq"]["args"] == []
+    assert desktop["hq"]["example"] == nil
+    assert tui["hq"]["usage"] == "/hq [plane]"
+    assert [%{"name" => "plane"}] = tui["hq"]["args"]
+    assert tui["hq"]["example"] == "/hq https://troupe.example"
+    # A row without the maps, and one from a harness before them, read as they were.
+    assert desktop["goal"] == neutral["goal"]
+    old = Map.drop(neutral["hq"], ~w(usages examples))
+    assert [%{"usage" => "/hq [plane]"}] = Commands.for_client([old], "desktop")
   end
 
   # The branch and window commands, and the agent tree, have nothing in the desktop app to

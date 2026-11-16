@@ -781,6 +781,10 @@ defmodule Troupe.FakeRemote do
     "blob.get" => ~w(blob)
   }
 
+  # An artifact in place of bytes names no path and no content.
+  defp refused?(:worker, "fs.upload", %{"artifact" => artifact}) when is_binary(artifact),
+    do: false
+
   defp refused?(:worker, method, params) when is_map_key(@required, method),
     do: not (Enum.all?(@required[method], &is_binary(params[&1])) and edit?(method, params))
 
@@ -1144,6 +1148,34 @@ defmodule Troupe.FakeRemote do
   defp dispatch(state, _kind, "fs.read", _params, _pid),
     do: {{:ok, %{"content" => "hello from the worker\n"}}, state}
 
+  # A pod fetching an artifact into the session's workspace over its control link:
+  # the version's text lands as `index.md` under `session:/`.
+  defp dispatch(state, _kind, "fs.upload", %{"artifact" => artifact} = params, pid) do
+    id = session_of(state, pid)
+
+    case {Enum.find(state.artifacts, &(&1["id"] == artifact)), state.artifact_texts[artifact]} do
+      {%{} = row, text} when is_binary(text) ->
+        {event, state} =
+          append(state, id, "fs.changed", %{"paths" => ["index.md"]},
+            command_id: params["command_id"]
+          )
+
+        push(state, id, notification(id, event))
+
+        {{:ok,
+          %{
+            "artifact" => artifact,
+            "title" => row["title"],
+            "version" => params["version"] || row["version"],
+            "files" => [%{"path" => "index.md", "bytes" => byte_size(text)}]
+          }}, state}
+
+      _none ->
+        {{:error, -32_005, "not_found", %{"reason" => "no artifact #{artifact} you can see"}},
+         state}
+    end
+  end
+
   defp dispatch(state, _kind, "fs.upload", params, pid) do
     id = session_of(state, pid)
 
@@ -1469,7 +1501,7 @@ defmodule Troupe.FakeRemote do
   end
 
   defp dispatch(state, _kind, method, %{"id" => id} = params, _pid)
-       when method in ~w(artifact.get artifact.open artifact.read artifact.share) do
+       when method in ~w(artifact.get artifact.open artifact.read artifact.files artifact.share) do
     case Enum.find(state.artifacts, &(&1["id"] == id)) do
       nil -> {{:error, -32_005, "not_found", %{"id" => id}}, state}
       row -> {artifact(state, method, row, params), state}
@@ -1754,6 +1786,30 @@ defmodule Troupe.FakeRemote do
            "version" => params["version"] || row["version"],
            "path" => "index.md",
            "text" => text
+         }}
+    end
+  end
+
+  # A version's files for a session's workspace, as the plane answers a
+  # daemon's `fs.upload` with `artifact`: its text as one file, `index.md`, in base64.
+  defp artifact(state, "artifact.files", row, params) do
+    case state.artifact_texts[row["id"]] do
+      nil ->
+        {:error, -32_005, "not_found", %{"id" => row["id"]}}
+
+      text ->
+        {:ok,
+         %{
+           "id" => row["id"],
+           "title" => row["title"],
+           "version" => params["version"] || row["version"],
+           "files" => [
+             %{
+               "path" => "index.md",
+               "content_type" => "text/markdown",
+               "bytes" => Base.encode64(text)
+             }
+           ]
          }}
     end
   end

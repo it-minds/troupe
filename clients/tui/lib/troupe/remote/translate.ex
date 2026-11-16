@@ -207,6 +207,26 @@ defmodule Troupe.Remote.Translate do
 
   defp put_by(data, _event, _memory), do: data
 
+  # A person's answer: `by` by name where the actor carries one worth showing, else the
+  # subject, and `mine?` the person here. Nothing for the harness's own, nor while this
+  # client does not yet know who it is, so an answer is never drawn as another's by mistake.
+  defp answered_by(%{"actor" => %{"kind" => "user", "subject" => subject} = actor}, %{me: me})
+       when is_binary(me) and is_binary(subject) and subject != "" do
+    name = actor["display_name"]
+
+    %{
+      by:
+        if(is_binary(name) and String.trim(name) not in ["", subject],
+          do: String.trim(name),
+          else: subject
+        ),
+      by_subject: subject,
+      mine?: me == subject
+    }
+  end
+
+  defp answered_by(_event, _memory), do: %{}
+
   defp data(%{"data" => %{} = data}), do: data
   defp data(_event), do: %{}
 
@@ -458,9 +478,17 @@ defmodule Troupe.Remote.Translate do
            })
          ], memory}
 
+      # Who answered is the event's actor: `by` their name, or their
+      # subject, and `mine?` the person here, for a window several people steer.
       "question_answered" ->
         {[
-           emit.(:question_answered, %{call_id: call_id(data), text: to_string(data["text"] || "")})
+           emit.(
+             :question_answered,
+             Map.merge(
+               %{call_id: call_id(data), text: to_string(data["text"] || "")},
+               answered_by(event, memory)
+             )
+           )
          ], memory}
 
       # A workspace's command that asked first and was not sent: the harness's sentence
