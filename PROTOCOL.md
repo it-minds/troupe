@@ -390,9 +390,14 @@ Durable:
 
 A spent budget is a question, not a stop (Decision 660): the agent's `agent_state` is
 `waiting` until the answer, input queues meanwhile, and the answer says how much more and
-for how long (Decision 699) — a checkpoint every time. It is a stop where the budget is a
-contract (`budget_asks: false`, which the plane's terms set) and never asked under
-`full_send`; a session with `approvals: deny` answers no itself, as it does an `ask_user`.
+for how long (Decision 699) — a checkpoint every time. A pod session asks as a laptop one
+does, the question waiting in the log for whoever attaches while the session sleeps
+(Decision 1010). It is a stop where the budget is a contract (`budget_asks: false`, which
+a pod session's terms set when they set `max_turns` or `wall_clock_seconds`) and never
+asked under `full_send`; a session with `approvals: deny` answers no itself, as it does an
+`ask_user`. The wall clock is working time (Decision 1011): each turn from its start to
+its end, summed, with the time a call waits on an approval or a question left out, so a
+session resting between turns spends none of it.
 A subagent never asks: it hands its parent what it found, labelled partial, and the parent
 may delegate again. It ends `budget_exhausted` with no further model call and nothing left
 running, and a `done` subagent keeps no session awake: its parent stops it on taking its
@@ -428,7 +433,8 @@ configuration, so it is never in the log; a client that attached late has the wi
 the next call.
 
 `budget_warning` — `dimension` (`turns`, `input`, `output`, `wall`, `context`), `used`,
-`limit`, `fraction`, `detail` (`input tokens 4.9M/6.0M (82%)`) — is written once per
+`limit`, `fraction`, `detail` (`input tokens 4.9M/6.0M (82%)`; `wall` is working time, in
+milliseconds, `working time 24m/30m (80%)`) — is written once per
 dimension per agent when it crosses `budget_warn_at` (0.8 by default), so a person hears
 a limit is near before `budget_exhausted` stops the agent. Durable, because an ephemeral
 may be dropped under load and a warning has to arrive. `agent_state.budget.headroom`

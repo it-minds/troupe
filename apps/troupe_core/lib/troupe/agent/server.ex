@@ -246,6 +246,24 @@ defmodule Troupe.Agent.Server do
   @spec shell_ran(pid(), map(), Event.Actor.t() | nil) :: :ok
   def shell_ran(pid, data, actor), do: :gen_statem.call(pid, {:shell_ran, data, actor}, 5_000)
 
+  @doc """
+  Run `fun`, which waits on a person (an approval, a question), with the agent at `agent`
+  told so before and after: its wall clock counts working time, and stands still for as
+  long as `fun` waits. `id` is the call's. Anything but a pid for `agent` runs `fun` alone.
+  """
+  @spec waiting_on_person(pid() | nil, String.t(), (-> result)) :: result when result: term()
+  def waiting_on_person(agent, id, fun) when is_pid(agent) do
+    send(agent, {:person_wait, id, true})
+
+    try do
+      fun.()
+    after
+      send(agent, {:person_wait, id, false})
+    end
+  end
+
+  def waiting_on_person(_agent, _id, fun), do: fun.()
+
   # -- init and replay --------------------------------------------------------
 
   @impl :gen_statem
@@ -297,7 +315,9 @@ defmodule Troupe.Agent.Server do
       parent_ref: Keyword.get(opts, :parent_ref),
       watcher: Keyword.get(opts, :watcher),
       bundle: Keyword.get(opts, :bundle),
-      budget: opts |> Keyword.get(:budget, Config.budget(config)) |> Budget.start(),
+      # The wall clock is not running: it counts working time, from a turn's start. A
+      # restarted agent's starts again from nothing; the time worked before is forgiven.
+      budget: Keyword.get(opts, :budget, Config.budget(config)),
       fake: Keyword.get(opts, :fake),
       restart_limit: limit
     }
@@ -549,7 +569,8 @@ defmodule Troupe.Agent.Server do
       state
       | budget_ask_pending: data["call_id"],
         budget_asks: state.budget_asks + 1,
-        budget_ask_limit: limit_of(data["dimension"])
+        budget_ask_limit: limit_of(data["dimension"]),
+        budget: worked_at_least(state.budget, data)
     }
   end
 
@@ -584,6 +605,14 @@ defmodule Troupe.Agent.Server do
   defp fold_limits(state, "tool_failures_ask_answered", _data) do
     %{state | budget_ask_pending: nil, failure_ask: nil}
   end
+
+  # A restarted agent's wall clock starts from nothing, the time worked before forgiven,
+  # except what a question about it wrote down: that much was worked, so a question owed
+  # when the session slept is still owed when it wakes.
+  defp worked_at_least(budget, %{"dimension" => "wall", "used" => used}) when is_integer(used),
+    do: %{budget | worked_ms: max(budget.worked_ms, used)}
+
+  defp worked_at_least(budget, _data), do: budget
 
   # The summariser's call, charged and counted as it was live (Decision 769). A `compacted`
   # written before that has no usage, and folds as it always did.
@@ -1215,6 +1244,10 @@ defmodule Troupe.Agent.Server do
     end
   end
 
+  # A call of this agent's, or of one under it, began or stopped waiting on a person.
+  defp common(:info, {:person_wait, id, waiting?}, state_name, state),
+    do: {:keep_state, person_wait(state, id, waiting?, state_name)}
+
   defp common(:info, message, state_name, state) do
     Logger.debug(
       "troupe agent #{State.label(state)} dropped #{inspect(message)} in #{state_name}"
@@ -1460,6 +1493,7 @@ defmodule Troupe.Agent.Server do
 
         {state, held} =
           state
+          |> clock_on()
           |> fold_shell()
           |> fold_child_reports()
           |> take_organisation()
@@ -2593,7 +2627,7 @@ defmodule Troupe.Agent.Server do
   # A run that ends with a background child's end held takes it as its next turn (Decision
   # 853), unless the harness ended it: then it waits for the next input, as after a cancel.
   defp rest(state, reason \\ nil) do
-    state = reclaim_run_grant(%{state | turn_mode: nil})
+    state = reclaim_run_grant(%{clock_off(state) | turn_mode: nil})
     data = if(reason, do: %{"reason" => reason}, else: %{})
     log(state, :turn_ended, Map.put(data, "turn", Spend.to_json(state.turn)))
     state = let_go(%{state | turn: %Spend{}})
@@ -2607,7 +2641,7 @@ defmodule Troupe.Agent.Server do
   # `turn_ended` says `waiting` and carries no `turn`, and the sum goes on, folded as it was.
   defp wait_for_children(state) do
     log(state, :turn_ended, %{"reason" => "waiting"})
-    state = %{state | turn_mode: nil}
+    state = %{clock_off(state) | turn_mode: nil}
     publish_state(state, :idle)
     if state.child_reports != [], do: send(self(), :child_reports)
     {:next_state, :idle, state}
@@ -3008,6 +3042,38 @@ defmodule Troupe.Agent.Server do
     end
   end
 
+  # -- the wall clock ---------------------------------------------------------
+
+  # The wall clock counts working time: it runs from a turn's start (or a compaction's) to
+  # the turn's end, and stands still while the agent rests, waits on the budget's or the
+  # failure guard's question, or has a call waiting on a person's approval or answer. A
+  # turn's start and end also forget waits a killed task never closed.
+  @working [:thinking, :acting, :compacting]
+
+  defp clock_on(state), do: %{state | budget: Budget.work(state.budget), person_waits: MapSet.new()}
+
+  defp clock_off(state), do: %{state | budget: Budget.pause(state.budget), person_waits: MapSet.new()}
+
+  # A wait under this agent is the parent's too: a delegation waiting on a person is time
+  # nobody works, all the way up. The parent counts it under the child's path, so two
+  # agents' call ids never meet.
+  defp person_wait(state, id, waiting?, state_name) do
+    if is_pid(state.parent), do: send(state.parent, {:person_wait, {state.agent_path, id}, waiting?})
+
+    if waiting? do
+      %{state | person_waits: MapSet.put(state.person_waits, id), budget: Budget.pause(state.budget)}
+    else
+      waits = MapSet.delete(state.person_waits, id)
+
+      budget =
+        if MapSet.size(waits) == 0 and state_name in @working,
+          do: Budget.work(state.budget),
+          else: state.budget
+
+      %{state | person_waits: waits, budget: budget}
+    end
+  end
+
   # -- the gate ---------------------------------------------------------------
 
   # What stands between an agent and its next model call: the failure guard, then the
@@ -3066,6 +3132,7 @@ defmodule Troupe.Agent.Server do
   end
 
   defp gate_halt({:ask, state}) do
+    state = clock_off(state)
     publish_state(state, :waiting)
     {:next_state, :waiting, state}
   end
@@ -3451,7 +3518,8 @@ defmodule Troupe.Agent.Server do
 
     {:ok, pid} =
       Task.Supervisor.start_child(tasks(state), fn ->
-        send(agent, {:delegation_answer, call.id, Approvals.request(session_id, req)})
+        answer = waiting_on_person(agent, call.id, fn -> Approvals.request(session_id, req) end)
+        send(agent, {:delegation_answer, call.id, answer})
       end)
 
     monitor = Process.monitor(pid)
@@ -3860,6 +3928,7 @@ defmodule Troupe.Agent.Server do
       # it was, which is what a replay of the log rebuilds (Decision 774).
       state =
         state
+        |> clock_on()
         |> send_request(request)
         |> Map.merge(%{
           llm_summariser: true,
@@ -4101,7 +4170,7 @@ defmodule Troupe.Agent.Server do
       state.cancelled_by
     )
 
-    state = let_go(Map.merge(state, %{turn_mode: nil, turn: %Spend{}, cancelled_by: nil}))
+    state = let_go(Map.merge(clock_off(state), %{turn_mode: nil, turn: %Spend{}, cancelled_by: nil}))
 
     publish_state(state, :idle)
     {:next_state, :idle, state}
@@ -4268,7 +4337,7 @@ defmodule Troupe.Agent.Server do
   # (Decision 853): its parent stops this agent on its report, which would take the child
   # with it unrecorded.
   defp enter_done(state, reason, data, result \\ nil) do
-    state = state |> clear_llm() |> reclaim_run_grant() |> end_all_background("stopped")
+    state = state |> clock_off() |> clear_llm() |> reclaim_run_grant() |> end_all_background("stopped")
 
     log(
       state,

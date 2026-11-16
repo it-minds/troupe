@@ -44,9 +44,11 @@ question owed, asked again under the same id, where the questions server hands b
 an answer given meanwhile rather than asking twice. The budget is checked when a
 model call is about to be made and nowhere else — an agent whose turn ended with
 the budget spent rests idle and asks when next given something to do — except where
-the budget is a contract: `budget_asks: false`, which the worker sets whenever the
-plane's terms set anything at all, keeps the stop, because a limit somebody wrote
-into a session's terms is not a suggestion. A subagent never asks either: its
+the budget is a contract: `budget_asks: false`, which the worker sets when the
+plane's terms set a turn or wall-clock limit (1010; until then it was set whenever
+any terms came, which was every placement), keeps the stop, because a limit somebody
+wrote into a session's terms is not a suggestion. The wall clock is working time
+(1011). A subagent never asks either: its
 budget is a slice its parent gave it, and what it found goes back to the parent
 labelled partial for the parent to delegate again if it wants more — a subtree
 waiting on a person while its parent's tool call hangs would be the worse shape.
