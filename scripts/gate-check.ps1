@@ -294,6 +294,17 @@ watch: true
   $r = Invoke-Troupe @("doctor", "--bench") -With @{ TROUPE_PROVIDER = "fake"; TROUPE_MODEL = "fake-model" }
   if ($r.Code -eq 0 -and $r.All -match "(?m)^ok\s+bench\s+(\d+) of \1 passed") { Pass 3 "troupe doctor --bench: $($Matches[1]) of $($Matches[1]) offline scenarios passed" }
   else { Fail 3 "troupe doctor --bench exited $($r.Code)" $r.All }
+  # Again with the temporary directory inside a repository, as a CI runner's workspace or a
+  # build sandbox can be, whose AGENTS.md would put every scenario over its budget: the
+  # bench's workspaces read no instruction file from outside themselves (#767). A .git is
+  # all the harness looks for to find a repository's root.
+  $outer = Join-Path $Work "outer-repository"
+  $outerTemp = Join-Path $outer "tmp"
+  New-Item -ItemType Directory -Force -Path (Join-Path $outer ".git"), $outerTemp | Out-Null
+  Write-Text (Join-Path $outer "AGENTS.md") ("A rule of the repository the temporary directory is in.`n" * 200)
+  $r = Invoke-Troupe @("doctor", "--bench") -With @{ TROUPE_PROVIDER = "fake"; TROUPE_MODEL = "fake-model"; TEMP = $outerTemp; TMP = $outerTemp; TMPDIR = $outerTemp }
+  if ($r.Code -eq 0 -and $r.All -match "(?m)^ok\s+bench\s+(\d+) of \1 passed") { Pass 3 "the same with the temporary directory inside a repository: $($Matches[1]) of $($Matches[1]), its AGENTS.md in no scenario's prompt" }
+  else { Fail 3 "troupe doctor --bench with the temporary directory inside a repository exited $($r.Code): its AGENTS.md reached the scenarios" $r.All }
 
   # ==== row 5: only what the release key signed ============================================
   if ($Offline) { Skip 5 "troupe update --check against the latest release (-Offline)" }

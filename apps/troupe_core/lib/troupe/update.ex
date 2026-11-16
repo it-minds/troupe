@@ -551,7 +551,7 @@ defmodule Troupe.Update do
 
       {:error, :not_found} when name == "manifest.json" ->
         {:error,
-         "the release at #{base} has no manifest.json: releases from before 0.13 and pre-releases " <>
+         "the release at #{base} has no manifest.json: releases from before 0.13 " <>
            "are not signed, and troupe update installs nothing it cannot check"}
 
       {:error, :not_found} ->

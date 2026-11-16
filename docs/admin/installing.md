@@ -157,10 +157,10 @@ one, is **Break glass** on the console's sign-in screen
 `Troupe.Plane.ConsoleWalkthroughTest` drives this sequence on every build:
 
 1. **Identity**: check the admin group.
-2. **Policy**: save it, and the ceilings every team inherits.
+2. **Policy and settings**: save it, and the ceilings every team inherits.
 3. **Teams**: turn a provider group into a team.
-4. **Workers**, *New profile*: write a worker profile.
-5. **Bundles**: publish what a session on it gets, reading the diff first.
+4. **Profiles**: write a worker profile.
+5. **Configuration bundles**: publish what a session on it gets, reading the diff first.
 6. **Teams**: grant the profile to the team.
 7. **Identity**: a service principal for work nobody starts by hand.
 8. **Triggers**: a schedule that fires as it.
