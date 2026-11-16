@@ -1,5 +1,5 @@
 # Every night, on `main`: the full suite — every job whatever changed, the soak and flake
-# hunt, and the cluster suite — the native builds, and the harness against a real model through the
+# hunt, and the cluster suite — the native builds, the licences and Hex advisories, and the harness against a real model through the
 # gateway, so a race, a cluster regression, a broken Windows build or a model the harness
 # no longer stops is found the next morning rather than by the next release. Nothing is
 # published. `docs/developer/ci.md` has the picture.
@@ -43,6 +43,15 @@ jobs:
     name: native builds
     if: inputs.only != 'live'
     uses: ./.github/workflows/native.yml
+
+  # `mix hex.audit` on both Mix locks, beside the licence check: Dependabot does not read
+  # Hex, and a pull request runs it only when one is open.
+  licences:
+    name: licences and Hex advisories
+    if: inputs.only != 'live'
+    uses: ./.github/workflows/licences.yml
+    permissions:
+      contents: read
 
   live:
     name: against the real gateway

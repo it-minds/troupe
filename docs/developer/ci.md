@@ -8,7 +8,7 @@ Three speeds, one set of jobs (Decision 676):
 | **Pre-release** — [`prerelease.yml`](../../.github/workflows/prerelease.yml) | by hand, any branch or commit | builds only, **no test suite** | a GitHub pre-release `v<VERSION>-pre.<n>`: images, chart, `troupe`, `troupe-daemon`, desktop installers |
 | **Release** — [`release.yml`](../../.github/workflows/release.yml) | merging a VERSION change (`scripts/release 0.16.0-beta`) | **the full suite**: every job, nine soak runs, the cluster suite | the GitHub release `v<VERSION>`, images and chart at that version |
 
-Plus [`nightly.yml`](../../.github/workflows/nightly.yml) — the full suite, the native builds and the harness against a real model on `main` every night, publishing nothing — [`pages.yml`](../../.github/workflows/pages.yml), which builds the documentation site on every pull request and publishes it from `main` (Decision 739), and [`quick-start.yml`](../../.github/workflows/quick-start.yml), which runs [the quick start](../quick-start.md)'s commands every night against the latest release, on Linux and Windows, as a reader would (Decision 740).
+Plus [`nightly.yml`](../../.github/workflows/nightly.yml) — the full suite, the native builds, the licences with `mix hex.audit`, and the harness against a real model on `main` every night, publishing nothing — [`pages.yml`](../../.github/workflows/pages.yml), which builds the documentation site on every pull request and publishes it from `main` (Decision 739), and [`quick-start.yml`](../../.github/workflows/quick-start.yml), which runs [the quick start](../quick-start.md)'s commands every night against the latest release, on Linux and Windows, as a reader would (Decision 740).
 
 **Nothing here deploys** (Decision 735). A release publishes and ends: a deployment takes the published chart and images and rolls them from somewhere of its own, and no workflow in this repository knows where that is or holds a credential for it.
 
@@ -311,7 +311,7 @@ A failure is a harness regression until shown otherwise: the step prints the run
 | `ci.yml` | every check; focused or full | pull requests into `main`, pushes to `main`, `nightly.yml`, `release.yml` |
 | `dev-check.yml` | compile, credo, schema, client builds (the VS Code extension's `.vsix` kept as the run's artifact), and the decisions' check and the citation check whatever changed; no tests but the cluster suite, when the change touches what it deploys | every other pull request: into a `development-*` chunk ([fixing-issues.md](fixing-issues.md)), or stacked on another branch |
 | `cluster.yml` | the suite that needs a cluster, on kind ([above](#the-suite-that-needs-a-cluster)) | `ci.yml`, `dev-check.yml` |
-| `licences.yml` | every locked package's licence against the policy in `scripts/licences.exs`, and `docs/third-party-licences.md`, `THIRD-PARTY-NOTICES.txt` and the chart's LICENSE and NOTICE current; `mix hex.audit` on both Mix locks, so a Hex security advisory fails the pull request | every pull request |
+| `licences.yml` | every locked package's licence against the policy in `scripts/licences.exs`, and `docs/third-party-licences.md`, `THIRD-PARTY-NOTICES.txt` and the chart's LICENSE and NOTICE current; `mix hex.audit` on both Mix locks, so a Hex security advisory fails the pull request, and the nightly finds one published against a lock nobody has changed | every pull request, `nightly.yml` |
 | `pages.yml` | the documentation site (`mkdocs.yml`), strict: a broken link, a nav entry to a missing page or a page left out of the nav fails it; on `main`, published to GitHub Pages | every pull request, pushes to `main` |
 | `dco.yml` | every commit authored from 2026-09-27 has its author's `Signed-off-by:` ([CONTRIBUTING.md](../../CONTRIBUTING.md)) | pull requests into `main` and `development-*` |
 | `images.yml` | the five images to ghcr.io, `sha-<short>` and an optional version | `ci.yml` (main), `prerelease.yml`, `release.yml` |
@@ -319,7 +319,7 @@ A failure is a harness regression until shown otherwise: the step prints the run
 | `signing.yml` | `native.yml` with `sign: self-signed` on one Mac and Windows, and the manifest held to what was signed | `ci.yml`, `dev-check.yml` (PRs that change what signs) |
 | `prerelease.yml` | an untested pre-release of any commit | by hand |
 | `release.yml` | full suite → images → tag → publish | a VERSION change on `main`; by hand to retry |
-| `nightly.yml` | full suite + native builds + the live check; `only: live` for the last alone | schedule; by hand |
+| `nightly.yml` | full suite + native builds + licences and `mix hex.audit` + the live check; `only: live` for the last alone | schedule; by hand |
 | `live.yml` | three headless runs against the real gateway | `nightly.yml` |
 | `quick-start.yml` | the blocks `docs/quick-start.md` marks, from the latest release's installers, on Ubuntu (`sh`) and Windows (PowerShell), with the scripted model; that the README's quick start is the page's and its protocol badge PROTOCOL.md's version | schedule; pull requests that change the page, the README, PROTOCOL.md or it; by hand, with a release to install |
 
