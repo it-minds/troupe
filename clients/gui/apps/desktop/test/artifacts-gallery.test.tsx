@@ -163,6 +163,36 @@ describe("the gallery", () => {
     expect(network!.requests.filter((r) => r.url.includes("artifacts.example.test"))).toEqual([]);
   });
 
+  it("says when one goes on its card and its page, only where the plane says it will", async () => {
+    Object.assign(daemon.artifacts![1]!, {
+      goes_at: "2027-03-04T09:00:00Z",
+      retention: { versions_days: 90, unopened_days: 60 },
+      version_goes_at: { "1": "2027-02-01T09:00:00Z", "2": "2027-02-11T09:00:00Z" },
+    });
+    await signedIn();
+    await openGallery();
+    const card = (title: string) => waitFor(() => [...gallery().querySelectorAll<HTMLButtonElement>(".card")].find((c) => c.textContent?.includes(title)), title);
+    // Beside its pieces, not among them; and on no card the plane gave no date.
+    expect((await card("Core runbook")).querySelector(".goes")?.textContent).toMatch(/^Goes 4 Mar( 2027)? unless opened$/);
+    expect((await card("Weekly figures")).querySelector(".goes")).toBeNull();
+    expect(gallery().querySelectorAll(".card .goes")).toHaveLength(1);
+
+    (await card("Core runbook")).click();
+    const details = await waitFor(aside, "the aside");
+    await sees("It goes on 4 Mar");
+    await sees("Artifacts nobody opens for 60 days are removed, and opening it starts the 60 days again.");
+    await sees("Versions older than the newest are removed 90 days after they were published; the newest, and a pinned one, are kept. 2 of these go on the days they show.");
+    await waitFor(() => details.querySelectorAll(".versions li").length === 3, "three versions");
+    expect([...details.querySelectorAll(".versions li")].map((li) => li.querySelector(".goes")?.textContent ?? null)).toEqual([null, expect.stringMatching(/^goes 11 Feb/), expect.stringMatching(/^goes 1 Feb/)]);
+
+    // One the plane gives no date says nothing of going.
+    (await card("Weekly figures")).click();
+    await waitFor(() => aside()?.textContent?.includes("Weekly figures") ?? false, "its aside");
+    await waitFor(() => (aside()?.querySelectorAll(".versions li").length ?? 0) === 1, "its version");
+    expect(aside()!.textContent).not.toContain("It goes on");
+    expect(aside()!.textContent).not.toContain("Versions older than");
+  });
+
   it("gives its owner a view link, a version, a pin, a rollback and a revoke", async () => {
     await signedIn();
     await openGallery();

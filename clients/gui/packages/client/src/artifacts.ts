@@ -106,11 +106,22 @@ export interface Artifact {
   /** Whether a public link opens it now. */
   public?: boolean;
   /**
+   * When it is removed because nobody opened it (`artifacts_keep_unopened_days`); opening it
+   * moves the date out. Null, or absent from an older plane, while no such period is set.
+   */
+  goes_at?: string | null;
+  /**
    * Whether the caller keeps it at the top of their own gallery: the person's view, kept on
    * the plane so every device and app of theirs shows it so, and nobody else's. Absent from
    * a plane from before it.
    */
   kept?: boolean;
+}
+
+/** An administrator's retention periods, in days; null for one that is off. */
+export interface ArtifactRetention {
+  versions_days: number | null;
+  unopened_days: number | null;
 }
 
 export interface ArtifactFile {
@@ -130,6 +141,8 @@ export interface ArtifactVersion {
   /** What its publisher said of it; a rollback's says which version it brought back. */
   note?: string | null;
   rolled_back_to?: number | null;
+  /** When it is removed for its age (`artifacts_keep_versions_days`); null for the newest, the pinned one, and every one while that is off. */
+  goes_at?: string | null;
   url: string;
 }
 
@@ -194,6 +207,8 @@ export interface ArtifactDetail extends Artifact {
   people?: ArtifactPersonShare[];
   /** For its owner: whether an administrator allows public links, so one may be made. */
   public_links_allowed?: boolean;
+  /** How long it and its old versions are kept; absent from a plane from before retention. */
+  retention?: ArtifactRetention;
 }
 
 /** What `artifact.list` answers. */

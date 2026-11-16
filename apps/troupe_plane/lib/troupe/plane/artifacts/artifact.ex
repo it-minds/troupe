@@ -36,6 +36,9 @@ defmodule Troupe.Plane.Artifacts.Artifact do
     # The version in force, and every version, which is what counts against the quota.
     field(:bytes, :integer, default: 0)
     field(:total_bytes, :integer, default: 0)
+    # When somebody last opened it, at most once an hour; nil for never since the column
+    # came. What the unopened retention period counts from, with `updated_at`.
+    field(:opened_at, :utc_datetime_usec)
 
     has_many(:versions, Troupe.Plane.Artifacts.Version,
       references: :id,

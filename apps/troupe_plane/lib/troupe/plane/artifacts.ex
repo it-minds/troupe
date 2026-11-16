@@ -40,6 +40,10 @@ defmodule Troupe.Plane.Artifacts do
   together at most its `artifact_quota_bytes`, every version counted (zero is no quota). What
   one call can carry is less than that: the door's own limit on a body.
 
+  **How long it is kept.** Until an owner deletes it or an administrator takes it down,
+  unless an administrator sets a retention period: then old versions, or artifacts nobody
+  opens, are removed by `Retention`'s hourly pass, and every row says when it goes (`goes_at`).
+
   **Where it is read.** Never on the plane's host. The artifacts host
   (`Troupe.Plane.Web.Artifacts`) serves it, on an origin of its own, to a viewer who came
   through a ticket this module signs (`ticket/3`) and holds the cookie that host set.
@@ -49,7 +53,7 @@ defmodule Troupe.Plane.Artifacts do
 
   alias Troupe.ObjectStore
   alias Troupe.Plane.{Admin, Audit, Identity, Repo, Settings}
-  alias Troupe.Plane.Artifacts.{Artifact, Comments, People, Previews, Shares, Uploads, Version}
+  alias Troupe.Plane.Artifacts.{Artifact, Comments, People, Previews, Retention, Shares, Uploads, Version}
   alias Troupe.Plane.Artifacts.Keeps
   alias Troupe.Plane.Identity.User
   alias Troupe.Plane.Sessions.Session
@@ -1262,7 +1266,8 @@ defmodule Troupe.Plane.Artifacts do
 
     with {:ok, artifact} <- visible(id, user, admin?) do
       artifact = artifact |> Repo.preload([:owner, :owner_team, :team, :versions])
-      json = to_json(artifact, user, admin?)
+      # How long it and its old versions are kept, which its page says beside the dates.
+      json = artifact |> to_json(user, admin?) |> Map.put("retention", retention())
 
       # Who holds a link to it, and who it is shared with by name, is an owner's to read, and
       # whether a public one may be made.
@@ -1405,8 +1410,10 @@ defmodule Troupe.Plane.Artifacts do
   def fetch(id, version, path, %User{} = user) do
     with {:ok, artifact} <- visible(id, user, platform_admin?(user)),
          %Version{} = found <- version_of(artifact, version),
-         {:ok, path} <- file_path(artifact, found, path),
-         {:ok, file, body} <- file_of(artifact, found, path) do
+         {:ok, entry} <- file_path(artifact, found, path),
+         {:ok, file, body} <- file_of(artifact, found, entry) do
+      # Its entry page is somebody opening it, which keeps it under the unopened period.
+      if is_nil(path), do: Retention.touch(artifact)
       {:ok, %{artifact: artifact, version: found, file: file, body: body}}
     else
       _no -> {:error, :not_found}
@@ -1647,6 +1654,7 @@ defmodule Troupe.Plane.Artifacts do
       "total_bytes" => artifact.total_bytes,
       "created_at" => artifact.inserted_at,
       "published_at" => artifact.updated_at,
+      "goes_at" => Retention.goes_at(artifact, Retention.periods()),
       "may_take_down" => true
     }
   end
@@ -2011,8 +2019,9 @@ defmodule Troupe.Plane.Artifacts do
          {:ok, artifact} <- Shares.public_artifact(token),
          true <- artifact.public_links != false,
          %Version{} = version <- version_of(artifact, :current),
-         {:ok, path} <- file_path(artifact, version, path),
-         {:ok, file, body} <- file_of(artifact, version, path) do
+         {:ok, entry} <- file_path(artifact, version, path),
+         {:ok, file, body} <- file_of(artifact, version, entry) do
+      if is_nil(path), do: Retention.touch(artifact)
       {:ok, %{artifact: artifact, version: version, file: file, body: body}}
     else
       _no -> :error
@@ -2111,6 +2120,7 @@ defmodule Troupe.Plane.Artifacts do
               })} do
       claims = %{"s" => user.subject, "a" => artifact.id, "v" => version, "n" => nonce()}
       token = Plug.Crypto.sign(secret(), "troupe artifact ticket", claims)
+      :ok = Retention.touch(artifact)
 
       {:ok, %{"url" => "#{host}/enter?ticket=#{token}", "expires_in" => @ticket_seconds}}
     end
@@ -2234,13 +2244,26 @@ defmodule Troupe.Plane.Artifacts do
       "kept" => Map.get(meta, :kept, false),
       # The owner's switch for its public links, and whether one opens now.
       "public_links" => artifact.public_links != false,
-      "public" => meta.public
+      "public" => meta.public,
+      # When it is removed for nobody opening it, or nil where no period says it will be.
+      "goes_at" => Retention.goes_at(artifact, Retention.periods())
     }
     |> put_versions(artifact)
   end
 
+  # The administrator's retention periods in days, nil for one that is off.
+  defp retention do
+    periods = Retention.periods()
+    %{"versions_days" => periods.versions, "unopened_days" => periods.unopened}
+  end
+
+  @doc false
+  # The store artifacts are kept in, for `Retention`'s removals.
+  def object_store, do: store()
+
   defp put_versions(json, %Artifact{versions: versions} = artifact) when is_list(versions) do
     people = versions |> Enum.map(& &1.published_by) |> Enum.uniq() |> people()
+    periods = Retention.periods()
 
     Map.put(
       json,
@@ -2261,6 +2284,9 @@ defmodule Troupe.Plane.Artifacts do
           "published_at" => version.published_at,
           "note" => version.note,
           "rolled_back_to" => version.rolled_back_to,
+          # When this version is removed for its age; nil for the newest, the pinned one,
+          # and every one while that period is off.
+          "goes_at" => Retention.version_goes_at(artifact, version, periods),
           "url" => host_url() && "#{host_url()}/a/#{artifact.id}/v#{version.n}/"
         }
       end)

@@ -900,7 +900,7 @@ export interface TriggerRun {
  * How a person reads and types a setting's value. Not the value's own unit: a `dollars`
  * value is millionths of a dollar and a `minutes` one seconds, on the wire both ways.
  */
-export type SettingUnit = "days" | "minutes" | "seconds" | "dollars" | "bytes" | "count" | "switch" | "text" | "choice" | "url";
+export type SettingUnit = "days" | "days_or_off" | "minutes" | "seconds" | "dollars" | "bytes" | "count" | "switch" | "text" | "choice" | "url";
 
 /** A setting's name and unit, as `admin.settings.list` and `admin.setting.effective` carry them; absent from a plane from before them. */
 export interface SettingNaming {
@@ -1341,6 +1341,8 @@ export interface AdminArtifact {
   total_bytes: number;
   created_at: string;
   published_at: string;
+  /** When the retention period for artifacts nobody opens removes it; null or absent while none is set. */
+  goes_at?: string | null;
   may_take_down: boolean;
 }
 

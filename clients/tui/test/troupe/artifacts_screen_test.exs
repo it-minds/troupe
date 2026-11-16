@@ -261,6 +261,58 @@ defmodule Troupe.ArtifactsScreenTest do
     assert text =~ ~r/◐  new Hiring plan\s+page\s+v1\s+Dee\s+2 h ago\s+you may comment/
   end
 
+  # A retention period an administrator set (#981): the row and its versions say when they
+  # go, and a row the plane gives no date says nothing of it.
+  test "a row says when a retention period removes it, and its versions which go when" do
+    going = %{
+      "id" => "a-going",
+      "title" => "Old plan",
+      "kind" => "markdown",
+      "visibility" => "organisation",
+      "scope" => "organisation",
+      "version" => 2,
+      "owner" => %{"display_name" => "Dee"},
+      "published_at" => @now,
+      "goes_at" => "2027-03-04T09:00:00Z",
+      "versions" => [
+        %{
+          "n" => 2,
+          "published_by" => %{"display_name" => "Dee"},
+          "published_at" => @now,
+          "goes_at" => nil
+        },
+        %{
+          "n" => 1,
+          "published_by" => %{"display_name" => "Dee"},
+          "published_at" => @now,
+          "goes_at" => "2027-02-01T09:00:00Z"
+        }
+      ]
+    }
+
+    kept = Map.merge(hd(@rows), %{"goes_at" => nil})
+
+    signed_in(artifacts: [going, kept])
+    {sid, _, _} = start_session!(script: [])
+    {pid, session} = start_tui(sid)
+    type(pid, "/artifacts")
+    press(pid, "enter")
+    eventually(fn -> user_state(pid).focus == :artifacts end)
+
+    text = screen_text(pid, session)
+    assert text =~ ~r/Old plan.*goes 4 Mar( 2027)? unless opened/
+    refute text =~ ~r/Quarterly report.*goes/
+
+    press(pid, "/")
+    type(pid, "old plan")
+    press(pid, "enter")
+    press(pid, "v")
+    text = screen_text(pid, session)
+    assert text =~ "versions of Old plan"
+    assert text =~ ~r/v1\s+Dee\s+2 h ago · goes 1 Feb/
+    refute text =~ ~r/v2\s+Dee\s+2 h ago · goes/
+  end
+
   test "Shared with you, empty, says where a share by name lands" do
     signed_in(artifacts: [])
     {sid, _, _} = start_session!(script: [])
