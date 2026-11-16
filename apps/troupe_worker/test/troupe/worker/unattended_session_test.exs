@@ -11,11 +11,14 @@ defmodule Troupe.Worker.UnattendedSessionTest do
   use Troupe.Worker.SessionCase, async: false
 
   alias Troupe.LLM.Fake
-  alias Troupe.Session.Approvals
+  alias Troupe.Session.{Approvals, Questions}
 
   @moduletag timeout: 180_000
 
   @prompt "update every dependency with a patch release"
+
+  # The platform's two switches, which the plane sends with every placement's terms.
+  @managed [managed_permission_rules_only: false, managed_mcp_servers_only: false]
 
   describe "a prompt through activation" do
     test "is the first input, once, however many times the session is activated", context do
@@ -130,7 +133,7 @@ defmodule Troupe.Worker.UnattendedSessionTest do
       fake = scripted([look, look, {:text, "x"}])
 
       assert {:ok, _} =
-               activate(context, fake: fake, prompt: "look around", terms: [max_turns: 1])
+               activate(context, fake: fake, prompt: "look around", terms: [max_turns: 1] ++ @managed)
 
       await_type(context.session_id, "agent_done")
 
@@ -144,6 +147,88 @@ defmodule Troupe.Worker.UnattendedSessionTest do
       {_state_name, state} = :sys.get_state(Troupe.Registry.agent_pid(context.session_id, ["root"]))
       assert state.config.terms == %{max_turns: 1}
       assert state.config.budget_asks == false
+    end
+
+    # Issue #986: the platform's switches ride in with every placement's terms, and the
+    # session read "terms came" as "terms set a limit": no pod session ever asked.
+    test "terms that set no limit leave the session asking; one that sets a limit is a contract",
+         context do
+      context = requires_tier(context)
+
+      # What the plane sends for terms of `approvals: wait` alone: the two switches.
+      assert {:ok, _} = activate(context, terms: @managed)
+
+      {_state_name, state} = :sys.get_state(Troupe.Registry.agent_pid(context.session_id, ["root"]))
+      assert state.config.budget_asks == true
+      assert state.config.terms == %{}, "on the platform, with nothing to cap"
+
+      assert {:ok, _} = Sessions.dormant(context.session_id)
+      assert {:ok, _} = activate(context, epoch: 2, terms: [max_turns: 5] ++ @managed)
+
+      {_state_name, state} = :sys.get_state(Troupe.Registry.agent_pid(context.session_id, ["root"]))
+      assert state.config.budget_asks == false
+      assert state.config.terms == %{max_turns: 5}
+    end
+
+    test "a spent budget with no limit in the terms asks, sleeps on the question, and wakes to it",
+         context do
+      context = requires_tier(context)
+      look = {:tools, [{"list_files", %{}}]}
+      fake = scripted([look, look, {:text, "carried on"}])
+
+      assert {:ok, _} =
+               activate(context,
+                 fake: fake,
+                 terms: @managed,
+                 config_overrides: [max_turns: 1],
+                 dormant_after_ms: 300,
+                 report: reporter_to(self())
+               )
+
+      Troupe.send_input(context.session_id, "look around")
+      await_type(context.session_id, "budget_ask_started")
+
+      events = Troupe.replay_from(context.session_id, 0)
+      refute Enum.any?(events, &(&1.type == "agent_done")), "the question, not the end"
+      assert Fake.call_count(fake) == 1
+
+      # Nobody answers: the session goes dormant on the idle timer, the question owed.
+      assert %{"status" => "waiting", "pending_questions" => 1} = await_dormant()
+      eventually(fn -> Sessions.whereis(context.session_id) == nil end)
+
+      # The first client back finds the same question, and its answer carries the turn on.
+      assert {:ok, _} = activate(context, fake: fake, epoch: 2, terms: @managed, config_overrides: [max_turns: 1])
+      eventually(fn -> Enum.any?(Questions.pending(context.session_id), &(&1.call_id == "budget-1")) end)
+
+      Troupe.answer(context.session_id, "budget-1", "+10")
+      await_responses(context.session_id, 3)
+      await_type(context.session_id, "turn_ended")
+
+      events = Troupe.replay_from(context.session_id, 0)
+      assert [%{data: %{"call_id" => "budget-1", "decision" => "raise"}}] = Enum.filter(events, &(&1.type == "budget_ask_answered"))
+      refute Enum.any?(events, &(&1.type == "agent_done"))
+    end
+
+    test "approvals: deny answers its own budget question no, and the session ends", context do
+      context = requires_tier(context)
+      look = {:tools, [{"list_files", %{}}]}
+      fake = scripted([look, look, {:text, "x"}])
+
+      assert {:ok, _} =
+               activate(context,
+                 fake: fake,
+                 prompt: "look around",
+                 terms: [approvals: :deny] ++ @managed,
+                 config_overrides: [max_turns: 1]
+               )
+
+      await_type(context.session_id, "agent_done")
+
+      events = Troupe.replay_from(context.session_id, 0)
+      assert [%{data: %{"decision" => "deny"}}] = Enum.filter(events, &(&1.type == "budget_ask_answered"))
+      [done] = Enum.filter(events, &(&1.type == "agent_done"))
+      assert done.data["reason"] == "budget_exhausted"
+      assert Fake.call_count(fake) == 1
     end
 
     test "approvals: deny answers no on the spot, with the system as the actor", context do

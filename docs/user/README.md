@@ -248,8 +248,9 @@ Publishing an [artifact](artifacts.md) asks too, and the approval is where you s
 is for: the agent proposes an audience only when you named one, and otherwise you choose
 it there, whatever your permission rules or `--auto-approve` say.
 
-**Budget.** Limits on turns, tokens and time, plus your team's money budget on the plane.
-When one is reached the agent says which and asks, or stops; it never silently continues.
+**Budget.** Limits on turns, tokens and working time, plus your team's money budget on the plane.
+When one is reached the agent says which and asks, or stops where the session's terms set a
+turn or time limit, as a trigger's may; it never silently continues.
 The question says what the session has used and spent, and you answer with how much more
 and for how long: pick a size for this run, this session or this workspace (which writes
 it to the repository's `.troupe/config.yaml`, so the next session there starts with it),

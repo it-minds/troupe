@@ -22,6 +22,10 @@ defmodule Troupe.Agent.HeadroomTest do
     assert headroom.input.fraction == 0.25
     assert headroom.context == %{used: 150_000, limit: 200_000, fraction: 0.75}
     assert headroom.wall.used == 0, "a budget that has not started has spent no time"
+
+    # The gauge reads the time worked, not the time since the agent began.
+    assert Headroom.of(%{budget | worked_ms: 90_000, wall_clock_ms: 120_000}, 0, 1).wall ==
+             %{used: 90_000, limit: 120_000, fraction: 0.75}
     assert {:turns, %{fraction: 0.8}} = Headroom.tightest(headroom)
 
     assert Headroom.of(budget, 5, 0).context == %{used: 5, limit: 1, fraction: 0.0}
@@ -40,7 +44,8 @@ defmodule Troupe.Agent.HeadroomTest do
     assert Headroom.describe(:input, %{used: 4_900_000, limit: 6_000_000, fraction: 0.8166}) ==
              "input tokens 4.9M/6.0M (82%)"
 
-    assert Headroom.describe(:wall, %{used: 125_000, limit: 1_800_000, fraction: 0.07}) == "wall clock 2m/30m (7%)"
+    # The wall clock counts working time, and says so.
+    assert Headroom.describe(:wall, %{used: 125_000, limit: 1_800_000, fraction: 0.07}) == "working time 2m/30m (7%)"
     assert Headroom.describe(:turns, %{used: 3, limit: 40, fraction: 0.075}) == "turns 3/40 (8%)"
 
     # D70: no figure in an exponent's notation, and one that rounds to a thousand thousands is 1.0M.
