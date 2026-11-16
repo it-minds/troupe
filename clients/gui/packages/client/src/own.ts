@@ -43,6 +43,8 @@ export interface OwnPlane {
   moveArtifact(id: string, base: number, visibility: string): Promise<ArtifactDetail>;
   pinArtifact(id: string, version: number | null): Promise<ArtifactDetail>;
   transferArtifact(id: string, to: ArtifactTransferTo): Promise<ArtifactDetail>;
+  /** Keep it at the top of the person's own gallery, or let it go: theirs, on the plane. */
+  keepArtifact(id: string, on: boolean): Promise<ArtifactDetail>;
   /** Share it with one person by name at `role`, no link made. The owner's. */
   sharePersonArtifact(id: string, person: string, role: ArtifactShareRole): Promise<{ id: string; person: ArtifactPersonShare }>;
   /** Its thread, oldest first, and whether the caller may write in it. */
@@ -167,6 +169,10 @@ export class PlaneOwn implements OwnPlane {
 
   transferArtifact(id: string, to: ArtifactTransferTo): Promise<ArtifactDetail> {
     return this.ask<ArtifactDetail>("artifact.transfer", { id, to });
+  }
+
+  keepArtifact(id: string, on: boolean): Promise<ArtifactDetail> {
+    return this.ask<ArtifactDetail>("artifact.keep", { id, on });
   }
 
   sharePersonArtifact(id: string, person: string, role: ArtifactShareRole): Promise<{ id: string; person: ArtifactPersonShare }> {

@@ -219,6 +219,8 @@ defmodule Troupe.Plane.Harness do
     "artifact.share" => :control,
     "artifact.unshare" => :control,
     "artifact.public" => :control,
+    # One kept at the top of the caller's own gallery, or let go: theirs alone.
+    "artifact.keep" => :control,
     # Its thread: read by whoever may open it, written by whoever holds comment or above.
     "artifact.comments" => :observe,
     "artifact.comment" => :control,
@@ -627,6 +629,16 @@ defmodule Troupe.Plane.Harness do
 
   defp handle("artifact.redeem", _params, _context),
     do: {:error, Error.new(:invalid_params, %{reason: "artifact.redeem takes a link's token"})}
+
+  defp handle("artifact.keep", %{"id" => id} = params, %{user: user} = context) when is_binary(id),
+    do: Artifacts.keep(id, params["on"], user, platform_admin?: admin?(context))
+
+  defp handle("artifact.keep", _params, _context),
+    do:
+      {:error,
+       Error.new(:invalid_params, %{
+         reason: "artifact.keep takes an artifact's id and on, true or false"
+       })}
 
   defp handle("artifact.public", _params, _context),
     do:

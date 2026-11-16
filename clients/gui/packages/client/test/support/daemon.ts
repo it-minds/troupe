@@ -2018,6 +2018,7 @@ evoked where nothing is set and there was a sign-in. */
       case "artifact.rollback":
       case "artifact.pin":
       case "artifact.transfer":
+      case "artifact.keep":
       case "artifact.read":
       case "artifact.comments":
       case "artifact.comment":
@@ -2037,7 +2038,7 @@ evoked where nothing is set and there was a sign-in. */
           // Each row says which gallery tab it is under, as the plane does where a row does not.
           const rows = mine
             .filter((a) => (params["mine"] === true ? a["mine"] === true : params["shared"] === true ? a["shared"] === true : true))
-            .map((a) => ({ scope: a["mine"] === true ? "mine" : a["shared"] === true ? "shared" : a["visibility"], ...a }));
+            .map((a) => ({ scope: a["mine"] === true ? "mine" : a["shared"] === true ? "shared" : a["visibility"], ...a, kept: a["kept"] === true }));
           return reply(ws, id, { enabled: true, profiles: ["dev"], teams: ["core"], publish_organisation: "everyone", public_links: false, gallery_url: "https://plane.example.test/console#/artifacts", plane_url: "https://plane.example.test", artifacts: rows });
         }
         if (method !== "artifact.publish") {
@@ -2129,6 +2130,12 @@ evoked where nothing is set and there was a sign-in. */
               return reply(ws, id, { ...found });
             case "artifact.pin":
               found["pinned"] = params["version"] ?? null;
+              return reply(ws, id, { ...found });
+            // Kept at the top of the person's own gallery, or let go: kept on the row, as the
+            // plane keeps it for the person, so every client of theirs reads it back.
+            case "artifact.keep":
+              if (typeof params["on"] !== "boolean") return reply(ws, id, null, { code: -32602, message: "invalid_params", data: { reason: "on is true, to keep it at the top of your gallery, or false, to let it go" } });
+              found["kept"] = params["on"];
               return reply(ws, id, { ...found });
             // Between the person and a team: given to a team of theirs, or taken back by its admin.
             case "artifact.transfer": {

@@ -873,6 +873,10 @@ defmodule Troupe.Gateway.FakePlane do
      }}
   end
 
+  # One kept at the top of the person's own gallery, or let go: the artifact, saying so.
+  defp dispatch(_state, "artifact.keep", %{"id" => id, "on" => on}),
+    do: {:ok, %{"id" => id, "version" => 1, "kept" => on}}
+
   # The person's own memory's history and a rollback, over what `keep_own/1` set.
   defp dispatch(state, "me.memory.history", params) do
     case Agent.get(state, &Map.get(&1, :own)) do

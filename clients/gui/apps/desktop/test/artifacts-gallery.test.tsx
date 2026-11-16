@@ -10,7 +10,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { WebSocket as NodeWebSocket } from "ws";
 import { webTokenStore } from "@troupe/client";
 import { App } from "../src/App";
-import { dayOf } from "../src/views/Artifacts";
+import { dayOf, localDay, rangeWords } from "../src/views/Artifacts";
 import { FakeDaemon } from "../../../packages/client/test/support/daemon.js";
 import { startHarness } from "../../../packages/client/test/support/harness.js";
 import { keptBy } from "../../../packages/client/test/support/kept.js";
@@ -345,9 +345,77 @@ describe("the gallery", () => {
     choose(gallery().querySelector<HTMLSelectElement>('select[aria-label="Kind"]')!, "markdown");
     await waitFor(() => titles().join() === "Style guide", "the document alone");
     choose(gallery().querySelector<HTMLSelectElement>('select[aria-label="Kind"]')!, "file");
-    await sees("Nothing here yet");
+    // The empty state says what narrowed it.
+    await sees("Nothing here among files");
+    await sees("Try every kind.");
     (await seesButton("Show everything", gallery())).click();
     await waitFor(() => titles().length === 5, "all five again");
+  });
+
+  // #978: kept at the top, the person's on the plane; one row of team chips where there is a
+  // choice; a published range that narrows the groups, said in the empty state.
+  it("keeps one at the top of the person's own gallery, on the plane, and lets it go", async () => {
+    await signedIn();
+    await openGallery();
+    await waitFor(() => titles().length === 4, "four cards");
+    expect([...gallery().querySelectorAll(".day h2")].map((h) => h.textContent)).toEqual(["Today2", "This week1", "Earlier1"]);
+    (await waitFor(() => [...gallery().querySelectorAll<HTMLButtonElement>(".card")].find((c) => c.textContent?.includes("Field interviews")), "the oldest card")).click();
+    const details = await waitFor(aside, "the aside");
+    (await seesButton("Keep at the top", details)).click();
+    await waitFor(() => gallery().querySelector(".day h2")?.textContent === "Kept at the top1", "a group above the days");
+    expect([...gallery().querySelectorAll(".day h2")].map((h) => h.textContent)).toEqual(["Kept at the top1", "Today2", "This week1"]);
+    expect(gallery().querySelector('.day[aria-label="Kept at the top"] .card .title')?.textContent).toBe("Field interviews");
+    await sees("Kept at the top of your gallery, on every device you sign in on.");
+    // The plane holds it, not this device: another device's list says so too.
+    expect(daemon.artifacts!.find((a) => a["id"] === "art-link")!["kept"]).toBe(true);
+    expect(daemon.artifactCalls.filter((c) => c.method === "artifact.keep").map((c) => c.params)).toEqual([{ id: "art-link", on: true }]);
+
+    (await seesButton("Let go from the top", details)).click();
+    await waitFor(() => [...gallery().querySelectorAll(".day h2")].map((h) => h.textContent).join() === "Today2,This week1,Earlier1", "back under when it was published");
+    expect(daemon.artifacts!.find((a) => a["id"] === "art-link")!["kept"]).toBe(false);
+  });
+
+  it("names the teams in Your teams as chips where there are two, and not with one", async () => {
+    await signedIn();
+    daemon.artifacts!.push(row({ id: "art-design", title: "Design review", visibility: "team:design", scope: "team:design", published_at: now }));
+    await openGallery();
+    await waitFor(() => titles().length === 5, "five cards");
+    // Only inside Your teams.
+    expect(gallery().querySelector('[aria-label="Which of your teams"]')).toBeNull();
+    chip("Your teams").click();
+    const teams = await waitFor(() => gallery().querySelector<HTMLElement>('[aria-label="Which of your teams"]'), "the team chips");
+    expect([...teams.querySelectorAll("button")].map((b) => b.textContent)).toEqual(["All of them2", "design1", "dev profile1"]);
+    [...teams.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent?.startsWith("design"))!.click();
+    await waitFor(() => titles().join() === "Design review", "design's alone");
+    [...teams.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent?.startsWith("All of them"))!.click();
+    await waitFor(() => titles().length === 2, "both teams' again");
+
+    // Narrowed to one team's (by when it was published), there is nothing to choose: no chips.
+    type(gallery().querySelector<HTMLInputElement>('input[aria-label="Published until"]')!, localDay(lastWeek));
+    await waitFor(() => titles().join() === "Core runbook", "the one team's");
+    expect(gallery().querySelector('[aria-label="Which of your teams"]')).toBeNull();
+  });
+
+  it("narrows the groups to a published range, and the empty state names the range", async () => {
+    await signedIn();
+    await openGallery();
+    await waitFor(() => titles().length === 4, "four cards");
+    const since = gallery().querySelector<HTMLInputElement>('input[aria-label="Published since"]')!;
+    const until = gallery().querySelector<HTMLInputElement>('input[aria-label="Published until"]')!;
+    type(since, localDay(lastWeek));
+    await waitFor(() => titles().length === 3, "this week's and today's");
+    expect([...gallery().querySelectorAll(".day h2")].map((h) => h.textContent)).toEqual(["Today2", "This week1"]);
+    type(until, localDay(lastWeek));
+    await waitFor(() => titles().join() === "Core runbook", "that day's alone");
+    type(since, "2025-01-01");
+    type(until, "2025-01-31");
+    await sees("Nothing here published between 1 January 2025 and 31 January 2025");
+    await sees("Try wider dates.");
+    (await seesButton("Show everything", gallery())).click();
+    await waitFor(() => titles().length === 4, "all four again");
+    expect(since.value).toBe("");
+    expect(rangeWords("2026-11-03", "")).toBe("since 3 November 2026");
+    expect(rangeWords("", "2026-11-03")).toBe("until 3 November 2026");
   });
 
   it("says the plane's refusal of a move in its own words", async () => {

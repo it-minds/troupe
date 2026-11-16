@@ -1278,6 +1278,11 @@ export class DaemonClient implements OwnPlane {
     return this.command<ArtifactDetail>("artifact.transfer", { id, to });
   }
 
+  /** Keep it at the top of the person's own gallery, or let it go: the plane's `artifact.keep`, forwarded as `artifact.pin` is. */
+  keepArtifact(id: string, on: boolean): Promise<ArtifactDetail> {
+    return this.command<ArtifactDetail>("artifact.keep", { id, on });
+  }
+
   /** Share it with one person by name at `role`, no link made: the plane's `artifact.share` with `person`. The owner's. */
   sharePersonArtifact(id: string, person: string, role: ArtifactShareRole): Promise<{ id: string; person: ArtifactPersonShare }> {
     return this.command<{ id: string; person: ArtifactPersonShare }>("artifact.share", { id, person, role });

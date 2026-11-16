@@ -203,12 +203,20 @@ sign in first, and it brings you straight back to the artifact.
 **In the desktop app**, *Artifacts* in the rail is the same gallery, read from the plane the
 app is signed in to, or through this computer's daemon and its sign-in when the app is not:
 cards grouped by when, chips for who each is for (everyone, your teams and
-profiles, shared with you, only you), a choice of kind (pages, documents, files) and a search by
-title, person or session. A card new to you is one whose
-newest version this computer has not opened. The one you choose shows its versions, where it
-came from and who can see it; **Open** shows it in a window of its own, from its own host,
+profiles, shared with you, only you), a choice of kind (pages, documents, files), a range of
+days it was published in (*Published since … until …*) and a search by title, person or
+session. Under *Your teams*, when what it shows comes from more than one of your teams or
+profiles, a second row of chips picks one of them. The range and the team are this window's
+choice and are cleared when the app starts again; an empty gallery says what narrowed it. A
+card new to you is one whose newest version this computer has not opened. The one you choose
+shows its versions, where it came from and who can see it; **Open** shows it in a window of its own, from its own host,
 and each version opens the same way. **Copy link** copies a view link for your own and the
 address for anybody else's. On your own you can also pin or roll back to a version, revoke a
 link and publish a new version (that one through the daemon, which sends the files from
 this computer). The app never loads an artifact into itself. Under *Local
 only* the gallery asks the plane nothing.
+
+**Keep at the top**, on the one you choose, puts it in a group of its own above *Today*;
+**Let go from the top** puts it back under when it was published. It is yours alone and kept
+on the plane, so the desktop app shows it there on every computer you sign in on, and nobody
+else, its owner included, sees what you keep.
