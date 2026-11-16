@@ -456,7 +456,7 @@ depends on the machine.
 
 ## The desktop app (Cargo)
 
-530 crates, from `clients/gui/apps/desktop/src-tauri/Cargo.lock`, for every
+537 crates, from `clients/gui/apps/desktop/src-tauri/Cargo.lock`, for every
 platform, build dependencies included.
 
 | package | licence |
@@ -515,6 +515,8 @@ platform, build dependencies included.
 | `clipboard-win` | BSL-1.0 |
 | `combine` | MIT |
 | `concurrent-queue` | Apache-2.0 OR MIT |
+| `const-random` | MIT OR Apache-2.0 |
+| `const-random-macro` | MIT OR Apache-2.0 |
 | `constant_time_eq` | CC0-1.0 OR MIT-0 OR Apache-2.0 |
 | `cookie` | MIT OR Apache-2.0 |
 | `cookie_store` | MIT OR Apache-2.0 |
@@ -551,6 +553,7 @@ platform, build dependencies included.
 | `displaydoc` | MIT OR Apache-2.0 |
 | `dlopen2` | MIT |
 | `dlopen2_derive` | MIT |
+| `dlv-list` | MIT OR Apache-2.0 |
 | `document-features` | MIT OR Apache-2.0 |
 | `dom_query` | MIT |
 | `downcast-rs` | MIT/Apache-2.0 |
@@ -723,6 +726,7 @@ platform, build dependencies included.
 | `open` | MIT |
 | `openssl-probe` | MIT OR Apache-2.0 |
 | `option-ext` | MPL-2.0 |
+| `ordered-multimap` | MIT |
 | `ordered-stream` | MIT OR Apache-2.0 |
 | `os_pipe` | MIT |
 | `osakit` | MIT OR Apache-2.0 |
@@ -777,6 +781,7 @@ platform, build dependencies included.
 | `reqwest` | MIT OR Apache-2.0 |
 | `rfd` | MIT |
 | `ring` | Apache-2.0 AND ISC |
+| `rust-ini` | MIT |
 | `rustc-hash` | Apache-2.0 OR MIT |
 | `rustc_version` | MIT OR Apache-2.0 |
 | `rustix` | Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT |
@@ -846,6 +851,7 @@ platform, build dependencies included.
 | `tauri-macros` | Apache-2.0 OR MIT |
 | `tauri-plugin` | Apache-2.0 OR MIT |
 | `tauri-plugin-clipboard-manager` | Apache-2.0 OR MIT |
+| `tauri-plugin-deep-link` | Apache-2.0 OR MIT |
 | `tauri-plugin-dialog` | Apache-2.0 OR MIT |
 | `tauri-plugin-fs` | Apache-2.0 OR MIT |
 | `tauri-plugin-http` | Apache-2.0 OR MIT |
@@ -867,6 +873,7 @@ platform, build dependencies included.
 | `time` | MIT OR Apache-2.0 |
 | `time-core` | MIT OR Apache-2.0 |
 | `time-macros` | MIT OR Apache-2.0 |
+| `tiny-keccak` | CC0-1.0 |
 | `tinystr` | Unicode-3.0 |
 | `tinyvec` | Zlib OR Apache-2.0 OR MIT |
 | `tinyvec_macros` | MIT OR Apache-2.0 OR Zlib |

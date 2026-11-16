@@ -428,3 +428,24 @@ export type {
   SetupStep,
   SetupStepName,
 } from "./setup.js";
+export {
+  BANNER_DISMISSED,
+  BANNER_WORDS,
+  LINK_SCHEME,
+  OPEN_WAIT_MS,
+  PLATFORM_NAME,
+  RELEASES_PAGE,
+  appLink,
+  bannerDismissed,
+  dismissBanner,
+  downloadsOf,
+  followAppLink,
+  inDesktopApp,
+  isRefused,
+  pageWatch,
+  parseAppLink,
+  planeAddress,
+  planeHost,
+  platformOf,
+} from "./deeplink.js";
+export type { AppDownloads, AppLink, BannerPlatform, OpenWatch, RefusedLink } from "./deeplink.js";

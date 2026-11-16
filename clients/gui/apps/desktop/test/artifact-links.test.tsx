@@ -98,7 +98,8 @@ describe("the artifact panel in the shell", () => {
     const panel = await panelOf("My notes");
     (await seesButton("Copy link", panel)).click();
     await waitFor(() => copied.length === 1, "the link copied by the shell");
-    expect(copied[0]).toBe("https://artifacts.example.test/s/tok-sh-1");
+    // Under the link, the app's own, which carries nothing of its key (#959).
+    expect(copied[0]).toBe(`https://artifacts.example.test/s/tok-sh-1\ntroupe://artifact/art-mine?plane=${encodeURIComponent(harness!.plane.baseUrl)}`);
     expect(daemon.artifactCalls.map((c) => [c.method, c.params["role"]])).toContainEqual(["artifact.share", "view"]);
     await seesButton("Link copied", panel);
     expect(pageWrote).toEqual([]);
@@ -108,7 +109,7 @@ describe("the artifact panel in the shell", () => {
     const panel = await panelOf("Weekly figures");
     (await seesButton("Copy link", panel)).click();
     await waitFor(() => copied.length === 1, "the address copied by the shell");
-    expect(copied[0]).toBe("https://artifacts.example.test/a/art-weekly/");
+    expect(copied[0]).toBe(`https://artifacts.example.test/a/art-weekly/\ntroupe://artifact/art-weekly?plane=${encodeURIComponent(harness!.plane.baseUrl)}`);
     expect(daemon.artifactCalls.map((c) => c.method)).not.toContain("artifact.share");
     expect(pageWrote).toEqual([]);
   });

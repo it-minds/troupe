@@ -125,6 +125,11 @@ export interface PlaneOptions {
   /** The plane's own build version, which discovery says as `plane.build.version`. None is a plane whose discovery names no build. */
   version?: string;
   /**
+   * What discovery says a web page offers to install, as `plane.downloads` (#959). None is
+   * a plane that recommends no desktop version: the latest release's page and no files.
+   */
+  downloads?: { version: string | null; page: string; windows: string | null; macos: string | null; linux: string | null };
+  /**
    * The admin writes discovery says take `dry_run: true` (`plane.dry_run`); absent, the
    * ones this fake does. An empty list is a plane from before, which would make the write.
    */
@@ -1075,6 +1080,8 @@ export class FakePlane {
           rpc: "/rpc",
           jwks: "/.well-known/jwks.json",
           protocol_version: "1",
+          console: null,
+          downloads: this.opts.downloads ?? { version: null, page: "https://github.com/it-minds/troupe/releases/latest", windows: null, macos: null, linux: null },
           ...(this.opts.version ? { build: { version: this.opts.version } } : {}),
           dry_run: this.opts.dryRun ?? ["admin.clients.put"],
         },

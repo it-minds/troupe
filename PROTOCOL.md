@@ -3620,6 +3620,21 @@ installs a version the policy it holds refuses. `admin.releases.mirror` copies a
 there from where releases are published, its manifest checked against the release keys
 first; `admin.releases.list` says which are kept.
 
+**What a web page offers to install** (#959) is in the discovery document, which anybody may
+read: `/.well-known/troupe` names `plane.downloads`, the `desktop` component's recommended
+version and the installer for each platform, from `release.url` where the plane names one
+and GitHub's release otherwise, and `plane.console`, the console's address or null:
+
+```json
+"downloads": {"version": "0.39.0-beta", "page": "https://github.com/it-minds/troupe/releases/tag/v0.39.0-beta",
+  "windows": ".../v0.39.0-beta/Troupe_0.39.0_x64-setup.exe", "macos": ".../Troupe_0.39.0_universal.dmg",
+  "linux": ".../Troupe_0.39.0_amd64.AppImage"}
+```
+
+With no recommended version the three are null and `page` is the latest release's. It says
+which version is offered and nothing of which are refused, and nothing installs from it: the
+desktop app's own update still reads the signed `me.client_versions`.
+
 ### The plane's signing key
 
 A plane signs what it tells people's machines with an Ed25519 key of its own (#657), held
