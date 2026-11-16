@@ -35,6 +35,13 @@ defmodule Troupe.Plane.SCIM do
   @group_schema "urn:ietf:params:scim:schemas:core:2.0:Group"
   @list_schema "urn:ietf:params:scim:api:messages:2.0:ListResponse"
   @error_schema "urn:ietf:params:scim:api:messages:2.0:Error"
+  @config_schema "urn:ietf:params:scim:schemas:core:2.0:ServiceProviderConfig"
+  @resource_type_schema "urn:ietf:params:scim:schemas:core:2.0:ResourceType"
+
+  # The most resources a filtered list answers. A filter here matches on a subject or a
+  # group's name, so an answer is one resource or none in practice; the bound is what the
+  # service tells a provider it holds to.
+  @max_results 200
 
   # What a filter may ask about: what a provider matches on before it creates somebody.
   @user_filters %{"userName" => :user_name, "externalId" => :external_id}
@@ -722,6 +729,75 @@ defmodule Troupe.Plane.SCIM do
       do: group |> render_group() |> Map.delete("members"),
       else: render_group(group, Identity.members_of(group))
   end
+
+  @doc """
+  What this service does, as RFC 7643 §5 has a provider ask before it syncs: `PATCH`
+  supported, bulk not, a filter supported and answered with at most `max_results/0`
+  resources, `changePassword`, sorting and ETags not, and the connector's bearer token as
+  the one way in. Fixed: nothing here depends on the request or the plane's state.
+  """
+  @spec service_provider_config() :: map()
+  def service_provider_config do
+    %{
+      "schemas" => [@config_schema],
+      "documentationUri" => "https://datatracker.ietf.org/doc/html/rfc7644",
+      "patch" => %{"supported" => true},
+      "bulk" => %{"supported" => false, "maxOperations" => 0, "maxPayloadSize" => 0},
+      "filter" => %{"supported" => true, "maxResults" => @max_results},
+      "changePassword" => %{"supported" => false},
+      "sort" => %{"supported" => false},
+      "etag" => %{"supported" => false},
+      "authenticationSchemes" => [
+        %{
+          "type" => "oauthbearertoken",
+          "name" => "Bearer token",
+          "description" =>
+            "The SCIM connector's token, rotated from the console, or the token the plane was deployed with, sent as Authorization: Bearer.",
+          "primary" => true
+        }
+      ],
+      "meta" => %{
+        "resourceType" => "ServiceProviderConfig",
+        "location" => "/scim/v2/ServiceProviderConfig"
+      }
+    }
+  end
+
+  @doc """
+  The resource types this service keeps (RFC 7643 §6): users and groups, each at its
+  endpoint under its core schema, with no extension.
+  """
+  @spec resource_types() :: map()
+  def resource_types do
+    render_list([
+      resource_type("User", "/Users", @user_schema, "A person, keyed on externalId or userName."),
+      resource_type("Group", "/Groups", @group_schema, "A group of people, which a team is linked to.")
+    ])
+  end
+
+  defp resource_type(name, endpoint, schema, description) do
+    %{
+      "schemas" => [@resource_type_schema],
+      "id" => name,
+      "name" => name,
+      "endpoint" => endpoint,
+      "description" => description,
+      "schema" => schema,
+      "schemaExtensions" => [],
+      "meta" => %{"resourceType" => "ResourceType", "location" => "/scim/v2/ResourceTypes/#{name}"}
+    }
+  end
+
+  @doc "The most resources a filtered list answers, as `ServiceProviderConfig` says."
+  @spec max_results() :: pos_integer()
+  def max_results, do: @max_results
+
+  @doc """
+  A filtered list's answer: the first `max_results/0` matches, with `totalResults` the
+  count of all of them, so a provider can tell a page from the whole.
+  """
+  @spec render_page([map()]) :: map()
+  def render_page(resources), do: render_list(Enum.take(resources, @max_results), length(resources))
 
   @doc "A SCIM list response."
   @spec render_list([map()], non_neg_integer()) :: map()

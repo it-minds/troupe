@@ -36,7 +36,29 @@ describe("the audit", () => {
     await sees("Dan", update);
     expect(says("dan@example.com", update)).toBe(false);
     expect(update.querySelector("td[title='dan@example.com']")?.textContent).toBe("Dan");
-    await sees("idle_timeout_seconds 1800 → 1200", update);
+    // A team's limit as its Limits tab says it: by its label, in its unit, never raw seconds.
+    await sees("Idle before it falls asleep 30 min → 20 min", update);
+    expect(says("1800", update)).toBe(false);
+  });
+
+  // #957: a setting's row in the unit the setting is read in, from the plane's settings table.
+  it("says a setting's change by its label and in its unit, the key in the row's subject", async () => {
+    fake.admin.audit.push({
+      actor: "alice@example.com",
+      action: "setting.put",
+      subject_kind: "setting",
+      subject_id: "default_idle_timeout_seconds",
+      detail: { default_idle_timeout_seconds: { from: 1800, to: 900 } },
+      occurred_at: "2026-10-12T08:00:00Z",
+    });
+    await signedInAs(fake, PEOPLE.alice);
+    unmount = render(<App />).unmount;
+    const row = await waitFor(() => rows().find((r) => says("default_idle_timeout_seconds", r) && says("15 min", r)), "the setting's row in minutes");
+    await sees("Idle before a session goes to sleep 30 min → 15 min", row);
+    expect(says("1800", row)).toBe(false);
+    // The search reads the words shown as well as the plane's values.
+    type(document.querySelector<HTMLInputElement>('[aria-label="Search the audit"]')!, "15 min");
+    await waitFor(() => rows().length === 1, "the search by the unit's words");
   });
 
   it("shows an actor the plane has no name for by subject", async () => {

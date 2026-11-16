@@ -21,7 +21,7 @@ import type { JSX } from "react";
 import { andList, clientStanding, releaseVersion, versionOlder } from "@troupe/client";
 import type { ClientCounts, ClientFleet, ClientPolicy, ClientPolicyChange, ClientPolicyPut, ClientSeen } from "@troupe/client";
 import { describeError, show, useConsole, useLoad } from "../console";
-import { AuditNote, Diff, Empty, Field, Loaded, Preview, Region, Status, changed, count, when } from "./bits";
+import { AuditNote, Diff, Empty, Field, Loaded, Loading, Preview, Region, Status, changed, count, when } from "./bits";
 import type { DiffLine } from "./bits";
 
 /** What each component is to a person, for the ones this console knows the name of. */
@@ -64,7 +64,15 @@ export function ClientVersions(): JSX.Element {
                   {role === "platform_admin" ? "Set a minimum to turn away clients older than a release." : "A platform admin sets one."}
                 </Empty>
               )}
-              {role === "platform_admin" && plane.version && <RecommendPlane version={plane.version} policies={policies} fleet={data.fleet} onApplied={applied} />}
+              {role === "platform_admin" &&
+                (plane.version ? (
+                  <RecommendPlane version={plane.version} dryRun={plane.dryRun.includes("admin.clients.put")} policies={policies} fleet={data.fleet} onApplied={applied} />
+                ) : (
+                  <p className="note recommend">
+                    This plane does not say which version it runs, so it is too old to recommend its own version from here. Set each kind of client's recommended
+                    version below.
+                  </p>
+                ))}
               {policies.map((p) => (
                 <Component key={p.component} policy={p} fleet={data.fleet?.[p.component]} editable={role === "platform_admin"} onApplied={(answer) => applied([answer])} />
               ))}
@@ -117,22 +125,28 @@ function countsLine(counts: ClientCounts, version: string): string {
  * The puts go one at a time, in the page's order; one the plane refuses stops the rest and
  * says which, and the ones before it stand. A component whose policy the plane would refuse
  * it for (the version blocked, or a minimum newer than it) is left as it is, and the
- * preview says so before anything is sent. The counts are worked out here from the clients
- * last seen, as the plane judges them, since a put has no dry run.
+ * preview says so before anything is sent. The counts are the plane's own, from a dry run
+ * of each put, where the plane's discovery says `admin.clients.put` takes one; a plane from
+ * before would make the write, so there the counts are worked out here from the clients
+ * last seen, as the plane judges them.
  */
 function RecommendPlane({
   version: reported,
+  dryRun,
   policies,
   fleet,
   onApplied,
 }: {
   version: string;
+  dryRun: boolean;
   policies: ClientPolicy[];
   fleet: Record<string, ClientFleet> | undefined;
   onApplied: (answers: ClientPolicyPut[]) => void;
 }): JSX.Element {
   const { admin, notify } = useConsole();
   const [previewing, setPreviewing] = useState(false);
+  // The plane's answer to each dry run, by component: what the put would leave, or why it would be refused.
+  const [dry, setDry] = useState<Record<string, ClientPolicyPut | { refused: string }> | null>(null);
   const version = releaseVersion(reported);
   if (!version) {
     return (
@@ -154,35 +168,59 @@ function RecommendPlane({
       </p>
     );
   }
-  const lines: DiffLine[] = todo.map((p) => ({ field: `${p.component}.recommended`, from: p.recommended, to: version }));
+  // A component the plane's dry run refused is left as it is, as one the console knows it refuses is.
+  const planeRefused = (c: string): string | null => {
+    const answer = dry?.[c];
+    return answer && "refused" in answer ? answer.refused : null;
+  };
+  const sent = todo.filter((p) => !planeRefused(p.component));
+  const lines: DiffLine[] = sent.map((p) => ({ field: `${p.component}.recommended`, from: p.recommended, to: version }));
   const effects = [
-    ...todo.map((p) => {
+    ...sent.map((p) => {
       const { name, program, updates } = known(p.component);
       return `${name}: ${updates ? `troupe update installs ${version} for people signed in here, and ${anOlder(program)}` : anOlder(program)} is told ${version} is out.`;
     }),
     ...(refused.length > 0 ? [`Left as it is, since the plane refuses it while ${andList(refused)}.`] : []),
+    ...todo.filter((p) => planeRefused(p.component)).map((p) => `${known(p.component).name} is left as it is: the plane would refuse it. ${planeRefused(p.component)}`),
     "A client already connected is held to it when it next connects. The plane installs and removes nothing.",
   ];
+  const open = async () => {
+    setDry(null);
+    setPreviewing(true);
+    if (!dryRun) return;
+    const answers: Record<string, ClientPolicyPut | { refused: string }> = {};
+    for (const p of todo) {
+      try {
+        answers[p.component] = await admin.previewClients(p.component, { recommended: version });
+      } catch (e) {
+        answers[p.component] = { refused: describeError(e) };
+      }
+    }
+    setDry(answers);
+  };
 
   return (
     <section className="recommend" aria-label="Recommend this plane's version">
       {!previewing && (
-        <button type="button" onClick={() => setPreviewing(true)}>
+        <button type="button" onClick={() => void open()}>
           Recommend this plane's version
         </button>
       )}
-      {previewing && (
+      {previewing && dryRun && dry === null && <Loading what="what the plane would do" />}
+      {previewing && (!dryRun || dry !== null) && (
         <Preview
           title="clients"
           lines={lines}
           body={
             <>
-              {todo.map((p) => {
+              {sent.map((p) => {
                 const f = fleet?.[p.component];
+                const answer = dry?.[p.component];
+                const counts = answer && "affected" in answer && answer.affected ? answer.affected : f ? countsWith(p, version, f) : null;
                 return (
                   <div key={p.component} className="recommend-row">
                     <Diff title={`clients/${p.component}`} lines={[{ field: "recommended", from: p.recommended, to: version }]} />
-                    {f && <p className="fleet">{countsLine(countsWith(p, version, f), version)}</p>}
+                    {counts && <p className="fleet">{countsLine(counts, version)}</p>}
                   </div>
                 );
               })}
@@ -193,7 +231,7 @@ function RecommendPlane({
           onCancel={() => setPreviewing(false)}
           onConfirm={async () => {
             const answers: ClientPolicyPut[] = [];
-            for (const p of todo) {
+            for (const p of sent) {
               try {
                 answers.push(await admin.putClients(p.component, { recommended: version }));
               } catch (e) {

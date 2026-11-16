@@ -70,6 +70,33 @@ defmodule Troupe.RemoteHQTest do
     {sid, ws}
   end
 
+  describe "a pod the operator removed" do
+    # `profiles.list` lists it `gone` until the plane forgets it; it is not one of the
+    # profile's pods, so a profile whose every other pod is healthy reads ok.
+    test "leaves the profile's health as its running pods say it" do
+      gone = %{
+        "name" => "code",
+        "description" => "writes code",
+        "health" => "ok",
+        "gone" => 1,
+        "capacity" => %{"free" => 3, "total" => 4}
+      }
+
+      {remote, url} =
+        start_remote!(sessions: [], profiles: [gone], teams: [%{"id" => "core", "name" => "Core"}])
+
+      login!(remote, url)
+      {sid, _ws} = local_session!()
+
+      {pid, screen} = start_tui(sid, page: :hq, plane: url)
+      text = screen_text(pid, screen)
+
+      assert text =~ "code"
+      assert text =~ "ok"
+      refute text =~ "degraded"
+    end
+  end
+
   describe "troupe --remote" do
     test "lists exactly what FakeRemote returns, with local sessions alongside and labelled" do
       {remote, url} =

@@ -50,8 +50,8 @@
 
 import { useState } from "react";
 import type { JSX } from "react";
-import { RULE_ACTIONS } from "@troupe/client";
-import type { AdminProfile, AdminTeam, EffectiveBundle, EffectiveProfile, ProfileBelow, ProfileDetail, ProfileWrite, ProviderTypeChoice, RuleAction } from "@troupe/client";
+import { RULE_ACTIONS, ceilingAboveWords } from "@troupe/client";
+import type { AdminProfile, AdminTeam, EffectiveBundle, EffectiveProfile, ProfileBelow, ProfileDetail, ProfilePreview, ProfileWrite, ProviderTypeChoice, RuleAction } from "@troupe/client";
 import { href } from "../route";
 import { describeError, recorded, show, useConsole, useLoad } from "../console";
 import { AuditNote, Empty, Field, Fields, GitopsProblem, Loaded, Locked, Preview, Region, Status, count, linesOf, modeOf, money, useChange } from "./bits";
@@ -1153,7 +1153,12 @@ export function ProfileEditor({
             const theirLines = below.flatMap((b) => linesOf(b.changes).map((l) => ({ ...l, field: `${b.name}: ${l.field}` })));
             setPreview({
               lines: [...lines, ...theirLines],
-              effects: [...effectsOf(answer.policy, answer.mode, draft, detail, lines), ...ruleEffects(draft.name, parent, had, rulesOfDraft(rules)), ...belowEffects(draft.name, below)],
+              effects: [
+                ...effectsOf(answer.policy, answer.mode, draft, detail, lines),
+                ...capacityEffects(draft.name, answer.capacity),
+                ...ruleEffects(draft.name, parent, had, rulesOfDraft(rules)),
+                ...belowEffects(draft.name, below),
+              ],
             });
           },
           (e: unknown) => {
@@ -1525,6 +1530,16 @@ function ruleEffects(name: string, parent: string, had: RuleLists, now: RuleList
       .filter((r) => !now[a].includes(r))
       .map((r) => `${r} is no longer one of ${name}'s own ${a} rules${parent ? `, though ${parent}'s still hold` : ""}.`),
   ]);
+}
+
+/**
+ * A ceiling above what the profile's pods could run at once, in a sentence with both
+ * numbers: saved either way, as a limit and not a promise. Nothing where the plane knows
+ * no most for its pods, or answers no capacity at all.
+ */
+function capacityEffects(name: string, capacity: ProfilePreview["capacity"]): string[] {
+  const line = capacity ? ceilingAboveWords(name, capacity.max_sessions, capacity.at_once) : null;
+  return line ? [line] : [];
 }
 
 /** What a write does to each profile that extends the one written, in words. */

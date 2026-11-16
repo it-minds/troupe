@@ -56,7 +56,7 @@ defmodule Troupe.Plane.Admin do
   }
 
   alias Troupe.Plane.Control.TLS
-  alias Troupe.Plane.Fleet.{Bundle, Extends, Provisioner, SizeClass, Worker}
+  alias Troupe.Plane.Fleet.{Bundle, Extends, Provisioner, Scaler, SizeClass, Worker}
   alias Troupe.Plane.GitHub.Issue, as: GitHubIssue
   alias Troupe.Plane.GitHub.Issues, as: GitHubIssues
   alias Troupe.Plane.GitHub.Policy, as: GitHubPolicy
@@ -1550,19 +1550,31 @@ defmodule Troupe.Plane.Admin do
            asked: refusal.asked,
            ceiling: refusal.ceiling,
            decided_by: refusal.rung,
-           # The ceiling again, with its unit, and the sentence a person reads: the console's
-           # preview words the same sentence from the same ceiling, so the warning before
-           # Apply and the refusal after it say one thing.
-           limit: refusal.ceiling,
-           unit: limit_unit(refusal.field),
+           # The ceiling again in the unit the platform's setting is read in (its row in the
+           # settings table: an idle timeout in minutes, a retention in days), with that unit
+           # beside it, and the sentence a person reads: the console's preview words the same
+           # sentence from the same ceiling, so the warning before Apply and the refusal after
+           # it say one thing. `ceiling` stays the team field's own value, in seconds or days.
+           limit: in_setting_unit(refusal.key, refusal.ceiling),
+           unit: limit_unit(refusal.key),
            reason: limit_refusal(refusal.field, refusal.asked, refusal.ceiling)
          })}
     end
   end
 
-  defp limit_unit(:idle_timeout_seconds), do: "seconds"
-  defp limit_unit(field) when field in [:cache_eviction_days, :erase_after_days], do: "days"
-  defp limit_unit(_switch), do: "switch"
+  defp limit_unit(key), do: key |> Settings.naming() |> Map.get(:unit) |> to_string()
+
+  # A ceiling kept in seconds, said in minutes where the setting is read in minutes: whole
+  # where it divides, else to the second as a fraction of a minute.
+  defp in_setting_unit(key, ceiling) when is_integer(ceiling) do
+    case Settings.naming(key).unit do
+      :minutes when rem(ceiling, 60) == 0 -> div(ceiling, 60)
+      :minutes -> Float.round(ceiling / 60, 6)
+      _unit -> ceiling
+    end
+  end
+
+  defp in_setting_unit(_key, ceiling), do: ceiling
 
   # In the console's words for a limit: a length of time as hours, minutes and seconds
   # leaving out what is nought, days counted, a permission by what it lets members do.
@@ -2185,6 +2197,7 @@ defmodule Troupe.Plane.Admin do
         state: session.state
       }
     end
+    |> Names.decorate(owner: :owner_name)
   end
 
   @doc """
@@ -2226,7 +2239,8 @@ defmodule Troupe.Plane.Admin do
          # What the typed confirmation has to match, in the answer rather than assumed by
          # the surface: the MCP tool and the dialog are one rule in two renderings.
          confirm: session.id
-       }}
+       }
+       |> Names.decorate(owner: :owner_name)}
     end
   end
 
@@ -2313,10 +2327,30 @@ defmodule Troupe.Plane.Admin do
          policy: Provision.verdict(attrs),
          changes: Audit.diff(comparable(current), as_written(current, attrs)),
          mode: Provision.mode(),
-         extended_by: if(is_binary(name), do: effects_below(name, attrs), else: [])
+         extended_by: if(is_binary(name), do: effects_below(name, attrs), else: []),
+         capacity: capacity_preview(name, current, attrs)
        }}
     end
   end
+
+  # The ceiling the write leaves against the most its pods could run at once: saved
+  # either way, since it is a limit and not a promise, and said so where it is higher.
+  defp capacity_preview(name, current, attrs) do
+    pick = fn key -> Map.get(attrs, key) || (current && Map.get(current, String.to_existing_atom(key))) end
+    max = Map.get(attrs, "max_sessions", current && current.max_sessions)
+
+    at_once =
+      Scaler.at_once(%{name: name, provisioner: pick.("provisioner"), size_class: pick.("size_class")})
+
+    %{
+      max_sessions: max,
+      at_once: at_once_json(at_once),
+      above: is_integer(max) and is_integer(at_once.sessions) and max > at_once.sessions
+    }
+  end
+
+  defp at_once_json(%{sessions: sessions, by: by}),
+    do: %{sessions: sessions, by: by && to_string(by)}
 
   # The write as `profile_put/2` would read it, resolved where it names a parent or stops
   # naming one; a parent the put would refuse is refused here too, with the same sentence.
@@ -2598,22 +2632,42 @@ defmodule Troupe.Plane.Admin do
   than the recommended version, or a recommended version that is blocked. Audited with the
   diff, and with how many of the component's clients last seen the policy now finds
   current, behind and refused (`affected`). A client is held to it at its next `initialize`.
+
+  `dry_run: true` makes every check and answers the same, the policy as the put would
+  leave it with its `changes` and `affected`, and writes and audits nothing, so a preview
+  says what the plane would do rather than what a console works out (`dry_run: true` is in
+  the answer).
   """
-  @spec clients_put(actor(), String.t(), map()) :: result()
-  def clients_put(actor, component, policy) do
+  @spec clients_put(actor(), String.t(), map(), boolean() | nil) :: result()
+  def clients_put(actor, component, policy, dry_run \\ false) do
+    dry_run = dry_run == true
+
     with :ok <- require_platform_admin(actor) do
-      case ClientVersions.put(component, policy || %{}, actor.subject) do
+      case ClientVersions.put(component, policy || %{}, actor.subject, dry_run: dry_run) do
         {:ok, %{before: before, now: now}} ->
           changes = Audit.diff(policy_fields(before), policy_fields(now))
           affected = ClientsSeen.affected(component, policy_fields(now))
           detail = Map.put(changes, "affected", affected)
-          {:ok, _} = Audit.record(actor.subject, "clients.put", component, detail)
-          {:ok, now |> Map.put(:changes, changes) |> Map.put(:affected, affected)}
+          :ok = audit_put(dry_run, actor, component, detail)
+
+          {:ok,
+           now
+           |> Map.put(:changes, changes)
+           |> Map.put(:affected, affected)
+           |> Map.put(:dry_run, dry_run)}
 
         {:error, why} ->
           {:error, Error.new(:invalid_params, why)}
       end
     end
+  end
+
+  # A dry run is audited nowhere: nothing was changed.
+  defp audit_put(true, _actor, _component, _detail), do: :ok
+
+  defp audit_put(false, actor, component, detail) do
+    {:ok, _} = Audit.record(actor.subject, "clients.put", component, detail)
+    :ok
   end
 
   @doc "The keys a component's policy takes, as `admin.clients.put` declares them."
@@ -2851,9 +2905,9 @@ defmodule Troupe.Plane.Admin do
     readers = Memory.readers(owner)
 
     sessions =
-      Enum.map(readers.sessions, fn row ->
-        Map.update!(row, :turn_at, &(&1 && DateTime.to_iso8601(&1)))
-      end)
+      readers.sessions
+      |> Enum.map(fn row -> Map.update!(row, :turn_at, &(&1 && DateTime.to_iso8601(&1))) end)
+      |> Names.decorate(owner: :owner_name)
 
     %{readers | sessions: sessions}
   end
@@ -5183,6 +5237,9 @@ defmodule Troupe.Plane.Admin do
       replicas: profile.replicas,
       sessions_per_pod: profile.sessions_per_pod,
       capacity_sessions: profile.replicas * profile.sessions_per_pod,
+      # The most its pods could ever run at once, and what bounds it (`hosts`, `policy`),
+      # or `nil` where nothing does: what a `max_sessions` above it cannot reach.
+      at_once: at_once_json(Scaler.at_once(profile)),
       # The channel the profile names, or has from the profile it extends; and the one its
       # pods load, which for a profile on a channel of its own below a parent on another is
       # the bundle the plane composes from both.

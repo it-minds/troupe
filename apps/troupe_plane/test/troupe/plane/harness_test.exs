@@ -427,6 +427,38 @@ defmodule Troupe.Plane.HarnessTest do
       assert results |> Enum.map(fn {:ok, r} -> r["state"] end) |> Enum.uniq() == ["active"]
     end
 
+    # The chunk 46 audit's open question: a ceiling above what the pods run. The refusal
+    # says both numbers, so a person can tell "full for now" from "set past what runs".
+    test "waking a session with every pod full says what the pods run and what the profile allows" do
+      team = team_with_grant("engineering", "dev", name: "engineering")
+      user = person("ada@example.test", ["engineering"])
+      {:ok, _} = Fleet.put_profile(%{name: "dev", max_sessions: 12})
+      {:ok, worker} = enrol_worker("dev", "troupe-w-dev-0", capacity: 1)
+
+      {:ok, _running} =
+        Sessions.create(%{
+          id: "s-holding-#{System.unique_integer([:positive])}",
+          owner_id: user.id,
+          owner_subject: user.subject,
+          team_id: team.id,
+          profile: "dev",
+          visibility: "private",
+          state: "active",
+          epoch: 1,
+          worker_id: worker.id
+        })
+
+      session = session!("s-full", user, team, state: "dormant")
+
+      assert {:error, error} =
+               Harness.call("session.open", %{"session_id" => session.id, "mode" => "activate"}, context(user))
+
+      assert error.message == "capacity"
+      assert error.data.capacity == 1
+      assert error.data.max_sessions == 12
+      assert error.data.reason == "every pod is full: its pods run 1 session(s) at once, and dev allows 12 at once"
+    end
+
     test "a pod that cannot put the tree back parks the session read-only, and the next open says so",
          context do
       team = team_with_grant("engineering", "dev", name: "engineering")

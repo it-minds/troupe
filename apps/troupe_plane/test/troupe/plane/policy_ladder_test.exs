@@ -129,13 +129,26 @@ defmodule Troupe.Plane.PolicyLadderTest do
       assert {:error, error} =
                Admin.team_update(context.root, "engineering", %{"idle_timeout_seconds" => 7200})
 
-      assert error.data.limit == 1800
-      assert error.data.unit == "seconds"
+      # In the unit the platform's setting is read in, minutes, as the settings table names
+      # it; the ceiling beside it stays the field's seconds.
+      assert error.data.limit == 30
+      assert error.data.unit == "minutes"
+      assert error.data.ceiling == 1800
 
       assert error.data.reason ==
                "The platform allows at most 30 min idle; 2 h is more than that."
 
       refute error.data.reason =~ "idle_timeout_seconds"
+    end
+
+    test "says a ceiling that is not whole minutes as a fraction of one", context do
+      {:ok, _} = Settings.put("default_idle_timeout_seconds", "90", context.root.subject)
+
+      assert {:error, error} =
+               Admin.team_update(context.root, "engineering", %{"idle_timeout_seconds" => 600})
+
+      assert error.data.limit == 1.5
+      assert error.data.unit == "minutes"
     end
 
     test "may still narrow, which is the whole point of having its own rung", context do

@@ -13,7 +13,7 @@ defmodule Troupe.Plane.MemoryReadTest do
 
   use Troupe.Plane.DataCase, async: false
 
-  alias Troupe.Plane.{Admin, Audit, Erasure, FakePod, Fleet, Harness, Memory, Sessions}
+  alias Troupe.Plane.{Admin, Audit, Erasure, FakePod, Fleet, Harness, Identity, Memory, Sessions}
   alias Troupe.Plane.Control.{Connections, Listener}
 
   @moduletag timeout: 60_000
@@ -106,8 +106,17 @@ defmodule Troupe.Plane.MemoryReadTest do
 
       {:ok, doc} = Admin.memory_get(context.root, "organisation", nil, nil, nil)
 
-      assert [%{session_id: ^id, where: "pod", version: 1, behind: false, activated: true, turn_at: nil}] =
+      assert [%{session_id: ^id, where: "pod", version: 1, behind: false, activated: true, turn_at: nil} = row] =
                doc.readers.sessions
+
+      # Its owner by subject and, from the identity record, by name; nothing where the
+      # record's name is only the subject again.
+      assert row.owner == "ada@example.test"
+      refute Map.has_key?(row, :owner_name)
+      {:ok, _} =
+        Identity.upsert_user(%{subject: "ada@example.test", display_name: "Ada Lovelace"})
+      {:ok, doc} = Admin.memory_get(context.root, "organisation", nil, nil, nil)
+      assert [%{owner_name: "Ada Lovelace"}] = doc.readers.sessions
 
       # Its erasure takes what it read with it, rather than leaving it a week for the prune.
       assert Memory.read_of(id)
