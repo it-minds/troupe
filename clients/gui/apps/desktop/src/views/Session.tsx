@@ -34,6 +34,7 @@ import {
   scratchSize,
   scratchVersion,
   settleLoop,
+  stoppedSentence,
   unseenSummary,
 } from "@troupe/client";
 import type {
@@ -168,6 +169,10 @@ export function Session({
   // A relayed session shared to observe is read here as a viewer's is.
   const readOnly = row?.state === "read_only" || row?.yourRole === "viewer" || row?.yourRole === "observe";
   const dormant = row?.state === "dormant";
+  // A root that ended so the harness drops what is sent to it (a spent budget, a refusal):
+  // the composer gives way to the sentence that says so. One that finished keeps it, since
+  // a message resumes it.
+  const stopped = stoppedSentence(view.state);
   const open = openApprovals(view.state);
   // The clock, while a prompt or a request has drawn nothing: the composer's hint says so.
   const waitNow = useNow(waitingOn(view.state, Date.now()) !== null);
@@ -358,7 +363,7 @@ export function Session({
             onSetup={onGo ? () => onGo("setup") : undefined}
             onScratch={showScratch}
             onSave={saveReady}
-            onRetry={readOnly ? undefined : retry}
+            onRetry={readOnly ? undefined : (stopped ?? retry)}
             onPublish={publishReply}
           />
 
@@ -391,6 +396,8 @@ export function Session({
 
           {readOnly ? (
             <ReadOnly />
+          ) : stopped ? (
+            <Stopped sentence={stopped} />
           ) : (
             <Composer
               view={view}
@@ -707,7 +714,15 @@ function Header({
       <div className="controls">
         {here.length > 0 && <Here members={here} self={self} />}
         {state.doneReason ? (
-          <Pill status={state.doneReason === "budget_exhausted" ? "error" : "allowed"}>Finished</Pill>
+          // A root the harness wakes no more has stopped, and says why; one that finished
+          // is resumed by the next message.
+          stoppedSentence(state) ? (
+            <Pill status="error" title={stoppedSentence(state)}>
+              Stopped
+            </Pill>
+          ) : (
+            <Pill status="allowed">Finished</Pill>
+          )
         ) : state.failed ? (
           // The root kept crashing and the session stopped on it: a failure, with what it
           // raised, and not a rest.
@@ -981,8 +996,8 @@ function Stream({
   onScratch: (name: string) => void;
   /** Save a file the agent made, by its path in the session's workspace: what was said of it. */
   onSave: (path: string) => Promise<string>;
-  /** Send the person's words again as a new turn; absent where they may only read. */
-  onRetry?: ((text: string) => Promise<void>) | undefined;
+  /** Send the person's words again as a new turn; absent where they may only read, or why not where the session takes no more. */
+  onRetry?: ((text: string) => Promise<void>) | string | undefined;
   /** Open the publish dialog with a reply as its file; absent with no daemon to publish through. */
   onPublish?: ((text: string) => void) | undefined;
 }): JSX.Element {
@@ -1209,7 +1224,7 @@ type EntryProps = {
   onSave: (path: string) => Promise<string>;
   /** For the line that says what a turn cost: what its foot acts on. */
   reply?: TurnReply | undefined;
-  onRetry?: ((text: string) => Promise<void>) | undefined;
+  onRetry?: ((text: string) => Promise<void>) | string | undefined;
   onPublish?: ((text: string) => void) | undefined;
 };
 
@@ -1369,7 +1384,7 @@ const StreamEntry = memo(function StreamEntry({
       return (
         <>
           <p
-            className={`note ${entry.type === "llm_error" || entry.type === "budget_exhausted" || entry.type === "agent_failed" ? "error" : ""} ${entry.type === "profile_switched" ? "switched" : ""}`}
+            className={`note ${ERROR_NOTES.has(entry.type) ? "error" : ""} ${entry.type === "profile_switched" ? "switched" : ""}`}
           >
             {/* The start's suggestion is the harness's sentence, written for a terminal in
                 Markdown: in this app's words where it has them, else rendered, never raw. */}
@@ -1723,7 +1738,7 @@ function ReplyFoot({
   cost,
 }: {
   reply: TurnReply | undefined;
-  onRetry?: ((text: string) => Promise<void>) | undefined;
+  onRetry?: ((text: string) => Promise<void>) | string | undefined;
   onPublish?: ((text: string) => void) | undefined;
   cost: JSX.Element;
 }): JSX.Element {
@@ -1744,15 +1759,17 @@ function ReplyFoot({
       <button
         type="button"
         className="fbtn"
-        disabled={!onRetry || prompt === null}
+        disabled={typeof onRetry !== "function" || prompt === null}
         title={
-          !onRetry
+          typeof onRetry === "string"
+            ? onRetry
+            : !onRetry
             ? "You can read this session but not add to it"
             : prompt === null
               ? "Not yet: the transcript does not say which message of yours began this turn"
               : "Send your message again, as a new turn"
         }
-        onClick={() => prompt !== null && onRetry && act(() => onRetry(prompt), "sent again")}
+        onClick={() => prompt !== null && typeof onRetry === "function" && act(() => onRetry(prompt), "sent again")}
       >
         Retry
       </button>
@@ -2318,6 +2335,21 @@ function ReadOnly(): JSX.Element {
     <div className="instead">
       <p>You can read this session but not add to it.</p>
       <p className="muted">Ask its owner to give you access if you need to take part.</p>
+    </div>
+  );
+}
+
+/** The notes that say something went wrong: a failed model call, a stop, a message dropped. */
+const ERROR_NOTES = new Set(["llm_error", "budget_exhausted", "agent_failed", "input_after_done"]);
+
+/**
+ * A session whose agent takes no more input, in the composer's place: why, and what to do.
+ * No disabled box, which would invite typing a message that is dropped.
+ */
+function Stopped({ sentence }: { sentence: string }): JSX.Element {
+  return (
+    <div className="instead stopped" role="status">
+      <p>{sentence}</p>
     </div>
   );
 }
