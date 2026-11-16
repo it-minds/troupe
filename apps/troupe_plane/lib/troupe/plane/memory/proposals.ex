@@ -10,8 +10,8 @@ defmodule Troupe.Plane.Memory.Proposals do
   pod's at once, a machine's at its daemon's next poll of `me.memory`, which carries the
   person's own proposals.
 
-  The setting `memory_proposals` switches them off; a proposal then is refused in words and
-  nothing is kept. Each person has at most twenty pending at once, so an agent in a loop does
+  The setting `memory_proposals` switches them off, and a profile's `memoryProposals: false`
+  for its pods' sessions; a proposal then is refused in words and nothing is kept. Each person has at most twenty pending at once, so an agent in a loop does
   not fill an administrator's queue. A proposal, an acceptance and a refusal are each an
   audit row (`memory.propose`, `memory.proposal.accept`, `memory.proposal.decline`) on the
   level's subject, never with the entry's text, as a save's row holds none.
@@ -28,31 +28,58 @@ defmodule Troupe.Plane.Memory.Proposals do
   @shown_days 7
   @reason_bytes 1_024
 
-  @off "proposals to a team's or the organisation's memory are switched off on this plane " <>
-         "(the setting memory_proposals); nothing was proposed. Remember it for this " <>
-         "repository instead, or in the person's own memory (level me)"
+  @instead "nothing was proposed. Remember it for this repository instead, or in the " <>
+             "person's own memory (level me)"
 
   @doc "Whether proposals are taken on this plane (the setting `memory_proposals`)."
   @spec enabled?() :: boolean()
   def enabled?, do: Settings.get("memory_proposals") != false
 
-  @doc "The sentence a proposal is refused with while they are switched off."
-  @spec off_reason() :: String.t()
-  def off_reason, do: @off
+  @doc """
+  The sentence a proposal is refused with while they are switched off: on the plane by the
+  setting, or with a profile's name, for that profile's sessions by its `memoryProposals`.
+  The two say the same thing and offer the same instead, naming what switched them off.
+  """
+  @spec off_reason(String.t() | nil) :: String.t()
+  def off_reason(profile \\ nil)
+
+  def off_reason(nil),
+    do:
+      "proposals to a team's or the organisation's memory are switched off on this plane " <>
+        "(the setting memory_proposals); " <> @instead
+
+  def off_reason(profile),
+    do:
+      "proposals to a team's or the organisation's memory are switched off for the sessions " <>
+        "of the profile #{profile} (its memoryProposals is false); " <> @instead
+
+  # Whether a pod's session on `profile` may propose: no where its profile in effect says
+  # `memoryProposals: false`, its own or a profile's it extends, which a child cannot undo.
+  defp profile_allows(nil), do: :ok
+
+  defp profile_allows(name) do
+    case Fleet.get_profile(name) do
+      %{spec: %{"memoryProposals" => false}} -> {:error, {:off, name}}
+      _on_or_gone -> :ok
+    end
+  end
 
   @doc """
   Keep one entry proposed for `scope` (`team`, with `team`, or `organisation`) by an agent
   of `user`'s: `opts` names the `:topic` (`Notes` for none), the `:session`, the `:agent` and
-  `:where` the session runs (`pod` or `machine`). Refused, and nothing kept, while proposals
-  are switched off (`{:error, :off}`), for an entry or topic that could not be one, and for a
-  person with #{@pending_per_person} pending already.
+  `:where` the session runs (`pod` or `machine`), and for a pod's session the `:profile` it
+  runs on. Refused, and nothing kept, while proposals are switched off on the plane
+  (`{:error, :off}`) or for the profile's sessions (`{:error, {:off, profile}}`), for an entry
+  or topic that could not be one, and for a person with #{@pending_per_person} pending already.
   """
   @spec propose(User.t(), String.t(), Team.t() | nil, term(), keyword()) ::
-          {:ok, Proposal.t()} | {:error, :off | :no_person | String.t()}
+          {:ok, Proposal.t()}
+          | {:error, :off | {:off, String.t()} | :no_person | String.t()}
   def propose(user, scope, team, entry, opts \\ [])
 
   def propose(%User{id: id} = user, scope, team, entry, opts) when is_binary(id) do
     with :ok <- if(enabled?(), do: :ok, else: {:error, :off}),
+         :ok <- profile_allows(opts[:profile]),
          :ok <- level(scope, team),
          {:ok, entry} <- Memory.entry_text(entry),
          {:ok, topic} <- Memory.topic_text(opts[:topic]),

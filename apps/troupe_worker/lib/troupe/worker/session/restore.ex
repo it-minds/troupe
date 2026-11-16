@@ -426,8 +426,12 @@ defmodule Troupe.Worker.Session.Restore do
     }
   end
 
-  # The limits the terms set ride along by the budget's names, so a session whose terms
-  # do let it ask cannot raise itself past them (Decision 699).
+  # Whether a spent budget asks is read off the limits the terms set, not off whether
+  # anything came with them: the platform's switches ride in with every placement, and
+  # `approvals` is not a limit. Terms that set a turn or wall-clock limit are a contract,
+  # and the session stops at it; terms that set neither leave the session asking the
+  # person attached, as a laptop session does. The limits ride along by the budget's
+  # names either way, as ceilings an answer to the budget question cannot raise past.
   defp contract([]), do: []
 
   defp contract(terms) do
@@ -439,7 +443,8 @@ defmodule Troupe.Worker.Session.Restore do
         {key, value} -> {key, value}
       end)
 
-    terms |> Keyword.put_new(:budget_asks, false) |> Keyword.put(:terms, caps)
+    terms = Keyword.put(terms, :terms, caps)
+    if caps == %{}, do: terms, else: Keyword.put_new(terms, :budget_asks, false)
   end
 
   # Whether a person may offer this session their own tools: the worker profile's

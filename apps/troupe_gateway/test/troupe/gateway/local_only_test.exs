@@ -378,7 +378,7 @@ defmodule Troupe.Gateway.LocalOnlyTest do
 
     # Nor the desktop app's gallery and viewer, which go to the plane through the daemon.
     for method <- ~w(artifact.get artifact.open artifact.read artifact.share artifact.unshare artifact.rollback artifact.pin
-                     artifact.comments artifact.comment) do
+                     artifact.comments artifact.comment artifact.comment.delete artifact.comment.edit) do
       assert {:error, %{message: "forbidden", data: %{"reason" => why}}} =
                Client.call(ctx.local, method, %{"command_id" => Client.command_id(), "id" => "art-1"})
 

@@ -1917,7 +1917,9 @@ defmodule Troupe.Plane.Artifacts do
   @doc "Artifact `id`'s thread, oldest first, for whoever may open it (`Comments`)."
   @spec comments(String.t(), User.t(), keyword()) :: {:ok, map()} | {:error, Error.t()}
   def comments(id, %User{} = user, opts \\ []) do
-    with {:ok, artifact} <- visible(id, user, Keyword.get(opts, :platform_admin?, false)) do
+    admin? = Keyword.get(opts, :platform_admin?, false)
+
+    with {:ok, artifact} <- visible(id, user, admin?) do
       role = role(artifact, user)
 
       {:ok,
@@ -1925,7 +1927,7 @@ defmodule Troupe.Plane.Artifacts do
          "id" => artifact.id,
          "may_comment" => role in Comments.writers(),
          "max_length" => Comments.max_body(),
-         "comments" => Comments.list(artifact)
+         "comments" => Comments.list(artifact, user, role, takes_down?(artifact, user, admin?))
        }}
     end
   end
@@ -1938,6 +1940,34 @@ defmodule Troupe.Plane.Artifacts do
       Comments.add(artifact, user, role(artifact, user), body)
     end
   end
+
+  @doc """
+  Delete comment `comment` from artifact `id`'s thread: its author's, an owner's, or a
+  takedown by whoever may take the artifact down (a platform administrator, the
+  administrator of the team it is for). Audited without its text.
+  """
+  @spec delete_comment(String.t(), User.t(), term(), keyword()) :: {:ok, map()} | {:error, Error.t()}
+  def delete_comment(id, %User{} = user, comment, opts \\ []) do
+    admin? = Keyword.get(opts, :platform_admin?, false)
+
+    with :ok <- on(),
+         {:ok, artifact} <- visible(id, user, admin?) do
+      Comments.delete(artifact, user, role(artifact, user), takes_down?(artifact, user, admin?), comment)
+    end
+  end
+
+  @doc "Comment `comment` in artifact `id`'s thread with `body` instead, by its author, marked edited."
+  @spec edit_comment(String.t(), User.t(), term(), term(), keyword()) :: {:ok, map()} | {:error, Error.t()}
+  def edit_comment(id, %User{} = user, comment, body, opts \\ []) do
+    with :ok <- on(),
+         {:ok, artifact} <- visible(id, user, Keyword.get(opts, :platform_admin?, false)) do
+      Comments.edit(artifact, user, role(artifact, user), comment, body)
+    end
+  end
+
+  # Whether `user` may take `artifact` down, as `delete/3` lets them: whoever may do that
+  # to the whole artifact may do it to one comment in its thread.
+  defp takes_down?(artifact, user, admin?), do: admin? or administers?(artifact, user)
 
   @doc """
   A link's token, spent by the person the plane signed in: they hold its role on the

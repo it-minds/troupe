@@ -890,6 +890,8 @@ function SharedWith({ via, artifact, detail, onChanged }: { via: OwnPlane; artif
  * The artifact's thread, oldest first, each comment with who wrote it and when; a box to
  * write one for whoever the plane says may (its owners, and anybody given comment or edit).
  * The session it came from is told of each, so whoever steers it can ask its agent to act.
+ * Its author edits a comment (marked edited) and deletes it; an owner, or whoever may take
+ * the artifact down, deletes any. Each control is there only for whoever may use it.
  */
 function Thread({ via, artifact }: { via: OwnPlane; artifact: Artifact }): JSX.Element {
   const [thread, setThread] = useState<ArtifactThread | null>(null);
@@ -898,6 +900,9 @@ function Thread({ via, artifact }: { via: OwnPlane; artifact: Artifact }): JSX.E
   const [busy, setBusy] = useState(false);
   const [asked, setAsked] = useState(0);
   const [absent, setAbsent] = useState(false);
+  const [editing, setEditing] = useState<string | null>(null);
+  const [editDraft, setEditDraft] = useState("");
+  const [confirming, setConfirming] = useState<string | null>(null);
 
   useEffect(() => {
     let live = true;
@@ -931,6 +936,37 @@ function Thread({ via, artifact }: { via: OwnPlane; artifact: Artifact }): JSX.E
     }
   };
 
+  // A comment's own controls, offered only where the plane says this person may: their own
+  // to edit, and their own (or any, for an owner or whoever may take the artifact down) to
+  // delete. Deleting asks once, saying what it does.
+  const remove = async (comment: string): Promise<void> => {
+    setBusy(true);
+    setError(null);
+    try {
+      await via.deleteArtifactComment(artifact.id, comment);
+      setConfirming(null);
+      setAsked((n) => n + 1);
+    } catch (e) {
+      setError(`Not deleted: ${sentence(e)}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const save = async (comment: string): Promise<void> => {
+    setBusy(true);
+    setError(null);
+    try {
+      await via.editArtifactComment(artifact.id, comment, editDraft);
+      setEditing(null);
+      setAsked((n) => n + 1);
+    } catch (e) {
+      setError(`Not saved: ${sentence(e)}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const comments = thread?.comments ?? [];
   return (
     <section aria-label="Comments">
@@ -944,8 +980,72 @@ function Thread({ via, artifact }: { via: OwnPlane; artifact: Artifact }): JSX.E
               <p className="micro">
                 <span className="author">{c.author.display_name || c.author.subject}</span> ·{" "}
                 <span title={c.created_at}>{relative(Date.parse(c.created_at))}</span>
+                {c.edited_at && (
+                  <>
+                    {" "}
+                    · <span title={c.edited_at}>edited {relative(Date.parse(c.edited_at))}</span>
+                  </>
+                )}
               </p>
-              <p className="comment-body">{c.body}</p>
+              {editing === c.id ? (
+                <form
+                  className="comment-form"
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    if (editDraft.trim() !== "") void save(c.id);
+                  }}
+                >
+                  <label>
+                    <span className="visually-hidden">Edit your comment</span>
+                    <textarea value={editDraft} maxLength={thread?.max_length} disabled={busy} onChange={(e) => setEditDraft(e.target.value)} rows={3} />
+                  </label>
+                  <div className="comment-edit-actions">
+                    <button type="submit" disabled={busy || editDraft.trim() === ""}>
+                      Save
+                    </button>
+                    <button type="button" className="link" disabled={busy} onClick={() => setEditing(null)}>
+                      Cancel
+                    </button>
+                  </div>
+                </form>
+              ) : (
+                <p className="comment-body">{c.body}</p>
+              )}
+              {confirming === c.id ? (
+                <p className="micro" role="group" aria-label="Delete this comment?">
+                  It goes from the thread for everybody, and cannot be brought back.{" "}
+                  <button type="button" className="danger" disabled={busy} onClick={() => void remove(c.id)}>
+                    Delete
+                  </button>{" "}
+                  <button type="button" className="link" disabled={busy} onClick={() => setConfirming(null)}>
+                    Keep it
+                  </button>
+                </p>
+              ) : (
+                editing !== c.id &&
+                (c.may_edit || c.may_delete) && (
+                  <p className="micro comment-actions">
+                    {c.may_edit && (
+                      <button
+                        type="button"
+                        className="link"
+                        disabled={busy}
+                        onClick={() => {
+                          setEditing(c.id);
+                          setEditDraft(c.body);
+                        }}
+                      >
+                        Edit
+                      </button>
+                    )}{" "}
+                    {c.may_delete && (
+                      <button type="button" className="link" disabled={busy} onClick={() => setConfirming(c.id)}>
+                        Delete
+                      </button>
+                    )}
+                  </p>
+                )
+              )}
             </li>
           ))}
         </ol>

@@ -289,7 +289,7 @@ defmodule Troupe.Gateway.ArtifactsTest do
     assert reason =~ "owner"
   end
 
-  test "a share with a person, the thread and the picker's search go to the plane with only their arguments",
+  test "a share with a person, the thread, a comment's deletion and edit and the picker's search go to the plane with only their arguments",
        ctx do
     forwarded = [
       {"artifact.share",
@@ -302,7 +302,10 @@ defmodule Troupe.Gateway.ArtifactsTest do
       {"artifact.comments", %{"id" => "art-fakefakefakefake"}},
       {"artifact.comment",
        %{"command_id" => Client.command_id(), "id" => "art-fakefakefakefake", "body" => "Looks good."}},
-      {"people.search", %{"query" => "cy"}}
+      {"people.search", %{"query" => "cy"}},
+      {"artifact.comment.delete", %{"command_id" => Client.command_id(), "id" => "art-fakefakefakefake", "comment" => "c-1"}},
+      {"artifact.comment.edit",
+       %{"command_id" => Client.command_id(), "id" => "art-fakefakefakefake", "comment" => "c-2", "body" => "Looks better."}}
     ]
 
     for {method, params} <- forwarded do
@@ -322,6 +325,12 @@ defmodule Troupe.Gateway.ArtifactsTest do
 
     assert {:ok, %{"people" => [%{"subject" => "cy@example.test"}]}} =
              Client.call(ctx.client, "people.search", %{"query" => "cy"})
+
+    assert {:ok, %{"comment" => "c-1", "deleted" => true}} =
+             Client.call(ctx.client, "artifact.comment.delete", Enum.at(forwarded, 4) |> elem(1))
+
+    assert {:ok, %{"comment" => %{"body" => "Looks better.", "edited_at" => _}}} =
+             Client.call(ctx.client, "artifact.comment.edit", Enum.at(forwarded, 5) |> elem(1))
 
     calls = FakePlane.calls(ctx.plane.state)
 

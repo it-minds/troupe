@@ -79,6 +79,11 @@ collapses nothing. A frame longer than 24 lines shows its first 20 and `… 42 m
 and opening its turn shows the rest in place; a scratchpad document stays a card that
 `/scratch` opens.
 
+An agent's finish is a `done:` note, its report's parts under it. Its `changed:` line is
+Troupe's count of what the agent's file tools wrote: the files and the lines each added and
+removed, and what its shell commands changed as not counted. The desktop app shows the same
+count as the finish frame's `changed`.
+
 Replies are rendered as in the desktop app, with these of the terminal's own: nested lists
 are indented, each level its own marker (`•` `◦` `▪`); `inline code` and **bold** keep their
 emphasis without their markers; code has full syntax highlighting; a `csv`, `tsv` or

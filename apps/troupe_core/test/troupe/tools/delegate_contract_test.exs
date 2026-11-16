@@ -244,6 +244,17 @@ defmodule Troupe.Tools.DelegateContractTest do
                "said" => "nothing else"
              } = report["changed"]
 
+      # The summary is the model's, read_branch call and all; the report is what a client
+      # writes the person's line from (#968): the facts as data, and no tool call in any of
+      # its text.
+      assert report["changed"]["agent"] == started.data["child_path"]
+      assert report["changed"]["added"] == 3 and report["changed"]["removed"] == 1
+
+      refute report
+             |> Map.values()
+             |> Enum.concat(Map.values(report["changed"]))
+             |> Enum.any?(&(is_binary(&1) and &1 =~ "read_branch("))
+
       # The diff is read only when it is asked for.
       ctx = ctx(session, context)
       assert {:ok, read} = ReadBranch.run(%{"child" => child}, ctx)

@@ -17,9 +17,17 @@ defmodule Troupe.Gateway.Artifacts do
   `list/1` is the person's own artifacts on the plane, for a client's "Publish a new version
   of…", with where the console's gallery is. `forward/2` is what the desktop app's gallery
   and viewer ask of one artifact, each the plane's method of the same name.
+
+  **Comments heard.** The plane cannot reach a session here, so a comment on an artifact one
+  of them published reaches it on the daemon's poll of `me.memory` (`comments_ask/1`, every
+  five minutes and at every link): the plane answers the comments written since the last
+  poll on the person's artifacts that came from a session on their machine, and `heard/2`
+  writes each into its session's log as `artifact_commented`, once, where that session runs
+  here and is not under Local only. A line whoever steers the session reads, never input.
   """
 
   alias Troupe.Gateway.{LocalOnly, Memory, Plane}
+  alias Troupe.Session.Log
 
   # `owner`, `me` or `team`, is whose a new team publication is; the plane makes it the
   # team's unless told `me`.
@@ -162,6 +170,9 @@ defmodule Troupe.Gateway.Artifacts do
     # Its thread, and a comment in it.
     "artifact.comments" => ~w(id),
     "artifact.comment" => ~w(id body),
+    # One taken back by whoever may, and its author's edit.
+    "artifact.comment.delete" => ~w(id comment),
+    "artifact.comment.edit" => ~w(id comment body),
     # The share picker's search for a person, as the plane lets the person find them.
     "people.search" => ~w(query limit),
     "artifact.unshare" => ~w(id share person),
@@ -197,6 +208,69 @@ defmodule Troupe.Gateway.Artifacts do
       _signed_out -> {:error, :signed_out}
     end
   end
+
+  # -- comments heard on the poll ---------------------------------------------------
+
+  @doc """
+  What every ask of `me.memory` carries to hear the comments on the person's artifacts:
+  where the last answer from `plane_url` left off, `nil` for none (the plane then answers
+  where to start). Never a session's id: the plane answers by whose artifacts they are.
+  """
+  @spec comments_ask(String.t() | nil) :: map()
+  def comments_ask(plane_url) do
+    case Application.get_env(:troupe_gateway, :artifact_comments_since) do
+      {^plane_url, since} when is_binary(plane_url) -> %{"since" => since}
+      _none -> %{"since" => nil}
+    end
+  end
+
+  @doc """
+  The comments a `me.memory` answer from `plane_url` carried (`artifact_comments`): each one
+  for a session running here, and not under Local only, written into its log as
+  `artifact_commented` once, where whoever steers the session reads it beside
+  the work; and where the next ask starts. No turn starts: a comment is somebody else's
+  words. A plane from before it carries none.
+  """
+  @spec heard(String.t(), term()) :: :ok
+  def heard(plane_url, %{"since" => since, "comments" => comments})
+      when is_binary(plane_url) and is_binary(since) and is_list(comments) do
+    Enum.each(comments, &tell/1)
+    Application.put_env(:troupe_gateway, :artifact_comments_since, {plane_url, since})
+  end
+
+  def heard(_plane_url, _none), do: :ok
+
+  defp tell(%{
+         "session_id" => session_id,
+         "artifact" => %{"id" => id} = artifact,
+         "comment" => %{"id" => comment_id, "body" => body} = comment
+       })
+       when is_binary(session_id) and is_binary(id) and is_binary(comment_id) and is_binary(body) do
+    unless LocalOnly.session?(session_id) or told?(session_id, comment_id) do
+      data = %{
+        "artifact" => Map.take(artifact, ["id", "title"]),
+        "comment" => Map.take(comment, ["id", "author", "body", "created_at"])
+      }
+
+      # The session's own line, as the pod writes it, no agent's.
+      {:ok, _seq} = Log.append(session_id, [], "artifact_commented", data)
+    end
+
+    :ok
+  catch
+    # Not running here: the thread on the plane is the record.
+    :exit, _not_running -> :ok
+  end
+
+  defp tell(_shapeless), do: :ok
+
+  # Whether the session's log already has it: two asks made at once (a link's and the
+  # poll's) both start where the last answer left off, so both carry it.
+  defp told?(session_id, comment_id),
+    do:
+      session_id
+      |> Log.replay()
+      |> Enum.any?(&(&1.type == "artifact_commented" and get_in(&1.data, ["comment", "id"]) == comment_id))
 
   @doc """
   `params` as a publish sends them: inline where its files fit in one call; else by an

@@ -139,6 +139,15 @@ defmodule Troupe.Gateway.FakePlane do
   """
   def proposals_with(state, proposals), do: Agent.update(state, &Map.put(&1, :proposals, proposals))
 
+  @doc """
+  The comments on the person's artifacts from a session on their machine, each `%{"session_id",
+  "artifact", "comment"}` with the comment's `created_at`, which `me.memory` asked with
+  `artifact_comments: {since}` answers from now on beside the signed memory, as the plane
+  does: those written after `since`, and none for no `since` (#980).
+  """
+  def artifact_comments_with(state, comments),
+    do: Agent.update(state, &Map.put(&1, :artifact_comments, comments))
+
   @doc "The person's teams, by name, which `me.memory` asked with `entries` names."
   @spec teams_with(pid(), [String.t()]) :: :ok
   def teams_with(state, teams), do: Agent.update(state, &Map.put(&1, :teams, teams))
@@ -468,13 +477,14 @@ defmodule Troupe.Gateway.FakePlane do
         else: teams
 
     teams = with_proposals(teams, Agent.get(state, &Map.get(&1, :proposals)))
+    comments = artifact_comments(Agent.get(state, &Map.get(&1, :artifact_comments)), params["artifact_comments"])
 
     case Agent.get(state, &{Map.get(&1, :memory), Map.get(&1, :own)}) do
       {nil, nil} ->
         {:rpc_error, -32_601, "method_not_found", %{"method" => "me.memory"}}
 
       {documents, nil} ->
-        {:ok, signed(state, "memory", Map.merge(%{"documents" => documents}, teams))}
+        {:ok, state |> signed("memory", Map.merge(%{"documents" => documents}, teams)) |> Map.merge(comments)}
 
       {documents, own} ->
         {:ok,
@@ -488,7 +498,8 @@ defmodule Troupe.Gateway.FakePlane do
              },
              teams
            )
-         )}
+         )
+         |> Map.merge(comments)}
     end
   end
 
@@ -792,6 +803,23 @@ defmodule Troupe.Gateway.FakePlane do
          }
        }}
 
+  defp dispatch(_state, "artifact.comment.delete", %{"id" => id, "comment" => comment}),
+    do: {:ok, %{"id" => id, "comment" => comment, "deleted" => true}}
+
+  defp dispatch(_state, "artifact.comment.edit", %{"id" => id, "comment" => comment, "body" => body}),
+    do:
+      {:ok,
+       %{
+         "id" => id,
+         "comment" => %{
+           "id" => comment,
+           "author" => %{"subject" => "ada@example.test", "display_name" => "Ada"},
+           "body" => body,
+           "created_at" => "2026-11-16T09:01:00Z",
+           "edited_at" => "2026-11-16T09:05:00Z"
+         }
+       }}
+
   defp dispatch(_state, "people.search", %{"query" => _query}),
     do: {:ok, %{"people" => [%{"subject" => "cy@example.test", "display_name" => "Cy", "email" => "cy@example.test"}]}}
 
@@ -1066,6 +1094,22 @@ defmodule Troupe.Gateway.FakePlane do
   # The person's proposals, which every `me.memory` answer carries once a test set them.
   defp with_proposals(answer, proposals) when is_list(proposals), do: Map.put(answer, "proposals", proposals)
   defp with_proposals(answer, _none), do: answer
+
+  # Beside the signed memory, where the ask asked and a test set some: those written after
+  # `since`, and none with where to start for no `since`.
+  defp artifact_comments(comments, %{} = asked) when is_list(comments) do
+    case asked["since"] do
+      since when is_binary(since) ->
+        after_since = Enum.filter(comments, &(&1["comment"]["created_at"] > since))
+        last = after_since |> Enum.map(& &1["comment"]["created_at"]) |> Enum.max(fn -> since end)
+        %{"artifact_comments" => %{"since" => last, "comments" => after_since}}
+
+      _none ->
+        %{"artifact_comments" => %{"since" => "2026-01-01T00:00:00Z", "comments" => []}}
+    end
+  end
+
+  defp artifact_comments(_comments, _asked), do: %{}
 
   defp own_json(own),
     do:

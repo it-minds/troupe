@@ -245,6 +245,8 @@ defmodule Troupe.Gateway.Dispatch do
     # The thread: read as the artifact is, written as a share is.
     "artifact.comments" => :observe,
     "artifact.comment" => :control,
+    "artifact.comment.delete" => :control,
+    "artifact.comment.edit" => :control,
     # Finding a person to share one with, which names nobody it does not find.
     "people.search" => :observe,
     "artifact.rollback" => :control,
@@ -328,7 +330,7 @@ defmodule Troupe.Gateway.Dispatch do
   # and after a create, whose session there was no id for before.
   @work ~w(input.send commands.run session.goal.set session.loop.start)
   @invites ~w(session.invite session.uninvite session.invites session.read_sealed)
-  @forwarded_artifacts ~w(artifact.get artifact.open artifact.read artifact.share artifact.unshare artifact.comments artifact.comment people.search artifact.rollback artifact.pin artifact.put artifact.transfer)
+  @forwarded_artifacts ~w(artifact.get artifact.open artifact.read artifact.share artifact.unshare artifact.comments artifact.comment artifact.comment.delete artifact.comment.edit people.search artifact.rollback artifact.pin artifact.put artifact.transfer)
 
   defp local_only("remote.offer", params, context) do
     cond do

@@ -289,6 +289,54 @@ describe("the gallery", () => {
     await sees("Its owner decides who may write them.");
   });
 
+  // A comment taken back or edited (#979): its author edits it, marked edited, and deletes
+  // it; an owner deletes anybody's; nobody is offered a control they may not use.
+  it("offers Edit and Delete on a comment only to whoever may, and each does it", async () => {
+    await signedIn();
+    daemon.artifacts!.push(row({ id: "art-named", title: "Hiring plan", visibility: "private", scope: "shared", role: "comment", may_comment: true, comments: 2 }));
+    daemon.artifactComments.set("art-named", [
+      { id: "c-1", author: { subject: "bo@example.test", display_name: "Bo" }, body: "The second table is wrong.", created_at: lastWeek },
+      { id: "c-2", author: { subject: "alice@example.com", display_name: "Alice" }, body: "Row 3?", created_at: lastWeek },
+    ]);
+    daemon.artifactComments.set("art-mine", [{ id: "c-1", author: { subject: "bo@example.test", display_name: "Bo" }, body: "Off topic.", created_at: lastWeek }]);
+    await openGallery();
+    (await waitFor(() => [...gallery().querySelectorAll<HTMLButtonElement>(".card")].find((c) => c.textContent?.includes("Hiring plan")), "the shared card")).click();
+    const items = (): HTMLLIElement[] => [...(aside()?.querySelectorAll<HTMLLIElement>(".comments li") ?? [])];
+    const buttons = (li: HTMLElement): string[] => [...li.querySelectorAll("button")].map((b) => b.textContent ?? "");
+    await waitFor(() => items().length === 2, "the thread");
+
+    // Bo's: nothing for a commenter who did not write it. Hers: both.
+    expect(buttons(items()[0]!)).toEqual([]);
+    expect(buttons(items()[1]!)).toEqual(["Edit", "Delete"]);
+
+    [...items()[1]!.querySelectorAll("button")].find((b) => b.textContent === "Edit")!.click();
+    const box = await waitFor(() => items()[1]!.querySelector<HTMLTextAreaElement>("textarea"), "her comment in a box");
+    expect(box.value).toBe("Row 3?");
+    type(box, "Row 4, not row 3.");
+    (await seesButton("Save", items()[1]!)).click();
+    await waitFor(() => items()[1]?.querySelector(".comment-body")?.textContent === "Row 4, not row 3.", "the edited comment");
+    expect(items()[1]!.textContent).toContain("edited");
+    expect(daemon.artifactCalls.find((c) => c.method === "artifact.comment.edit")?.params).toMatchObject({ id: "art-named", comment: "c-2", body: "Row 4, not row 3." });
+
+    // Deleting asks once, saying what it does, and Keep it keeps it.
+    [...items()[1]!.querySelectorAll("button")].find((b) => b.textContent === "Delete")!.click();
+    await sees("It goes from the thread for everybody, and cannot be brought back.");
+    [...items()[1]!.querySelectorAll("button")].find((b) => b.textContent === "Keep it")!.click();
+    await waitFor(() => buttons(items()[1]!).join() === "Edit,Delete", "kept");
+    [...items()[1]!.querySelectorAll("button")].find((b) => b.textContent === "Delete")!.click();
+    (await waitFor(() => [...items()[1]!.querySelectorAll<HTMLButtonElement>("button.danger")].find((b) => b.textContent === "Delete"), "Delete, said once more")).click();
+    await waitFor(() => items().length === 1, "her comment gone");
+    expect(daemon.artifactCalls.find((c) => c.method === "artifact.comment.delete")?.params).toMatchObject({ id: "art-named", comment: "c-2" });
+
+    // Her own artifact: she deletes Bo's comment, and edits nobody's but her own.
+    (await waitFor(() => [...gallery().querySelectorAll<HTMLButtonElement>(".card")].find((c) => c.textContent?.includes("My notes")), "her card")).click();
+    await waitFor(() => items()[0]?.textContent?.includes("Off topic."), "Bo's comment on hers");
+    expect(buttons(items()[0]!)).toEqual(["Delete"]);
+    items()[0]!.querySelector("button")!.click();
+    (await waitFor(() => items()[0]?.querySelector<HTMLButtonElement>("button.danger"), "Delete, said once more")).click();
+    await waitFor(() => items().length === 0, "Bo's comment gone");
+  });
+
   it("narrows the cards by kind", async () => {
     await signedIn();
     daemon.artifacts!.push(row({ id: "art-doc", title: "Style guide", kind: "markdown", scope: "organisation" }));

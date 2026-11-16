@@ -27,7 +27,7 @@ flat `WorkerProfile`.
 | agents, skills, MCP servers and ACP agents in the bundle its pods load | the parent's channel's, and its own channel's **added** by name (Bundles, below) |
 | `max_sessions` | the **lower** of the two: a child can narrow a ceiling, never raise it |
 | `budget_micros` | the **lower** of the two; one set above the parent's is **refused** with a sentence |
-| `personalTools`, `repositoryOverridesBundle` | a parent's `forbid` or `false` **holds** whatever the child says; otherwise the child's, or the parent's |
+| `personalTools`, `repositoryOverridesBundle`, `memoryProposals` | a parent's `forbid` or `false` **holds** whatever the child says, and the preview and the effective view say so where the child says otherwise; otherwise the child's, or the parent's |
 | `image`, `size_class`, `provisioner`, the `llm` fields, `storage.storageClassName`, `configBundleChannel`, `github`, `orgMount` and any other field | the child's where it sets one, the parent's where it does not (for `github`'s caps and denied paths, see [github.md §9](github.md#9-how-far-a-run-may-go)) |
 | `llm.secretRef`, `mcpIdentities`, grants, `warm_workers` | **never inherited**: a key and an identity are each profile's own, in its own namespace, and a grant of the standard does not make a team a user of its extensions |
 
@@ -222,6 +222,27 @@ a toggle. Like `repositoryOverridesBundle` it rides the activation, so a change 
 session the next time it wakes, restarts no pod, and applies to `ssh` profiles too; a
 session awake when it changes keeps what it had until then. The platform's
 `managed_mcp_servers_only` refuses the same offer on every profile at once.
+
+## Proposals to shared memory from a pod
+
+An agent may propose an entry for its team's or the organisation's memory, for an
+administrator to accept or decline (Decision 1004). A profile whose sessions should propose
+nothing, a review or a trigger's, says so (Decision 1012):
+
+```yaml
+spec:
+  memoryProposals: false
+```
+
+The plane then refuses every proposal from a session on its pods, keeps nothing, and answers
+`forbidden` with the sentence the platform setting *Agents may propose memory* refuses with,
+naming the profile in its place: `proposals to a team's or the organisation's memory are
+switched off for the sessions of the profile <name> (its memoryProposals is false); nothing
+was proposed`, and where to remember it instead. Absent or `true`, the setting decides. A
+parent's `false` holds for every profile that extends it. The plane reads it at each
+proposal, so a change restarts no pod. A session on a person's machine runs on no profile,
+and only the setting turns its proposals off. The console's profile editor has it as *Agents
+may propose memory*.
 
 ## Where the organisation keeps files
 

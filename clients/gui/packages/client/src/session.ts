@@ -545,7 +545,8 @@ export class SessionView {
    * Send a prompt and wait for the turn to end. Returns timings for each milestone.
    *
    * A turn ends in one of two ways. Durably: `agent_done`, `cancelled`,
-   * `budget_exhausted` or `llm_error`. Or quietly: a text-only answer leaves the agent
+   * `budget_exhausted` or `llm_error`, or `input_after_done` when there was none, the
+   * agent having stopped and the input dropped. Or quietly: a text-only answer leaves the agent
    * `idle` with no durable marker, announced only by an ephemeral `agent_state` — which
    * may be dropped under load, so after an `llm_response` that ends the turn we also
    * poll `session.get` until its status is no longer busy.
@@ -592,7 +593,7 @@ export class SessionView {
     const isRoot = (e: TroupeEvent) => e.agent.length === 1;
     const terminal = this.waitFor(
       (e) =>
-        (isDurable(e) && ["agent_done", "cancelled", "budget_exhausted", "llm_error"].includes(e.type) && isRoot(e)) ||
+        (isDurable(e) && ["agent_done", "cancelled", "budget_exhausted", "llm_error", "input_after_done"].includes(e.type) && isRoot(e)) ||
         (!isDurable(e) && e.type === "agent_state" && isRoot(e) && acceptedSeen && ["idle", "done"].includes(String(e.data["state"]))),
       timeoutMs,
       "end of turn",

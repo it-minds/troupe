@@ -38,9 +38,9 @@ defmodule Troupe.Agent.BudgetQuestionTest do
 
   defp labels(asked), do: Enum.map(asked["options"], &label/1)
 
-  defp await_question(sid, call_id) do
+  defp await_question(sid, call_id, timeout \\ 10_000) do
     assert_receive {:troupe_event, ^sid, %Event{type: "question_asked", data: %{"call_id" => ^call_id} = asked}},
-                   10_000
+                   timeout
 
     asked
   end
@@ -141,12 +141,45 @@ defmodule Troupe.Agent.BudgetQuestionTest do
     Troupe.answer(sid, "budget-2", "deny")
     assert await_done(sid)["limit"] == "max_input_tokens"
 
-    {slow, _fake} = run(context, tools(6), max_turns: 1, wall_clock_ms: 1_500)
+    # The clock counts working time (issue #985): the calls after the answer spend it.
+    {slow, _fake} = run(context, tools(8), [max_turns: 1, wall_clock_ms: 1_500], delay_ms: 400)
     await_question(slow, "budget-1")
     Troupe.answer(slow, "budget-1", "always")
-    Process.sleep(1_600)
-    Troupe.send_input(slow, "and again")
-    assert await_question(slow, "budget-2")["question"] =~ "wall clock"
+    assert await_question(slow, "budget-2")["question"] =~ "working time"
+  end
+
+  # Issue #985: a pod session awake for half an hour died on its next message, because the
+  # clock had run since the agent began.
+  test "the wall clock is working time: resting between turns spends none of it", context do
+    # A clock wide enough for two short turns on a busy machine, and a rest longer than it.
+    {sid, fake} = run(context, [{:text, "first"}, {:text, "second"}], wall_clock_ms: 3_000)
+
+    await_event(sid, :turn_ended, 10_000)
+    Process.sleep(3_500)
+    Troupe.send_input(sid, "and again")
+    await_event(sid, :turn_ended, 10_000)
+
+    assert Fake.call_count(fake) == 2
+    assert events_of_type(sid, :budget_ask_started) == []
+    assert snapshot_state(sid).budget.worked_ms < 3_000
+  end
+
+  test "time waiting on the budget question is not working time either", context do
+    {sid, fake} = run(context, tools(30), [max_turns: 1, wall_clock_ms: 3_000], delay_ms: 300)
+
+    await_question(sid, "budget-1")
+    # Longer than the whole clock, waiting on the person.
+    Process.sleep(3_500)
+    Troupe.answer(sid, "budget-1", "always")
+
+    # The clock runs out after a few more calls, not on the answer: counted, the wait
+    # alone would have spent it, and the question would come back before another call.
+    asked = await_question(sid, "budget-2", 20_000)
+    assert asked["question"] =~ "working time"
+    assert Fake.call_count(fake) >= 3
+
+    [started] = Enum.filter(events_of_type(sid, :budget_ask_started), &(&1.data["dimension"] == "wall"))
+    assert started.data["detail"] =~ ~r/^working time \d+s\/3s/
   end
 
   test "an always from before the answer said what it lifted folds to the limit its question named", context do
@@ -255,7 +288,7 @@ defmodule Troupe.Agent.BudgetQuestionTest do
     assert await_done(sid)["reason"] == "finished"
 
     {slow, _fake} = run(context, tools(6) ++ [finish("ok")], max_turns: 40, wall_clock_ms: 1)
-    assert await_question(slow, "budget-1")["question"] =~ "wall clock"
+    assert await_question(slow, "budget-1")["question"] =~ "working time"
     Troupe.answer(slow, "budget-1", "+15 min")
     assert %{"decision" => "raise", "limit" => "wall_clock", "amount" => 900_000} = await_answered(slow, "budget-1")
     assert await_done(slow)["reason"] == "finished"
@@ -384,6 +417,80 @@ defmodule Troupe.Agent.BudgetQuestionTest do
     assert %{"decision" => "raise", "scope" => "session"} = await_answered(loose, "budget-2")
     assert await_done(loose)["reason"] == "finished"
     refute File.exists?(Config.project_path(context.workspace))
+  end
+
+  # Issue #986: what the worker now gives a pod session whose terms set no limit, the
+  # platform's two switches and no caps, asks as a laptop session does rather than ending.
+  test "a pod session whose terms set no limit asks, and its input waits for the answer", context do
+    pod = [terms: %{}, managed_permission_rules_only: false, managed_mcp_servers_only: false]
+    {sid, fake} = run(context, tools(6) ++ [finish("ok")], [max_turns: 2] ++ pod)
+
+    await_question(sid, "budget-1")
+    assert [%{data: %{"dimension" => "turns"}}] = events_of_type(sid, :budget_ask_started)
+    assert events_of_type(sid, :agent_done) == []
+
+    # Somebody writes meanwhile: it queues behind the question rather than being dropped.
+    Troupe.send_input(sid, "are you still there?")
+    await_event(sid, :input_queued, 10_000)
+    assert events_of_type(sid, :input_after_done) == []
+
+    Troupe.answer(sid, "budget-1", "+10")
+    assert %{"decision" => "raise", "scope" => "session"} = await_answered(sid, "budget-1")
+    assert await_done(sid)["reason"] == "finished"
+    assert Fake.call_count(fake) >= 3
+  end
+
+  # A person reading an approval takes the time they take, and nobody is working meanwhile:
+  # not the subagent whose call waits, and not the root waiting on the subagent.
+  test "an approval waited on is not working time, for the agent that asked or above it", context do
+    %{session: session} =
+      start_session(context,
+        config_overrides: [auto_approve: false, wall_clock_ms: 3_000],
+        routes: %{
+          "root" => [{:tools, [{"delegate", brief("general", "ask for it")}]}, {:text, "root done"}],
+          "general" => [{:tools, [{"needs_approval", %{"note" => "child"}}]}, {:text, "child done"}]
+        }
+      )
+
+    sid = session.id
+    :ok = Troupe.subscribe(sid)
+    Troupe.send_input(sid, "delegate it")
+
+    request = await_event(sid, :approval_requested, 10_000)
+    # Longer than either clock, waiting on the person.
+    Process.sleep(3_500)
+    Troupe.approve(sid, request.data["call_id"], :allow)
+
+    await_event(sid, :turn_ended, 10_000)
+    assert events_of_type(sid, :budget_ask_started) == []
+
+    [result] =
+      sid |> events_of_type(:tool_call_completed) |> Enum.filter(&(&1.agent == ["root"]))
+
+    refute result.data["content"] =~ "cut short"
+    assert snapshot_state(sid).budget.worked_ms < 3_000
+  end
+
+  # A restart forgives the time worked, all but what the question wrote down: one owed
+  # about the clock is still owed, and asked again under its id rather than waved through.
+  test "a restart keeps the working time a question about it recorded, and nothing more", context do
+    {sid, fake} = run(context, tools(6), [max_turns: 40, wall_clock_ms: 200], delay_ms: 150)
+
+    asked = await_question(sid, "budget-1")
+    assert asked["question"] =~ "working time"
+    [%{data: %{"used" => used}}] = events_of_type(sid, :budget_ask_started)
+    calls = Fake.call_count(fake)
+
+    agent = Troupe.Registry.agent_pid(sid, ["root"])
+    ref = Process.monitor(agent)
+    Process.exit(agent, :kill)
+    assert_receive {:DOWN, ^ref, :process, ^agent, :killed}, 2_000
+
+    {_state_name, state} = :sys.get_state(await_new_agent(sid, agent, 50))
+    assert state.budget.worked_ms == used
+    assert state.budget_ask_pending == "budget-1"
+    assert {:exhausted, :wall_clock} = Budget.check(state.budget)
+    assert Fake.call_count(fake) == calls, "the restarted agent asks before it calls the model"
   end
 
   defp await_new_agent(_sid, _old, 0), do: flunk("the agent was not restarted")

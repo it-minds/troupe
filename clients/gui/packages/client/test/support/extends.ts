@@ -5,7 +5,8 @@
 // Egress hosts, MCP servers and each list of permission rules are added (a server with a
 // parent's name replaces it only with `override: true`; a rule the parent has is the
 // parent's, so a child cannot drop one); `max_sessions` and `budget_micros` narrow; a parent's `personalTools: forbid` and
-// `repositoryOverridesBundle: false` hold; `llm.secretRef`, `mcpIdentities` and
+// `repositoryOverridesBundle: false` and `memoryProposals: false` hold, and a child that says
+// otherwise is told so in `problems`; `llm.secretRef`, `mcpIdentities` and
 // `warm_workers` are never inherited; everything else is the child's where it sets it.
 
 export type Plain = Record<string, unknown>;
@@ -47,6 +48,7 @@ const SPEC: Record<string, Rule> = {
   mcpIdentities: "own",
   personalTools: { restrict: "forbid" },
   repositoryOverridesBundle: { restrict: false },
+  memoryProposals: { restrict: false },
 };
 
 const isPlain = (v: unknown): v is Plain => typeof v === "object" && v !== null && !Array.isArray(v);
@@ -117,9 +119,14 @@ export function merge(parent: Resolved, written: Plain, name: string): Resolved 
       }
       if (isSet(inner)) spec[key] = inner;
     } else {
-      const [value, source] = field(SPEC[key] ?? "replaced", parentSpec[key], parent.from[path], ownSpec[key], name);
+      const rule = SPEC[key] ?? "replaced";
+      const [value, source] = field(rule, parentSpec[key], parent.from[path], ownSpec[key], name);
       if (value !== undefined && value !== null) spec[key] = value;
       put(path, value, source);
+      // A child's own value under a parent's restriction does nothing, and is said.
+      if (typeof rule === "object" && parentSpec[key] === rule.restrict && isSet(ownSpec[key]) && ownSpec[key] !== rule.restrict) {
+        problems.push(`${name} sets ${key} to ${String(ownSpec[key])}, and ${String(source)}'s ${String(rule.restrict)} holds: a profile cannot undo a restriction of the profile it extends`);
+      }
     }
   }
   attrs["spec"] = spec;
