@@ -1,5 +1,5 @@
 ---
-number: 1001
+number: 1003
 title: "The desktop app asks where an Always allow rule goes, this workspace (the default) or everywhere, once per rule; an answered question names who answered where two or more people steer; a row a client types with other arguments carries that client's `usages` and `examples`, so `/hq` names no plane there; the start screen carries the brand once, the rail's; a session on this computer is owned by the signed-in person's name"
 date: 2026-11-16
 status: accepted

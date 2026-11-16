@@ -1704,7 +1704,7 @@ row from an older harness, has the neutral words alone. A row a client types wit
 arguments carries `usages` and `examples` the same way (`/hq`'s `{"desktop": "/hq"}`
 and `{"desktop": null}`: the desktop app takes no plane address): that client shows its
 own usage, keeps only the `args` it names, and its own example, `null` for none
-(Decision 1001).
+(Decision 1003).
 
 #### `memory.get`
 ```json

@@ -25,7 +25,7 @@ gist: "w = Always allow where approval_allow_always is named; w again = workspac
 ---
 
 Issue #956, the terminal client's half of what chunk 47 left (#938, #940). The desktop's
-half is root Decision 1001. On the chunk's tip the approval box answered `y`, `n` and `a`
+half is root Decision 1003. On the chunk's tip the approval box answered `y`, `n` and `a`
 only, the composer had no way to attach an artifact, and an answered question left no
 line, although the daemon and the plane answer all three (root Decisions 989, 990, 992).
 
