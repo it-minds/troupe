@@ -172,8 +172,20 @@ defmodule Troupe.Plane.Fleet.Profile do
     # `administration: write` would be asking for what no session is given.
     github = Enum.map(GitHub.spec_problems(Map.get(spec, "github")), &{:spec, &1})
 
+    # `memoryProposals: false` has the profile's sessions propose nothing to a team's or the
+    # organisation's memory. A string `"false"` would leave them proposing, so it is refused.
+    proposals =
+      case Map.fetch(spec, "memoryProposals") do
+        {:ok, value} when not is_boolean(value) ->
+          [spec: "memoryProposals must be true or false, not #{inspect(value)}"]
+
+        _absent_or_boolean ->
+          []
+      end
+
     overrides ++
       personal ++
+      proposals ++
       github ++
       llm_problems(Map.get(spec, "llm")) ++
       rule_problems(Map.get(spec, "permissions")) ++ agents_problems(Map.get(spec, "agents"))

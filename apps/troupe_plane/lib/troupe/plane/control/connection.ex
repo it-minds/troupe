@@ -767,7 +767,9 @@ defmodule Troupe.Plane.Control.Connection do
          :ok <- at_epoch(session, params["epoch"]),
          {:owner, %User{active: true} = owner} <- {:owner, Identity.get_user(session.owner_subject)},
          {:ok, scope, team} <- proposal_level(params["scope"], session) do
-      opts = [session: session.id, topic: params["topic"], where: "pod"] ++ agent_of(params)
+      opts =
+        [session: session.id, topic: params["topic"], where: "pod", profile: session.profile] ++
+          agent_of(params)
 
       case Memory.Proposals.propose(owner, scope, team, params["append"], opts) do
         {:ok, proposal} ->
@@ -775,6 +777,9 @@ defmodule Troupe.Plane.Control.Connection do
 
         {:error, :off} ->
           {:error, Error.new(:forbidden, %{reason: Memory.Proposals.off_reason()}), state}
+
+        {:error, {:off, profile}} ->
+          {:error, Error.new(:forbidden, %{reason: Memory.Proposals.off_reason(profile)}), state}
 
         {:error, reason} ->
           {:error, Error.new(:invalid_params, %{reason: own_reason(reason)}), state}
