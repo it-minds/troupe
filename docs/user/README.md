@@ -151,7 +151,8 @@ all out from what it enforces (`profile.get`), so the page is what your session 
 it says how it runs, "Runs on the platform with dev as build · everyone on core can open
 it", each word a picker; the profile is the last used with room, else the first with room,
 and a line says which. `@dev`, `#plan`, `/local` in the message set those and are removed
-before the agent reads it; a full profile says *Queue it* and starts when a place frees.
+before the agent reads it; a full profile says *Queue it* and starts when a place frees. If
+two of your teams may use the profile you pick the team once (its budget pays); it is kept.
 
 ## Words you will meet
 

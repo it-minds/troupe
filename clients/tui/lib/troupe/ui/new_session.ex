@@ -273,4 +273,51 @@ defmodule Troupe.UI.NewSession do
 
   def no_agents(:platform, profile, _daemon_up?),
     do: "#{profile} offers no agents to pick."
+
+  @doc """
+  The teams a refused `session.create` asks the person to choose between: the plane's
+  `invalid_params` with `reason: "choose a team"` and `teams`, sent when more than one of
+  their teams may use the profile and the create named none. Whose budget pays and who can
+  open the session follow from the answer, so the plane asks rather than guess. `nil` for
+  any other refusal.
+  """
+  @spec teams_to_choose(term()) :: [String.t()] | nil
+  def teams_to_choose(%{data: %{"reason" => "choose a team", "teams" => teams}}),
+    do: teams_to_choose({:choose_team, teams})
+
+  def teams_to_choose({:choose_team, teams}) when is_list(teams) do
+    case Enum.filter(teams, &(is_binary(&1) and &1 != "")) do
+      [_, _ | _] = names -> names
+      _fewer -> nil
+    end
+  end
+
+  def teams_to_choose(_refusal), do: nil
+
+  @doc """
+  The team a session on a profile is for, where that is a choice: the one picked on the
+  screen, else the one this client remembers for the profile, whichever is still one of
+  `candidates`; `nil` where there is none yet and the person is asked. With one candidate
+  or none it is `nil` as well, and the create names no team: the plane takes the only one.
+  """
+  @spec chosen_team([String.t()] | nil, String.t() | nil, String.t() | nil) :: String.t() | nil
+  def chosen_team(candidates, picked, remembered) do
+    names = candidates || []
+
+    cond do
+      length(names) < 2 -> nil
+      picked in names -> picked
+      remembered in names -> remembered
+      true -> nil
+    end
+  end
+
+  @doc "The question, when more than one of the person's teams may use the profile."
+  @spec team_question(String.t(), [String.t()]) :: String.t()
+  def team_question(profile, teams) do
+    all = if length(teams) == 2, do: "both", else: "all"
+
+    "#{and_list(teams)} can #{all} use #{profile}. " <>
+      "Choose the team it is for: its budget pays, and everyone on it can open it."
+  end
 end

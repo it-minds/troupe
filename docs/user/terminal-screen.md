@@ -299,6 +299,13 @@ session from this screen is the team's. `@profile`, `#agent`, `/local` and `/pla
 taken out before the agent reads it; in this box `@name` naming a profile is not a file
 path, and `/local` is not a command. CALLED is the first line until you edit it.
 
+Where more than one of your teams may use the profile, the sentence ends `everyone on
+[which team?] can open it` and the team is a fourth chip: Enter asks which team the session
+is for first (its budget pays, and everyone on it can open it), the pick starts it, and Esc
+goes back to the form without starting. The team is kept for that profile on this machine
+and shown on the chip next time, where you can change it. `troupe run --team NAME` says it
+for a script; without it a run on such a profile stops and names the teams.
+
 Enter starts it; Ctrl-J is a new line, as on the command line (Shift or Alt with Enter
 too, where the terminal tells them from Enter; Windows Terminal does not). A typed digit
 types: Tab past CALLED reaches the recent sessions, where ↑↓ and Enter, or `1`-`3`, set

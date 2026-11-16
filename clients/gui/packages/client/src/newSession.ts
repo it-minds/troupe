@@ -181,3 +181,38 @@ export function ceilingSentence(name: string, maxSessions: number): string {
 
 /** The line while this computer's daemon is not there. */
 export const LOCAL_DOWN_SENTENCE = "This computer’s Troupe app isn’t running yet. Start it, and this switches on by itself.";
+
+/**
+ * The teams a refused `session.create` asks the person to choose between: the plane's
+ * `invalid_params` with `reason: "choose a team"` and `teams`, sent when more than one of
+ * their teams may use the profile and the create named none. Whose budget pays and who can
+ * open the session follow from the answer, so the plane asks rather than guess. Null for
+ * any other refusal.
+ */
+export function teamsToChoose(e: unknown): string[] | null {
+  const data = (e as { data?: unknown } | null)?.data;
+  if (!data || typeof data !== "object") return null;
+  const { reason, teams } = data as { reason?: unknown; teams?: unknown };
+  if (reason !== "choose a team" || !Array.isArray(teams)) return null;
+  const names = teams.filter((t): t is string => typeof t === "string" && t !== "");
+  return names.length > 1 ? names : null;
+}
+
+/**
+ * The team a session on a profile is for, where that is a choice: the one picked on the
+ * screen, else the one this client remembers for the profile, whichever is still one of
+ * `candidates`; null where there is none yet and the person is asked. With one candidate
+ * or none it is null as well, and the create names no team: the plane takes the only one.
+ */
+export function chosenTeam(candidates: readonly string[] | null | undefined, picked: string | null | undefined, remembered: string | null | undefined): string | null {
+  const names = candidates ?? [];
+  if (names.length < 2) return null;
+  if (picked && names.includes(picked)) return picked;
+  if (remembered && names.includes(remembered)) return remembered;
+  return null;
+}
+
+/** The question, when more than one of the person's teams may use the profile. */
+export function teamQuestion(profile: string, teams: readonly string[]): string {
+  return `${andList(teams)} can ${teams.length === 2 ? "both" : "all"} use ${profile}. Choose the team it is for: its budget pays, and everyone on it can open it.`;
+}
