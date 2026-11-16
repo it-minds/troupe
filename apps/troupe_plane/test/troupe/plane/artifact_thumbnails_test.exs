@@ -103,7 +103,9 @@ defmodule Troupe.Plane.ArtifactThumbnailsTest do
 
     test "a version without one has none, whatever the one before had", context do
       {:ok, first} = publish(context.ada, %{"thumbnail" => picture()})
+      assert first["thumbnail_url"] =~ "/t/"
       {:ok, plain} = publish(context.ada, %{})
+      assert Map.has_key?(plain, "thumbnail_url")
 
       assert plain["thumbnail_url"] == nil
       assert row(context.ada, plain["id"])["thumbnail_url"] == nil

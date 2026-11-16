@@ -1008,10 +1008,8 @@ defmodule Troupe.Plane.Artifacts do
   # refusal or the failure is taken back.
   defp write(user, existing, attrs) do
     bytes = attrs.files |> Enum.map(& &1.bytes) |> Enum.sum()
-    new_bytes = attrs.files |> Enum.filter(&Map.has_key?(&1, :body)) |> Enum.map(& &1.bytes) |> Enum.sum()
-    # A picture sent with the version is stored as a file is, and counts as one.
     thumbnail = attrs[:thumbnail]
-    new_bytes = new_bytes + ((thumbnail && Map.has_key?(thumbnail, :body) && thumbnail.bytes) || 0)
+    new_bytes = new_bytes(attrs.files, thumbnail)
     moved = moved_bytes(existing, attrs.team_id)
     hash = version_hash(attrs.files)
     now = DateTime.utc_now()
@@ -1041,16 +1039,16 @@ defmodule Troupe.Plane.Artifacts do
 
           artifact =
             artifact
-            |> Ecto.Changeset.change(%{
-              title: attrs.title,
-              visibility: attrs.visibility,
-              team_id: attrs.team_id,
-              version: n,
-              bytes: if(artifact.pinned, do: artifact.bytes, else: bytes),
-              thumbnail: if(artifact.pinned, do: artifact.thumbnail, else: thumbnail_json(thumbnail)),
-              total_bytes: artifact.total_bytes + new_bytes,
-              updated_at: now
-            })
+            |> Ecto.Changeset.change(
+              Map.merge(in_force(artifact, bytes, thumbnail), %{
+                title: attrs.title,
+                visibility: attrs.visibility,
+                team_id: attrs.team_id,
+                version: n,
+                total_bytes: artifact.total_bytes + new_bytes,
+                updated_at: now
+              })
+            )
             |> Repo.update!()
 
           artifact = Repo.preload(artifact, :owner_team)
@@ -1072,6 +1070,24 @@ defmodule Troupe.Plane.Artifacts do
       {:error, %Error{} = error} -> {:error, error}
     end
   end
+
+  # What a version puts in the store: the files it brings (not those it carries) and the
+  # picture sent with it, which counts as a file does.
+  defp new_bytes(files, thumbnail) do
+    sent = files |> Enum.filter(&Map.has_key?(&1, :body)) |> Enum.map(& &1.bytes) |> Enum.sum()
+
+    case thumbnail do
+      %{body: _, bytes: picture} -> sent + picture
+      _carried_or_none -> sent
+    end
+  end
+
+  # The size and picture the artifact's address serves: the new version's, unless the owner
+  # pinned another, which keeps serving.
+  defp in_force(%Artifact{pinned: pinned} = artifact, _bytes, _thumbnail) when is_integer(pinned),
+    do: %{bytes: artifact.bytes, thumbnail: artifact.thumbnail}
+
+  defp in_force(_artifact, bytes, thumbnail), do: %{bytes: bytes, thumbnail: thumbnail_json(thumbnail)}
 
   # An artifact moved to another team takes what it already holds to that team's quota.
   defp moved_bytes(%Artifact{team_id: from, total_bytes: bytes}, to) when from != to, do: bytes
