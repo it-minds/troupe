@@ -745,7 +745,8 @@ jobs:
         run: sh scripts/signing/macos-keychain.sh self-signed
 
       # tauri-action takes the App Store Connect key as a file, APPLE_API_KEY_PATH; a secret
-      # cannot be a file, so the key's text is written to one only this job reads.
+      # cannot be a file, so the key's text is written to one only this job reads, and
+      # removed once the bundles are built ("Remove the notarisation key", below).
       - name: The notarisation key, as a file (macOS)
         id: apikey
         if: runner.os == 'macOS' && steps.sign.outputs.mode == 'release'
@@ -754,6 +755,7 @@ jobs:
         env:
           APPLE_API_PRIVATE_KEY: ${{ secrets.APPLE_API_PRIVATE_KEY }}
         run: |
+          set +x
           umask 077
           dir="$RUNNER_TEMP/private_keys"; mkdir -p "$dir"
           printf '%s\n' "$APPLE_API_PRIVATE_KEY" > "$dir/notary.p8"
@@ -807,6 +809,18 @@ jobs:
         with:
           projectPath: clients/gui/apps/desktop
           args: --target ${{ matrix.target }} --config src-tauri/tauri.signing.conf.json
+
+      # Whether the build passed or failed: nothing after it needs the key, and a runner's
+      # temporary directory is not a place to leave it.
+      - name: Remove the notarisation key (macOS)
+        if: always() && steps.apikey.outcome == 'success'
+        shell: bash
+        working-directory: .
+        env:
+          KEY: ${{ steps.apikey.outputs.path }}
+        run: |
+          rm -f "$KEY"
+          test ! -e "$KEY"
 
       # The same configuration and sign command, with the test's identity: no certificate
       # for Tauri to import on macOS, and no notarisation, which needs Apple.

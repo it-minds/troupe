@@ -125,7 +125,8 @@ defmodule Troupe.Release.SigningWorkflowTest do
     assert is_binary(own) and own != ""
 
     downloads =
-      for step <- signing["manifest"]["steps"], uses("actions/download-artifact").(step),
+      for step <- signing["manifest"]["steps"],
+          uses("actions/download-artifact").(step),
           do: step["with"]["pattern"]
 
     assert downloads != []
@@ -134,6 +135,30 @@ defmodule Troupe.Release.SigningWorkflowTest do
     # A release builds once, under the names its `attach` job looks for.
     refute Map.has_key?(workflow("release.yml")["jobs"]["native"]["with"], "artifact_prefix")
     refute Map.has_key?(workflow("ci.yml")["jobs"]["native"]["with"] || %{}, "artifact_prefix")
+  end
+
+  # tauri-action reads the App Store Connect key from a file, which the desktop job writes
+  # from the secret; it must not outlive the build, failed or not.
+  test "the notarisation key the desktop job writes to a file is removed after the build" do
+    steps = workflow("native.yml")["jobs"]["desktop"]["steps"]
+    written = step_index(steps, &(&1["id"] == "apikey"))
+    assert written, "the desktop job writes no notarisation key"
+    assert Enum.at(steps, written)["run"] =~ "set +x"
+
+    signed = step_index(steps, named("Build the bundles (signed)"))
+
+    assert Enum.at(steps, signed)["env"]["APPLE_API_KEY_PATH"] ==
+             "${{ steps.apikey.outputs.path }}"
+
+    removed =
+      step_index(
+        steps,
+        &((&1["run"] || "") =~ "rm -f" and (&1["if"] || "") =~ "steps.apikey.outcome")
+      )
+
+    assert removed && removed > signed, "the notarisation key is not removed after the build"
+    assert Enum.at(steps, removed)["if"] =~ "always()"
+    assert Enum.at(steps, removed)["env"]["KEY"] == "${{ steps.apikey.outputs.path }}"
   end
 
   test "the release's files are signed before they are packed" do
