@@ -17,7 +17,11 @@ defmodule Troupe.Budget do
             turns: 0,
             input_tokens: 0,
             output_tokens: 0,
-            started_at: nil,
+            # The wall clock is working time: what the stretches of work so far added up
+            # to, and when the one under way began, `nil` while the agent rests or waits on
+            # a person.
+            worked_ms: 0,
+            working_since: nil,
             # The allowance as first given, once a grant has enlarged it: what `allow` on the
             # budget question buys again (Decision 660). `nil` until then.
             original: nil,
@@ -33,7 +37,8 @@ defmodule Troupe.Budget do
           turns: non_neg_integer(),
           input_tokens: non_neg_integer(),
           output_tokens: non_neg_integer(),
-          started_at: integer() | nil,
+          worked_ms: non_neg_integer(),
+          working_since: integer() | nil,
           original: slice() | nil,
           lifted: [exhaustion()]
         }
@@ -48,13 +53,40 @@ defmodule Troupe.Budget do
           wall_clock_ms: pos_integer()
         }
 
-  @doc "Start the wall clock. Called when an agent begins, and on replay."
-  @spec start(t()) :: t()
-  def start(%__MODULE__{started_at: nil} = budget) do
-    %{budget | started_at: System.monotonic_time(:millisecond)}
+  @doc """
+  Start the wall clock: the agent is working. The clock counts working time and nothing
+  else, so an agent resting between turns, or waiting on an approval or a question,
+  spends none of it. Called when a turn starts, when a compaction starts, and when the
+  last call waiting on a person has its answer. A clock already running is left alone.
+  """
+  @spec work(t()) :: t()
+  def work(%__MODULE__{working_since: nil} = b),
+    do: %{b | working_since: System.monotonic_time(:millisecond)}
+
+  def work(%__MODULE__{} = b), do: b
+
+  @doc """
+  Stop the wall clock: the turn ended, or the agent waits on a person. The stretch just
+  worked is added to the time worked. A clock already stopped is left alone.
+  """
+  @spec pause(t()) :: t()
+  def pause(%__MODULE__{working_since: nil} = b), do: b
+
+  def pause(%__MODULE__{working_since: since} = b) do
+    now = System.monotonic_time(:millisecond)
+    %{b | worked_ms: b.worked_ms + max(now - since, 0), working_since: nil}
   end
 
-  def start(%__MODULE__{} = budget), do: budget
+  @doc "Whether the wall clock is running."
+  @spec working?(t()) :: boolean()
+  def working?(%__MODULE__{working_since: since}), do: since != nil
+
+  @doc "The working time so far, in milliseconds, the stretch under way included."
+  @spec elapsed(t()) :: non_neg_integer()
+  def elapsed(%__MODULE__{working_since: nil} = b), do: b.worked_ms
+
+  def elapsed(%__MODULE__{working_since: since} = b),
+    do: b.worked_ms + max(System.monotonic_time(:millisecond) - since, 0)
 
   @doc """
   Whether another LLM request is allowed, and if not, which limit stopped it.
@@ -234,9 +266,6 @@ defmodule Troupe.Budget do
   def usage(%__MODULE__{} = b) do
     %Usage{input_tokens: b.input_tokens, output_tokens: b.output_tokens}
   end
-
-  defp elapsed(%__MODULE__{started_at: nil}), do: 0
-  defp elapsed(%__MODULE__{started_at: at}), do: System.monotonic_time(:millisecond) - at
 
   defp left(%__MODULE__{lifted: lifted}, limit, remaining, first),
     do: if(limit in lifted, do: first, else: remaining)

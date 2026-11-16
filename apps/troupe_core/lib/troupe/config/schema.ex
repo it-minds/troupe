@@ -330,7 +330,10 @@ defmodule Troupe.Config.Schema do
         )
       ]),
       group("Budget", [
-        spec("max_turns", {:integer, 1}, "Model calls an agent may make before its budget stops it.",
+        spec(
+          "max_turns",
+          {:integer, 1},
+          "Model calls an agent may make before its budget is spent: then it asks to go on, or stops (`budget_asks`).",
           default: 40,
           field: :max_turns,
           label: "max turns",
@@ -344,7 +347,11 @@ defmodule Troupe.Config.Schema do
           default: 400_000,
           field: :max_output_tokens
         ),
-        spec("wall_clock_ms", {:integer, 1}, "How long an agent may run.",
+        spec(
+          "wall_clock_ms",
+          {:integer, 1},
+          "How long an agent may work, in working time: each turn from its start to its end, summed. " <>
+            "Resting between turns and waiting on an approval or a question do not count.",
           default: 1_800_000,
           field: :wall_clock_ms,
           enforce: :ceiling
@@ -368,7 +375,11 @@ defmodule Troupe.Config.Schema do
           field: :full_send,
           label: "full send"
         ),
-        spec("budget_asks", :boolean, "A spent budget asks the person attached, rather than stopping.",
+        spec(
+          "budget_asks",
+          :boolean,
+          "A spent budget asks the person attached, rather than stopping. A pod session asks too, " <>
+            "unless its terms set a turn or time limit: then that limit is a contract and it stops.",
           default: true,
           field: :budget_asks
         )

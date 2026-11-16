@@ -22,6 +22,9 @@ defmodule Troupe.Remote.Translate do
   @key_errors ["no API key is configured", "the provider rejected the credentials"]
   @plane_key_step "the model's key is the plane's, not this machine's: ask the plane's administrator"
 
+  # `agent_woken`: a root that had finished took the new input as its next turn.
+  @woken "the agent had finished; new input picked the conversation back up"
+
   @typedoc """
   What the translator has to remember between events of one session, and what the
   window it opens says the session works in: `:remote` for a worker on a plane,
@@ -31,7 +34,10 @@ defmodule Troupe.Remote.Translate do
   `spawned /root`. `budget` is each budget question not yet answered: whether it is
   still asked, who asked, and what its `budget_ask_started` said. `me` is the subject this
   client is connected as, once `initialize` said it: a line another person sent is drawn
-  with their name, and one of this person's own is not.
+  with their name, and one of this person's own is not. `limits` is each window agent's
+  budget ceilings by dimension, as its `budget_warning`s and `budget_ask_started`s said
+  them, and `stopped` how each one ended that the harness wakes no more (its reason, and
+  the limit a spent budget names): what a dropped input is said with.
   """
   @type memory :: %{
           agents: MapSet.t(),
@@ -39,7 +45,9 @@ defmodule Troupe.Remote.Translate do
           isolation: atom(),
           profile: String.t() | nil,
           budget: %{String.t() => {:asked | :ended, String.t(), map()}},
-          me: String.t() | nil
+          me: String.t() | nil,
+          limits: %{String.t() => %{String.t() => number()}},
+          stopped: %{String.t() => {String.t(), String.t() | nil}}
         }
 
   @spec memory(atom(), String.t() | nil) :: memory()
@@ -50,7 +58,9 @@ defmodule Troupe.Remote.Translate do
       isolation: isolation,
       profile: profile,
       budget: %{},
-      me: nil
+      me: nil,
+      limits: %{},
+      stopped: %{}
     }
 
   @doc "Records the subject this client is connected as, from `initialize`'s principal."
@@ -437,7 +447,7 @@ defmodule Troupe.Remote.Translate do
           agent,
           call_id(data),
           %{detail: data["detail"] || "budget exhausted", dimension: dimension(data["dimension"])},
-          memory
+          ceiling(memory, agent, data)
         )
 
       "budget_ask_answered" ->
@@ -556,22 +566,28 @@ defmodule Troupe.Remote.Translate do
         {[
            emit.(:remote_note, %{text: "agent started" <> as(data)}),
            emit.(:agent_named, %{name: data["profile"]})
-         ], memory}
+         ], unstop(memory, agent)}
 
       "agent_restarted" ->
         {[emit.(:remote_note, %{text: "agent restarted"})], memory}
 
-      # A finished root agent took new input as a turn (troupe-remote Decision 635):
-      # the window is working again, and says so.
+      # A finished root agent took new input as a turn: the window is working again, and
+      # says the conversation was picked back up. Only a finish is woken so.
       "agent_woken" ->
-        {[emit.(:remote_note, %{text: "woken"}), emit.(:agent_state, %{to: :thinking})], memory}
+        {[emit.(:remote_note, %{text: @woken}), emit.(:agent_state, %{to: :thinking})],
+         unstop(memory, agent)}
 
       # The reason rides along, so a reader that must tell a finish from a stop short (the
       # headless printer's exit code) does not have to parse the note. The note comes
-      # first: a headless run ends at the state, and would end without the summary.
+      # first: a headless run ends at the state, and would end without the summary. A
+      # window's agent that ended so the harness drops its input says why, after it, for
+      # its input line.
       "agent_done" ->
+        {stopped, memory} = done_stop(emit, agent, data, memory)
+
         {done_note(emit, data) ++
-           [emit.(:agent_state, spent(%{to: :done, reason: data["reason"]}, data))], memory}
+           [emit.(:agent_state, spent(%{to: :done, reason: data["reason"]}, data))] ++ stopped,
+         memory}
 
       # The turn is over and the agent waits for input: the same `idle` the live
       # `agent_state` says, but from the log, so it is neither dropped nor missed by a
@@ -596,12 +612,21 @@ defmodule Troupe.Remote.Translate do
       "compacted" ->
         {[emit.(:remote_note, %{text: "context compacted"})] ++ summarised(emit, data), memory}
 
+      # The limit, where the `agent_done` before it did not name it, goes to the input line.
       "budget_exhausted" ->
-        {[emit.(:remote_note, %{text: "budget exhausted" <> limit(data)})], memory}
+        {named, memory} = exhausted_limit(emit, agent, data, memory)
+        {[emit.(:remote_note, %{text: "budget exhausted" <> limit(data)})] ++ named, memory}
 
-      # A limit is near (troupe-remote Decision 655): durable on the wire, shown once by
-      # the window, which already knew how.
+      # Input a done agent did not take: dropped, and said so with why and what to do.
+      # Never the picked-up line, which is `agent_woken`'s.
+      "input_after_done" ->
+        {[emit.(:remote_note, %{text: not_taken(memory, agent)})], memory}
+
+      # A limit is near: durable on the wire, shown once by the window, which already knew
+      # how. Its ceiling is kept, to name a spent limit with its size.
       "budget_warning" ->
+        memory = ceiling(memory, agent, data)
+
         {[
            emit.(:budget_warning, %{
              dimension: dimension(data["dimension"]),
@@ -670,7 +695,7 @@ defmodule Troupe.Remote.Translate do
            emit.(:agent_named, %{name: data["profile"]})
          ], memory}
 
-      type when type in ["input_after_done", "trigger_fired"] ->
+      "trigger_fired" = type ->
         {[emit.(:remote_note, %{text: generic(type, data)})], memory}
 
       type when type in ["session.activated", "session_activated"] ->
@@ -906,6 +931,135 @@ defmodule Troupe.Remote.Translate do
 
   defp count(1, noun), do: "1 #{noun}"
   defp count(n, noun), do: "#{n} #{noun}s"
+
+  # How a window's agent ended that the harness wakes no more: every end but `finished`
+  # (new input resumes it) and `llm_error` (a root rests on one, and the next message is a
+  # retry). What is sent to one of these is dropped, with `input_after_done`.
+  @stops %{
+    "refused" => "the model refused to go on",
+    "output_truncated" => "the model's reply was cut off at its length limit",
+    "empty_reply" => "the model's reply came back empty",
+    "tool_failures" => "a tool kept failing"
+  }
+
+  defp done_stop(emit, agent, %{"reason" => reason} = data, memory)
+       when is_binary(reason) and reason not in ["finished", "llm_error"] do
+    if agent == root(agent) do
+      limit = if is_binary(data["limit"]), do: data["limit"]
+      memory = put_in(memory, [:stopped, agent], {reason, limit})
+      {[emit.(:stopped, %{why: stopped_because(memory, agent)})], memory}
+    else
+      {[], memory}
+    end
+  end
+
+  defp done_stop(_emit, agent, _data, memory), do: {[], unstop(memory, agent)}
+
+  defp unstop(memory, agent), do: %{memory | stopped: Map.delete(memory.stopped, agent)}
+
+  # A spent budget's `agent_done` from a harness that did not name the limit on it.
+  defp exhausted_limit(emit, agent, %{"limit" => limit}, memory) when is_binary(limit) do
+    case memory.stopped do
+      %{^agent => {"budget_exhausted", nil}} ->
+        memory = put_in(memory, [:stopped, agent], {"budget_exhausted", limit})
+        {[emit.(:stopped, %{why: stopped_because(memory, agent)})], memory}
+
+      _ ->
+        {[], memory}
+    end
+  end
+
+  defp exhausted_limit(_emit, _agent, _data, memory), do: {[], memory}
+
+  # A ceiling a `budget_warning` or `budget_ask_started` says, for naming a spent limit
+  # with its size.
+  defp ceiling(memory, agent, %{"dimension" => dim, "limit" => n})
+       when is_binary(dim) and is_number(n) and n > 0 do
+    case limit_dimension(dim) do
+      nil -> memory
+      d -> %{memory | limits: Map.update(memory.limits, agent, %{d => n}, &Map.put(&1, d, n))}
+    end
+  end
+
+  defp ceiling(memory, _agent, _data), do: memory
+
+  @limit_dimensions %{
+    "max_turns" => "turns",
+    "turns" => "turns",
+    "max_input_tokens" => "input",
+    "input" => "input",
+    "max_output_tokens" => "output",
+    "output" => "output",
+    "wall_clock" => "wall",
+    "wall" => "wall"
+  }
+  defp limit_dimension(name), do: Map.get(@limit_dimensions, name)
+
+  # Why the agent takes no more input, as the clause after "stopped:".
+  defp stopped_because(memory, agent) do
+    case Map.get(memory.stopped, agent) do
+      {"budget_exhausted", limit} ->
+        limit_words(limit, Map.get(memory.limits, agent, %{})) <> " is spent"
+
+      {reason, _limit} ->
+        Map.get(@stops, reason, "it ended " <> String.replace(reason, "_", " "))
+
+      nil ->
+        nil
+    end
+  end
+
+  @doc """
+  A spent budget limit in words, with its size where the session said it: "its 30-minute
+  working limit", "its 40-turn limit", "its 6M input-token limit"; "its budget" for a
+  limit this client does not know.
+  """
+  @spec limit_words(String.t() | nil, map()) :: String.t()
+  def limit_words(limit, limits) do
+    dim = limit && limit_dimension(limit)
+    n = dim && Map.get(limits, dim)
+
+    case {dim, n} do
+      {"wall", n} when is_number(n) -> "its #{duration(n)} working limit"
+      {"wall", _} -> "its working-time limit"
+      {"turns", n} when is_number(n) -> "its #{n}-turn limit"
+      {"turns", _} -> "its turn limit"
+      {"input", n} when is_number(n) -> "its #{token_count(n)} input-token limit"
+      {"input", _} -> "its input-token limit"
+      {"output", n} when is_number(n) -> "its #{token_count(n)} output-token limit"
+      {"output", _} -> "its output-token limit"
+      _ -> "its budget"
+    end
+  end
+
+  defp duration(ms) when ms >= 3_600_000 and rem(trunc(ms), 3_600_000) == 0,
+    do: "#{div(trunc(ms), 3_600_000)}-hour"
+
+  defp duration(ms) when ms >= 60_000, do: "#{round(ms / 60_000)}-minute"
+  defp duration(ms), do: "#{round(ms / 1000)}-second"
+
+  defp token_count(n) when n >= 1_000_000, do: one_place(n / 1_000_000) <> "M"
+  defp token_count(n) when n >= 1_000, do: one_place(n / 1_000) <> "k"
+  defp token_count(n), do: to_string(n)
+
+  defp one_place(x) do
+    rounded = Float.round(x * 1.0, 1)
+
+    if rounded == trunc(rounded),
+      do: Integer.to_string(trunc(rounded)),
+      else: Float.to_string(rounded)
+  end
+
+  # `input_after_done`: the message was dropped, why, and what to do instead.
+  defp not_taken(memory, agent) do
+    why =
+      case stopped_because(memory, root(agent)) do
+        nil -> ""
+        clause -> " (#{clause})"
+      end
+
+    "Your message was not taken: the session had stopped#{why}. Start a new session to continue."
+  end
 
   defp ended_by_parent("stopped"), do: "stopped by its parent"
   defp ended_by_parent("cancelled"), do: "stopped by the cancel"

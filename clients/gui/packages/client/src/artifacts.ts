@@ -164,6 +164,12 @@ export interface ArtifactComment {
   author: ArtifactPerson;
   body: string;
   created_at: string;
+  /** When its author last edited it; null or absent for one never edited. */
+  edited_at?: string | null;
+  /** Whether the caller may edit it: its author, while they may write in the thread. Absent from a plane from before it. */
+  may_edit?: boolean;
+  /** Whether the caller may delete it: its author, an owner, or whoever may take the artifact down. Absent from a plane from before it. */
+  may_delete?: boolean;
 }
 
 /** What `artifact.comments` answers: the thread, oldest first, and whether the caller may write in it. */
@@ -383,6 +389,16 @@ export class ArtifactApi {
   /** A comment in its thread, by whoever holds comment, edit or owner on it. */
   comment(id: string, body: string): Promise<{ id: string; comment: ArtifactComment }> {
     return this.rpc<{ id: string; comment: ArtifactComment }>("artifact.comment", { id, body });
+  }
+
+  /** Delete a comment from its thread: its author, an owner, or whoever may take the artifact down. */
+  deleteComment(id: string, comment: string): Promise<{ id: string; comment: string; deleted: boolean }> {
+    return this.rpc<{ id: string; comment: string; deleted: boolean }>("artifact.comment.delete", { id, comment });
+  }
+
+  /** A comment's text replaced by its author, marked edited. */
+  editComment(id: string, comment: string, body: string): Promise<{ id: string; comment: ArtifactComment }> {
+    return this.rpc<{ id: string; comment: ArtifactComment }>("artifact.comment.edit", { id, comment, body });
   }
 
   /** Revoke a link by its id, or one person from every link by their subject. */

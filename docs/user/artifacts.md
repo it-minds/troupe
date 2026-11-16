@@ -166,10 +166,17 @@ them. Its owners write them, and so does anybody a link or a share by name gave 
 the thread and writes in it once an owner gives them a role. A comment is at most 4000
 characters. Its writing is in the audit trail, never its text.
 
-The session the artifact came from, where that is a pod's and it is running, hears each
-comment: its transcript shows it, so whoever steers the session can ask the agent to act on
-it. A comment never reaches an agent on its own. The gallery's cards say how many comments an
-artifact has.
+Whoever wrote a comment can **Edit** it, which marks it edited, and **Delete** it. The
+artifact's owners delete anybody's, and so do whoever may take the artifact down: a platform
+administrator, and the administrator of the team it is for. A deleted comment is gone from
+the thread for everybody. Each edit and deletion is in the audit trail, never the text; you
+see the buttons only on the comments you may change.
+
+The session the artifact came from hears each comment while it is running: its transcript
+shows it, so whoever steers the session can ask the agent to act on it. A session on a pod
+hears it at once; a session on your own computer hears it when your daemon next asks the
+plane, within five minutes, and not while your app is in Local only. A comment never reaches
+an agent on its own. The gallery's cards say how many comments an artifact has.
 
 ## Reading
 

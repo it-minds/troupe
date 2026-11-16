@@ -4433,6 +4433,11 @@ defmodule Troupe.UI.TUI.Server do
       question = text != "" && pending_of(w, state.pane.agent || path, [:question, :budget]) ->
         Client.answer(sid, question.call_id, text)
 
+      # An agent that takes no more input would drop the message: it stays in the box, and
+      # the line under the screen says why.
+      stopped = Model.stopped(state.model, path) ->
+        {:stopped, stopped}
+
       Map.has_key?(state.attached, path) ->
         :attached
 
@@ -4440,6 +4445,7 @@ defmodule Troupe.UI.TUI.Server do
         Client.send_input(sid, path, text)
     end
     |> case do
+      {:stopped, sentence} -> notice(state, sentence)
       :attached -> send_attached(state, path, text)
       # Any Enter that reaches here either answered the question or replaced it
       # with fresh input, so a half-built selection is stale either way.

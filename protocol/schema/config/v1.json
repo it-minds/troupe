@@ -375,7 +375,7 @@
       ]
     },
     "max_turns": {
-      "description": "Model calls an agent may make before its budget stops it. An organisation may enforce it, and nothing on this machine then goes past it.",
+      "description": "Model calls an agent may make before its budget is spent: then it asks to go on, or stops (`budget_asks`). An organisation may enforce it, and nothing on this machine then goes past it.",
       "default": 40,
       "type": [
         "integer",
@@ -402,7 +402,7 @@
       "minimum": 1
     },
     "wall_clock_ms": {
-      "description": "How long an agent may run. An organisation may enforce it, and nothing on this machine then goes past it.",
+      "description": "How long an agent may work, in working time: each turn from its start to its end, summed. Resting between turns and waiting on an approval or a question do not count. An organisation may enforce it, and nothing on this machine then goes past it.",
       "default": 1800000,
       "type": [
         "integer",
@@ -438,7 +438,7 @@
       ]
     },
     "budget_asks": {
-      "description": "A spent budget asks the person attached, rather than stopping.",
+      "description": "A spent budget asks the person attached, rather than stopping. A pod session asks too, unless its terms set a turn or time limit: then that limit is a contract and it stops.",
       "default": true,
       "type": [
         "boolean",

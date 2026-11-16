@@ -278,10 +278,11 @@ console.log(`
 
 Sign in to the plane URL above. A browser is sent to the provider and straight back as
 Alice; a device code approves itself.
-Prompts understand four prefixes: "approve: <cmd>" asks for an approval,
+Prompts understand five prefixes: "approve: <cmd>" asks for an approval,
 "big: <label>" returns a tool result too large to inline, "show: <title>" puts
-notes.md in the session's scratchpad (again for its next version), and "quiet: …"
-answers without streaming.
+notes.md in the session's scratchpad (again for its next version), "spend:" runs
+the session's 30-minute working limit out (it takes no more input after), and
+"quiet: …" answers without streaming.
 
 This computer's daemon is a fake too: open the app at
   ${origins[0]}/#daemon=${daemon.port}:${daemon.token}

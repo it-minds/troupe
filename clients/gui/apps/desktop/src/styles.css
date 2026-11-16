@@ -5445,6 +5445,16 @@ pre.instruction {
 .repertoire-aside .comment-form button {
   align-self: flex-end;
 }
+/* A comment's own Edit and Delete, and Save beside Cancel while it is edited. */
+.repertoire-aside .comments .comment-actions {
+  margin: var(--space-1) 0 0;
+}
+.repertoire-aside .comment-edit-actions {
+  display: flex;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
 .audiences .kind-filter select {
   min-height: var(--touch-target);
 }

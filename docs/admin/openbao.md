@@ -47,6 +47,12 @@ ServiceAccount token says so at start, and on the Overview, with the role line a
 | `invites` (only for inviting people into private sessions) | `troupe-plane-invites` | destroy the copy of a private session's key its owner's daemon put in an invitee's own slot, when the invitation is taken back or the session erased | an erasure of a private session somebody was invited into stays pending, and taking an invitation back leaves the copy it gave in the invitee's slot |
 | `github-app` (only with a GitHub App) | `troupe-plane-github` | import, sign with and delete the GitHub App's key and webhook secret | a GitHub App cannot be set up, and one set up before stops signing |
 
+`token_policies` replaces the role's whole list, so each section below ends with the
+same line, naming every policy in the table, the optional ones too: OpenBao grants
+nothing for a name it holds no policy under, and the plane checks what its token can
+do, not what the role names. Run the sections in any order, one alone or again after
+an upgrade, and the role still carries every policy written.
+
 ### `troupe-plane-session-tokens`
 
 To sign session tokens, and read the key's public half that workers check them with.
@@ -61,7 +67,7 @@ path "transit/keys/troupe-session-tokens" {
   capabilities = ["read"]
 }
 POLICY
-bao write auth/kubernetes/role/troupe-plane token_policies=troupe-plane-session-tokens,troupe-plane-signing,troupe-plane
+bao write auth/kubernetes/role/troupe-plane token_policies=troupe-plane-session-tokens,troupe-plane-signing,troupe-plane,troupe-plane-invites,troupe-plane-github
 ```
 
 ### `troupe-plane-signing`
@@ -82,7 +88,7 @@ path "transit/sign/troupe-plane-signing" {
   capabilities = ["create", "update"]
 }
 POLICY
-bao write auth/kubernetes/role/troupe-plane token_policies=troupe-plane-session-tokens,troupe-plane-signing,troupe-plane
+bao write auth/kubernetes/role/troupe-plane token_policies=troupe-plane-session-tokens,troupe-plane-signing,troupe-plane,troupe-plane-invites,troupe-plane-github
 ```
 
 ### `troupe-plane`
@@ -103,7 +109,7 @@ path "secret/metadata/troupe/people/+/mcp/*" {
   capabilities = ["list", "read"]
 }
 POLICY
-bao write auth/kubernetes/role/troupe-plane token_policies=troupe-plane-session-tokens,troupe-plane-signing,troupe-plane
+bao write auth/kubernetes/role/troupe-plane token_policies=troupe-plane-session-tokens,troupe-plane-signing,troupe-plane,troupe-plane-invites,troupe-plane-github
 ```
 
 ### `troupe-plane-invites`
@@ -116,7 +122,7 @@ path "secret/metadata/troupe/people/+/invited/*" {
   capabilities = ["delete"]
 }
 POLICY
-bao write auth/kubernetes/role/troupe-plane token_policies=troupe-plane-session-tokens,troupe-plane-signing,troupe-plane,troupe-plane-invites
+bao write auth/kubernetes/role/troupe-plane token_policies=troupe-plane-session-tokens,troupe-plane-signing,troupe-plane,troupe-plane-invites,troupe-plane-github
 ```
 
 ### `troupe-plane-github`
@@ -169,7 +175,7 @@ path "transit/hmac/troupe-github-webhook/sha2-256" {
   capabilities = ["create", "update"]
 }
 POLICY
-bao write auth/kubernetes/role/troupe-plane token_policies=troupe-plane-session-tokens,troupe-plane-signing,troupe-plane,troupe-plane-github
+bao write auth/kubernetes/role/troupe-plane token_policies=troupe-plane-session-tokens,troupe-plane-signing,troupe-plane,troupe-plane-invites,troupe-plane-github
 ```
 
 ## 3. Workers and people

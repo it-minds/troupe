@@ -51,6 +51,36 @@ defmodule Troupe.WindowAttentionTest do
       assert [%{state: :running}] = Model.windows(answered)
     end
 
+    # Issue #967: the start's question (whether to start a workspace's MCP server) made the
+    # session's own agent look given work, and once it was answered it read running and
+    # starting, with a spinner, for as long as the session was open.
+    test "a start's question answered with nothing sent leaves the session's agent idle" do
+      [started, created] = start()
+      asked = [started, question_asked("root", "q_mcp"), created]
+
+      assert [%{path: "root", state: :needs_input}] = Model.windows(fold(asked))
+      assert Model.attention_summary(fold(asked)) == "1 need input"
+
+      # The whole log of such a session: nothing after the answer.
+      answered = fold(asked ++ [question_answered("root", "q_mcp")])
+
+      assert Model.windows(answered) == []
+      assert %{state: :idle, started: false} = w = Model.session_window(answered)
+      assert Model.activity_line(w, "root", 0, 10) == nil
+      assert Model.curtain_line(w, "root", 0, 10) == nil
+      assert Model.attention_summary(answered) == "idle"
+    end
+
+    test "a turn after the start's question still runs" do
+      model =
+        fold(
+          start() ++
+            [question_asked("root", "q_mcp"), question_answered("root", "q_mcp")] ++ turn()
+        )
+
+      assert [%{path: "root", state: :running}] = Model.windows(model)
+    end
+
     test "a turn that ended is done, and unread" do
       model = fold(turn() ++ [wire("root", "turn_ended")])
 
@@ -278,6 +308,36 @@ defmodule Troupe.WindowAttentionTest do
       refute Model.attention_summary(user_state(pid).model) =~ "failed"
     end
 
+    # Issue #967, on screen: asked, the session's agent is a row that needs you; answered
+    # with nothing sent, the home reads as a start that asked nothing.
+    test "the start's question answered leaves nothing running on the home",
+         %{sid: sid, pid: pid, session: session} do
+      inject(pid, sid, [question_asked("root", "q_mcp")])
+      asked = screen_text(pid, session)
+      assert asked =~ "1 root · question: Which colour?"
+      # The row's word blinks between the two.
+      assert asked =~ ~r/1 root\s+build\s+(needs you|▶ you)/
+      refute asked =~ "Nothing running"
+
+      inject(pid, sid, [question_answered("root", "q_mcp")])
+      home = screen_text(pid, session)
+
+      assert home =~ "Nothing running. Type what you want done"
+      refute home =~ ~r/1 root\s/
+      refute home =~ "starting"
+      refute home =~ "gathers on stage"
+      assert Model.windows(user_state(pid).model) == []
+    end
+
+    test "the start's question answered and a turn after it is running",
+         %{sid: sid, pid: pid, session: session} do
+      inject(pid, sid, [question_asked("root", "q_mcp"), question_answered("root", "q_mcp")])
+      inject(pid, sid, turn())
+
+      assert screen_text(pid, session) =~ ~r/1 root\s.*running/
+      refute screen_text(pid, session) =~ "Nothing running"
+    end
+
     test "a window that ends while it is open is read", %{sid: sid, pid: pid} do
       inject(pid, sid, turn("build-1"))
       open(pid, "build-1")
@@ -339,6 +399,14 @@ defmodule Troupe.WindowAttentionTest do
   end
 
   ## Wire events, as a worker receives them
+
+  # A session's start before its first turn: its agent started, and the session created.
+  defp start do
+    [
+      wire("root", "agent_started", %{"mode" => "root", "profile" => "build"}),
+      wire("root", "session_created", %{"profile" => "build"})
+    ]
+  end
 
   # A turn the window's agent is taking: the person's line and the model asked.
   defp turn(agent \\ "root") do

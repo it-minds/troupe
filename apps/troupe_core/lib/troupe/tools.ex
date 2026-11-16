@@ -8,7 +8,7 @@ defmodule Troupe.Tools do
   model, not the security boundary.
   """
 
-  alias Troupe.Agent.Definition
+  alias Troupe.Agent.{Definition, Server}
   alias Troupe.Config.Permissions
   alias Troupe.Session.{Approvals, ClientTools}
   alias Troupe.{Skills, Tool}
@@ -472,9 +472,9 @@ defmodule Troupe.Tools do
   defp answered(_tool, name, _args, ctx, _denied),
     do: Result.error(ctx.call_id, name, {:denied, name})
 
+  # The time the call waits on the person is not the agent's working time.
   defp ask(ctx, name, args, always?, rule) do
-    Approvals.request(
-      ctx.session_id,
+    req =
       %{
         call_id: ctx.call_id,
         tool: name,
@@ -485,7 +485,8 @@ defmodule Troupe.Tools do
       |> put_cwd(ctx, args)
       |> put_rule(rule)
       |> put_publication(name, args)
-    )
+
+    Server.waiting_on_person(ctx.agent_pid, ctx.call_id, fn -> Approvals.request(ctx.session_id, req) end)
   end
 
   # The folder the call acts in, so whoever answers sees it wherever they are: the call's

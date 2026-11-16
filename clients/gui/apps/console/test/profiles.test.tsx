@@ -212,6 +212,7 @@ describe("the editor", () => {
         orgMount: false,
         repositoryOverridesBundle: false,
         forbidPersonalTools: false,
+        memoryProposals: true,
         allowPublic: false,
         denyPaths: "",
         maxPushes: "",
@@ -263,6 +264,7 @@ describe("the editor", () => {
       orgMount: false,
       repositoryOverridesBundle: false,
       forbidPersonalTools: false,
+      memoryProposals: true,
       budget: "",
       allowPublic: false,
       denyPaths: "secrets/\n *.tfstate \n",
@@ -292,6 +294,24 @@ describe("the editor", () => {
     await waitFor(() => says("pushes and pull requests allowed"), "dev read again");
     await sees("secrets/, and");
     await sees(".env, .env.*, *.pem");
+  });
+
+  // #965: a profile refuses its sessions' proposals to shared memory; absent is the setting's.
+  it("switches memory proposals off for a profile's sessions, behind the plane's preview", async () => {
+    await open("#/profiles/dev");
+    await waitFor(() => heading() === "dev" && says("Agents may propose memory"), "dev");
+    await sees("as the platform setting says");
+    button("Change dev")!.click();
+    const switched = (await waitFor(() => field("Agents may propose memory"), "the editor")) as HTMLSelectElement;
+    expect([...switched.options].map((o) => o.textContent)).toEqual(["as the platform setting says", "refused for its sessions"]);
+    type(switched, "false");
+    button("Preview")!.click();
+    await waitFor(() => says("What will happen"), "the preview");
+    await sees("spec.memoryProposals");
+    button("Apply")!.click();
+    await waitFor(() => says("Recorded in the audit as profile.put on dev"), "the audit's note");
+    expect(fake.admin.profiles.find((p) => p.name === "dev")!.spec!["memoryProposals"]).toBe(false);
+    await waitFor(() => says("refused for its sessions"), "dev read again");
   });
 
   it("says at the endpoint, before anything is sent, that model settings need one", async () => {
@@ -486,6 +506,24 @@ describe("a profile that extends another", () => {
     button("Preview")!.click();
     await waitFor(() => says("a profile that extends another can only lower its budget"), "the refusal");
     expect(fake.admin.profiles.find((p) => p.name === "data-team")!.budget_micros).toBe(500_000_000);
+  });
+
+  // #965: a parent whose sessions may not propose to shared memory keeps its child from it,
+  // whatever the child says; the page says whose refusal it is, and the preview why.
+  it("has its parent's refusal of memory proposals, which the preview says it cannot undo", async () => {
+    fake.admin.profiles.find((p) => p.name === "dev")!.spec!["memoryProposals"] = false;
+    await fake.admin.call(PEOPLE.alice.subject, "admin.profile.put", { profile: { ...dataTeam, spec: { ...dataTeam.spec, memoryProposals: true } } });
+    await open("#/profiles/data-team");
+    await waitFor(() => heading() === "data-team" && says("Agents may propose memory"), "data-team");
+    await sees("refused for its sessions, as dev says");
+
+    button("Change data-team")!.click();
+    const switched = (await waitFor(() => field("Agents may propose memory"), "the editor")) as HTMLSelectElement;
+    expect(switched.value).toBe("true");
+    expect([...switched.options].map((o) => o.textContent)).toEqual(["dev's", "as the platform setting says", "refused for its sessions"]);
+    button("Preview")!.click();
+    await waitFor(() => says("What will happen"), "the preview");
+    await sees("data-team sets memoryProposals to true, and dev's false holds: a profile cannot undo a restriction of the profile it extends.");
   });
 
   it("keeps its parent from being deleted while it extends it", async () => {

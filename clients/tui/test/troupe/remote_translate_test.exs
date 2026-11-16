@@ -35,6 +35,100 @@ defmodule Troupe.RemoteTranslateTest do
     events
   end
 
+  # After a budget stop the harness drops what is sent and writes `input_after_done`; only a
+  # root that finished is woken, with `agent_woken` (troupe #987).
+  defp translate_all(events) do
+    {out, _memory} =
+      Enum.reduce(events, {[], Translate.remember(Translate.memory(), "root")}, fn e, {acc, m} ->
+        {events, m} = Translate.durable("s-1", e, m)
+        {acc ++ events, m}
+      end)
+
+    out
+  end
+
+  defp notes(events), do: for(%{type: :remote_note, data: %{text: t}} <- events, do: t)
+
+  describe "input after the agent is done" do
+    test "a message after a budget stop was not taken, with the limit, and the window learns why" do
+      events =
+        translate_all([
+          durable("budget_warning", %{
+            "dimension" => "wall",
+            "used" => 1_440_000,
+            "limit" => 1_800_000,
+            "fraction" => 0.8,
+            "detail" => "working time 24m/30m (80%)"
+          }),
+          durable("agent_done", %{"reason" => "budget_exhausted", "limit" => "wall_clock"}),
+          durable("budget_exhausted", %{"limit" => "wall_clock"}),
+          durable("input_after_done", %{"source" => "user"})
+        ])
+
+      assert [%{data: %{why: "its 30-minute working limit is spent"}}] =
+               Enum.filter(events, &(&1.type == :stopped))
+
+      assert List.last(notes(events)) ==
+               "Your message was not taken: the session had stopped " <>
+                 "(its 30-minute working limit is spent). Start a new session to continue."
+
+      refute Enum.any?(notes(events), &(&1 =~ "picked"))
+    end
+
+    test "the limit comes from budget_exhausted when the agent_done did not name it" do
+      events =
+        translate_all([
+          durable("agent_done", %{"reason" => "budget_exhausted"}),
+          durable("budget_exhausted", %{"limit" => "max_turns"})
+        ])
+
+      assert [%{data: %{why: "its budget is spent"}}, %{data: %{why: "its turn limit is spent"}}] =
+               Enum.filter(events, &(&1.type == :stopped))
+    end
+
+    test "a finished agent takes input, and says it picked the conversation up when woken" do
+      events =
+        translate_all([
+          durable("agent_done", %{"reason" => "finished"}),
+          durable("agent_woken", %{"from" => "finished", "source" => "user"})
+        ])
+
+      refute Enum.any?(events, &(&1.type == :stopped))
+
+      assert List.last(notes(events)) ==
+               "the agent had finished; new input picked the conversation back up"
+    end
+
+    test "a model error leaves input open; a subagent's stop is not its window's" do
+      assert [] =
+               translate_all([durable("agent_done", %{"reason" => "llm_error"})])
+               |> Enum.filter(&(&1.type == :stopped))
+
+      assert [] =
+               translate_all([
+                 durable("agent_done", %{"reason" => "budget_exhausted"}, %{
+                   "agent" => ["root", "explore#1"]
+                 })
+               ])
+               |> Enum.filter(&(&1.type == :stopped))
+    end
+
+    test "each limit is said with its size where the session said it" do
+      assert Translate.limit_words("wall_clock", %{"wall" => 7_200_000}) ==
+               "its 2-hour working limit"
+
+      assert Translate.limit_words("max_turns", %{"turns" => 40}) == "its 40-turn limit"
+
+      assert Translate.limit_words("max_input_tokens", %{"input" => 6_000_000}) ==
+               "its 6M input-token limit"
+
+      assert Translate.limit_words("max_output_tokens", %{"output" => 1_500_000}) ==
+               "its 1.5M output-token limit"
+
+      assert Translate.limit_words(nil, %{}) == "its budget"
+    end
+  end
+
   # A file the agent made for the person (root issue #765): where it is on this machine, or
   # on a pod the path and the command that saves it here. A headless run prints the line.
   test "a file_ready is a line with where the file is, or how to save it from a pod" do
@@ -421,7 +515,10 @@ defmodule Troupe.RemoteTranslateTest do
              translate(durable("session_dormant", %{"last_seq" => 40}))
 
     assert [
-             %{type: :remote_note, data: %{text: "woken"}},
+             %{
+               type: :remote_note,
+               data: %{text: "the agent had finished; new input picked the conversation back up"}
+             },
              %{type: :agent_state, data: %{to: :thinking}}
            ] =
              translate(durable("agent_woken", %{"from" => "finished", "source" => "user"}))
@@ -673,7 +770,8 @@ defmodule Troupe.RemoteTranslateTest do
     [window] = "s-1" |> Model.rebuild("/w", [spawned | asked]) |> Model.windows()
     assert [%{kind: :question, call_id: "failures-1"}] = window.pending
 
-    [window] = "s-1" |> Model.rebuild("/w", [spawned | asked] ++ answered) |> Model.windows()
+    # Answered, with no turn in this log, the session's own window is idle and unlisted.
+    window = "s-1" |> Model.rebuild("/w", [spawned | asked] ++ answered) |> Model.session_window()
     assert window.pending == []
   end
 

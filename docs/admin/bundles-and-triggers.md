@@ -355,9 +355,9 @@ session exists and re-sent on every activation:
 | Term | Range | Default | Effect |
 |---|---|---|---|
 | `budget_micros` | ≥ 1, capped to the least any ceiling above it has left (team, person or platform); none left refuses the session with `budget_exhausted` | 5 000 000 | reserved at each activation |
-| `max_turns` | 1–500 | the agent's own | ends the session `done` with `budget_exhausted` |
-| `wall_clock_seconds` | 60–86 400 | the agent's own | same |
-| `approvals` | `wait` or `deny` — there is **no** `auto` | `wait` | `wait` leaves the approval for a person; `deny` answers no. A trigger that needs no approvals runs a profile whose bundle sets those tools to `auto` |
+| `max_turns` | 1–500 | the agent's own | ends the session `done` with `budget_exhausted`; with this or `wall_clock_seconds` set, every limit of the session stops it rather than asking |
+| `wall_clock_seconds` | 60–86 400 | the agent's own | same, counted in working time: a turn's time, not the time the session is awake |
+| `approvals` | `wait` or `deny` — there is **no** `auto` | `wait` | `wait` leaves the approval for a person; `deny` answers no. A trigger that needs no approvals runs a profile whose bundle sets those tools to `auto`. With neither limit above set, a spent budget asks the person attached, as on a laptop, and `deny` answers that no too |
 
 A session whose origin is a trigger or A2A and that nobody has marked reviewed is in the
 review queue (`needs_review` on `sessions.list` and `admin.sessions.list`);

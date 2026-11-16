@@ -1,0 +1,23 @@
+{
+  "$id": "https://troupe.dev/schema/v1/commands/artifact.comment.delete.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "properties": {
+    "command_id": {
+      "type": "string"
+    },
+    "comment": {
+      "type": "string"
+    },
+    "id": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "command_id",
+    "comment",
+    "id"
+  ],
+  "title": "artifact.comment.delete",
+  "type": "object"
+}

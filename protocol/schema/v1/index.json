@@ -10,6 +10,8 @@
     "commands/agents.put.json",
     "commands/agents.validate.json",
     "commands/approval.respond.json",
+    "commands/artifact.comment.delete.json",
+    "commands/artifact.comment.edit.json",
     "commands/artifact.comment.json",
     "commands/artifact.comments.json",
     "commands/artifact.get.json",
