@@ -10,7 +10,7 @@
 
 import { useState } from "react";
 import type { JSX } from "react";
-import { visibilityWords } from "@troupe/client";
+import { goesDate, visibilityWords } from "@troupe/client";
 import type { AdminArtifact } from "@troupe/client";
 import { useConsole, useLoad } from "../console";
 import { AuditNote, Empty, Loaded, Preview, bytes, useChange, when } from "./bits";
@@ -69,7 +69,10 @@ export function PublishedArtifacts(): JSX.Element {
                       <td>{a.team ?? "—"}</td>
                       <td className="num">{a.version}</td>
                       <td className="num">{bytes(a.total_bytes)}</td>
-                      <td>{when(a.published_at)}</td>
+                      <td>
+                        {when(a.published_at)}
+                        {a.goes_at && <span className="muted"> · goes {goesDate(a.goes_at)} unless opened</span>}
+                      </td>
                       <td className="row-actions">
                         {a.may_take_down && (
                           <button type="button" className="danger" disabled={taking !== null} onClick={() => setTaking(a)}>

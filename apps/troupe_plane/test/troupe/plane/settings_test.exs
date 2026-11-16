@@ -240,7 +240,8 @@ defmodule Troupe.Plane.SettingsTest do
         if String.ends_with?(setting.key, "_seconds"),
           do: assert(setting.unit in [:minutes, :seconds], setting.key)
 
-        if String.ends_with?(setting.key, "_days"), do: assert(setting.unit == :days, setting.key)
+        if String.ends_with?(setting.key, "_days"),
+          do: assert(setting.unit in [:days, :days_or_off], setting.key)
         assert setting.type == :boolean == (setting.unit == :switch), setting.key
         assert setting.type == :enum == (setting.unit == :choice), setting.key
 

@@ -109,6 +109,14 @@ daemon.artifacts = [
   artifact({ id: "art-interviews", title: "Field interview guide", kind: "file", visibility: "profile:ux", shared: true, role: "view", published_at: day(4) }),
   artifact({ id: "art-mine", title: "Placement loop benchmarks", mine: true, role: "owner", owner: { subject: "alice@example.com", display_name: "Alice" }, version: 2, current: 2, published_at: day(12), may_delete: true }),
 ];
+// RETENTION=1 is a plane whose administrator set both artifact retention periods (#981):
+// 90 days for old versions, 60 for one nobody opens. Unset, both are off and nothing new is shown.
+if (process.env["RETENTION"]) {
+  const later = (n: number): string => new Date(Date.now() + n * 24 * 3600 * 1000).toISOString();
+  const retention = { versions_days: 90, unopened_days: 60 };
+  for (const a of daemon.artifacts) Object.assign(a, { retention, goes_at: later(a["id"] === "art-mine" ? 48 : 60) });
+  Object.assign(daemon.artifacts[0]!, { version_goes_at: { "1": later(75), "2": later(88) } });
+}
 // Who the share picker finds, and a thread on one artifact (troupe #62).
 const findable = [
   { subject: "bob@example.com", display_name: "Bob Example", email: "bob@example.com" },

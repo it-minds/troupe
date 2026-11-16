@@ -86,7 +86,8 @@ On a plane's pod, the session's own person publishes it.
 ## Versions
 
 Every publish of an artifact that is already there is its next version at the same address;
-nothing is overwritten, and every version stays until the artifact is deleted. An artifact's
+nothing is overwritten, and every version stays until the artifact is deleted, unless an
+administrator set [how long they are kept](#how-long-it-is-kept). An artifact's
 page in the console lists them newest first, each with who published it, when, and its note.
 
 - **Open any version.** The version switcher beside **Open** opens the one you pick, at its own
@@ -100,6 +101,17 @@ page in the console lists them newest first, each with who published it, when, a
 Who may publish a version: the owner, and anybody the owner gave an [edit link](#links). Only
 the owner pins one, changes who it is for, deletes it, or makes and revokes links. Where a
 [team owns it](#a-teams-artifact), every member is its owner.
+
+## How long it is kept
+
+Until its owner deletes it, unless an administrator sets a retention period (Decision 1019).
+There are two, and either may be off. One removes a version older than the newest some days
+after it was published: the newest version and a pinned one are always kept, and the page
+lists, beside each version that will go, the day it goes. The other removes an artifact
+nobody has opened, republished or changed for some days, every version with it: each card
+then says the day it goes, and the artifact's page says so too. **Opening it keeps it**: the
+count starts again whenever anybody opens it, in the app, the console, the terminal or by a
+link. With neither set, nothing is removed and nothing about it is shown.
 
 ## Editing in the console
 

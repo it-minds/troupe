@@ -81,6 +81,9 @@ defmodule Troupe.Plane.Application do
       # team sessions' keys earlier releases left (Decision 811). A `:global` singleton
       # with a keeper, for the scheduler's reasons; after the credential it destroys with.
       Troupe.Plane.Erasure.Retry.Keeper,
+      # Every hour, the artifacts and old versions the retention settings say have run out
+      # (#981); nothing while both are off. A `:global` singleton with a keeper, as above.
+      Troupe.Plane.Artifacts.Retention.Sweep.Keeper,
       # A release being mirrored into the object store, copied after `admin.releases.mirror`
       # has answered (`Releases`), and which copies are under way. Before the endpoint,
       # which is where that call arrives.

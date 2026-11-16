@@ -659,6 +659,36 @@ defmodule Troupe.Plane.Settings do
         "On, an owner may make view-only public links that expire within 90 days, and switch an artifact's off. " <>
           "Off, none is made and every one made already stops opening; links that honour sign-in work either way.",
       effect: :immediate
+    },
+    # How long what was published is kept (#981): both off, nothing is ever removed but by
+    # its owner or a takedown. The organisation's alone; a team neither narrows nor widens it.
+    %Setting{
+      key: "artifacts_keep_versions_days",
+      label: "Old versions of an artifact kept",
+      unit: :days_or_off,
+      group: :artifacts,
+      type: :integer,
+      fallback: 0,
+      summary:
+        "How many days a version older than the newest is kept before it is removed, its files with it. 0 is off: every version is kept.",
+      consequence:
+        "Checked every hour. The newest version and the one an owner pinned are never removed. Each removal is in the audit trail; " <>
+          "a removed version cannot be opened or rolled back to. The whole organisation's: a team cannot change it yet.",
+      effect: :immediate
+    },
+    %Setting{
+      key: "artifacts_keep_unopened_days",
+      label: "An artifact nobody opens kept",
+      unit: :days_or_off,
+      group: :artifacts,
+      type: :integer,
+      fallback: 0,
+      summary:
+        "How many days an artifact is kept after it was last opened, published or changed, before it is removed whole. 0 is off: it is kept.",
+      consequence:
+        "Checked every hour; opening it starts the count again. It goes as a delete would: every version, its files, its links and its comments, " <>
+          "in the audit trail. While artifacts are off nothing is removed. The whole organisation's: a team cannot change it yet.",
+      effect: :immediate
     }
   ]
 
@@ -998,6 +1028,18 @@ defmodule Troupe.Plane.Settings do
 
       _other ->
         if String.trim(value) == "", do: {:ok, ""}, else: {:error, {:invalid, not_a_url()}}
+    end
+  end
+
+  # A number of days, or off: 0, `off` or nothing, which is what both retention periods
+  # ship as. A negative one is not a period.
+  defp parse(%Setting{unit: :days_or_off}, value) do
+    text = value |> String.trim() |> String.downcase()
+
+    case {text, Integer.parse(text)} do
+      {off, _parsed} when off in ["", "off"] -> {:ok, 0}
+      {_text, {days, ""}} when days >= 0 -> {:ok, days}
+      _other -> {:error, {:invalid, "must be a whole number of days, or 0 or off to keep everything"}}
     end
   end
 

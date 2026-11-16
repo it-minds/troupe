@@ -2042,7 +2042,7 @@ evoked where nothing is set and there was a sign-in. */
           this.artifactCalls.push({ method, params });
           const found = mine.find((a) => a["id"] === params["id"]);
           if (!found) return reply(ws, id, null, { code: -32005, message: "not_found", data: { id: params["id"] } });
-          const versions = Array.from({ length: Number(found["version"]) }, (_, i) => Number(found["version"]) - i).map((n) => ({ n, note: n === 1 ? null : `Version ${n}'s note`, published_at: "2026-10-26T08:00:00Z", url: `https://artifacts.example.test/a/${String(found["id"])}/v${n}/`, files: artifactFiles(found).map((f) => ({ path: f.path, sha256: "sha256:fake", content_type: "text/markdown", bytes: f.text.length })), hash: `sha256:${n}`, bytes: 10, published_by: { subject: "ada@example.test" } }));
+          const versions = Array.from({ length: Number(found["version"]) }, (_, i) => Number(found["version"]) - i).map((n) => ({ n, note: n === 1 ? null : `Version ${n}'s note`, published_at: "2026-10-26T08:00:00Z", url: `https://artifacts.example.test/a/${String(found["id"])}/v${n}/`, files: artifactFiles(found).map((f) => ({ path: f.path, sha256: "sha256:fake", content_type: "text/markdown", bytes: f.text.length })), hash: `sha256:${n}`, bytes: 10, published_by: { subject: "ada@example.test" }, goes_at: (found["version_goes_at"] as Record<string, string> | undefined)?.[String(n)] ?? null }));
           const owner = found["mine"] === true;
           switch (method) {
             // A version's text file, from the files the test gave the artifact.

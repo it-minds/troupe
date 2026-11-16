@@ -114,6 +114,8 @@ export interface PlaneOptions {
   publishOrganisation?: "everyone" | "platform_admins";
   /** Whether an administrator allows public links (`artifacts_public_links`). */
   publicLinks?: boolean;
+  /** The administrator's retention periods in days (`artifacts_keep_versions_days`, `artifacts_keep_unopened_days`); none is both off. */
+  retention?: { versions_days?: number | null; unopened_days?: number | null };
   /**
    * The break-glass token the plane holds, which `POST /auth/breakglass` exchanges for a
    * plane token of the break-glass subject, a platform admin with no teams. None is a
@@ -186,6 +188,8 @@ export interface FakeArtifact {
   pinned?: number | null;
   /** The owner's switch for its public links. */
   public_links?: boolean;
+  /** When somebody last opened it; none is never, and its count runs from its newest version. */
+  opened_at?: string | null;
 }
 
 /** An artifact with the plane's shape: one version of one HTML page, unless told otherwise. */
@@ -966,9 +970,10 @@ export class FakePlane {
   /** An artifact as `artifact.list` answers it to this person: never a file's content. */
   private artifactJson(a: FakeArtifact, subject: string): Record<string, unknown> {
     const latest = a.versions[a.versions.length - 1]!;
-    const { versions: _versions, ...shown } = a;
+    const { versions: _versions, opened_at: _opened, ...shown } = a;
     return {
       ...shown,
+      goes_at: this.goesAt(a),
       owner_team: a.owner_team ?? null,
       mine: this.owns(a, subject),
       may_transfer: this.mayTransfer(a, subject),
@@ -990,6 +995,22 @@ export class FakePlane {
     };
   }
 
+  /** When the unopened period removes it, as the plane says it: from the later of its last open and its newest version. */
+  private goesAt(a: FakeArtifact): string | null {
+    const days = this.opts.retention?.unopened_days;
+    if (!days) return null;
+    const last = Math.max(Date.parse(a.versions[a.versions.length - 1]!.published_at), a.opened_at ? Date.parse(a.opened_at) : 0);
+    return new Date(last + days * 86_400_000).toISOString();
+  }
+
+  /** When a version goes for its age: never the newest or the pinned one, nor any while that period is off. */
+  private versionGoesAt(a: FakeArtifact, v: FakeArtifactVersion): string | null {
+    const days = this.opts.retention?.versions_days;
+    const newest = a.versions[a.versions.length - 1]!.n;
+    if (!days || v.n === newest || v.n === a.pinned) return null;
+    return new Date(Date.parse(v.published_at) + days * 86_400_000).toISOString();
+  }
+
   /** Its versions, newest first, each with its files described and none of what they hold. */
   private artifactVersions(a: FakeArtifact): Array<Record<string, unknown>> {
     return [...a.versions]
@@ -1005,6 +1026,7 @@ export class FakePlane {
           published_at: v.published_at,
           note: v.note ?? null,
           rolled_back_to: v.rolled_back_to ?? null,
+          goes_at: this.versionGoesAt(a, v),
           url: `https://artifacts.example.test/a/${a.id}/v${v.n}/`,
         };
       });
@@ -1507,7 +1529,8 @@ export class FakePlane {
         if (!a || !this.mayRead(a, subject)) return { error: { code: -32005, message: "not_found" } };
         const people = [...(this.named.get(a.id) ?? new Map()).entries()].map(([s, g]) => ({ subject: s, display_name: this.nameOf(s), email: this.people.find((p) => p.subject === s)?.email ?? null, ...g }));
         const shares = this.owns(a, subject) ? { shares: [...this.shares.values()].filter((sh) => sh.artifact === a.id).map((sh) => this.shareJson(sh)), people, public_links_allowed: this.opts.publicLinks ?? false } : {};
-        return { result: { ...this.artifactJson(a, subject), versions: this.artifactVersions(a), ...shares } };
+        const retention = { versions_days: this.opts.retention?.versions_days || null, unopened_days: this.opts.retention?.unopened_days || null };
+        return { result: { ...this.artifactJson(a, subject), versions: this.artifactVersions(a), retention, ...shares } };
       }
 
       case "artifact.publish":
@@ -1666,6 +1689,8 @@ export class FakePlane {
         if (version !== null && !a.versions.some((v) => v.n === version)) return { error: { code: -32005, message: "not_found" } };
         const url = `https://artifacts.example.test/enter?ticket=t-${++this.counter}`;
         this.opened.push({ subject, id: a.id, version, url });
+        // Opening it starts the unopened period's count again.
+        a.opened_at = new Date().toISOString();
         return { result: { url, expires_in: 60 } };
       }
 

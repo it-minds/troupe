@@ -18,6 +18,7 @@ import { useCallback, useEffect, useState } from "react";
 import type { JSX } from "react";
 import { appLink, audienceName, audienceOf, teamOwned, visibilityWords } from "@troupe/client";
 import type { Artifact, ArtifactAudience, ArtifactDetail, ArtifactList, ArtifactShareRole, ArtifactThread, DaemonClient, OwnPlane, Person } from "@troupe/client";
+import { goesLine, goesSentence, versionGoes, versionsSentence } from "@troupe/client";
 import { copyText } from "../clipboard";
 import { shell } from "../shell";
 import { Loading, relative, unreachedWords } from "./bits";
@@ -293,6 +294,7 @@ export function Artifacts({
                           <span className="kind micro">{KIND[a.kind] ?? a.kind.toUpperCase()}</span>
                           {(a.comments ?? 0) > 0 && <span className="kind micro">{a.comments === 1 ? "1 COMMENT" : `${a.comments} COMMENTS`}</span>}
                         </span>
+                        {a.goes_at && <span className="byline goes">{goesLine(a)}</span>}
                       </span>
                     </button>
                   );
@@ -469,6 +471,7 @@ function Aside({
       </div>
       {error && <p className="note error">{error}</p>}
       {said && <p className="note" role="status">{said}</p>}
+      {(detail ?? artifact).goes_at && <p className="muted goes">{goesSentence(detail ?? artifact)}</p>}
 
       <section>
         <h3 className="screen">Who can see it</h3>
@@ -573,6 +576,7 @@ function Aside({
         <h3 className="screen">Versions</h3>
         {!detail && !error && <Loading what="Reading its versions…" />}
         {pinned !== null && <p className="muted micro">Its address serves version {pinned}, pinned by its owner.</p>}
+        {detail && versionsSentence(detail) && <p className="muted micro">{versionsSentence(detail)}</p>}
         <ol className="versions">
           {versions.map((v, i) => (
             <li key={v.n} className={i === 0 ? "newest" : undefined}>
@@ -581,6 +585,7 @@ function Aside({
               <span className="micro" title={v.published_at}>
                 {relative(Date.parse(v.published_at))}
               </span>
+              {v.goes_at && <span className="micro goes">{versionGoes(v)}</span>}
               <span className="version-actions">
                 <button type="button" className="link" onClick={() => open(v.n)} aria-label={`Open version ${v.n}`}>
                   Open
