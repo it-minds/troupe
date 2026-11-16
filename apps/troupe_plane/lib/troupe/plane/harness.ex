@@ -634,14 +634,17 @@ defmodule Troupe.Plane.Harness do
       |> granted_profiles()
       |> Enum.map(fn profile ->
         workers = Fleet.list_workers(profile)
+        row = Fleet.get_profile(profile)
+        # A pod the operator removed and that has gone quiet is listed `gone` until the
+        # sweep forgets it, and counts for nothing, whatever its last flags said.
+        gone = MapSet.new(Enum.filter(workers, &Fleet.gone?(&1, row)), & &1.id)
         # A draining pod is listed, so a person can see it, and counts for nothing: it
         # takes no session and is out of its Service, so it is neither room nor health.
-        placeable = Enum.reject(workers, & &1.draining)
-        row = Fleet.get_profile(profile)
+        placeable = Enum.reject(workers, &(&1.draining or MapSet.member?(gone, &1.id)))
 
         %{
           "name" => profile,
-          "pods" => Enum.map(workers, &worker_json/1),
+          "pods" => Enum.map(workers, &worker_json(&1, MapSet.member?(gone, &1.id))),
           "capacity" => Enum.sum(Enum.map(placeable, & &1.capacity)),
           "active_sessions" => Enum.sum(Enum.map(workers, & &1.active_sessions)),
           "healthy_pods" => Enum.count(placeable, & &1.healthy),
@@ -2356,6 +2359,34 @@ defmodule Troupe.Plane.Harness do
     })
   end
 
+  # Every pod full, in both numbers a person weighs it by: what the pods run at once now,
+  # and the most the profile allows, which may be more than its pods can run (a limit is
+  # not a promise). A profile with no ceiling says so rather than a number.
+  defp pods_full(profile_name) do
+    row = Fleet.get_profile(profile_name)
+
+    capacity =
+      profile_name
+      |> Fleet.list_workers()
+      |> Enum.reject(&(&1.draining or Fleet.gone?(&1, row)))
+      |> Enum.map(& &1.capacity)
+      |> Enum.sum()
+
+    max = row && row.max_sessions
+
+    allows =
+      if is_integer(max),
+        do: "#{profile_name} allows #{max} at once",
+        else: "#{profile_name} sets no ceiling of its own"
+
+    Error.new(:capacity, %{
+      profile: profile_name,
+      capacity: capacity,
+      max_sessions: max,
+      reason: "every pod is full: its pods run #{capacity} session(s) at once, and #{allows}"
+    })
+  end
+
   defp unwind(session) do
     Budget.release(session.team_id, session.id, answerable_for(session), session.profile)
     Sessions.delete(session.id)
@@ -2386,7 +2417,7 @@ defmodule Troupe.Plane.Harness do
 
       {:error, :at_capacity} ->
         if Keyword.get(opts, :unwind, false), do: Sessions.delete(session.id)
-        {:error, Error.new(:capacity, %{profile: session.profile, reason: "every pod is full"})}
+        {:error, pods_full(session.profile)}
 
       # Not full: not there. `capacity` says add replicas, which is useless advice when
       # the replicas exist and cannot start — and `unavailable` is the code whose whole
@@ -3729,13 +3760,14 @@ defmodule Troupe.Plane.Harness do
     end
   end
 
-  defp worker_json(worker) do
+  defp worker_json(worker, gone) do
     %{
       "pod" => worker.pod_name,
       "ordinal" => worker.ordinal,
       "endpoint" => worker.endpoint,
       "healthy" => worker.healthy,
       "draining" => worker.draining,
+      "gone" => gone,
       "capacity" => worker.capacity,
       "active_sessions" => worker.active_sessions,
       "disk_used_bytes" => worker.disk_used_bytes,

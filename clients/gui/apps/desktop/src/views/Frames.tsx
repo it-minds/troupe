@@ -3,13 +3,14 @@
 // affordances; the strip a turn's working folds into; and the curtain line while a turn
 // works. What each says is `frames.ts`'s; this file only draws it.
 //
-// The model's Markdown is read by a parser (marked's lexer, Decision 877) and drawn from
+// The model's Markdown is read by a parser (marked's lexer) and drawn from
 // its tokens as elements, never as HTML: raw HTML in a reply is shown as the text it is,
 // so there is nothing to sanitise and nothing a reply can make the page load or run. A
-// fenced block is a frame of its own inside the prose, on the prose's surface. Mermaid is
-// drawn as its source for now.
+// fenced block is a frame of its own inside the prose, on the prose's surface. Code is
+// highlighted from a built-in set of grammars once they have loaded (`highlight.ts`), and
+// a Mermaid fence is drawn as a diagram, an image of what Mermaid drew (`diagram.ts`).
 
-import { Fragment, useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import type { JSX, ReactNode } from "react";
 import { Lexer } from "marked";
 import type { Token, Tokens } from "marked";
@@ -17,6 +18,9 @@ import { BRIEF_PARTS, FINISH_PARTS, isBlobRef, partsOf } from "@troupe/client";
 import type { BlobRef, Entry } from "@troupe/client";
 import { bytes, cut, dataOf, diffOf, fenceOf, moreLines, numberedSource, saidInHead, stripParts, toolHead, took } from "../frames";
 import type { CurtainLine, Detail, Strip } from "../frames";
+import { coloursAt, drawMermaid } from "../diagram";
+import { useHighlight } from "../highlight";
+import type { Segment } from "../highlight";
 
 /** The time, again every `every` milliseconds while `active`: what a running call's and the curtain line's durations count from. */
 export function useNow(active: boolean, every = 1000): number {
@@ -74,6 +78,135 @@ function Head({ label, note }: { label: string; note?: string | undefined }): JS
 /** Source as it was written, in the reader's ink. */
 function Source({ text, full }: { text: string; full: boolean }): JSX.Element {
   return <Cut lines={text.split("\n")} full={full}>{(shown) => <pre>{shown.join("\n")}</pre>}</Cut>;
+}
+
+/** A token's kinds as the stylesheet's classes: `title function_` is `hl-title hl-function_`. */
+const kindClass = (kind: string): string =>
+  kind
+    .split(" ")
+    .map((k) => `hl-${k}`)
+    .join(" ");
+
+/** One line of code, its tokens in their roles' colours. */
+function CodeLine({ line }: { line: Segment[] }): JSX.Element {
+  return (
+    <>
+      {line.map((s, j) =>
+        s.kind ? (
+          <span key={j} className={kindClass(s.kind)}>
+            {s.text}
+          </span>
+        ) : (
+          <Fragment key={j}>{s.text}</Fragment>
+        ),
+      )}
+    </>
+  );
+}
+
+/**
+ * Code in `language`, highlighted once the grammars are in and as written until then, cut
+ * by lines like any body. With no language, or one the set has no grammar for, it stays
+ * as written.
+ */
+function Code({ text, language, full }: { text: string; language: string | undefined; full: boolean }): JSX.Element {
+  const highlighted = useHighlight(text, language);
+  const lines = useMemo(() => highlighted ?? text.split("\n").map((l): Segment[] => (l ? [{ text: l }] : [])), [highlighted, text]);
+  return (
+    <Cut lines={lines} full={full}>
+      {(shown) => (
+        <pre className={highlighted ? "highlighted" : undefined}>
+          {shown.map((line, i) => (
+            <Fragment key={i}>
+              <CodeLine line={line} />
+              {i < shown.length - 1 ? "\n" : ""}
+            </Fragment>
+          ))}
+        </pre>
+      )}
+    </Cut>
+  );
+}
+
+/** Whether the document's theme or mode, or the system's light or dark, changed: a count that moves when one does. */
+function useThemeChanges(): number {
+  const [n, setN] = useState(0);
+  useEffect(() => {
+    const bump = (): void => setN((x) => x + 1);
+    const watch = new MutationObserver(bump);
+    watch.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme", "data-mode"] });
+    const media = typeof window.matchMedia === "function" ? window.matchMedia("(prefers-color-scheme: dark)") : null;
+    media?.addEventListener?.("change", bump);
+    return () => {
+      watch.disconnect();
+      media?.removeEventListener?.("change", bump);
+    };
+  }, []);
+  return n;
+}
+
+// While a reply streams its fence grows; it is drawn once it has stood still this long.
+const DRAW_AFTER_MS = 300;
+
+/**
+ * A Mermaid fence, drawn as the diagram it describes, with a toggle to its source. Until it
+ * is drawn, and when it does not draw, it is its source; one that does not draw says so in
+ * a line under it.
+ */
+function MermaidFrame({ text, full, className }: { text: string; full: boolean; className: string }): JSX.Element {
+  const ref = useRef<HTMLDivElement>(null);
+  const [drawn, setDrawn] = useState<{ text: string; url?: string; error?: string } | null>(null);
+  const [source, setSource] = useState(false);
+  const theme = useThemeChanges();
+
+  useEffect(() => {
+    let live = true;
+    const timer = setTimeout(() => {
+      const colours = ref.current ? coloursAt(ref.current) : {};
+      drawMermaid(text, colours).then(
+        (url) => live && setDrawn({ text, url }),
+        (e: unknown) => live && setDrawn({ text, error: firstWords(e) }),
+      );
+    }, DRAW_AFTER_MS);
+    return () => {
+      live = false;
+      clearTimeout(timer);
+    };
+  }, [text, theme]);
+
+  const now = drawn && drawn.text === text ? drawn : null;
+  return (
+    <div className={className} ref={ref}>
+      <div className="frame-head">
+        <span className="label">mermaid</span>
+        {now?.url && (
+          <button
+            type="button"
+            className="source-toggle"
+            aria-pressed={source}
+            onClick={() => setSource((s) => !s)}
+            title={source ? "Show the diagram" : "Show the Mermaid source"}
+          >
+            source
+          </button>
+        )}
+      </div>
+      {now?.url && !source ? (
+        <div className="diagram">
+          <img src={now.url} alt="A diagram drawn from this reply's Mermaid source, which the source toggle shows" />
+        </div>
+      ) : (
+        <Source text={text} full={full} />
+      )}
+      {now?.error && <p className="note">This diagram did not draw: {now.error}</p>}
+    </div>
+  );
+}
+
+/** The first line of why something failed, without the parser's own trailing colon. */
+function firstWords(e: unknown): string {
+  const message = e instanceof Error ? e.message : typeof e === "string" ? e : "Mermaid could not read it";
+  return (message.split("\n").find((l) => l.trim() !== "") ?? "Mermaid could not read it").trim().replace(/:$/, "");
 }
 
 /** A table under its header row, cut past the cap by rows. */
@@ -143,15 +276,17 @@ export function FencedFrame({ info, text, full, nested = true }: { info: string 
     return (
       <div className={className}>
         <Head label={fence.label} note={table ? ` · ${table.rows.length === 1 ? "1 row" : `${table.rows.length} rows`}${at}` : at || undefined} />
-        {table ? <Table columns={table.columns} rows={table.rows} full={full} /> : <Source text={text} full={full} />}
+        {table ? <Table columns={table.columns} rows={table.rows} full={full} /> : <Code text={text} language={fence.label} full={full} />}
       </div>
     );
   }
 
+  if (fence.kind === "mermaid") return <MermaidFrame text={text} full={full} className={className} />;
+
   return (
     <div className={className}>
       <Head label={fence.label} note={at || undefined} />
-      <Source text={text} full={full} />
+      <Code text={text} language={info?.trim() ? fence.label : undefined} full={full} />
     </div>
   );
 }
@@ -375,6 +510,36 @@ function Parts({ parts }: { parts: Array<[string, string]> }): JSX.Element {
   );
 }
 
+/** A file's extension, the language its source is highlighted in, as the terminal takes it. */
+function extensionOf(path: string): string | undefined {
+  const name = path.split(/[\\/]/).pop() ?? "";
+  const dot = name.lastIndexOf(".");
+  return dot > 0 ? name.slice(dot + 1) : name.toLowerCase() === "dockerfile" ? "dockerfile" : undefined;
+}
+
+/** A file read as numbered source: its line numbers in a gutter of their own, the code highlighted for the file's language. */
+function Numbered({ lines, language, full }: { lines: Array<[string, string]>; language: string | undefined; full: boolean }): JSX.Element {
+  const code = useMemo(() => lines.map(([, c]) => c).join("\n"), [lines]);
+  const highlighted = useHighlight(code, language);
+  const rows = useMemo(() => lines.map(([n, c], i): [string, Segment[]] => [n, highlighted?.[i] ?? (c ? [{ text: c }] : [])]), [lines, highlighted]);
+  const width = Math.max(...lines.map(([n]) => n.length));
+  return (
+    <Cut lines={rows} full={full}>
+      {(shown) => (
+        <pre className={highlighted ? "numbered highlighted" : "numbered"} style={{ ["--gutter" as string]: `${width}ch` }}>
+          {shown.map(([n, line], i) => (
+            <Fragment key={n}>
+              <span className="n">{n}</span>
+              <CodeLine line={line} />
+              {i < shown.length - 1 ? "\n" : ""}
+            </Fragment>
+          ))}
+        </pre>
+      )}
+    </Cut>
+  );
+}
+
 /** What came back, on the rendered surface: numbered source for a file read, the text as it came otherwise. */
 function Result({ entry, readBlob, full }: { entry: ToolEntry; readBlob: (b: string) => Promise<string>; full: boolean }): JSX.Element | null {
   const content = entry.content;
@@ -383,7 +548,7 @@ function Result({ entry, readBlob, full }: { entry: ToolEntry; readBlob: (b: str
   if (saidInHead(entry)) return null;
   const numbered = entry.name === "read_file" ? numberedSource(content) : null;
   if (!numbered) return <Source text={content.replace(/\s+$/, "")} full={full} />;
-  const width = Math.max(...numbered.lines.map(([n]) => n.length));
+  const path = (entry.args as { path?: unknown } | undefined)?.path;
   return (
     <>
       {numbered.head.map((l) => (
@@ -391,19 +556,7 @@ function Result({ entry, readBlob, full }: { entry: ToolEntry; readBlob: (b: str
           {l}
         </p>
       ))}
-      <Cut lines={numbered.lines} full={full}>
-        {(shown) => (
-          <pre className="numbered" style={{ ["--gutter" as string]: `${width}ch` }}>
-            {shown.map(([n, code], i) => (
-              <Fragment key={n}>
-                <span className="n">{n}</span>
-                {code}
-                {i < shown.length - 1 ? "\n" : ""}
-              </Fragment>
-            ))}
-          </pre>
-        )}
-      </Cut>
+      <Numbered lines={numbered.lines} language={typeof path === "string" ? extensionOf(path) : undefined} full={full} />
       {numbered.tail.map((l) => (
         <p key={l} className="note">
           {l}

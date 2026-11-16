@@ -226,7 +226,7 @@ function Erase({ session, onCancel, onConfirm }: { session: AdminSessionRow; onC
         <Preview
           title={`session/${id}`}
           lines={[{ field: "state", from: session.state, to: "erased" }]}
-          effects={eraseWords(effect, nameOrSubject(effect.owner, session.owner_name))}
+          effects={eraseWords(effect, nameOrSubject(effect.owner, effect.owner_name ?? session.owner_name))}
           verb={`Erase ${id}`}
           typeToConfirm={effect.confirm || id}
           onCancel={onCancel}

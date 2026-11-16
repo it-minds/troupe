@@ -1005,9 +1005,13 @@ defmodule Troupe.Client.Remote do
   defp capacity(total, _active) when is_integer(total), do: %{free: nil, total: total}
   defp capacity(_capacity, _active), do: %{free: nil, total: nil}
 
-  # The live plane reports its pods rather than a verdict; the verdict is drawn here.
+  # The live plane reports its pods rather than a verdict; the verdict is drawn here. A pod
+  # the operator removed is listed `gone` until the plane forgets it, and is nobody's to
+  # look at: it is not a pod of the profile's, healthy or not.
   defp health(%{"pods" => pods, "healthy_pods" => healthy})
        when is_list(pods) and is_integer(healthy) do
+    pods = Enum.reject(pods, &(is_map(&1) and &1["gone"] == true))
+
     cond do
       pods == [] -> "no pods"
       healthy == length(pods) -> "ok"

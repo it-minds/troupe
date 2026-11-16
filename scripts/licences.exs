@@ -104,6 +104,13 @@ defmodule Licences do
        "sharing or shipping it. `@vscode/vsce`, the tool that packages the VS Code " <>
        "extension's `.vsix`, requires it; the build runs it, and neither the `.vsix` nor " <>
        "this repository carries it. Its builds for each platform are covered with it."},
+    {:pnpm, "khroma", "Unknown",
+     "MIT, which its package.json does not declare (no `license` field, so the list reads " <>
+       "Unknown). The `license` file in the 2.1.0 package, and in its repository " <>
+       "(https://github.com/fabiospampinato/khroma/blob/master/license, tag v2.1.0, which " <>
+       "GitHub identifies as MIT), is the MIT License text, copyright Fabio Spampinato and " <>
+       "Andrew Maney. Mermaid's colour library, through `mermaid`, in the desktop app's " <>
+       "lazily loaded diagram chunk; it ships, and the notices carry that file. Unmodified."},
     {:pnpm, "istextorbinary", "Artistic-2.0",
      "Used by `@secretlint/source-creator`, through which `@vscode/vsce` checks the " <>
        "extension's files for secrets before packaging. A build tool: nothing of it is in " <>

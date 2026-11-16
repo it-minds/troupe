@@ -1439,6 +1439,12 @@ defmodule Troupe.Plane.Admin.API do
           required: true,
           description: "The keys to change.",
           properties: @client_policy_properties
+        },
+        %Argument{
+          name: "dry_run",
+          type: :boolean,
+          description:
+            "true makes every check and answers what the put would leave, with changes and affected, and writes and audits nothing; the answer says dry_run: true. A preview's own answer."
         }
       ]
     },

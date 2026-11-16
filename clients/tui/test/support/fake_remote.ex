@@ -2032,7 +2032,13 @@ defmodule Troupe.FakeRemote do
 
     %{
       "name" => profile["name"],
-      "pods" => List.duplicate(%{"pod" => profile["name"] <> "-0", "healthy" => healthy > 0}, pods),
+      # `gone` pods besides, as the plane lists one the operator removed until it forgets it.
+      "pods" =>
+        List.duplicate(%{"pod" => profile["name"] <> "-0", "healthy" => healthy > 0}, pods) ++
+          List.duplicate(
+            %{"pod" => profile["name"] <> "-gone", "healthy" => true, "gone" => true},
+            profile["gone"] || 0
+          ),
       "capacity" => total,
       "active_sessions" => total - free,
       "healthy_pods" => healthy,

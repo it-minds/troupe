@@ -820,7 +820,7 @@ export function App(): JSX.Element {
 
           {where.screen === "memory" && <MemoryScreen via={own} daemon={daemon.client} daemonState={daemon} localOnly={localOnly} teams={planeAuth?.me?.teams ?? []} />}
 
-          {where.screen === "appearance" && <AppearanceSettings {...appearance} />}
+          {where.screen === "appearance" && <AppearanceSettings {...appearance} daemon={daemon.client} />}
 
           {where.screen === "setup" && <SetupScreen client={daemon.client} opened={daemon.opened} onDone={setupDone} />}
 

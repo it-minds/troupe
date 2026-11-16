@@ -13,6 +13,7 @@ defmodule Troupe.Plane.SCIMAnswersTest do
 
   alias Troupe.Plane.{Identity, Login, Principals}
   alias Troupe.Plane.Identity.ServicePrincipal
+  alias Troupe.Plane.SCIM
   alias Troupe.Plane.SCIM.Connector
   alias Troupe.Plane.Web.Router
 
@@ -154,6 +155,61 @@ defmodule Troupe.Plane.SCIMAnswersTest do
       end
 
       assert [_ada] = Identity.list_users()
+    end
+  end
+
+  # #870: a provider that discovers what the service supports asks for this first, and was
+  # answered 404 every sync.
+  describe "what the service supports" do
+    test "is RFC 7643 section 5's document, saying what the plane does", context do
+      assert {200, config, _} = request(context, :get, "/scim/v2/ServiceProviderConfig")
+
+      assert config["schemas"] == ["urn:ietf:params:scim:schemas:core:2.0:ServiceProviderConfig"]
+      assert config["patch"] == %{"supported" => true}
+      assert config["bulk"]["supported"] == false
+      assert config["filter"] == %{"supported" => true, "maxResults" => 200}
+      assert config["changePassword"] == %{"supported" => false}
+      assert config["sort"] == %{"supported" => false}
+      assert config["etag"] == %{"supported" => false}
+      assert [%{"type" => "oauthbearertoken", "primary" => true}] = config["authenticationSchemes"]
+      assert config["meta"]["resourceType"] == "ServiceProviderConfig"
+    end
+
+    test "is refused without the connector's token, and with a wrong one", context do
+      for header <- [nil, "Bearer not-the-token"] do
+        conn =
+          Plug.Test.conn(:get, "/scim/v2/ServiceProviderConfig")
+          |> then(&if(header, do: Plug.Conn.put_req_header(&1, "authorization", header), else: &1))
+          |> Router.call(Router.init([]))
+
+        assert conn.status == 401
+        refute Jason.decode!(conn.resp_body)["patch"]
+      end
+
+      assert {200, _config, _} = request(context, :get, "/scim/v2/ServiceProviderConfig")
+    end
+
+    test "lists users and groups as its resource types, each by itself too", context do
+      assert {200, %{"Resources" => types, "totalResults" => 2}, _} =
+               request(context, :get, "/scim/v2/ResourceTypes")
+
+      assert Enum.map(types, & &1["endpoint"]) == ["/Users", "/Groups"]
+      assert {200, %{"id" => "Group", "schema" => "urn:ietf:params:scim:schemas:core:2.0:Group"}, _} =
+               request(context, :get, "/scim/v2/ResourceTypes/Group")
+
+      assert {404, _, _} = request(context, :get, "/scim/v2/ResourceTypes/Device")
+      assert {404, _, _} = request(context, :get, "/scim/v2/Schemas")
+    end
+
+    test "holds a filtered list to the page it says, and counts every match", context do
+      for n <- 1..3, do: {201, _, _} = request(context, :post, "/scim/v2/Users", user("p#{n}"))
+
+      assert {200, %{"totalResults" => 1, "itemsPerPage" => 1}, _} =
+               request(context, :get, "/scim/v2/Users?filter=" <> URI.encode_www_form(~s(userName eq "p2@example.test")))
+
+      page = SCIM.render_page(Enum.map(1..205, &%{"id" => "#{&1}"}))
+      assert page["totalResults"] == 205
+      assert page["itemsPerPage"] == 200
     end
   end
 

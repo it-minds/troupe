@@ -48,8 +48,8 @@ symbols: `1 row`, `2 rows`, `1 step`, `7 steps`. The minus in `+n −m` is U+221
   an error with `(n lines)` when it has more. The duration is said from one second up;
   under a second it says nothing a person reads for.
 - **reasoning**: `thinking · 12s`, from the first reasoning the model streamed to its
-  reply. Both clients draw reasoning live only; a transcript replayed from the log shows no
-  reasoning frame yet (§9).
+  reply. A transcript replayed from the log, or attached to mid-turn, draws the frame from
+  the reasoning the logged reply carries, as `thinking` alone: the log has no time for it.
 - **data**: `csv · 4 rows`, the header row not counted; `json · 2 rows` for an array of
   flat objects, whose columns are the keys in the order they first appear.
 - **prose** has no header. It is the frame read most, and it is recognised by its surface.
@@ -69,8 +69,15 @@ Durations: `14s` under a minute, `4m 2s` from a minute.
 
 **The step.** Rendered output sits one step from the chat's background, and the step reads
 as rendered, not as important: nothing louder than a background and a hairline or a rail.
-In Afterglow dark `--bg-sunken` is the canvas's own colour, so there the hairline is the
-whole step (§9).
+In every theme and mode `--bg-sunken` is a step from the canvas (Afterglow dark's below
+its void).
+
+**The width** (desktop app). Prose keeps the reading measure, 78ch; what is not prose runs
+to the session's column. A frame is as wide as what is in it, from the measure up to the
+column: a reply of sentences is a frame of the measure, and one with a wide code block,
+diff or table widens to show it while its paragraphs stay at the measure. A call's output
+does the same. A body wider than the column scrolls sideways inside its frame. Reasoning
+and the strip are words, and keep the measure. The terminal draws to its pane's width.
 
 In the terminal the step is the `surface` role, the theme's `bg.hover` token: of the
 background tokens it is the one that moves away from both a dark terminal's black and a
@@ -165,9 +172,14 @@ colour. The desktop app's tokens are named beside each.
 | reasoning, the strip, `… n more lines`, the curtain's flourish | `muted` | `text.muted` |
 | what waits on a person, and nothing else | `needs_you` | `status.waiting.fg` |
 
-Highlighting takes its colours from the highlighter at truecolor, their nearest of 256 at
-256, and the reader's ink with fewer (Decision tui/0126). A grammar a person installs maps
-its captures to these roles too (#659).
+Highlighting, in the terminal, takes its colours from the highlighter at truecolor, their
+nearest of 256 at 256, and the reader's ink with fewer (Decision tui/0126). In the desktop
+app a token takes a role: a keyword, a tag or a heading the accent; a name being defined
+`text.primary`; a string, a number and a type the person palette's third, second and fifth
+hues (`--p3`, `--p2`, `--p5`), never the reserved colour; a comment and punctuation
+`text.muted`; what a diff adds or removes, its colours. The language is the fence's first
+word, or a file's extension; a fence with none, or one the built-in set lacks, is drawn as
+written. A grammar a person installs is to map its captures to these roles too (#659).
 
 ## 7. The curtain line
 
@@ -234,14 +246,14 @@ cut, and a table wider than its frame scrolls inside it. It has a rendered/sourc
 on a prose frame, which settles every "is the model's Markdown broken, or is ours?"
 question (Decision 877).
 
+A `mermaid` fence is drawn as the diagram in the desktop app: nothing a reply holds runs in
+the page, so Mermaid draws it at `securityLevel: 'strict'` and the result is shown as an
+image, which runs no script and loads nothing. It has a toggle to its source, and a
+diagram that does not draw is its source with one line saying so. The terminal shows the
+source, as a code frame.
+
 ## 9. Not here yet
 
 - Tree-sitter grammars a person installs, and the WASM spike to measure them (#659). The
-  built-in highlighting stays as it is.
-- Highlighting in the desktop app, whose code frames show their source in the reader's
-  ink until #659 settles what highlights there.
-- Mermaid drawn as a diagram in the desktop app (#659); it is a code frame of its source for
-  now.
+  built-in highlighting stays as it is in both clients.
 - The viewer (#61), where a frame past 500 lines will open, and the hand-off to it (#659).
-- Reasoning on replay, a settings control for `transcript.detail` in the desktop app, and
-  Afterglow dark's frame surface (#659).

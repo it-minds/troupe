@@ -99,6 +99,8 @@ describe("sessions", () => {
     await waitFor(() => says("What will happen") && says("s-7f3a9c25"), "the preview, with the fork that survives");
     await sees("1 fork survives");
     await sees("Its key is destroyed");
+    // The owner by name, from the preview's own answer.
+    await sees("can recover what Dan's session said");
     expect((await seesButton("Erase s-7f3a9c22")).disabled).toBe(true);
     type(field("Type s-7f3a9c22 to confirm")!, "s-7f3a9c2");
     expect((await seesButton("Erase s-7f3a9c22")).disabled).toBe(true);

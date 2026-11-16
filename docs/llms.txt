@@ -1,0 +1,38 @@
+# Troupe
+
+> Troupe is an open-source (Apache-2.0) harness for coding agents, on your own machine and on your team's Kubernetes cluster. An agent reads your code, changes it and runs commands, asking first, in a session that lives in a daemon or on a worker pod rather than in the terminal that started it. Every client, the bundled terminal client, desktop app and console included, speaks one documented protocol, and every session is an append-only, hash-chained event log.
+
+Troupe is a beta. It runs no model of its own: it calls the provider you configure (Anthropic, OpenAI, or any gateway with either API) with your key. One machine needs only the installer; a team runs a "plane" on Kubernetes with PostgreSQL, S3-compatible storage, OpenBao or Vault, and an OIDC identity provider. The words Troupe uses (session, daemon, plane, worker, profile, team, trigger) are defined in the glossary; read it before answering about them.
+
+## Start here
+
+- [Quick start](https://it-minds.github.io/troupe/quick-start/): install, a key for a model, a first session, its cost and a cap, in ten minutes
+- [Why Troupe](https://it-minds.github.io/troupe/why-troupe/): who it is for, how it compares with an agent CLI on a laptop, and when you do not need it
+- [Glossary](https://it-minds.github.io/troupe/glossary/): the words, defined once
+
+## Using Troupe
+
+- [Using Troupe](https://it-minds.github.io/troupe/user/): what a session is, the first run, the ways in
+- [The terminal client](https://it-minds.github.io/troupe/clients/tui/): installing and using `troupe`
+- [Command reference](https://it-minds.github.io/troupe/user/cli-reference/): every command line and in-session command (generated)
+- [Configuration](https://it-minds.github.io/troupe/user/configuration/): every key in config.yaml, and which file wins
+- [Models and providers](https://it-minds.github.io/troupe/user/models/)
+- [MCP servers and skills](https://it-minds.github.io/troupe/user/mcp/)
+- [Instruction files and onboarding](https://it-minds.github.io/troupe/user/instructions/): AGENTS.md, and bringing in CLAUDE.md, Cursor and Copilot rules
+- [The desktop app](https://it-minds.github.io/troupe/clients/gui/docs/install/): installing it while it is unsigned
+
+## Running a deployment
+
+- [Administrator's guide](https://it-minds.github.io/troupe/admin/)
+- [Installing a plane](https://it-minds.github.io/troupe/admin/installing/): from an empty cluster to a first team
+- [Security, for a reviewer](https://it-minds.github.io/troupe/admin/security/)
+
+## Writing a client
+
+- [The protocol](https://it-minds.github.io/troupe/PROTOCOL/): the whole client surface, normative
+- [Architecture](https://it-minds.github.io/troupe/ARCHITECTURE/): the design, and why the log is the session
+
+## Optional
+
+- [Decisions](https://it-minds.github.io/troupe/decisions/): the judgment calls that still hold, one page each
+- [Source code and releases](https://github.com/it-minds/troupe)

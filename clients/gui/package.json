@@ -15,10 +15,11 @@
     "console": "pnpm --filter @troupe/console dev",
     "console:fake": "tsx scripts/fake-console.ts",
     "tokens": "tsx scripts/tokens.ts",
-    "tokens:check": "tsx scripts/tokens.ts && git diff --exit-code apps/desktop/src/tokens.css apps/desktop/src/mark.ts apps/console/src/tokens.css apps/console/src/mark.ts",
+    "tokens:check": "tsx scripts/tokens.ts && git diff --exit-code apps/desktop/src/tokens.css apps/desktop/src/mark.ts apps/console/src/tokens.css apps/console/src/mark.ts ../../docs/assets/afterglow.css",
     "lines": "tsx scripts/lines.ts",
     "lines:check": "tsx scripts/lines.ts --check",
     "icons": "tsx scripts/icons.ts",
+    "social-card": "tsx scripts/social-card.ts",
     "icons:check": "tsx scripts/icons.ts --check",
     "first-token": "tsx scripts/first-token.ts"
   },

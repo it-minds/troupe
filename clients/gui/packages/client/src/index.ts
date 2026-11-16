@@ -174,7 +174,7 @@ export type { EntryDraft, EntryLevel, InEffect, MemoryEntry, MemoryInEffect } fr
 export type { Artifact, ArtifactAudience, ArtifactDetail, ArtifactFile, ArtifactFilter, ArtifactKind, ArtifactLinkUse, ArtifactList, ArtifactNewLink, ArtifactOrigin, ArtifactOwner, ArtifactPerson, ArtifactPublish, ArtifactPut, ArtifactRole, ArtifactScope, ArtifactShare, ArtifactText, ArtifactTicket, ArtifactTransferTo, ArtifactUpload, ArtifactVersion } from "./artifacts.js";
 export { openRemote, remoteRefusal, watchRemote, watchUrl, when as remoteWhen } from "./remote.js";
 export type { RemoteListRow, RemoteWatch, RemoteWatchOptions } from "./remote.js";
-export { AdminApi, bundleErrors, clientStanding, releaseVersion, requiredRole, versionOlder } from "./admin.js";
+export { AdminApi, bundleErrors, ceilingAboveWords, clientStanding, releaseVersion, requiredRole, versionOlder } from "./admin.js";
 export type {
   AdminFilter,
   AdminPod,
@@ -207,6 +207,7 @@ export type {
   TeamUpdated,
   TeamDisableEffect,
   AuditRow,
+  AtOnce,
   BundleDetail,
   BundlePreview,
   BundleSummary,

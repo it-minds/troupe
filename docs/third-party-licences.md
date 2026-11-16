@@ -37,6 +37,7 @@ the NIF's crates from its own Cargo.lock, the rest from a list kept in the scrip
 | pnpm | `@fontsource/vt323` | OFL-1.1 | As `@fontsource/figtree`. |
 | pnpm | `lightningcss` | MPL-2.0 | Vite's CSS minifier from Vite 8, one of the GUI's build tools. It does not ship: the bundle holds the stylesheet it wrote, not its code. MPL-2.0 is copyleft per file, and we use it unmodified, as npm publishes it with its source. |
 | pnpm | `@vscode/vsce-sign` | Unknown | Microsoft's licence (`SEE LICENSE IN LICENSE.txt`, so no SPDX name), which allows using it with Visual Studio Code to develop and test an application, and not sharing or shipping it. `@vscode/vsce`, the tool that packages the VS Code extension's `.vsix`, requires it; the build runs it, and neither the `.vsix` nor this repository carries it. Its builds for each platform are covered with it. |
+| pnpm | `khroma` | Unknown | MIT, which its package.json does not declare (no `license` field, so the list reads Unknown). The `license` file in the 2.1.0 package, and in its repository (https://github.com/fabiospampinato/khroma/blob/master/license, tag v2.1.0, which GitHub identifies as MIT), is the MIT License text, copyright Fabio Spampinato and Andrew Maney. Mermaid's colour library, through `mermaid`, in the desktop app's lazily loaded diagram chunk; it ships, and the notices carry that file. Unmodified. |
 | pnpm | `istextorbinary` | Artistic-2.0 | Used by `@secretlint/source-creator`, through which `@vscode/vsce` checks the extension's files for secrets before packaging. A build tool: nothing of it is in the `.vsix`. Artistic-2.0 asks more only of a changed copy that is distributed; we use it unmodified. |
 | pnpm | `binaryextensions` | Artistic-2.0 | Used by `istextorbinary`. As `istextorbinary`. |
 | pnpm | `textextensions` | Artistic-2.0 | Used by `istextorbinary`. As `istextorbinary`. |
@@ -102,7 +103,7 @@ tools included.
 
 ## The GUI and the VS Code extension (pnpm)
 
-229 packages, from `clients/gui/pnpm-lock.yaml` and `clients/vscode/pnpm-lock.yaml`,
+338 packages, from `clients/gui/pnpm-lock.yaml` and `clients/vscode/pnpm-lock.yaml`,
 build and test tools included; the VS Code extension's are all build and test tools. A
 package's builds for one operating system and processor, such as esbuild's, are checked
 and not listed: each is under its parent's licence, and which of them are installed
@@ -110,6 +111,7 @@ depends on the machine.
 
 | package | licence |
 |---|---|
+| `@antfu/install-pkg` | MIT |
 | `@asamuzakjp/css-color` | MIT |
 | `@asamuzakjp/dom-selector` | MIT |
 | `@azure/abort-controller` | MIT |
@@ -124,7 +126,9 @@ depends on the machine.
 | `@azure/msal-browser` | MIT |
 | `@azure/msal-common` | MIT |
 | `@azure/msal-node` | MIT |
+| `@braintree/sanitize-url` | MIT |
 | `@bramus/specificity` | MIT |
+| `@chevrotain/types` | Apache-2.0 |
 | `@csstools/color-helpers` | MIT-0 |
 | `@csstools/css-calc` | MIT |
 | `@csstools/css-color-parser` | MIT |
@@ -135,10 +139,13 @@ depends on the machine.
 | `@fontsource/dm-mono` | OFL-1.1 |
 | `@fontsource/figtree` | OFL-1.1 |
 | `@fontsource/vt323` | OFL-1.1 |
+| `@iconify/types` | MIT |
+| `@iconify/utils` | MIT |
 | `@isaacs/nonrecursive-glob-match` | BlueOak-1.0.0 |
 | `@jridgewell/resolve-uri` | MIT |
 | `@jridgewell/sourcemap-codec` | MIT |
 | `@jridgewell/trace-mapping` | MIT |
+| `@mermaid-js/parser` | MIT |
 | `@napi-rs/keyring` | MIT |
 | `@oxc-project/types` | MIT |
 | `@rolldown/pluginutils` | MIT |
@@ -156,14 +163,50 @@ depends on the machine.
 | `@tauri-apps/plugin-notification` | MIT OR Apache-2.0 |
 | `@tauri-apps/plugin-opener` | MIT OR Apache-2.0 |
 | `@types/chai` | MIT |
+| `@types/d3` | MIT |
+| `@types/d3-array` | MIT |
+| `@types/d3-axis` | MIT |
+| `@types/d3-brush` | MIT |
+| `@types/d3-chord` | MIT |
+| `@types/d3-color` | MIT |
+| `@types/d3-contour` | MIT |
+| `@types/d3-delaunay` | MIT |
+| `@types/d3-dispatch` | MIT |
+| `@types/d3-drag` | MIT |
+| `@types/d3-dsv` | MIT |
+| `@types/d3-ease` | MIT |
+| `@types/d3-fetch` | MIT |
+| `@types/d3-force` | MIT |
+| `@types/d3-format` | MIT |
+| `@types/d3-geo` | MIT |
+| `@types/d3-hierarchy` | MIT |
+| `@types/d3-interpolate` | MIT |
+| `@types/d3-path` | MIT |
+| `@types/d3-polygon` | MIT |
+| `@types/d3-quadtree` | MIT |
+| `@types/d3-random` | MIT |
+| `@types/d3-scale` | MIT |
+| `@types/d3-scale-chromatic` | MIT |
+| `@types/d3-selection` | MIT |
+| `@types/d3-shape` | MIT |
+| `@types/d3-time` | MIT |
+| `@types/d3-time-format` | MIT |
+| `@types/d3-timer` | MIT |
+| `@types/d3-transition` | MIT |
+| `@types/d3-zoom` | MIT |
 | `@types/deep-eql` | MIT |
 | `@types/estree` | MIT |
+| `@types/geojson` | MIT |
+| `@types/hast` | MIT |
 | `@types/node` | MIT |
 | `@types/react` | MIT |
 | `@types/react-dom` | MIT |
+| `@types/trusted-types` | MIT |
+| `@types/unist` | MIT |
 | `@types/vscode` | MIT |
 | `@types/ws` | MIT |
 | `@typespec/ts-http-runtime` | MIT |
+| `@upsetjs/venn.js` | MIT |
 | `@vitejs/plugin-react` | MIT |
 | `@vitest/mocker` | MIT |
 | `@vitest/spy` | MIT |
@@ -191,15 +234,60 @@ depends on the machine.
 | `cockatiel` | MIT |
 | `commander` | MIT |
 | `core-util-is` | MIT |
+| `cose-base` | MIT |
 | `css-tree` | MIT |
 | `csstype` | MIT |
+| `cytoscape` | MIT |
+| `cytoscape-cose-bilkent` | MIT |
+| `cytoscape-fcose` | MIT |
+| `d3` | ISC |
+| `d3-array` | BSD-3-Clause |
+| `d3-array` | ISC |
+| `d3-axis` | ISC |
+| `d3-brush` | ISC |
+| `d3-chord` | ISC |
+| `d3-color` | ISC |
+| `d3-contour` | ISC |
+| `d3-delaunay` | ISC |
+| `d3-dispatch` | ISC |
+| `d3-drag` | ISC |
+| `d3-dsv` | ISC |
+| `d3-ease` | BSD-3-Clause |
+| `d3-fetch` | ISC |
+| `d3-force` | ISC |
+| `d3-format` | ISC |
+| `d3-geo` | ISC |
+| `d3-hierarchy` | ISC |
+| `d3-interpolate` | ISC |
+| `d3-path` | BSD-3-Clause |
+| `d3-path` | ISC |
+| `d3-polygon` | ISC |
+| `d3-quadtree` | ISC |
+| `d3-random` | ISC |
+| `d3-sankey` | BSD-3-Clause |
+| `d3-scale` | ISC |
+| `d3-scale-chromatic` | ISC |
+| `d3-selection` | ISC |
+| `d3-shape` | BSD-3-Clause |
+| `d3-shape` | ISC |
+| `d3-time` | ISC |
+| `d3-time-format` | ISC |
+| `d3-timer` | ISC |
+| `d3-transition` | ISC |
+| `d3-zoom` | ISC |
+| `dagre-d3-es` | MIT |
 | `data-urls` | MIT |
+| `dayjs` | MIT |
 | `debug` | MIT |
 | `decimal.js` | MIT |
 | `default-browser` | MIT |
 | `default-browser-id` | MIT |
 | `define-lazy-prop` | MIT |
+| `delaunator` | ISC |
+| `dequal` | MIT |
 | `detect-libc` | Apache-2.0 |
+| `devlop` | MIT |
+| `dompurify` | (MPL-2.0 OR Apache-2.0) |
 | `dunder-proto` | MIT |
 | `ecdsa-sig-formatter` | Apache-2.0 |
 | `editions` | Artistic-2.0 |
@@ -209,9 +297,11 @@ depends on the machine.
 | `es-errors` | MIT |
 | `es-module-lexer` | MIT |
 | `es-object-atoms` | MIT |
+| `es-toolkit` | MIT |
 | `esbuild` | MIT |
 | `estree-walker` | MIT |
 | `expect-type` | Apache-2.0 |
+| `fastdom` | MIT |
 | `fdir` | MIT |
 | `function-bind` | MIT |
 | `get-east-asian-width` | MIT |
@@ -219,14 +309,19 @@ depends on the machine.
 | `get-proto` | MIT |
 | `gopd` | MIT |
 | `graceful-fs` | ISC |
+| `hachure-fill` | MIT |
 | `has-symbols` | MIT |
 | `hasown` | MIT |
+| `highlight.js` | BSD-3-Clause |
 | `hosted-git-info` | ISC |
 | `html-encoding-sniffer` | MIT |
 | `http-proxy-agent` | MIT |
 | `https-proxy-agent` | MIT |
+| `iconv-lite` | MIT |
 | `immediate` | MIT |
+| `import-meta-resolve` | MIT |
 | `inherits` | ISC |
+| `internmap` | ISC |
 | `is-docker` | MIT |
 | `is-inside-container` | MIT |
 | `is-interactive` | MIT |
@@ -241,8 +336,12 @@ depends on the machine.
 | `jszip` | (MIT OR GPL-3.0-or-later) |
 | `jwa` | MIT |
 | `jws` | MIT |
+| `katex` | MIT |
+| `khroma` | Unknown |
+| `layout-base` | MIT |
 | `lie` | MIT |
 | `lightningcss` | MPL-2.0 |
+| `lodash-es` | MIT |
 | `lodash.includes` | MIT |
 | `lodash.isboolean` | MIT |
 | `lodash.isinteger` | MIT |
@@ -251,12 +350,14 @@ depends on the machine.
 | `lodash.isstring` | MIT |
 | `lodash.once` | MIT |
 | `log-symbols` | MIT |
+| `lowlight` | MIT |
 | `lru-cache` | BlueOak-1.0.0 |
 | `lru-cache` | ISC |
 | `magic-string` | MIT |
 | `marked` | MIT |
 | `math-intrinsics` | MIT |
 | `mdn-data` | CC0-1.0 |
+| `mermaid` | MIT |
 | `mime` | MIT |
 | `mimic-function` | MIT |
 | `minimatch` | BlueOak-1.0.0 |
@@ -268,11 +369,15 @@ depends on the machine.
 | `onetime` | MIT |
 | `open` | MIT |
 | `ora` | MIT |
+| `package-manager-detector` | MIT |
 | `pako` | (MIT AND Zlib) |
 | `parse5` | MIT |
+| `path-data-parser` | MIT |
 | `pend` | MIT |
 | `picocolors` | ISC |
 | `picomatch` | MIT |
+| `points-on-curve` | MIT |
+| `points-on-path` | MIT |
 | `postcss` | MIT |
 | `process-nextick-args` | MIT |
 | `proper-lockfile` | MIT |
@@ -285,9 +390,13 @@ depends on the machine.
 | `require-from-string` | MIT |
 | `restore-cursor` | MIT |
 | `retry` | MIT |
+| `robust-predicates` | Unlicense |
 | `rolldown` | MIT |
+| `roughjs` | MIT |
 | `run-applescript` | MIT |
+| `rw` | BSD-3-Clause |
 | `safe-buffer` | MIT |
+| `safer-buffer` | MIT |
 | `sax` | BlueOak-1.0.0 |
 | `saxes` | ISC |
 | `scheduler` | MIT |
@@ -301,10 +410,12 @@ depends on the machine.
 | `source-map-js` | BSD-3-Clause |
 | `std-env` | MIT |
 | `stdin-discarder` | MIT |
+| `strictdom` | MIT |
 | `string-width` | MIT |
 | `string_decoder` | MIT |
 | `strip-ansi` | MIT |
 | `structured-source` | BSD-2-Clause |
+| `stylis` | MIT |
 | `textextensions` | Artistic-2.0 |
 | `tinybench` | MIT |
 | `tinyexec` | MIT |
@@ -313,6 +424,7 @@ depends on the machine.
 | `tldts-core` | MIT |
 | `tough-cookie` | BSD-3-Clause |
 | `tr46` | MIT |
+| `ts-dedent` | MIT |
 | `tslib` | 0BSD |
 | `tsx` | MIT |
 | `tunnel` | MIT |
@@ -323,6 +435,7 @@ depends on the machine.
 | `undici-types` | MIT |
 | `url-join` | MIT |
 | `util-deprecate` | MIT |
+| `uuid` | MIT |
 | `version-range` | Artistic-2.0 |
 | `vite` | MIT |
 | `vitest` | MIT |
