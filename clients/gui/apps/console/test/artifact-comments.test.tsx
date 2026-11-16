@@ -57,6 +57,45 @@ describe("an artifact's thread", () => {
     expect(fake.plane.comments.get("art-org")!.map((c) => c.body)).toEqual(["Is Q3 right?", "Yes, checked."]);
   });
 
+  // A comment taken back or edited (#979): each control only for whoever may use it.
+  it("offers its owner Delete on anybody's comment and Edit on her own, and each does it", async () => {
+    fake.plane.comments.set("art-org", [
+      { id: "c-1", author: { subject: PEOPLE.bob.subject, display_name: "Bob" }, body: "Is Q3 right?", created_at: "2026-10-25T12:00:00Z" },
+      { id: "c-2", author: carol, body: "Yes.", created_at: "2026-10-25T12:05:00Z" },
+    ]);
+    await open("#/artifacts/art-org", PEOPLE.carol);
+    await sees("Is Q3 right?", thread);
+    const items = (): HTMLLIElement[] => [...thread()!.querySelectorAll<HTMLLIElement>(".artifact-comments > li")];
+    const buttons = (li: HTMLElement): string[] => [...li.querySelectorAll("button")].map((b) => b.textContent ?? "");
+    expect(buttons(items()[0]!)).toEqual(["Delete"]);
+    expect(buttons(items()[1]!)).toEqual(["Edit", "Delete"]);
+
+    [...items()[1]!.querySelectorAll("button")].find((b) => b.textContent === "Edit")!.click();
+    const box = await waitFor(() => items()[1]!.querySelector<HTMLTextAreaElement>("textarea"), "her comment in a box");
+    type(box, "Yes, checked twice.");
+    (await seesButton("Save", items()[1]!)).click();
+    await waitFor(() => items()[1]?.querySelector(".comment-body")?.textContent === "Yes, checked twice.", "the edited comment");
+    expect(items()[1]!.textContent).toContain("edited");
+
+    [...items()[0]!.querySelectorAll("button")].find((b) => b.textContent === "Delete")!.click();
+    await sees("It goes from the thread for everybody, and cannot be brought back.", thread);
+    (await waitFor(() => items()[0]!.querySelector<HTMLButtonElement>("button.danger"), "Delete, said once more")).click();
+    await waitFor(() => items().length === 1, "Bob's comment gone");
+    expect(fake.plane.comments.get("art-org")!.map((c) => c.body)).toEqual(["Yes, checked twice."]);
+  });
+
+  it("offers a reader no control on another's comment, and Delete, not Edit, on their own", async () => {
+    fake.plane.comments.set("art-org", [
+      { id: "c-1", author: carol, body: "Draft.", created_at: "2026-10-25T12:00:00Z" },
+      { id: "c-2", author: { subject: PEOPLE.bob.subject, display_name: "Bob" }, body: "Mine, from when I could write.", created_at: "2026-10-25T12:05:00Z" },
+    ]);
+    await open("#/artifacts/art-org", PEOPLE.bob);
+    await sees("Draft.", thread);
+    const items = [...thread()!.querySelectorAll<HTMLLIElement>(".artifact-comments > li")];
+    expect([...items[0]!.querySelectorAll("button")]).toEqual([]);
+    expect([...items[1]!.querySelectorAll("button")].map((b) => b.textContent)).toEqual(["Delete"]);
+  });
+
   it("is read without a box by somebody who sees it only because of who it is for", async () => {
     await open("#/artifacts/art-org", PEOPLE.bob);
     await sees("No comments yet.", thread);

@@ -1293,6 +1293,16 @@ export class DaemonClient implements OwnPlane {
     return this.command<{ id: string; comment: ArtifactComment }>("artifact.comment", { id, body });
   }
 
+  /** A comment deleted from its thread: the plane's `artifact.comment.delete`, as the person. */
+  deleteArtifactComment(id: string, comment: string): Promise<{ id: string; comment: string; deleted: boolean }> {
+    return this.command<{ id: string; comment: string; deleted: boolean }>("artifact.comment.delete", { id, comment });
+  }
+
+  /** A comment's text replaced by its author: the plane's `artifact.comment.edit`, as the person. */
+  editArtifactComment(id: string, comment: string, body: string): Promise<{ id: string; comment: ArtifactComment }> {
+    return this.command<{ id: string; comment: ArtifactComment }>("artifact.comment.edit", { id, comment, body });
+  }
+
   /** The share picker's search, the plane's `people.search` as the person. */
   searchPeople(query: string): Promise<{ people: Person[] }> {
     return this.call<{ people: Person[] }>("people.search", { query });

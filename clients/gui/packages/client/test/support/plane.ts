@@ -332,7 +332,7 @@ export class FakePlane {
   /** Who each artifact is shared with by name, by artifact and then by person. */
   readonly named = new Map<string, Map<string, { role: "view" | "comment" | "edit"; granted_by: string; granted_at: string }>>();
   /** Each artifact's thread, oldest first. */
-  readonly comments = new Map<string, Array<{ id: string; author: { subject: string; display_name: string | null }; body: string; created_at: string }>>();
+  readonly comments = new Map<string, Array<{ id: string; author: { subject: string; display_name: string | null }; body: string; created_at: string; edited_at?: string | null }>>();
   /** Every `artifact.preview` asked, in order, with what it showed and the address it answered. */
   readonly previews: Array<{ subject: string; id: string; base: number; path: string; text: string; url: string }> = [];
   /**
@@ -1627,7 +1627,39 @@ export class FakePlane {
       case "artifact.comments": {
         const a = this.artifacts.get(String(params["id"] ?? ""));
         if (!a || !this.mayRead(a, subject)) return { error: { code: -32005, message: "not_found" } };
-        return { result: { id: a.id, may_comment: ["owner", "edit", "comment"].includes(this.roleOf(a, subject) ?? ""), max_length: 4000, comments: this.comments.get(a.id) ?? [] } };
+        const writes = ["owner", "edit", "comment"].includes(this.roleOf(a, subject) ?? "");
+        // Each says what this person may do with it: their own they edit while they may write,
+        // and delete; an owner, or whoever may take the artifact down, deletes any.
+        const takesDown = this.owns(a, subject) || this.opts.admin?.role(subject) === "platform_admin" || this.administers(a, subject);
+        const comments = (this.comments.get(a.id) ?? []).map((c) => ({ ...c, may_edit: c.author.subject === subject && writes, may_delete: c.author.subject === subject || takesDown }));
+        return { result: { id: a.id, may_comment: writes, max_length: 4000, comments } };
+      }
+
+      // A comment taken back: its author's, an owner's, or a takedown by whoever may take the
+      // artifact down; its author's edit, marked edited.
+      case "artifact.comment.delete":
+      case "artifact.comment.edit": {
+        const a = this.artifacts.get(String(params["id"] ?? ""));
+        if (!a || !this.mayRead(a, subject)) return { error: { code: -32005, message: "not_found" } };
+        const thread = this.comments.get(a.id) ?? [];
+        const c = thread.find((x) => x.id === params["comment"]);
+        if (!c) return { error: { code: -32005, message: "not_found", data: { comment: params["comment"] } } };
+        const own = c.author.subject === subject;
+        if (method === "artifact.comment.delete") {
+          const takesDown = this.owns(a, subject) || this.opts.admin?.role(subject) === "platform_admin" || this.administers(a, subject);
+          if (!own && !takesDown) return { error: { code: -32004, message: "forbidden", data: { reason: "only whoever wrote a comment, the artifact's owners, or whoever may take the artifact down deletes it" } } };
+          this.comments.set(a.id, thread.filter((x) => x !== c));
+          return { result: { id: a.id, comment: c.id, deleted: true } };
+        }
+        if (!own) return { error: { code: -32004, message: "forbidden", data: { reason: "only whoever wrote a comment edits it" } } };
+        if (!["owner", "edit", "comment"].includes(this.roleOf(a, subject) ?? "")) {
+          return { error: { code: -32004, message: "forbidden", data: { reason: "you may read this artifact's comments; its owner gives the people who may write in them comment or edit" } } };
+        }
+        const body = typeof params["body"] === "string" ? params["body"].trim() : "";
+        if (body === "") return { error: { code: -32602, message: "invalid_params", data: { reason: "a comment needs some text" } } };
+        const edited = { ...c, body, edited_at: new Date(Date.parse("2026-10-25T12:00:00Z") + ++this.counter * 60_000).toISOString() };
+        this.comments.set(a.id, thread.map((x) => (x === c ? edited : x)));
+        return { result: { id: a.id, comment: edited } };
       }
 
       case "artifact.comment": {
