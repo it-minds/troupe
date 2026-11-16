@@ -17,7 +17,12 @@
 // way out; the settings one applies as you click and has no buttons at all, because
 // there is nothing to confirm.
 
+import { useEffect, useState } from "react";
 import type { JSX } from "react";
+import { configKey, servesKeys } from "@troupe/client";
+import type { DaemonClient } from "@troupe/client";
+import { DEFAULT_DETAIL, isDetail } from "../frames";
+import type { Detail } from "../frames";
 import { useNotificationSetting } from "../notify";
 import type { Permission } from "../notify";
 import { DEFAULT_MODE, DEFAULT_THEME, MODES, THEMES } from "../theme";
@@ -162,7 +167,7 @@ export function Onboarding({ name, appearance, onDone }: { name: string | null; 
  * The settings screen. Changing a theme applies immediately, with no reload and no
  * confirmation: it is an attribute on the document root and nothing more.
  */
-export function AppearanceSettings(props: Appearance): JSX.Element {
+export function AppearanceSettings({ daemon = null, ...props }: Appearance & { daemon?: DaemonClient | null }): JSX.Element {
   return (
     <>
       <header className="screen-head">
@@ -174,6 +179,7 @@ export function AppearanceSettings(props: Appearance): JSX.Element {
           <p>Yours alone. Other people in your sessions see them in their own theme, and nothing about a theme changes what anything means.</p>
           <Chooser {...props} />
           <Notifications />
+          {daemon && <TranscriptDetail daemon={daemon} />}
           <Start />
         </div>
       </div>
@@ -210,6 +216,82 @@ function Notifications(): JSX.Element {
         </button>
       </div>
       {note && <p className="note">{note}</p>}
+    </section>
+  );
+}
+
+/** The levels, in the terminal's words for them, and what each draws. */
+const LEVELS: Array<{ level: Detail; says: string }> = [
+  { level: "quiet", says: "A turn's answer, with its working as one line above it that opens the turn when pressed." },
+  { level: "tools", says: "The answer and the turn's tool calls open, each with what came back; reasoning shut to its header." },
+  { level: "everything", says: "Nothing shut: reasoning open and every result whole, which is what a bug report wants." },
+];
+
+/** Who chose the level, when it is not you. */
+const SET_BY: Record<string, string> = {
+  org: "Your organisation's settings choose",
+  enforced: "Your organisation fixes",
+  env: "An environment variable chooses",
+  cli: "The daemon's command line chooses",
+};
+
+/**
+ * How much of a turn a transcript draws open (`transcript.detail`, docs/design/frames.md
+ * §4), in both clients: the daemon keeps it in your own settings, and the terminal reads the
+ * same key. A failed call, an approval, a question and what follows a budget stop are open
+ * at every level; a project's own file can set another level for its sessions;
+ * and `/detail` in a session changes it for that session alone. Shown only where the
+ * daemon keeps settings: with no daemon there is nowhere to keep it.
+ */
+function TranscriptDetail({ daemon }: { daemon: DaemonClient }): JSX.Element | null {
+  const [shown, setShown] = useState<{ level: Detail; layer: string | null } | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let live = true;
+    const read = (): void => {
+      daemon
+        .modelConfig()
+        .then((config) => {
+          if (!live) return;
+          if (!servesKeys(config)) return setShown(null);
+          const entry = configKey(config, "transcript.detail");
+          setShown({ level: isDetail(entry?.value) ? entry.value : DEFAULT_DETAIL, layer: entry?.layer ?? null });
+        })
+        .catch(() => undefined);
+    };
+    read();
+    const stop = daemon.onConfigChanged((changed) => {
+      if (changed.keys.some((k) => k === "transcript" || k.startsWith("transcript."))) read();
+    });
+    return () => {
+      live = false;
+      stop();
+    };
+  }, [daemon]);
+
+  if (!shown) return null;
+  const choose = (level: Detail): void => {
+    setError(null);
+    setShown({ level, layer: "user" });
+    daemon.setSetting("transcript.detail", level).catch((e: unknown) => setError(`Not kept: ${e instanceof Error ? e.message : String(e)}`));
+  };
+  return (
+    <section className="detail">
+      <h2 className="screen">Transcript detail</h2>
+      <div className="options">
+        {LEVELS.map(({ level, says }) => (
+          <button key={level} type="button" className="option" aria-pressed={shown.level === level} onClick={() => choose(level)}>
+            <span className="label">{level}</span>
+            <span className="consequence">{says}</span>
+          </button>
+        ))}
+      </div>
+      <p className="note">
+        {shown.layer && shown.layer !== "user" && shown.layer !== "default" && <>{SET_BY[shown.layer] ?? `The ${shown.layer} settings choose`} this level, over yours. </>}
+        In the desktop app and the terminal both. A failed call, an approval and a question are open at every level, a project's own settings can choose another level for its sessions, and /detail in a session changes it for that session alone.
+      </p>
+      {error && <p className="note error">{error}</p>}
     </section>
   );
 }

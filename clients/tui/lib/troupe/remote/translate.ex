@@ -759,7 +759,9 @@ defmodule Troupe.Remote.Translate do
   defp scalar(v), do: inspect(v)
 
   # `llm_response` carries the whole assistant message — `{"role", "content": [blocks]}`
-  # — where the dotted vocabulary carried its text. Only the text is kept: the tool
+  # — where the dotted vocabulary carried its text. Its text is kept, and its reasoning,
+  # which the log keeps as a block of its own, so that a replayed or late-attached
+  # session, which saw none of it stream, draws its reasoning frame from it. The tool
   # calls in it arrive again as `tool_call_started`/`tool_call_completed`, which is what
   # the model draws a tool line from, and keeping both drew every call twice.
   defp message(data) do
@@ -780,6 +782,14 @@ defmodule Troupe.Remote.Translate do
 
   defp block(%{"type" => "text", "text" => text}) when is_binary(text),
     do: [Message.text_block(text)]
+
+  # A redacted block has no words to show, and an empty one nothing to draw.
+  defp block(%{"type" => type, "text" => text} = b)
+       when type in ["reasoning", "thinking"] and is_binary(text) do
+    if Map.get(b, "redacted") == true or String.trim(text) == "",
+      do: [],
+      else: [Message.reasoning_block(text)]
+  end
 
   defp block(_block), do: []
 

@@ -66,10 +66,10 @@ export type Entry =
       endedAt: number | undefined;
     }
   /**
-   * What the model thought before it answered, as this client saw it stream, kept where the
-   * reply it came before lands (troupe #474). Live only, as in the terminal client (its
-   * Decision 36): a transcript replayed from the log has none. `ms` is how long it streamed,
-   * from its first delta to the reply, by this client's clock.
+   * What the model thought before it answered, kept where the reply it came before lands
+   * (troupe #474): as this client saw it stream, or, in a transcript replayed from the log,
+   * as the reply's reasoning blocks carry it (troupe #659). `ms` is how long it streamed,
+   * from its first delta to the reply, by this client's clock; a replay has no time to say.
    */
   | { kind: "reasoning"; seq: number; agent: string[]; text: string; ms: number | undefined }
   /**
@@ -519,6 +519,21 @@ function textOf(message: unknown): string {
   // The model's thinking is not its answer, in either spelling (troupe-remote Decision 658).
   for (const block of content) if (typeof block.text === "string" && block.type !== "thinking" && block.type !== "reasoning") out += block.text;
   return out;
+}
+
+/**
+ * The reasoning a logged reply carries: its reasoning blocks' text, in either spelling, in
+ * order. A redacted block has no words to show.
+ */
+function reasoningOf(message: unknown): string {
+  const content = (message as { content?: Array<{ type?: string; text?: string; thinking?: string; redacted?: boolean }> } | undefined)?.content ?? [];
+  const parts: string[] = [];
+  for (const block of content) {
+    if ((block.type !== "reasoning" && block.type !== "thinking") || block.redacted === true) continue;
+    const text = typeof block.text === "string" ? block.text : typeof block.thinking === "string" ? block.thinking : "";
+    if (text.trim() !== "") parts.push(text);
+  }
+  return parts.join("\n\n");
 }
 
 /**
@@ -1186,12 +1201,17 @@ export function fold(state: TranscriptState, e: TroupeEvent, options: FoldOption
     case "llm_response": {
       const text = textOf(d.data["message"]);
       const cost = costOf(d.data["gateway"]);
-      // The reasoning this client saw stream before the reply is kept where the reply lands,
-      // ahead of it; a replay streamed none, and has none (troupe #474).
+      // The reasoning before the reply is kept where the reply lands, ahead of it: what this
+      // client saw stream, with how long it took, else what the log's reply carries in its
+      // reasoning blocks beside its text, which is all a replayed or
+      // late-attached session has, with no time to say (troupe #659).
+      const logged = isRoot(d.agent) && !state.thinking ? reasoningOf(d.data["message"]) : "";
       const thought: Entry[] =
         isRoot(d.agent) && state.thinking
           ? [{ kind: "reasoning", ...base, text: state.thinking, ms: state.thinkingAt === undefined ? undefined : Math.max(now() - state.thinkingAt, 0) }]
-          : [];
+          : logged
+            ? [{ kind: "reasoning", ...base, text: logged, ms: undefined }]
+            : [];
       const entries = [
         ...state.entries,
         ...thought,
