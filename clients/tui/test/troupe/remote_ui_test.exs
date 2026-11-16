@@ -70,6 +70,76 @@ defmodule Troupe.RemoteUITest do
     end
   end
 
+  # After a budget stop the harness drops what is sent (troupe #987): the input line says
+  # so in its place and keeps a typed line rather than sending it to vanish, and the line
+  # the harness writes for a dropped message reads as dropped, never as picked up.
+  describe "a session that stopped" do
+    @stopped "This session has stopped: its 30-minute working limit is spent. Start a new session to continue."
+
+    test "the input line says why after a budget stop, and a message is not sent" do
+      {remote, url} = start_remote!(sessions: [fixture()])
+      origin = connect!(remote, url)
+      sid = attach!(origin, "s-ui")
+
+      {pid, screen} = start_tui(sid)
+      eventually(fn -> user_state(pid).model.windows["code-1"] != nil end)
+
+      FakeRemote.emit(remote, "s-ui", "budget_warning", %{
+        "dimension" => "wall",
+        "used" => 1_440_000,
+        "limit" => 1_800_000,
+        "fraction" => 0.8,
+        "detail" => "working time 24m/30m (80%)"
+      })
+
+      FakeRemote.emit(remote, "s-ui", "agent_done", %{
+        "reason" => "budget_exhausted",
+        "limit" => "wall_clock"
+      })
+
+      FakeRemote.emit(remote, "s-ui", "budget_exhausted", %{"limit" => "wall_clock"})
+      FakeRemote.emit(remote, "s-ui", "input_after_done", %{"source" => "user"})
+      press(pid, "1")
+
+      eventually(fn -> screen_text(pid, screen) =~ @stopped end)
+      text = screen_text(pid, screen)
+      assert text =~ "takes no more input"
+      assert text =~ "Your message was not taken: the session had stopped"
+      refute text =~ "picked"
+
+      sent = fn -> Enum.count(FakeRemote.calls(remote), &(elem(&1, 0) == "input.send")) end
+      before = sent.()
+      type(pid, "are you there")
+      press(pid, "enter")
+
+      eventually(fn -> screen_text(pid, screen) =~ "are you there" end)
+      assert user_state(pid).win_text == "are you there"
+      assert sent.() == before
+
+      GenServer.stop(pid, :normal)
+    end
+
+    test "a finished agent keeps its input line, and says it picked the conversation up" do
+      {remote, url} = start_remote!(sessions: [fixture()])
+      origin = connect!(remote, url)
+      sid = attach!(origin, "s-ui")
+
+      {pid, screen} = start_tui(sid)
+      eventually(fn -> user_state(pid).model.windows["code-1"] != nil end)
+
+      FakeRemote.emit(remote, "s-ui", "agent_done", %{"reason" => "finished"})
+      FakeRemote.emit(remote, "s-ui", "agent_woken", %{"from" => "finished", "source" => "user"})
+      press(pid, "1")
+
+      eventually(fn -> screen_text(pid, screen) =~ "new input picked the conversation back up" end)
+      text = screen_text(pid, screen)
+      refute text =~ "takes no more input"
+      refute text =~ "This session has stopped"
+
+      GenServer.stop(pid, :normal)
+    end
+  end
+
   describe "a read-only session" do
     test "disables input and says why on the box the user types into" do
       {remote, url} = start_remote!(sessions: [fixture(state: "read_only")])

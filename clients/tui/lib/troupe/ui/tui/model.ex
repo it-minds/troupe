@@ -196,6 +196,7 @@ defmodule Troupe.UI.TUI.Model do
           unconfirmed: %{optional(String.t()) => String.t()},
           drawn_inputs: %{optional(String.t()) => String.t()},
           warnings: %{optional(atom()) => map()},
+          stopped: String.t() | nil,
           curtain: %{optional(atom()) => pos_integer()},
           host: String.t() | nil,
           wait: wait()
@@ -325,6 +326,9 @@ defmodule Troupe.UI.TUI.Model do
           # The lines drawn for inputs the agent has not yet taken, by command id.
           drawn_inputs: %{},
           warnings: %{},
+          # Why the window's own agent takes no more input, once it ended so (a spent
+          # budget, a refusal); nil while input reaches it.
+          stopped: nil,
           curtain: %{},
           host: m.host,
           wait: @no_wait
@@ -461,7 +465,12 @@ defmodule Troupe.UI.TUI.Model do
   # A turn that starts puts the last one's figures away: the side box says nothing of a
   # turn while it runs (TUI Decision 160), as the line under it never did.
   defp working(w),
-    do: %{w | outcome: nil, message: nil, ended_at: nil, started: true, last_turn: nil}
+    do:
+      Map.put(
+        %{w | outcome: nil, message: nil, ended_at: nil, started: true, last_turn: nil},
+        :stopped,
+        nil
+      )
 
   # Why a rest is a failure, in words, or nil when it is none: the line the headless
   # printer draws between a run that finished and one that ended short, save that a cancel
@@ -871,6 +880,11 @@ defmodule Troupe.UI.TUI.Model do
       :budget_warning ->
         %{w | warnings: Map.put(w.warnings, d.dimension, d)}
         |> push(path, {:system, "⚠ " <> (d[:detail] || to_string(d.dimension)) <> " used"})
+
+      # The window's own agent ended so that the harness drops what is sent to it: the
+      # input line says so in its place, until the agent works again.
+      :stopped when path == w.path ->
+        Map.put(w, :stopped, d[:why])
 
       _ ->
         w
@@ -1544,6 +1558,22 @@ defmodule Troupe.UI.TUI.Model do
   end
 
   @doc """
+  What the input line says in its place while the window's agent takes no more input —
+  "This session has stopped: its 30-minute working limit is spent. Start a new session to
+  continue." — or `nil` while input reaches it.
+  """
+  @spec stopped(t(), String.t()) :: String.t() | nil
+  def stopped(%__MODULE__{windows: windows}, path) do
+    case Map.get(windows, path) do
+      %{stopped: why} when is_binary(why) ->
+        "This session has stopped: #{why}. Start a new session to continue."
+
+      _ ->
+        nil
+    end
+  end
+
+  @doc """
   The goal this screen's session has, as its events say, for the status line: the one on
   the session's own window, `"root"`. A branch is a session of its own and keeps its goal
   on its own window.
@@ -1924,7 +1954,7 @@ defmodule Troupe.UI.TUI.Model do
   defp dimension_label(:turns), do: "turns"
   defp dimension_label(:input), do: "input tokens"
   defp dimension_label(:output), do: "output tokens"
-  defp dimension_label(:wall), do: "wall clock"
+  defp dimension_label(:wall), do: "working time"
   defp dimension_label(:context), do: "context window"
   defp dimension_label(other), do: to_string(other)
 

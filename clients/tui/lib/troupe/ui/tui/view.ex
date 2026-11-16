@@ -3149,11 +3149,17 @@ defmodule Troupe.UI.TUI.View do
 
         {:window, path} ->
           target = if state.pane.agent in [nil, path], do: "", else: " to the branch root"
+          stopped = Model.stopped(state.model, path)
 
           title =
             cond do
               blocked = input_blocked(state) ->
                 " → #{path} — input disabled: #{blocked} "
+
+              # The agent takes no more input: the box says why in its place, and the
+              # title what still works.
+              stopped ->
+                " → #{path} — takes no more input · /new starts a session · Esc back "
 
               armed = armed_note(state, path) ->
                 armed
@@ -3169,7 +3175,11 @@ defmodule Troupe.UI.TUI.View do
                 " → #{path} (Enter sends#{target}, Esc back) "
             end
 
-          {{:edit, {state.win_text, state.win_pos}}, title}
+          # Nothing typed in a box whose agent takes no more input shows why, not an empty
+          # line that would take a message only to drop it.
+          if stopped && state.win_text == "",
+            do: {{:said, stopped}, title},
+            else: {{:edit, {state.win_text, state.win_pos}}, title}
 
         :settings ->
           settings_command_line(state)
@@ -3234,6 +3244,7 @@ defmodule Troupe.UI.TUI.View do
 
   defp with_more_keys(text, nil), do: text
   defp with_more_keys({:edit, input}, more), do: {:edit, input, "also " <> more}
+  defp with_more_keys({:said, text}, more), do: {:said, text <> "\nalso " <> more}
   defp with_more_keys("", more), do: "also " <> more
   defp with_more_keys(text, more), do: text <> "\nalso " <> more
 
@@ -3267,6 +3278,20 @@ defmodule Troupe.UI.TUI.View do
       |> min(max(length(rows) - content, 0))
 
     rows |> Enum.slice(offset, content) |> Enum.join("\n")
+  end
+
+  # A sentence in the box's place, wrapped at words from its first row: prose, whose
+  # beginning is what is read.
+  defp input_box_text(state, {:said, text}, box_rows) do
+    w = cmd_inner_width(state, box_rows)
+    content = max(box_rows - 2, 1)
+
+    text
+    |> String.split("\n")
+    |> Enum.flat_map(&Model.wrap(&1, w, :word))
+    |> Enum.map(&String.trim_trailing/1)
+    |> Enum.take(content)
+    |> Enum.join("\n")
   end
 
   # A box nobody types into (a page's footer, the HQ wizard) just shows its tail.
