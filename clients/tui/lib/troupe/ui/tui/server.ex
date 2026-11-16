@@ -662,6 +662,24 @@ defmodule Troupe.UI.TUI.Server do
     {:noreply, notice(state, waiting_line(start)), render?: true}
   end
 
+  # The plane asked which team: the form comes back, on the casting steps or on the form
+  # alike, with the question open on the names it gave. A team this machine remembers for
+  # the profile, and one of those named, sends the create again at once.
+  def handle_info(
+        {:new_session_done, ref, {:error, {:choose_team, teams}}},
+        %{new_task: ref, new_page: %{} = page} = state
+      ) do
+    state = %{state | new_task: nil, new_start: nil}
+
+    case NewSessionPage.choose_team(page, teams) do
+      {:ok, page} ->
+        {:noreply, %{state | new_page: page}, render?: true}
+
+      {:start, page, origin, params} ->
+        {:noreply, start_new(%{state | new_page: page}, origin, params), render?: true}
+    end
+  end
+
   # The screen closed while the start ran: the curtain line says how it ended, and the
   # session is in /sessions; nothing is taken from what is on screen now.
   def handle_info({:new_session_done, ref, result}, %{new_task: ref, new_page: nil} = state) do
@@ -2024,6 +2042,11 @@ defmodule Troupe.UI.TUI.Server do
 
   # Errors cross the client as strings or as reasons; the notice line takes text.
   defp to_message(reason) when is_binary(reason), do: reason
+
+  defp to_message({:choose_team, teams}),
+    do:
+      "#{Troupe.UI.NewSession.and_list(teams)} may each pay for it; /new asks which team it is for"
+
   defp to_message(reason), do: inspect(reason)
 
   defp approval_error(:unknown_call), do: "that request is no longer outstanding"
@@ -4433,6 +4456,11 @@ defmodule Troupe.UI.TUI.Server do
       question = text != "" && pending_of(w, state.pane.agent || path, [:question, :budget]) ->
         Client.answer(sid, question.call_id, text)
 
+      # An agent that takes no more input would drop the message: it stays in the box, and
+      # the line under the screen says why.
+      stopped = Model.stopped(state.model, path) ->
+        {:stopped, stopped}
+
       Map.has_key?(state.attached, path) ->
         :attached
 
@@ -4440,6 +4468,7 @@ defmodule Troupe.UI.TUI.Server do
         Client.send_input(sid, path, text)
     end
     |> case do
+      {:stopped, sentence} -> notice(state, sentence)
       :attached -> send_attached(state, path, text)
       # Any Enter that reaches here either answered the question or replaced it
       # with fresh input, so a half-built selection is stale either way.

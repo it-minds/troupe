@@ -325,6 +325,12 @@ export interface ProfilePreview {
   extended_by?: ProfileBelow[];
   /** The ceiling the write leaves against the most its pods could run at once; absent from a plane before it. */
   capacity?: { max_sessions: number | null; at_once: AtOnce; above: boolean };
+  /**
+   * What resolving the write against the profile it extends has to say, none of it refusing
+   * the write: a parent's restriction holding over what it sets, a key not inherited. Absent
+   * from a plane before it.
+   */
+  problems?: string[];
 }
 
 /**

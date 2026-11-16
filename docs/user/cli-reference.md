@@ -21,7 +21,7 @@ they are not what the tables say, so edit the tables rather than this page.
 | `troupe --full-send` | start with every budget/token limit lifted for the session |
 | `troupe --private` | a private session, sealed to the plane you are signed in to |
 | `troupe run [AGENT] "task" [--headless] [--worktree] [--auto-approve] [--full-send] [--private] [--workspace DIR]` | one task: in the TUI, or with --headless printed line by line until the agent rests |
-| `troupe run [AGENT] "task" --profile NAME [--title "TITLE"] [--headless]` | the task on the platform, on that plane profile, as the TUI's /new would start it; a full profile is waited on, a line a wait; @profile #agent /local /platform in the task set those and are taken out of it |
+| `troupe run [AGENT] "task" --profile NAME [--team TEAM] [--title "TITLE"] [--headless]` | the task on the platform, on that plane profile, as the TUI's /new would start it; a full profile is waited on, a line a wait; @profile #agent /local /platform in the task set those and are taken out of it; --team names whose session it is where more than one of your teams may use the profile |
 | `troupe resume [SESSION_ID \| latest] [--private]` | no id: the newest session here, picker open; latest, or --private for the newest private one: straight in (troupe --resume is the same) |
 | `troupe resume SESSION_ID\|latest\|--private --headless "message"` | one turn on that session, printed as run --headless prints it, then exit |
 | `troupe --remote [PLANE_URL]` | open HQ: teams, profiles and sessions on a plane |

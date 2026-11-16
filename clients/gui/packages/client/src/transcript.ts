@@ -64,6 +64,12 @@ export type Entry =
       /** When its events were written, in milliseconds, for the duration its frame's header says (troupe #474). */
       startedAt: number | undefined;
       endedAt: number | undefined;
+      /**
+       * A `finish`'s: what Troupe counted its agent's file tools changing, off the report its
+       * `agent_done` carries, in this library's words (troupe #968). Absent until then, and
+       * from a report from before the parts.
+       */
+      changed?: string;
     }
   /**
    * What the model thought before it answered, kept where the reply it came before lands
@@ -320,6 +326,17 @@ export interface TranscriptState {
   /** Set once the root agent reports it has finished; its `agent_done.reason`. */
   doneReason: string | undefined;
   /**
+   * The limit a root that ended `budget_exhausted` ran into, as its `agent_done` or the
+   * `budget_exhausted` after it names it (`wall_clock`, `max_turns`, ...); undefined otherwise.
+   */
+  doneLimit: string | undefined;
+  /**
+   * Each budget dimension's ceiling (`turns`, `input`, `output`, `wall` in milliseconds),
+   * as the root's last `budget_warning` or `budget_ask_started` said it: what names a
+   * spent limit with its number.
+   */
+  limits: Record<string, number>;
+  /**
    * How the root agent's last turn failed, when the harness ended it so: `agent_failed`,
    * a root that kept crashing, with what it raised; the session stops after it (Decision
    * 727). Cleared by the next turn's input.
@@ -504,6 +521,8 @@ export const emptyTranscript: TranscriptState = {
   startedAt: undefined,
   error: undefined,
   doneReason: undefined,
+  doneLimit: undefined,
+  limits: {},
   failed: undefined,
   costMicros: undefined,
   usage: undefined,
@@ -842,6 +861,46 @@ function lastIndex<T>(items: T[], pred: (item: T) => boolean): number {
   return -1;
 }
 
+/**
+ * The agent's last `finish` frame with what its `agent_done` report counted as changed. The
+ * `summary` beside the report says it for the agent that delegated, ending on the
+ * `read_branch` call that reads the diff, a call a person cannot make (troupe #968).
+ */
+function withChanged(entries: Entry[], d: DurableEvent): Entry[] {
+  const report = d.data["report"];
+  if (typeof report !== "object" || report === null || !("ran" in report)) return entries;
+  const text = changedText((report as Record<string, unknown>)["changed"]);
+  const at = lastIndex(entries, (en) => en.kind === "tool" && en.name === "finish" && samePath(en.agent, d.agent));
+  return at < 0 ? entries : entries.map((en, i) => (i === at && en.kind === "tool" ? { ...en, changed: text } : en));
+}
+
+// The files a count names before it says how many more there are, as the harness's own.
+const LISTED = 20;
+
+/**
+ * A finish's `changed` as a person reads it: the files, the lines added and removed, and
+ * under it each file, the commands not counted and what the agent said besides.
+ */
+export function changedText(changed: unknown): string {
+  if (typeof changed !== "object" || changed === null) return "not reported";
+  const c = changed as Record<string, unknown>;
+  const files = Array.isArray(c["files"]) ? c["files"].filter((f): f is Record<string, unknown> => typeof f === "object" && f !== null) : [];
+  const commands = num(c["commands"]) ?? 0;
+  const head =
+    files.length > 0
+      ? `${files.length === 1 ? "1 file" : `${files.length} files`}, +${num(c["added"]) ?? 0} −${num(c["removed"]) ?? 0}`
+      : commands > 0
+        ? "no file through its file tools"
+        : "nothing";
+  const under = [
+    ...files.slice(0, LISTED).map((f) => `${str(f["path"])} +${num(f["added"]) ?? 0} −${num(f["removed"]) ?? 0}${f["whole"] === true ? " (written whole)" : ""}`),
+    ...(files.length > LISTED ? [`and ${files.length - LISTED} more`] : []),
+    ...(commands > 0 ? [`not counted: what its ${commands === 1 ? "1 command" : `${commands} commands`} changed`] : []),
+    ...(typeof c["said"] === "string" && c["said"] !== "" ? [`it says: ${c["said"]}`] : []),
+  ];
+  return [head, ...under].join("\n");
+}
+
 /** What a failed call answered, as a line: a reference's preview when it ran long. */
 function errorOf(v: unknown): string | undefined {
   const content = contentOf(v);
@@ -936,8 +995,8 @@ function systemText(d: DurableEvent): string {
       return `nearly out: ${str(d.data["detail"], str(d.data["dimension"], "a limit"))}`;
     case "agent_done":
       return ENDED_BY_PARENT[str(d.data["reason"])] ?? `done: ${str(d.data["reason"], "finished")}`;
-    case "input_after_done":
-      return "input after the agent had finished; it picked the conversation back up";
+    case "agent_woken":
+      return WOKEN;
     case "cancelled":
       return "turn cancelled";
     case "budget_exhausted":
@@ -974,6 +1033,107 @@ const ENDED_BY_PARENT: Record<string, string> = {
   cancelled: "stopped by the cancel",
   failed: "failed past its restarts",
 };
+
+/** `agent_woken`: a root that had finished took the new input as its next turn. */
+const WOKEN = "the agent had finished; new input picked the conversation back up";
+
+/**
+ * How a root agent ended that the harness wakes no more: any end but `finished` (which new
+ * input resumes) and `llm_error` (a root rests on one, and the next message is a retry).
+ * Input sent to one of these is dropped, with `input_after_done`.
+ */
+const STOPS: Record<string, string> = {
+  refused: "the model refused to go on",
+  output_truncated: "the model's reply was cut off at its length limit",
+  empty_reply: "the model's reply came back empty",
+  tool_failures: "a tool kept failing",
+};
+
+/** A budget limit's dimension, as `budget_exhausted.limit` and `budget_warning.dimension` each name it. */
+const DIMENSION: Record<string, string> = {
+  max_turns: "turns",
+  turns: "turns",
+  max_input_tokens: "input",
+  input: "input",
+  max_output_tokens: "output",
+  output: "output",
+  wall_clock: "wall",
+  wall: "wall",
+};
+
+/** The ceilings a `budget_warning` or `budget_ask_started` says, kept by dimension. */
+function ceilingOf(limits: Record<string, number>, d: DurableEvent): Record<string, number> {
+  if (!isRoot(d.agent)) return limits;
+  const dim = DIMENSION[str(d.data["dimension"])];
+  const limit = d.data["limit"];
+  if (!dim || typeof limit !== "number" || !Number.isFinite(limit) || limit <= 0) return limits;
+  return { ...limits, [dim]: limit };
+}
+
+/** A count of tokens as a person reads it: 6M, 1.5M, 200k. */
+function tokenCount(n: number): string {
+  const one = (x: number): string => (Number.isInteger(x) ? String(x) : x.toFixed(1).replace(/\.0$/, ""));
+  if (n >= 1_000_000) return `${one(n / 1_000_000)}M`;
+  if (n >= 1_000) return `${one(n / 1_000)}k`;
+  return String(n);
+}
+
+/** A working time in milliseconds as a limit's size: 30-minute, 2-hour, 45-second. */
+function duration(ms: number): string {
+  if (ms >= 3_600_000 && ms % 3_600_000 === 0) return `${ms / 3_600_000}-hour`;
+  if (ms >= 60_000) return `${Math.round(ms / 60_000)}-minute`;
+  return `${Math.round(ms / 1000)}-second`;
+}
+
+/**
+ * A spent budget limit in words, with its size where the session said it: "its 30-minute
+ * working limit", "its 40-turn limit", "its 6M input-token limit"; "its budget" for a limit
+ * the client does not know.
+ */
+export function limitWords(limit: string | undefined, limits: Record<string, number> = {}): string {
+  const dim = DIMENSION[limit ?? ""];
+  const n = dim ? limits[dim] : undefined;
+  switch (dim) {
+    case "wall":
+      return n ? `its ${duration(n)} working limit` : "its working-time limit";
+    case "turns":
+      return n ? `its ${n}-turn limit` : "its turn limit";
+    case "input":
+      return n ? `its ${tokenCount(n)} input-token limit` : "its input-token limit";
+    case "output":
+      return n ? `its ${tokenCount(n)} output-token limit` : "its output-token limit";
+    default:
+      return "its budget";
+  }
+}
+
+/**
+ * Why the root agent takes no more input, as the clause after "stopped:" — "its 30-minute
+ * working limit is spent" — or undefined while input still reaches it: a root that works,
+ * rests, finished (input resumes it) or failed a model call (input is a retry).
+ */
+export function stoppedBecause(state: Pick<TranscriptState, "doneReason" | "doneLimit" | "limits">): string | undefined {
+  const reason = state.doneReason;
+  if (!reason || reason === "finished" || reason === "llm_error") return undefined;
+  if (reason === "budget_exhausted") return `${limitWords(state.doneLimit, state.limits)} is spent`;
+  return STOPS[reason] ?? `it ended ${reason.replace(/_/g, " ")}`;
+}
+
+/**
+ * What the composer says in its place while the session takes no more input:
+ * "This session has stopped: its 30-minute working limit is spent. Start a new session
+ * to continue." Undefined while it takes input.
+ */
+export function stoppedSentence(state: Pick<TranscriptState, "doneReason" | "doneLimit" | "limits">): string | undefined {
+  const why = stoppedBecause(state);
+  return why ? `This session has stopped: ${why}. Start a new session to continue.` : undefined;
+}
+
+/** `input_after_done`: the message was dropped, why, and what to do instead. */
+function notTakenText(state: TranscriptState): string {
+  const why = stoppedBecause(state);
+  return `Your message was not taken: the session had stopped${why ? ` (${why})` : ""}. Start a new session to continue.`;
+}
 
 /** How a child in the background ended, by the `ended` its end was handed over with. */
 const ENDED: Record<string, string> = {
@@ -1382,8 +1542,9 @@ export function fold(state: TranscriptState, e: TroupeEvent, options: FoldOption
     // next turn: the entry it had is open again.
     case "budget_ask_started": {
       const callId = str(d.data["call_id"]);
-      if (hasQuestion(state, callId)) return { ...next, entries: reopen(state.entries, callId) };
-      return { ...next, entries: [...state.entries, budgetQuestion(base, callId, str(d.data["detail"], "budget exhausted"), [])] };
+      const limits = ceilingOf(next.limits, d);
+      if (hasQuestion(state, callId)) return { ...next, limits, entries: reopen(state.entries, callId) };
+      return { ...next, limits, entries: [...state.entries, budgetQuestion(base, callId, str(d.data["detail"], "budget exhausted"), [])] };
     }
 
     case "question_asked": {
@@ -1635,6 +1796,7 @@ export function fold(state: TranscriptState, e: TroupeEvent, options: FoldOption
         ...next,
         bundleVersion: str(d.data["bundle_version"]) || next.bundleVersion,
         doneReason: isRoot(d.agent) ? undefined : next.doneReason,
+        doneLimit: isRoot(d.agent) ? undefined : next.doneLimit,
         entries: [...state.entries, { kind: "system", ...base, type: d.type, text: systemText(d) }],
       };
 
@@ -1647,13 +1809,48 @@ export function fold(state: TranscriptState, e: TroupeEvent, options: FoldOption
 
     // The session is finished when its root agent is: a subagent reporting, or one a
     // restore ended `interrupted`, is its own agent's state and a note, and nothing more.
-    // Either says what its last turn cost, a subagent's being its whole task.
+    // Either says what its last turn cost, a subagent's being its whole task. Its report's
+    // count of what changed goes to its `finish` frame.
     case "agent_done":
       return {
         ...next,
         doneReason: isRoot(d.agent) ? str(d.data["reason"], "finished") : next.doneReason,
+        doneLimit: isRoot(d.agent) ? str(d.data["limit"]) || undefined : next.doneLimit,
         agentState: { ...next.agentState, [pathKey(d.agent)]: "done" },
-        entries: [...state.entries, { kind: "system", ...base, type: d.type, text: systemText(d) }, ...spent(base, d)],
+        entries: [...withChanged(state.entries, d), { kind: "system", ...base, type: d.type, text: systemText(d) }, ...spent(base, d)],
+      };
+
+    // The limit a budget stop ran into, where the `agent_done` before it did not name it.
+    case "budget_exhausted":
+      return {
+        ...next,
+        doneLimit: isRoot(d.agent) ? next.doneLimit || str(d.data["limit"]) || undefined : next.doneLimit,
+        entries: [...state.entries, { kind: "system", ...base, type: d.type, text: systemText(d) }],
+      };
+
+    case "budget_warning":
+      return {
+        ...next,
+        limits: ceilingOf(next.limits, d),
+        entries: [...state.entries, { kind: "system", ...base, type: d.type, text: systemText(d) }],
+      };
+
+    // A root that had finished took new input as a turn: it is no longer done. The line
+    // says so; it is the only event that does.
+    case "agent_woken":
+      return {
+        ...next,
+        doneReason: isRoot(d.agent) ? undefined : next.doneReason,
+        doneLimit: isRoot(d.agent) ? undefined : next.doneLimit,
+        entries: [...state.entries, { kind: "system", ...base, type: d.type, text: WOKEN }],
+      };
+
+    // Input a done agent did not take: dropped, and said so with why and what to do, from
+    // how the root ended. Never the picked-up sentence, which is `agent_woken`'s.
+    case "input_after_done":
+      return {
+        ...next,
+        entries: [...state.entries, { kind: "system", ...base, type: d.type, text: notTakenText(next) }],
       };
 
     case "llm_error":

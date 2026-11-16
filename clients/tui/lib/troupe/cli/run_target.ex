@@ -67,6 +67,9 @@ defmodule Troupe.CLI.RunTarget do
          %{
            profile: profile,
            agent: agent,
+           # Whose it is, where more than one of the person's teams may use the profile: a
+           # script says so, and is never given the team this machine's /new remembers.
+           team: args[:team],
            title: blank(title),
            prompt: cleaned,
            on_wait: fn answer -> waiting(io, profile, answer) end

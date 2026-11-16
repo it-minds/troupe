@@ -29,6 +29,10 @@ const plane = await FakePlane.start({
   corsOrigins: origins,
   podTokenLifetime: 900,
   clientDefaults: process.env["NO_CLIENT_DEFAULTS"] ? { configured: false } : GATEWAY_DEFAULTS,
+  // TEAMS=core,design puts everybody in both, so a new session asks which team it is for;
+  // LISTS_ONE_TEAM=1 has the listing name only the first, so the plane's refusal asks instead.
+  ...(process.env["TEAMS"] ? { teams: process.env["TEAMS"].split(",") } : {}),
+  ...(process.env["LISTS_ONE_TEAM"] ? { listsOneTeam: true } : {}),
   // The person's memory and artifacts are the ones the daemon below keeps, so the app shows
   // the same signed in, when it asks the plane, and offline, when it asks the daemon.
   keeper: (method, params) => keptBy(daemon)(method, params),
@@ -106,6 +110,8 @@ daemon.artifacts = [
     ],
   }),
   artifact({ id: "art-ledger", title: "Ledger migration plan", visibility: "profile:dev", published_at: day(2) }),
+  // A second of the person's teams under Your teams, so it offers a chip per team (#978).
+  artifact({ id: "art-oncall", title: "On-call handover", kind: "markdown", visibility: "team:core", published_at: day(5) }),
   artifact({ id: "art-interviews", title: "Field interview guide", kind: "file", visibility: "profile:ux", shared: true, role: "view", published_at: day(4) }),
   artifact({ id: "art-mine", title: "Placement loop benchmarks", mine: true, role: "owner", owner: { subject: "alice@example.com", display_name: "Alice" }, version: 2, current: 2, published_at: day(12), may_delete: true }),
 ];
@@ -286,10 +292,11 @@ console.log(`
 
 Sign in to the plane URL above. A browser is sent to the provider and straight back as
 Alice; a device code approves itself.
-Prompts understand four prefixes: "approve: <cmd>" asks for an approval,
+Prompts understand five prefixes: "approve: <cmd>" asks for an approval,
 "big: <label>" returns a tool result too large to inline, "show: <title>" puts
-notes.md in the session's scratchpad (again for its next version), and "quiet: …"
-answers without streaming.
+notes.md in the session's scratchpad (again for its next version), "spend:" runs
+the session's 30-minute working limit out (it takes no more input after), and
+"quiet: …" answers without streaming.
 
 This computer's daemon is a fake too: open the app at
   ${origins[0]}/#daemon=${daemon.port}:${daemon.token}

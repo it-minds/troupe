@@ -245,6 +245,8 @@ defmodule Troupe.Gateway.Dispatch do
     # The thread: read as the artifact is, written as a share is.
     "artifact.comments" => :observe,
     "artifact.comment" => :control,
+    "artifact.comment.delete" => :control,
+    "artifact.comment.edit" => :control,
     # Finding a person to share one with, which names nobody it does not find.
     "people.search" => :observe,
     "artifact.rollback" => :control,
@@ -253,6 +255,8 @@ defmodule Troupe.Gateway.Dispatch do
     "artifact.put" => :control,
     # Whose it is: handed to a team, or taken back from one.
     "artifact.transfer" => :control,
+    # One kept at the top of the person's own gallery, or let go.
+    "artifact.keep" => :control,
     # Where this machine's copy of the plane's memory stands, and what each session here
     # last read: for the person's own debugging (`troupe memory --status`).
     "me.memory.status" => :observe,
@@ -326,7 +330,7 @@ defmodule Troupe.Gateway.Dispatch do
   # and after a create, whose session there was no id for before.
   @work ~w(input.send commands.run session.goal.set session.loop.start)
   @invites ~w(session.invite session.uninvite session.invites session.read_sealed)
-  @forwarded_artifacts ~w(artifact.get artifact.open artifact.read artifact.share artifact.unshare artifact.comments artifact.comment people.search artifact.rollback artifact.pin artifact.put artifact.transfer)
+  @forwarded_artifacts ~w(artifact.get artifact.open artifact.read artifact.share artifact.unshare artifact.comments artifact.comment artifact.comment.delete artifact.comment.edit people.search artifact.rollback artifact.pin artifact.put artifact.transfer)
 
   defp local_only("remote.offer", params, context) do
     cond do
@@ -1640,6 +1644,10 @@ defmodule Troupe.Gateway.Dispatch do
   # its answer with `plane_url`, its refusal with the plane's own code. Signed out, a sentence.
   defp handle(method, params, _context) when method in @forwarded_artifacts,
     do: forwarded(method, Artifacts.forward(method, params))
+
+  # One kept at the top of the person's own gallery, or let go, forwarded as those are.
+  defp handle("artifact.keep", params, _context),
+    do: forwarded("artifact.keep", Artifacts.forward("artifact.keep", params))
 
   # The person's own memory's history and a rollback, for the desktop app's Memory view.
   defp handle("me.memory.history", params, _context),

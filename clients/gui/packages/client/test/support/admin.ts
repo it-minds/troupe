@@ -1499,7 +1499,7 @@ export class FakeAdmin {
             size_class: typeof sentAttrs["size_class"] === "string" ? sentAttrs["size_class"] : (before?.size_class ?? "standard"),
           });
           const capacity = { max_sessions: max, at_once: atOnce, above: typeof max === "number" && atOnce.sessions !== null && max > atOnce.sessions };
-          return { result: { policy: this.verdict(attrs), changes: diff(was, { ...was, ...sent }), mode: this.mode, extended_by: below, capacity } };
+          return { result: { policy: this.verdict(attrs), changes: diff(was, { ...was, ...sent }), mode: this.mode, extended_by: below, capacity, problems: effect.problems ?? [] } };
         }
         const held = this.heldByRepository(subject, "profile.put", name, "WorkerProfile");
         if (held) return held;
@@ -2912,7 +2912,7 @@ export class FakeAdmin {
    * The write as the plane reads it: resolved where it names a parent, and for a profile
    * that stops naming one, what it had in effect with the write laid over it.
    */
-  private inEffect(name: string, sent: Record<string, unknown>, parent: string | null, before: FakeProfile | null): { attrs: Record<string, unknown>; own: Record<string, unknown> | null } | string {
+  private inEffect(name: string, sent: Record<string, unknown>, parent: string | null, before: FakeProfile | null): { attrs: Record<string, unknown>; own: Record<string, unknown> | null; problems?: string[] } | string {
     const own = { ...(before?.extends ? (before.own ?? {}) : {}), ...Object.fromEntries(WRITTEN_KEYS.filter((k) => k in sent).map((k) => [k, sent[k]])) };
     const via = parent ?? before?.extends ?? null;
     if (!via) return { attrs: sent, own: null };
@@ -2931,7 +2931,7 @@ export class FakeAdmin {
       return `${name} has a monthly budget of ${dollars} from ${String(source)}, and a profile that extends another can only lower its budget: set ${name}'s at or below ${dollars}, or raise ${String(source)}'s`;
     }
     const { channel: _channel, ...row } = rowOf(resolved);
-    return { attrs: { ...row, name }, own: parent ? own : null };
+    return { attrs: { ...row, name }, own: parent ? own : null, problems: parent ? resolved.problems : [] };
   }
 
   /** Each profile below `name` as this write would leave it: its diff, the policy's verdict, and what would refuse the write. */

@@ -11,7 +11,7 @@ defmodule Troupe.Gateway.PlaneMemoryTest do
   use ExUnit.Case, async: false
 
   alias Troupe.Config.Org
-  alias Troupe.Gateway.{Daemon, FakePlane}
+  alias Troupe.Gateway.{Daemon, FakePlane, LocalOnly}
   alias Troupe.LLM.Fake
   alias Troupe.{PlaneKeys, PlaneMemory}
   alias Troupe.Protocol.{Client, Endpoint}
@@ -582,6 +582,81 @@ defmodule Troupe.Gateway.PlaneMemoryTest do
 
       assert Enum.any?(Troupe.events(writer.id), fn event ->
                event.type == "tool_call_completed" and inspect(event.data) =~ "level repository"
+             end)
+    end
+  end
+
+  # A comment on an artifact a session here published reaches that session on the poll the
+  # daemon makes anyway (#980): written into its log once, as a line, never as input; and
+  # not into a session under Local only.
+  describe "a comment on an artifact a session here published" do
+    test "is written into that session's log once, on the poll, and starts no turn", ctx do
+      FakePlane.memory_with(ctx.plane.state, @documents)
+      %{session: here} = session(ctx, [{:text, "never asked"}])
+      %{session: local} = session(ctx, [{:text, "never asked"}])
+
+      # Another client put that one under Local only; one that is not keeps the poll going.
+      held = spawn(fn -> Process.sleep(:infinity) end)
+      other = spawn(fn -> Process.sleep(:infinity) end)
+      on_exit(fn ->
+        Enum.each([held, other], &Process.exit(&1, :kill))
+        Application.delete_env(:troupe_gateway, :artifact_comments_since)
+      end)
+      :ok = LocalOnly.client(held, true, [local.id])
+      :ok = LocalOnly.client(other, false)
+
+      assert {:ok, %{"linked" => true}} = link(ctx)
+
+      # The first ask starts from nothing, and the plane says where to start.
+      assert eventually(fn ->
+               Enum.any?(FakePlane.calls(ctx.plane.state), &match?({"me.memory", %{"artifact_comments" => %{"since" => nil}}}, &1))
+             end)
+
+      comment = fn session_id, id, body ->
+        %{
+          "session_id" => session_id,
+          "artifact" => %{"id" => "art-#{session_id}", "title" => "Findings"},
+          "comment" => %{
+            "id" => id,
+            "author" => %{"subject" => "cy@example.test", "display_name" => "Cy"},
+            "body" => body,
+            "created_at" => "2026-11-16T10:00:0#{id}Z"
+          }
+        }
+      end
+
+      FakePlane.artifact_comments_with(ctx.plane.state, [
+        comment.(here.id, "1", "Is the second table right?"),
+        comment.(local.id, "2", "Under Local only."),
+        comment.("s-not-here", "3", "Nobody here runs it.")
+      ])
+
+      heard = fn id -> id |> Troupe.events() |> Enum.filter(&(&1.type == "artifact_commented")) end
+      assert eventually(fn -> heard.(here.id) != [] end)
+
+      # Later polls ask from where the last answer left off, and it is said once.
+      assert eventually(fn ->
+               Enum.any?(
+                 FakePlane.calls(ctx.plane.state),
+                 &match?({"me.memory", %{"artifact_comments" => %{"since" => "2026-11-16T10:00:03Z"}}}, &1)
+               )
+             end)
+
+      Process.sleep(400)
+
+      assert [%{data: data}] = heard.(here.id)
+      assert data["artifact"] == %{"id" => "art-#{here.id}", "title" => "Findings"}
+      assert data["comment"]["body"] == "Is the second table right?"
+      assert data["comment"]["author"]["display_name"] == "Cy"
+
+      # A line, not input: no turn ran.
+      refute Enum.any?(Troupe.events(here.id), &(&1.type in ["user_input", "llm_request"]))
+      assert heard.(local.id) == []
+
+      # Never a session's id in the ask: the plane answers by whose artifacts they are.
+      refute Enum.any?(FakePlane.calls(ctx.plane.state), fn
+               {"me.memory", %{"artifact_comments" => asked}} -> Map.keys(asked) != ["since"]
+               _other -> false
              end)
     end
   end

@@ -219,9 +219,15 @@ defmodule Troupe.Plane.Harness do
     "artifact.share" => :control,
     "artifact.unshare" => :control,
     "artifact.public" => :control,
+    # One kept at the top of the caller's own gallery, or let go: theirs alone.
+    "artifact.keep" => :control,
     # Its thread: read by whoever may open it, written by whoever holds comment or above.
     "artifact.comments" => :observe,
     "artifact.comment" => :control,
+    # A comment taken back by its author, an owner or whoever may take the artifact down,
+    # and its author's edit.
+    "artifact.comment.delete" => :control,
+    "artifact.comment.edit" => :control,
     # As `session.redeem`: its caller is not yet anybody on this artifact, and what the link
     # gives them was decided when it was made.
     "artifact.redeem" => :observe
@@ -465,7 +471,7 @@ defmodule Troupe.Plane.Harness do
           |> Map.put("roles", memory_roles(user, context)),
         else: answer
 
-    {:ok, Signing.signed("memory", answer)}
+    {:ok, "memory" |> Signing.signed(answer) |> with_artifact_comments(user, params)}
   end
 
   # What is in effect for a new session of the caller's in one of their teams (the one
@@ -612,11 +618,27 @@ defmodule Troupe.Plane.Harness do
   defp handle("artifact.comment", %{"id" => id} = params, %{user: user} = context),
     do: Artifacts.comment(id, user, params["body"], platform_admin?: admin?(context))
 
+  defp handle("artifact.comment.delete", %{"id" => id} = params, %{user: user} = context),
+    do: Artifacts.delete_comment(id, user, params["comment"], platform_admin?: admin?(context))
+
+  defp handle("artifact.comment.edit", %{"id" => id} = params, %{user: user} = context),
+    do: Artifacts.edit_comment(id, user, params["comment"], params["body"], platform_admin?: admin?(context))
+
   defp handle("artifact.redeem", %{"token" => token}, %{user: user}) when is_binary(token),
     do: Artifacts.redeem_link(token, user)
 
   defp handle("artifact.redeem", _params, _context),
     do: {:error, Error.new(:invalid_params, %{reason: "artifact.redeem takes a link's token"})}
+
+  defp handle("artifact.keep", %{"id" => id} = params, %{user: user} = context) when is_binary(id),
+    do: Artifacts.keep(id, params["on"], user, platform_admin?: admin?(context))
+
+  defp handle("artifact.keep", _params, _context),
+    do:
+      {:error,
+       Error.new(:invalid_params, %{
+         reason: "artifact.keep takes an artifact's id and on, true or false"
+       })}
 
   defp handle("artifact.public", _params, _context),
     do:
@@ -647,7 +669,8 @@ defmodule Troupe.Plane.Harness do
   defp handle(method, _params, _context)
        when method in ~w(artifact.get artifact.open artifact.delete artifact.rollback artifact.pin
                          artifact.read artifact.preview artifact.share artifact.unshare
-                         artifact.transfer artifact.comments artifact.comment),
+                         artifact.transfer artifact.comments artifact.comment
+                         artifact.comment.delete artifact.comment.edit),
        do: {:error, Error.new(:invalid_params, %{reason: "#{method} takes an artifact's id"})}
 
   # Which version each of the caller's own clients last ran, and how that stands against
@@ -2345,7 +2368,13 @@ defmodule Troupe.Plane.Harness do
 
       several ->
         # Several teams could pay for this. Asking is better than guessing, because the
-        # answer decides whose budget and whose volume the session gets.
+        # answer decides whose budget and whose volume the session gets. Said in the log,
+        # so an operator asked why a person could not start a session finds the line.
+        Logger.info(
+          "troupe plane: session.create by #{user.subject} on #{profile} asked which team: " <>
+            "#{length(several)} of theirs may use it and none was named"
+        )
+
         {:error,
          Error.new(:invalid_params, %{
            reason: "choose a team",
@@ -3708,6 +3737,17 @@ defmodule Troupe.Plane.Harness do
   end
 
   defp admin?(context), do: Map.get(context, :platform_admin?, false)
+
+  # The comments on the caller's artifacts published from a session on their own machine,
+  # written since the daemon's last poll (`artifact_comments: {since}`), which the daemon
+  # writes into that session's log: the plane has no way to reach a laptop's session, and
+  # the daemon polls `me.memory` anyway. Beside the signed memory rather than in it: the
+  # signature is the organisation's word on its memory, and the copy a machine keeps of it
+  # holds no comment.
+  defp with_artifact_comments(answer, user, %{"artifact_comments" => %{} = asked}),
+    do: Map.put(answer, "artifact_comments", Artifacts.Comments.since(user, asked["since"]))
+
+  defp with_artifact_comments(answer, _user, _params), do: answer
 
   # Who may change which memory level, as `Admin.memory_put/6` decides it: a platform admin
   # the organisation's, a team's admins that team's. A principal administers nothing.

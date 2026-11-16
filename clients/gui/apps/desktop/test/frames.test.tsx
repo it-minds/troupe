@@ -228,6 +228,32 @@ describe("the levels", () => {
     await waitFor(() => document.querySelector(".palette .notice")?.textContent === "usage: /detail [quiet | tools | everything]", "the usage");
   });
 
+  // A finish's changed line is Troupe's count, in the person's words (troupe #968): the
+  // summary beside the report ends it on the read_branch call the delegating agent reads
+  // the diff with, which no person can make.
+  it("shows a finish's changed part as Troupe counted it, and no read_branch call", async () => {
+    daemon.projects[WORKSPACE] = { "transcript.detail": "tools" };
+    const session = daemon.seed(WORKSPACE);
+    session.log.append("user_input", { source: "user", text: "fix add.py" }, { kind: "user", subject: "ada" });
+    const parts = { summary: "add.py adds now", ran: "none", passed: "none", unverified: "none", needs: "none" };
+    call(session, "w1", "write_file", { path: "add.py", content: "def add(a, b):\n    return a + b\n" }, true, "wrote add.py");
+    call(session, "f1", "finish", parts, true, "reported");
+    session.log.append("agent_done", {
+      reason: "finished",
+      summary: 'add.py adds now\n\nchanged: 1 file, +2 -0; the full diff: read_branch(session_id: "s-branch", diff: true)\n  add.py +2 -0 (written whole)',
+      report: { ...parts, changed: { files: [{ path: "add.py", added: 2, removed: 0, whole: true }], added: 2, removed: 0, commands: 0, session_id: "s-branch", agent: ["root"] } },
+    });
+    await open(session);
+
+    const finish = await waitFor(() => toolFrames().find((f) => f.querySelector("summary")?.textContent?.includes("finish")), "the finish frame");
+    const changed = await waitFor(
+      () => [...finish.querySelectorAll("dt")].find((dt) => dt.textContent === "changed")?.nextElementSibling?.textContent,
+      "its changed part",
+    );
+    expect(changed).toBe("1 file, +2 −0\nadd.py +2 −0 (written whole)");
+    expect(stream().textContent).not.toContain("read_branch(");
+  });
+
   it("opens a turn with a click on its strip, live reasoning and all, and shuts it with another", async () => {
     const session = daemon.seed(WORKSPACE);
     await open(session);

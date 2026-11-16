@@ -54,6 +54,7 @@ defmodule Troupe.Plane.Artifacts do
   alias Troupe.ObjectStore
   alias Troupe.Plane.{Admin, Audit, Identity, Repo, Settings}
   alias Troupe.Plane.Artifacts.{Artifact, Comments, People, Previews, Retention, Shares, Uploads, Version}
+  alias Troupe.Plane.Artifacts.Keeps
   alias Troupe.Plane.Identity.User
   alias Troupe.Plane.Sessions.Session
   alias Troupe.Protocol.Error
@@ -289,6 +290,29 @@ defmodule Troupe.Plane.Artifacts do
       {:ok, answer(artifact, user, admin?)}
     end
   end
+
+  @doc """
+  Keep artifact `id` at the top of `user`'s own gallery (`on: true`), or let it go
+  (`false`): anybody who may open it, for themselves alone. The person's view of their
+  gallery, so nobody else sees it and it is not audited. `not_found` for one they may not
+  open; a principal, which has no gallery, is `invalid_params`.
+  """
+  @spec keep(String.t(), term(), User.t(), keyword()) :: {:ok, map()} | {:error, Error.t()}
+  def keep(id, on, %User{} = user, opts \\ []) do
+    admin? = Keyword.get(opts, :platform_admin?, false)
+
+    with :ok <- keepable(on, user),
+         {:ok, artifact} <- visible(id, user, admin?) do
+      :ok = Keeps.set(artifact.id, user, on)
+      {:ok, answer(artifact, user, admin?)}
+    end
+  end
+
+  defp keepable(on, _user) when not is_boolean(on),
+    do: {:error, invalid("on is true, to keep it at the top of your gallery, or false, to let it go")}
+
+  defp keepable(_on, %User{id: id}) when is_binary(id), do: :ok
+  defp keepable(_on, _user), do: {:error, invalid("a principal has no gallery to keep an artifact at the top of")}
 
   defp answer(artifact, user, admin?),
     do: artifact |> Repo.preload([:owner, :owner_team, :team, :versions], force: true) |> to_json(user, admin?)
@@ -1142,15 +1166,20 @@ defmodule Troupe.Plane.Artifacts do
 
     audience = audience_of(user)
 
+    # The ones the caller keeps at the top are never left out for being old: taken first
+    # into the 500, then put back where they fall, newest first.
+    kept = Keeps.ids(user)
+
     artifacts =
       if enabled?() do
         user
         |> visible_query(audience, admin?)
         |> narrow(params, user, audience, admin?)
-        |> order_by([a], desc: a.updated_at)
+        |> order_by([a], desc: a.id in ^kept, desc: a.updated_at)
         |> limit(500)
         |> preload([:owner, :owner_team, :team])
         |> Repo.all()
+        |> Enum.sort_by(& &1.updated_at, {:desc, DateTime})
         |> with_roles(user, admin?, audience)
         |> Enum.map(fn {artifact, meta} -> to_json(artifact, user, admin?, meta) end)
       else
@@ -1326,6 +1355,7 @@ defmodule Troupe.Plane.Artifacts do
     linked = Shares.roles(ids, user)
     public = Shares.public_ids(ids)
     comments = Comments.counts(ids)
+    kept = Keeps.among(ids, user)
 
     Enum.map(artifacts, fn artifact ->
       for? = for?(artifact, user, audience)
@@ -1343,6 +1373,7 @@ defmodule Troupe.Plane.Artifacts do
        %{
          role: role,
          comments: Map.get(comments, artifact.id, {0, nil}),
+         kept: MapSet.member?(kept, artifact.id),
          public: MapSet.member?(public, artifact.id),
          scope: scope(artifact, role, for?, link),
          administers: administers?(artifact, user, audience.administered),
@@ -1894,7 +1925,9 @@ defmodule Troupe.Plane.Artifacts do
   @doc "Artifact `id`'s thread, oldest first, for whoever may open it (`Comments`)."
   @spec comments(String.t(), User.t(), keyword()) :: {:ok, map()} | {:error, Error.t()}
   def comments(id, %User{} = user, opts \\ []) do
-    with {:ok, artifact} <- visible(id, user, Keyword.get(opts, :platform_admin?, false)) do
+    admin? = Keyword.get(opts, :platform_admin?, false)
+
+    with {:ok, artifact} <- visible(id, user, admin?) do
       role = role(artifact, user)
 
       {:ok,
@@ -1902,7 +1935,7 @@ defmodule Troupe.Plane.Artifacts do
          "id" => artifact.id,
          "may_comment" => role in Comments.writers(),
          "max_length" => Comments.max_body(),
-         "comments" => Comments.list(artifact)
+         "comments" => Comments.list(artifact, user, role, takes_down?(artifact, user, admin?))
        }}
     end
   end
@@ -1915,6 +1948,34 @@ defmodule Troupe.Plane.Artifacts do
       Comments.add(artifact, user, role(artifact, user), body)
     end
   end
+
+  @doc """
+  Delete comment `comment` from artifact `id`'s thread: its author's, an owner's, or a
+  takedown by whoever may take the artifact down (a platform administrator, the
+  administrator of the team it is for). Audited without its text.
+  """
+  @spec delete_comment(String.t(), User.t(), term(), keyword()) :: {:ok, map()} | {:error, Error.t()}
+  def delete_comment(id, %User{} = user, comment, opts \\ []) do
+    admin? = Keyword.get(opts, :platform_admin?, false)
+
+    with :ok <- on(),
+         {:ok, artifact} <- visible(id, user, admin?) do
+      Comments.delete(artifact, user, role(artifact, user), takes_down?(artifact, user, admin?), comment)
+    end
+  end
+
+  @doc "Comment `comment` in artifact `id`'s thread with `body` instead, by its author, marked edited."
+  @spec edit_comment(String.t(), User.t(), term(), term(), keyword()) :: {:ok, map()} | {:error, Error.t()}
+  def edit_comment(id, %User{} = user, comment, body, opts \\ []) do
+    with :ok <- on(),
+         {:ok, artifact} <- visible(id, user, Keyword.get(opts, :platform_admin?, false)) do
+      Comments.edit(artifact, user, role(artifact, user), comment, body)
+    end
+  end
+
+  # Whether `user` may take `artifact` down, as `delete/3` lets them: whoever may do that
+  # to the whole artifact may do it to one comment in its thread.
+  defp takes_down?(artifact, user, admin?), do: admin? or administers?(artifact, user)
 
   @doc """
   A link's token, spent by the person the plane signed in: they hold its role on the
@@ -2179,6 +2240,8 @@ defmodule Troupe.Plane.Artifacts do
       "commented_at" => elem(meta.comments, 1),
       # Whether the caller could move whose it is with `artifact.transfer`.
       "may_transfer" => meta.may_transfer,
+      # Whether the caller keeps it at the top of their own gallery: theirs alone to say.
+      "kept" => Map.get(meta, :kept, false),
       # The owner's switch for its public links, and whether one opens now.
       "public_links" => artifact.public_links != false,
       "public" => meta.public,

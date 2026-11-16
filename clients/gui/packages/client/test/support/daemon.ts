@@ -712,7 +712,7 @@ evoked where nothing is set and there was a sign-in. */
   /** Who the person's artifacts are shared with by name, each at a role. */
   artifactPeople: Array<{ artifact: string; subject: string; display_name: string; email: string; role: string; granted_by: string; granted_at: string }> = [];
   /** Each artifact's thread, oldest first, by id. */
-  readonly artifactComments = new Map<string, Array<{ id: string; author: { subject: string; display_name: string }; body: string; created_at: string }>>();
+  readonly artifactComments = new Map<string, Array<{ id: string; author: { subject: string; display_name: string }; body: string; created_at: string; edited_at?: string | null }>>();
   /** Who the share picker's search (`people.search`, forwarded to the plane) finds. */
   people: Array<{ subject: string; display_name: string; email: string }> = [];
   /**
@@ -2018,9 +2018,12 @@ evoked where nothing is set and there was a sign-in. */
       case "artifact.rollback":
       case "artifact.pin":
       case "artifact.transfer":
+      case "artifact.keep":
       case "artifact.read":
       case "artifact.comments":
       case "artifact.comment":
+      case "artifact.comment.delete":
+      case "artifact.comment.edit":
       case "artifact.put": {
         const mine = this.artifacts;
         // Refused under Local only as the daemon refuses every one of them: an artifact is
@@ -2035,7 +2038,7 @@ evoked where nothing is set and there was a sign-in. */
           // Each row says which gallery tab it is under, as the plane does where a row does not.
           const rows = mine
             .filter((a) => (params["mine"] === true ? a["mine"] === true : params["shared"] === true ? a["shared"] === true : true))
-            .map((a) => ({ scope: a["mine"] === true ? "mine" : a["shared"] === true ? "shared" : a["visibility"], ...a }));
+            .map((a) => ({ scope: a["mine"] === true ? "mine" : a["shared"] === true ? "shared" : a["visibility"], ...a, kept: a["kept"] === true }));
           return reply(ws, id, { enabled: true, profiles: ["dev"], teams: ["core"], publish_organisation: "everyone", public_links: false, gallery_url: "https://plane.example.test/console#/artifacts", plane_url: "https://plane.example.test", artifacts: rows });
         }
         if (method !== "artifact.publish") {
@@ -2054,8 +2057,34 @@ evoked where nothing is set and there was a sign-in. */
             case "artifact.get":
               return reply(ws, id, { ...found, versions, ...(owner ? { shares: this.artifactShares.filter((s) => s["artifact"] === found["id"]), people: this.artifactPeople.filter((p) => p.artifact === found["id"]).map(({ artifact: _a, ...p }) => p) } : {}) });
             // Its thread: read by whoever sees it, written by an owner or a role that comments.
-            case "artifact.comments":
-              return reply(ws, id, { id: found["id"], may_comment: owner || ["edit", "comment"].includes(String(found["role"] ?? "")), max_length: 4000, comments: this.artifactComments.get(String(found["id"])) ?? [] });
+            // Each comment says what this person may do with it: their own they edit while they
+            // may write and delete; an owner deletes any.
+            case "artifact.comments": {
+              const writes = owner || ["edit", "comment"].includes(String(found["role"] ?? ""));
+              const comments = (this.artifactComments.get(String(found["id"])) ?? []).map((c) => {
+                const own = c.author.subject === "alice@example.com";
+                return { ...c, may_edit: own && writes, may_delete: own || owner };
+              });
+              return reply(ws, id, { id: found["id"], may_comment: writes, max_length: 4000, comments });
+            }
+            case "artifact.comment.delete":
+            case "artifact.comment.edit": {
+              const thread = this.artifactComments.get(String(found["id"])) ?? [];
+              const c = thread.find((x) => x.id === params["comment"]);
+              if (!c) return reply(ws, id, null, { code: -32005, message: "not_found", data: { comment: params["comment"] } });
+              const own = c.author.subject === "alice@example.com";
+              if (method === "artifact.comment.delete") {
+                if (!own && !owner) return reply(ws, id, null, { code: -32004, message: "forbidden", data: { reason: "only whoever wrote a comment, the artifact's owners, or whoever may take the artifact down deletes it" } });
+                this.artifactComments.set(String(found["id"]), thread.filter((x) => x !== c));
+                return reply(ws, id, { id: found["id"], comment: c.id, deleted: true });
+              }
+              if (!own) return reply(ws, id, null, { code: -32004, message: "forbidden", data: { reason: "only whoever wrote a comment edits it" } });
+              const body = String(params["body"] ?? "").trim();
+              if (body === "") return reply(ws, id, null, { code: -32602, message: "invalid_params", data: { reason: "a comment needs some text" } });
+              const edited = { ...c, body, edited_at: new Date().toISOString() };
+              this.artifactComments.set(String(found["id"]), thread.map((x) => (x === c ? edited : x)));
+              return reply(ws, id, { id: found["id"], comment: edited });
+            }
             case "artifact.comment": {
               if (!owner && !["edit", "comment"].includes(String(found["role"] ?? ""))) {
                 return reply(ws, id, null, { code: -32004, message: "forbidden", data: { reason: "you may read this artifact's comments; its owner gives the people who may write in them comment or edit" } });
@@ -2101,6 +2130,12 @@ evoked where nothing is set and there was a sign-in. */
               return reply(ws, id, { ...found });
             case "artifact.pin":
               found["pinned"] = params["version"] ?? null;
+              return reply(ws, id, { ...found });
+            // Kept at the top of the person's own gallery, or let go: kept on the row, as the
+            // plane keeps it for the person, so every client of theirs reads it back.
+            case "artifact.keep":
+              if (typeof params["on"] !== "boolean") return reply(ws, id, null, { code: -32602, message: "invalid_params", data: { reason: "on is true, to keep it at the top of your gallery, or false, to let it go" } });
+              found["kept"] = params["on"];
               return reply(ws, id, { ...found });
             // Between the person and a team: given to a team of theirs, or taken back by its admin.
             case "artifact.transfer": {

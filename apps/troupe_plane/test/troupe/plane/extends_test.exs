@@ -56,6 +56,7 @@ defmodule Troupe.Plane.ExtendsTest do
           }
         ],
         "personalTools" => "forbid",
+        "memoryProposals" => false,
         "github" => %{"permissions" => %{"contents" => "read"}}
       }
     }
@@ -71,7 +72,8 @@ defmodule Troupe.Plane.ExtendsTest do
         "egress" => %{"fqdns" => ["warehouse.example.test", "docs.example.test"]},
         "mcpServers" => [%{"name" => "warehouse", "url" => "https://warehouse.example.test/mcp"}],
         "personalTools" => "allow",
-        "repositoryOverridesBundle" => true
+        "repositoryOverridesBundle" => true,
+        "memoryProposals" => true
       }
     }
   end
@@ -107,6 +109,8 @@ defmodule Troupe.Plane.ExtendsTest do
       # still restrict what the parent left open, and `true` is not a restriction.
       assert spec["personalTools"] == "forbid"
       assert spec["repositoryOverridesBundle"] == true
+      # A parent whose sessions propose nothing to shared memory keeps its child from it.
+      assert spec["memoryProposals"] == false
 
       # Never inherited: the parent's key and its identities are its own, and so are its
       # grants, which `teams` projects.
@@ -182,6 +186,10 @@ defmodule Troupe.Plane.ExtendsTest do
                got.effective.problems,
                &(&1 =~ "set llm.secretRef to a Secret of data-team's")
              )
+
+      # And so is a value of the child's that a parent's restriction makes do nothing.
+      assert "data-team sets personalTools to allow, and standard's forbid holds: a profile " <>
+               "cannot undo a restriction of the profile it extends" in got.effective.problems
 
       # The parent knows who extends it.
       assert {:ok, %{extended_by: ["data-team"]}} = Admin.profile_get(context.actor, "standard")
