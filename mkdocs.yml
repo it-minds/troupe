@@ -25,6 +25,10 @@ not_in_nav: |
 theme:
   name: material
   custom_dir: docs/overrides
+  # No font service: the text face is the product's Figtree, served from assets/fonts/ by
+  # assets/site.css, and the code face the system's, so a page asks no third party for
+  # anything. (A page with a Mermaid diagram still loads Mermaid from the theme's CDN.)
+  font: false
   features:
     - navigation.tabs
     - navigation.sections
@@ -49,6 +53,13 @@ theme:
       toggle:
         icon: material/weather-sunny
         name: Light
+
+extra:
+  # The front page's title after "Troupe: ", in a search result and on a shared link's card.
+  tagline: open-source coding agents on your machine and on your team's Kubernetes cluster
+
+extra_css:
+  - assets/site.css
 
 hooks:
   - docs/overrides/hooks.py

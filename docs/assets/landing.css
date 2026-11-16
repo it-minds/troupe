@@ -1,39 +1,177 @@
 /* The front page (docs/overrides/landing.html): docs/README.md's own sections, read as a
-   product's page. Colours are the theme's, so light and dark follow its palette toggle. */
+   product's page, in the product's palette. The colours are the app's default theme,
+   generated into afterglow.css from the design tokens, under the site's two schemes, so
+   the theme's light and dark toggle switches them; nothing here names a colour of its own.
+   As in the app: square corners, one flat offset block for depth, the reserved pink for
+   links, and cyan for the one filled button. */
+
+body[data-md-color-scheme]:has(.tx-landing) {
+  --md-default-bg-color: var(--bg-canvas);
+  --md-default-fg-color: var(--text-primary);
+  --md-default-fg-color--light: var(--text-secondary);
+  --md-default-fg-color--lighter: var(--text-muted);
+  --md-default-fg-color--lightest: var(--border-hairline);
+  --md-typeset-color: var(--text-body);
+  --md-typeset-a-color: var(--link);
+  --md-accent-fg-color: var(--link-hover);
+  --md-code-bg-color: var(--bg-panel);
+  --md-code-fg-color: var(--text-body);
+  --md-footer-bg-color: var(--bg-panel);
+  --md-footer-bg-color--dark: var(--bg-stage);
+  --md-footer-fg-color: var(--text-primary);
+  --md-footer-fg-color--light: var(--text-secondary);
+  --md-footer-fg-color--lighter: var(--text-muted);
+  background-color: var(--bg-canvas);
+}
 
 .tx-landing h1 {
-  font-size: 2.4rem;
+  font-size: 2.6rem;
+  font-weight: 900;
+  line-height: 1;
+  letter-spacing: -0.02em;
+  margin-bottom: 1rem;
+  color: var(--text-primary);
+}
+
+.tx-landing h2 {
+  font-weight: 900;
+  color: var(--text-primary);
+}
+
+.tx-landing h3 {
   font-weight: 700;
-  margin-bottom: 0.4rem;
-  color: var(--md-default-fg-color);
+  color: var(--text-primary);
+}
+
+.tx-landing a:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
 }
 
 .tx-landing .tx-hero > p:first-child {
   font-size: 1.12rem;
   line-height: 1.6;
   max-width: 38em;
+  color: var(--text-primary);
 }
 
 .tx-landing .tx-hero {
   margin-bottom: 1.6rem;
 }
 
+/* The three downloads, and the two ways on from the front page: square, a flat block of
+   shadow under each, and the one meant for the reader filled. */
+.tx-landing .tx-downloads,
+.tx-landing .tx-paths {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.8rem;
+  margin: 1rem 0 0.4rem;
+}
+
+.tx-landing .tx-downloads .md-button,
+.tx-landing .tx-paths a {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-start;
+  min-width: 8.5rem;
+  margin: 0;
+  padding: 0.55rem 1rem;
+  border: 1px solid var(--border-strong);
+  border-radius: 0;
+  background: var(--bg-raised);
+  color: var(--text-primary);
+  font-weight: 700;
+  text-decoration: none;
+  box-shadow: 3px 3px 0 var(--bg-shadow);
+  transition: transform 120ms ease;
+}
+
+.tx-landing .tx-downloads .md-button small {
+  font-family: var(--md-code-font-family);
+  font-size: 0.62rem;
+  opacity: 1;
+  font-weight: 400;
+  color: var(--text-secondary);
+}
+
+.tx-landing .tx-downloads .md-button:hover,
+.tx-landing .tx-paths a:hover {
+  transform: translate(0, -2px);
+  border-color: var(--text-primary);
+  color: var(--text-primary);
+}
+
+.tx-landing .tx-downloads .md-button.tx-yours,
+.tx-landing .tx-paths a:first-child {
+  background: var(--running-solid);
+  border-color: var(--running-solid);
+  color: var(--text-inverse);
+}
+
+.tx-landing .tx-downloads .md-button.tx-yours small {
+  color: var(--text-inverse);
+}
+
+.tx-landing .tx-paths a {
+  justify-content: center;
+  padding: 0.8rem 1.4rem;
+  font-size: 0.9rem;
+}
+
 .tx-landing .tx-recording {
   margin: 0 0 2.4rem;
 }
 
-.tx-landing .tx-recording img,
-.tx-landing .tx-recording video {
+.tx-landing figure img {
+  display: block;
   width: 100%;
   height: auto;
-  border-radius: 0.5rem;
-  box-shadow: var(--md-shadow-z2);
+  border: 1px solid var(--border-hairline);
+  box-shadow: 6px 6px 0 var(--bg-shadow);
 }
 
-.tx-landing .tx-recording figcaption {
+.tx-landing figure figcaption {
   max-width: none;
+  margin-top: 0.9rem;
   font-size: 0.8rem;
-  color: var(--md-default-fg-color--light);
+  color: var(--text-secondary);
+}
+
+/* What the page opens on: what Troupe is beside a picture of it, where there is room for
+   both, and the install under the two at the page's full width, so no command is cut;
+   one above the other on a phone. The hero's own blocks join the grid, in their order. */
+@media screen and (min-width: 60em) {
+  .tx-landing .tx-top {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    column-gap: 2.4rem;
+    align-items: start;
+  }
+
+  .tx-landing .tx-top > .tx-hero {
+    display: contents;
+  }
+
+  .tx-landing .tx-top > .tx-hero > * {
+    grid-column: 1 / -1;
+  }
+
+  .tx-landing .tx-top > .tx-hero > p:first-child {
+    grid-column: 1;
+    grid-row: 1;
+    margin-top: 0;
+  }
+
+  .tx-landing .tx-top > .tx-recording {
+    grid-column: 2;
+    grid-row: 1;
+    margin: 0;
+  }
+
+  .tx-landing .tx-top > .tx-recording figcaption {
+    margin-bottom: 0;
+  }
 }
 
 .tx-landing .tx-feature {
@@ -50,6 +188,10 @@
   margin-top: 0;
 }
 
+.tx-landing .tx-shots figure {
+  margin: 1.6rem 0;
+}
+
 /* Text beside its picture where there is room for both, one above the other on a phone. */
 @media screen and (min-width: 60em) {
   .tx-landing .tx-feature {
@@ -62,4 +204,43 @@
   .tx-landing .tx-feature > p {
     margin: 0;
   }
+
+  .tx-landing .tx-shots {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 2rem;
+    align-items: start;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tx-landing .tx-downloads .md-button,
+  .tx-landing .tx-paths a {
+    transition: none;
+  }
+}
+
+/* A link in a sentence is underlined as well as coloured: the pink alone is too close to
+   the body text in the dark to be the only sign. */
+.tx-landing p:not(.tx-paths) a:not(.md-button),
+.tx-landing li a,
+.tx-landing td a {
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 0.18em;
+}
+
+/* The theme's light code colours are drawn for a grey ground; on cream its violet and
+   blue fall under 4.5:1, so the install's words take the machine's cyan and the ink. */
+body[data-md-color-scheme="default"]:has(.tx-landing) {
+  --md-code-hl-keyword-color: var(--running-fg);
+  --md-code-hl-builtin-color: var(--running-fg);
+  --md-code-hl-function-color: var(--running-fg);
+  --md-code-hl-constant-color: var(--running-fg);
+  --md-code-hl-name-color: var(--text-body);
+  --md-code-hl-variable-color: var(--text-body);
+  --md-code-hl-operator-color: var(--text-secondary);
+  --md-code-hl-punctuation-color: var(--text-secondary);
+  --md-code-hl-string-color: var(--text-body);
+  --md-code-hl-number-color: var(--text-body);
 }
