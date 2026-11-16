@@ -5263,6 +5263,65 @@ pre.instruction {
   gap: var(--space-3);
   flex: 1 1 100%;
 }
+/* Who its owner shared it with by name, and the picker that adds somebody. */
+.repertoire-aside .shared-with {
+  margin-top: var(--space-4);
+}
+.repertoire-aside .shared-with h4 {
+  margin: 0 0 var(--space-2);
+  color: var(--text-muted);
+}
+.repertoire-aside .shared-with .people {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  flex: 1 1 100%;
+}
+.repertoire-aside .shared-with input {
+  min-width: 0;
+}
+/* Its thread, oldest first: who and when above each comment. */
+.repertoire-aside .comments {
+  list-style: none;
+  margin: 0 0 var(--space-3);
+  padding: 0;
+}
+.repertoire-aside .comments li {
+  padding: 7px 0;
+  border-bottom: var(--bw-hairline) solid var(--border-hairline);
+}
+.repertoire-aside .comments .micro {
+  margin: 0 0 var(--space-1);
+  color: var(--text-muted);
+}
+.repertoire-aside .comments .author {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+.repertoire-aside .comment-body {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.repertoire-aside .comment-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.repertoire-aside .comment-form textarea {
+  width: 100%;
+  box-sizing: border-box;
+  resize: vertical;
+}
+.repertoire-aside .comment-form button {
+  align-self: flex-end;
+}
+.audiences .kind-filter select {
+  min-height: var(--touch-target);
+}
 
 /* The memory view's levels, lowest to closest, with the read-only ones marked. */
 .levels .rule {

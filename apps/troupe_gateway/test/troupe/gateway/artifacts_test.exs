@@ -289,6 +289,48 @@ defmodule Troupe.Gateway.ArtifactsTest do
     assert reason =~ "owner"
   end
 
+  test "a share with a person, the thread and the picker's search go to the plane with only their arguments",
+       ctx do
+    forwarded = [
+      {"artifact.share",
+       %{
+         "command_id" => Client.command_id(),
+         "id" => "art-fakefakefakefake",
+         "person" => "cy@example.test",
+         "role" => "comment"
+       }},
+      {"artifact.comments", %{"id" => "art-fakefakefakefake"}},
+      {"artifact.comment",
+       %{"command_id" => Client.command_id(), "id" => "art-fakefakefakefake", "body" => "Looks good."}},
+      {"people.search", %{"query" => "cy"}}
+    ]
+
+    for {method, params} <- forwarded do
+      assert {:error, %{message: "unavailable"}} = Client.call(ctx.client, method, params), method
+    end
+
+    assert {:ok, %{"linked" => true}} = link(ctx)
+
+    assert {:ok, %{"person" => %{"subject" => "cy@example.test", "role" => "comment"}}} =
+             Client.call(ctx.client, "artifact.share", Enum.at(forwarded, 0) |> elem(1))
+
+    assert {:ok, %{"comments" => [%{"author" => %{"display_name" => "Cy"}}], "plane_url" => _}} =
+             Client.call(ctx.client, "artifact.comments", Enum.at(forwarded, 1) |> elem(1))
+
+    assert {:ok, %{"comment" => %{"body" => "Looks good."}}} =
+             Client.call(ctx.client, "artifact.comment", Enum.at(forwarded, 2) |> elem(1))
+
+    assert {:ok, %{"people" => [%{"subject" => "cy@example.test"}]}} =
+             Client.call(ctx.client, "people.search", %{"query" => "cy"})
+
+    calls = FakePlane.calls(ctx.plane.state)
+
+    for {method, params} <- forwarded do
+      {^method, sent} = Enum.find(calls, &match?({^method, _}, &1))
+      assert sent == Map.delete(params, "command_id"), method
+    end
+  end
+
   test "a session's agent publishes through the daemon, naming the session and itself", ctx do
     assert {:ok, %{"linked" => true}} = link(ctx)
     File.write!(Path.join(ctx.workspace, "report.md"), "# Findings")

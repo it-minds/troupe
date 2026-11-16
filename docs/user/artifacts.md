@@ -117,8 +117,9 @@ copy it.
 ## Links
 
 A link to an artifact, `https://<artifacts host>/s/<token>`, is how you give it to somebody it
-is not for. The owner makes one on the artifact's page under **Links**: with the role **View**
-or **Edit** (may publish new versions), and an expiry if you want one. Its address is shown
+is not for. The owner makes one on the artifact's page under **Links**: with the role **View**,
+**Comment** (may write in its comments) or **Edit** (may also publish new versions), and an
+expiry if you want one. Its address is shown
 once; the plane keeps only a hash of it.
 
 **What a link does.** Whoever opens it is signed in at your plane first, as themselves, and
@@ -143,6 +144,32 @@ owner may make one: view only, and always with an expiry, within 90 days. Its ad
 a slash, and the artifact's own files are served beneath it. The gallery marks an artifact a
 public link opens. The owner turns an artifact's public links off on its page, and the
 administrator's setting off stops all of them.
+
+## Sharing with picked people
+
+An owner also shares an artifact with one person by name, no link made: in the desktop app's
+gallery, under **Who can see it**, type the start of their name or email in **Share with**,
+pick them, and choose what they may do: **view** it, **comment** on it, or **edit** it
+(comment and publish new versions). The picker finds the people who share a team with you,
+as the session's invitation picker does. They find it under **Shared with you** at once,
+whatever it is for, and keep that role until you **Remove** them; naming them again changes
+the role. A link and a share by name add up: a person holds the stronger of the two.
+Removing a person ends both. The console lists who an artifact is shared with by name on its
+page, for its owner, and removes them there too.
+
+## Comments
+
+Every artifact has one thread of comments, beside it in the desktop app's gallery and on its
+page in the console, each with who wrote it and when. Whoever may open the artifact reads
+them. Its owners write them, and so does anybody a link or a share by name gave **comment** or
+**edit**; somebody who reads it only because it is for their team or the organisation reads
+the thread and writes in it once an owner gives them a role. A comment is at most 4000
+characters. Its writing is in the audit trail, never its text.
+
+The session the artifact came from, where that is a pod's and it is running, hears each
+comment: its transcript shows it, so whoever steers the session can ask the agent to act on
+it. A comment never reaches an agent on its own. The gallery's cards say how many comments an
+artifact has.
 
 ## Reading
 
@@ -169,7 +196,8 @@ sign in first, and it brings you straight back to the artifact.
 **In the desktop app**, *Artifacts* in the rail is the same gallery, read from the plane the
 app is signed in to, or through this computer's daemon and its sign-in when the app is not:
 cards grouped by when, chips for who each is for (everyone, your teams and
-profiles, shared with you by a link, only you) and a search. A card new to you is one whose
+profiles, shared with you, only you), a choice of kind (pages, documents, files) and a search by
+title, person or session. A card new to you is one whose
 newest version this computer has not opened. The one you choose shows its versions, where it
 came from and who can see it; **Open** shows it in a window of its own, from its own host,
 and each version opens the same way. **Copy link** copies a view link for your own and the

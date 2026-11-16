@@ -157,7 +157,13 @@ defmodule Troupe.Gateway.Artifacts do
     "artifact.open" => ~w(id version),
     # One text file of a version, for the terminal's frame.
     "artifact.read" => ~w(id version path),
-    "artifact.share" => ~w(id role expires),
+    # A link, or with `person` the artifact shared with that person by name.
+    "artifact.share" => ~w(id role expires person),
+    # Its thread, and a comment in it.
+    "artifact.comments" => ~w(id),
+    "artifact.comment" => ~w(id body),
+    # The share picker's search for a person, as the plane lets the person find them.
+    "people.search" => ~w(query limit),
     "artifact.unshare" => ~w(id share person),
     "artifact.rollback" => ~w(id version),
     "artifact.pin" => ~w(id version),

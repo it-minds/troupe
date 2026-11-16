@@ -489,6 +489,11 @@ defmodule Troupe.Remote.Translate do
            })
          ], memory}
 
+      # Somebody wrote a comment on an artifact this session published (root #62): one line,
+      # who, on which and what, for whoever steers the session to act on. Never input.
+      "artifact_commented" ->
+        {[emit.(:remote_note, %{text: commented(data)})], memory}
+
       # A saved `AI!` or `AI?` comment started a branch of this session (root Decision 844):
       # the branch's session, its agent, and the comments, as the daemon wrote them.
       "watch_triggered" ->
@@ -1202,6 +1207,19 @@ defmodule Troupe.Remote.Translate do
 
   defp where(%{isolation: :remote, profile: profile}) when is_binary(profile), do: profile
   defp where(_memory), do: nil
+
+  # A comment on an artifact this session published, as one line: who, on which, and what.
+  defp commented(data) do
+    artifact = if is_map(data["artifact"]), do: data["artifact"], else: %{}
+    comment = if is_map(data["comment"]), do: data["comment"], else: %{}
+    author = if is_map(comment["author"]), do: comment["author"], else: %{}
+    who = present(author["display_name"]) || present(author["subject"]) || "Somebody"
+    title = present(artifact["title"]) || "an artifact"
+    "#{who} commented on “#{title}”: #{comment["body"] || ""}"
+  end
+
+  defp present(value) when is_binary(value) and value != "", do: value
+  defp present(_value), do: nil
 
   # The server's `seq` travels with every event this one durable event becomes,
   # so the journal can tell a replay from something new whatever it unfolds into.

@@ -718,6 +718,18 @@ describe("questions, and what the daemon says about limits (troupe-remote Decisi
     assert.equal((state.entries[0] as Extract<Entry, { kind: "system" }>).text, message);
   });
 
+  it("says a comment on an artifact the session published, with who, which and what (troupe #62)", () => {
+    seq = 0;
+    const state = foldAll([
+      durable("artifact_commented", { artifact: { id: "art-1", title: "Plan" }, comment: { id: "c-1", author: { subject: "cy@example.test", display_name: "Cy" }, body: "Can you add last quarter?", created_at: "2026-11-16T09:00:00Z" } }),
+    ]);
+    assert.deepEqual(
+      state.entries.map((e) => e.kind),
+      ["system"],
+    );
+    assert.equal((state.entries[0] as Extract<Entry, { kind: "system" }>).text, "Cy commented on “Plan”: Can you add last quarter?");
+  });
+
   it("says the organisation's memory changed under a running session as the harness's sentence (troupe #55)", () => {
     seq = 0;
     const message = "The organisation's memory changed: the team design's memory is now version 6 (it was 5). Read from this turn on.";

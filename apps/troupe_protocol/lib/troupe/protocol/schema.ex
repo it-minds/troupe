@@ -660,6 +660,12 @@ defmodule Troupe.Protocol.Schema do
         "display_name" => optional(:string),
         "by_name" => optional(:string)
       },
+      # A comment written on an artifact this session published, from the plane: the
+      # artifact, who wrote it and what. Somebody else's words, never input to an agent.
+      "artifact_commented" => %{
+        "artifact" => required(:object),
+        "comment" => required(:object)
+      },
       "acl_revoked" => %{
         "subject" => required(:string),
         "role" => required(:string),
@@ -1251,12 +1257,26 @@ defmodule Troupe.Protocol.Schema do
         "version" => optional(:integer),
         "path" => optional(:string)
       },
+      # A link (`role` view, comment or edit), or with `person` (a subject) the artifact
+      # shared with that person by name at `role`, no link made.
       "artifact.share" => %{
         "command_id" => required(:string),
         "id" => required(:string),
         "role" => required(:string),
-        "expires" => optional(:string)
+        "expires" => optional(:string),
+        "person" => optional(:string)
       },
+      # The artifact's thread, oldest first, for whoever may open it; and a comment written
+      # in it by whoever holds comment, edit or owner on it.
+      "artifact.comments" => %{"id" => required(:string)},
+      "artifact.comment" => %{
+        "command_id" => required(:string),
+        "id" => required(:string),
+        "body" => required(:string)
+      },
+      # The share picker's search: people whose name, email or subject starts with `query`,
+      # among those the plane lets the person find, as its `people.search`.
+      "people.search" => %{"query" => required(:string), "limit" => optional(:integer)},
       "artifact.unshare" => %{
         "command_id" => required(:string),
         "id" => required(:string),

@@ -14,7 +14,7 @@
 import { TroupeConnection, TroupeRpcError } from "./connection.js";
 import { SessionView } from "./session.js";
 import type { CallOptions, ConnectOptions, ConnectionHooks } from "./connection.js";
-import type { Artifact, ArtifactDetail, ArtifactFilter, ArtifactKind, ArtifactList, ArtifactNewLink, ArtifactOwner, ArtifactText, ArtifactTicket, ArtifactTransferTo, ArtifactUpload } from "./artifacts.js";
+import type { Artifact, ArtifactComment, ArtifactDetail, ArtifactFilter, ArtifactKind, ArtifactList, ArtifactNewLink, ArtifactOwner, ArtifactPersonShare, ArtifactShareRole, ArtifactText, ArtifactThread, ArtifactTicket, ArtifactTransferTo, ArtifactUpload } from "./artifacts.js";
 import type { AgentBroken, AgentCheck, AgentDefinition, AgentDeleted, AgentRow, AgentScope, AgentSkippedFile, AgentsChanged, AgentWritten } from "./agents.js";
 import type { ConfigScope, ConfigSetParams, ModelConfig, ModelDiscovery, ModelsParams } from "./config.js";
 import { remoteOffer, syncState } from "./fleet.js";
@@ -23,7 +23,7 @@ import type { MemoryStatus, OwnMemory, OwnMemoryHistory, OwnMemorySaved } from "
 import type { MemoryDocument, MemoryPreview, MemorySaved } from "./admin.js";
 import { renderEntries } from "./entries.js";
 import type { MemoryEntry, MemoryInEffect } from "./entries.js";
-import type { Invitee, InviteRole, SealedRead } from "./invites.js";
+import type { Invitee, InviteRole, Person, SealedRead } from "./invites.js";
 import type { MemoryBrief } from "./memory.js";
 import type { OwnPlane } from "./own.js";
 import type { OnboardApplied, OnboardPlan } from "./onboard.js";
@@ -1276,6 +1276,26 @@ export class DaemonClient implements OwnPlane {
    */
   transferArtifact(id: string, to: ArtifactTransferTo): Promise<ArtifactDetail> {
     return this.command<ArtifactDetail>("artifact.transfer", { id, to });
+  }
+
+  /** Share it with one person by name at `role`, no link made: the plane's `artifact.share` with `person`. The owner's. */
+  sharePersonArtifact(id: string, person: string, role: ArtifactShareRole): Promise<{ id: string; person: ArtifactPersonShare }> {
+    return this.command<{ id: string; person: ArtifactPersonShare }>("artifact.share", { id, person, role });
+  }
+
+  /** Its thread, oldest first: the plane's `artifact.comments`, as the person. */
+  artifactComments(id: string): Promise<ArtifactThread> {
+    return this.call<ArtifactThread>("artifact.comments", { id });
+  }
+
+  /** A comment in its thread: the plane's `artifact.comment`, as the person. */
+  commentArtifact(id: string, body: string): Promise<{ id: string; comment: ArtifactComment }> {
+    return this.command<{ id: string; comment: ArtifactComment }>("artifact.comment", { id, body });
+  }
+
+  /** The share picker's search, the plane's `people.search` as the person. */
+  searchPeople(query: string): Promise<{ people: Person[] }> {
+    return this.call<{ people: Person[] }>("people.search", { query });
   }
 
   /** Forget one fact of a repository's memory, by its id; `memory.md` is written again without it. */

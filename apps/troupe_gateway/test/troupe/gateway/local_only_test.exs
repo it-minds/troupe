@@ -353,12 +353,16 @@ defmodule Troupe.Gateway.LocalOnlyTest do
     assert {:error, %{message: "forbidden"}} = Client.call(ctx.local, "artifact.list", %{})
 
     # Nor the desktop app's gallery and viewer, which go to the plane through the daemon.
-    for method <- ~w(artifact.get artifact.open artifact.read artifact.share artifact.unshare artifact.rollback artifact.pin) do
+    for method <- ~w(artifact.get artifact.open artifact.read artifact.share artifact.unshare artifact.rollback artifact.pin
+                     artifact.comments artifact.comment) do
       assert {:error, %{message: "forbidden", data: %{"reason" => why}}} =
                Client.call(ctx.local, method, %{"command_id" => Client.command_id(), "id" => "art-1"})
 
       assert why =~ "Local only", method
     end
+
+    # Nor the share picker's search, which asks the plane who there is.
+    assert {:error, %{message: "forbidden"}} = Client.call(ctx.local, "people.search", %{"query" => "cy"})
 
     File.write!(Path.join(ctx.workspace, "report.md"), "# Weekly\n")
 
