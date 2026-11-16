@@ -795,31 +795,29 @@ defmodule Troupe.Plane.Memory do
     current = current(owner)
     text = appended((current && current.text) || "", entry, topic)
 
-    with :ok <- room(text) do
-      case put(owner, text, subject, number(current)) do
-        {:ok, :unchanged} ->
-          {:ok, %{now: current, changes: %{}}}
-
-        {:ok, %{before: before, now: now}} ->
-          changes = Audit.diff(fields(before), fields(now))
-
-          detail =
-            for {key, opt} <- [{"session", :session}, {"agent", :agent}, {"proposal", :proposal}],
-                opts[opt],
-                into: changes,
-                do: {key, opts[opt]}
-
-          {:ok, _} = Audit.record(subject, "memory.put", subject(owner), detail)
-          _told = announce(owner)
-          {:ok, %{now: now, changes: changes}}
-
-        {:error, {:conflict, _}} when attempts > 1 ->
-          append_entry(owner, entry, topic, subject, opts, attempts - 1)
-
-        error ->
-          error
-      end
+    with :ok <- room(text),
+         {:ok, saved} <- put(owner, text, subject, number(current)) do
+      {:ok, appended_entry(owner, current, saved, subject, opts)}
+    else
+      {:error, {:conflict, _}} when attempts > 1 -> append_entry(owner, entry, topic, subject, opts, attempts - 1)
+      error -> error
     end
+  end
+
+  defp appended_entry(_owner, current, :unchanged, _subject, _opts), do: %{now: current, changes: %{}}
+
+  defp appended_entry(owner, _current, %{before: before, now: now}, subject, opts) do
+    changes = Audit.diff(fields(before), fields(now))
+
+    detail =
+      for {key, opt} <- [{"session", :session}, {"agent", :agent}, {"proposal", :proposal}],
+          opts[opt],
+          into: changes,
+          do: {key, opts[opt]}
+
+    {:ok, _} = Audit.record(subject, "memory.put", subject(owner), detail)
+    _told = announce(owner)
+    %{now: now, changes: changes}
   end
 
   @doc "An entry as one is kept: one line, white space folded, at most 1024 bytes; or why not."

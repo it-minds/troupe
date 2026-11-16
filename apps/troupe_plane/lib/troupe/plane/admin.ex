@@ -3142,23 +3142,19 @@ defmodule Troupe.Plane.Admin do
 
   # A proposal the actor may decide; another team's is not there, as its team is not.
   defp memory_proposal(actor, id) do
-    with :ok <- require_admin(actor) do
-      case Memory.Proposals.get(id) do
-        nil ->
-          {:error, Error.new(:not_found, %{proposal: id})}
+    with :ok <- require_admin(actor),
+         %Memory.Proposal{} = proposal <- Memory.Proposals.get(id),
+         true <- Memory.Proposals.decides?(actor, proposal) || proposal do
+      {:ok, proposal}
+    else
+      %Memory.Proposal{scope: "organisation"} ->
+        {:error, Error.new(:forbidden, %{required_role: "platform_admin", reason: memory_who("forbidden", "organisation", nil)})}
 
-        proposal ->
-          cond do
-            Memory.Proposals.decides?(actor, proposal) ->
-              {:ok, proposal}
+      {:error, _} = refused ->
+        refused
 
-            proposal.scope == "organisation" ->
-              {:error, Error.new(:forbidden, %{required_role: "platform_admin", reason: memory_who("forbidden", "organisation", nil)})}
-
-            true ->
-              {:error, Error.new(:not_found, %{proposal: id})}
-          end
-      end
+      _not_theirs ->
+        {:error, Error.new(:not_found, %{proposal: id})}
     end
   end
 

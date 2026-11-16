@@ -467,11 +467,7 @@ defmodule Troupe.Gateway.FakePlane do
         do: Map.put(teams, "roles", roles),
         else: teams
 
-    teams =
-      case Agent.get(state, &Map.get(&1, :proposals)) do
-        proposals when is_list(proposals) -> Map.put(teams, "proposals", proposals)
-        _none -> teams
-      end
+    teams = with_proposals(teams, Agent.get(state, &Map.get(&1, :proposals)))
 
     case Agent.get(state, &{Map.get(&1, :memory), Map.get(&1, :own)}) do
       {nil, nil} ->
@@ -1025,6 +1021,10 @@ defmodule Troupe.Gateway.FakePlane do
         "text" => own["text"]
       }
     ]
+
+  # The person's proposals, which every `me.memory` answer carries once a test set them.
+  defp with_proposals(answer, proposals) when is_list(proposals), do: Map.put(answer, "proposals", proposals)
+  defp with_proposals(answer, _none), do: answer
 
   defp own_json(own),
     do:

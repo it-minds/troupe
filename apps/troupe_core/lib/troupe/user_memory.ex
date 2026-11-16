@@ -15,6 +15,9 @@ defmodule Troupe.UserMemory do
   agent sends replaces a word of it.
   """
 
+  alias Troupe.Session
+  alias Troupe.Session.Log
+
   @typedoc "What the plane did with the entry: the entry as kept, its topic, and the version now in force."
   @type saved :: %{String.t() => term()}
 
@@ -71,12 +74,12 @@ defmodule Troupe.UserMemory do
       when is_binary(session_id) and is_binary(proposal) and is_binary(message) do
     said? =
       session_id
-      |> Troupe.Session.Log.replay()
+      |> Log.replay()
       |> Enum.any?(&(&1.type == "config_note" and &1.data["proposal"] == proposal))
 
     unless said? do
       {:ok, _seq} =
-        Troupe.Session.Log.append(session_id, Troupe.Session.root_path(), :config_note, %{
+        Log.append(session_id, Session.root_path(), :config_note, %{
           "key" => "memory_proposals",
           "message" => message,
           "proposal" => proposal

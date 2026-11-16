@@ -110,7 +110,8 @@ defmodule Troupe.Plane.Memory.Proposals do
     query =
       case actor do
         %{role: :platform_admin} -> query
-        %{role: :team_admin, teams: names} -> from(p in query, join: t in assoc(p, :team), where: p.scope == "team" and t.name in ^names)
+        %{role: :team_admin, teams: names} ->
+          from(p in query, join: t in assoc(p, :team), where: p.scope == "team" and t.name in ^names)
         _nobody -> from(p in query, where: false)
       end
 
