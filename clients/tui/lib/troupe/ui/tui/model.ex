@@ -424,11 +424,14 @@ defmodule Troupe.UI.TUI.Model do
   defp window_state(%{started: false}), do: :idle
   defp window_state(_w), do: :running
 
-  # What says a window's agent has been given something to do (TUI Decision 155): its
-  # own work, never a note about it. A session's own window opens with the session and
+  # What says a window's agent has been given something to do: its own work, never a
+  # note about it. A session's own window opens with the session and
   # hears that it was created, that its agent started and what its start asks, and is
-  # idle through all of it; it used to read `running` from its first frame.
-  @work ~w(input assistant_message llm_delta tool_started approval_requested question_asked
+  # idle through all of it; it used to read `running` from its first frame. A question is
+  # no work either: the harness asks one at a start, before any turn (whether to start a
+  # workspace's MCP server), and once it is answered with nothing sent the agent is idle.
+  # One asked in a turn comes after the turn's own input or model request, which say it.
+  @work ~w(input assistant_message llm_delta tool_started approval_requested
            budget_ask_started cancelled llm_error call_usage)a
 
   defp begun(%{started: true} = w, _e), do: w
@@ -1447,11 +1450,12 @@ defmodule Troupe.UI.TUI.Model do
 
   @doc """
   The windows on screen, in the order they opened: the branches, numbered by the digit
-  that opens each. The session's own window, `"root"`, is command mode's (TUI Decision
-  155), not a branch beside them: it is folded like any other, for its goal, its loop, the
+  that opens each. The session's own window, `"root"`, is command mode's, not a branch
+  beside them: it is folded like any other, for its goal, its loop, the
   start's questions and the session's own lines, and listed only once its agent has been
   given work of its own (a `troupe run` task, a loop, a watch trigger, a pod session's
-  input, or a session from before command mode).
+  input, or a session from before command mode), or while the harness asks a question
+  there, as it may at the start before any turn.
   """
   @spec windows(t()) :: [window()]
   def windows(%__MODULE__{} = m) do
@@ -1460,7 +1464,11 @@ defmodule Troupe.UI.TUI.Model do
     |> Enum.filter(&listed?/1)
   end
 
-  defp listed?(%{path: "root"} = w), do: Map.get(w, :started, true)
+  # Listed while the harness asks a question there too, so its row says it needs you and
+  # its digit opens it; the client's own start questions are drawn without a row.
+  defp listed?(%{path: "root"} = w),
+    do: Map.get(w, :started, true) or Enum.any?(Map.get(w, :pending, []), &(&1.kind != :local))
+
   defp listed?(_w), do: true
 
   @doc "The session's own window, `\"root\"`, listed or not; `nil` before its first event."

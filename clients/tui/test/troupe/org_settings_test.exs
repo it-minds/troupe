@@ -83,6 +83,34 @@ defmodule Troupe.OrgSettingsTest do
       refute File.read!(Path.join(ws, ".troupe/config.yaml")) =~ "max_turns"
       assert Config.load(ws).max_turns == 25
     end
+
+    # Issue #970: the key line offered `Enter edits` and `s where it goes` on a row that has
+    # no edit and no change to send anywhere.
+    test "on an enforced row the key line offers no edit and no destination; elsewhere it does" do
+      File.write!(Org.managed_path(), "defaults:\n  max_depth: 2\nenforced:\n  max_turns: 25\n")
+
+      {sid, _fake, _ws} = start_session!()
+      {pid, session} = start_tui(sid)
+
+      type(pid, "/settings")
+      press(pid, "enter")
+
+      to_setting(pid, "max_turns")
+      text = screen_text(pid, session)
+      assert text =~ "settings — ↑↓ move · Esc back"
+      refute text =~ "Enter edits"
+      refute text =~ "s where it goes"
+
+      # The organisation's default, which a change here wins over: an ordinary row.
+      depth = Enum.find_index(Settings.fields(), &(&1.key == "max_depth"))
+      turns = user_state(pid).settings.cursor
+      move = if depth > turns, do: "down", else: "up"
+      for _ <- 1..abs(depth - turns)//1, do: press(pid, move)
+      assert user_state(pid).settings.cursor == depth
+
+      assert screen_text(pid, session) =~
+               "settings — ↑↓ move · Enter edits · s where it goes · Esc back"
+    end
   end
 
   describe "troupe config pull" do

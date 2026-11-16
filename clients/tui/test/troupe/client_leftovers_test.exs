@@ -342,8 +342,10 @@ defmodule Troupe.ClientLeftoversTest do
           {Enum.reduce(local, model, &Model.apply(&2, &1)), memory}
         end)
 
-      model
-      |> Model.windows()
+      # Every window, the session's own too, which a question answered with no turn in the
+      # log leaves unlisted; the home draws its lines all the same.
+      model.windows
+      |> Map.values()
       |> Enum.flat_map(fn w -> Enum.flat_map(Map.values(w.agents), & &1.transcript) end)
       |> Enum.flat_map(fn
         {:system, text} -> [text]

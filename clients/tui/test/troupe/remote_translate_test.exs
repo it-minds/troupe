@@ -721,7 +721,8 @@ defmodule Troupe.RemoteTranslateTest do
     [window] = "s-1" |> Model.rebuild("/w", [spawned | asked]) |> Model.windows()
     assert [%{kind: :question, call_id: "failures-1"}] = window.pending
 
-    [window] = "s-1" |> Model.rebuild("/w", [spawned | asked] ++ answered) |> Model.windows()
+    # Answered, with no turn in this log, the session's own window is idle and unlisted.
+    window = "s-1" |> Model.rebuild("/w", [spawned | asked] ++ answered) |> Model.session_window()
     assert window.pending == []
   end
 

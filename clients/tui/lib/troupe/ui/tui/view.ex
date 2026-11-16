@@ -1952,9 +1952,13 @@ defmodule Troupe.UI.TUI.View do
   defp settings_command_line(%{settings: %{editing: nil, view: %{pod?: true}} = s}),
     do: {s.status || "", " settings in force on the platform — ↑↓ move · Esc back "}
 
+  # A row the organisation enforces has no edit and no change to send anywhere, so the line
+  # offers neither, as the pod's does not.
   defp settings_command_line(%{settings: %{editing: nil} = s}) do
+    field = Enum.at(Settings.fields(), s.cursor)
+
     hint =
-      case Enum.at(Settings.fields(), s.cursor) do
+      case field do
         %{type: :bool} -> "Enter/Space toggles"
         %{type: :model} -> "Enter opens the model menu"
         %{type: :theme} -> "Enter opens the theme menu"
@@ -1963,7 +1967,9 @@ defmodule Troupe.UI.TUI.View do
         _ -> "Enter edits"
       end
 
-    {s.status || "", " settings — ↑↓ move · #{hint} · s where it goes · Esc back "}
+    if field && Settings.enforced(s.view, field.key),
+      do: {s.status || "", " settings — ↑↓ move · Esc back "},
+      else: {s.status || "", " settings — ↑↓ move · #{hint} · s where it goes · Esc back "}
   end
 
   defp settings_command_line(%{settings: %{editing: text} = s}) do
