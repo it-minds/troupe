@@ -16,7 +16,7 @@ defmodule Troupe.Plane.Fleet.Extends do
   | `egress.fqdns`, `egress.gitHosts` | **added**: the parent's, then the child's that the parent lacks |
   | `mcpServers`, and the bundle its pods load | **added** by name, composed with the chain's channels' bundles (`Troupe.Plane.Bundles.Effective`). An entry with a name above it replaces that one only with `override: true`; otherwise the one above is kept, and the clash is reported |
   | `max_sessions`, `budget_micros` | **narrow only**: the lower of the two, where either sets one; a child's budget above its parent's is refused where it is written |
-  | `personalTools`, `repositoryOverridesBundle`, `github.allowPublic` | **restrict only**: a parent's `forbid` or `false` holds whatever the child says; otherwise the child's, or the parent's |
+  | `personalTools`, `repositoryOverridesBundle`, `memoryProposals`, `github.allowPublic` | **restrict only**: a parent's `forbid` or `false` holds whatever the child says, and a child that says otherwise is told so in `problems`; otherwise the child's, or the parent's |
   | `github.denyPaths` | **added**, as the egress lists are |
   | `github.maxPushes`, `github.maxRuns`, `github.maxAttempts` | **narrow only**, as `max_sessions` is |
   | `permissions.deny`, `permissions.ask`, `permissions.allow` | **added**: a child adds rules and drops none of its parent's; each profile's are its own scope on the pods (`rules/1`), so the strictest holds and no child loosens a parent's `deny` or `ask` |
@@ -72,6 +72,9 @@ defmodule Troupe.Plane.Fleet.Extends do
     "mcpIdentities" => :own,
     "personalTools" => {:restrict, "forbid"},
     "repositoryOverridesBundle" => {:restrict, false},
+    # A parent whose sessions propose nothing to a team's or the organisation's memory
+    # keeps every profile below it from proposing too.
+    "memoryProposals" => {:restrict, false},
     # The fix loop's policy on GitHub: a parent's denied paths stay denied, its "no public
     # repositories" holds, and its caps can only be lowered.
     "github" =>
@@ -573,10 +576,11 @@ defmodule Troupe.Plane.Fleet.Extends do
                                                                                    problems} ->
       sub = path <> "." <> key
 
-      {got, source} =
-        field(Map.get(rules, key, :replaced), parent[key], parent_from[sub], own[key], name)
+      rule = Map.get(rules, key, :replaced)
+      {got, source} = field(rule, parent[key], parent_from[sub], own[key], name)
 
-      {put_set(value, key, got), put_set(from, sub, source), problems}
+      {put_set(value, key, got), put_set(from, sub, source),
+       problems ++ held(rule, sub, parent[key], own[key], source, name)}
     end)
     |> then(fn {value, from, problems} -> {blank_to_nil(value), from, problems} end)
   end
@@ -599,10 +603,29 @@ defmodule Troupe.Plane.Fleet.Extends do
     {value, put_set(from, path, source), []}
   end
 
+  # A child's own value under a parent's restriction is kept as written and does nothing;
+  # said, so the administrator who wrote it learns why its pods do not do what it says.
   defp spec_field(rule, path, parent, own, parent_from, from, name) do
     {value, source} = field(rule, parent, parent_from[path], own, name)
-    {value, put_set(from, path, source), []}
+    {value, put_set(from, path, source), held(rule, path, parent, own, source, name)}
   end
+
+  # A child's own value under a parent's restriction is kept as written and does nothing;
+  # said, so the administrator who wrote it learns why its pods do not do what it says.
+  defp held({:restrict, held}, path, held, own, source, name) do
+    if set?(own) and own != held,
+      do: [
+        "#{name} sets #{String.replace_prefix(path, "spec.", "")} to #{word(own)}, and " <>
+          "#{source}'s #{word(held)} holds: a profile cannot undo a restriction of the " <>
+          "profile it extends"
+      ],
+      else: []
+  end
+
+  defp held(_rule, _path, _parent, _own, _source, _name), do: []
+
+  defp word(value) when is_binary(value), do: value
+  defp word(value), do: inspect(value)
 
   defp field(:replaced, parent, parent_from, own, name) do
     if set?(own), do: {own, name}, else: {parent, parent_from}

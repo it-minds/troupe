@@ -167,6 +167,12 @@ defmodule Mix.Tasks.Troupe.Openbao.Policy do
     | --- | --- | --- | --- |
     #{Enum.map_join(grants, "\n", &row/1)}
 
+    `token_policies` replaces the role's whole list, so each section below ends with the
+    same line, naming every policy in the table, the optional ones too: OpenBao grants
+    nothing for a name it holds no policy under, and the plane checks what its token can
+    do, not what the role names. Run the sections in any order, one alone or again after
+    an upgrade, and the role still carries every policy written.
+
     #{Enum.map_join(grants, "\n", &section/1)}
     ## 3. Workers and people
 
@@ -203,8 +209,8 @@ defmodule Mix.Tasks.Troupe.Openbao.Policy do
     """
   end
 
-  # The role as section 1 makes it, so adding a grant to it keeps the others.
-  defp plane_policies(_grant) do
-    for grant <- Policy.plane_grants(), grant.required, do: grant.policy
-  end
+  # `token_policies` replaces the role's whole list, so every section's line names every
+  # policy on the page, in the table's order: a section run alone, out of order or again
+  # after an upgrade leaves the role carrying all of them, and none undoes another.
+  defp plane_policies(_grant), do: Enum.map(Policy.plane_grants(), & &1.policy)
 end

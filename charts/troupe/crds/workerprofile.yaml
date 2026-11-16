@@ -48,7 +48,8 @@ spec:
                     status.effective, which the operator and admission read. Egress hosts, MCP
                     servers and permission rules are added to the parent's; max sessions and
                     the budget can only be lowered; the parent's personalTools forbid,
-                    repositoryOverridesBundle false and github.allowPublic false hold; the
+                    repositoryOverridesBundle false, memoryProposals false and
+                    github.allowPublic false hold; the
                     model key (llm.secretRef), mcpIdentities and the grants are never
                     inherited; any other field is the parent's where this one sets none. The
                     pods wait until the plane has written the status.
@@ -381,6 +382,17 @@ spec:
                     pods refuse the offer with a sentence naming this setting, log it, and
                     register nothing.
                     The plane reads it at every activation; no pod restarts.
+                memoryProposals:
+                  type: boolean
+                  description: >-
+                    Whether an agent of a session on this profile's pods may propose an
+                    entry for its team's or the organisation's memory (remember at level
+                    team or organisation) for an administrator to review. false, the plane
+                    refuses every proposal with the sentence the platform setting
+                    memory_proposals refuses with, naming this profile, and keeps nothing.
+                    Absent or true, the setting decides. A parent's false holds for every
+                    profile that extends it. The plane reads it at each proposal; no pod
+                    restarts.
                 teams:
                   type: array
                   description: >-

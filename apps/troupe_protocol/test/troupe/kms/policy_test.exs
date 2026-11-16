@@ -35,6 +35,28 @@ defmodule Troupe.KMS.PolicyTest do
     for policy <- policies, do: assert(kind =~ "  #{policy}.hcl: |\n")
   end
 
+  # `token_policies` replaces the role's list, so a section's line that left out a policy an
+  # earlier line gave undid that section (#971: the GitHub App's dropped the invitations').
+  test "no role line on the page takes away a policy another gave, and the last names all" do
+    lines =
+      Regex.scan(~r{^bao write auth/kubernetes/role/troupe-plane .*token_policies=(\S+)}m, Task.render())
+      |> Enum.map(fn [_line, carried] -> String.split(carried, ",") end)
+
+    every = Enum.map(Policy.plane_grants(), & &1.policy)
+
+    assert length(lines) > length(Policy.plane_grants())
+    assert Enum.sort(List.last(lines)) == Enum.sort(every)
+
+    lines
+    |> Enum.drop(1)
+    |> Enum.reduce(hd(lines), fn carried, before ->
+      assert before -- carried == [], "a later role line drops #{inspect(before -- carried)}"
+      carried
+    end)
+
+    for section_line <- Enum.drop(lines, 1), do: assert(Enum.sort(section_line) == Enum.sort(every))
+  end
+
   test "every grant the plane checks is on the page, with its policy and every path" do
     page = Task.render()
 

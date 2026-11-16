@@ -498,6 +498,18 @@ defmodule Troupe.Operator.ResourcesTest do
                context.resources
     end
 
+    # #965: whether the profile's sessions may propose to a team's or the organisation's
+    # memory is the plane's to read at each proposal, so a profile that switches them off
+    # renders what one that does not renders, and no pod is replaced to change it.
+    test "memoryProposals changes nothing the operator renders", context do
+      quiet =
+        profile()
+        |> put_in(["spec", "memoryProposals"], false)
+        |> Profile.from_resource()
+
+      assert Resources.for_profile(quiet, context.policy, context.settings) == context.resources
+    end
+
     test "the container drops every capability", %{resources: resources} do
       security = container(resources)["securityContext"]
       assert security["allowPrivilegeEscalation"] == false

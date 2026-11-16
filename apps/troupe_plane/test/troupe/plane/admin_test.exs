@@ -1127,6 +1127,42 @@ defmodule Troupe.Plane.AdminTest do
       assert Fleet.get_profile("tools-dev").spec["personalTools"] == "allow"
     end
 
+    # Whether the profile's sessions may propose to a team's or the organisation's memory
+    # (#965): a boolean and nothing else, since only `false` switches them off and a
+    # "false" saved as text would leave them proposing.
+    test "memoryProposals is kept when it is a boolean and refused otherwise", context do
+      profile = %{"name" => "quiet-dev", "image" => "ghcr.io/troupe/worker:1"}
+
+      for value <- [true, false] do
+        assert {:ok, _} = Admin.profile_put(context.root, Map.put(profile, "spec", %{"memoryProposals" => value}))
+        assert Fleet.get_profile("quiet-dev").spec["memoryProposals"] == value
+      end
+
+      for value <- ["false", 0, "no"] do
+        sent = Map.put(profile, "spec", %{"memoryProposals" => value})
+        assert {:error, error} = Admin.profile_put(context.root, sent)
+        assert error.message == "invalid_params"
+        assert error.data.reason =~ "memoryProposals must be true or false"
+      end
+
+      assert Fleet.get_profile("quiet-dev").spec["memoryProposals"] == false
+    end
+
+    # The resource declares it, optional and with no default of its own, so a profile kept
+    # in a repository carries it to the plane and no existing resource changes on upgrade.
+    test "the WorkerProfile resource declares memoryProposals as an optional boolean" do
+      crd =
+        "../../../../../charts/troupe/crds/workerprofile.yaml"
+        |> Path.expand(__DIR__)
+        |> YamlElixir.read_from_file!()
+
+      [%{"schema" => %{"openAPIV3Schema" => schema}}] = crd["spec"]["versions"]
+      field = schema["properties"]["spec"]["properties"]["memoryProposals"]
+
+      assert field["type"] == "boolean"
+      refute Map.has_key?(field, "default")
+    end
+
     # An identity's subject is optional, so every resource written before it stays valid,
     # and one that is empty or longer than a name is refused by the API server, as
     # `MCPIdentity.problems/1` reports it.
