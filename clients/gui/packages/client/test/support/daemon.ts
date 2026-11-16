@@ -2260,6 +2260,13 @@ evoked where nothing is set and there was a sign-in. */
       changed = this.ui[key] !== (value ?? undefined);
       if (value === null) delete this.ui[key];
       else this.ui[key] = value;
+    } else if (key === "transcript.detail") {
+      if (value !== null && !["quiet", "tools", "everything"].includes(String(value))) {
+        return invalid(`transcript.detail must be one of quiet, tools, everything, not ${JSON.stringify(value)}`);
+      }
+      changed = this.transcript[key] !== (value ?? undefined);
+      if (value === null) delete this.transcript[key];
+      else this.transcript[key] = value;
     } else {
       return invalid(`${key} is not a setting Troupe knows; \`troupe config --explain\` lists them all`);
     }

@@ -95,6 +95,53 @@ defmodule Troupe.Plane.ClientVersions do
     end
   end
 
+  # The public release page, where releases are published when this plane names no
+  # other place: one release's page, or the latest.
+  @release_pages "https://github.com/it-minds/troupe/releases"
+
+  # The installer each platform's person is offered, as a release names it: the desktop
+  # app's number without its pre-release, since an MSI version must be numeric.
+  @installers %{
+    "windows" => "_x64-setup.exe",
+    "macos" => "_universal.dmg",
+    "linux" => "_amd64.AppImage"
+  }
+
+  @doc """
+  Where a web page sends a person to install the desktop app: the version this plane
+  recommends for it, the release's page, and its installer for each of the three
+  platforms, from where this plane says releases are (`release_url/0`) or else GitHub's.
+  With no recommended version, the files are `nil` and the page is the latest release's.
+
+  For `/.well-known/troupe`, which anybody may read: the recommended version is what a
+  page offers to install, and says nothing of which versions are refused.
+  """
+  @spec downloads() :: map()
+  def downloads do
+    case policy("desktop").recommended do
+      version when is_binary(version) and version != "" ->
+        file = "Troupe_" <> (version |> String.split(["-", "+"], parts: 2) |> hd())
+        base = (release_url() || @release_pages <> "/download") <> "/v#{version}/"
+
+        Map.merge(
+          %{
+            "version" => version,
+            "page" => if(release_url(), do: base, else: @release_pages <> "/tag/v#{version}")
+          },
+          Map.new(@installers, fn {platform, suffix} -> {platform, base <> file <> suffix} end)
+        )
+
+      _none ->
+        %{
+          "version" => nil,
+          "page" => @release_pages <> "/latest",
+          "windows" => nil,
+          "macos" => nil,
+          "linux" => nil
+        }
+    end
+  end
+
   @doc """
   Change one component's policy.
 
@@ -102,10 +149,13 @@ defmodule Troupe.Plane.ClientVersions do
   list. Every version must be one SemVer reads, the minimum may not be newer than the
   recommended version, and the recommended version may not be blocked: each refusal says
   which, and nothing is written. Answers the policy as it now stands, and the one before.
+
+  With `dry_run: true`, every check is made and nothing is written: the answer is the
+  policy as the put would leave it, and the one before.
   """
-  @spec put(String.t(), map(), String.t()) ::
+  @spec put(String.t(), map(), String.t(), keyword()) ::
           {:ok, %{before: map(), now: map()}} | {:error, map()}
-  def put(component, attrs, by) do
+  def put(component, attrs, by, opts \\ []) do
     with :ok <- known(component),
          {:ok, changes} <- read(attrs) do
       row = Repo.get(__MODULE__, component) || %__MODULE__{component: component}
@@ -117,11 +167,15 @@ defmodule Troupe.Plane.ClientVersions do
         |> put_change(:updated_by, by)
 
       with :ok <- coherent(Map.merge(Map.from_struct(row), changes)) do
-        stored = Repo.insert_or_update!(changeset)
+        stored = store(changeset, Keyword.get(opts, :dry_run, false))
         {:ok, %{before: before, now: describe(stored, component)}}
       end
     end
   end
+
+  # A dry run's row is the changeset applied, written nowhere.
+  defp store(changeset, true), do: apply_changes(changeset)
+  defp store(changeset, _write), do: Repo.insert_or_update!(changeset)
 
   defp known(component) do
     if component in components(),

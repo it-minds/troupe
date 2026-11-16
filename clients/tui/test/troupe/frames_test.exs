@@ -271,6 +271,40 @@ defmodule Troupe.FramesTest do
     assert screen =~ "▎ Let me look at the parser."
   end
 
+  # A replayed or late-attached session saw no reasoning stream; the log's reply carries it
+  # as a block of its own, and the frame is drawn from that, with no time to say (#659).
+  test "a replay draws the reasoning frame from the logged reply, with no time to say" do
+    replayed =
+      opened() ++
+        [
+          event(
+            :assistant_message,
+            %{
+              content: [
+                Message.reasoning_block("The parser drops its last line."),
+                Message.text_block("Fixed.")
+              ]
+            },
+            13_000
+          ),
+          event(:agent_state, %{to: :idle, turn: turn_cost()}, 13_500)
+        ]
+
+    everything = text(draw(fold(replayed), detail: :everything))
+    assert everything =~ "▾ thinking"
+    refute everything =~ "thinking ·"
+    assert everything =~ "▎ The parser drops its last line."
+    assert everything =~ "▎ Fixed."
+
+    tools = text(draw(fold(replayed), detail: :tools))
+    assert tools =~ "▸ thinking"
+    refute tools =~ "The parser drops its last line."
+
+    # What streamed wins over the log's copy of it: the same words, and the time they took.
+    live = text(draw(fold(turn()), detail: :everything))
+    assert live =~ "▾ thinking · 12s"
+  end
+
   test "e opens the whole turn and closes it again, and a level of everything the other way" do
     quiet = text(draw(fold(turn())))
     opened = text(draw(fold(turn()), open: [0]))

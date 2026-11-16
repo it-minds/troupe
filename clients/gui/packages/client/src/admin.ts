@@ -74,6 +74,8 @@ export interface SessionGitHub {
 export interface SessionErasePreview {
   session_id: string;
   owner: string;
+  /** The owner's name, from the identity record; absent where it has none, and from a plane before it. */
+  owner_name?: string;
   profile: string | null;
   object_bytes: number | null;
   workspace_bytes: number | null;
@@ -168,6 +170,8 @@ export interface AdminProfile {
   unenforced?: boolean;
   replicas: number | null;
   sessions_per_pod: number | null;
+  /** The most its pods could run at once and what bounds it; absent from a plane before it. */
+  at_once?: AtOnce;
   /** The channel the profile names, or has from the profile it extends. */
   channel: string | null;
   /** The channel its pods load: the bundle the plane composes for it, where it extends a profile on another channel. */
@@ -319,6 +323,25 @@ export interface ProfilePreview {
   mode: string;
   /** Every profile below the one previewed, as the write would leave it. */
   extended_by?: ProfileBelow[];
+  /** The ceiling the write leaves against the most its pods could run at once; absent from a plane before it. */
+  capacity?: { max_sessions: number | null; at_once: AtOnce; above: boolean };
+}
+
+/**
+ * The most sessions a profile's pods could run at once, and what bounds it: the hosts
+ * registered for it, or the cluster policy's replicas; `sessions: null` where nothing
+ * does, the plane adding pods up to `max_sessions`.
+ */
+export interface AtOnce {
+  sessions: number | null;
+  by: "hosts" | "policy" | null;
+}
+
+/** The sentence a ceiling above what the pods could run earns, or null where it is not above or nothing bounds them. */
+export function ceilingAboveWords(profile: string, maxSessions: number | null | undefined, atOnce: AtOnce | null | undefined): string | null {
+  if (typeof maxSessions !== "number" || !atOnce || atOnce.sessions === null || maxSessions <= atOnce.sessions) return null;
+  const why = atOnce.by === "hosts" ? "the hosts registered for it" : "the cluster policy's most replicas";
+  return `${profile} allows ${maxSessions} sessions at once, and its pods can run ${atOnce.sessions} at once (${why}): saved as a limit, not a promise, so no more than ${atOnce.sessions} run.`;
 }
 
 /** What `admin.profile.put` answers: the profile, what moved, and how it reached the cluster. */
@@ -528,6 +551,8 @@ export interface ClientPolicyPut extends ClientPolicy {
   changes: AuditChanges;
   /** How the component's clients last seen stand against the policy now, as the audit records it. */
   affected?: ClientCounts;
+  /** True where it was a dry run: nothing was written. Absent from a plane before it. */
+  dry_run?: boolean;
 }
 
 const RELEASE_VERSION = /^v?(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?(?:\+[0-9A-Za-z.-]+)?$/;
@@ -1151,6 +1176,8 @@ export interface MemoryReader {
   /** `pod`: told at once by a nudge; `machine`: its daemon asks at its next poll. */
   where: "pod" | "machine";
   owner: string | null;
+  /** The owner's name, from the identity record; absent where it has none, and from a plane before it. */
+  owner_name?: string;
   profile: string | null;
   team: string | null;
   /** The version its last turn read; 0 for none. */
@@ -1347,7 +1374,8 @@ export interface ProfilesExport {
  */
 export interface Connections {
   servers: Array<{ name: string; slot: string | null; profiles: string[]; people: Array<{ subject: string; display_name: string | null; connected: boolean }> }>;
-  sessions: Array<{ id: string; profile: string; team: string; owner: string; state: string }>;
+  /** Each with its owner, whose identity its calls go out as, and their name where the identity record has one. */
+  sessions: Array<{ id: string; profile: string; team: string; owner: string; owner_name?: string; state: string }>;
   credentials_readable: false;
 }
 
@@ -1842,6 +1870,15 @@ export class AdminApi {
   /** Change one component's policy. A platform admin's; refused whole with `data.field` and `data.reason`. */
   putClients(component: string, policy: ClientPolicyChange): Promise<ClientPolicyPut> {
     return this.rpc<ClientPolicyPut>("admin.clients.put", { component, policy });
+  }
+
+  /**
+   * What `putClients` would do, written and audited nowhere: the plane's own `changes` and
+   * `affected`. Ask it only of a plane whose discovery lists `admin.clients.put` under
+   * `plane.dry_run`: one from before ignores the flag and makes the write.
+   */
+  previewClients(component: string, policy: ClientPolicyChange): Promise<ClientPolicyPut> {
+    return this.rpc<ClientPolicyPut>("admin.clients.put", { component, policy, dry_run: true });
   }
 
   identityCheck(group?: string): Promise<IdentityCheckResult> {

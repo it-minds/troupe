@@ -243,6 +243,21 @@ describe("the voids", () => {
 
     unmount = render(<ApprovalPanel entry={approval} canAnswer others={[]} alwaysAllow onAnswer={async (d, a) => void answers.push([d, a])} />).unmount;
     (await seesButton("Always allow shell")).click();
+    // It asks where, once, and sends nothing until it is told: this workspace first, focused.
+    const workspace = await seesButton("This workspace");
+    expect(document.activeElement).toBe(workspace);
+    await seesButton("Everywhere");
+    expect(answers.some(([d]) => d === "allow_always")).toBe(false);
+    workspace.click();
+    await waitFor(() => answers.some(([d]) => d === "allow_always"), "allow_always sent");
+    expect(answers.find(([d]) => d === "allow_always")?.[1]).toEqual({ scope: "workspace" });
+  });
+
+  it("sends everywhere when the person says so", async () => {
+    const answers: Array<[string, unknown]> = [];
+    unmount = render(<ApprovalPanel entry={approval} canAnswer others={[]} alwaysAllow onAnswer={async (d, a) => void answers.push([d, a])} />).unmount;
+    (await seesButton("Always allow shell")).click();
+    (await seesButton("Everywhere")).click();
     await waitFor(() => answers.some(([d]) => d === "allow_always"), "allow_always sent");
     expect(answers.find(([d]) => d === "allow_always")?.[1]).toEqual({ scope: "everywhere" });
   });
@@ -251,8 +266,10 @@ describe("the voids", () => {
     const { session } = await open();
     daemon.askTool(session.id, "write_file", { path: "plan.md" });
     (await seesButton("Always allow write_file")).click();
+    (await seesButton("This workspace")).click();
     await waitFor(() => daemon.permissions.some((r) => r["rule"] === "write_file"), "the rule written");
-    expect(daemon.calls.find((c) => c.method === "approval.respond")?.params).toMatchObject({ decision: "allow_always", scope: "everywhere" });
+    expect(daemon.calls.find((c) => c.method === "approval.respond")?.params).toMatchObject({ decision: "allow_always", scope: "workspace" });
+    expect(daemon.permissions.find((r) => r["rule"] === "write_file")?.["source"]).toMatch(/\.troupe\/config\.local\.yaml$/);
     await sees("Always allowed");
   });
 

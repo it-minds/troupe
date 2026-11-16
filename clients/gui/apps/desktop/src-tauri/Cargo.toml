@@ -44,7 +44,14 @@ tauri-plugin-notification = "~2.8"
 # One copy of the app: a second launch, from the Start menu or from a click on a
 # notification, hands its arguments to the one running and exits. `~2.5`, the minor that
 # goes with tauri 2.12; it has no JavaScript half.
-tauri-plugin-single-instance = "~2.5"
+tauri-plugin-single-instance = { version = "~2.5", features = ["deep-link"] }
+# The app's own `troupe://` links (#959): the scheme registered by each installer from
+# tauri.conf.json, a link heard whether it started the app or reached the running one
+# through the single-instance plugin, whose `deep-link` feature hands a second launch's
+# link over. `~2.6`, the minor that goes with tauri 2.12 and the one single-instance 2.5
+# asks for; driven from Rust alone (src/deep_link.rs), so it has no JavaScript half and
+# the page is granted none of its commands.
+tauri-plugin-deep-link = "~2.6"
 # The app's own update (#66): Tauri's updater installs a release's setup
 # (Windows), app archive (macOS) or AppImage (Linux) once src/update.rs has checked the
 # release's signed manifest. `~2.14`, the minor that goes with tauri 2.12; it is driven

@@ -130,7 +130,8 @@ defmodule Troupe.Remote.Worker do
   @spec cancel(String.t()) :: :ok | {:error, term()}
   def cancel(session_id), do: call(session_id, :cancel)
 
-  @spec approve(String.t(), String.t(), :allow | :deny | :allow_session) :: :ok | {:error, term()}
+  @spec approve(String.t(), String.t(), :allow | :deny | :allow_session | :allow_always, map()) ::
+          :ok | {:error, term()}
   def approve(session_id, call_id, decision, answer \\ %{}),
     do: call(session_id, {:approve, call_id, decision, answer})
 
@@ -175,6 +176,15 @@ defmodule Troupe.Remote.Worker do
 
   @spec fs_upload(String.t(), String.t(), binary()) :: :ok | {:error, term()}
   def fs_upload(session_id, path, content), do: call(session_id, {:upload, path, content})
+
+  @doc """
+  Attaches an artifact: `fs.upload` naming it, the session's server
+  fetching its files from the plane. `{:ok, answer}` with where each file landed.
+  """
+  @spec fs_upload_artifact(String.t(), String.t(), integer() | nil) ::
+          {:ok, map()} | {:error, term()}
+  def fs_upload_artifact(session_id, artifact, version),
+    do: call(session_id, {:upload_artifact, artifact, version})
 
   @doc """
   Whether a file of `size` bytes can go in one `fs.upload` (D115): the sentence `fs_upload/3`
@@ -358,7 +368,9 @@ defmodule Troupe.Remote.Worker do
        scopes: state.scopes,
        endpoint: state.endpoint,
        error: state.error,
-       relayed?: relayed?(state)
+       relayed?: relayed?(state),
+       always_allow?: state.capabilities["approval_allow_always"] == true,
+       attach_artifact?: state.capabilities["fs_upload_artifact"] == true
      }, state}
   end
 
@@ -441,14 +453,16 @@ defmodule Troupe.Remote.Worker do
 
   # A delegation's answer carries more than its word (root Decision 850): `agent`, `brief`
   # and `reason`, sent as they are given; a publication's carries whom it is for and whose
-  # (`visibility`, `owner`) the same way, beside the decision.
+  # (`visibility`, `owner`) the same way, beside the decision; an Always allow carries
+  # where its rule is written (`scope`).
   def handle_call({:approve, call_id, decision, answer}, from, state) do
     keys = %{
       "agent" => :agent,
       "brief" => :brief,
       "reason" => :reason,
       "visibility" => :visibility,
-      "owner" => :owner
+      "owner" => :owner,
+      "scope" => :scope
     }
 
     given = for {key, value} <- answer, Map.has_key?(keys, key), into: %{}, do: {keys[key], value}
@@ -515,6 +529,14 @@ defmodule Troupe.Remote.Worker do
       {:reply, {:error, "the file for #{path} is not UTF-8 text; an upload carries text only"},
        state}
     end
+  end
+
+  # An artifact in place of bytes: the session's server fetches its
+  # files from the plane itself, and answers where each landed.
+  def handle_call({:upload_artifact, artifact, version}, from, state) do
+    params = %{artifact: artifact, command_id: RPC.command_id()}
+    params = if version, do: Map.put(params, :version, version), else: params
+    activating(state, from, "fs.upload", params)
   end
 
   def handle_call({:upload_fits, size}, _from, %{max_message: limit} = state)
@@ -1479,6 +1501,11 @@ defmodule Troupe.Remote.Worker do
       |> Map.put(:endpoint, state.endpoint)
       |> Map.put(:plane_url, state.plane_url)
       |> Map.put(:relayed?, relayed?(state))
+      # What the server takes beyond the contract's core, as it said at `initialize`: an
+      # Always allow that writes the person's rule (a daemon's; a pod's rules are its profile's), and an
+      # artifact attached by name, its files fetched by the server.
+      |> Map.put(:always_allow?, state.capabilities["approval_allow_always"] == true)
+      |> Map.put(:attach_artifact?, state.capabilities["fs_upload_artifact"] == true)
     )
   end
 

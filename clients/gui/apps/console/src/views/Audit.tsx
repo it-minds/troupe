@@ -10,9 +10,11 @@
 import { useState } from "react";
 import type { JSX } from "react";
 import { nameOrSubject } from "@troupe/client";
-import type { AuditIntegrity } from "@troupe/client";
+import type { AuditChanges, AuditIntegrity, AuditRow, PlatformSetting } from "@troupe/client";
 import { useConsole, useLoad } from "../console";
 import { DetailList, Empty, Failure, Field, Loaded, Loading, Region, Status, when } from "./bits";
+import { changesInUnit } from "./settingUnits";
+import { teamChangesInUnit } from "./Team";
 
 const STEP = 100;
 
@@ -32,6 +34,10 @@ export function Audit(): JSX.Element {
   const [query, setQuery] = useState("");
   const asked = Object.fromEntries(Object.entries(filter).filter(([, v]) => v.trim() !== "").map(([k, v]) => [k, v.trim()]));
   const [load, reload] = useLoad(() => admin.audit({ ...asked, limit }), [admin, filter.actor, filter.kind, filter.subject_id, limit]);
+  // The settings' names and units, to say a setting's row in them; a plane that cannot list
+  // them leaves every row as the audit recorded it.
+  const [namingLoad] = useLoad(() => admin.settings().catch(() => null), [admin]);
+  const naming = new Map<string, PlatformSetting>(namingLoad.state === "ready" && namingLoad.data ? namingLoad.data.settings.map((s) => [s.key, s]) : []);
   const q = query.trim().toLowerCase();
 
   return (
@@ -82,7 +88,7 @@ export function Audit(): JSX.Element {
       </div>
       <Loaded load={load} what="the audit" retry={reload} slow>
         {(rows) => {
-          const shown = rows.filter((r) => !q || JSON.stringify([r.actor, r.actor_name ?? "", r.action, r.subject_id, r.detail]).toLowerCase().includes(q));
+          const shown = rows.filter((r) => !q || JSON.stringify([r.actor, r.actor_name ?? "", r.action, r.subject_id, r.detail, inUnits(r, naming)]).toLowerCase().includes(q));
           if (rows.length === 0) {
             return (
               <Empty title={asked["actor"] || asked["kind"] || asked["subject_id"] ? "Nothing recorded that matches" : "Nothing recorded yet"}>
@@ -115,7 +121,7 @@ export function Audit(): JSX.Element {
                             <code>{r.action}</code>
                           </td>
                           <td className="mono">{r.subject_id ?? "—"}</td>
-                          <td>{r.detail && Object.keys(r.detail).length > 0 ? <DetailList detail={r.detail} /> : <span className="muted">—</span>}</td>
+                          <td>{r.detail && Object.keys(r.detail).length > 0 ? <DetailList detail={inUnits(r, naming)} /> : <span className="muted">—</span>}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -139,6 +145,22 @@ export function Audit(): JSX.Element {
       {role === "platform_admin" && <Integrity />}
     </div>
   );
+}
+
+/**
+ * A row's diff as the pages it came from say it: a setting's (`setting.put`, `setting.reset`)
+ * by its label with each value in its unit, from the plane's settings table, and a team's
+ * limits (`team.update`) as the team's Limits tab names them. The plane's values are what
+ * the row holds; the key stays in the row's subject, and the search reads both.
+ */
+function inUnits(row: AuditRow, naming: Map<string, PlatformSetting>): Record<string, unknown> {
+  const detail = row.detail ?? {};
+  if (row.action === "setting.put" || row.action === "setting.reset") {
+    const setting = row.subject_id ? naming.get(row.subject_id) : undefined;
+    return setting ? changesInUnit(setting, detail as AuditChanges) : detail;
+  }
+  if (row.action === "team.update") return teamChangesInUnit(detail);
+  return detail;
 }
 
 /** The chain's check, a platform admin's: the trail is the whole plane's. */

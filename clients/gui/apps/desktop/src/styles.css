@@ -1682,10 +1682,17 @@ details.advanced > summary {
    colour is a role's token: the rules, a table's lines and line numbers the strong
    border; a label, a heading and a list marker `--frame-accent`; outcomes their status;
    reasoning, the strip and the flourish muted; what waits on a person, and nothing else,
-   the reserved colour. */
+   the reserved colour.
+
+   Width: prose keeps the reading measure, and what is not prose runs to the column. A
+   frame is as wide as what is in it, from the measure up to the column, so a reply of
+   sentences is a frame of the measure and one with a wide diff, table or listing widens
+   to show it, its paragraphs still at the measure; a body wider than the column scrolls
+   sideways inside its frame. */
 .frame {
-  max-width: var(--measure-reading);
-  min-width: 0;
+  width: fit-content;
+  min-width: min(100%, var(--measure-reading));
+  max-width: 100%;
   padding: var(--space-3) var(--space-4);
   background: var(--bg-sunken);
   border: var(--bw-hairline) solid var(--border-hairline);
@@ -1710,8 +1717,11 @@ details.advanced > summary {
 .frame-head .fact {
   white-space: pre;
 }
-/* A block inside prose: its header over a rule, and a rule under it. */
+/* A block inside prose: its header over a rule, and a rule under it, across the prose's
+   frame. */
 .frame.nested {
+  width: auto;
+  min-width: 0;
   margin: 0 0 var(--space-3);
   padding: 0;
   background: none;
@@ -1733,6 +1743,102 @@ details.advanced > summary {
 }
 .frame.diff .hunk {
   color: var(--diff-hunk);
+}
+/* Highlighted code (issue #659): the grammar's token kinds in the palette's roles, never
+   a highlighter theme's colours. A keyword, a tag and a heading take the accent, as a
+   label does; a name being defined the primary ink; a string, a number and a type the
+   person palette's third, second and fifth hues, which no theme gives the reserved
+   colour; a comment and punctuation are muted; what a diff adds or removes, its colours.
+   Everything else is the reader's ink. */
+.frame pre .hl-keyword,
+.frame pre .hl-selector-tag,
+.frame pre .hl-name,
+.frame pre .hl-section,
+.frame pre .hl-doctag,
+.frame pre .hl-meta-keyword {
+  color: var(--frame-accent);
+}
+.frame pre .hl-title,
+.frame pre .hl-function_,
+.frame pre .hl-class_ {
+  color: var(--text-primary);
+}
+.frame pre .hl-string,
+.frame pre .hl-regexp,
+.frame pre .hl-symbol,
+.frame pre .hl-char,
+.frame pre .hl-link,
+.frame pre .hl-selector-attr,
+.frame pre .hl-selector-pseudo,
+.frame pre .hl-template-tag {
+  color: var(--p3);
+}
+.frame pre .hl-number,
+.frame pre .hl-literal {
+  color: var(--p2);
+}
+.frame pre .hl-built_in,
+.frame pre .hl-type,
+.frame pre .hl-selector-class,
+.frame pre .hl-selector-id {
+  color: var(--p5);
+}
+.frame pre .hl-attr,
+.frame pre .hl-attribute,
+.frame pre .hl-property,
+.frame pre .hl-variable,
+.frame pre .hl-template-variable,
+.frame pre .hl-params {
+  color: var(--text-secondary);
+}
+.frame pre .hl-comment,
+.frame pre .hl-quote,
+.frame pre .hl-meta,
+.frame pre .hl-punctuation {
+  color: var(--text-muted);
+}
+.frame pre .hl-comment,
+.frame pre .hl-emphasis {
+  font-style: italic;
+}
+.frame pre .hl-strong {
+  font-weight: 700;
+}
+.frame pre .hl-addition {
+  color: var(--diff-add-fg);
+}
+.frame pre .hl-deletion {
+  color: var(--diff-del-fg);
+}
+/* A Mermaid diagram: the image Mermaid drew, at its own size up to the frame's, and
+   scrolled sideways inside the frame past it. Its source toggle sits at the header's end. */
+.frame.mermaid > .frame-head {
+  justify-content: space-between;
+}
+.frame.mermaid .diagram {
+  padding: var(--space-2) 0;
+  overflow-x: auto;
+}
+.frame.mermaid .diagram img {
+  display: block;
+  max-width: none;
+}
+.frame.mermaid .note {
+  margin: 0 0 var(--space-2);
+  font: var(--t-note);
+  color: var(--text-muted);
+}
+.frame.mermaid button.source-toggle {
+  min-height: 0;
+  padding: 0 var(--space-1);
+  border: none;
+  background: none;
+  font: var(--t-micro);
+  letter-spacing: var(--tracking-micro);
+  color: var(--text-muted);
+}
+.frame.mermaid button.source-toggle[aria-pressed="true"] {
+  color: var(--text-primary);
 }
 /* A file read: its line numbers in a column of their own, out of the way of a copy. */
 .frame pre.numbered .n {
@@ -1801,8 +1907,20 @@ details.advanced > summary {
   color: var(--text-primary);
 }
 .frame.prose pre.source {
+  max-width: var(--measure-reading);
   white-space: pre-wrap;
   color: var(--text-secondary);
+}
+/* The words of a reply keep the reading measure however wide its frame is. */
+.md > p,
+.md > h3,
+.md > h4,
+.md > ul,
+.md > ol,
+.md > blockquote,
+.md > hr,
+.md > .raw {
+  max-width: var(--measure-reading);
 }
 .md > :first-child {
   margin-top: 0;
@@ -1876,9 +1994,10 @@ details.advanced > summary {
   white-space: pre-wrap;
 }
 
-/* A call: its header on the chat, what came back on the surface under it. */
+/* A call: its header on the chat, what came back on the surface under it, out to the
+   column when what came back is that wide. */
 .tool-frame {
-  max-width: var(--measure-reading);
+  max-width: 100%;
   display: flex;
   flex-direction: column;
   gap: var(--space-1);
@@ -2476,6 +2595,26 @@ details.advanced > summary {
   padding: 0 var(--space-4);
   border-color: transparent;
   color: var(--denied-fg);
+}
+/* Where an Always allow rule applies, asked once under the row: this workspace first, the
+   default, then everywhere. A line of its own, so the row above keeps its order. */
+.approval .answers .always-scope {
+  flex: 1 1 100%;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+.approval .answers .always-scope .where {
+  font: var(--t-note);
+  color: var(--text-secondary);
+  margin-right: var(--space-2);
+}
+.approval .answers .always-scope button {
+  flex: 0 1 auto;
+  min-height: var(--touch-target);
+  border-color: var(--border-hairline);
+  font: var(--t-note);
 }
 
 /* A delegation at the gate (troupe Decision 850): what the subagent gets, as facts, and
@@ -3157,17 +3296,20 @@ details.advanced > summary {
 /* On or off, as the mode is chosen, and a line when the OS or the browser says otherwise.
    What the app opens on is chosen the same way. */
 .appearance > .notify,
+.appearance > .detail,
 .appearance > .opening {
   display: flex;
   flex-direction: column;
   gap: var(--space-3);
 }
 .appearance > .notify .options,
+.appearance > .detail .options,
 .appearance > .opening .options {
   max-width: var(--measure-narrow);
 }
 /* The note is set in mono, whose `ch` is narrower: the reading measure lines it up. */
-.appearance > .notify .note {
+.appearance > .notify .note,
+.appearance > .detail .note {
   margin: 0;
   max-width: var(--measure-reading);
 }
@@ -3654,18 +3796,6 @@ details.advanced > summary {
   clip: rect(0 0 0 0);
   white-space: nowrap;
 }
-.new-session .ns-brand {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  padding: var(--space-3) var(--space-6);
-  border-bottom: var(--bw-hairline) solid var(--border-hairline);
-  color: var(--text-primary);
-}
-.new-session .ns-word {
-  font: var(--t-wordmark);
-  letter-spacing: var(--tracking-wordmark);
-}
 .new-session .body {
   max-width: 860px;
   gap: var(--space-5);
@@ -4031,10 +4161,6 @@ details.advanced > summary {
 }
 @media (max-width: 719px) {
   .new-session .ns-hero-mask {
-    display: none;
-  }
-  /* The phone's top bar carries the mark already. */
-  .new-session .ns-brand {
     display: none;
   }
   .ns-sentence,

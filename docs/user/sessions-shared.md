@@ -84,3 +84,34 @@ Erasing a session erases it for everybody it was shared with. For a private sess
 plane destroys every copy of its key, the ones in invitees' slots first, and then every key
 the session was sealed under; until all are gone it says the erasure is pending, as it
 does for any private session ([guide](README.md#words-you-will-meet)).
+
+## Links into the desktop app
+
+The desktop app opens `troupe://` links, registered by its installer (an AppImage
+registers them itself when it starts). A link that reaches the app while it is running
+brings that window forward rather than starting a second.
+
+| Link | Opens |
+|---|---|
+| `troupe://open?plane=<url>` | the app, signed in to that plane; with no `plane`, just the app |
+| `troupe://session/<id>?plane=<url>` | that session's view |
+| `troupe://artifact/<id>?plane=<url>` | that artifact in the gallery |
+
+A link is an address and nothing more: it carries the place and the plane's `https`
+address, never a token, a code or a password, and a link with anything else in it is
+refused whole, said in one line. When the app is not signed in to that plane, it shows the
+sign-in with the address filled in and "This link is for *host*. Sign in there?", and sends
+nothing to the plane until you press Sign in; signed in to another plane, it asks before it
+signs you out of that one. A link opens only what you may already see: a session you were
+invited into, an artifact published for you. An artifact's share link is the `https` one,
+which gives you its role; the `troupe://` line under it opens it in the app after that.
+
+The console offers the app in a line at the top of every screen, an artifact's page
+included, and the docs site on every page: *Open in the app* follows the link for the page
+you are on, and when nothing opens within a moment the line offers the installer for your
+computer, the version your plane recommends (on the docs site, the release's page).
+*Dismiss* keeps it away in that browser until the recommended version changes. Whether the
+app opened is the page's guess, since a browser does not say: one that asks "Open Troupe?"
+and is told no is not offered the install. On a phone the line says the app is for a
+computer and copies the page's link for you to send yourself. *Copy link* in a session's
+head copies its `troupe://` link, with the console's page for it under it where it has one.

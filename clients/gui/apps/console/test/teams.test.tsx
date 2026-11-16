@@ -4,7 +4,9 @@
 // quoted and the plane's refusal shown where it was made.
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { TroupeRpcError } from "@troupe/client";
 import { App } from "../src/App";
+import { describeError, limitWords } from "../src/console";
 import { PEOPLE, button, field, freshBrowser, link, render, says, sees, seesButton, seesLink, signedInAs, startFake, type, visit, waitFor } from "./support";
 import type { FakeDeployment } from "./support";
 
@@ -119,7 +121,11 @@ describe("a team", () => {
     visit("#/teams/core/limits");
     unmount = render(<App />).unmount;
     (await waitFor(() => button("Change core's limits"), "the limits")).click();
-    type(await waitFor(() => field("Idle before it falls asleep"), "the form"), "600");
+    // Asked in minutes, the unit the platform's setting is read in, and kept in seconds.
+    const idle = await waitFor(() => field("Idle before it falls asleep"), "the form");
+    expect(idle.value).toBe("20");
+    type(idle, "10");
+    await sees("In minutes.");
     await sees("The platform allows at most 30 min.");
     button("Preview")!.click();
 
@@ -141,7 +147,7 @@ describe("a team", () => {
     visit("#/teams/core/limits");
     unmount = render(<App />).unmount;
     (await waitFor(() => button("Change core's limits"), "the limits")).click();
-    type(await waitFor(() => field("Idle before it falls asleep"), "the form"), "7200");
+    type(await waitFor(() => field("Idle before it falls asleep"), "the form"), "120");
     button("Preview")!.click();
     await waitFor(() => says("The plane will refuse this. The platform allows at most 30 min idle; 2 h is more than that."), "the warning");
     const recorded = fake.admin.audit.length;
@@ -468,5 +474,19 @@ describe("a team's edits", () => {
     visit("#/teams");
     await waitFor(() => link("design"), "the team list");
     expect(button("Enable a group as a team")).toBeNull();
+  });
+});
+
+// #957: a limit's refusal says the ceiling in the unit the platform's setting is read in,
+// with the unit beside it; a refusal with no sentence of the plane's is worded from them.
+describe("a limit's refusal in its unit", () => {
+  it("words the ceiling from limit and unit where the plane gives no sentence", () => {
+    expect(limitWords(30, "minutes")).toBe("The platform allows at most 30 min.");
+    expect(limitWords(1.5, "minutes")).toBe("The platform allows at most 1 min 30 s.");
+    expect(limitWords(1800, "seconds")).toBe("The platform allows at most 30 min.");
+    expect(limitWords(1, "days")).toBe("The platform allows at most 1 day.");
+    expect(limitWords(false, "switch")).toBe("The platform does not allow it; a team may not turn it on.");
+    const refusal = new TroupeRpcError("admin.team.update", { code: -32_004, message: "forbidden", data: { field: "idle_timeout_seconds", asked: 7200, ceiling: 1800, limit: 30, unit: "minutes" } });
+    expect(describeError(refusal)).toBe("The platform allows at most 30 min.");
   });
 });

@@ -147,7 +147,10 @@ defmodule Troupe.Client.Daemon do
 
       _pid ->
         status = Worker.status(sid)
+
         %{Capability.of(status.state, status.scopes, status.up?) | remote?: false}
+        |> Map.put(:always_allow?, Map.get(status, :always_allow?, false))
+        |> Map.put(:attach_artifact?, Map.get(status, :attach_artifact?, false))
     end
   end
 
@@ -990,6 +993,16 @@ defmodule Troupe.Client.Daemon do
 
   @impl true
   def fs_upload(sid, path, content), do: describe(Worker.fs_upload(sid, path, content))
+
+  # The daemon fetches the artifact's files from the plane with its own sign-in.
+  @impl true
+  def attach_artifact(sid, artifact, version) do
+    case Worker.fs_upload_artifact(sid, artifact, version) do
+      {:ok, %{} = answer} -> {:ok, answer}
+      {:ok, other} -> {:error, "unexpected fs.upload answer: #{inspect(other)}"}
+      {:error, reason} -> {:error, message(reason)}
+    end
+  end
 
   @impl true
   def upload_fits(sid, size), do: Worker.upload_fits(sid, size)

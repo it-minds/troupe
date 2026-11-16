@@ -1,15 +1,17 @@
 {#- The front page: docs/README.md, which hooks.py draws with this template and without the
     nav and the table of contents beside it. Everything it says is in that page; this adds
-    only its title for a search result, what the page is to a search engine, and the
-    styles that make the page's own sections read as a front page. -#}
+    only its title for a search result, what the page is to a search engine, the product's
+    palette and the styles that make the page's own sections read as a front page, and a
+    line of script that fills in the download for the reader's own system. -#}
 {% extends "main.html" %}
 
 {% block htmltitle %}
-  <title>{{ config.site_name }}: coding agents on your machine and on your team's cluster</title>
+  <title>{{ config.site_name }}: {{ config.extra.tagline }}</title>
 {% endblock %}
 
 {% block extrahead %}
   {{ super() }}
+  <link rel="preload" href="{{ 'assets/fonts/figtree-latin-900-normal.woff2' | url }}" as="font" type="font/woff2" crossorigin>
   <script type="application/ld+json">
     {
       "@context": "https://schema.org",
@@ -18,21 +20,47 @@
       "description": {{ config.site_description | tojson }},
       "url": {{ config.site_url | tojson }},
       "applicationCategory": "DeveloperApplication",
+      "applicationSubCategory": "Coding agent",
       "operatingSystem": "Linux, macOS, Windows",
       "softwareVersion": {{ config.extra.troupe_version | tojson }},
       "license": "https://www.apache.org/licenses/LICENSE-2.0",
-      "downloadUrl": {{ (config.repo_url ~ "/releases/latest") | tojson }}
+      "isAccessibleForFree": true,
+      "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
+      "downloadUrl": {{ (config.repo_url ~ "/releases/latest") | tojson }},
+      "installUrl": {{ (config.site_url ~ "quick-start/") | tojson }},
+      "image": {{ (config.site_url ~ "assets/social-card.png") | tojson }},
+      "screenshot": {{ (config.site_url ~ "assets/landing-desktop-dark.webp") | tojson }},
+      "sameAs": [{{ config.repo_url | tojson }}]
     }
   </script>
 {% endblock %}
 
 {% block styles %}
   {{ super() }}
+  <link rel="stylesheet" href="{{ 'assets/afterglow.css' | url }}">
   <link rel="stylesheet" href="{{ 'assets/landing.css' | url }}">
 {% endblock %}
 
 {% block content %}
   <div class="tx-landing">
+    {#- Reserved for "open in the app" (#959): a link that hands the page's context to the
+        installed desktop app goes here, above the page's own heading. Nothing is drawn
+        until it exists. -#}
     {{ super() }}
   </div>
+{% endblock %}
+
+{% block scripts %}
+  {{ super() }}
+  {#- The download for the system the reader is on is the filled one. Without script, or on
+      a system none of the three names, all three are drawn alike, and every one leads to
+      the same release page. -#}
+  <script>
+    (function () {
+      var p = ((navigator.userAgentData && navigator.userAgentData.platform) || navigator.platform || "").toLowerCase();
+      var os = /win/.test(p) ? "windows" : /mac/.test(p) ? "macos" : /linux|x11/.test(p) && !/android/.test(navigator.userAgent.toLowerCase()) ? "linux" : null;
+      var mine = os && document.querySelector('.tx-downloads [data-os="' + os + '"]');
+      if (mine) mine.classList.add("tx-yours");
+    })();
+  </script>
 {% endblock %}

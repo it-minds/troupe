@@ -23,7 +23,7 @@ defmodule Troupe.Client do
 
   @type session_id :: String.t()
   @type origin :: {:local, String.t()} | {:remote, String.t()}
-  @type decision :: :allow | :deny | :allow_session
+  @type decision :: :allow | :deny | :allow_session | :allow_always
 
   @typedoc """
   One session as a picker or HQ row shows it, whichever side it lives on.
@@ -80,6 +80,8 @@ defmodule Troupe.Client do
 
   @typedoc "What a session allows right now, and why not when it does not."
   @type capability :: %{
+          optional(:always_allow?) => boolean(),
+          optional(:attach_artifact?) => boolean(),
           state: atom(),
           scopes: [String.t()],
           can_input?: boolean(),
@@ -153,6 +155,8 @@ defmodule Troupe.Client do
   @callback scratch_read(session_id(), String.t() | nil, String.t()) ::
               {:ok, String.t()} | {:error, term()}
   @callback fs_upload(session_id(), String.t(), binary()) :: :ok | {:error, term()}
+  @callback attach_artifact(session_id(), String.t(), integer() | nil) ::
+              {:ok, map()} | {:error, term()}
   @callback upload_fits(session_id(), non_neg_integer()) :: :ok | {:error, String.t()}
   @callback stop_session(session_id()) :: :ok | {:error, term()}
   @callback has_session?(session_id()) :: boolean()
@@ -560,6 +564,15 @@ defmodule Troupe.Client do
 
   @spec fs_upload(session_id(), String.t(), binary()) :: :ok | {:error, term()}
   def fs_upload(sid, path, content), do: impl(sid).fs_upload(sid, path, content)
+
+  @doc """
+  Attaches one of the person's artifacts to the session: its server
+  fetches the version's files from the plane, never through this client, and answers
+  `{"artifact", "title", "version", "files": [{"path", "bytes"}]}`, where each landed.
+  """
+  @spec attach_artifact(session_id(), String.t(), integer() | nil) ::
+          {:ok, map()} | {:error, term()}
+  def attach_artifact(sid, artifact, version), do: impl(sid).attach_artifact(sid, artifact, version)
 
   @doc """
   Whether a file of `size` bytes can go in one `fs_upload/3`: `:ok`, or the sentence saying

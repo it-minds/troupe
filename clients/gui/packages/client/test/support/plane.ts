@@ -62,7 +62,7 @@ export interface PlaneOptions {
    * below its ceiling answers `pending` until `placeWaiting` gives it a place; one at the
    * ceiling is refused with `capacity`, as the plane refuses it.
    */
-  room?: Record<string, { capacity: number; active: number; max_sessions?: number | null }>;
+  room?: Record<string, { capacity: number; active: number; max_sessions?: number | null; gone?: number }>;
   /**
    * The primaries each profile offers, by name, where they are not the default: the
    * primaries of the profile's composition for the person asking (`profileSpecs`, its
@@ -124,6 +124,16 @@ export interface PlaneOptions {
   breakglassLifetime?: number;
   /** The plane's own build version, which discovery says as `plane.build.version`. None is a plane whose discovery names no build. */
   version?: string;
+  /**
+   * What discovery says a web page offers to install, as `plane.downloads` (#959). None is
+   * a plane that recommends no desktop version: the latest release's page and no files.
+   */
+  downloads?: { version: string | null; page: string; windows: string | null; macos: string | null; linux: string | null };
+  /**
+   * The admin writes discovery says take `dry_run: true` (`plane.dry_run`); absent, the
+   * ones this fake does. An empty list is a plane from before, which would make the write.
+   */
+  dryRun?: string[];
 }
 
 /** A file of an artifact's version, with what it holds, which no answer carries. */
@@ -620,7 +630,7 @@ export class FakePlane {
   readonly mints: string[] = [];
 
   /** Say how full a profile is from now on, as `room` does at the start. */
-  setRoom(profile: string, room: { capacity: number; active: number; max_sessions?: number | null }): void {
+  setRoom(profile: string, room: { capacity: number; active: number; max_sessions?: number | null; gone?: number }): void {
     this.opts.room = { ...(this.opts.room ?? {}), [profile]: room };
   }
 
@@ -647,7 +657,7 @@ export class FakePlane {
   }
 
   /** How full a profile is: what a test set, else 8 places and its own active sessions, which `profiles.list` and `profile.get` both answer. */
-  private roomOf(profile: string): { capacity: number; active: number; max_sessions?: number | null } {
+  private roomOf(profile: string): { capacity: number; active: number; max_sessions?: number | null; gone?: number } {
     return this.opts.room?.[profile] ?? { capacity: 8, active: [...this.rows.values()].filter((r) => r.profile === profile && r.state === "active").length };
   }
 
@@ -1065,7 +1075,16 @@ export class FakePlane {
         device_authorization_endpoint: this.opts.idp.deviceAuthorizationEndpoint,
         token_endpoint: this.opts.idp.tokenEndpoint,
         scopes: ["openid", "profile", "email", "offline_access", "groups"],
-        plane: { name: "fake", rpc: "/rpc", jwks: "/.well-known/jwks.json", protocol_version: "1", ...(this.opts.version ? { build: { version: this.opts.version } } : {}) },
+        plane: {
+          name: "fake",
+          rpc: "/rpc",
+          jwks: "/.well-known/jwks.json",
+          protocol_version: "1",
+          console: null,
+          downloads: this.opts.downloads ?? { version: null, page: "https://github.com/it-minds/troupe/releases/latest", windows: null, macos: null, linux: null },
+          ...(this.opts.version ? { build: { version: this.opts.version } } : {}),
+          dry_run: this.opts.dryRun ?? ["admin.clients.put"],
+        },
         breakglass: typeof this.opts.breakglass === "string",
       });
     }
@@ -1223,7 +1242,11 @@ export class FakePlane {
           result: {
             profiles: profiles.map((p) => ({
               name: p,
-              pods: [{ pod: `${p}-0`, ordinal: 0, endpoint: worker.endpoint, healthy: true, draining: false, capacity: this.roomOf(p).capacity, active_sessions: this.roomOf(p).active }],
+              // A pod the operator removed is listed `gone` until the plane forgets it, and counts for nothing.
+              pods: [
+                { pod: `${p}-0`, ordinal: 0, endpoint: worker.endpoint, healthy: true, draining: false, gone: false, capacity: this.roomOf(p).capacity, active_sessions: this.roomOf(p).active },
+                ...Array.from({ length: this.roomOf(p).gone ?? 0 }, (_, i) => ({ pod: `${p}-${i + 1}`, ordinal: i + 1, endpoint: worker.endpoint, healthy: true, draining: false, gone: true, capacity: 4, active_sessions: 0 })),
+              ],
               capacity: this.roomOf(p).capacity,
               active_sessions: this.roomOf(p).active,
               healthy_pods: 1,

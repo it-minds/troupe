@@ -47,6 +47,7 @@ defmodule Troupe.Plane.Web.Router do
     Admin,
     Breakglass,
     Build,
+    ClientVersions,
     Harness,
     Identity,
     OIDC,
@@ -160,9 +161,19 @@ defmodule Troupe.Plane.Web.Router do
         # Where the web app is, for `troupe-daemon open`: an address it can open wherever
         # the app is mounted rather than the chart's usual place, and null without one.
         "app" => app_address(conn),
+        # Where the console is, as the same kind of address, for a link to one of its pages
+        # copied from the desktop app beside the app's own `troupe://` one; null without one.
+        "console" => console_address(conn),
+        # What a web page offers to install the desktop app from: the recommended version
+        # and its three installers, from where this plane says releases are.
+        "downloads" => ClientVersions.downloads(),
         "protocol_version" => Troupe.Protocol.version(),
         # The same facts the footer shows, so a deploy check and a browser cannot disagree.
-        "build" => Build.to_json()
+        "build" => Build.to_json(),
+        # The admin writes that take `dry_run: true`. Named here because a plane from
+        # before one ignores an argument it does not know and would make the write: a
+        # console asks a plane for a dry run only where the plane says it has one.
+        "dry_run" => ["admin.clients.put"]
       }
     })
   end
@@ -728,6 +739,13 @@ defmodule Troupe.Plane.Web.Router do
     end
   end
 
+  defp console_address(conn) do
+    case Index.console_url() do
+      nil -> nil
+      url -> URI.to_string(URI.merge(base_url(conn) <> "/", url))
+    end
+  end
+
   # Where the terminal client is published, which this host does not build and cannot
   # serve: it runs in a cluster and has no binary for anyone's laptop. Unset by default,
   # because a wrong guess here is a download link that 404s.
@@ -783,7 +801,7 @@ defmodule Troupe.Plane.Web.Router do
       "GET" ->
         case SCIM.find_users(conn.query_params["filter"]) do
           {:ok, users} ->
-            send_json(conn, 200, SCIM.render_list(Enum.map(users, &SCIM.render_user/1)))
+            send_json(conn, 200, scim_list(conn, Enum.map(users, &SCIM.render_user/1)))
 
           {:error, reason} ->
             scim_error(conn, reason)
@@ -825,7 +843,7 @@ defmodule Troupe.Plane.Web.Router do
         case SCIM.find_groups(conn.query_params["filter"]) do
           {:ok, groups} ->
             groups = Enum.map(groups, &SCIM.render_group_for(&1, conn.query_params))
-            send_json(conn, 200, SCIM.render_list(groups))
+            send_json(conn, 200, scim_list(conn, groups))
 
           {:error, reason} ->
             scim_error(conn, reason)
@@ -845,7 +863,34 @@ defmodule Troupe.Plane.Web.Router do
     end
   end
 
+  # What the service supports and which resources it keeps (RFC 7643 §5, §6), asked by a
+  # provider that discovers them at the start of a sync. `/Schemas` is not served: no
+  # provider seen asks for it, and a 404 there is what one that does falls back from.
+  defp scim(%{method: "GET"} = conn, ["ServiceProviderConfig"]),
+    do: send_json(conn, 200, SCIM.service_provider_config())
+
+  defp scim(%{method: "GET"} = conn, ["ResourceTypes"]),
+    do: send_json(conn, 200, SCIM.resource_types())
+
+  defp scim(%{method: "GET"} = conn, ["ResourceTypes", name]) do
+    case Enum.find(SCIM.resource_types()["Resources"], &(&1["id"] == name)) do
+      nil -> scim_error(conn, :not_found)
+      type -> send_json(conn, 200, type)
+    end
+  end
+
+  defp scim(conn, [discovery | _rest]) when discovery in ["ServiceProviderConfig", "ResourceTypes"],
+    do: send_json(conn, 405, %{"status" => "405"})
+
   defp scim(conn, _rest), do: send_json(conn, 404, %{"status" => "404"})
+
+  # A list asked with a filter is a page of at most what `ServiceProviderConfig` says; one
+  # asked without is every resource, which is how a provider reconciles.
+  defp scim_list(conn, resources) do
+    if conn.query_params["filter"],
+      do: SCIM.render_page(resources),
+      else: SCIM.render_list(resources)
+  end
 
   defp scim_get_group(conn, id) do
     case Identity.get_group_by_id(id) do

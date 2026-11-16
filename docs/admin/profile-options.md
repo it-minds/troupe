@@ -164,11 +164,11 @@ event, written at each activation whose list differs from the last one recorded:
 
 ```json
 {"files": [{"kind": "agent", "name": "build", "path": "/var/lib/troupe/workspaces/<id>/.troupe/agents/build.md",
-            "reason": "the session's bundle has an agent named build, and on a pod the bundle's beats a repository's unless the profile allows the repository's"}]}
+            "reason": "the session's bundle has an agent named build, and on the platform the bundle's beats a repository's unless the profile allows the repository's"}]}
 ```
 
-An agent named like a built-in gets the reason `build is an agent Troupe ships, and on a
-pod Troupe's own beats a repository's unless the profile allows the repository's`. The
+An agent named like a built-in gets the reason `build is an agent Troupe ships, and on the
+platform Troupe's own beats a repository's unless the profile allows the repository's`. The
 terminal and the desktop app show the event in the transcript as a note: how many of each
 kind, each file, and why.
 

@@ -116,7 +116,7 @@ defmodule Troupe.Plane.Settings do
       summary:
         "Where the profiles and triggers come from in gitops mode, as a person should read it: a repository and a path.",
       consequence:
-        "Shown beside Locked to gitops, so whoever wants to change a profile or a trigger knows where to go. Display only: the plane neither reads nor writes that repository. Deployment only.",
+        "Shown beside Held in a repository, so whoever wants to change a profile or a trigger knows where to go. Display only: the plane neither reads nor writes that repository. Deployment only.",
       effect: :restart
     },
     %Setting{

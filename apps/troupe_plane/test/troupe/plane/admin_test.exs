@@ -310,6 +310,40 @@ defmodule Troupe.Plane.AdminTest do
       assert update.actor_name == "Lea Lead"
     end
 
+    # The answers that name a session's owner beside the session lists: what erasing it
+    # would take, and Connections' sessions whose calls go out as their owner.
+    test "a session's owner by name in its erasure's preview and in Connections", context do
+      mine = session!("s-named", context.engineering, "dev")
+
+      {:ok, _} =
+        Bundles.publish(
+          "stable",
+          %{
+            "schema" => 1,
+            "agents" => [],
+            "skills" => [],
+            "mcp_servers" => [
+              %{"name" => "jira", "url" => "https://mcp.jira.example/mcp", "credential_mode" => "person"}
+            ]
+          },
+          announce: false
+        )
+
+      assert {:ok, preview} = Admin.session_erase_preview(context.lead, mine.id)
+      refute Map.has_key?(preview, :owner_name)
+      assert {:ok, %{sessions: carrying}} = Admin.connections(context.lead)
+      refute Map.has_key?(Enum.find(carrying, &(&1.id == mine.id)), :owner_name)
+
+      {:ok, _} = Identity.upsert_user(%{subject: "someone@example.test", display_name: "Some One"})
+
+      assert {:ok, preview} = Admin.session_erase_preview(context.lead, mine.id)
+      assert preview.owner == "someone@example.test"
+      assert preview.owner_name == "Some One"
+
+      assert {:ok, %{sessions: carrying}} = Admin.connections(context.lead)
+      assert %{owner: "someone@example.test", owner_name: "Some One"} = Enum.find(carrying, &(&1.id == mine.id))
+    end
+
     test "their own team's spend and no others", context do
       assert {:ok, overview} = Admin.overview(context.lead)
       assert Enum.map(overview.teams, & &1.name) == ["engineering"]

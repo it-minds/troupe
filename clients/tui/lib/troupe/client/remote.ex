@@ -77,6 +77,8 @@ defmodule Troupe.Client.Remote do
     status.state
     |> Capability.of(status.scopes, status.up?, status.error)
     |> Map.put(:relayed?, Map.get(status, :relayed?, false))
+    |> Map.put(:always_allow?, Map.get(status, :always_allow?, false))
+    |> Map.put(:attach_artifact?, Map.get(status, :attach_artifact?, false))
   end
 
   @impl true
@@ -355,6 +357,16 @@ defmodule Troupe.Client.Remote do
 
   @impl true
   def fs_upload(sid, path, content), do: describe(Worker.fs_upload(sid, path, content))
+
+  # The pod fetches the artifact's files over its control link, for the person here.
+  @impl true
+  def attach_artifact(sid, artifact, version) do
+    case Worker.fs_upload_artifact(sid, artifact, version) do
+      {:ok, %{} = answer} -> {:ok, answer}
+      {:ok, other} -> {:error, "unexpected fs.upload answer: #{inspect(other)}"}
+      {:error, reason} -> {:error, message(reason)}
+    end
+  end
 
   @impl true
   def upload_fits(sid, size), do: Worker.upload_fits(sid, size)
@@ -1005,9 +1017,13 @@ defmodule Troupe.Client.Remote do
   defp capacity(total, _active) when is_integer(total), do: %{free: nil, total: total}
   defp capacity(_capacity, _active), do: %{free: nil, total: nil}
 
-  # The live plane reports its pods rather than a verdict; the verdict is drawn here.
+  # The live plane reports its pods rather than a verdict; the verdict is drawn here. A pod
+  # the operator removed is listed `gone` until the plane forgets it, and is nobody's to
+  # look at: it is not a pod of the profile's, healthy or not.
   defp health(%{"pods" => pods, "healthy_pods" => healthy})
        when is_list(pods) and is_integer(healthy) do
+    pods = Enum.reject(pods, &(is_map(&1) and &1["gone"] == true))
+
     cond do
       pods == [] -> "no pods"
       healthy == length(pods) -> "ok"
