@@ -835,6 +835,13 @@ defmodule Troupe.Remote.Translate do
   defp done_note(emit, %{"reason" => reason}) when reason in ~w(stopped cancelled failed),
     do: [emit.(:remote_note, %{text: ended_by_parent(reason)})]
 
+  # A finish in parts is said from its report, its changed line in this client's words: the
+  # summary beside it says that line for the agent that delegated, ending on the
+  # `read_branch` call that reads the diff, which a person cannot make.
+  defp done_note(emit, %{"report" => %{"summary" => summary, "ran" => _} = report})
+       when is_binary(summary),
+       do: [emit.(:remote_note, %{text: "done: " <> reported(report)})]
+
   defp done_note(emit, %{"summary" => summary}) when is_binary(summary) and summary != "",
     do: [emit.(:remote_note, %{text: "done: " <> summary})]
 
@@ -843,6 +850,59 @@ defmodule Troupe.Remote.Translate do
        do: [emit.(:remote_note, %{text: "done (#{reason})"})]
 
   defp done_note(_emit, _data), do: []
+
+  # The summary, then each part under its name, `changed` first and on its own line.
+  defp reported(report) do
+    parts =
+      ["changed: " <> changed_line(report["changed"])] ++
+        for part <- ~w(ran passed unverified needs), is_binary(report[part]) do
+          if String.contains?(report[part], "\n"),
+            do: "#{part}:\n#{report[part]}",
+            else: "#{part}: #{report[part]}"
+        end
+
+    Enum.join([report["summary"], Enum.join(parts, "\n")], "\n\n")
+  end
+
+  # The files the line names before it says how many more there are, as the harness's own.
+  @listed 20
+
+  # What the agent's file tools changed, as Troupe counted it: the files and the lines, and
+  # under it each file, the commands not counted and what the agent said besides.
+  defp changed_line(%{"files" => files} = changed) when is_list(files) do
+    commands = if is_integer(changed["commands"]), do: changed["commands"], else: 0
+
+    head =
+      cond do
+        files != [] ->
+          "#{count(length(files), "file")}, +#{changed["added"] || 0} -#{changed["removed"] || 0}"
+
+        commands > 0 ->
+          "no file through its file tools"
+
+        true ->
+          "nothing"
+      end
+
+    shown =
+      for %{"path" => path} = file <- Enum.take(files, @listed) do
+        "#{path} +#{file["added"] || 0} -#{file["removed"] || 0}" <>
+          if(file["whole"] == true, do: " (written whole)", else: "")
+      end
+
+    under =
+      shown ++
+        if(length(files) > @listed, do: ["and #{length(files) - @listed} more"], else: []) ++
+        if(commands > 0, do: ["not counted: what its #{count(commands, "command")} changed"], else: []) ++
+        if(is_binary(changed["said"]), do: ["it says: " <> changed["said"]], else: [])
+
+    Enum.join([head | Enum.map(under, &("  " <> &1))], "\n")
+  end
+
+  defp changed_line(_changed), do: "not reported"
+
+  defp count(1, noun), do: "1 #{noun}"
+  defp count(n, noun), do: "#{n} #{noun}s"
 
   defp ended_by_parent("stopped"), do: "stopped by its parent"
   defp ended_by_parent("cancelled"), do: "stopped by the cancel"

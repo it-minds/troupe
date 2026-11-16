@@ -306,6 +306,10 @@ own way of drawing it is in [its page](terminal-screen.md#reading-a-transcript).
   **source** at the top of an answer shows the Markdown as the model wrote it. Raw HTML in
   a reply is shown as text, never as markup, and an image is never loaded; Mermaid shows
   its source for now.
+- **A finish**, an agent's report when it is done, has a `changed` line that Troupe counts
+  from the agent's file tools: the files, the lines each added and removed, and what its
+  shell commands changed as not counted. It is the finish frame's `changed` in the desktop
+  app and the `changed:` line under `done:` in the terminal.
 - **Reasoning** is what the model streamed before it answered, so it is there for a turn
   the app watched happen, and not in a session opened afterwards.
 - **While a turn works**, the line under it says what is running, how many and for how

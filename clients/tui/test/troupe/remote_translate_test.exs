@@ -331,6 +331,55 @@ defmodule Troupe.RemoteTranslateTest do
            ] =
              translate(durable("agent_done", %{"reason" => "finished", "summary" => "all green"}))
 
+    # A finish in parts is said from its report (troupe #968): the summary beside it ends its
+    # changed line on the read_branch call that reads the diff, which a person cannot make.
+    report = %{
+      "summary" => "add.py adds now",
+      "ran" => "none",
+      "passed" => "none",
+      "unverified" => "none",
+      "needs" => "none",
+      "changed" => %{
+        "files" => [%{"path" => "add.py", "added" => 2, "removed" => 0, "whole" => true}],
+        "added" => 2,
+        "removed" => 0,
+        "commands" => 1,
+        "session_id" => "s-branch",
+        "agent" => ["root"]
+      }
+    }
+
+    summary =
+      "add.py adds now\n\nchanged: 1 file, +2 -0; the full diff: " <>
+        ~s[read_branch(session_id: "s-branch", diff: true)\n  add.py +2 -0 (written whole)]
+
+    assert [%{type: :remote_note, data: %{text: finished}}, %{type: :agent_state}] =
+             translate(
+               durable("agent_done", %{
+                 "reason" => "finished",
+                 "summary" => summary,
+                 "report" => report
+               })
+             )
+
+    assert finished ==
+             Enum.join(
+               [
+                 "done: add.py adds now",
+                 "",
+                 "changed: 1 file, +2 -0",
+                 "  add.py +2 -0 (written whole)",
+                 "  not counted: what its 1 command changed",
+                 "ran: none",
+                 "passed: none",
+                 "unverified: none",
+                 "needs: none"
+               ],
+               "\n"
+             )
+
+    refute finished =~ "read_branch("
+
     # The end of a turn, from the log: the same `idle` the live `agent_state` says, with the
     # durable event's `seq`, which is how a reader tells the two apart.
     assert [%{type: :agent_state, data: %{to: :idle} = idle, seq: 7}] =

@@ -64,6 +64,12 @@ export type Entry =
       /** When its events were written, in milliseconds, for the duration its frame's header says (troupe #474). */
       startedAt: number | undefined;
       endedAt: number | undefined;
+      /**
+       * A `finish`'s: what Troupe counted its agent's file tools changing, off the report its
+       * `agent_done` carries, in this library's words (troupe #968). Absent until then, and
+       * from a report from before the parts.
+       */
+      changed?: string;
     }
   /**
    * What the model thought before it answered, kept where the reply it came before lands
@@ -840,6 +846,46 @@ function fillCard(card: Extract<Entry, { kind: "scratch" }>, doc: ScratchDocumen
 function lastIndex<T>(items: T[], pred: (item: T) => boolean): number {
   for (let i = items.length - 1; i >= 0; i--) if (pred(items[i]!)) return i;
   return -1;
+}
+
+/**
+ * The agent's last `finish` frame with what its `agent_done` report counted as changed. The
+ * `summary` beside the report says it for the agent that delegated, ending on the
+ * `read_branch` call that reads the diff, a call a person cannot make (troupe #968).
+ */
+function withChanged(entries: Entry[], d: DurableEvent): Entry[] {
+  const report = d.data["report"];
+  if (typeof report !== "object" || report === null || !("ran" in report)) return entries;
+  const text = changedText((report as Record<string, unknown>)["changed"]);
+  const at = lastIndex(entries, (en) => en.kind === "tool" && en.name === "finish" && samePath(en.agent, d.agent));
+  return at < 0 ? entries : entries.map((en, i) => (i === at && en.kind === "tool" ? { ...en, changed: text } : en));
+}
+
+// The files a count names before it says how many more there are, as the harness's own.
+const LISTED = 20;
+
+/**
+ * A finish's `changed` as a person reads it: the files, the lines added and removed, and
+ * under it each file, the commands not counted and what the agent said besides.
+ */
+export function changedText(changed: unknown): string {
+  if (typeof changed !== "object" || changed === null) return "not reported";
+  const c = changed as Record<string, unknown>;
+  const files = Array.isArray(c["files"]) ? c["files"].filter((f): f is Record<string, unknown> => typeof f === "object" && f !== null) : [];
+  const commands = num(c["commands"]) ?? 0;
+  const head =
+    files.length > 0
+      ? `${files.length === 1 ? "1 file" : `${files.length} files`}, +${num(c["added"]) ?? 0} −${num(c["removed"]) ?? 0}`
+      : commands > 0
+        ? "no file through its file tools"
+        : "nothing";
+  const under = [
+    ...files.slice(0, LISTED).map((f) => `${str(f["path"])} +${num(f["added"]) ?? 0} −${num(f["removed"]) ?? 0}${f["whole"] === true ? " (written whole)" : ""}`),
+    ...(files.length > LISTED ? [`and ${files.length - LISTED} more`] : []),
+    ...(commands > 0 ? [`not counted: what its ${commands === 1 ? "1 command" : `${commands} commands`} changed`] : []),
+    ...(typeof c["said"] === "string" && c["said"] !== "" ? [`it says: ${c["said"]}`] : []),
+  ];
+  return [head, ...under].join("\n");
 }
 
 /** What a failed call answered, as a line: a reference's preview when it ran long. */
@@ -1647,13 +1693,14 @@ export function fold(state: TranscriptState, e: TroupeEvent, options: FoldOption
 
     // The session is finished when its root agent is: a subagent reporting, or one a
     // restore ended `interrupted`, is its own agent's state and a note, and nothing more.
-    // Either says what its last turn cost, a subagent's being its whole task.
+    // Either says what its last turn cost, a subagent's being its whole task. Its report's
+    // count of what changed goes to its `finish` frame.
     case "agent_done":
       return {
         ...next,
         doneReason: isRoot(d.agent) ? str(d.data["reason"], "finished") : next.doneReason,
         agentState: { ...next.agentState, [pathKey(d.agent)]: "done" },
-        entries: [...state.entries, { kind: "system", ...base, type: d.type, text: systemText(d) }, ...spent(base, d)],
+        entries: [...withChanged(state.entries, d), { kind: "system", ...base, type: d.type, text: systemText(d) }, ...spent(base, d)],
       };
 
     case "llm_error":

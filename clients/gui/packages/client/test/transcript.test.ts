@@ -23,6 +23,7 @@ import {
   settleLoop,
 } from "../src/index.js";
 import type { DurableEvent, Entry, TranscriptState, TroupeEvent } from "../src/index.js";
+import { changedText } from "../src/transcript.js";
 
 let seq = 0;
 function durable(type: string, data: Record<string, unknown> = {}, agent = ["root"], subject = "alice"): DurableEvent {
@@ -122,6 +123,38 @@ describe("the transcript fold", () => {
       ["unverified", "the tests"],
     ]);
     assert.deepEqual(partsOf({ agent: "explore", task: "old" }, BRIEF_PARTS), []);
+  });
+
+  // The summary beside a finish's report ends its changed line on the read_branch call the
+  // delegating agent reads the diff with (troupe #968): the finish frame says the count in
+  // the person's words, and no tool call.
+  it("gives a finish frame its report's count of what changed, without the model's read_branch call", () => {
+    seq = 0;
+    const summary =
+      'add.py adds now\n\nchanged: 1 file, +2 -0; the full diff: read_branch(session_id: "s-branch", diff: true)\n  add.py +2 -0 (written whole)\nran: none\npassed: none\nunverified: none\nneeds: none';
+    const report = {
+      summary: "add.py adds now",
+      ran: "none",
+      passed: "none",
+      unverified: "none",
+      needs: "none",
+      changed: { files: [{ path: "add.py", added: 2, removed: 0, whole: true }], added: 2, removed: 0, commands: 1, session_id: "s-branch", agent: ["root"], said: "the README too" },
+    };
+    const state = foldAll([
+      durable("tool_call_started", { call_id: "f", name: "finish", args: { summary: "add.py adds now", ran: "none", passed: "none", unverified: "none", needs: "none", changed: "the README too" } }),
+      durable("tool_call_completed", { call_id: "f", name: "finish", ok: true, content: "reported" }),
+      durable("agent_done", { reason: "finished", summary, report }),
+    ]);
+
+    const finish = state.entries.find((e) => e.kind === "tool") as Extract<Entry, { kind: "tool" }>;
+    assert.equal(finish.changed, "1 file, +2 −0\nadd.py +2 −0 (written whole)\nnot counted: what its 1 command changed\nit says: the README too");
+    assert.ok(state.entries.every((e) => !JSON.stringify(e).includes("read_branch(")), "no entry carries the read_branch call");
+
+    // A summary alone, from before the parts, leaves the frame as it was.
+    const old = foldAll([durable("tool_call_started", { call_id: "g", name: "finish", args: { summary: "found it" } }), durable("agent_done", { reason: "finished", summary: "found it" })]);
+    assert.equal((old.entries[0] as Extract<Entry, { kind: "tool" }>).changed, undefined);
+    assert.equal(changedText({ files: [], commands: 0 }), "nothing");
+    assert.equal(changedText(undefined), "not reported");
   });
 
   // A delegation a person asked to see first (troupe Decision 850) asks with what the gate
