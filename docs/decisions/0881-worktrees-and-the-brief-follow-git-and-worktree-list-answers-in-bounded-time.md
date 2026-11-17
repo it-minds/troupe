@@ -20,15 +20,7 @@ symbols:
 gist: "Ignored folder: own workspace, no worktrees, own brief; tracked: the repository's. worktree.list reads status 2 s, checkout first, else checked false"
 ---
 
-Issue #650, after #621. A workspace that is a plain directory inside another repository
-was that repository everywhere: `worktree.list` listed and looked at every worktree of the
-repository around it (in the repository #621 was found in, 199 of them, minutes on
-Windows), `session.create` in `auto` or `always` mode made a worktree of the whole
-repository *inside* it (`<folder>-<slug>`, an untracked directory in the checkout),
-`memory.get` answered the repository's brief, and with `memory_auto_refresh` on a session
-started there launched a librarian that rewrote that brief. The desktop app asked
-`worktree.list` whether the workspace was a repository, so it waited as long. The
-maintainer's rule (2026-10-12): worktrees and the brief follow git.
+The maintainer's rule (2026-10-12): worktrees and the brief follow git.
 
 **The rule.** `Troupe.Git.ignored?/1` asks git (`git check-ignore -q -- .`, through
 `Troupe.Git.run/3`, so neutralised and confined as every other call).
@@ -50,17 +42,12 @@ maintainer's rule (2026-10-12): worktrees and the brief follow git.
   own (`root` and `top` the folder). Decision 831's rule for a forged `.git` stands; this
   adds an ignored folder to its "anything else". `repository?/1` now follows `locate/1`
   (the checkout it names has a `.git`), so `refresh_due` is false there and no librarian
-  starts by itself; `/memory refresh` still writes the folder's own brief. It first walks up
-  for a `.git` as before and runs no git where there is none, so a home directory costs
-  what it did. `Troupe.Memory.Facts` asks it with the location it already has. Onboarding,
-  which asks the same `repository?/1`, is due nothing in an ignored folder either, and
-  `onboard.apply` refuses there as it does outside a repository. The instruction files are
-  not part of this: they are still read up to the nearest `.git`.
-- *`memory.get`* gains `repository`, and asks git where the brief is once
-  (`locate/1` takes a location in place of a path) rather than once per field. The
-  terminal client's start reads `repository: false` as the quiet "not a repository" case;
-  without it, `refresh_due: false` on an absent brief read as a librarian held off and said
-  so on screen.
+  starts by itself; `/memory refresh` still writes the folder's own brief. It first walks
+  up for a `.git` as before and runs no git where there is none, so a home directory costs
+  what it did. Onboarding, which asks the same `repository?/1`, is due nothing in an
+  ignored folder either, and `onboard.apply` refuses there as it does outside a
+  repository. The instruction files are not part of this: they are still read up to the
+  nearest `.git`.
 - *`worktree.list`* in an ignored folder answers no rows. In a tracked one it answers the
   repository's worktrees, as before.
 - *`Worktrees.resolve/3`* in `auto` and `always`: an ignored folder works where it is. A
@@ -75,14 +62,10 @@ maintainer's rule (2026-10-12): worktrees and the brief follow git.
   holds it (a checkout that holds its worktrees' directories does not take theirs). A merge,
   a discard and a named tree's reuse are refused while a session works anywhere in the
   tree, its folders included, since sessions now start in them.
-- *The desktop app* asks `worktree.list` with `status: false` whether a workspace is a
-  repository (`librarianBarred` in `memory.ts`), so it no longer waits on a listing that
-  looks at every tree.
 
 **Bounded time: lazy for those that need no status, bounded for those that do.**
 - `status: false` answers each row's `path`, `branch` and `session_id` from git's list of
-  the trees alone, with no git per tree. The terminal client's `/worktree` placement and
-  Tab completion ask it so, and so does the desktop app's repository check.
+  the trees alone, with no git per tree.
 - Otherwise the status is read as Decision 851 reads it (one `status --porcelain=v2` and one
   `diff --numstat` a tree), but within a budget of two seconds
   (`:worktree_status_ms` in the gateway's application environment, a test's knob), eight
@@ -103,35 +86,3 @@ maintainer's rule (2026-10-12): worktrees and the brief follow git.
   per-tree status method (both clients would have to fetch row by row; the budget gives the
   rows that matter at once). Not done: a client cannot ask for the rest later; a refresh
   reads the same first trees again.
-
-**Measured**, 201 trees (a checkout and 200 linked worktrees of a one-file repository),
-through the daemon's socket. In WSL (Linux) on the chunk's tip: `worktree.list` 33.8 s,
-every tree read; with this change 2.7 s with 24 trees read, and 0.16 s with `status: false`
-(which the tip ignored, 38.9 s). On Windows, the installed builds on scratch homes: before,
-54.7 s at the checkout and 48.5 s in an ignored folder (201 rows each, every tree read);
-after, 2.7 to 2.8 s at the checkout or in a tracked folder (about 40 trees read), 0.6 to
-0.7 s with `status: false`, and 0.7 s with no rows in the ignored folder. A plain line in
-the ignored folder opened `build-1` in 0.75 s.
-
-**Proof.** Each failed on the chunk's tip (8b1b760) first.
-- `Troupe.Gateway.EnclosingRepositoryTest`. An ignored folder: `worktree.list` empty with
-  and without status; `memory.get`'s path the folder's own, `refresh_due` and
-  `repository` false; `session.create` `always` and `auto` in the folder itself, with no
-  tree made; a named tree refused. A tracked folder: the repository's trees; its brief;
-  `always` makes `outer-<slug>` beside the checkout with the session in `packages/ws` of it;
-  a named tree at `outer-login`, whose row names its session. A folder the repository would
-  add belongs too, its folder made in the new tree.
-- `Troupe.Gateway.WorktreesTest`, "worktree.list answers in bounded time with many
-  worktrees": 200 worktrees; `status: false` runs one `worktree list` and no status, diff or
-  rev-list; a budget of 0 reads none and every row says `checked: false`; a budget of a
-  second answers within ten, the checkout read and clean.
-- `Troupe.Tools.RememberTest`, "a folder the repository ignores keeps a brief of its own":
-  `locate/1`, `path/1`, `repository?/1`, `refresh_due?/2`, the brief and onboarding notices,
-  and a fact written there landing in the folder's own brief.
-- The terminal client's `WorkspaceInAnotherRepositoryTest`: in an ignored folder command
-  mode and `/worktree` list nothing and no librarian starts or is mentioned (on the tip a
-  librarian started on the repository's brief); in a tracked one the repository's trees.
-  Its `CommandModeTest`: a row the listing did not reach shows no state, where the tip
-  drew it `clean`.
-- The desktop app's `memory.test.ts`: the repository check asks `worktree.list` with
-  `status: false`.

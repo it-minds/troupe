@@ -19,10 +19,6 @@ symbols:
 gist: "4 MiB body limit at the endpoint, 413 by Content-Length unread; with a control cert, TLS only unless \"false\"; App delete deletes its transit keys; alive = initialize answered"
 ---
 
-A sweep of small defects from `docs/developer/defects.md` D128 and what the chunk 36
-fixers noticed. Four of them change a rule somebody could undo without knowing why; the
-rest are bugs with tests of their own and are named in the pull request.
-
 **One limit on a request body, held where the body is read.** The endpoint parsed every
 body with `Plug.Parsers`' own default, eight megabytes, before either router saw the
 request, so the API router's four mebibytes never applied behind it: `/rpc`, `/mcp`, SCIM,
@@ -34,7 +30,6 @@ only that far and is `413` too. The router keeps both for when it is mounted alo
 mebibytes stays the figure because `admin.bundle.publish` is the largest legitimate body.
 A client that keeps sending a body after the refusal may see the connection close under
 it rather than the answer; that is what "before it is read" costs.
-`body_limit_test.exs` sends the head alone and is answered `413` on six routes.
 
 **A plane with a control certificate takes TLS only, left unsaid** (partly replaces 906,
 which turned it on in the chart alone, and through it 902's "unset is off").

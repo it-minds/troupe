@@ -15,11 +15,6 @@ paths:
 gist: An MCP server is opened with the lifecycle's handshake, and the session it issues is kept by whoever calls it, per server and credential, opened…
 ---
 
-Issue #319. `Troupe.MCP.Client` sent `tools/list`
-and `tools/call` as lone POSTs with no `initialize` before them and kept nothing a
-server answered, so a server that keeps state per client, and refuses a request
-without the `Mcp-Session-Id` its `initialize` issued, could not be used from a local
-session or a pod at all. That is the handshake 741 left out.
 - **The handshake, once.** Before the first request to a server: `initialize` with
   the version Troupe speaks (`2025-06-18`), then `notifications/initialized`, whose
   answer is waited for and not read. Every request after carries the session id the
@@ -51,20 +46,3 @@ session or a pod at all. That is the handshake 741 left out.
   in a session) opens a session for its one request and ends it after;
   `Client.initialize/1`, the bare call sign-in discovery makes, ends any session it is
   given.
-- **Out of this slice.** A `400` to a request that carried a session id, which some
-  servers built from the SDKs' examples answer for a session they have forgotten, is
-  an error rather than a reason to open another. A session left behind by a refreshed
-  token is ended only when its holder stops. Streams the server opens (`GET`) and
-  resuming one.
-- **Proof:** `Troupe.MCPHandshakeTest`, against `test/support/fake_mcp.exs`, which
-  refuses a request without its session id (`400`), with one it has forgotten (`404`)
-  or with another credential than the session's (`403`), answers an older protocol
-  version, and ends a session on `DELETE` or refuses it (`405`): an agent lists and
-  calls the tools in one session carrying the version the server chose, a forgotten
-  session is opened again once, the session ends when the local session stops and a
-  `405` is let be, two credentials are two sessions, a server that keeps none is
-  called without one, and a check's session lasts its one request; and
-  `Troupe.Worker.MCPTest`: discovery per server and credential, every session of a pod
-  in the profile's one, a person's in their own, a forgotten one opened again, and the
-  pod's stopping. The fakes in `Troupe.MCPTest` and `fake_oauth.exs` now answer the
-  `notifications/initialized` they had never been sent, with `202`.

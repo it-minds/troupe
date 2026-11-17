@@ -43,17 +43,3 @@ D26 and D36, and two the #246 hotfix found.
   sleeps). The picker lists the sessions that spoke to a model or started a branch
   (since Decision 101 a plain line is work of the session's own), the session on
   screen, and no branch, which is a window of its parent's.
-- **Dead readers (D36).** The printer's `branch_state`, `branch_failed` and
-  `finished`, the model's `finished`, `delegation_started` and `delegation_completed`,
-  and the view's own count of what is pending, which Decision 129 made the model's,
-  are gone. A subagent's durable `agent_done` marks it ended, and a cancel ends the
-  subagents under the cancelled agent and clears what they were doing. `Troupe.Codec`
-  reads an event back as it was published: `to` and `dimension` as atoms, `reason`
-  as the harness's string, where it gave `to` as a string and `reason` as an atom.
-- **Proof:** `unit_test.exs` (the release's log), `branch_client_test.exs` ("a
-  branch's first events are read back inside its window", "the session picker lists
-  the sessions that did something"), `memory_client_test.exs` ("a screen opened after
-  the librarian started"), `cli_test.exs` (a queued line: waited for, dropped by an
-  agent that ended short, never taken) and `window_attention_test.exs` (the codec, a
-  finished and a cancelled subagent), all but the dropped line failing on the chunk's
-  tip, and the installed build, on the pull request.

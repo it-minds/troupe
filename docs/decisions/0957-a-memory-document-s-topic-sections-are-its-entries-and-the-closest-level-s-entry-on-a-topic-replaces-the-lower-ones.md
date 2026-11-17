@@ -19,13 +19,9 @@ symbols:
 gist: "## Topic sections are entries, parsed from the kept text; closest level's entry per topic wins in prompt and memory.in_effect; remember takes topic"
 ---
 
-#55, to the maintainer's design and decision of 2026-10-26 on #765 ("memory as entries"): a
-level's memory is notes on topics, and where two levels have a note on one topic the closer
-one is the note a session follows. Decisions 922, 929, 943, 947 and 951 kept each level as
-one Markdown document, read whole into every session in its scope, the organisation's first;
-Decision 954 had the desktop app read them as entries in the client, and C45's terminal did
-the same, each with a shim to go once the plane answered entries. This records how the plane
-and the harness read entries, and what changed in what a session's prompt holds.
+#55, to the maintainer's design and decision of 2026-10-26 on #765 ("memory as entries"):
+a level's memory is notes on topics, and where two levels have a note on one topic the
+closer one is the note a session follows.
 
 ## Entries are a reading of the text
 
@@ -107,89 +103,28 @@ the one that extends nothing first), since which profile is closer now decides a
 
 ## `remember` writes under a topic
 
-`remember` with `level: "me"` takes a `topic`, `Notes` where none is named, and the plane adds
-`- <entry>` at the end of that topic's section (found as topics compare), making `## <topic>`
-at the end of the document where there is none, never in place of a word (`append_own/3`,
-`me.memory.put {append, topic}`, `session.memory.put {..., topic}`). Sections under a date,
-which agents wrote before this, stay as they are. The host function `Troupe.UserMemory`
-installs takes the topic as a third argument; one from before takes the entry alone. The
-tool's schema gains `topic` as a bare string and its description names it only where a host
-is installed, as `level`'s does. Measured with the umbrella's `mix troupe.bench` (no host),
-against 0.28.0's numbers in `budgets.json`: tool definitions 14787 to 14813 bytes, the first
-prompt 16612 to 16638, the largest 32109 to 32135, the turn's input tokens 189998 to 190204,
-the schema's 26 bytes on every call; every budget holds, none moves. A prompt reads the
-replaces line only where a document has a topic a closer one has, which the bench's
-scenarios have none of.
+`remember` with `level: "me"` takes a `topic`, `Notes` where none is named, and the plane
+adds `- <entry>` at the end of that topic's section (found as topics compare), making `##
+<topic>` at the end of the document where there is none, never in place of a word
+(`append_own/3`, `me.memory.put {append, topic}`, `session.memory.put {..., topic}`).
+Sections under a date, which agents wrote before this, stay as they are. The host function
+`Troupe.UserMemory` installs takes the topic as a third argument; one from before takes
+the entry alone. The tool's schema gains `topic` as a bare string and its description
+names it only where a host is installed, as `level`'s does.
 
 ## Every level the person may change, through the daemon
 
 The daemon sends `memory.in_effect` and `admin.memory.get`, `admin.memory.preview` and
 `admin.memory.put` on to the plane as its person, with the arguments the plane takes and
-nothing else (`Troupe.Gateway.Memory.in_effect/1`, `admin/2`), all `control` as the person's
-own memory's are: the text is theirs to read, and a put is a save. **The plane decides who
-may**: a team admin their team's, a platform admin the organisation's and a profile's, and
-anybody else is told the plane's own refusal with its code. A put asks for the copy again, so
-the sessions running there read it from their next turn. All four are refused to a client in
-Local only, as the rest of memory is (Decision 951). The screens that use the admin methods
-are the app's and the terminal's to draw; neither edits the organisation's levels yet.
+nothing else (`Troupe.Gateway.Memory.in_effect/1`, `admin/2`), all `control` as the
+person's own memory's are: the text is theirs to read, and a put is a save. **The plane
+decides who may**: a team admin their team's, a platform admin the organisation's and a
+profile's, and anybody else is told the plane's own refusal with its code. A put asks for
+the copy again, so the sessions running there read it from their next turn. All four are
+refused to a client in Local only, as the rest of memory is (Decision 951).
 
 **The organisation's name** is the plane's (`plane_name`, what the console's header shows),
 answered as `organisation: {name}` in `me` (so in `initialize`'s `principal`), in `me.memory`
 and in `memory.in_effect`, so a client says "Everyone at <name>". **Every team of the
 person's** is a level, a team with no document among them: `me.memory {entries: true}` names
 them (`teams`), and the daemon answers a team with none as an empty document.
-
-## The clients read them
-
-The desktop app's Memory view reads each level's entries from `me.memory` and *In effect for
-you* from `memory.in_effect`, saves the person's own as entries, and shows who last changed
-each entry, when and in how many sessions it was used at every level; the client's parsing and
-in-effect (`packages/client/src/entries.ts`) go, leaving the types, the topic comparison its
-clash warnings use and the side-by-side rows. The gallery's `scopeOf` and its second listing
-go too: every plane row says its `scope` since Decision 953. The terminal's `/memory` reads the
-same answers and saves entries; `Troupe.Client.MemoryEntries` goes. The terminal may call
-`Troupe.Protocol.Memory.Entries` (`mix troupe.xref`'s list of the harness's doors): a pure
-module of the protocol, as `Troupe.Protocol.Glob` is, for comparing topics and writing the
-text a conflict shows beside the other version, never for working out what is in effect. The console's Company
-memory keeps its document editor and gains only *Its entries*, a read-only list.
-
-## Left
-
-The app's and the terminal's screens for changing the organisation's and a team's levels over
-`admin.memory.*` (since drawn, by role: `me.memory {entries: true}` answers `roles`, whether
-the caller is a platform admin and the teams they administer, and a refusal of a level's save
-says in `data.reason` who may change it); a fallback for a plane from before `memory.in_effect` (the daemon says it is
-`unavailable`); rules inside memory; an agent writing above the person's level.
-
-## Proof
-
-- `apps/troupe_protocol/test/troupe/protocol/memory_entries_test.exs`: sections and General, a
-  heading in a code block the code's, round trips with the heading kept, entries checked, keys,
-  in effect with replaces closest first, a level's entries marked, two of one rank both kept.
-- `apps/troupe_plane/test/troupe/plane/memory_entries_test.exs`: entries with who and when
-  beside the text, as the version stood; entries saved and previewed and refused; role
-  refusals; used counts; `me.memory {entries}` with every document's, the organisation's name
-  and every team; `memory.in_effect` as one list, with a profile's chain, and refused for a
-  team the person is not in or a profile they may not use. `user_memory_test.exs`: an entry at
-  the end of its topic's section, a new section made, a dated one kept, a topic too long.
-- `apps/troupe_core/test/troupe/instructions_prompt_test.exs`: an organisation's `Tone` and a
-  person's `tone`, the person's read with its replaces line and the organisation's left out, a
-  team's `Prices` replacing the organisation's, the organisation's other sections first, and
-  `instructions_loaded.memory`'s `replaced`. `tools/remember_me_test.exs`: the topic reaching
-  the host and named in the answer, `Notes` for none.
-- `apps/troupe_gateway/test/troupe/gateway/plane_memory_test.exs`: `me.memory` with every
-  document's entries read off a plane that sent none, an empty team level, `me.memory.put`
-  with entries, `memory.in_effect` and `admin.memory.*` forwarded with exactly their
-  arguments, the plane's `forbidden` and `not_found` kept; `remember` with a topic landing
-  under it. `local_only_test.exs`: all four refused under Local only.
-- `apps/troupe_worker/test/troupe/worker/user_memory_test.exs`: a pod's entry under `Notes`
-  and under a named topic, over a real control link.
-- `clients/gui/apps/desktop/test/own-memory.test.tsx`: in effect asked of the daemon for the
-  team chosen, "Everyone at", who wrote each entry and how many sessions used it, saves sent
-  as entries. `artifacts-gallery.test.tsx`: the tabs off the rows' `scope`.
-  `apps/console/test/memory.test.tsx`: *Its entries*, read only.
-- `clients/tui/test/troupe/memory_screen_test.exs`: `/memory` as before, now off the plane's
-  entries and `memory.in_effect`.
-
-The plane, core, gateway and worker tests above failed on the chunk's tip (`f4b7606e`) with
-the parser alone in place: no `entries`, no `memory.in_effect`, no topic, no replaced section.

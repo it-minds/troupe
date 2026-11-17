@@ -81,16 +81,3 @@ registration carried a secret and a redirect URI that existed only for it.
   loud because using it is a token someone holds, not a page someone finds. A console with
   a sign-in that the provider cannot refuse keeps every change under an actor the audit
   names.
-
-## Proof
-
-- `apps/troupe_plane/test/troupe/plane/breakglass_test.exs`: the discovery flag, the
-  exchange for the right token and the refusal and audit for a wrong one, 404 when the door
-  is not configured, and a token marked `breakglass` resolving at `/rpc` and `/mcp` to the
-  platform admin with no teams that `me` reports as break-glass, and refused once expired.
-- `clients/gui/apps/console/test/breakglass.test.tsx`, against the fake plane:
-  *Break glass* offered only when the plane says the door is configured, the exchange made
-  through the sign-in screen, every screen marked, and the sign-in screen back once the
-  token has run out.
-- `clients/gui/packages/client/test/breakglass.test.ts`: the client library's break-glass exchange and
-  the token kept and presented as a plane token, with nothing refreshing it.

@@ -11,22 +11,18 @@ paths:
 gist: "VS Code reaches Troupe through a door, not a second client: the extension in `clients/vscode` has one command that opens anything, `Troupe: Open`…"
 ---
 
-Issue #378's v1, its first slice; the TUI
-is the product (#378), and the panel over the daemon's ACP is v2.
 - **Where it lives and how it ships.** A pnpm project of its own, not a package of the
-  GUI's workspace, which shares a protocol client the extension has no use for.
-  TypeScript compiled by `tsc`, no runtime dependencies, so the `.vsix` that
-  `vsce package --no-dependencies` makes is its own code with LICENSE and NOTICE,
-  copied in at packaging as every release artifact carries them. `dev-check.yml` and
-  `ci.yml` keep the `.vsix` as the run's artifact. The Marketplace
-  or Open VSX, a version check against the TUI, and telemetry are not in it, as decided
-  on the issue; the README says there is no telemetry. Its id is
-  `objective-mj.troupe`, under the desktop app's identifier (710), and its version is
-  VERSION without the pre-release part, kept by `scripts/version.exs`, because
-  `vsce publish` refuses a pre-release version as WiX does (the desktop app's reason).
-  Dependabot moves its tools monthly; `@types/vscode`, the API `engines.vscode`
-  promises (1.93, for shell integration's events), and `@types/node`'s major, the
-  Node that version runs, move by hand with that line.
+  GUI's workspace, which shares a protocol client the extension has no use for. TypeScript
+  compiled by `tsc`, no runtime dependencies, so the `.vsix` that `vsce package
+  --no-dependencies` makes is its own code with LICENSE and NOTICE, copied in at packaging
+  as every release artifact carries them. The Marketplace or Open VSX, a version check
+  against the TUI, and telemetry are not in it, as decided on the issue; the README says
+  there is no telemetry. Its id is `objective-mj.troupe`, under the desktop app's
+  identifier (710), and its version is VERSION without the pre-release part, kept by
+  `scripts/version.exs`, because `vsce publish` refuses a pre-release version as WiX does
+  (the desktop app's reason). Dependabot moves its tools monthly; `@types/vscode`, the API
+  `engines.vscode` promises (1.93, for shell integration's events), and `@types/node`'s
+  major, the Node that version runs, move by hand with that line.
 - **A line typed into the person's shell, not the TUI as the terminal's program.**
   VS Code disposes a terminal whose program exits, and with it the one line a failed
   start prints (`troupe: could not start: …`, #231); and the person's shell carries
@@ -38,10 +34,9 @@ is the product (#378), and the panel over the daemon's ACP is v2.
   cannot run a Windows path) gets `troupe` as the terminal's program instead.
 - **`--workspace` and the `cwd` both.** `troupe --workspace DIR` was already parsed for
   every mode and roots the TUI's session at DIR whichever directory it starts in; it
-  was documented only for `troupe run`. `clients/tui/lib/troupe/cli.ex` is unchanged
-  and the TUI needs no decision of its own: a test pins it and the TUI's README shows
-  it. The extension passes it as well as setting the terminal's `cwd`, so a shell whose
-  start-up files change directory does not move the work.
+  was documented only for `troupe run`. The extension passes it as well as setting the
+  terminal's `cwd`, so a shell whose start-up files change directory does not move the
+  work.
 - **Which folder.** The active editor's; with none, the Troupe terminal in front, so a
   second press from it finds it again without asking; then the only folder; with
   several and nothing to go by, a question, once. **One terminal per folder**: a press
@@ -80,8 +75,7 @@ is the product (#378), and the panel over the daemon's ACP is v2.
   or not set, never even masked; a unit test fails on `sk-` anywhere in the rows. A
   `.cmd` `troupe` (the suite's fake, or a person's own wrapper) runs through
   `cmd.exe /d /s /c` with the line quoted as the terminal's is, since Node runs no batch
-  file without a shell. The models to choose from, with windows and prices, wait on
-  `troupe models --json` (#387).
+  file without a shell.
 - **A release attaches it, and one line installs it to try.** `release.yml` and
   `prerelease.yml` build the `.vsix` as `dev-check.yml` does and attach it as
   `troupe.vsix`, in the release's `SHA256SUMS` with the rest. `install.sh --vscode` and
@@ -120,49 +114,3 @@ is the product (#378), and the panel over the daemon's ACP is v2.
   `scripts/licences.exs` as reviewed exceptions, for approval on the pull request:
   none ships, and none is changed. Refused, the alternative is a packager of our own;
   a `.vsix` is a zip of the extension with two XML files.
-- **Not in this slice**, and #378 stays open for them: commands for `troupe resume`,
-  `troupe run`, `troupe doctor` and `troupe config` (which need a decision on "the
-  same terminal" while a TUI runs in it), explorer and editor items that put a path in
-  the TUI's prompt (which needs a way into the prompt from outside), opening on folder
-  open, the terminal profile setting, and changing a setting or trusting the workspace
-  from the Settings view, which writes the person's own files.
-- **Proof:** the TUI's `cli_test` ("--workspace roots the TUI at DIR"), which passes on
-  the chunk's tip, so this confirms rather than fixes, and stays as the pin. The
-  extension's unit tests (the folder, the search on Linux and Windows file systems with
-  the #231 file, the sentence, the line for each shell), which also put the line
-  through every shell the machine has with a folder name of quotes, `$`, `&` and
-  backticks: Windows PowerShell 5.1, PowerShell 7 and cmd.exe here, and sh, bash and
-  dash in WSL. Its suite inside VS Code 1.140 on Windows, with its own user data and
-  extensions directories, against a fake `troupe` on a workspace of four folders: the
-  active editor's folder, `--workspace` and the `cwd`; a second press reusing the
-  terminal; the other root from its own editor; no editor, so the terminal in front;
-  a clean quit closing the terminal; a failed start keeping it and running again on
-  the next press; a missing `troupe` as the sentence and no terminal; and an
-  extensionless `troupe` beside the `.cmd` never opened. With the editor area and the
-  side bar, 33 unit tests (2 skipped: sh and fish on Windows) and 14 of 14 in VS Code:
-  the tab in the editor group in front by default, `beside` in group two, `panel` with
-  no tab; a folder handed to the command, as the list and the title bar hand it; the
-  activity bar opening Troupe at the editor's folder and, shown again, only showing
-  it; and the Settings view's rows from the fake's `config --explain --json`, with no
-  key in them and the call not counted as a start. CI runs both on Linux and
-  Windows, macOS in a full run. And installed: the `.vsix` put into a scratch VS Code
-  profile, whose terminals had scratch homes, found the installed `troupe.exe` on the
-  `PATH` and ran it through PowerShell 7 at the folder, the TUI's session recorded with
-  that folder as its workspace and a second press reusing its terminal; and the
-  installed `troupe.exe --workspace DIR`, typed into a terminal in another directory,
-  rooted its session at DIR and none at the directory it started in. Then into a
-  person's own VS Code 1.140 on a US-International layout, used by hand: the key, the
-  tab, the title bar's and the activity bar's masks; and the Settings rows made from
-  that machine's real `troupe config --explain --json`, which showed its gateway, its
-  models and the workspace untrusted, and no key. The installers against a local
-  mirror of v0.8.0-beta with this `troupe.vsix` and a `SHA256SUMS` over both, every
-  Troupe directory a scratch one: `install.ps1 -VSCode -Yes` under Windows PowerShell
-  5.1 with a recording `code.cmd` that writes to stderr, and under PowerShell 7 with
-  the real `code.cmd`, which installed it; without any `code`, refused before the plan
-  with nothing made. `install.sh --vscode -y` under dash in WSL with a scratch `HOME`
-  and a recording `code`: installed, then `--uninstall -y` removed the extension;
-  through a pseudo-terminal, the question about it after the other two, `[y/N]` with
-  the TUI declined; without `code`, refused before the plan. The release notes'
-  heredocs rendered with sample values, `$?` and `.\install.ps1` as written. Not run:
-  `-VSCode` asked interactively on Windows, and `release.yml`'s new steps, which run
-  at the next release.

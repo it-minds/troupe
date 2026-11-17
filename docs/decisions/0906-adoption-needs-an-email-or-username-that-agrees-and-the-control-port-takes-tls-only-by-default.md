@@ -20,14 +20,11 @@ symbols:
 gist: "Adopt an externalId's row only if its email or userName agrees, else audit and list; SCIM PUT by id; removed: and svc: refused; requireTls on by default"
 ---
 
-Issue #715, and the identity and control-channel lines of `defects.md` D128. Settled by
-the maintainer on 2026-10-16: an adoption needs a second attribute to agree, and
-`plane.controlTls.requireTls` turns on in 0.20 as Decision 902 said it would. This replaces
-the part of Decision 899 that adopts on the `externalId` alone and its "Not done" about
-`removed:` subjects at SCIM; the part of Decision 759 that keeps a `PUT` keyed on its body
-and answers a refused `POST` or `PUT` without SCIM's error body; and the part of Decision
-902 that leaves `requireTls` off in the chart, logs each refusal, and says no profile
-status reports a missing CA. The rest of all three stands.
+This replaces the part of Decision 899 that adopts on the `externalId` alone and its "Not
+done" about `removed:` subjects at SCIM; the part of Decision 759 that keeps a `PUT` keyed
+on its body and answers a refused `POST` or `PUT` without SCIM's error body; and the part
+of Decision 902 that leaves `requireTls` off in the chart, logs each refusal, and says no
+profile status reports a missing CA. The rest of all three stands.
 
 **An adoption needs the email or the `userName` to agree.** A sign-in, or a SCIM push,
 that finds nobody under its subject but finds the row SCIM gave that value as
@@ -63,9 +60,8 @@ its own. That is the cost of not guessing, and the pair is listed for it.
 fetches the row by the id in the path, and a body that would key it on another subject, a
 different `externalId` or, without one, a different `userName`, is refused `400`
 `mutability`, the rule a `PATCH` already had (754); otherwise the body is written to that
-row under its own subject. Before, a `PUT` for an id that existed upserted on the body's
-subject, so a body naming somebody else changed them. A refused `POST` or `PUT` now
-answers SCIM's error body (`scimType`, `detail`) like every other refusal.
+row under its own subject. A refused `POST` or `PUT` now answers SCIM's error body
+(`scimType`, `detail`) like every other refusal.
 
 **`removed:` and `svc:` are refused at SCIM** as they are at sign-in: a push whose subject,
 `externalId` else `userName`, starts with either answers `400` `invalidValue`. A person
@@ -108,25 +104,4 @@ the same instant may both be said.
 when there is, and `False` with `NotGiven` where pods are given no CA. Looked for rather
 than inferred from the pass, since a pass that could not read the file leaves the CA an
 earlier pass wrote. Beside `SecretMissing`, not part of `Ready`, for the same reason: the
-profile reconciled. The new console did not show a profile's conditions at all; its
-profile page now has "What the cluster says", every condition with its message, as the
-LiveView pages did.
-
-**Proof.** The plane's `identity_gaps_test.exs`: SCIM first under `oid`, the sign-in that
-moves the row, then back on `sub` a sign-in whose email agrees adopting the row, one whose
-`preferred_username` agrees adopting it, and one that agrees on neither getting its own
-row, with `person.adopt_refused` audited without an email and the pair in
-`admin.identity.duplicates`, and its next sign-in asking nothing again; a push that agrees
-updating SCIM's row and one that does not answered `409` `uniqueness`, audited and listed;
-a `PUT` changing only the person at its id, and one carrying another person's body refused
-`mutability` with nobody changed; pushes under `removed:` and `svc:`, as `externalId` and
-as `userName`, refused `invalidValue`; a removal taking the subject off a trigger's
-`notify`, moving the month's spend to the marker with the team's total unchanged, and the
-person pushed again starting at nothing. Every one but the adoptions that agree failed on
-the chunk tip. `ControlTLSTest`: three plaintext dials from one address said once, and
-`Refusals` saying the count after a minute. `ReconcilerTest`: `PlaneCAMissing` true before
-the file is there, false once a pass writes the CA and after a pass that cannot read it,
-and `NotGiven` without a CA path; both failed on the tip. The console's
-`profiles.test.tsx`: the conditions of a profile the fake reports a missing CA for.
-`helm template` renders `TROUPE_PLANE_CONTROL_REQUIRE_TLS` by default and refuses
-`enabled: false` alone; on the tip it rendered nothing.
+profile reconciled.

@@ -18,13 +18,6 @@ symbols:
 gist: "A pod the substrate no longer runs is gone once quiet past its lease and its row is dropped past the drain deadline with no active session; gone offers nothing"
 ---
 
-Issue #883, folded into #928. A scale-down retires a pod (`Fleet.retire/1`, Decision 731),
-and once the count is down past it `Fleet.retired/2` cleared `retiring` and kept the row:
-"their rows stay, as a removed pod's always have". So the row kept `draining: true`,
-`healthy: false` and a heartbeat weeks old for good, and `admin.profiles.list` and
-`profiles.list` listed it. The console's Pods page and Overview read it as a pod stuck
-mid-drain, with no action, and the Overview counted it among the profile's pods.
-
 ## What the plane decides
 
 **Listed is the substrate's word, not health** (`Fleet.listed?/2`). For a profile the
@@ -68,21 +61,3 @@ and not gone, whatever the gone row's other flags last said. The Overview leaves
 out of the fleet's count, of each profile's state and of "Needs attention": a removed pod
 is nobody's to look at, and a profile short of a pod is still said to be short. The fake
 plane seeds one gone pod (`troupe-w-ux-1`).
-
-**Left:** `profiles.list`'s `pods` (the desktop's and the terminal's) carries no `gone`;
-its rows go with the sweep like the console's, and neither client lists a profile's pods
-by state today.
-
-## Proof
-
-- `apps/troupe_plane/test/troupe/plane/fleet_test.exs`, "a pod the operator removed": gone
-  once quiet past its lease and not before, a pod still run never gone; forgotten by the
-  sweep only past the drain deadline, the pod still run kept however quiet, a second sweep
-  forgetting nothing; kept while it holds an active session; a pod enrolling at the
-  ordinal again is a new row, not draining; a pod of a profile the plane no longer has
-  forgotten too; `admin.profiles.list` saying `gone` on the removed pod's row alone. Each
-  failed on the chunk's tip, where none of the three functions existed.
-- `clients/gui/apps/console/test/operate.test.tsx`: the gone row reads "gone" and its time,
-  not "draining", offers no Drain, and a drain of the profile's other pod says no pod can
-  take its sessions even with the gone row's flags left healthy; the region counts
-  `1 of 1 pod`. Both failed on the tip.

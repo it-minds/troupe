@@ -65,11 +65,3 @@ when the two diverge. *A `recopy` method of its own*: a copy of a resource that 
 is that row's re-copy, so one method with one argument does both, and the answer's `made`
 says which it was. *Removing a copied row when its resource goes*: a removal is a decision,
 and here the plane makes none.
-
-Proof: `trigger_copies_test.exs` (listing with pass and fail reasons, a cluster that does
-not answer, a copy with its generation and a key shown once, a refused copy, a team
-admin's reach, a changed resource's diff and a re-copy keeping URL, key, runs and
-revisions, a console edit that differs, a removed resource whose row keeps running, a
-typed row taken over, a gitops plane refusing both and its pass unchanged, a switch that
-changes nothing, the MCP tools, the chart's Role) and the console's
-`trigger-copies.test.tsx`.

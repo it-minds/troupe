@@ -16,16 +16,6 @@ symbols:
 gist: "One compose file is a supported plane: published images, Dex bundled, OpenBao persistent and self-unsealing, the worker a registered machine; one box by design"
 ---
 
-## What was there
-
-A plane ran on Kubernetes, with the chart and the operator, and nowhere else. A machine
-could be a worker of a plane (`admin.host.register`, [single-machine.md](../admin/single-machine.md)),
-but the plane itself still wanted a cluster. The development stack
-(`dev/docker-compose.yml`) and the GUI's end-to-end stack (`clients/gui/dev/plane-stack.yml`)
-ran the plane's dependencies, and the latter the plane too, unhardened and without a
-worker: nothing a person could put on a server and keep. Issue #600 named the case:
-an office, or one person, with a box in a corner and no cluster.
-
 ## What changes
 
 `deploy/plane-light/compose.yml` is a plane a person runs from the published images with
@@ -73,15 +63,3 @@ an office, or one person, with a box in a corner and no cluster.
 - A pairing sign-in for a box with no provider (#600's slice 2) and a filesystem object
   store and local signer (slice 3): later, each named as a weaker guarantee when it comes.
 - HTTPS in the stack: a certificate belongs to the proxy the person already has.
-
-## Proof
-
-`scripts/plane-light-check`, on this machine with images built from the checkout and in
-CI (`clients/gui/packages/client/test/e2e.plane-light.test.ts`): the administrator signs
-in through the bundled Dex as a platform admin; the team is granted the box's profile at
-that first sign-in; a session runs on the box's own worker with a command in bubblewrap
-inside the container, answered by the fake model; an artifact is published and read back
-from the artifacts port; the app, the console and `/admin`'s redirect answer where the
-index points; then the whole stack is stopped and started and OpenBao is unsealed and
-the session still readable. The check runs on a pull request that touches the stack and
-nightly for everything else, because three images from scratch is most of half an hour.

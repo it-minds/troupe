@@ -10,10 +10,6 @@ paths:
 gist: "A delegation always comes back: a subagent whose model request fails hands its parent what it has, a child's path names one child for the life of…"
 ---
 
-Issue #149, three defects found by
-fixers in the chunk before 0.5.0, in the family of its gate on runaway and hung
-agents. Two left a parent waiting on its `delegate` call for ever, since a delegation
-has no timeout; the third ended a turn before the model saw its results.
 - **A failed model request.** A root rests after one (685): the error goes into its
   conversation and the person says what next. A subagent rested too, and nobody
   talks to a subagent but its parent, which was waiting on it. It now ends
@@ -45,11 +41,3 @@ has no timeout; the third ended a turn before the model saw its results.
   it: the children it started are in the witness already, each an agent under its
   own path, so the recorded fixture hashes stand and a change in how paths are made
   would still move them.
-- **Proof:**
-  - `Troupe.Agent.DelegationTest`: a subagent whose model request fails, after
-    saying something and before.
-  - `Troupe.Agent.ResilienceTest`: a second delegation after an agent restart and
-    after the session comes back, a delegation a restart takes up again, a woken
-    agent's tool turn, and a `finish` in a cancelled turn.
-  - `Troupe.Log.FoldTest`: the fixture hashes, unchanged, and the witness.
-  - The installed daemon, driven with a fake-provider script.

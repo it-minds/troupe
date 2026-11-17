@@ -44,12 +44,3 @@ are the places that went on without looking at the row or the grant.
   putting its tree back is waited for. The local daemon's endpoint has no such
   option and restores as before, and `session.create` on a pod, open only to a token
   with no session (PROTOCOL.md §7), is unchanged.
-- **Proof:** `Troupe.Plane.GrantEnforcementTest`: a revoke pushes `session.dormant`
-  to the pod and parks a waiting session with its slice back; a wake is refused with
-  the grant gone and with the team gone; admission parks instead of placing in both
-  cases, and the scaler places the next session. `Troupe.Plane.ControlTest`: a pod's
-  dormancy report leaves a revoked session read-only and an erased one erased.
-  `Troupe.Worker.PlaneLinkTest`: a revoke stops the session on a real pod, and the
-  pod's report leaves the row read-only. `Troupe.Worker.HarnessWebSocketTest`:
-  activating commands for a session the pod has only on disk answer `not_found` and
-  start nothing. All ten fail on the chunk's tip.

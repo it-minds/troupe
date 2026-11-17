@@ -16,15 +16,6 @@ symbols:
 gist: "Both of issue 465's options stay off by default; a stable system prompt only ever appends to the conversation; llm_request and llm_response carry the counts"
 ---
 
-Issue #465, the measurement its last comment asks for before the maintainer decides.
-Anthropic's newest models bind a thinking block to the conversation it was made in, and
-Troupe changes that conversation between turns: the task list (792), the instruction
-files and the brief (798) and the goal (678) are in the top-level system prompt, and a
-compaction rewrites the history. Since Decision 805 such a block, refused, costs one
-refused request and a resend without any thinking. The two ways out, and what each needs
-answered, were in `docs/developer/prompt-prefix.md` (in git history), with the offline
-numbers and the commands for the live ones.
-
 - **Settings, not a choice.** `thinking_binding: default | drop_block` and
   `system_prompt: per_turn | stable`, flat keys any layer may set, each with an
   environment variable (`TROUPE_THINKING_BINDING`, `TROUPE_SYSTEM_PROMPT`) so a bench is
@@ -65,36 +56,3 @@ numbers and the commands for the live ones.
   log), and `thinking_dropped`, the blocks the beta dropped; both absent when nothing
   happened. Optional fields, no new event, nothing folded: the fold's witness and every
   fixture hash stand.
-- **The counter.** `Troupe.Bench.Prefix.count/1` adds those up per session; a log
-  written before them has its changes judged by `prompt_bytes`' system and tools sizes
-  (769), a floor, and says how many were. Every live run's record carries it as `prefix`,
-  the report's summary adds it up and the table prints it, and `mix troupe.prefix PATH...`
-  counts a directory of session logs.
-- **The live bench** carries the two settings from the person's configuration or the
-  environment into each run and says them (`experiment` on the report and each history
-  line), and a scenario may have `follow_ups`, each typed once the turn before ended by
-  itself. `follow_up`, in no suite, is two turns where the first brings `docs/AGENTS.md`
-  into the second's instruction files (798), and whose outcome is the second turn's file
-  under both files' rules.
-- **The stand-in** (`fake_openai.exs`) answers Anthropic's `/v1/messages` too: the same
-  scripts, each answer after an empty thinking block signed over the model, the tools as
-  a set, the system prompt, every message before it without thinking or cache marks, and
-  the block before it; it refuses a block whose conversation changed with Anthropic's
-  400, or with the beta and `drop_block` drops it and every thinking block after it and
-  says so; and it keeps a prompt cache by marks. Served with `elixir`, an installed
-  `troupe` is pointed at it as `type: anthropic`.
-- **Proof:** `ThinkingTest` (no header and no `block_binding` whatever the model and
-  effort unless asked for; asked for, the header and the field beside each form, none on
-  a request that hands nothing back; dropped blocks and a resend on the response),
-  `StablePromptTest` (by default the list a turn left changes the system prompt the next
-  turn begins with and the log says so; stable, one system prompt for the session, the
-  instruction files with the first turn and the list with the second, each request the
-  one before with something added; a goal set between turns goes with the next), and
-  `BenchLiveTest`'s `follow_up` against the stand-in as Claude Opus 5.5: by default the
-  second turn's two calls each refused once and sent again (two resends, one system
-  prompt change), with `drop_block` none refused and 3 then 4 blocks dropped, stable no
-  change, no refusal, no drop and more read from the cache; `mix troupe.prefix` over the
-  kept log says what the run's record says. On the chunk's tip five of these failed: no
-  header with the setting, no response fields, the system prompt changed between turns
-  with `stable` set, and no log fields. The installed build ran `troupe bench --live
-  --scenario follow_up` against the served stand-in with each setting.

@@ -16,14 +16,12 @@ symbols:
 gist: "One release key signs the desktop update too; the app trusts only keys compiled in, checks the manifest first, never moves back, asks before restarting"
 ---
 
-#66 slice 2, after slice 1 made releases signed and `troupe update` install only what the
-release key signed (Decision 865), and gave the plane a version policy it says at
-`initialize` (Decision 868). The maintainer decided the shape on 2026-10-12: the release
-minisign key also signs the desktop app's update, so there is one key and one rotation
-story; the desktop app updates itself, and the daemon it runs, only from a signed release;
-it follows the plane's recommended version when signed in, never a blocked one and never
-below the minimum; it asks the person before it restarts; and it calls the plane's
-`initialize` and shows `update_required` as a sentence. This records how.
+The maintainer decided the shape on 2026-10-12: the release minisign key also signs the
+desktop app's update, so there is one key and one rotation story; the desktop app updates
+itself, and the daemon it runs, only from a signed release; it follows the plane's
+recommended version when signed in, never a blocked one and never below the minimum; it
+asks the person before it restarts; and it calls the plane's `initialize` and shows
+`update_required` as a sentence.
 
 ## One key: Tauri's updater takes the release key as it is
 
@@ -40,16 +38,8 @@ under a newer number is refused by the updater too.
 
 ## What a release carries
 
-`scripts/release-desktop-update.exs`, run in the publish job before the manifest, writes a
-`.sig` beside each file the desktop app updates itself from — the per-user setup on Windows
-(`Troupe_<v>_x64-setup.exe`), the app archive on macOS (`Troupe_<v>_universal.app.tar.gz`,
-which `native.yml` packs beside the disk image) and the AppImage on Linux — and
-`latest.json`, the document the updater reads. These are what the installers put on a
-machine, so each updates what is there. The manifest is written after them and names them
-like any other file (`latest.json` is the desktop app's), so one signature chain covers
-everything a client installs. The script refuses as the manifest's does: no key, an
-encrypted key, or a key that is not the first in `release-keys.txt`, and the release stays
-a draft.
+The script refuses as the manifest's does: no key, an encrypted key, or a key that is not
+the first in `release-keys.txt`, and the release stays a draft.
 
 **A key rotation.** The updater checks one key, the first block of a signature. The apps
 that update *to* a rotation release were built before it and trust the old key alone, and
@@ -106,56 +96,12 @@ its place: the installers' names, so `troupe update --rollback` and
 daemon goes back as it was. A daemon a terminal runs inside itself says so and is left
 running.
 
-**A machine with only the desktop app's daemon** — the desktop app and `troupe-daemon`, no
-`troupe` — had no updater (D122): `troupe-daemon` cannot replace the directory it runs
-from on Windows. It has one now, the desktop app, which runs from elsewhere. A machine
-with the daemon alone is still updated by its installer.
-
 ## The plane's word
 
 Signed in, below the minimum or on a blocked version, the app says the refusal as a
 sentence with **Update now**, worded from the refusal's fields as the terminal words its
 own (`This plane needs the desktop app 0.15.0-beta or later, and this is 0.14.0-beta:
 update it now, which installs 0.15.1-beta.`), and keeps to the sessions on this computer,
-as it does when the plane is not answering: the plane is not asked for the team's. The
-plane's own `reason` for the desktop app now says "update the desktop app", since it has an
-updater; `data.run` stays `null`, there being no command. Served with `action: "suggest"`,
-the app says the plane's recommended version in the update's quiet line. A plane from
-before the policy says nothing either way.
-
-**The terminal.** `suggest` is one quiet line where the terminal meets the plane — HQ
-under the lockup, and after `troupe login` and `troupe whoami` — with the command to run
-(`This plane recommends troupe 0.15.1-beta, and this is 0.15.0-beta: run troupe update.`),
-never a warning or an exit status. `Troupe.Protocol.ClientUpdate.suggestion/2` is that
-line, read the same way from the plane's map or its JSON. The terminal does not ask the
-plane at start; it says the line when it connects, which is when the plane answers.
-
-## Not in this slice
-
-OS code signing and notarisation (the setup is still unsigned on Windows and macOS, and
-the release key does not change that); the plane serving the release's files
-(`/downloads/*`); re-judging a client already connected when the policy changes; and the
-terminal's own daily check.
-
-## Proof
-
-- `clients/gui/apps/desktop/src-tauri`: `cargo test` — the shared signature and artifact
-  vectors through the Rust verifier, a key as the updater takes it, the manifest fetched
-  over HTTP and refused when changed, another key's, another version's or missing, the
-  update's signature naming the key the updater is given, the daemon unpacked beside and
-  swapped in with the old kept and back, a plane's blocked or too-old version never
-  installed.
-- `apps/troupe_core/test/troupe/release/desktop_update_test.exs`: the script run as CI
-  runs it with throwaway keys, each `.sig` checked with the clients' verifier and its
-  trusted comment naming the version, `latest.json`, the manifest naming both, the
-  refusals, and the rotation signed with the retiring key; the publish job runs it before
-  the manifest.
-- `clients/gui/apps/desktop/test/updates.test.tsx`: against the fake plane with a policy,
-  `initialize` as `troupe-gui` with the version; `update_required` as a sentence with
-  **Update now**, and the plane not used; `suggest` quiet; the check on start and again;
-  the restart asked for, held while a turn is at work, and the daemon asked to stop. On
-  the tip before this the app never called `initialize` and never checked for a release.
-- `clients/gui/packages/client/test/client-update.test.ts`: `askPlane` and the sentences.
-- `clients/tui/test/troupe/plane_version_test.exs`: `suggest` as one line in the status,
-  `troupe whoami` and HQ, and nothing at the recommended version. On the tip before this
-  `suggest` said nothing anywhere.
+as it does when the plane is not answering: the plane is not asked for the team's. Served
+with `action: "suggest"`, the app says the plane's recommended version in the update's
+quiet line. A plane from before the policy says nothing either way.

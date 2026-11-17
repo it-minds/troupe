@@ -28,14 +28,6 @@ symbols:
 gist: "Sweep and fix this go through Triggers.fire with the trigger's policy; being fixed = run live or its PR open; attempts default 1; GitHubApp CRD, no key"
 ---
 
-Issue #147's remaining asks and #653's GitOps half, after slices 1 to 4 (Decisions 885, 891,
-905 and 911). On the chunk tip a trigger's source refused `sweep` ("a GitHub trigger's
-source takes kind, provider, repository, label, command, ref"), `admin.trigger.fix` was
-`method_not_found`, a comment on a run's draft was matched against the triggers' commands
-and ignored, and a GitOps pass read no `GitHubApp`. Two defects B37 found are fixed with
-them: a refused push left what it staged in the agent's index, and a skipped run said
-nothing about why.
-
 - **A sweep is a trigger on a repository with a schedule of its own.** `source.sweep`, a
   five-field cron in UTC, beside `label` and `command`, rather than a schedule trigger that
   names a repository: a repository trigger is already the App's (905), its sessions already
@@ -141,44 +133,3 @@ nothing about why.
   agent's index file from the worker's VM, which would follow a link the agent planted at
   `.git/index` to whatever the VM can read; and starting from an empty index, which drops
   every tracked file a `.gitignore` also matches.
-- **Out of this decision.** Teams themselves in GitOps (a `GitHubApp` holds their
-  repositories, not the teams); a cap of open pull requests at once, which the runs-at-once
-  cap and "being fixed" bound in practice; sweeping more than 50 issues a minute, or more
-  than the first 100 open pull requests; a content scan of pushes (911).
-- **Proof.** `github_issues_test.exs` in the plane, against the development OpenBao and
-  the fake GitHub, which now serves a repository's issues, its issue search and its pull
-  requests to a token holding `issues: read`: a sweep at its minute starts one run on each
-  open issue with its label and none on a closed or unlabelled one, fenced, with a token
-  narrowed to reading, and at the next minute leaves both as being fixed; a query's sweep
-  starts runs on what the search finds; an issue with an open pull request its run opened
-  is left, and once that is closed, left as tried once, tried again when the team allows
-  two and left after, and started again after a person asks; the sweep stops at a run the
-  trigger's cap skips, which says why in the row and in `admin.runs.list`; a public
-  repository and an unlisted one start nothing; every malformed sweep and query is refused
-  at put. Fix this starts one run on one issue by number, fenced, and the same by link in
-  the same minute is the same run, audited; a closed issue, a pull request, a missing one,
-  another repository's link, a foreign host, a word and a public repository are refused,
-  and a trigger not on a repository is sent to `admin.trigger.run`; it is skipped over the
-  cap with the reason. `github_webhook_test.exs`: a member's comment on the draft resumes its
-  session with the comment fenced, read with a `pull_requests: read` token, audited, once;
-  a stranger's, a contributor's, a bot's, the App's own, an empty one, an edited one,
-  another pull request, a foreign installation and a draft marked ready resume nothing; a
-  hostile comment stays inside one fence; a command on a pull request's conversation starts
-  nothing; a run over the team's cap is skipped with the reason in the outcome and the row.
-  `gitops_github_app_test.exs`: a resource becomes the App's settings and every team's
-  repositories, with a trail, the same one again changes nothing, and a commit changes
-  them; every malformed field, a `privateKey`, a second name refused, the App as it was; a
-  team the plane lacks reported while the rest is used; gone takes them, and an App from
-  before is `missing` and still removable; `admin.github.put` of the settings,
-  `admin.team.update` of `github` and the delete refused as `managed_by_gitops`, a key and
-  a webhook secret taken into transit; export reads back; the CRD and the role match.
-  `github_policy_test.exs`: `maxAttempts` read and refused by name, the lower of the two,
-  one where neither, inherited as a narrowing. In the worker, `github_fix_loop_test.exs`: a
-  refused push stages nothing in the agent's index and leaves no index of its own, and a
-  `.gitignore` alone lets the next push go; the plane's own input for a hostile
-  conversation comment, to a model that obeys it, gets refusals for `troupe/../main` and
-  `pr_merge`. The console's `triggers.test.tsx`, `integrations.test.tsx` and
-  `teams.test.tsx`: fix this by link refused for another repository and taken by number
-  behind its confirm, a skipped run's reason on the note and its page, a sweep and a query
-  in the form with their refusals, the App's settings and a team's repositories locked on
-  a GitOps plane with the key still set, and the attempts cap set.

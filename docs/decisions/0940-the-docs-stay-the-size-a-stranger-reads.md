@@ -13,13 +13,8 @@ gist: Pages <= 400 lines (not PROTOCOL.md, not generated), split by heading, anc
 ---
 
 **Why.** #422's done-when says no hand-written document passes about 400 lines but the
-protocol, and `defects.md` lists only open defects; row 7 of the Stage 1 gate checks it.
-The chunk 41 desk walk measured six pages past the line, and by this chunk there were nine:
-`defects.md` at 1,669 lines, `ARCHITECTURE.md`, `docs/user/configuration.md`,
-`prompt-prefix.md`, `profiles-and-policy.md` and `github.md` near 600, the TUI's README,
-the admin configuration reference and the installing page between 447 and 476. Each had
-grown a section at a time, each section reasonable, and nothing noticed. A rule a person
-checks once a release is a rule that holds once a release.
+protocol, and `defects.md` lists only open defects; row 7 of the Stage 1 gate checks it. A
+rule a person checks once a release is a rule that holds once a release.
 
 **The decision.**
 
@@ -48,26 +43,6 @@ checks once a release is a rule that holds once a release.
   the core's tests read them there), `ARCHITECTURE.md` keeps section 2 (code cites its
   failure matrix and transition table), and a YAML example that moved to a new page is
   added to the core's test that checks every example is a valid config file.
-- **`defects.md` is the list of open defects; the entries are on pages of their own.** The
-  open entries were 1,480 lines, every one of them an item somebody had seen and nobody had
-  fixed, so trimming could not bring the page under the line without closing defects that
-  are not closed. `defects.md` is now the rules, the severities and a table with a row
-  per open entry; the entries are on `docs/developer/defects/d<first number>.md`, a few
-  hundred lines each, a new one at the end of the last page, which is closed when full and
-  the next one started. An open entry is a `### D<n> - <what> (<severity>)` heading with at
-  least one item, a line starting `- `; a fixer deletes an item when it is fixed or taken,
-  and an entry with none left is closed. The check fails on an entry with no item, a row
-  naming an entry its page does not have, an entry without a row, and an entry or a
-  closed-record section written into `defects.md` itself.
-- **What is closed is deleted; git history is the archive**, as
-  `docs/developer/fixing-issues.md` already has it for reports. The Taken, Won't fix and
-  Checked and not a defect sections are gone from `defects.md`, and `defects.md` says
-  where to find them (`git log -p -- docs/developer/defects.md`), which is where a `D`
-  number cited in a decision or a test is looked up. `docs/history/` keeps only the
-  records it held before, and stays exempt from the line while it has any. The three decision logs this issue also asked about were
-  split into `docs/decisions/` by Decision 790 and are no longer in the repository; their
-  text is in git's history, which `docs/decisions/README.md` names, so there is nothing
-  left to mark as history on the site.
 - **The site's front page is `docs/README.md`, drawn as a landing page** (#189). It is the
   page both a GitHub reader of `docs/` and a site visitor meet, so it stays one file:
   `docs/overrides/hooks.py` gives the home page `landing.html` and hides the nav and the
@@ -75,17 +50,8 @@ checks once a release is a rule that holds once a release.
   Above the fold: what Troupe is, the install as the quick start has it (held to the quick
   start word for word by `quick-start.yml`, as the root README's is), and a figure marked
   `<!-- recording: docs/assets/seam.mp4, ... -->` that shows a still until the gate's row
-  4 recording exists. Then the three things #189 names, each with a picture drawn as SVG
-  from what the code and the protocol say, with its own light and dark colours; who it is
-  for; ten minutes; where to go. The search basics are the pages' own: each page's
+  4 recording exists. The search basics are the pages' own: each page's
   description and canonical URL from the hook, Open Graph on every page with a static
   image, `sitemap.xml` from MkDocs, a `SoftwareApplication` description on the front page,
   and `robots.txt`, which a crawler reads at a host's root only and so does its work once
   the site has a host of its own.
-
-**Proof.** `scripts/doc-size.exs` on the chunk's tip before this change: nine pages past
-400 lines and every open entry in `defects.md` itself, 95 findings; after it, none.
-Seeded failures (a 401-line page, an entry with no item, an entry without a row, a row
-without an entry) each fail it, and a 450-line page under `docs/history/` does not.
-`mkdocs build --strict`, `scripts/doc-links.exs`, `scripts/check-neutral.exs` and the
-core's config tests pass on the split pages.

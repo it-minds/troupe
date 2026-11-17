@@ -16,10 +16,7 @@ symbols:
 gist: "/profiles one summary line each; /profile <name> six groups Agents, Tools, Model, Reach, Limits, Who from profile.get; null is not said; access in words; troupe profiles same lines"
 ---
 
-A person choosing where to start a session had a profile's name and, in HQ, its health
-and room; what a session there would be given — which agents, which tools and with whose
-access, which hosts it reaches, what it may spend — was in a bundle and a profile spec
-only an administrator reads. The plane now answers `profile.get` for the caller, composed
+The plane now answers `profile.get` for the caller, composed
 from what it enforces (the root decision of the same date); this is the terminal's side.
 
 **The list.** `/profiles` is one line per profile the person may use, from `profiles.list`
@@ -63,9 +60,3 @@ a person's session gets once their team's grant, the organisation's rules and th
 profile's identity are applied, and only the plane applies them; two clients composing
 would be two answers. A screen per group: the point is reading it through once before
 starting.
-
-**Proof.** `profiles_screen_test.exs` (the list's lines; the six groups in order with the
-not-here rows, the rules and each access word; a profile not granted; a profile with
-little said; Esc and `q`; scrolling), `profiles_cli_test.exs` (the list, the page, `--json`,
-not found exits 1), `profile_lines_headless_test.exs` (not said throughout, the access
-words, a long tool list wrapped), against `FakeRemote`'s `profile.get`.

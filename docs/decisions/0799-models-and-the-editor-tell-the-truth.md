@@ -16,9 +16,6 @@ symbols:
 gist: "served: false means context null and no ctx in the text, role or not; models/1 and context_window/2 keep the fallback; config errors read from stdout"
 ---
 
-Defects D70 (its fourth item) and D76, which chunk 20 left. Two reports said less than
-the truth.
-
 - **The model list.** `Config.models/1` gives every model the window `context_window/2`
   plans compaction against: what a file declares, else what the provider's list said,
   else `context_window` (200,000 by default, TUI Decision 17). For a model its provider
@@ -29,9 +26,6 @@ the truth.
   1 with `{"errors": [...]}` on standard output and nothing on standard error (783 kept it
   so for a program). The Settings view read standard error only, and with nothing there
   showed Node's own message, `Command failed: <path> config --explain --json ...`.
-
-What changed:
-
 - **No window for a model nobody serves.** `Troupe.Config.Models.json/2` gives `context:
   null` to every model whose `served` is `false`, a role's or not, and whatever a file
   declares for it: a window describes a model a session can call, and this one fails a
@@ -60,23 +54,3 @@ What changed:
   asked and says why it could not list them.
 - **Older `troupe`s.** The extension's Models group already gave a not-served model no
   window (794), so it reads a `troupe` before this one and after it the same.
-
-Not in this: the TUI's model menu still shows a not-served model's fallback window, since
-it does not read the cache's record; the view does not ask again when a file only an error
-names is saved (it does for the files a loaded config listed); `troupe-daemon models
---json` (D70's fourth bullet).
-
-Proof: `Troupe.Config.ModelsTest`, against the stand-in gateway: a model not served, a
-role's and a priced `house-model`, has `context: null` and keeps its price, a served one
-its window, and before any answer the fallback stands; the JSON and the text agree, each
-not-served model said so and with no `ctx`. Both failed on the chunk's tip with `"context"
-=> 200000` and `house-model  200k ctx`. TUI `ModelsCLITest`: `troupe models` prints
-`house-model  not served by openai, $0.50/$1.50 (models.prices), from your config`, and
-`--json` gives it and `qwen3.5` `context: null` (failed on the tip with `200k ctx`). The
-extension's unit tests run a fake `troupe` that prints `errors` and exits 1, through `run`:
-the view shows the errors, a key in one taken out, and no "Command failed" (failed on the
-tip's reading, moved unchanged, with `Command failed: C:\WINDOWS\system32\cmd.exe /d /s /c
-...`); a failure with no errors to show is still one line from standard error; and the
-Models group gives a not-served model with `context: null` the rows it gave one with the
-fallback. The suite inside VS Code, its fake now printing a config's errors, shows them,
-each opening its file at its line.

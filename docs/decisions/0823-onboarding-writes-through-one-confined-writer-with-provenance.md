@@ -18,15 +18,11 @@ symbols:
 gist: One writer, two roots by real path, Troupe's kinds of file only; provenance recorded; nothing overwritten unasked; a config-dir write always asks
 ---
 
-Issue #516, slice 3, and the command that drives it. #516 decided that other tools'
-configuration stops being read at runtime and is onboarded once into Troupe's own files.
-The maintainer decided for this chunk that the writer is a dedicated tool confined to
-`.troupe/` and the config directory, as `remember` is (Decision 649), not `write_file`
-behind an approval, which would hand the model a free path argument. What was there: no
-tool the librarian has could write `.troupe/agents/x.md` (its list is `read_file`,
-`list_files`, `grep`, `remember`, `finish`), `write_file` could reach any path in the
-workspace with nothing recorded about where the content came from, and `troupe onboard`
-was an unknown command line.
+#516 decided that other tools' configuration stops being read at runtime and is onboarded
+once into Troupe's own files. The maintainer decided for this chunk that the writer is a
+dedicated tool confined to `.troupe/` and the config directory, as `remember` is (Decision
+649), not `write_file` behind an approval, which would hand the model a free path
+argument.
 
 - **One writer, two roots, Troupe's kinds of file.** `Troupe.Onboard.write/3` is the only
   thing that writes an onboarded file, for the command line and the tool alike. A file is
@@ -162,38 +158,3 @@ was an unknown command line.
   check to ask whether a file elsewhere on the machine has a given content. `--json` adds
   `onboarded` (`file`, `path`, `imported_from`), and the count line names the onboarded
   files when there are any.
-- **Not this slice.** No source is registered yet (slice 4's agents and commands, and
-  slice 2's instruction files); onboarding does not start by itself (#516's decision 4);
-  the librarian's prompt is not rewritten to onboard (slice 2); the readers of
-  `.troupe/agents`, `commands` and `workflows` are not yet held to the workspace's edge
-  (#512's reading half); a workspace's agent that grants itself `onboard_write: auto` in
-  an untrusted workspace is #511's, capped where a session reads it.
-- **Proof:** `Troupe.OnboardTest` (a new agent proposed as a diff and written with the
-  three keys, still parsed as the agent it is, and a second plan proposing nothing; a
-  declined proposal leaving nothing in either root, not offered again, offered with `all`
-  and again once its source changed; a changed source offered as a diff with the file
-  untouched until accepted; a person's edit standing; a file changed after it was shown
-  not overwritten; a file onboarding did not write offered, never taken; `mcp.json` and
-  `AGENTS.md` recorded in `onboarded.json`; a failing source refused by name; a source's
-  skipped files passed on; a file made from a settings file too recording it, unchanged
-  until that file changes, then proposed again and drifting on its own line, and a wrong
-  or outside `also_from` refused; every path
-  refusal and both crossings refused with nothing written; a `.troupe`, an `agents` and a
-  source that link out refused; drift on a changed and a gone source in `.troupe/` and in
-  the config directory, in text and JSON, and a record pointing outside passed over),
-  `Troupe.Tools.OnboardWriteTest` (the librarian's call waits for the approval, then
-  writes the file with its provenance and logs `onboarded`; with `auto_approve` on and
-  the profile's `auto`, a `target: repo` call written unasked and a `target: user` call
-  still raising an approval that turning `auto_approve` on again does not release (it
-  times out waiting for that approval with `must_ask?/1` off); a denied call leaves nothing;
-  `build` is neither offered it nor let call it; each refusal; a pod and a workspace's own
-  agent refused), and the TUI's `Troupe.OnboardCLITest` (the command line; `--yes` through
-  the runner with a source registered; a yes and a no, the diff and the notes printed, and
-  a second run proposing nothing; a changed source offered as a diff and left as it was on
-  a no, and `troupe instructions check` going from 0 to 1 with the drift line; nobody to
-  ask; a refused proposal exiting 1; `--json` with and without `--yes`; a skipped file
-  listed, a file made with a settings file too naming it and drifting when it changes; a
-  missing workspace). On the chunk's tip all five of the tool's tests and all eight of the
-  command line's failed: the librarian's call was refused before any approval, and
-  `troupe onboard` was `unknown arguments: onboard`. The installed build's run on a
-  scratch repository with a stub source is on the pull request.

@@ -14,11 +14,6 @@ paths:
 gist: A person's own MCP servers and skills live in two layers beside `config.yaml`, import from the files other tools keep, and a workspace's servers…
 ---
 
-Issue #60, the local half. What was there: `mcp:`
-in `config.yaml` (654), read from a project's file only in a trusted workspace
-(686), and skills read from the pinned bundle alone. What a person has is a
-`.mcp.json` from Claude Code, Cursor, Claude Desktop or VS Code and a
-`~/.claude/skills`, and bringing them in meant retyping them into YAML.
 - **Layers.** `<config>/mcp.json` and `<config>/skills/` for the user,
   `.troupe/mcp.json` and `.troupe/skills/` for the workspace: the `mcpServers`
   shape every other tool reads and writes, plus an `include` list that reads
@@ -52,21 +47,5 @@ in `config.yaml` (654), read from a project's file only in a trusted workspace
   are read beside the workspace wherever the session runs, as `.troupe/agents/` is.
   A local skill's files are listed by their path, and the user's directory and every
   linked root are read roots of the session.
-- **Protocol.** `mcp.list`, `mcp.add`, `mcp.remove`, `mcp.check` and `skills.list`,
-  `skills.add`, `skills.remove`, the daemon's only like `config.*`; `mcp.status`
-  gains `layer` and `source`. `mcp.check` on a session's server reads its files
-  again and starts what they say now — reconnect, enable and disable in one verb —
-  and on a server not in a session runs it once and stops it. `mcp.list` with a
-  `session_id` joins the live state onto the listing, so one call fills a page. Env
-  values never go over the wire: `mcp.list` and `mcp.add` answer with the names.
-- **Out of this slice**, and said in the pull request: streamable HTTP and SSE with
-  OAuth for remote servers, and keychain storage for their tokens. A `url` server
-  stays the one-shot HTTP client 654 gave it.
-- **Proof:** `Troupe.MCP.ImportTest` (the four shapes, placeholders, skips),
-  `Troupe.MCP.LocalTest` (layering, links, merging, writes, the trust store),
-  `Troupe.Skills.LocalTest` (both layers, copy and link, the tool and the prompt),
-  `Troupe.MCPLocalTest` (the question and each answer, a trusted workspace,
-  `managed_mcp_servers_only`, reload), `Troupe.MCPLayersTest` (the user's layer and
-  the read roots), `Troupe.Gateway.LocalSourcesTest` (the seven methods over the
-  daemon's socket, and none without the daemon), the TUI's `Troupe.MCPPageTest` and
-  the GUI's `local-sources.test.ts` and `servers-panel.test.tsx`.
+- **Protocol.** Env values never go over the wire: `mcp.list` and `mcp.add` answer with
+  the names.

@@ -19,10 +19,6 @@ symbols:
 gist: "config.get naming a session is what it started with, layers named (profile, session, enforced); a pod answers its token; GUI waits for controls; no key kept off a webhook"
 ---
 
-Chunk 38's slot C38: the follow-up Decision 913 left ("there is no method that explains a
-pod session's configuration"), the rest of Decision 915's waiting guard, and the small
-code-local items of `defects.md` D130. Each part had a test that failed on the chunk's tip.
-
 ## A running session explains what is in force in it
 
 **What is in force is what it started with.** A session resolves its configuration once,
@@ -66,12 +62,12 @@ plane cannot read and make every wake an event.
 ## A GUI test waits for a control as for words
 
 Decision 915's check refused a bare `says` or `link`; a control is the same shape. It now
-refuses `expect(button(…))`, `field(…)` or `row(…)` asserted present at once, and a read of
-one found at once (`button(…)!.disabled`), unless marked `// at once: <why>`. The supports
-wait for it, `await seesButton(…)` (the console's `seesField(…)` too), and the test reads the
-control the wait answered. 43 such assertions were converted across both apps. Absence is
-still not checked, as words' is not: `expect(button(…)).toBeNull()` cannot flake this way,
-only pass early, and the about 65 of them stay.
+refuses `expect(button(…))`, `field(…)` or `row(…)` asserted present at once, and a read
+of one found at once (`button(…)!.disabled`), unless marked `// at once: <why>`. The
+supports wait for it, `await seesButton(…)` (the console's `seesField(…)` too), and the
+test reads the control the wait answered. Absence is still not checked, as words' is not:
+`expect(button(…)).toBeNull()` cannot flake this way, only pass early, and the about 65 of
+them stay.
 
 ## A trigger that stops taking a key loses it
 
@@ -93,28 +89,3 @@ rotation gives it one, as 914 said, and now also says.
 - **Plane test databases.** `scripts/dev-down --test-databases [DAYS]` drops the
   per-checkout test databases made more than a week (or DAYS days) ago, saying each, and
   keeps one in use; a checkout that still runs its suite makes its own again.
-- **The cluster suite's waits say why.** `World.eventually/2` takes `:explain`, asked once
-  when it gives up, and a world's wait for a profile to finish replacing its pods says the
-  profile's conditions, each pod's phase, readiness and container states, and the namespace's
-  last warnings.
-- **The fake pod's mark everywhere.** `bundles_test.exs` and `control_test.exs` enrol with
-  `FakePod.token/1` and verify with `FakePod.verify/1`, as the other plane suites do, so
-  another checkout's worker link that reaches the port is refused.
-
-## Proof
-
-On the chunk's tip `config_explain_test.exs` (worker) failed every test: `config.get`
-naming the session was `forbidden` to its token, and `method_not_found` on a pod to anyone.
-Now it answers the profile's `models.cheap` as `profile`, `max_turns` and `approvals` as
-`session`, `managed_permission_rules_only` as `enforced` with no scope, the repository's
-`compact_at` and not its `auto_approve`, the profile's two rules with their profiles, and
-the explanation's text, ladder and JSON; the pod's own settings and another session's stay
-refused, and a session not running there is `not_found`. Core's `describe_session/1` answers
-what a session started with though its file changed after. The TUI's `pod_settings_test.exs`
-draws `/settings` in a pod session from the fake pod's answer and changes nothing, and the CLI
-asks the daemon, then the pod, then says the session runs nowhere. The desktop's
-`pod-config.test.tsx` lists the pod's keys and rules in a team session's Settings pane, and a
-local session has none. Both apps' `waits.test.tsx` refuse the control forms and found 43 on
-the tip. `trigger_ingress_test.exs` keeps no key on a trigger made a schedule and lists a
-kept one as none; `identity_gaps_test.exs` drops a refusal a later push resolved and lists one
-after it again.

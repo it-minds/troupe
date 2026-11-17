@@ -11,8 +11,6 @@ paths:
 gist: "A subagent is stopped once its parent has its result, and a restart closes what it leaves behind: the calls of a child nothing starts again, a…"
 ---
 
-Issue #171, and D18 and D19 in
-docs/developer/defects.md.
 - **Stopped on report (#171).** A finished subagent kept its process, and with it its
   whole conversation, until its session's tree stopped. Nothing addresses a finished
   child by its process. Input, a cancel, the loop, the watcher and an approval's
@@ -42,37 +40,13 @@ docs/developer/defects.md.
 - **A turn a restart comes back in the middle of (D19).** The results that were back
   before it were not put back. The next `tool_results` held only the calls re-run or
   closed, which a provider refuses (every `tool_use` is owed a `tool_result`), and a
-  `finish` among them lost its summary and took another model turn. Replay now puts
-  the completed calls back from their `tool_call_completed`, with the summary of a
-  `finish` among them, when the restart re-runs or closes the rest; one that takes
-  nothing up leaves them, so a summary cannot outlive its turn (688). A call closed
-  as interrupted and one put back out to a person now reach the conversation in one
-  `tool_results`, not two.
+  `finish` among them lost its summary and took another model turn. Replay now puts the
+  completed calls back from their `tool_call_completed`, with the summary of a `finish`
+  among them, when the restart re-runs or closes the rest; one that takes nothing up
+  leaves them, so a summary cannot outlive its turn (688).
 - **A root's failed request (D19).** "The previous model request failed: ..." went
   into the conversation and not into the log, so the conversation a restart rebuilt
   did not have it. It rides in the `llm_error` as `note`, and replay folds it. Not a
   `user_input` from the harness, as the other notes are: a client reads one of those
   as the turn going on, and the A2A mapping would turn a failed task back to
   `working`, while this note ends the turn.
-- **Old logs** have no `note` and no `interrupted`, and replay as they did.
-  `Troupe.Log.Fold` counts a `note` as a message, and the recorded fixture hashes are
-  unchanged.
-- **Proof:**
-  - `Troupe.Agent.DelegationTest`: five delegations with one still at work hold that
-    one alone (the agent tree and the registered processes counted), five in a row
-    hold none, and a stopped child is still read from its log, before and after its
-    parent restarts; each child's `agent_done` comes before its result is taken.
-  - `Troupe.Agent.ResilienceTest`: a restored session leaves no approval of its
-    subagent open, in `Summary` or the gate; the child a restart re-ran a delegation
-    past ends `interrupted` with nothing open; a root's failure note survives the
-    session coming back; a turn keeps the results already back when the session comes
-    back, a call closed as interrupted and one put back out to a person reach the
-    model together, and a `finish` among them ends a root, and a subagent with the
-    summary its parent is handed, after the agent restarts.
-  - `Troupe.Agent.CutShortTest`: a subagent cut short is stopped, and its session
-    still sleeps. `Troupe.Session.LocalPricingTest`: a model only subagents call is
-    said once a session. `Troupe.Log.FoldTest`: the fixture hashes, unchanged, and
-    the note.
-  - The installed daemon, driven with a fake-provider script.
-- **Not done here:** a subagent a cancel takes down still leaves its own calls open in
-  its own log; the `cancelled` on the agent above closes them for every reader (#145).

@@ -16,15 +16,6 @@ Amends the pod paragraph of Decision 660 and nothing else of it: a spent budget 
 question, `full_send` still never asks, a subagent still never asks, and a limit somebody
 wrote into a session's terms is still a contract that stops.
 
-**What was wrong.** 660 had the worker set `budget_asks: false` "whenever the plane's
-terms set anything at all", and `Restore.contract/1` read that as "the terms list is not
-empty". It is never empty: the plane sends the platform's two `managed_*` switches with
-the terms on every placement, so absent means off. Every pod session therefore ran its
-budget as a contract, and a shared session started from the desktop with no limits in its
-terms ended `budget_exhausted` on the first message after its wall clock ran out, with
-everything written after it dropped as `input_after_done`. Defect D32 had noted the
-leftover in September.
-
 **The rule.** `contract/1` decides from the limit keys, `max_turns` and `wall_clock_ms`
 (the plane's `wall_clock_seconds`), not from the list's length:
 
@@ -58,10 +49,3 @@ under the same id (660's fold), so the first client to attach finds it.
 suggested: it adds a field to the wire, the trigger form and the console for a choice the
 limit keys already make. A trigger that wants a hard stop writes a limit; one that does not
 has nobody to stop for.
-
-**Proof.** `Troupe.Worker.UnattendedSessionTest`: terms of the switches alone give
-`budget_asks: true` and no caps, `max_turns: 5` with them gives `false` and the cap; a spent
-budget with no limit in the terms asks, the session goes dormant on its idle timer with the
-question owed, and wakes to the same question, whose answer carries the turn on; under
-`approvals: deny` the question is answered no and the session ends. `Troupe.Agent.BudgetQuestionTest`:
-a pod-shaped root (the switches, no caps) asks, and input sent meanwhile is queued, not dropped.

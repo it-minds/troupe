@@ -75,16 +75,3 @@ done. The record says "Always allowed".
 **What an older client sees.** A capability it does not know, and `approval_decided` with a
 decision word it shows as an allow. An older daemon answers `allow_always` with
 `invalid_params` naming `decision`, and names no capability, so no client offers it there.
-
-## Proof
-
-`allow_always_test.exs` (daemon, over its socket): the capability; `everywhere` writing
-`permissions.allow: [write_file]` into the user's file, the decision carrying the rule and
-the actor, the turn's second write running unasked, `config.changed` and `config.get`'s
-rules listing it; an MCP tool kept as `mcp(github.create_issue)` from either prefix, once;
-`managed_permission_rules_only` refused with nothing written and the call then allowed once;
-`workspace` in an untrusted workspace refused; a scope that is neither. `relay_test.exs`:
-refused over the relay. `harness_auth_test.exs` (a pod): no capability, and `forbidden` with
-the profile's sentence. All failed on the chunk's tip, where `allow_always` was an unknown
-decision. Desktop: `session-chat.test.tsx`, the button absent without the capability, sent
-with its scope with it, and the rule written through the fake daemon and recorded.

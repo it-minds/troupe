@@ -11,14 +11,6 @@ paths:
 gist: PROTOCOL.md is kept whole and exempt from the line; split or generate it only from a schema that carries the meaning, not field names
 ---
 
-**Why.** #422 asked for `PROTOCOL.md` to be decided deliberately rather than by the
-400-line rule, and Decision 940 left it exempt until somebody did. It is 3,841 lines on the
-chunk 48 branch. The proposal weighed here was the one `mix troupe.cli.reference` already
-makes for the command line: keep the prose contract (transports, the handshake, scopes,
-sessions, the seam, the invariants) in `PROTOCOL.md`, and move the per-method and
-per-event reference to pages under `docs/protocol/` generated from
-`Troupe.Protocol.Schema`, checked in and diffed in CI.
-
 **What reading the file found.** That split needs the reference to be a copy of the
 schema, and it is not.
 
@@ -28,11 +20,6 @@ schema, and it is not.
   capped at `tool_output_limit` with the `read_output` marker, and what `agent: false` is.
   Of the 68 rows in the durable event table, 16 are only field names; the other 52 are the
   contract for that event, and a generated page would carry none of it.
-- **The commands are prose, not tables.** Section 6 is 66 methods, each an example request,
-  its answer, and paragraphs: what is refused and with which error and field, what needs
-  `control`, where a file lands on a pod and on a laptop, what a replay of the same
-  `command_id` answers. Table rows are 259 of the file's lines; outside tables and code
-  blocks are 2,799. The 3,841 lines are the contract, not a contract plus reference.
 - **Moving the prose by hand would cost what the rule is there to save.** The file says
   of itself that it is complete on its own, and a client author reads it end to end and
   searches it as one thing; the site publishes it as one page (`mkdocs.yml`, through the
@@ -65,7 +52,3 @@ schema, and it is not.
 beside the whole file: it would add a page that says less than the JSON Schema already
 committed, and shrink nothing. Splitting the file into a page per section: the cost above,
 for a line count. Raising the limit for everyone: the rule holds for every other page.
-
-**Proof.** `elixir scripts/doc-size.exs` passes with `PROTOCOL.md` the only named
-exemption; `mkdocs build --strict` builds it as one page; `mix troupe.decisions --check`
-reads this file.

@@ -43,9 +43,6 @@ breakpoint jumps in the markup".
   and the scratchpad are each a sheet over the whole screen with its Close; opening one
   shuts the other, since one would only hide the other. Beside the conversation, on a wide
   window, both may still be open.
-- **The sessions list (#950).** Its head keeps the search, a Filter button ("Filter · n"
-  while n are set) with the "x of y" count, and Start; the four selects open in the same
-  sheet, applied as chosen, shut by Done or Escape. At 375×812 the first row starts at 46%.
 - **A finger's targets.** Every button (not a link standing in a sentence), select and
   field is 44px tall on a phone, as DESIGN.md §10 asks; the links that stand alone in a
   row's head or foot (Waiting for you, Review) too.
@@ -54,14 +51,3 @@ breakpoint jumps in the markup".
   and the composer stays above it. Chromium honours the key, which includes the Windows
   shell's WebView2; WebKit (the macOS and Linux shells) ignores it and keeps its own
   resizing. None of the desktop shells has an on-screen keyboard in normal use.
-
-**Measured** in the browser build against `pnpm fake`: at 375×812 the bar is 52px, the head
-53, the composer's dock 136 and the transcript 571px (70%); at 390×844 the transcript is
-603px (71%). No screen scrolls sideways at either width.
-
-**Proof.** `clients/gui/apps/desktop/test/phone-layout.test.tsx`: at the narrow query the
-top bar is drawn and the rail is not, the menu carries the waiting count and opens the
-sheet with the rail's list, a destination, Close and Escape shut it; the backstage and the
-scratchpad open one at a time (from ⋯ and from the transcript's card); on a wide window the
-rail stays and both may stand beside the conversation. The narrow tests failed before the
-change.

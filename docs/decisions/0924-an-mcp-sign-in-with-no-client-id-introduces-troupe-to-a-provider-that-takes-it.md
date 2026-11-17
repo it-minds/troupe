@@ -16,9 +16,6 @@ symbols:
 gist: "No client_id: metadata document, else RFC 7591 public client (loopback, no secret) kept in state; entry's id wins. A gone client tool says whose"
 ---
 
-Issues #585 and #592, both from #308's pod side. Two decisions, recorded together because
-one number was reserved for the slot that made them; each part stands alone.
-
 ## A sign-in with no client id (#585)
 
 Decision 741 made `oauth.client_id` required: a provider with no dynamic registration has
@@ -85,15 +82,6 @@ the server".
   endpoint is (`outbound/2`) and the request goes to the address checked, with no
   redirects followed.
 
-**Proof:** `Troupe.MCPOAuthTest`, "an entry with no client_id", against
-`fake_oauth.exs`'s `registration` and `metadata_document` modes: the metadata Troupe sends
-and that it holds no secret; the sign-in made as the registered client and the client kept
-owner-only in the state directory; the next sign-in reusing it, port and all, and a
-refresh going as it; a provider that forgot it, the client forgotten here and registered
-anew; a port held by something else; the document presented and nothing registered; a
-configured `client_id` winning; neither offered, the sentence; a confidential-only
-registration refused; and the published document matching what Troupe registers.
-
 ## A person's tool that left (#592)
 
 Decision 861 said a model that names a person's tool after it went gets the ordinary
@@ -115,7 +103,3 @@ tools go. Both changed.
   ("Ada's 2 tools are no longer offered to the session, because their client left:
   client.notes.read, client.notes.search"), beside the line they already drew for
   `session_tainted`.
-
-**Proof:** `Troupe.Session.ClientToolsTest` (the event's actor and the model's sentence,
-and the unknown name's), the TUI's `remote_translate_test.exs`, the desktop app's
-`transcript.test.ts` and `own-servers.test.tsx`.

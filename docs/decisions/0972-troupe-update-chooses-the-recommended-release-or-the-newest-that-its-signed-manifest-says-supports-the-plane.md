@@ -47,8 +47,6 @@ refusal, or from a method that was not there, after the install.
   and says so when it stops.
 - **`--version X` is unchanged**: still refused where the plane blocks X or holds it
   below its minimum. There is no `--force`, and this adds none.
-- **`troupe doctor` says it, never as a failure.** Being on the recommended version is
-  where a person should be; a newer supported one is information.
 - **Where the list comes from.** GitHub's releases list (drafts out, pre-releases in, since
   a beta is published as one), or the one release `TROUPE_RELEASE_URL` names. A plane's
   own mirror is found by version and lists nothing, so there `--latest` asks for a version.

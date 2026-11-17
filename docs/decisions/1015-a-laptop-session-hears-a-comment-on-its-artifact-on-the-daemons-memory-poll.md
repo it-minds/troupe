@@ -16,10 +16,6 @@ symbols:
 gist: "laptop session hears a comment on me.memory's poll: artifact_comments {since} beside signed, no session ids sent; once per comment id; never input; Local only hears nothing"
 ---
 
-Decision 1007 told the session an artifact came from of each comment, but only on a pod:
-the plane notifies the pod over its control link. A daemon is never dialled; it dials the
-plane. An artifact published from a laptop's session (`origin.where: laptop`) had no path.
-
 ## The path
 
 The daemon already asks the plane's `me.memory` at every link that brings a token and every
@@ -70,19 +66,3 @@ given it. A comment is somebody else's words.
   writing. Nothing of a session is sent to hear its comments.
 - **Edits and deletions are not announced** (Decision 1016): a deleted comment is not in a
   later answer, and an edit does not move its `created_at`.
-
-## Proof
-
-- `apps/troupe_plane/test/troupe/plane/artifact_comment_edits_test.exs` ("a laptop's daemon,
-  on its poll"): the first poll hears nothing written before it and is given where to start;
-  the next hears a comment on the caller's laptop artifact with its session, artifact and
-  author, and not one on an artifact from no session nor on another person's; asked again from
-  where it left off, nothing, and a deleted comment is not told; the field is not inside
-  `signed`; a poll that does not ask has none.
-- `apps/troupe_gateway/test/troupe/gateway/plane_memory_test.exs` ("a comment on an artifact a
-  session here published"): the comment is written into the running session's log once across
-  several polls, starts no turn, is not written into a session under Local only, and the asks
-  carry `since` and nothing else.
-
-Both failed on the chunk's tip: `me.memory` answered no `artifact_comments`, and the daemon
-asked for none.

@@ -62,7 +62,3 @@ limit), and "cluster" where it meant where sessions run is "the plane" or "the p
 The map's areas are **Profiles** (was Worker profiles) and **Pods** (was Workers and pods).
 Mine, a person's own page, shows its sessions' state through `SessionState`, with a running
 session's status after it, never the plane's `active · idle`.
-
-This rewrites the sentences Decision 922 quotes for a pod's memory source and leaves its
-substance; it supersedes nothing. The plane's settings table's labels (#933's) still say
-"dormant" for two team defaults and are left for that table's owner to word.

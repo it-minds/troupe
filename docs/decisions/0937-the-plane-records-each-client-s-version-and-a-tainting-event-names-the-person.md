@@ -16,9 +16,6 @@ symbols:
 gist: "clients_seen: one row per (person, component) at a served initialize, no history; keyring CI on real stores, mac parts past one line; taint has display_name; offer re-asks, per server"
 ---
 
-The last part of #657, the loose ends of the 0.24 seam that the Stage 1 gate walks (#765),
-D133's credential-store item and D50's first edge.
-
 ## The plane records each client's version
 
 A policy (Decision 868) was set blind: nothing said how many clients a raised minimum
@@ -53,17 +50,13 @@ version at `initialize`; now it keeps them.
 
 ## The credential stores, on CI
 
-`Troupe.Keyring.OS` had been exercised on Windows only; Linux CI checked the "store
-unavailable" answer and nothing ran `security` or `secret-tool` (D133).
-
 - **A workflow of its own.** `keyring.yml`, called by `ci.yml` and by `dev-check.yml` (as
   the cluster suite is, since a fixer's Windows machine has neither store) when the code
   that keeps a secret in one changes, and in a full run: the protocol's keyring test on a
   `macos-14` runner against a keychain the job makes, unlocks and sets as default, and on
   Linux against `gnome-keyring` on a session bus of the step's own, with a login keyring
-  made and unlocked with a password of the job's own (an empty one left the store asking
-  a prompt nobody sees, which CI found); and the desktop crate's `secrets.rs` tests on the Mac. A value stored,
-  read, replaced, four kilobytes of it whole, and deleted with every part.
+  made and unlocked with a password of the job's own; and the desktop crate's `secrets.rs`
+  tests on the Mac.
 - **Skipped where there is no store, failed where there should be one.** Both tests print
   `SKIPPED` and pass on a machine with no store; the jobs set `TROUPE_KEYRING_REQUIRE=1`,
   so a store that did not come up fails them rather than passing green with nothing run.
@@ -112,19 +105,3 @@ server signed in to while attached waited for the next attachment.
 - **The rest as it was.** A socket that comes back registers what the person chose
   without asking; a different set of tools from the same servers is asked about again; a
   session that takes no person's tools refuses for the attachment (Decision 879).
-
-## Proof
-
-`ClientVersionsTest`: a served `initialize` records the version and platform, one row a
-component, moved on by a newer one; a refused client, an unplaced one and a bare
-`initialize` record nothing; `admin.clients.get` counts current, behind and refused and
-lists the people, a team admin only their team's; `admin.clients.put` answers and audits
-`affected`; a removed person's rows go. The console's tests: the count line, the list
-oldest first with its filter, a team admin's own people, the note after applying, and the
-Overview's line and its absence. `ClientToolsTest`, the TUI's `RemoteTranslateTest` and
-the client's transcript test: the name in the event and in the sentence, the subject
-without it. The client's own-servers tests: a server signed in to while attached is asked
-about with what was offered ticked, a picked subset alone is registered and stays so on
-the next socket, an unticked server is taken back; the desktop's: the boxes, the button
-naming what is ticked, the focus that asks again. The keyring jobs on this change's pull
-request.

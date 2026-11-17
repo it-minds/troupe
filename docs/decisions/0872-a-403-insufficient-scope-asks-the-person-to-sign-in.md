@@ -17,27 +17,13 @@ symbols:
 gist: "403 insufficient_scope: sign_in_required + scope, kept as step_up; the person's sign-in asks granted+named at the metadata's issuer; sign-out revokes (RFC 7009), forgets anyway"
 ---
 
-Issues #586 and #587, two items of Decision 741's "out of this slice" list (#308's last
-paragraph). What was there: a person's own MCP server that answered a call `403` with
-`WWW-Authenticate: Bearer error="insufficient_scope", scope="…"` was an ordinary failed
-call ("the identity this call went out as may not use this tool"), and nothing asked the
-person to grant the scope; and `mcp.sign_out` forgot the tokens in the daemon's state
-directory but sent nothing to the provider, so the refresh token stayed good there until
-it expired, and a copy of the state directory could still renew it.
-
 **The step-up (#586).**
 
-- **The answer.** The MCP client returns a `403` whose challenge says
-  `insufficient_scope` as `{:insufficient_scope, header}`; any other `403` is the refusal
-  it was. `OAuth.authorized/2` turns one that names a scope into
-  `{:error, {:sign_in_required, scope}}`, and the tool's answer is the `sign_in_required`
-  note a run-out sign-in gets, with `scope`, the scope the server named, and a hint the
-  model relays. Listing the tools that way makes the session's server `sign_in`, saying
-  the scope. One that names no scope leaves a sign-in nothing to ask for, and stays the
-  refusal it was, described as such.
-- **Where it is kept.** The named scope goes beside the sign-in in the store (`step_up`,
-  through `Tokens`, the store's one writer), and `mcp.list`'s `auth` carries it as
-  `step_up`; the TUI's `/mcp` page shows `wants <scope> — s`.
+- **The answer.** The MCP client returns a `403` whose challenge says `insufficient_scope`
+  as `{:insufficient_scope, header}`; any other `403` is the refusal it was. Listing the
+  tools that way makes the session's server `sign_in`, saying the scope. One that names no
+  scope leaves a sign-in nothing to ask for, and stays the refusal it was, described as
+  such.
 - **The scope asked for** is the union of what the next sign-in would ask anyway (the
   entry's, the `401`'s, the metadata's), what was granted (the token endpoint's `scope`,
   or what was asked when it said none) and what the server named, with `offline_access`
@@ -46,8 +32,7 @@ it expired, and a copy of the state directory could still renew it.
 - **Where the sign-in goes.** Only the scope is read from the `403`. Its
   `resource_metadata` is not followed: the sign-in is discovered as any is, from the
   server's own `401` and protected-resource metadata, so a `403` cannot send the person to
-  another authorization server. The suite's server names one elsewhere in every `403`, and
-  nothing goes there.
+  another authorization server.
 - **Who decides.** Nothing signs in on its own. The step-up is a note the model relays and
   a line on the page; a sign-in starts only when the person asks for one (`s`,
   `/mcp sign-in`, **Sign in**), and the provider's consent page names the scopes.
@@ -80,8 +65,7 @@ it expired, and a copy of the state directory could still renew it.
 - **When it cannot be told.** A refusal, a non-2xx answer, or no answer in five seconds
   (connect and receive) is `failed` with the reason; the tokens are forgotten anyway and
   the answer says the provider was not told. Metadata with no `revocation_endpoint` is
-  `unsupported`. Nothing held is `none`. `mcp.sign_out` answers `revocation: {state,
-  reason}`, and the TUI's page and `troupe logout` say it in one sentence.
+  `unsupported`. Nothing held is `none`.
 - **`troupe logout`.** `mcp.sign_out` with `all: true` signs out of every entry in the
   store, by whatever name and in whatever workspace it was signed in from. `troupe logout`
   without a plane named, and `--all`, ask the daemon for it after the plane sign-out and
@@ -92,21 +76,3 @@ it expired, and a copy of the state directory could still renew it.
   sign-ins it holds, never using what is in them, and says they were kept and why. A
   daemon that refuses the call (one from before this, which wants a `name`) is said to
   have kept them.
-
-**Proof.** `Troupe.MCPOAuthTest`, against `fake_oauth.exs`, whose tokens now carry their
-scopes, whose `write` tool wants `notes.write` and answers `403 insufficient_scope`
-naming metadata elsewhere, and whose authorization server revokes at
-`/tenant/revoke` or refuses, is slow, or names none: in a local session the `403` is the
-note with the scope, nothing signs in or goes elsewhere, the tokens are kept and used, the
-sign-in asks for the union at the same issuer, and the call goes through after it; a
-refused step-up keeps the sign-in; sign-out revoked, refused, timed out, absent, link-local,
-an old entry looked up, nothing held, and every sign-in at once; `outbound/2` over the list;
-the client's `{:insufficient_scope, header}`. On the chunk's tip every new case failed (11
-of 23). `Troupe.Gateway.MCPCallTest`: a pod session's agent calls a person's offered
-`write` through the client, the pod's model gets the note with the scope, `mcp.list`
-shows `step_up`, and after the person's sign-in `mcp.call` goes through.
-`Troupe.Gateway.MCPSignInTest`: `revocation` in `mcp.sign_out`'s answer, and `all`. The
-TUI's `MCPPageTest`: the page's `wants notes.write — s`, `s` asking for it, the sign-out
-notice saying the provider revoked it, and `troupe logout` saying the sign-in was kept
-while the daemon is not running (and starting none), then, with it running, signing out
-of the server with its provider told.

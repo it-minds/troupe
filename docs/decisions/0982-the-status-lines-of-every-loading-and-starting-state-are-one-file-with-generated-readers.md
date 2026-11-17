@@ -47,31 +47,20 @@ Both have `--check`, run in CI beside the design tokens' (`pnpm lines:check`, an
 CI.
 
 **One picking rule.** Per turn (or per wait), a kind's lines are taken in an order
-shuffled from a seed (the turn's id, else the session's, else a counter), so within a
-turn nothing repeats, two turns do not open the same way, and past the end of the list
-there is no line, which is the facts alone, as before. The shuffle is FNV-1a over
-`kind/seed` into a mulberry32 stream driving a Fisher-Yates, all on unsigned 32 bits;
-it is written once in `scripts/lines-rule.ts`, which is copied into the TypeScript
-reader, and again in the Elixir generator. `clients/gui/docs/design/lines.order.json`,
-written by `pnpm lines` from the TypeScript reader, holds the order for a few seeds, one
-with non-ASCII bytes, and both test suites read it, so the two cannot drift. The desktop
-seeds a turn with the session's id and the turn's number (counted in the transcript, from
-the user's own lines and loop iterations, not the harness's notes); the terminal with the
-session's id, else the window's path, and the turn's number; a screen that opens (the
-start screen, the casting footer) with the time it opened.
+shuffled from a seed (the turn's id, else the session's, else a counter), so within a turn
+nothing repeats, two turns do not open the same way, and past the end of the list there is
+no line, which is the facts alone, as before. The shuffle is FNV-1a over `kind/seed` into
+a mulberry32 stream driving a Fisher-Yates, all on unsigned 32 bits; it is written once in
+`scripts/lines-rule.ts`, which is copied into the TypeScript reader, and again in the
+Elixir generator. `clients/gui/docs/design/lines.order.json`, written by `pnpm lines` from
+the TypeScript reader, holds the order for a few seeds, one with non-ASCII bytes, and both
+test suites read it, so the two cannot drift.
 
 **Where a line goes, and where none does.** A turn past five minutes says a `long_turn`
-line in place of the phase's, the same one to its end. The curtain line in both clients;
-the desktop's casting screen (an aside a step, from `casting`, and the wait from
-`waiting_for_a_place`) and start screen; the terminal's `/new` quip and the `casting —`
-footer, which keeps its keys (and says them shorter so a line of 26 characters leaves it
-within 80 columns); the console's `Loading` on its slow, whole-page loads only (the
-audit, and the check of its whole chain), not on every panel; `troupe login`'s wait,
-`troupe update`'s on the error stream and only at a terminal, the first run's busy
-lines in the terminal and the desktop, the desktop's search for the daemon. None where
-`frames.md` section 7 says none: what waits on a person, a model error, a subagent's own
-pane, a failed start; and none in a headless run, `troupe bench`, CI logs or anything
-with `--json`, which print the facts.
+line in place of the phase's, the same one to its end. None where `frames.md` section 7
+says none: what waits on a person, a model error, a subagent's own pane, a failed start;
+and none in a headless run, `troupe bench`, CI logs or anything with `--json`, which print
+the facts.
 
 ## Consequences
 

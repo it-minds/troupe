@@ -21,19 +21,6 @@ symbols:
 gist: "agents.list by workspace or session (pod: its token may, naming no path); rows say origin (4 words), overrides, editable; plane holds drafts to AgentCheck"
 ---
 
-Issue #594, as slot E38 of chunk 38 took it: one list, one shape; the TUI's one picker
-(TUI Decision 164); the desktop app's picker on the start screen and in a session's head;
-and an agent builder in the console's bundle editor. On the chunk's tip `agents.list` took
-a workspace only, so a pod session's own agents (its bundle's) could not be listed with the
-token the plane mints for it: the worker refused `agents.list`, `agents.get` and
-`agents.validate` as not about the session, and the desktop app read a pod's agents from the
-names in `commands.list`. No row said where an agent came from in a person's words, what it
-stood in for, or whether it could be changed. The desktop start screen on this computer
-had no agent to choose; the head's switch was a drop-down that only switched; and the
-console published a bundle's agents only as JSON, checked by the protocol's parser alone,
-so a definition the daemon's `agents.put` refuses (a key no agent has, a missing `mode`, a
-tool that does not exist) published.
-
 - **One list, for a workspace or a session.** `agents.list` takes `workspace` or
   `session_id`. Named by a session, the rows are the session's own definitions read again
   from their files (`Definitions.reload/1`, as `profile.switch` reads them), so on a pod
@@ -93,23 +80,3 @@ tool that does not exist) published.
   servers) stays JSON, and a document that still carries `agents` there is refused, naming
   the builder. Publishing is the existing path: validate, preview with who loses what,
   confirm, audit.
-- **Not here** (the issue's other slices): `/agents` and `/new` onto the TUI picker, the
-  manager density, copy and new-from-template in the pickers, save → start, the builder's
-  profile-first view (subagents beneath, the `delegate` list, team grants, a model picked
-  from the provider's list, copy a built-in into a draft), and the desktop manager's merge
-  into the picker.
-
-Proof: `Troupe.Gateway.AgentsPickerTest` (each row's origin, overrides and editability; a
-session's listing reading an agent written after it started; a bundle session's rows the
-organisation's with its profile, the working copy's file skipped) failed on the tip, where
-rows had no `origin` and `agents.list` without a workspace was `invalid_params`.
-`Troupe.Worker.AuthTest` (the three reads naming the token's session allowed, with a path
-or for another session refused) and `HarnessAuthTest` (a session's token lists its agents)
-failed on the tip with `forbidden`. `Troupe.Agent.ValidateTest` holds the protocol's tool
-list to the harness's and the two checks to one answer; `Troupe.Plane.AdminTest` refuses a
-draft's agent in the daemon's words at validate, preview and publish and answers
-`admin.agent.check`. The plane's suite runs with fixtures that now say `mode`. The desktop
-app's `agent-picker.test.tsx` and `agents-manager.test.tsx` and the console's
-`bundles.test.tsx` drive the pickers and the builder against the fakes, which answer the
-new fields and `admin.agent.check`; `agent_file.rs`'s tests open an agent's file and refuse
-anything else.

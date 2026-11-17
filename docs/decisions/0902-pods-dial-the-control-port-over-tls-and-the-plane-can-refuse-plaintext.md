@@ -19,14 +19,8 @@ symbols:
 gist: "Pods get the control CA (certs only) per namespace each pass and dial TLS; requireTls closes plaintext after byte 1 (on from 0.20); no unrecv"
 ---
 
-Part of issue #663, the pods' half. Decision 893 put TLS on the control port and made a
-registered machine enrol over it alone, and left pods in plaintext: giving them the CA meant
-copying it out of the plane's namespace into each worker namespace, which the operator did
-not do. It also told TLS from plaintext by reading the first bytes and putting them back
-with `gen_tcp:unrecv/2`, which only the inet driver has; on `inet_backend: socket` it
-answers `enotsup`, and every handshake was refused (`defects.md` D127). This replaces
-893's "Pods stay as they were" and its "one port, two ways in" mechanism; the rest of 893
-stands.
+This replaces 893's "Pods stay as they were" and its "one port, two ways in" mechanism;
+the rest of 893 stands.
 
 **The CA reaches the pods.** The chart mounts `ca.crt` alone out of the plane's
 `plane.controlTls` Secret into the operator (`items:` lists the one key, so the kubelet
@@ -51,13 +45,12 @@ back to plaintext: a link given a CA path dials with TLS or not at all.
 
 **A renewed CA, without a restart.** cert-manager renews the chart's CA in place, keeping
 its key (893). The kubelet updates the operator's mounted file; the operator's next pass,
-within about thirty seconds (Bonny lists every profile again half a minute after the last
-listing ended, and any event on a profile starts one too), writes the new
-PEM into every namespace's ConfigMap, which changes the ConfigMap and not the pod template,
-so no pod is replaced; the kubelet updates each pod's mounted directory within its sync
-period; and the link reads the file again at its next dial. A connection already open
-keeps the CA it was verified with until it reconnects. The plane is not restarted at any
-point, and does not need to be: it reads its own certificate at each handshake (893).
+within about thirty seconds, writes the new PEM into every namespace's ConfigMap, which
+changes the ConfigMap and not the pod template, so no pod is replaced; the kubelet updates
+each pod's mounted directory within its sync period; and the link reads the file again at
+its next dial. A connection already open keeps the CA it was verified with until it
+reconnects. The plane is not restarted at any point, and does not need to be: it reads its
+own certificate at each handshake (893).
 
 **The plane can refuse plaintext.** `plane.controlTls.requireTls` (chart) sets
 `TROUPE_PLANE_CONTROL_REQUIRE_TLS` (`Troupe.Plane.Control.TLS.required?/0`). On, a
@@ -96,29 +89,3 @@ on the original socket (a hang, after the second message, in a standalone probe)
 the new connection process's mailbox from `controlling_process/2`, before the handshake has
 started, would leave it to whatever that process does with data in its first state; at
 the first activation it is the handshake reading, as it reads everything after.
-
-**Proof.** `Troupe.Plane.ControlTLSTest`, on the inet and the socket backend each: a
-machine enrols over TLS, a pod enrols in plaintext with its first line read whole, and
-with TLS required a plaintext `enrol` is closed unanswered with the log line while a pod
-over TLS enrols. On the tip, with the listener on `inet_backend: socket`, the TLS tests
-failed (`the handshake failed (:enotsup)`) and the required-TLS one was answered.
-`Troupe.Worker.MachineLinkTest`: a pod's link given the CA enrols over TLS with a plane
-requiring it and neither its token nor `enrol` crosses readable; without the CA it dials
-plaintext and is closed, never verified. `Troupe.Operator.ResourcesTest`: the namespace's
-ConfigMap holds `ca.crt` and nothing else; the volume is the optional ConfigMap's
-directory, read-only, no `subPath`; `TROUPE_PLANE_CA_PATH` is set and
-`TROUPE_PLANE_SERVER_NAME` is not; a renewed CA changes the ConfigMap and not the
-template; an unread pass and no CA at all. `Troupe.Operator.ReconcilerTest`: the ConfigMap
-follows the file, stays when the file is gone for a pass, and is pruned when the
-installation stops giving one. `Troupe.Operator.SettingsTest`: a file holding a certificate
-and a key yields the certificate alone. The cluster suite (`mix troupe.e2e`, kind with
-`requireTls: true`): the operator's pods enrol (so over TLS), the namespace's ConfigMap and
-the pod's mounted file hold the Secret's CA, a plaintext `enrol` from inside the worker pod
-to the control Service is closed unanswered, and the port-forwarded tests dial with TLS.
-`helm template` renders the operator's single-key mount and the plane's variable, and
-refuses `requireTls` as a string or without `enabled`.
-
-**Not done.** mTLS for pods: their projected token still authenticates them. A profile's
-status does not say when its namespace has no CA yet; the operator's log does. An
-installation that turns `controlTls.enabled` off takes the CA out of the pod template at
-the next pass, and its pods go back to plaintext through the same drain.

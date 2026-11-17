@@ -20,8 +20,7 @@ gist: "spec.personalTools (allow|forbid, absent allow) rides the activation, not
 
 Decision 862 settled that a worker profile may forbid people offering their own signed-in
 tools to its pods, with allowed as the default, and that a forbidding pod refuses
-`tools.register` with a sentence, logs it and registers nothing. #595 builds it. This
-records what 862 left to the build.
+`tools.register` with a sentence, logs it and registers nothing.
 
 - **The setting is `spec.personalTools`, `allow` or `forbid`.** A word rather than a
   boolean, as the issue spelled it, so a later middle setting (say, only some servers) has
@@ -29,18 +28,15 @@ records what 862 left to the build.
   `WorkerProfile` changes when the chart is upgraded: absent is `allow`. `Fleet.Profile`'s
   changeset refuses any other value, `null` included, for `admin.profile.put` and the
   gitops reader alike, because a pod reads only `forbid` as forbidding and a `"Forbid"`
-  saved would leave the pods taking what the admin believes they refuse. The console's
-  profile editor has it as a toggle and writes the word whichever way it is set, so a save
-  from there can lift it.
+  saved would leave the pods taking what the admin believes they refuse.
 - **It rides the activation, not the pod's environment.** As `repositoryOverridesBundle`
   does (Decision 826), and for the same reasons: an environment variable the operator set
   would replace every pod of the profile to change it, and an `ssh` profile has no pod
   template. `Harness.bundle_params/1`, which already reads the profile's row at every
-  activation, sends `personal_tools` beside the pin; the worker passes it to the session as
-  the config field `personal_tools_forbidden_by`, the profile's name, set only for
+  activation, sends `personal_tools` beside the pin; the worker passes it to the session
+  as the config field `personal_tools_forbidden_by`, the profile's name, set only for
   `forbid` and never from a file. A change reaches a session the next time it is
-  activated; a session awake when the admin changes it keeps what it had until then. The
-  operator renders nothing for it, and a test says so.
+  activated; a session awake when the admin changes it keeps what it had until then.
 - **Refused before the challenge, as `managed_mcp_servers_only` is.** Asking somebody to
   consent to tools the pod will not take is worse than refusing. The answer is `forbidden`
   with `setting: personalTools`, `profile`, and the sentence "the worker profile <name>
@@ -62,17 +58,3 @@ records what 862 left to the build.
   be offered here: ..."), and lists and registers nothing on a later socket. A session
   opened again is offered again. This also changes what the clients did for
   `managed_mcp_servers_only`, which they used to offer to on every socket.
-- **The chart.** The resource is the chart's (`charts/troupe/crds/`); the chart renders no
-  `WorkerProfile` and has no values for one, since the plane or a repository writes them,
-  so there is nothing to add to its values or templates.
-- **Proof:** `Troupe.Worker.PersonalToolsTest` (activated with `forbid`: refused with the
-  sentence, the log line, nothing registered or tainted; `allow` and nothing: the consent
-  challenge as before; a profile changed while the session slept reaches it at its next
-  activation), `Troupe.Gateway.ClientToolsTest` (the refusal over a socket, before any
-  challenge), the plane's `BundlesTest` (the push carries `personal_tools`), `AdminTest`
-  (the two words kept, anything else refused, the resource declaring them with no
-  default) and `PanelTest` (the toggle kept and lifted), the operator's `ResourcesTest`
-  (nothing rendered changes), the TUI's `RemoteClientToolsTest` (said once, nothing asked,
-  nothing offered on the next socket), and `@troupe/client`'s and the desktop app's
-  `own-servers` tests (the refusal shown with its reason, nobody asked, the next socket
-  quiet).

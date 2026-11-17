@@ -69,32 +69,9 @@ profile says about its pods, and it is about the agents that decision put in cha
   rule reads as a profile could have written it and passes the row's own check. The row
   holds the profile in effect, so `status.effective`, the harness and the export carry the
   composed rule without further work.
-- **Where people see it.** `admin.profile.agents` marks each row `offered` by the rule in
-  effect, leaves an excluded subagent out of every `delegate`, and answers `rule` and
-  `unmatched`. The console's profile page shows one line ("Agents: all but build,
-  implementer", or "only answer, ask"); its editor has no field for it and carries
-  `spec.agents` through a save as loaded, under Decision 900's rule. No editing UI: the
-  field is a list of names an admin writes once through the API or a manifest, and a form
-  for it would be a third place to spell the rule's reading. `admin.profiles.export`
-  writes it as any spec field. The TUI and the desktop app need nothing: they read the
-  offering.
 
 **Not chosen.** A per-team rule only, which exists already and cannot say what a profile
 is for whoever uses it. A deny-only field, which would have made "only these three" a list
 of everything else the bundle and Troupe ship, kept up to date by hand as agents are added.
 Narrowing primaries alone, as the grant does, which would have left a subagent nobody
 should have on these pods reachable by any primary that delegates.
-
-**Proof.** `Troupe.Plane.ProfileAgentsRuleTest`: `allow` keeps only the named primaries of
-the bundle and the built-ins, `deny` takes a built-in away and beats `allow`, a grant
-narrows further and never widens, `session.create` refuses an excluded primary naming the
-rest, the activation carries `agent_rule` beside the resolved set and no rule where the
-profile has none, a child's rule is its parent's cut and added, a put refuses a name in
-both lists, a gitops manifest's field reaches the row and the child's `status.effective`,
-the export round-trips it, and `admin.profile.agents` marks what is offered and names the
-unmatched. `Troupe.Protocol.AgentRuleTest` holds the reading. `Troupe.Agent.AgentRuleTest`
-(core): `Definitions.load` with the rule drops a built-in primary and a subagent, the
-delegate tool's list no longer names it, and the rule is applied after the entitled set.
-`Troupe.Worker.BundleWinsTest`: an activation carrying the rule loads neither `plan` nor
-`explore`, and `session_created` records it. The console's `profiles.test.tsx` shows the
-line and keeps the field through `keptOf`.

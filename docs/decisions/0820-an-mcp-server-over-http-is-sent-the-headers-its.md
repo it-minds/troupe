@@ -22,12 +22,6 @@ symbols:
 gist: "MCP headers: literal or {env:VAR}, read at start, shown by name only; the credential wins a same-named one; a copy writes values as {env:VAR}; no keychain"
 ---
 
-Issue #60, its last slice. What was there: an import dropped a server's `headers` with a
-warning (700), and the HTTP client sent one header, the server's credential
-(`Troupe.MCP.Server.headers/1`), so a server keyed with a static header (an `X-Api-Key`,
-a token issued once) could not be used from a local session at all, imported or written
-by hand.
-
 - **What the person writes.** `headers` on a `url` entry, in `mcp.json` and in
   `config.yaml`'s `mcp:`: a map of name to string, each value as it is or with
   `{env:VAR}` in it, read as every other string of the entry is, when the layers are
@@ -94,21 +88,3 @@ by hand.
   what the other tools' files already say (`${VAR}`), so an import needs no second
   place to put one. If the daemon gains a keychain for its own model key, headers and
   tokens move with it.
-- **Not this slice.** A bundle's servers on a pod carry their one credential and no
-  `headers` (`Bundle.mcp_server_configs/1` sends none). The TUI's `/mcp` page and the
-  desktop app's panel draw a server's URL or command and no other field, so they show no
-  headers either; `mcp.list` carries the names for when they do.
-- **Proof:** `Troupe.MCP.ClientHeadersTest` (troupe_protocol, against
-  `test/support/fake_mcp.exs`, which now reports every header of every request: the
-  headers on `initialize`, `notifications/initialized`, the listing, a call and the
-  `DELETE`, failed on the tip; the credential winning an `Authorization`; nothing in
-  `inspect`), `Troupe.MCP.ImportTest` (Claude Code's headers kept, failed on the tip;
-  Cursor's, VS Code's, opencode's block, `headersHelper`, `{file:…}`, and a copy's
-  `{env:…}` and warnings with no value in them), `Troupe.MCP.LocalTest` (read from the
-  environment, unset refused, never written back, the fingerprint; the refused names and
-  values; an import copying and a link reading as written), `Troupe.Config.LayersTest`
-  (`config.yaml`'s headers read and refused, `--explain` masking them in text and JSON),
-  `Troupe.MCPHandshakeTest` (a local session sends them on every request and the
-  `DELETE`, its status holds no value, and a workspace's question names them) and
-  `Troupe.Gateway.LocalSourcesTest` (`mcp.add` and `mcp.list` over the daemon's socket,
-  names only).

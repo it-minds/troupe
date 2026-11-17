@@ -23,9 +23,7 @@ symbols:
 gist: "GitOps child: spec.extends as written, plane writes status.effective, operator waits without it; profile rules a scope per profile, parent's kept; deny refuses !cmd on pods"
 ---
 
-#655's slice 4 and #724, as the maintainer decided them on 2026-10-16 and the slot brief
-put them: both change the `WorkerProfile` resource, and they share one cluster run. Two
-things Decision 907 and Decision 908 left are settled here: 908's "GitOps refuses
+Two things Decision 907 and Decision 908 left are settled here: 908's "GitOps refuses
 `extends`" rule is gone (its §GitOps mode is replaced by this), and 907's "a WorkerProfile
 carrying rules" and "a `deny: [shell]` and a person's own `!cmd`", both left for later.
 
@@ -124,30 +122,3 @@ files and a repository's could be changed by the person anyway, and a project's 
 refusing its owner's typing would be surprising. An `ask` does not apply: the person who
 typed it is who it would ask. It reads the line as the agent's call is read, so `ls && curl`
 is refused by `deny: [shell(curl)]`; like the agent's, it is a reading, not a sandbox.
-
-**Shown.** A refused call and an asked approval name the profile; the console's profile page
-lists every rule in effect with the profile it came from, and its editor edits a profile's
-own rules with the organisation's rule editor's reading (Decision 912), factored into
-`RuleLists.tsx`. `troupe config --explain` is about a machine's files and does not list a
-pod's profile rules; there is no method that explains a pod session's configuration, which
-is a follow-up.
-
-## Proof
-
-On the chunk's tip `gitops_extends_test.exs` failed every test (a manifest naming a parent
-was refused outright), `profile_rules_test.exs` (worker) ran the denied command, and the
-operator ran a child's spec as written. Now: a parent and a child applied as Flux applies
-them resolve to the child's row and `status.effective`, the plane owning only its three spec
-fields and that block; a parent's change reaches the child in the same pass and nothing is
-written again after; a default the API server filled in leaves the parent's value; a missing
-parent, a budget above it and an unreadable rule are refused; a child that stops extending
-loses its block; the export names the parent. The operator waits with `AwaitingPlane` and
-creates nothing, runs the status's spec and records its revision, refuses one outside the
-policy, and `SkipObserved` lets a new revision through. A worker refuses the agent's `touch`
-by the parent's `deny` over the child's `allow`, names the profile, refuses the person's
-`!touch` and runs it once the rule is gone at the next activation. Core: a profile `deny`
-over a user `allow`, a profile `ask` asking with `scope: profile`, the profile's `allow`
-under `managed_permission_rules_only`, `Shell.denied/3`. The cluster suite's
-`extends_test.exs` refuses a person's command by a profile's `deny` on a real pod, and
-switches the plane to gitops to apply a parent and a child from manifests and see the
-child's pods run the merge and roll onto the parent's change.

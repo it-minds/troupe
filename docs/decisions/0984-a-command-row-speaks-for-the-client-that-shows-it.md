@@ -20,14 +20,13 @@ gist: "summary/detail are client-neutral, summaries/details hold a client's own;
 ---
 
 Issue #898. The desktop palette read the table the terminal client's palette reads, word
-for word: `/quit` "Leave the terminal client; the session carries on" (its desktop
-runner, `window.close()`, does nothing in the browser build), `/cancel` "Stop a branch
-mid-turn and remove its window" in an app with no windows, `/sessions` "This directory's
-sessions" on a platform session, `/upload` greyed as "not in the desktop app yet", and
-`/build` and `/plan` greyed as "only for a session on this computer" while the head's
-agent switch beside the palette switched to them. Decision 698 made the table one; this
-amends it in three places (its `supersedes` is that part). D107 covers the palette's rows
-for an activated window and the subagents, not these words.
+for word: `/quit` "Leave the terminal client; the session carries on" (its desktop runner,
+`window.close()`, does nothing in the browser build), `/cancel` "Stop a branch mid-turn
+and remove its window" in an app with no windows, `/sessions` "This directory's sessions"
+on a platform session, `/upload` greyed as "not in the desktop app yet", and `/build` and
+`/plan` greyed as "only for a session on this computer" while the head's agent switch
+beside the palette switched to them. Decision 698 made the table one; this amends it in
+three places (its `supersedes` is that part).
 
 - **Neutral words, and a client's own beside them.** `summary` and `detail` stay on
   every row and say what the command does in words true in any client. A row whose
@@ -40,14 +39,6 @@ for an activated window and the subagents, not these words.
   settings' help), in `troupe --help` and in `mix troupe.cli.reference`; the desktop
   palette makes it as the table arrives. A row from a harness before the maps has
   neither, and reads as it did.
-- **The rows that differ now.** `/cancel`: "Stop the agent mid-turn" and "Stops the agent
-  where it is in its turn; the session stays, and the next message starts a new turn.",
-  with the terminal's words, unchanged, as `tui`. `/sessions`: "Your sessions, newest
-  first" for every client, the terminal's too (it is true there, and "This directory's"
-  was the one sentence that named a thing a platform session has not got); its detail is
-  neutral ("The list of your sessions; this one carries on while you look."), the
-  terminal's Enter and `/resume 2` kept as `tui`. Every other row reads as it did in the
-  terminal, so `docs/user/cli-reference.md` changes in the `/sessions` row alone.
 - **`availability` gains `tui`.** The terminal client's alone: `/quit` (leaving that
   client) and `/upload` (reading a file from where the terminal started). The table
   already carries what a command needs as `availability`, which every client judges, so
@@ -75,12 +66,3 @@ for an activated window and the subagents, not these words.
   `/observer`): those are the tool's and a person learns them from the list, and a later
   desktop may run them. A `usages` map: the only client-specific part of a usage is the
   window argument, which the desktop drops by its kind.
-
-**Proof.** `Troupe.CommandsTest` ("each client reads its own words where a row has them,
-and the neutral ones elsewhere", and every built-in's fields allowing the two maps and
-`tui`); `clients/gui/apps/desktop/test/command-palette.test.tsx` ("leaves out /quit and
-/upload, and says /cancel and /sessions as this app runs them"; "switches the session to
-an agent from its row, and sends what follows the name", `profile.switch` then
-`input.send`); `agents-manager.test.tsx` ("on the platform, switches from the palette's
-/plan as the head does"); `palette-agents-watch.test.tsx` (`/build` enabled on a session
-on this computer). Each failed before the change.

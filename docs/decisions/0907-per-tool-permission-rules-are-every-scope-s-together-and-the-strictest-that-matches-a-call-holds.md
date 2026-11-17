@@ -20,18 +20,8 @@ gist: "Every file's rules kept together: most specific in a file, strictest acro
 ---
 
 Issue #658's last part (slices 1 and 2 were Decisions 887 and 894): per-tool permission
-rules as configuration, merged across the organisation, user, project and local scopes with
-the strictest winning, applied by the harness and shown with where each came from. #122's
-proposal named the idea and left its shape open; the maintainer's slot brief fixed the
-three actions, the three kinds of pattern, strictest-wins and an enforced organisation
-layer, and left the rest to this decision.
-
-**What the tip did.** A `permissions:` key in any file was unknown, warned about and
-dropped. Approval came from three places only: a tool's own default (`ask` for a write, an
-edit, `shell`, `web_fetch`, an MCP tool), an agent definition's `permissions:` (`auto`,
-`ask`, `deny` per tool name, no pattern), and the session's `auto_approve`; an MCP server's
-`permission: auto` lowered its tools. Nothing let a person or an organisation say "never
-`git push`" or "always ask before `mcp(github.create_*)`".
+rules as configuration, merged across the organisation, user, project and local scopes
+with the strictest winning, applied by the harness and shown with where each came from.
 
 ## The shape
 
@@ -167,63 +157,3 @@ default a person replaces; the two differ in how `--explain` names them. On a pl
 `client_enforced` takes them as JSON (`admin.setting.put`), and the console's enforced-set
 editor, which builds its fields from the plane's `enforceable` list, writes an object-typed
 key as JSON text: a few lines in `Organisation.tsx`, the console's page.
-
-## Shown
-
-- `troupe config --explain` lists the rules after the keys, each with its action, layer
-  and file, and those held with why; `--explain permissions` lists only them, saying
-  "none" when there are none; `--json` adds `permissions`. The rows of `permissions.*`
-  as keys are left out, since the highest file's list is not the value in effect.
-- `config.get` answers `permissions` (the same records), the terminal UI's `/settings`
-  shows them in its help pane, read-only, and the desktop app's **This computer** page has
-  a **Permission rules** panel, read-only, re-read on `config.changed`.
-- A refused call's result names the rule and its file; an asked call's approval carries
-  the rule, which the terminal UI writes under `APPROVAL:` ("asked by the rule ask
-  shell(git push), from your organisation ...: every such call asks"), the headless
-  printer on its line, and the desktop app's approval panel under its question.
-
-## Not in this slice
-
-- **A WorkerProfile or bundle carrying rules** as an enforced layer on a pod. A pod reads
-  no organisation layer (Decision 869) and its configuration is its profile's; carrying
-  rules means a CRD field (`spec.permissions`), its schema and CEL check, the operator's
-  activation, the worker's config overrides and the plane's profile editors, and the
-  cluster job on every push. More than the slot's few hours; a follow-up. Meanwhile a
-  repository's `deny` and `ask` already apply on a pod.
-- A rule editor in either client (read-only display was the slot's bar).
-- A person's own `!cmd` (Decision 813) is not a tool call and no rule applies to it, as
-  `managed_permission_rules_only` already forbids it outright; whether a `deny: [shell]`
-  should forbid it too is left for a later decision.
-- Bedrock and Vertex, out under Decision 887.
-
-## Proof
-
-- `apps/troupe_protocol/test/troupe/protocol/permission_rule_test.exs`: each kind of
-  pattern read and written back; every malformed form refused with what to write
-  (`Bash(...)`, `WebFetch`, `Grep`, `mcp.x.y`, `client.x.y`, `shell()`, `git * --force`,
-  `npm test:*`, a pattern on `web_fetch`, `mcp(git hub)`); specificity; a set.
-- `organisation_test.exs`: `permissions` on the list as `:rules`, checked rule by rule,
-  never held.
-- `apps/troupe_core/test/troupe/config/permissions_test.exs`: the strict reader refusing
-  with the file, the key and the hint, and warning about a typo and an `ask` on an inline
-  tool; every scope's rules kept with layer and source (managed `enforced:` and
-  `defaults:`, user, project, local), an untrusted project's `allow` held with the reason
-  and applied once trusted, a pod reading a project's `deny` and not its `allow`; deny over
-  ask over allow across scopes; an enforced `ask` over a user's `allow`; the more specific
-  rule in one file, a tie to the stricter; `managed_permission_rules_only`; each pattern
-  kind, compound and substituted shell lines, `..`, `session:/`, absolute paths, client
-  tools; `--explain` text, `permissions` and JSON; `config.get`. All failed on the chunk's
-  tip, where `permissions` was an unknown key.
-- `apps/troupe_core/test/troupe/session/permission_rules_test.exs`, through a session:
-  a project's `deny` refusing `shell` before it runs (the file it would have made is not
-  there) and naming the rule and file; a `deny` on `todo_write`; an `ask` asking under
-  `auto_approve` with the rule on the request; an `ask` not covered by an earlier
-  `allow_session`; an `allow` running an asking tool unasked under `approvals: wait` and
-  `deny`; a watch branch holding every `allow`.
-- `cookbook_test.exs`: the `permissions` recipe loads clean and decides as its page says.
-- `org_test.exs`: the schema's mark against the protocol's kind.
-- TUI: `settings_test.exs` (the help's rule lines; `/settings` showing a project's rules
-  with their file), `frames_test.exs` (an approval a rule asked naming it).
-- GUI: `transcript.test.ts` (the rule kept on its approval), `permission-rules.test.tsx`
-  (the panel's rows with their sources, a held one's reason, no control that edits; none;
-  the approval panel naming the rule).

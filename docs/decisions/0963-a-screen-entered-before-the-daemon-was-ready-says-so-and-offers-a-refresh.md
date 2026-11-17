@@ -50,12 +50,6 @@ live. A banner at either would offer a refresh that changes nothing. A token ren
 links the daemon again with the same identity, so `linked` does not turn and no banner
 is said for it.
 
-**Proof.** `clients/gui/apps/desktop/test/daemon-ready.test.tsx`: a screen entered
-while `identity.link` is held back shows the daemon's refusal, then the banner once the
-link lands, and Refresh shows the rows; the banner goes at the next screen, which says
-nothing when entered after; a daemon stopped and started again on its port brings the
-banner once the list's poll dials again.
-
 **Narrowed by Decision 975.** The new-session screen shows no banner: its "On this
 computer" is off, with why, until the daemon answers and turns on by itself, and that
 screen asked the daemon nothing a refresh would ask again.
