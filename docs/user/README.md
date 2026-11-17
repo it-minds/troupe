@@ -27,8 +27,8 @@ On your own machine every way in is a client of one daemon, `troupe-daemon`, whi
 your sessions and outlives the windows you look at them through. Whichever client needs it
 first starts it (the terminal client runs one inside itself when none is running), and it
 stops on its own a while after the last client leaves, or never once `troupe daemon login
-on` has it start at login ([troupe-daemon](../../apps/troupe_daemon/README.md#how-long-it-stays-up),
-[start at login](../../apps/troupe_daemon/README.md#start-at-login)):
+on` has it start at login ([troupe-daemon](daemon.md#how-long-it-stays-up),
+[start at login](daemon.md#start-at-login)):
 
 ```mermaid
 flowchart LR

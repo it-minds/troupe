@@ -64,9 +64,9 @@ they are not what the tables say, so edit the tables rather than this page.
 | `troupe --help` | print the command lines and the commands inside a session |
 <!-- cli-commands:end -->
 
-`troupe-daemon` takes its own ([the daemon](../../apps/troupe_daemon/README.md)), and
+`troupe-daemon` takes its own ([the daemon](daemon.md)), and
 `troupe daemon ...` hands it everything after `daemon`. What a headless run's exit status
-means is in [the terminal client](../../clients/tui/README.md#use).
+means is in [the terminal client](terminal-client.md#use).
 
 `troupe run --profile dev "task"` starts the task on the platform as `/new`'s screen would,
 titled `--title` or the task's first line; on a full profile it prints `troupe: waiting for

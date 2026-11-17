@@ -52,5 +52,6 @@ Offering this machine's built-in tools (its files, its shell) to a remote sessio
 person's own signed-in MCP servers are offered), a GUI for the remote side (that is
 `clients/gui`, beside this directory), a Web UI, multi-node distribution, a resident
 assistant or free-text routing at the dispatcher, auto-commit or undo in the user's
-checkout, updating itself unasked, code signing and notarisation, and native Windows ARM
-builds.
+checkout, updating itself unasked, the operating systems' own code signing and notarisation (every
+release is signed with the release key, which `troupe update` checks;
+[code-signing.md](../../docs/developer/code-signing.md)), and native Windows ARM builds.

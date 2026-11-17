@@ -152,8 +152,9 @@ own configuration (Decision 832).
 | `TROUPE_REAPER_TARGETS` | which `reaper` targets to build (`all` in CI) |
 | `TROUPE_REGISTRY`, `TROUPE_IMAGE_TAG`, `TROUPE_PUSH`, `TROUPE_KIND_CLUSTER` | `scripts/build-images`: where images go; `TROUPE_PUSH=true` pushes, otherwise `kind load` |
 
-The daemon's and the TUI's own variables are in [`apps/troupe_daemon`](../../apps/troupe_daemon/README.md)
-and [`clients/tui`](../../clients/tui/README.md).
+The daemon's own variables are on [the daemon's page](../user/daemon.md#configuration), the
+terminal client's (`TROUPE_CA_FILE`) on [its page](../user/terminal-client.md), and the
+variables every client and the daemon read on [configuration](../user/configuration.md).
 
 ---
 

@@ -20,8 +20,8 @@ own way of drawing it is [below](#in-the-terminal).
   tables, quotes, and each fenced block a frame of its own, code with its language and
   path, a `diff` with `+n −m`, and `csv`, `tsv` or `json` as a table with its row count.
   **source** at the top of an answer shows the Markdown as the model wrote it. Raw HTML in
-  a reply is shown as text, never as markup, and an image is never loaded; a `mermaid` block is
-  drawn as a diagram, its source a press away.
+  a reply is shown as text, never as markup, and an image is never loaded; in the desktop app a
+  `mermaid` block is drawn as a diagram, its source a press away.
 - **Reasoning** is what the model streamed before it answered, so it is there for a turn
   the app watched happen, and not in a session opened afterwards.
 - **While a turn works**, the line under it says what is running, how many and for how
@@ -63,7 +63,8 @@ Replies are rendered as in the desktop app, with these of the terminal's own: ne
 are indented, each level its own marker (`•` `◦` `▪`); `inline code` and **bold** keep their
 emphasis without their markers; code has full syntax highlighting; a `csv`, `tsv` or
 `json` block that is not one is shown as written; a file an agent read is numbered source,
-its line numbers in their own column. Raw HTML, images, footnotes, and a
+its line numbers in their own column; a `mermaid` block is its source, in a code frame,
+not a diagram. Raw HTML, images, footnotes, and a
 table wider than 100 columns are left as written, under a line that says so. The same
 colours run through diffs and tool calls, by outcome.
 
