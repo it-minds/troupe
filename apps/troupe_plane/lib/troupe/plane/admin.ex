@@ -64,19 +64,7 @@ defmodule Troupe.Plane.Admin do
   alias Troupe.Plane.Gitops.TriggerCopies
   alias Troupe.Plane.Gitops.Triggers, as: GitopsTriggers
   alias Troupe.Plane.Identity.ServicePrincipal
-
-  alias Troupe.Plane.{
-    KMSCheck,
-    Names,
-    OIDC,
-    Principals,
-    Provision,
-    Reach,
-    Sessions,
-    Settings,
-    Triggers
-  }
-
+  alias Troupe.Plane.{KMSCheck, Names, OIDC, Principals, Provision, Reach, Sessions, Settings, Triggers}
   alias Troupe.Plane.SCIM.Connector
   alias Troupe.Plane.Settings.Ladder
   alias Troupe.Plane.Triggers.{Notify, Revision, Trigger}
@@ -241,10 +229,7 @@ defmodule Troupe.Plane.Admin do
       profiles = profiles_for(actor)
 
       {:ok,
-       Enum.map(
-         profiles,
-         &(&1 |> profile_summary() |> Map.put(:gitops, gitops_state(&1, reports)))
-       ) ++
+       Enum.map(profiles, &(&1 |> profile_summary() |> Map.put(:gitops, gitops_state(&1, reports)))) ++
          refused_only(actor, profiles, reports)}
     end
   end
@@ -364,9 +349,7 @@ defmodule Troupe.Plane.Admin do
       # A channel, or a profile's own servers, by name.
       layers:
         Enum.map(bundle.layers, fn
-          %{channel: channel, profile: profile} ->
-            %{profile: profile, channel: channel}
-
+          %{channel: channel, profile: profile} -> %{profile: profile, channel: channel}
           %{servers: servers, profile: profile} ->
             %{profile: profile, servers: Enum.map(servers, & &1["name"])}
         end),
@@ -535,8 +518,7 @@ defmodule Troupe.Plane.Admin do
         :ok
 
       reason ->
-        {:error,
-         Error.new(:invalid_params, %{budget_micros: own["budget_micros"], reason: reason})}
+        {:error, Error.new(:invalid_params, %{budget_micros: own["budget_micros"], reason: reason})}
     end
   end
 
@@ -812,12 +794,7 @@ defmodule Troupe.Plane.Admin do
         case Extends.resolve(name) do
           {:ok, resolved} ->
             own = get_in(resolved.attrs, ["spec", "llm", "model"])
-
-            {List.wrap(own),
-             resolved.bundle.layers
-             |> compose_layers()
-             |> effective_agents()
-             |> Enum.map(& &1.model)}
+            {List.wrap(own), resolved.bundle.layers |> compose_layers() |> effective_agents() |> Enum.map(& &1.model)}
 
           {:error, _reason} ->
             {[], []}
@@ -1932,9 +1909,7 @@ defmodule Troupe.Plane.Admin do
 
       case Identity.disable_team(team) do
         {:ok, _team} ->
-          {:ok, _} =
-            Audit.record(actor.subject, "team.disable", name, Map.delete(effect, :confirm))
-
+          {:ok, _} = Audit.record(actor.subject, "team.disable", name, Map.delete(effect, :confirm))
           {:ok, effect}
 
         {:error, changeset} ->
@@ -2375,18 +2350,11 @@ defmodule Troupe.Plane.Admin do
   # The ceiling the write leaves against the most its pods could run at once: saved
   # either way, since it is a limit and not a promise, and said so where it is higher.
   defp capacity_preview(name, current, attrs) do
-    pick = fn key ->
-      Map.get(attrs, key) || (current && Map.get(current, String.to_existing_atom(key)))
-    end
-
+    pick = fn key -> Map.get(attrs, key) || (current && Map.get(current, String.to_existing_atom(key))) end
     max = Map.get(attrs, "max_sessions", current && current.max_sessions)
 
     at_once =
-      Scaler.at_once(%{
-        name: name,
-        provisioner: pick.("provisioner"),
-        size_class: pick.("size_class")
-      })
+      Scaler.at_once(%{name: name, provisioner: pick.("provisioner"), size_class: pick.("size_class")})
 
     %{
       max_sessions: max,
@@ -2819,12 +2787,7 @@ defmodule Troupe.Plane.Admin do
     do: {:ok, version |> String.trim() |> String.trim_leading("v")}
 
   defp release_version(_version),
-    do:
-      {:error,
-       Error.new(:invalid_params, %{
-         field: "version",
-         reason: "a release's version, as 0.24.0-beta"
-       })}
+    do: {:error, Error.new(:invalid_params, %{field: "version", reason: "a release's version, as 0.24.0-beta"})}
 
   defp mirror_started({:ok, manifest}), do: {:ok, manifest}
 
@@ -2993,8 +2956,7 @@ defmodule Troupe.Plane.Admin do
   when. Refused, as the save would be, for a text past the limit or for an actor who may
   not change the document.
   """
-  @spec memory_preview(actor(), String.t(), String.t() | nil, String.t() | nil, list() | nil) ::
-          result()
+  @spec memory_preview(actor(), String.t(), String.t() | nil, String.t() | nil, list() | nil) :: result()
   def memory_preview(actor, scope, name, text, entries \\ nil) do
     with {:ok, owner} <- memory_writer(actor, scope, name),
          {:ok, text} <- memory_text(text, entries) do
@@ -3025,22 +2987,14 @@ defmodule Troupe.Plane.Admin do
   def memory_rollback(actor, scope, name, to, version) do
     with {:ok, owner} <- memory_writer(actor, scope, name),
          {:ok, %{text: text}} <- memory_rollback_to(owner, to) do
-      memory_save(actor, owner, text, version, %{
-        "rolled_back_to" => to,
-        "note" => "rolled back to v#{to}"
-      })
+      memory_save(actor, owner, text, version, %{"rolled_back_to" => to, "note" => "rolled back to v#{to}"})
     end
   end
 
   defp memory_rollback_to(owner, to) when is_integer(to), do: memory_version(owner, to)
 
   defp memory_rollback_to(_owner, _to),
-    do:
-      {:error,
-       Error.new(:invalid_params, %{
-         field: "to",
-         reason: "to is the number of the version to roll back to"
-       })}
+    do: {:error, Error.new(:invalid_params, %{field: "to", reason: "to is the number of the version to roll back to"})}
 
   @doc """
   Tell one running session a memory document reaches what it reads now, again: on a pod,
@@ -3053,15 +3007,8 @@ defmodule Troupe.Plane.Admin do
   def memory_nudge(actor, scope, name, session_id) do
     with {:ok, owner} <- memory_writer(actor, scope, name) do
       case is_binary(session_id) && Memory.nudge(owner, session_id) do
-        {:ok, told} ->
-          {:ok, told}
-
-        _not_reached ->
-          {:error,
-           Error.new(:not_found, %{
-             session_id: session_id,
-             reason: "no running session this document reaches"
-           })}
+        {:ok, told} -> {:ok, told}
+        _not_reached -> {:error, Error.new(:not_found, %{session_id: session_id, reason: "no running session this document reaches"})}
       end
     end
   end
@@ -3073,14 +3020,7 @@ defmodule Troupe.Plane.Admin do
   force makes no version. Audited as `memory.put` with the version, size and hash, before
   and after; every version's text is kept, so the audit names the versions to compare.
   """
-  @spec memory_put(
-          actor(),
-          String.t(),
-          String.t() | nil,
-          String.t() | nil,
-          integer() | nil,
-          list() | nil
-        ) ::
+  @spec memory_put(actor(), String.t(), String.t() | nil, String.t() | nil, integer() | nil, list() | nil) ::
           result()
   def memory_put(actor, scope, name, text, version, entries \\ nil) do
     with {:ok, owner} <- memory_writer(actor, scope, name),
@@ -3099,15 +3039,7 @@ defmodule Troupe.Plane.Admin do
 
       {:ok, %{before: before, now: now}} ->
         changes = Audit.diff(memory_fields(before), memory_fields(now))
-
-        {:ok, _} =
-          Audit.record(
-            actor.subject,
-            "memory.put",
-            Memory.subject(owner),
-            Map.merge(changes, note)
-          )
-
+        {:ok, _} = Audit.record(actor.subject, "memory.put", Memory.subject(owner), Map.merge(changes, note))
         # The sessions running now read it from their next turn.
         _told = Memory.announce(owner)
         {:ok, %{document: Memory.summary(now), changes: changes}}
@@ -3135,21 +3067,12 @@ defmodule Troupe.Plane.Admin do
   # their order, each heading as given (`Entries.render/1`).
   defp memory_text(nil, entries) when not is_nil(entries) do
     case Entries.cast(entries) do
-      {:ok, entries} ->
-        memory_text(Entries.render(entries), nil)
-
-      {:error, reason} ->
-        {:error, Error.new(:invalid_params, %{field: "entries", reason: reason})}
+      {:ok, entries} -> memory_text(Entries.render(entries), nil)
+      {:error, reason} -> {:error, Error.new(:invalid_params, %{field: "entries", reason: reason})}
     end
   end
 
-  defp memory_text(nil, nil),
-    do:
-      {:error,
-       Error.new(:invalid_params, %{
-         missing: "text",
-         reason: "give the document as text or as entries"
-       })}
+  defp memory_text(nil, nil), do: {:error, Error.new(:invalid_params, %{missing: "text", reason: "give the document as text or as entries"})}
 
   defp memory_text(text, _entries) do
     case Troupe.Protocol.Memory.check(text) do
@@ -3211,8 +3134,7 @@ defmodule Troupe.Plane.Admin do
     do: "only a platform administrator changes the organisation's memory"
 
   defp memory_who("not_found", "team", name),
-    do:
-      "there is no team called #{name} that you administer, so its memory is not yours to change"
+    do: "there is no team called #{name} that you administer, so its memory is not yours to change"
 
   defp memory_who(_token, "team", name),
     do: "only #{name}'s team admins and the platform administrators change #{name}'s memory"
@@ -3294,11 +3216,7 @@ defmodule Troupe.Plane.Admin do
       {:ok, proposal}
     else
       %Memory.Proposal{scope: "organisation"} ->
-        {:error,
-         Error.new(:forbidden, %{
-           required_role: "platform_admin",
-           reason: memory_who("forbidden", "organisation", nil)
-         })}
+        {:error, Error.new(:forbidden, %{required_role: "platform_admin", reason: memory_who("forbidden", "organisation", nil)})}
 
       {:error, _} = refused ->
         refused
@@ -3329,12 +3247,7 @@ defmodule Troupe.Plane.Admin do
   end
 
   defp memory_decided({:conflict, version}, _proposal),
-    do:
-      {:error,
-       Error.new(:conflict, %{
-         reason: "the document was saved by somebody else meanwhile; try again",
-         version: version
-       })}
+    do: {:error, Error.new(:conflict, %{reason: "the document was saved by somebody else meanwhile; try again", version: version})}
 
   defp memory_decided(reason, _proposal) when is_binary(reason),
     do: {:error, Error.new(:invalid_params, %{reason: reason})}
@@ -3558,8 +3471,7 @@ defmodule Troupe.Plane.Admin do
        %{
          checks: checks,
          ok: Enum.all?(checks, & &1.ok),
-         candidate:
-           Map.take(candidate, [:issuer, :token_endpoint, :device_authorization_endpoint])
+         candidate: Map.take(candidate, [:issuer, :token_endpoint, :device_authorization_endpoint])
        }}
     end
   end
@@ -5194,8 +5106,7 @@ defmodule Troupe.Plane.Admin do
           do: Keyword.delete(opts, :teams),
           else: Keyword.put(opts, :teams, visible_teams(actor))
 
-      {:ok,
-       opts |> Audit.list() |> Enum.map(&audit_summary/1) |> Names.decorate(actor: :actor_name)}
+      {:ok, opts |> Audit.list() |> Enum.map(&audit_summary/1) |> Names.decorate(actor: :actor_name)}
     end
   end
 

@@ -162,7 +162,7 @@ defmodule Troupe.Plane.AdminTest do
         Admin.principal_create(context.lead, "engineering", %{
           "name" => "bot",
           "profiles" => ["dev"],
-          "sponsor" => "lead@example.test"
+                 "sponsor" => "lead@example.test"
         })
 
       definition = %{
@@ -295,9 +295,7 @@ defmodule Troupe.Plane.AdminTest do
       assert {:ok, sessions} = Admin.sessions_list(context.lead)
       refute Map.has_key?(Enum.find(sessions, &(&1.id == mine.id)), :owner_name)
 
-      {:ok, _} =
-        Identity.upsert_user(%{subject: "someone@example.test", display_name: "Some One"})
-
+      {:ok, _} = Identity.upsert_user(%{subject: "someone@example.test", display_name: "Some One"})
       {:ok, _} = Identity.upsert_user(%{subject: "lead@example.test", display_name: "Lea Lead"})
 
       assert {:ok, sessions} = Admin.sessions_list(context.lead)
@@ -325,11 +323,7 @@ defmodule Troupe.Plane.AdminTest do
             "agents" => [],
             "skills" => [],
             "mcp_servers" => [
-              %{
-                "name" => "jira",
-                "url" => "https://mcp.jira.example/mcp",
-                "credential_mode" => "person"
-              }
+              %{"name" => "jira", "url" => "https://mcp.jira.example/mcp", "credential_mode" => "person"}
             ]
           },
           announce: false
@@ -340,17 +334,14 @@ defmodule Troupe.Plane.AdminTest do
       assert {:ok, %{sessions: carrying}} = Admin.connections(context.lead)
       refute Map.has_key?(Enum.find(carrying, &(&1.id == mine.id)), :owner_name)
 
-      {:ok, _} =
-        Identity.upsert_user(%{subject: "someone@example.test", display_name: "Some One"})
+      {:ok, _} = Identity.upsert_user(%{subject: "someone@example.test", display_name: "Some One"})
 
       assert {:ok, preview} = Admin.session_erase_preview(context.lead, mine.id)
       assert preview.owner == "someone@example.test"
       assert preview.owner_name == "Some One"
 
       assert {:ok, %{sessions: carrying}} = Admin.connections(context.lead)
-
-      assert %{owner: "someone@example.test", owner_name: "Some One"} =
-               Enum.find(carrying, &(&1.id == mine.id))
+      assert %{owner: "someone@example.test", owner_name: "Some One"} = Enum.find(carrying, &(&1.id == mine.id))
     end
 
     test "their own team's spend and no others", context do
@@ -375,7 +366,6 @@ defmodule Troupe.Plane.AdminTest do
       # And it is a sum over the open ones, not the first or the last.
       {:ok, _second} =
         Ledger.reserve(context.engineering.id, "s-also-running", "lead@example.test", 2_500_000)
-
       assert {:ok, more} = Admin.overview(context.lead)
       assert [%{reserved_micros: 7_500_000}] = more.teams
 
@@ -559,8 +549,7 @@ defmodule Troupe.Plane.AdminTest do
       assert List.last(platform.checks).ok
       assert List.last(platform.checks).detail =~ "including you."
       # A count says its noun in the right number, not both.
-      assert List.last(platform.checks).detail =~
-               ~r/\A(1 person known here carries|\d+ people known here carry) platform /
+      assert List.last(platform.checks).detail =~ ~r/\A(1 person known here carries|\d+ people known here carry) platform /
     end
 
     test "a profile's choices are the protocol's provider types and the plane's size classes",
@@ -778,9 +767,7 @@ defmodule Troupe.Plane.AdminTest do
       assert {:ok, checked} = Admin.agent_check(context.root, "triager", definition)
       assert checked == daemon
       assert Enum.map(checked.errors, & &1.field) == ["colour", "tools"]
-
-      assert Enum.find(checked.errors, &(&1.field == "tools")).message =~
-               "reed_file is not a tool"
+      assert Enum.find(checked.errors, &(&1.field == "tools")).message =~ "reed_file is not a tool"
 
       draft = %{"schema" => 1, "agents" => [%{"name" => "triager", "definition" => definition}]}
 
@@ -795,9 +782,7 @@ defmodule Troupe.Plane.AdminTest do
       fine =
         "---\ndescription: Reviews\nmode: primary\nmodel: big\ntools: [read_file, mcp.jira.search]\n---\nYou review.\n"
 
-      assert {:ok, %{ok: true, warnings: warnings}} =
-               Admin.agent_check(context.root, "triager", fine)
-
+      assert {:ok, %{ok: true, warnings: warnings}} = Admin.agent_check(context.root, "triager", fine)
       assert Enum.map(warnings, & &1.field) == ["tools", "model"]
 
       assert {:ok, _} =
@@ -874,8 +859,7 @@ defmodule Troupe.Plane.AdminTest do
         |> then(&if(agents, do: Map.put(&1, "agents", agents), else: &1))
       end
 
-      triager =
-        "---\ndescription: Triages\nmode: primary\nskills: [triage-notes]\n---\nYou triage.\n"
+      triager = "---\ndescription: Triages\nmode: primary\nskills: [triage-notes]\n---\nYou triage.\n"
 
       assert {:ok, _} =
                Admin.bundle_publish(context.root, "stable", %{
@@ -989,9 +973,7 @@ defmodule Troupe.Plane.AdminTest do
       assert {:ok, shown} = Admin.bundle_get(context.lead, "stable", published.version)
       assert shown.hash == published.hash
       assert shown.content == good
-
-      assert [%{name: "pr-reviewer", mode: :primary, description: "Reviews"}] =
-               shown.detail.agents
+      assert [%{name: "pr-reviewer", mode: :primary, description: "Reviews"}] = shown.detail.agents
 
       assert [%{name: "jira", secret: "troupe-mcp-jira", credential_ref: "JIRA_TOKEN"}] =
                shown.detail.mcp_servers
@@ -1152,12 +1134,7 @@ defmodule Troupe.Plane.AdminTest do
       profile = %{"name" => "quiet-dev", "image" => "ghcr.io/troupe/worker:1"}
 
       for value <- [true, false] do
-        assert {:ok, _} =
-                 Admin.profile_put(
-                   context.root,
-                   Map.put(profile, "spec", %{"memoryProposals" => value})
-                 )
-
+        assert {:ok, _} = Admin.profile_put(context.root, Map.put(profile, "spec", %{"memoryProposals" => value}))
         assert Fleet.get_profile("quiet-dev").spec["memoryProposals"] == value
       end
 

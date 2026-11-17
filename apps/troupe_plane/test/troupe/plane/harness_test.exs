@@ -451,18 +451,12 @@ defmodule Troupe.Plane.HarnessTest do
       session = session!("s-full", user, team, state: "dormant")
 
       assert {:error, error} =
-               Harness.call(
-                 "session.open",
-                 %{"session_id" => session.id, "mode" => "activate"},
-                 context(user)
-               )
+               Harness.call("session.open", %{"session_id" => session.id, "mode" => "activate"}, context(user))
 
       assert error.message == "capacity"
       assert error.data.capacity == 1
       assert error.data.max_sessions == 12
-
-      assert error.data.reason ==
-               "every pod is full: its pods run 1 session(s) at once, and dev allows 12 at once"
+      assert error.data.reason == "every pod is full: its pods run 1 session(s) at once, and dev allows 12 at once"
     end
 
     test "a pod that cannot put the tree back parks the session read-only, and the next open says so",

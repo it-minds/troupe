@@ -2853,27 +2853,13 @@ defmodule Troupe.Gateway.Dispatch do
     daemon? = Process.whereis(Troupe.Gateway.Daemon) != nil
 
     case Troupe.Artifacts.files(ask) do
-      {:ok, %{"files" => files} = answer} when is_list(files) ->
-        {:ok, answer}
-
-      {:ok, _other} ->
-        {:error, Error.new(:internal_error, %{reason: "the plane answered no files"})}
-
-      {:error, %Error{} = error} ->
-        {:error, error}
-
-      {:error, sentence} when is_binary(sentence) ->
-        {:error, Error.new(:unavailable, %{reason: sentence})}
-
-      {:error, %{"message" => message} = refusal} ->
-        {:error, plane_refusal(message, refusal)}
-
-      {:error, :signed_out} when not daemon? ->
-        {:error,
-         Error.new(:unavailable, %{reason: "nothing here fetches artifacts from a plane"})}
-
-      other ->
-        forwarded("artifact.files", other)
+      {:ok, %{"files" => files} = answer} when is_list(files) -> {:ok, answer}
+      {:ok, _other} -> {:error, Error.new(:internal_error, %{reason: "the plane answered no files"})}
+      {:error, %Error{} = error} -> {:error, error}
+      {:error, sentence} when is_binary(sentence) -> {:error, Error.new(:unavailable, %{reason: sentence})}
+      {:error, %{"message" => message} = refusal} -> {:error, plane_refusal(message, refusal)}
+      {:error, :signed_out} when not daemon? -> {:error, Error.new(:unavailable, %{reason: "nothing here fetches artifacts from a plane"})}
+      other -> forwarded("artifact.files", other)
     end
   end
 
@@ -2881,11 +2867,8 @@ defmodule Troupe.Gateway.Dispatch do
   defp plane_refusal(message, refusal) do
     token =
       case Error.token(refusal["code"]) do
-        :unknown ->
-          Enum.find(Map.keys(Error.codes()), :unavailable, &(Atom.to_string(&1) == message))
-
-        token ->
-          token
+        :unknown -> Enum.find(Map.keys(Error.codes()), :unavailable, &(Atom.to_string(&1) == message))
+        token -> token
       end
 
     Error.new(token, refusal["data"] || %{reason: "the plane refused it (#{message})"})
@@ -2926,18 +2909,12 @@ defmodule Troupe.Gateway.Dispatch do
 
   defp decoded(%{"bytes" => bytes} = file) when is_binary(bytes) do
     case Base.decode64(bytes, ignore: :whitespace) do
-      {:ok, body} ->
-        {:ok, body}
-
-      :error ->
-        {:error, Error.new(:internal_error, %{reason: "#{file["path"]}'s bytes are not base64"})}
+      {:ok, body} -> {:ok, body}
+      :error -> {:error, Error.new(:internal_error, %{reason: "#{file["path"]}'s bytes are not base64"})}
     end
   end
 
-  defp decoded(file),
-    do:
-      {:error,
-       Error.new(:internal_error, %{reason: "#{inspect(file["path"])} came with no bytes"})}
+  defp decoded(file), do: {:error, Error.new(:internal_error, %{reason: "#{inspect(file["path"])} came with no bytes"})}
 
   defp join_into(folder, path) when is_binary(path) do
     if String.ends_with?(folder, "/"), do: folder <> path, else: folder <> "/" <> path
@@ -2978,8 +2955,7 @@ defmodule Troupe.Gateway.Dispatch do
         {:error,
          Error.new(:forbidden, %{
            required_scope: "admin",
-           reason:
-             "a lasting rule is written into this computer's configuration, which is its person's"
+           reason: "a lasting rule is written into this computer's configuration, which is its person's"
          })}
   end
 
@@ -3005,11 +2981,8 @@ defmodule Troupe.Gateway.Dispatch do
     file_scope = if scope == "workspace", do: "local", else: "user"
 
     case announcing(file_scope, workspace, fn -> Settings.allow_rule(tool, scope, workspace) end) do
-      {:ok, written} ->
-        {:ok, written}
-
-      {:error, sentence} ->
-        {:error, Error.new(:invalid_params, %{field: "scope", reason: sentence})}
+      {:ok, written} -> {:ok, written}
+      {:error, sentence} -> {:error, Error.new(:invalid_params, %{field: "scope", reason: sentence})}
     end
   end
 

@@ -532,17 +532,10 @@ defmodule Troupe.Plane.Harness do
       opts = [topic: params["topic"], where: "machine"] ++ written_from(params)
 
       case Memory.Proposals.propose(user, scope, team, params["append"], opts) do
-        {:ok, proposal} ->
-          {:ok, Memory.Proposals.json(proposal)}
-
-        {:error, :off} ->
-          {:error, Error.new(:forbidden, %{reason: Memory.Proposals.off_reason()})}
-
-        {:error, :no_person} ->
-          own_memory(nil)
-
-        {:error, reason} ->
-          invalid(reason)
+        {:ok, proposal} -> {:ok, Memory.Proposals.json(proposal)}
+        {:error, :off} -> {:error, Error.new(:forbidden, %{reason: Memory.Proposals.off_reason()})}
+        {:error, :no_person} -> own_memory(nil)
+        {:error, reason} -> invalid(reason)
       end
     end
   end
@@ -630,10 +623,7 @@ defmodule Troupe.Plane.Harness do
     do: Artifacts.delete_comment(id, user, params["comment"], platform_admin?: admin?(context))
 
   defp handle("artifact.comment.edit", %{"id" => id} = params, %{user: user} = context),
-    do:
-      Artifacts.edit_comment(id, user, params["comment"], params["body"],
-        platform_admin?: admin?(context)
-      )
+    do: Artifacts.edit_comment(id, user, params["comment"], params["body"], platform_admin?: admin?(context))
 
   defp handle("artifact.redeem", %{"token" => token}, %{user: user}) when is_binary(token),
     do: Artifacts.redeem_link(token, user)
@@ -641,9 +631,8 @@ defmodule Troupe.Plane.Harness do
   defp handle("artifact.redeem", _params, _context),
     do: {:error, Error.new(:invalid_params, %{reason: "artifact.redeem takes a link's token"})}
 
-  defp handle("artifact.keep", %{"id" => id} = params, %{user: user} = context)
-       when is_binary(id),
-       do: Artifacts.keep(id, params["on"], user, platform_admin?: admin?(context))
+  defp handle("artifact.keep", %{"id" => id} = params, %{user: user} = context) when is_binary(id),
+    do: Artifacts.keep(id, params["on"], user, platform_admin?: admin?(context))
 
   defp handle("artifact.keep", _params, _context),
     do:
@@ -812,9 +801,7 @@ defmodule Troupe.Plane.Harness do
       |> put_option(:archived, params["archived"] == true)
 
     sessions = Sessions.visible_to(user, options)
-
-    {:ok,
-     %{"sessions" => sessions |> Enum.map(&session_row(&1, user)) |> Names.decorate(@owner_name)}}
+    {:ok, %{"sessions" => sessions |> Enum.map(&session_row(&1, user)) |> Names.decorate(@owner_name)}}
   end
 
   # Laptop sessions offered for steering from another device (#58): the caller's own, from
@@ -1570,10 +1557,7 @@ defmodule Troupe.Plane.Harness do
   # Waiting for room, or between the epoch bump and its placement: there is no pod to tell.
   defp sleep(%Session{} = session) do
     {:error,
-     Error.new(:conflict, %{
-       reason: "this session has not started on the platform yet",
-       state: session.state
-     })}
+     Error.new(:conflict, %{reason: "this session has not started on the platform yet", state: session.state})}
   end
 
   # The pod reports its dormancy down the control channel before it answers, so the row
@@ -3935,8 +3919,7 @@ defmodule Troupe.Plane.Harness do
   end
 
   # A session by its owner's name as well as their subject, where the plane knows one.
-  defp session_json(session, user),
-    do: session |> session_row(user) |> Names.decorate(@owner_name)
+  defp session_json(session, user), do: session |> session_row(user) |> Names.decorate(@owner_name)
 
   defp session_row(session, user) do
     %{
