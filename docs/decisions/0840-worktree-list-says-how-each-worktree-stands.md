@@ -6,7 +6,6 @@ status: accepted
 issue: 502
 paths:
   - apps/troupe_gateway/lib/troupe/gateway/worktrees.ex
-  - apps/troupe_gateway/test/troupe/gateway/worktrees_test.exs
 symbols:
   - Troupe.Gateway.Worktrees.list/1
 gist: "worktree.list rows carry ahead/behind (vs the checkout's branch; the checkout vs its upstream) and added/removed since the branch left, untracked counted"

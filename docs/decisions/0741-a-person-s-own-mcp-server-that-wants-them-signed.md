@@ -5,7 +5,6 @@ date: 2026-10-01
 status: accepted
 issue: 300
 paths:
-  - PROTOCOL.md
   - apps/troupe_core/lib/troupe/application.ex
   - apps/troupe_core/lib/troupe/config.ex
   - apps/troupe_core/lib/troupe/config/schema.ex
@@ -17,25 +16,17 @@ paths:
   - apps/troupe_core/lib/troupe/mcp/oauth/tokens.ex
   - apps/troupe_core/lib/troupe/mcp/tool.ex
   - apps/troupe_core/lib/troupe/session/mcp.ex
-  - apps/troupe_core/test/support/fake_oauth.exs
-  - apps/troupe_core/test/troupe/mcp_oauth_test.exs
   - apps/troupe_gateway/lib/troupe/gateway/dispatch.ex
   - apps/troupe_gateway/lib/troupe/gateway/local_sources.ex
-  - apps/troupe_gateway/test/troupe/gateway/mcp_sign_in_test.exs
   - apps/troupe_protocol/lib/troupe/mcp/client.ex
   - apps/troupe_protocol/lib/troupe/mcp/server.ex
   - apps/troupe_protocol/lib/troupe/protocol/schema.ex
   - clients/gui/apps/desktop/src/views/ConnectScreen.tsx
-  - clients/gui/apps/desktop/test/tools-and-skills.test.tsx
   - clients/gui/packages/client/src/daemon.ts
-  - clients/gui/packages/client/test/local-sources.test.ts
-  - clients/gui/packages/client/test/support/daemon.ts
   - clients/tui/lib/troupe/client/daemon.ex
   - clients/tui/lib/troupe/browser.ex
   - clients/tui/lib/troupe/ui/tui/server.ex
   - clients/tui/lib/troupe/ui/tui/view.ex
-  - clients/tui/test/troupe/mcp_page_test.exs
-  - docs/admin/bundles-and-triggers.md
 gist: A person's own MCP server that wants them signed in, rather than a machine, is signed in to by the daemon, with PKCE and a loopback redirect, and…
 ---
 

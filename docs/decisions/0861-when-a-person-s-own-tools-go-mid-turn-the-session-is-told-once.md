@@ -5,13 +5,10 @@ date: 2026-10-11
 status: accepted
 issue: 308
 paths:
-  - PROTOCOL.md
   - apps/troupe_gateway/lib/troupe/gateway/client_tool.ex
   - apps/troupe_core/lib/troupe/session/client_tools.ex
-  - apps/troupe_gateway/test/troupe/gateway/client_tools_test.exs
   - clients/tui/lib/troupe/remote/offer.ex
   - clients/tui/lib/troupe/remote/worker.ex
-  - clients/tui/test/troupe/remote_client_tools_test.exs
 symbols:
   - Troupe.Gateway.ClientTool.run/4
   - Troupe.Session.ClientTools.await/4

@@ -10,10 +10,6 @@ paths:
   - apps/troupe_core/lib/troupe/agent/state.ex
   - apps/troupe_core/lib/troupe/config.ex
   - apps/troupe_protocol/lib/troupe/protocol/schema.ex
-  - apps/troupe_core/test/troupe/agent/context_status_test.exs
-  - PROTOCOL.md
-  - clients/gui/packages/client/test/support/daemon.ts
-  - clients/gui/packages/client/test/support/worker.ts
   - clients/gui/scripts/fake-deployment.ts
 symbols:
   - Troupe.Config.known_window/2

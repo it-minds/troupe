@@ -932,8 +932,7 @@ defmodule Troupe.Remote.Worker do
 
   # The worker wraps every notification — `{"topic", "session_id", "event"}` — and
   # marks an ephemeral with `"ephemeral": true` inside it; the contract's example
-  # puts the event at the top level, and the fake used to. Both are read
-  # (Decision 98).
+  # puts the event at the top level, and the fake used to. Both are read.
   defp dispatch({:notification, "event", params}, state) do
     case unwrap_event(params) do
       %{"ephemeral" => true} = event -> ephemeral(state, event)

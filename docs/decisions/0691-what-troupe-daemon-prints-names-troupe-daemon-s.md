@@ -6,13 +6,7 @@ status: accepted
 paths:
   - apps/troupe_core/lib/troupe/config.ex
   - apps/troupe_core/lib/troupe/paths.ex
-  - apps/troupe_core/test/troupe/config/explain_test.exs
-  - apps/troupe_core/test/troupe/config/trust_test.exs
-  - apps/troupe_core/test/troupe/paths_test.exs
-  - apps/troupe_daemon/test/troupe/daemon/cli_test.exs
-  - apps/troupe_gateway/test/troupe/gateway/autospawn_test.exs
   - apps/troupe_protocol/lib/troupe/protocol/daemon.ex
-  - apps/troupe_worker/test/troupe/worker/unrestorable_test.exs
 gist: What `troupe-daemon` prints names `troupe-daemon`'s commands, in ASCII, with paths as Windows writes them
 ---
 

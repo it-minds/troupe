@@ -10,8 +10,6 @@ paths:
   - apps/troupe_core/lib/troupe/llm/message.ex
   - apps/troupe_core/lib/troupe/llm/providers/anthropic.ex
   - apps/troupe_core/lib/troupe/llm/providers/openai.ex
-  - apps/troupe_core/test/troupe/agent/usage_shape_test.exs
-  - apps/troupe_core/test/troupe/llm/usage_test.exs
 gist: Token usage is four disjoint figures — `input_tokens`, `cache_read`, `cache_write`, `output_tokens`
 ---
 

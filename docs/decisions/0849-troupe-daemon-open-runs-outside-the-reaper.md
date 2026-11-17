@@ -5,17 +5,12 @@ date: 2026-10-11
 status: accepted
 paths:
   - clients/tui/lib/troupe/cli/daemon.ex
-  - clients/tui/test/troupe/cli_daemon_test.exs
   - apps/troupe_core/lib/troupe/mcp/stdio.ex
-  - apps/troupe_core/test/troupe/mcp/stdio_test.exs
   - clients/tui/lib/troupe/clipboard.ex
-  - clients/tui/test/troupe/clipboard_test.exs
   - clients/tui/lib/troupe/client.ex
   - clients/tui/lib/troupe/remote/worker.ex
   - clients/tui/lib/troupe/ui/tui/server.ex
-  - clients/tui/test/troupe/worker_commands_test.exs
   - apps/troupe_protocol/lib/troupe/protocol/client.ex
-  - apps/troupe_protocol/test/troupe/protocol/client_test.exs
   - clients/tui/lib/troupe/client/daemon/link.ex
 symbols:
   - Troupe.CLI.Daemon.run/2

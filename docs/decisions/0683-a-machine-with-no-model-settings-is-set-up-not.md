@@ -6,9 +6,6 @@ status: accepted
 paths:
   - apps/troupe_core/lib/troupe/config/model_settings.ex
   - apps/troupe_core/lib/troupe/config/open_code.ex
-  - apps/troupe_core/test/troupe/config/model_settings_test.exs
-  - apps/troupe_gateway/test/troupe/gateway/model_settings_test.exs
-  - clients/tui/test/troupe/config_setup_test.exs
   - install.ps1
   - install.sh
 gist: A machine with no model settings is set up, not reported on, and opencode's can be copied

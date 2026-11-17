@@ -17,9 +17,6 @@ paths:
   - apps/troupe_plane/lib/troupe/plane/harness.ex
   - clients/tui/lib/troupe/cli/model_config.ex
   - clients/tui/lib/troupe/settings.ex
-  - docs/admin/configuration.md
-  - docs/user/configuration.md
-  - docs/admin/client-config.md
 symbols:
   - Troupe.Protocol.Organisation
   - Troupe.Config.Org

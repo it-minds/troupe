@@ -22,14 +22,6 @@ paths:
   - apps/troupe_core/lib/troupe/commands.ex
   - apps/troupe_gateway/lib/troupe/gateway/artifacts.ex
   - apps/troupe_gateway/lib/troupe/gateway/memory.ex
-  - clients/tui/test/troupe/artifacts_screen_test.exs
-  - clients/tui/test/troupe/memory_screen_test.exs
-  - clients/tui/test/troupe/memory_levels_screen_test.exs
-  - clients/tui/test/troupe/artifacts_cli_test.exs
-  - clients/tui/test/troupe/hq_inbox_test.exs
-  - docs/user/terminal-screen.md
-  - docs/user/cli-reference.md
-  - clients/tui/README.md
 symbols:
   - Troupe.UI.TUI.ArtifactsPage
   - Troupe.UI.TUI.MemoryPage

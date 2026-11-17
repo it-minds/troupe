@@ -19,7 +19,6 @@ paths:
   - apps/troupe_plane/lib/troupe/plane/client_versions.ex
   - apps/troupe_plane/lib/troupe/plane/web/router.ex
   - docs/overrides/main.html
-  - PROTOCOL.md
 symbols:
   - parseAppLink
   - appLink

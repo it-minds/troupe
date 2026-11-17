@@ -6,11 +6,8 @@ status: accepted
 issue: 249
 paths:
   - apps/troupe_operator/lib/troupe/operator/resources.ex
-  - apps/troupe_operator/test/troupe/operator/resources_test.exs
   - apps/troupe_worker/lib/troupe/worker/plane/link.ex
   - apps/troupe_worker/lib/troupe/worker/session/restore.ex
-  - apps/troupe_worker/test/troupe/worker/object_store_unreachable_test.exs
-  - apps/troupe_worker/test/troupe/worker/plane_link_test.exs
 gist: With Cilium, the operator admits the installation's own OpenBao and object store by name when they are outside the cluster
 ---
 

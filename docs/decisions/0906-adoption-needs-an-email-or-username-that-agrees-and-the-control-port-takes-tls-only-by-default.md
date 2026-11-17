@@ -17,13 +17,6 @@ paths:
   - charts/troupe/values.yaml
   - charts/troupe/templates/_helpers.tpl
   - clients/gui/apps/console/src/views/Profiles.tsx
-  - apps/troupe_plane/test/troupe/plane/identity_gaps_test.exs
-  - apps/troupe_plane/test/troupe/plane/control_tls_test.exs
-  - apps/troupe_operator/test/troupe/operator/reconciler_test.exs
-  - clients/gui/apps/console/test/profiles.test.tsx
-  - docs/admin/routine-tasks.md
-  - docs/admin/authentik.md
-  - docs/admin/integrations.md
 symbols:
   - Troupe.Plane.Identity.adoption/3
   - Troupe.Plane.Identity.lookalikes/0

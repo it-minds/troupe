@@ -29,12 +29,9 @@ paths:
   - clients/gui/packages/client/src/admin.ts
   - clients/gui/packages/client/src/instructions.ts
   - clients/gui/packages/client/src/own.ts
-  - clients/gui/packages/client/test/support/admin.ts
   - clients/gui/apps/console/src/views/Memory.tsx
   - clients/gui/apps/console/src/views/Overview.tsx
   - clients/gui/apps/desktop/src/views/OwnMemory.tsx
-  - PROTOCOL.md
-  - docs/admin/console.md
 ---
 
 #55's last slice. Decisions 922, 929, 943, 947, 951, 954, 957 and 976 gave every level a

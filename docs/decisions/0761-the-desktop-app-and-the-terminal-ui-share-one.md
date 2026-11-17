@@ -10,12 +10,8 @@ paths:
   - apps/troupe_core/lib/troupe/config/layers.ex
   - apps/troupe_core/lib/troupe/config/migrate.ex
   - apps/troupe_core/lib/troupe/config/settings.ex
-  - apps/troupe_core/test/troupe/config/settings_test.exs
-  - apps/troupe_gateway/test/troupe/gateway/model_settings_test.exs
-  - apps/troupe_gateway/test/troupe/gateway/shared_settings_test.exs
   - clients/gui/apps/desktop/src/shared.ts
   - clients/tui/lib/troupe/settings.ex
-  - clients/tui/test/troupe/shared_settings_test.exs
 gist: "The desktop app and the terminal UI share one set of settings: `config.yaml` at the ladder's scopes, served by the daemon with where each value…"
 ---
 

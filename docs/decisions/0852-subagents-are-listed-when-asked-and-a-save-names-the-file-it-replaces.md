@@ -6,17 +6,14 @@ status: accepted
 issue: 565
 supersedes: [841]
 paths:
-  - PROTOCOL.md
   - apps/troupe_protocol/lib/troupe/protocol/schema.ex
   - apps/troupe_gateway/lib/troupe/gateway/agents.ex
   - apps/troupe_core/lib/troupe/agent/local.ex
   - apps/troupe_core/lib/troupe/agent/definitions.ex
   - apps/troupe_core/lib/troupe/onboard.ex
-  - apps/troupe_gateway/test/troupe/gateway/agents_mend_test.exs
   - clients/tui/lib/troupe/ui/tui/agents.ex
   - clients/tui/lib/troupe/ui/tui/server.ex
   - clients/tui/lib/troupe/ui/headless/printer.ex
-  - clients/tui/test/troupe/agents_mend_test.exs
   - clients/gui/packages/client/src/agents.ts
   - clients/gui/packages/client/src/daemon.ts
   - clients/gui/packages/client/src/transcript.ts
@@ -25,7 +22,6 @@ paths:
   - clients/gui/apps/desktop/src/views/CommandPalette.tsx
   - clients/gui/apps/desktop/src/views/LocalControls.tsx
   - clients/gui/apps/desktop/src/views/Session.tsx
-  - clients/gui/apps/desktop/test/palette-agents-watch.test.tsx
 symbols:
   - Troupe.Agent.Local.broken/3
   - Troupe.Agent.Local.hash/1

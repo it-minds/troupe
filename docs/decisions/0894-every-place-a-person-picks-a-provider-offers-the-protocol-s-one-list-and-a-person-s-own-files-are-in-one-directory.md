@@ -32,8 +32,6 @@ paths:
   - charts/troupe/crds/workerprofile.yaml
   - apps/troupe_operator/lib/troupe/operator/resources.ex
   - .github/workflows/cluster.yml
-  - docs/user/configuration/*.md
-  - apps/troupe_core/test/troupe/config/cookbook_test.exs
 symbols:
   - Troupe.Protocol.ProviderTypes.wire/0
   - Troupe.Setup.kinds/0

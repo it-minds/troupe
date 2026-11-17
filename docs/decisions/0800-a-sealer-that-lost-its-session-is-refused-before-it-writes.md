@@ -5,13 +5,8 @@ date: 2026-10-06
 status: accepted
 issue: 441
 paths:
-  - ARCHITECTURE.md
-  - PROTOCOL.md
   - apps/troupe_gateway/lib/troupe/gateway/private.ex
-  - apps/troupe_gateway/test/support/fake_plane.ex
-  - apps/troupe_gateway/test/troupe/gateway/private_test.exs
   - apps/troupe_plane/lib/troupe/plane/harness.ex
-  - apps/troupe_plane/test/troupe/plane/private_sessions_test.exs
   - apps/troupe_protocol/lib/troupe/sessions/sealer.ex
 symbols:
   - Troupe.Gateway.Private.store/3

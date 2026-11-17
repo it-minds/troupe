@@ -5,9 +5,7 @@ date: 2026-10-05
 status: accepted
 issue: 386
 paths:
-  - PROTOCOL.md
   - apps/troupe_gateway/lib/troupe/gateway/private.ex
-  - apps/troupe_gateway/test/troupe/gateway/private_test.exs
 gist: "A daemon carries on, registers and seals a private session only for the person it belongs to: somebody else's link leaves the first person's…"
 ---
 

@@ -25,8 +25,6 @@ paths:
   - clients/gui/packages/client/src/daemon.ts
   - clients/gui/apps/desktop/src/views/Instructions.tsx
   - clients/gui/apps/console/src/views/Mine.tsx
-  - PROTOCOL.md
-  - docs/user/memory.md
 symbols:
   - Troupe.Plane.Memory.own/1
   - Troupe.Plane.Memory.save_own/4

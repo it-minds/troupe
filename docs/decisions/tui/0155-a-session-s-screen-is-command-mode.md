@@ -12,11 +12,7 @@ paths:
   - clients/tui/lib/troupe/client.ex
   - clients/tui/lib/troupe/client/daemon.ex
   - clients/tui/lib/troupe/client/remote.ex
-  - clients/tui/test/troupe/command_mode_test.exs
-  - clients/tui/README.md
-  - clients/tui/CLAUDE.md
   - apps/troupe_core/lib/troupe/commands/local.ex
-  - clients/tui/test/troupe/project_command_test.exs
 symbols:
   - Troupe.Client.start_command/5
   - Troupe.Commands.defined/1

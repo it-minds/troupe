@@ -15,9 +15,6 @@ paths:
   - clients/gui/apps/desktop/package.json
   - clients/gui/docs/design/themes/afterglow.tokens.json
   - clients/gui/packages/client/src/transcript.ts
-  - clients/gui/apps/desktop/test/code-frames.test.tsx
-  - clients/gui/apps/desktop/test/diagram.test.tsx
-  - docs/design/frames.md
 symbols:
   - useHighlight
   - drawMermaid

@@ -15,9 +15,6 @@ paths:
   - apps/troupe_core/lib/troupe/log/fold.ex
   - apps/troupe_protocol/lib/troupe/protocol/schema.ex
   - protocol/schema/v1/events/llm_request.json
-  - apps/troupe_core/test/troupe/agent/stable_tools_test.exs
-  - apps/troupe_core/test/support/fake_openai.exs
-  - PROTOCOL.md
 symbols:
   - Troupe.Agent.Hold
   - Troupe.Skills.found/3

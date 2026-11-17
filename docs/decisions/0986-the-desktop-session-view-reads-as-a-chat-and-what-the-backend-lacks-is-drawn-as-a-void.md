@@ -15,7 +15,6 @@ paths:
   - clients/gui/packages/client/src/transcript.ts
   - clients/gui/packages/client/src/session.ts
   - clients/gui/packages/client/src/daemon.ts
-  - clients/gui/docs/design/DESIGN.md
   - clients/gui/docs/design/session-chat.dc.html
 symbols:
   - Composer

@@ -5,13 +5,8 @@ date: 2026-11-13
 status: accepted
 paths:
   - apps/troupe_worker/lib/troupe/worker/client_credentials.ex
-  - apps/troupe_worker/test/support/fake_identity_provider.ex
-  - apps/troupe_worker/test/troupe/worker/client_credentials_test.exs
   - apps/troupe_protocol/lib/troupe/worker_profile.ex
-  - apps/troupe_protocol/test/troupe/worker_profile_identity_test.exs
   - charts/troupe/crds/workerprofile.yaml
-  - docs/admin/profile-options.md
-  - docs/admin/mcp-identity-keys.md
   - clients/gui/apps/console/src/views/Profiles.tsx
 gist: The assertion header carries x5t#S256 and kid alike; iss/sub are spec.mcpIdentities[].subject or the clientId; jti a UUID v4; renew 5 min (or 1/4 life) early
 ---

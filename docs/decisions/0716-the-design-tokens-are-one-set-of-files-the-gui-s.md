@@ -8,8 +8,6 @@ paths:
   - .github/workflows/ci.yml
   - apps/troupe_plane/lib/mix/tasks/troupe.theme.ex
   - apps/troupe_plane/lib/troupe/plane/web/page.ex
-  - docs/developer/architecture.md
-  - docs/developer/build.md
 gist: The design tokens are one set of files, the GUI's; the plane's front page and the TUI are generated from them, and the front page stays in Signal
 ---
 

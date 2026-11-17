@@ -7,8 +7,6 @@ issue: 936
 supersedes: [877]
 paths:
   - clients/gui/apps/desktop/src/styles.css
-  - clients/gui/apps/desktop/test/code-frames.test.tsx
-  - docs/design/frames.md
 gist: "Frames fit their content between the 78ch measure and the column; prose words stay at 78ch, code, diffs, tables and tool output widen to the column, then scroll in the frame"
 ---
 

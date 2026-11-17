@@ -6,7 +6,6 @@ status: accepted
 issue: 1020
 paths:
   - apps/troupe_protocol/lib/troupe/protocol/schema.ex
-  - PROTOCOL.md
   - apps/troupe_worker/lib/troupe/worker/auth.ex
   - apps/troupe_gateway/lib/troupe/gateway/dispatch.ex
   - apps/troupe_gateway/lib/troupe/gateway/session.ex

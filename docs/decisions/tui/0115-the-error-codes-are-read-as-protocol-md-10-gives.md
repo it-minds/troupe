@@ -5,7 +5,6 @@ date: 2026-09-25
 status: accepted
 supersedes: [81]
 paths:
-  - PROTOCOL.md
   - apps/troupe_protocol/lib/troupe/protocol/error.ex
   - clients/tui/lib/troupe/remote/rpc.ex
 gist: The error codes are read as PROTOCOL.md §10 gives them (this supersedes Decision 81)

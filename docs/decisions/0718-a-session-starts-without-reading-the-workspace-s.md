@@ -8,7 +8,6 @@ paths:
   - apps/troupe_core/lib/troupe/session.ex
   - apps/troupe_core/lib/troupe/session/files.ex
   - apps/troupe_core/lib/troupe/session/watcher.ex
-  - apps/troupe_core/test/troupe/watch/watch_session_test.exs
 gist: A session starts without reading the workspace's ignore rules; watching reads them when it starts
 ---
 

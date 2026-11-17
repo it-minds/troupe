@@ -5,7 +5,6 @@ date: 2026-09-20
 status: accepted
 paths:
   - clients/tui/CLAUDE.md
-  - clients/tui/test/troupe/branch_client_test.exs
 gist: A branch is a session the parent's screen shows as a window
 ---
 

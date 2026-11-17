@@ -14,25 +14,15 @@ paths:
   - apps/troupe_core/lib/troupe/skills.ex
   - apps/troupe_core/lib/troupe/skills/local.ex
   - apps/troupe_core/lib/troupe/tools.ex
-  - apps/troupe_core/test/troupe/mcp/import_test.exs
-  - apps/troupe_core/test/troupe/mcp/local_test.exs
-  - apps/troupe_core/test/troupe/mcp_layers_test.exs
-  - apps/troupe_core/test/troupe/mcp_local_test.exs
-  - apps/troupe_core/test/troupe/skills/local_test.exs
   - apps/troupe_gateway/lib/troupe/gateway/dispatch.ex
   - apps/troupe_gateway/lib/troupe/gateway/local_sources.ex
-  - apps/troupe_gateway/test/troupe/gateway/local_sources_test.exs
   - apps/troupe_protocol/lib/troupe/protocol/schema.ex
   - clients/gui/apps/desktop/src/views/ConnectScreen.tsx
-  - clients/gui/apps/desktop/test/tools-and-skills.test.tsx
   - clients/gui/packages/client/src/daemon.ts
-  - clients/gui/packages/client/test/local-sources.test.ts
-  - clients/gui/packages/client/test/support/daemon.ts
   - clients/tui/lib/troupe/client.ex
   - clients/tui/lib/troupe/client/daemon.ex
   - clients/tui/lib/troupe/ui/tui/server.ex
   - clients/tui/lib/troupe/ui/tui/view.ex
-  - clients/tui/test/troupe/mcp_page_test.exs
 gist: A person's own MCP servers and skills live in two layers beside `config.yaml`, import from the files other tools keep, and a workspace's servers…
 ---
 

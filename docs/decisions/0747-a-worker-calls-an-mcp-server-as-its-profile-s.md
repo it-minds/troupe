@@ -7,12 +7,9 @@ issue: 315
 paths:
   - apps/troupe_core/lib/troupe/mcp.ex
   - apps/troupe_core/lib/troupe/mcp/tool.ex
-  - apps/troupe_core/test/troupe/mcp_test.exs
   - apps/troupe_operator/lib/troupe/operator/names.ex
   - apps/troupe_operator/lib/troupe/operator/reconciler.ex
   - apps/troupe_operator/lib/troupe/operator/resources.ex
-  - apps/troupe_operator/test/troupe/operator/reconciler_test.exs
-  - apps/troupe_operator/test/troupe/operator/resources_test.exs
   - apps/troupe_plane/lib/troupe/plane/admin.ex
   - apps/troupe_plane/lib/troupe/plane/bundles.ex
   - apps/troupe_plane/lib/troupe/plane/provision.ex
@@ -21,19 +18,10 @@ paths:
   - apps/troupe_protocol/lib/troupe/mcp/server.ex
   - apps/troupe_protocol/lib/troupe/protocol/bundle.ex
   - apps/troupe_protocol/lib/troupe/worker_profile.ex
-  - apps/troupe_protocol/test/troupe/kms/open_bao_test.exs
-  - apps/troupe_protocol/test/troupe/protocol/bundle_test.exs
-  - apps/troupe_protocol/test/troupe/worker_profile_identity_test.exs
   - apps/troupe_worker/lib/troupe/worker/client_credentials.ex
-  - apps/troupe_worker/test/support/fake_identity_provider.ex
-  - apps/troupe_worker/test/troupe/worker/client_credentials_test.exs
   - charts/troupe/templates/operator-rbac.yaml
   - config/runtime.exs
   - dev/kind/dependencies.yaml
-  - docs/admin/bundles-and-triggers.md
-  - docs/admin/profiles-and-policy.md
-  - docs/admin/roles-and-permissions.md
-  - docs/admin/profile-options.md
 gist: A worker calls an MCP server as its profile's own identity, by OAuth client credentials with an assertion signed through OpenBao transit
 ---
 

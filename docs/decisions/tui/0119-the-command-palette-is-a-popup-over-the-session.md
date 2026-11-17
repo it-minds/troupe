@@ -7,7 +7,6 @@ issue: 124
 paths:
   - clients/tui/lib/troupe/ui/tui/server.ex
   - clients/tui/lib/troupe/ui/tui/view.ex
-  - clients/tui/test/troupe/command_palette_test.exs
 gist: The command palette is a popup over the session, opened by `/` on an empty line, Ctrl-K with nothing typed, or `/help`, and it is a view over the…
 ---
 

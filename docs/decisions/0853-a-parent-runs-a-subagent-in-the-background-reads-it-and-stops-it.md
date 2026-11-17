@@ -19,7 +19,6 @@ paths:
   - apps/troupe_core/priv/bench/budgets.json
   - apps/troupe_core/lib/troupe/sessions/index.ex
   - apps/troupe_protocol/lib/troupe/protocol/schema.ex
-  - PROTOCOL.md
   - clients/tui/lib/troupe/remote/translate.ex
   - clients/tui/lib/troupe/ui/tui/model.ex
   - clients/gui/packages/client/src/transcript.ts

@@ -15,16 +15,6 @@ paths:
   - clients/tui/lib/troupe/cli/config_setup.ex
   - install.sh
   - install.ps1
-  - docs/user/configuration.md
-  - docs/user/instructions.md
-  - apps/troupe_core/test/troupe/instructions_test.exs
-  - apps/troupe_core/test/troupe/instructions_prompt_test.exs
-  - apps/troupe_core/test/troupe/instructions_check_test.exs
-  - apps/troupe_core/test/troupe/instructions/front_matter_test.exs
-  - apps/troupe_core/test/troupe/config_providers_test.exs
-  - apps/troupe_gateway/test/troupe/gateway/context_test.exs
-  - clients/tui/test/troupe/context_command_test.exs
-  - clients/tui/test/troupe/config_setup_test.exs
 symbols:
   - Troupe.Instructions.load/3
   - Troupe.Instructions.FrontMatter

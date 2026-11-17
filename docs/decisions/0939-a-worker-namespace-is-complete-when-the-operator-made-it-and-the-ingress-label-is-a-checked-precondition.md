@@ -9,10 +9,6 @@ paths:
   - apps/troupe_operator/lib/troupe/operator/ingress_check.ex
   - apps/troupe_operator/lib/troupe/operator/reconciler.ex
   - apps/troupe_operator/lib/troupe/operator/settings.ex
-  - apps/troupe_operator/test/troupe/operator/worker_secrets_test.exs
-  - apps/troupe_operator/test/troupe/operator/ingress_check_test.exs
-  - apps/troupe_operator/test/e2e/no_hand_steps_test.exs
-  - apps/troupe_operator/test/e2e/credentials_test.exs
   - apps/troupe_protocol/lib/mix/tasks/troupe.openbao.policy.ex
   - charts/troupe/crds/workerprofile.yaml
   - charts/troupe/templates/operator-rbac.yaml
@@ -27,13 +23,6 @@ paths:
   - scripts/kind-up
   - scripts/remote-up
   - clients/gui/apps/console/src/views/Overview.tsx
-  - docs/admin/configuration.md
-  - docs/admin/installing.md
-  - docs/admin/README.md
-  - docs/admin/monitoring.md
-  - docs/admin/security.md
-  - docs/admin/routine-tasks.md
-  - docs/developer/conventions.md
 symbols:
   - Troupe.Operator.WorkerSecrets
   - Troupe.Operator.IngressCheck

@@ -6,7 +6,6 @@ status: accepted
 issue: 390
 paths:
   - .github/workflows/ci.yml
-  - PROTOCOL.md
   - apps/troupe_core/lib/mix/tasks/troupe.bench.ex
   - apps/troupe_core/lib/troupe/agent/spend.ex
   - apps/troupe_core/lib/troupe/bench.ex
@@ -16,10 +15,7 @@ paths:
   - apps/troupe_core/lib/troupe/bench/runner.ex
   - apps/troupe_core/lib/troupe/bench/scenario.ex
   - apps/troupe_core/lib/troupe/bench/scenarios.ex
-  - apps/troupe_core/test/troupe/bench_test.exs
   - clients/tui/lib/troupe/cli/bench.ex
-  - clients/tui/test/troupe/bench_cli_test.exs
-  - docs/developer/bench.md
   - scripts/ci
 gist: "`troupe bench` measures the harness offline against budgets kept in one file, and CI fails past one"
 ---

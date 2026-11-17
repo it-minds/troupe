@@ -18,7 +18,6 @@ paths:
   - apps/troupe_gateway/lib/troupe/gateway/dispatch.ex
   - apps/troupe_worker/lib/troupe/worker/auth.ex
   - apps/troupe_protocol/lib/troupe/protocol/schema.ex
-  - PROTOCOL.md
 symbols:
   - Troupe.Plane.Sessions.archive/3
   - Troupe.archive_session/2

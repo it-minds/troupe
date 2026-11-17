@@ -5,12 +5,9 @@ date: 2026-10-04
 status: accepted
 issue: 365
 paths:
-  - ARCHITECTURE.md
-  - PROTOCOL.md
   - apps/troupe_gateway/lib/troupe/gateway/connection.ex
   - apps/troupe_gateway/lib/troupe/gateway/dispatch.ex
   - apps/troupe_gateway/lib/troupe/gateway/private.ex
-  - apps/troupe_gateway/test/troupe/gateway/private_test.exs
   - clients/tui/lib/troupe/cli/remote.ex
 gist: A client signed in to a plane hands the daemon its plane token when it links it, when it reaches it, when the token is renewed and when the daemon…
 ---

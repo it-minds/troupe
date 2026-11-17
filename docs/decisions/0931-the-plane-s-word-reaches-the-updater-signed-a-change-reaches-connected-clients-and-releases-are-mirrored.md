@@ -27,9 +27,6 @@ paths:
   - apps/troupe_gateway/lib/troupe/gateway/plane.ex
   - apps/troupe_gateway/lib/troupe/gateway/policy.ex
   - clients/tui/lib/troupe/remote/plane.ex
-  - PROTOCOL.md
-  - docs/user/updating.md
-  - docs/admin/routine-tasks.md
 symbols:
   - Troupe.Gateway.Policy
   - Troupe.Session.Organisation

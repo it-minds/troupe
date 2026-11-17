@@ -13,9 +13,7 @@ paths:
   - apps/troupe_plane/lib/troupe/plane/artifacts/shares.ex
   - apps/troupe_plane/lib/troupe/plane/harness.ex
   - apps/troupe_plane/priv/repo/migrations/20261116001007_artifact_people_and_comments.exs
-  - apps/troupe_plane/test/troupe/plane/artifact_people_test.exs
   - apps/troupe_worker/lib/troupe/worker/plane/commands.ex
-  - apps/troupe_worker/test/troupe/worker/artifact_comments_test.exs
   - apps/troupe_gateway/lib/troupe/gateway/artifacts.ex
   - apps/troupe_gateway/lib/troupe/gateway/dispatch.ex
   - apps/troupe_protocol/lib/troupe/protocol/schema.ex
@@ -29,8 +27,6 @@ paths:
   - clients/tui/lib/troupe/ui/tui/artifacts_page.ex
   - clients/tui/lib/troupe/remote/translate.ex
   - clients/gui/packages/client/src/transcript.ts
-  - PROTOCOL.md
-  - docs/user/artifacts.md
 symbols:
   - Troupe.Plane.Artifacts.People
   - Troupe.Plane.Artifacts.Comments

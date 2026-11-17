@@ -11,7 +11,6 @@ paths:
   - clients/tui/lib/troupe/ui/tui/server.ex
   - clients/tui/lib/troupe/ui/tui/model.ex
   - clients/tui/lib/troupe/ui/tui/view.ex
-  - clients/tui/test/troupe/command_seams_test.exs
 symbols:
   - Troupe.Client.Daemon.dismissed_branches/1
   - Troupe.Client.dismissed_branches/1

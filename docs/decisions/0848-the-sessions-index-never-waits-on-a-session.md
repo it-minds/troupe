@@ -5,7 +5,6 @@ date: 2026-10-11
 status: accepted
 paths:
   - apps/troupe_core/lib/troupe/sessions/index.ex
-  - apps/troupe_core/test/troupe/sessions/index_test.exs
 symbols:
   - Troupe.Sessions.Index
 gist: Nothing in the index's process calls a session or reads a log; probes, stops and reads run in its tasks, and a stopping session is hidden and never stopped twice

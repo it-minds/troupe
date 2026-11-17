@@ -18,11 +18,6 @@ paths:
   - clients/gui/packages/client/src/memory.ts
   - clients/gui/packages/client/src/daemon.ts
   - clients/gui/apps/desktop/src/views/Local.tsx
-  - PROTOCOL.md
-  - apps/troupe_gateway/test/troupe/gateway/enclosing_repository_test.exs
-  - apps/troupe_gateway/test/troupe/gateway/worktrees_test.exs
-  - apps/troupe_core/test/troupe/tools/remember_test.exs
-  - clients/tui/test/troupe/workspace_in_another_repository_test.exs
 symbols:
   - Troupe.Git.ignored?/1
   - Troupe.Session.Memory.locate/1

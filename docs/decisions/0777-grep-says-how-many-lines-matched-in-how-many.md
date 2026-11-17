@@ -5,7 +5,6 @@ date: 2026-10-04
 status: accepted
 paths:
   - apps/troupe_core/lib/troupe/tools/grep.ex
-  - apps/troupe_core/test/troupe/tools/file_tools_test.exs
 gist: "`grep` says how many lines matched in how many files before it lists them, and a task-list update goes with the call that does the work, not as a…"
 ---
 

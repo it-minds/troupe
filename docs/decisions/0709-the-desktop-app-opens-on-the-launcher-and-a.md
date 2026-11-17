@@ -7,9 +7,6 @@ issue: 52
 paths:
   - clients/gui/apps/desktop/src/App.tsx
   - clients/gui/apps/desktop/src/views/Launcher.tsx
-  - clients/gui/apps/desktop/test/launcher.test.tsx
-  - clients/gui/apps/desktop/test/signin.test.tsx
-  - clients/gui/docs/design/DESIGN.md
 gist: The desktop app opens on the launcher, and a person who would rather start on the list says so once
 ---
 

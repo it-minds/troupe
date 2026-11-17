@@ -11,9 +11,6 @@ paths:
   - apps/troupe_core/lib/troupe/mcp/local.ex
   - apps/troupe_core/lib/troupe/mcp/trust.ex
   - apps/troupe_core/lib/troupe/session.ex
-  - apps/troupe_core/test/troupe/config/explain_test.exs
-  - apps/troupe_core/test/troupe/config/layers_test.exs
-  - docs/developer/local-setup.md
 gist: A config file has one key table, is read strictly, and says where each value came from
 ---
 

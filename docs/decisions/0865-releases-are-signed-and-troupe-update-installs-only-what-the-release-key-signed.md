@@ -15,7 +15,6 @@ paths:
   - apps/troupe_gateway/lib/troupe/gateway/idle.ex
   - install.sh
   - install.ps1
-  - test/fixtures/release/
 symbols:
   - Troupe.Release.Minisign
   - Troupe.Release.Manifest

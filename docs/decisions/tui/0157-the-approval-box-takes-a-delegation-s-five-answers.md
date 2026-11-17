@@ -12,7 +12,6 @@ paths:
   - clients/tui/lib/troupe/remote/worker.ex
   - clients/tui/lib/troupe/client.ex
   - clients/tui/lib/troupe/ui/headless/printer.ex
-  - clients/tui/test/troupe/delegation_gate_test.exs
 symbols:
   - Troupe.UI.TUI.Model.gate_draft/2
   - Troupe.UI.TUI.Model.gate_answer/2

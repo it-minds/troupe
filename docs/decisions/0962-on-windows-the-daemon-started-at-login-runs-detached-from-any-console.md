@@ -6,14 +6,11 @@ status: accepted
 supersedes: [762]
 paths:
   - apps/troupe_core/lib/troupe/start_at_login.ex
-  - apps/troupe_core/test/troupe/start_at_login_test.exs
   - apps/troupe_daemon/lib/troupe/daemon/release.ex
   - apps/troupe_daemon/lib/troupe/daemon/cli.ex
   - apps/troupe_daemon/lib/troupe/daemon/application.ex
   - apps/troupe_daemon/rel/env.bat.eex
   - apps/troupe_daemon/rel/vm.args.eex
-  - apps/troupe_daemon/test/troupe/daemon/release_test.exs
-  - apps/troupe_daemon/README.md
   - clients/tui/lib/troupe/ui/setup.ex
   - clients/gui/apps/desktop/src/views/Onboarding/Daemon.tsx
 symbols:

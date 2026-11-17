@@ -14,9 +14,6 @@ paths:
   - clients/tui/lib/troupe/client.ex
   - clients/tui/lib/troupe/client/daemon.ex
   - clients/tui/lib/troupe/client/remote.ex
-  - clients/tui/test/support/fake_remote.ex
-  - clients/tui/test/troupe/client_leftovers_test.exs
-  - docs/user/terminal-screen.md
 symbols:
   - Troupe.UI.TUI.Model.always_allow?/1
   - Troupe.UI.TUI.Model.attach_artifact?/1

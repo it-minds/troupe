@@ -5,7 +5,6 @@ date: 2026-09-30
 status: accepted
 issue: 186
 paths:
-  - ARCHITECTURE.md
   - apps/troupe_plane/lib/troupe/plane/admin.ex
   - apps/troupe_plane/lib/troupe/plane/gitops.ex
   - apps/troupe_plane/lib/troupe/plane/gitops/triggers.ex
@@ -14,12 +13,8 @@ paths:
   - clients/gui/apps/console/src/views/Triggers.tsx
   - clients/gui/apps/console/src/views/Pods.tsx
   - apps/troupe_plane/priv/repo/migrations/20260930000036_gitops_triggers.exs
-  - apps/troupe_plane/test/troupe/plane/gitops_triggers_test.exs
   - charts/troupe/crds/trigger.yaml
   - charts/troupe/templates/plane-rbac.yaml
-  - docs/admin/bundles-and-triggers.md
-  - docs/admin/profiles-and-policy.md
-  - docs/admin/gitops.md
 gist: In gitops mode a repository holds the triggers too, as `Trigger` resources the plane reads; a trigger's key, runs and revisions stay the plane's
 ---
 

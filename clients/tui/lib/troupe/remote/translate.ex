@@ -316,9 +316,8 @@ defmodule Troupe.Remote.Translate do
     shell_note? = data["source"] == "shell"
     subagent_end? = data["source"] == "subagent"
 
-    # Two spellings of one vocabulary: the worker's (`llm_response`,
-    # `tool_call_started` — PROTOCOL.md §4) and the older dotted one the contract's
-    # example and the fake use. Both land on the same local events (Decision 98).
+    # The worker's vocabulary (`llm_response`, `tool_call_started` — PROTOCOL.md §4),
+    # under the protocol schema's names and no others.
     case type do
       # The note the harness gives a model whose reply was cut or empty (troupe-remote
       # Decision 659): shown as what it is rather than as the person's words.

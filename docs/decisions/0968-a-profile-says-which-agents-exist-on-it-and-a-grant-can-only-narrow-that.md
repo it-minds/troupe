@@ -7,7 +7,6 @@ paths:
   - charts/troupe/crds/workerprofile.yaml
   - apps/troupe_protocol/lib/troupe/protocol/agent_rule.ex
   - apps/troupe_protocol/lib/troupe/protocol/schema.ex
-  - apps/troupe_protocol/test/troupe/protocol/agent_rule_test.exs
   - apps/troupe_plane/lib/troupe/plane/gitops/profiles.ex
   - apps/troupe_plane/lib/troupe/plane/bundles.ex
   - apps/troupe_plane/lib/troupe/plane/harness.ex
@@ -15,17 +14,13 @@ paths:
   - apps/troupe_plane/lib/troupe/plane/admin/api.ex
   - apps/troupe_plane/lib/troupe/plane/fleet/profile.ex
   - apps/troupe_plane/lib/troupe/plane/fleet/extends.ex
-  - apps/troupe_plane/test/troupe/plane/profile_agents_rule_test.exs
   - apps/troupe_core/lib/troupe/agent/definitions.ex
   - apps/troupe_core/lib/troupe/session.ex
   - apps/troupe_core/lib/troupe.ex
-  - apps/troupe_core/test/troupe/agent/agent_rule_test.exs
   - apps/troupe_worker/lib/troupe/worker/plane/commands.ex
-  - apps/troupe_worker/test/troupe/worker/bundle_wins_test.exs
   - clients/gui/apps/console/src/views/Profiles.tsx
   - clients/gui/apps/console/src/views/ProfileAgents.tsx
   - clients/gui/packages/client/src/admin.ts
-  - docs/admin/profile-options.md
 symbols:
   - Troupe.Protocol.AgentRule
   - Troupe.Plane.Bundles.offering/3

@@ -10,7 +10,6 @@ paths:
   - apps/troupe_plane/lib/troupe/plane/artifacts/keeps.ex
   - apps/troupe_plane/lib/troupe/plane/harness.ex
   - apps/troupe_plane/priv/repo/migrations/20261116001018_artifact_keeps.exs
-  - apps/troupe_plane/test/troupe/plane/artifact_keeps_test.exs
   - apps/troupe_gateway/lib/troupe/gateway/artifacts.ex
   - apps/troupe_gateway/lib/troupe/gateway/dispatch.ex
   - apps/troupe_protocol/lib/troupe/protocol/schema.ex
@@ -18,8 +17,6 @@ paths:
   - clients/gui/packages/client/src/own.ts
   - clients/gui/packages/client/src/daemon.ts
   - clients/gui/apps/desktop/src/views/Artifacts.tsx
-  - PROTOCOL.md
-  - docs/user/artifacts.md
 symbols:
   - Troupe.Plane.Artifacts.keep/4
   - Troupe.Plane.Artifacts.Keeps

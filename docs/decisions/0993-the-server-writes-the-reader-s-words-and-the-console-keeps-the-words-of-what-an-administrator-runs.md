@@ -19,7 +19,6 @@ paths:
   - clients/gui/apps/console/src/views/bits.tsx
   - clients/gui/apps/console/src/views/Mine.tsx
   - clients/tui/lib/troupe/remote/translate.ex
-  - docs/admin/console.md
 symbols:
   - inReadersWords
   - SessionState

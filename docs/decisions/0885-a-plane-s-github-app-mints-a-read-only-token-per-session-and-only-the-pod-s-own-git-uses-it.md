@@ -15,15 +15,11 @@ paths:
   - apps/troupe_plane/lib/troupe/plane/sessions/session.ex
   - apps/troupe_plane/lib/troupe/plane/tokens.ex
   - apps/troupe_plane/priv/repo/migrations/20261012000885_github_app.exs
-  - apps/troupe_plane/test/support/fake_github.ex
-  - apps/troupe_plane/test/troupe/plane/github_test.exs
   - apps/troupe_protocol/lib/troupe/kms/policy.ex
   - apps/troupe_worker/lib/troupe/worker/git_credentials.ex
   - apps/troupe_worker/lib/troupe/worker/session/clone.ex
   - apps/troupe_worker/lib/troupe/worker/session/manager.ex
   - apps/troupe_worker/lib/troupe/worker/plane/link.ex
-  - apps/troupe_worker/test/troupe/worker/git_clone_test.exs
-  - docs/admin/github.md
 symbols:
   - Troupe.Plane.GitHub.credential/2
   - Troupe.Plane.GitHub.repository/2

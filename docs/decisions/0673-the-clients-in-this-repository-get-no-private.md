@@ -5,8 +5,6 @@ date: 2026-09-21
 status: accepted
 paths:
   - .github/workflows/ci.yml
-  - clients/tui/CLAUDE.md
-  - docs/developer/architecture.md
 gist: The clients in this repository get no private door, and four checks say so
 ---
 

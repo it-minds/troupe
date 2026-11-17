@@ -7,9 +7,7 @@ issue: 76
 paths:
   - apps/troupe_core/lib/troupe/config.ex
   - apps/troupe_core/lib/troupe/paths.ex
-  - apps/troupe_core/test/troupe/config/key_problem_test.exs
   - clients/tui/lib/troupe/ui/model_error.ex
-  - clients/tui/test/troupe/config_setup_test.exs
 gist: A first run is told the one next step, and plain `troupe` asks it before a session
 ---
 

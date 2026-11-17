@@ -7,17 +7,13 @@ issue: 898
 supersedes: [698]
 paths:
   - apps/troupe_core/lib/troupe/commands.ex
-  - apps/troupe_core/test/troupe/commands_test.exs
   - clients/tui/lib/troupe/client.ex
   - clients/tui/lib/troupe/cli.ex
   - clients/tui/lib/mix/tasks/troupe.cli.reference.ex
   - clients/tui/lib/troupe/ui/tui/view.ex
   - clients/gui/packages/client/src/types.ts
-  - clients/gui/packages/client/test/support/commands.ts
   - clients/gui/apps/desktop/src/views/CommandPalette.tsx
   - clients/gui/apps/desktop/src/views/AgentSwitch.tsx
-  - clients/gui/apps/desktop/test/command-palette.test.tsx
-  - PROTOCOL.md
 symbols:
   - Troupe.Commands.for_client/2
 gist: "summary/detail are client-neutral, summaries/details hold a client's own; tui rows are hidden by other clients; desktop agent rows switch the session like the head"

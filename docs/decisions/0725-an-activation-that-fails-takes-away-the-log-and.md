@@ -7,7 +7,6 @@ issue: 259
 paths:
   - apps/troupe_worker/lib/troupe/worker/session/manager.ex
   - apps/troupe_worker/lib/troupe/worker/session/reader.ex
-  - apps/troupe_worker/test/troupe/worker/reader_log_test.exs
 gist: An activation that fails takes away the log and the workspace it put on the pod, and leaves what it found there
 ---
 

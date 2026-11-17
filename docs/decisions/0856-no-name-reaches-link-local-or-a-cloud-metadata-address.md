@@ -6,11 +6,7 @@ status: accepted
 issue: 361
 paths:
   - apps/troupe_operator/lib/troupe/operator/resources.ex
-  - apps/troupe_operator/test/troupe/operator/resources_test.exs
   - apps/troupe_protocol/lib/troupe/worker_profile/reach.ex
-  - apps/troupe_protocol/test/troupe/worker_profile/reach_test.exs
-  - docs/admin/profiles-and-policy.md
-  - docs/admin/configuration.md
 symbols:
   - Troupe.WorkerProfile.Reach.denied/1
 gist: "With Cilium, link-local, fd00:ec2::254 and 100.100.100.200 are denied by address (but 169.254.20.10, the platform's); 100.64/10 is not public"

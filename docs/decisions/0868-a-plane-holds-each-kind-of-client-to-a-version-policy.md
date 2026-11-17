@@ -14,7 +14,6 @@ paths:
   - apps/troupe_core/lib/troupe/update.ex
   - clients/tui/lib/troupe/remote/plane.ex
   - clients/tui/lib/troupe/cli/remote.ex
-  - docs/user/updating.md
 symbols:
   - Troupe.Plane.ClientVersions
   - Troupe.Protocol.ClientUpdate

@@ -10,10 +10,7 @@ paths:
   - apps/troupe_core/lib/troupe/tools/shell.ex
   - apps/troupe_core/lib/troupe/agent/acp_agent.ex
   - config/runtime.exs
-  - apps/troupe_core/test/troupe/sandbox_test.exs
-  - apps/troupe_worker/test/troupe/worker/sandbox_test.exs
   - apps/troupe_plane/lib/troupe/plane/fleet/size_class.ex
-  - ARCHITECTURE.md
 symbols:
   - Troupe.Sandbox.required?/0
   - Troupe.Sandbox.check/0

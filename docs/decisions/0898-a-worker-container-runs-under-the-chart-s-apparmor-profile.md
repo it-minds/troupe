@@ -12,8 +12,6 @@ paths:
   - charts/troupe/values.yaml
   - apps/troupe_operator/lib/troupe/operator/settings.ex
   - apps/troupe_operator/lib/troupe/operator/resources.ex
-  - apps/troupe_operator/test/troupe/operator/settings_test.exs
-  - apps/troupe_operator/test/e2e/isolation_test.exs
   - config/runtime.exs
   - docker/Dockerfile
   - dev/kind/values.yaml
@@ -21,8 +19,6 @@ paths:
   - scripts/kind-up
   - scripts/remote-up
   - .github/workflows/cluster.yml
-  - docs/admin/installing.md
-  - docs/admin/worker-sandbox.md
 symbols:
   - Troupe.Operator.Settings.worker_apparmor/1
 gist: "worker.appArmor: Localhost troupe-worker (containerd default + mount/pivot_root, abi 3.0, more denials), loaded by the DaemonSet's MAC_ADMIN container; never Unconfined; sysctl untouched"

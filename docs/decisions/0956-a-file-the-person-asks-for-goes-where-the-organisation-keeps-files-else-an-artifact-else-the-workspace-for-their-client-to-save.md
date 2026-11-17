@@ -21,7 +21,6 @@ paths:
   - apps/troupe_core/lib/troupe/config/schema.ex
   - apps/troupe_core/lib/troupe/commands.ex
   - apps/troupe_core/priv/bench/budgets.json
-  - apps/troupe_core/test/troupe/where_a_file_goes_test.exs
   - apps/troupe_protocol/lib/troupe/mcp/server.ex
   - apps/troupe_protocol/lib/troupe/protocol/bundle.ex
   - apps/troupe_protocol/lib/troupe/protocol/schema.ex
@@ -39,12 +38,6 @@ paths:
   - clients/gui/apps/desktop/src/shell-tauri.ts
   - clients/gui/apps/desktop/src-tauri/src/file_save.rs
   - clients/gui/apps/desktop/src-tauri/capabilities/default.json
-  - clients/gui/apps/desktop/test/file-ready.test.tsx
-  - PROTOCOL.md
-  - docs/user/artifacts.md
-  - docs/user/mcp.md
-  - docs/admin/profile-options.md
-  - docs/admin/bundles-and-triggers.md
 symbols:
   - Troupe.Instructions.Harness
   - Troupe.Artifacts.ready/1

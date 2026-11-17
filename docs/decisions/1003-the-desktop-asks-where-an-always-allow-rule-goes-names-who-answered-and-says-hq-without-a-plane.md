@@ -14,14 +14,7 @@ paths:
   - clients/gui/apps/desktop/src/styles.css
   - clients/gui/packages/client/src/transcript.ts
   - clients/gui/packages/client/src/types.ts
-  - clients/gui/packages/client/test/support/commands.ts
   - apps/troupe_core/lib/troupe/commands.ex
-  - apps/troupe_core/test/troupe/commands_test.exs
-  - PROTOCOL.md
-  - clients/gui/apps/desktop/test/session-chat.test.tsx
-  - clients/gui/apps/desktop/test/people-by-name.test.tsx
-  - clients/gui/apps/desktop/test/command-palette.test.tsx
-  - clients/gui/apps/desktop/test/new-session.test.tsx
 symbols:
   - severalSteer
   - Troupe.Commands.for_client/2

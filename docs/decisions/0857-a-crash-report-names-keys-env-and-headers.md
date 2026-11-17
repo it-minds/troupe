@@ -9,7 +9,6 @@ paths:
   - apps/troupe_core/lib/troupe/mcp/stdio.ex
   - apps/troupe_core/lib/troupe/session.ex
   - apps/troupe_core/lib/troupe/session/mcp.ex
-  - apps/troupe_core/test/troupe/crash_report_test.exs
 symbols:
   - Troupe.Config.redacted/1
   - Troupe.Config.redacted_server/1

@@ -6,14 +6,12 @@ status: accepted
 issue: 1015
 supersedes: [1009]
 paths:
-  - PROTOCOL.md
   - apps/troupe_plane/lib/mix/tasks/troupe.admin.reference.ex
   - apps/troupe_plane/lib/troupe/plane/admin/api.ex
   - apps/troupe_plane/lib/troupe/plane/admin/api/method.ex
   - .github/workflows/ci.yml
   - .github/workflows/dev-check.yml
   - scripts/ci
-  - docs/developer/build.md
 gist: Section 9's admin table is written by mix troupe.admin.reference from Admin.API's %Method{}s; never edit between its markers; a method declares its role
 ---
 

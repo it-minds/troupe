@@ -16,14 +16,6 @@ paths:
   - apps/troupe_core/lib/troupe.ex
   - apps/troupe_gateway/lib/troupe/gateway/dispatch.ex
   - apps/troupe_gateway/lib/troupe/gateway/local_sources.ex
-  - apps/troupe_core/test/troupe/troupe_dir_test.exs
-  - apps/troupe_core/test/troupe/skills/local_test.exs
-  - apps/troupe_gateway/test/troupe/gateway/agents_trust_test.exs
-  - apps/troupe_gateway/test/troupe/gateway/local_sources_test.exs
-  - PROTOCOL.md
-  - docs/user/configuration.md
-  - docs/user/agents.md
-  - docs/user/mcp.md
 symbols:
   - Troupe.Workspace.within?/2
   - Troupe.Workspace.files_within/3

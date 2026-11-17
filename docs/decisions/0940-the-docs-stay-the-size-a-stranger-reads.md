@@ -1,6 +1,6 @@
 ---
 number: 940
-title: No hand-written page passes 400 lines, a page that would is split along its headings with its anchors kept, defects.md lists open defects only with their entries on pages of their own, what is closed is deleted, and a check in CI holds all of it
+title: No hand-written page passes 400 lines, a page that would is split along its headings with its anchors kept, and a check in CI holds it
 date: 2026-10-24
 status: accepted
 issue: 422
@@ -9,7 +9,7 @@ paths:
   - mkdocs.yml
   - scripts/doc-size.exs
   - .github/workflows/quick-start.yml
-gist: Pages <= 400 lines (not PROTOCOL.md, generated, docs/history/), split by heading, anchors kept; defects.md indexes open entries; closed is deleted
+gist: Pages <= 400 lines (not PROTOCOL.md, not generated), split by heading, anchors kept; scripts/doc-size.exs holds it in CI
 ---
 
 **Why.** #422's done-when says no hand-written document passes about 400 lines but the

@@ -5,7 +5,6 @@ date: 2026-09-19
 status: accepted
 supersedes: [4]
 paths:
-  - apps/troupe_daemon/README.md
   - apps/troupe_protocol/mix.exs
   - .github/workflows/native.yml
 gist: Windows is back in the matrix, on a fork of `ezstd` that builds with Zig

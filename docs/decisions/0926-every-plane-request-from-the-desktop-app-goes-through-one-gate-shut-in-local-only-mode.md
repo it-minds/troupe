@@ -6,7 +6,6 @@ status: accepted
 paths:
   - clients/gui/apps/desktop/src/mode.ts
   - clients/gui/apps/desktop/src/views/SignIn.tsx
-  - clients/gui/apps/desktop/test/local-mode.test.tsx
 symbols:
   - throughTheGate
   - newSession

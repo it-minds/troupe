@@ -5,16 +5,11 @@ date: 2026-09-25
 status: accepted
 issue: 160
 paths:
-  - ARCHITECTURE.md
-  - PROTOCOL.md
   - apps/troupe_core/lib/troupe/agent/server.ex
   - apps/troupe_core/lib/troupe/bench/live.ex
   - apps/troupe_core/lib/troupe/config.ex
-  - apps/troupe_core/test/troupe/config/prices_test.exs
   - apps/troupe_operator/lib/troupe/operator/resources.ex
-  - apps/troupe_operator/test/troupe/operator/resources_test.exs
   - clients/gui/apps/console/src/views/Profiles.tsx
-  - apps/troupe_plane/test/troupe/plane/usage_test.exs
   - apps/troupe_protocol/lib/troupe/worker_profile.ex
   - scripts/live-check
 gist: A model the catalog does not price is priced from `models.prices`, which a profile sets for its pods as `llm.prices`

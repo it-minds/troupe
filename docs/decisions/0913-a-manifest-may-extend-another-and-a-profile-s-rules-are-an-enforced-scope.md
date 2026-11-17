@@ -12,8 +12,6 @@ paths:
   - apps/troupe_operator/lib/troupe/operator/reconciler.ex
   - apps/troupe_operator/lib/troupe/operator/skip_observed.ex
   - apps/troupe_operator/lib/troupe/operator/watch.ex
-  - apps/troupe_operator/test/troupe/operator/reconciler_test.exs
-  - apps/troupe_operator/test/e2e/extends_test.exs
   - apps/troupe_plane/lib/troupe/plane/gitops.ex
   - apps/troupe_plane/lib/troupe/plane/gitops/profiles.ex
   - apps/troupe_plane/lib/troupe/plane/provision.ex
@@ -21,19 +19,13 @@ paths:
   - apps/troupe_plane/lib/troupe/plane/fleet/profile.ex
   - apps/troupe_plane/lib/troupe/plane/harness.ex
   - apps/troupe_plane/lib/troupe/plane/admin.ex
-  - apps/troupe_plane/test/support/fake_cluster.ex
-  - apps/troupe_plane/test/troupe/plane/gitops_extends_test.exs
   - apps/troupe_core/lib/troupe/config/permissions.ex
   - apps/troupe_core/lib/troupe/session/shell.ex
   - apps/troupe_worker/lib/troupe/worker/session/restore.ex
-  - apps/troupe_worker/test/troupe/worker/profile_rules_test.exs
   - clients/tui/lib/troupe/ui/tui/model.ex
   - clients/gui/packages/client/src/config.ts
   - clients/gui/apps/console/src/views/Profiles.tsx
   - clients/gui/apps/console/src/views/RuleLists.tsx
-  - docs/admin/profiles-and-policy.md
-  - docs/admin/gitops.md
-  - docs/admin/profile-options.md
 symbols:
   - Troupe.WorkerProfile.in_effect/1
   - Troupe.Plane.Gitops.Profiles.order/1

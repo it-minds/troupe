@@ -8,15 +8,10 @@ paths:
   - apps/troupe_core/lib/troupe/registry.ex
   - apps/troupe_core/lib/troupe/session.ex
   - apps/troupe_core/lib/troupe/session/mcp.ex
-  - apps/troupe_core/test/support/fake_mcp.exs
-  - apps/troupe_core/test/support/fake_oauth.exs
-  - apps/troupe_core/test/troupe/mcp_handshake_test.exs
-  - apps/troupe_core/test/troupe/mcp_test.exs
   - apps/troupe_protocol/lib/troupe/mcp/client.ex
   - apps/troupe_protocol/lib/troupe/mcp/sessions.ex
   - apps/troupe_worker/lib/troupe/worker/application.ex
   - apps/troupe_worker/lib/troupe/worker/mcp.ex
-  - apps/troupe_worker/test/troupe/worker/mcp_test.exs
 gist: An MCP server is opened with the lifecycle's handshake, and the session it issues is kept by whoever calls it, per server and credential, opened…
 ---
 

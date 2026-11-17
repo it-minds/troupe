@@ -16,8 +16,6 @@ paths:
   - clients/gui/scripts/tokens.ts
   - clients/gui/scripts/fake-deployment.ts
   - clients/gui/packages/client/src/transcript.ts
-  - clients/gui/apps/desktop/test/frames.test.tsx
-  - docs/design/frames.md
 symbols:
   - layout
   - curtainLine

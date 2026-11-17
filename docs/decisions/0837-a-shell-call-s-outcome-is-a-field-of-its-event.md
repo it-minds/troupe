@@ -11,8 +11,6 @@ paths:
   - apps/troupe_core/lib/troupe/agent/server.ex
   - apps/troupe_core/lib/troupe/log/fold.ex
   - apps/troupe_protocol/lib/troupe/protocol/schema.ex
-  - apps/troupe_core/test/troupe/tools/shell_outcome_test.exs
-  - apps/troupe_worker/test/troupe/worker/sandbox_test.exs
 symbols:
   - Troupe.Tools.Shell.run/2
   - Troupe.Tools.execute/3

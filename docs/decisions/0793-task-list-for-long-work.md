@@ -8,8 +8,6 @@ paths:
   - apps/troupe_core/lib/troupe/tools.ex
   - apps/troupe_core/lib/troupe/tool.ex
   - apps/troupe_core/lib/troupe/tools/todo.ex
-  - apps/troupe_core/priv/agents/build.md
-  - apps/troupe_core/priv/agents/implementer.md
 symbols:
   - Troupe.Tools.available/2
   - Troupe.Tool.Ctx

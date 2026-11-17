@@ -6,7 +6,6 @@ status: accepted
 issue: 58
 paths:
   - apps/troupe_gateway/lib/troupe/gateway/remote.ex
-  - apps/troupe_gateway/test/troupe/gateway/remote_test.exs
   - apps/troupe_core/lib/troupe/start_at_login.ex
   - clients/tui/lib/troupe/client/steering.ex
   - clients/tui/lib/troupe/client/remote.ex
@@ -15,17 +14,11 @@ paths:
   - clients/tui/lib/troupe/ui/tui/model.ex
   - clients/tui/lib/troupe/ui/tui/view.ex
   - clients/tui/lib/troupe/ui/tui/server.ex
-  - clients/tui/test/troupe/steer_command_test.exs
   - clients/gui/packages/client/src/fleet.ts
   - clients/gui/apps/desktop/src/views/Remote.tsx
   - clients/gui/apps/desktop/src/views/Approval.tsx
   - clients/gui/apps/console/src/views/Remote.tsx
   - .github/workflows/native.yml
-  - apps/troupe_core/test/troupe/release/desktop_update_test.exs
-  - docs/developer/code-signing.md
-  - docs/developer/signing-day.md
-  - docs/user/sessions.md
-  - PROTOCOL.md
 symbols:
   - Troupe.StartAtLogin.enabled?/1
   - Troupe.Client.Steering.state/1

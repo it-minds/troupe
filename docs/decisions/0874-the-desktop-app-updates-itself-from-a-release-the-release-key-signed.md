@@ -19,7 +19,6 @@ paths:
   - clients/gui/packages/client/src/update.ts
   - clients/tui/lib/troupe/remote/plane.ex
   - clients/tui/lib/troupe/ui/hq.ex
-  - docs/user/updating.md
 symbols:
   - Troupe.Protocol.ClientUpdate.suggestion/2
 gist: "One release key signs the desktop update too; the app trusts only keys compiled in, checks the manifest first, never moves back, asks before restarting"

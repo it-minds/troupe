@@ -12,10 +12,7 @@ paths:
   - apps/troupe_core/lib/troupe/sessions/index.ex
   - apps/troupe_core/lib/troupe/sessions/unseen.ex
   - apps/troupe_core/lib/troupe/tools/output.ex
-  - apps/troupe_core/test/troupe/sessions/lifecycle_test.exs
-  - apps/troupe_core/test/troupe/sessions/index_test.exs
   - apps/troupe_gateway/lib/troupe/gateway/dispatch.ex
-  - apps/troupe_gateway/test/troupe/gateway/stopping_session_test.exs
 symbols:
   - Troupe.stop_session/1
   - Troupe.activate/2

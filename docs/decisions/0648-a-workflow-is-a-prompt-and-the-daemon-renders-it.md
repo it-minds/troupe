@@ -4,7 +4,6 @@ title: A workflow is a prompt, and the daemon renders it
 date: 2026-09-20
 status: accepted
 paths:
-  - apps/troupe_gateway/test/troupe/gateway/workflows_test.exs
   - clients/tui/lib/troupe/client/daemon.ex
 gist: A workflow is a prompt, and the daemon renders it
 ---

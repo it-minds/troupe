@@ -6,7 +6,6 @@ status: accepted
 paths:
   - apps/troupe_core/lib/troupe/config.ex
   - apps/troupe_core/lib/troupe/workspace.ex
-  - apps/troupe_core/test/troupe/read_roots_test.exs
 gist: The read tools may reach outside the workspace where the config says, and only the read tools
 ---
 

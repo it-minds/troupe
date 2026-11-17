@@ -15,16 +15,13 @@ paths:
   - apps/troupe_core/lib/troupe/config/schema.ex
   - apps/troupe_core/lib/troupe/workflow.ex
   - apps/troupe_core/lib/troupe.ex
-  - apps/troupe_core/priv/agents/orchestrate.md
   - apps/troupe_protocol/lib/troupe/protocol/agent_definition.ex
   - apps/troupe_protocol/lib/troupe/protocol/schema.ex
   - apps/troupe_gateway/lib/troupe/gateway/dispatch.ex
   - apps/troupe_gateway/lib/troupe/gateway/agents.ex
-  - apps/troupe_core/test/troupe/tools/delegation_gate_test.exs
   - clients/gui/packages/client/src/transcript.ts
   - clients/gui/packages/client/src/session.ts
   - clients/gui/apps/desktop/src/views/Approval.tsx
-  - clients/gui/apps/desktop/test/delegation-gate.test.tsx
 symbols:
   - Troupe.Tools.Delegate.asks?/2
   - Troupe.Tools.Delegate.gate/4

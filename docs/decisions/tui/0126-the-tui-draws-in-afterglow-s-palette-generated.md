@@ -11,7 +11,6 @@ paths:
   - clients/tui/lib/troupe/ui/tui/palette.ex
   - clients/tui/lib/troupe/ui/tui/theme.ex
   - clients/tui/lib/troupe/ui/tui/view.ex
-  - clients/tui/test/troupe/tui_theme_test.exs
 gist: The TUI draws in Afterglow's palette, generated from the design tokens, at the depth the terminal can show, and its pink means a person is needed
 ---
 

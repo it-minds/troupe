@@ -7,14 +7,12 @@ issue: 56
 paths:
   - clients/gui/apps/console/
   - clients/gui/packages/client/src/admin.ts
-  - clients/gui/packages/client/test/support/admin.ts
   - clients/gui/scripts/fake-console.ts
   - clients/gui/Dockerfile
   - clients/gui/docker/nginx.conf
   - charts/troupe/templates/gui-deployment.yaml
   - charts/troupe/values.yaml
   - apps/troupe_plane/lib/troupe/plane/settings.ex
-  - docs/admin/console.md
 gist: "Console: own app (imports nothing of desktop, nor it of console), GUI image at /console/, own Ingress and console.enabled; plane sign-in (PKCE), tab-scoped; only admin.* and me"
 ---
 

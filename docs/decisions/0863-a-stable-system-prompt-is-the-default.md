@@ -19,11 +19,6 @@ paths:
   - apps/troupe_core/lib/troupe/bench/onboarding.ex
   - apps/troupe_core/lib/troupe/bench/memory.ex
   - apps/troupe_protocol/lib/troupe/protocol/schema.ex
-  - apps/troupe_core/test/support/fake_openai.exs
-  - apps/troupe_core/test/support/fake_transport.ex
-  - apps/troupe_core/test/troupe/agent/stable_prompt_test.exs
-  - apps/troupe_core/test/troupe/llm/thinking_test.exs
-  - apps/troupe_core/test/troupe/bench_live_test.exs
 gist: "system_prompt defaults to stable (per_turn by name, read as written); turn context logged on llm_request and folded; drop_block opt-in, error asks for the 400; prefix_mismatch in the API's words"
 ---
 

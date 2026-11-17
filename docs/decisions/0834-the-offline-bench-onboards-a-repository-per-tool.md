@@ -10,8 +10,6 @@ paths:
   - apps/troupe_core/lib/troupe/bench/runner.ex
   - apps/troupe_core/lib/troupe/bench/model.ex
   - apps/troupe_core/priv/bench/budgets.json
-  - apps/troupe_core/test/troupe/bench_onboarding_test.exs
-  - docs/developer/bench.md
 symbols:
   - Troupe.Bench.Onboarding
   - Troupe.Bench.Onboarding.onboard/1

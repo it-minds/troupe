@@ -6,8 +6,6 @@ status: accepted
 issue: 51
 paths:
   - .github/dependabot.yml
-  - docs/developer/ci.md
-  - docs/developer/repo-structure.md
 gist: The documentation is one site, built from `docs/` and the documents its nav names elsewhere, and each document stays where whatever reads it looks…
 ---
 

@@ -26,8 +26,6 @@ paths:
   - clients/gui/apps/desktop/src/updates.ts
   - clients/gui/apps/desktop/src/views/Update.tsx
   - clients/gui/apps/console/src/views/Integrations.tsx
-  - PROTOCOL.md
-  - docs/user/updating.md
 symbols:
   - Troupe.Protocol.PlaneSignature
   - Troupe.Plane.Signing

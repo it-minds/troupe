@@ -7,11 +7,9 @@ issue: 664
 paths:
   - apps/troupe_gateway/lib/troupe/gateway/web.ex
   - apps/troupe_worker/lib/troupe/worker/harness.ex
-  - apps/troupe_worker/test/troupe/worker/harness_websocket_test.exs
   - charts/troupe/templates/_helpers.tpl
   - charts/troupe/templates/operator-deployment.yaml
   - charts/troupe/values.yaml
-  - docs/admin/configuration.md
 symbols:
   - Troupe.Worker.Harness.allowed_origins/0
 gist: "Empty or absent origin list admits no page; `*` admits all; worker adds tauri://localhost + http://tauri.localhost; chart adds plane origin with gui"

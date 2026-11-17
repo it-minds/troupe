@@ -25,9 +25,6 @@ paths:
   - apps/troupe_plane/lib/troupe/plane/harness.ex
   - apps/troupe_plane/lib/troupe/plane/memory.ex
   - apps/troupe_protocol/lib/troupe/protocol/schema.ex
-  - PROTOCOL.md
-  - docs/user/artifacts.md
-  - docs/user/memory.md
 symbols:
   - Troupe.Gateway.Artifacts.forward/2
   - Troupe.Gateway.Memory.history/1

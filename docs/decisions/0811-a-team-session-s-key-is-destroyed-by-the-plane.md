@@ -6,8 +6,6 @@ status: accepted
 issue: 470
 supersedes: [90, 756]
 paths:
-  - ARCHITECTURE.md
-  - PROTOCOL.md
   - apps/troupe_plane/lib/troupe/plane/erasure.ex
   - apps/troupe_plane/lib/troupe/plane/erasure/retry.ex
   - apps/troupe_plane/lib/troupe/plane/application.ex
@@ -15,12 +13,7 @@ paths:
   - apps/troupe_plane/lib/troupe/plane/sessions.ex
   - apps/troupe_plane/lib/troupe/plane/sessions/tombstone.ex
   - apps/troupe_plane/priv/repo/migrations/20261006000811_tombstone_key_destroyed.exs
-  - apps/troupe_plane/test/troupe/plane/private_erasure_test.exs
   - apps/troupe_worker/lib/troupe/worker/plane/commands.ex
-  - apps/troupe_worker/test/troupe/worker/erasure_test.exs
-  - docs/admin/backup-restore.md
-  - docs/admin/monitoring.md
-  - docs/admin/routine-tasks.md
 symbols:
   - Troupe.Plane.Erasure.retry/0
   - Troupe.Plane.Erasure.Retry

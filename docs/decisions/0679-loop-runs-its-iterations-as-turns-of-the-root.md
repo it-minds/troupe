@@ -4,7 +4,6 @@ title: "`/loop` runs its iterations as turns of the root agent, not as subagents
 date: 2026-09-22
 status: accepted
 paths:
-  - ARCHITECTURE.md
   - apps/troupe_core/lib/troupe.ex
   - apps/troupe_core/lib/troupe/agent/server.ex
   - apps/troupe_core/lib/troupe/agent/state.ex
@@ -15,10 +14,8 @@ paths:
   - apps/troupe_core/lib/troupe/session/loop.ex
   - apps/troupe_core/lib/troupe/tools.ex
   - apps/troupe_core/lib/troupe/tools/goal_complete.ex
-  - apps/troupe_core/test/troupe/session/loop_test.exs
   - apps/troupe_gateway/lib/troupe/gateway/dispatch.ex
   - apps/troupe_protocol/lib/troupe/protocol/schema.ex
-  - docs/developer/architecture.md
 gist: "`/loop` runs its iterations as turns of the root agent, not as subagents; each ends with the agent's verdict as a tool call"
 ---
 

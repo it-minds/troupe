@@ -13,8 +13,6 @@ paths:
   - apps/troupe_core/lib/troupe/llm/providers/fake.ex
   - apps/troupe_core/lib/troupe/config/schema.ex
   - apps/troupe_core/lib/troupe/doctor.ex
-  - apps/troupe_core/test/troupe/agent/first_byte_test.exs
-  - apps/troupe_core/test/support/fake_gateway.exs
 symbols:
   - Troupe.LLM.Provider.first_byte/3
   - Troupe.LLM.Request.host/1

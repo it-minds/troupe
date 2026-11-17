@@ -5,7 +5,6 @@ date: 2026-10-05
 status: accepted
 issue: 404
 paths:
-  - ARCHITECTURE.md
   - apps/troupe_core/lib/troupe/agent/server.ex
 gist: The compaction summariser reads the tool calls it summarises as text, and a summary that does not come within `llm_timeout_ms` is given up on
 ---

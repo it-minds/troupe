@@ -9,8 +9,6 @@ paths:
   - apps/troupe_core/lib/troupe/reaper.ex
   - apps/troupe_core/lib/troupe/session/memory.ex
   - apps/troupe_core/lib/troupe/tools/shell.ex
-  - apps/troupe_core/test/troupe/doctor_test.exs
-  - apps/troupe_core/test/troupe/reaper_test.exs
 gist: "A reaper helper that will not start is an error its caller gets back, never a raise: the session answers, runs no command, and `troupe doctor` says…"
 ---
 

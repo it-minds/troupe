@@ -8,18 +8,9 @@ paths:
   - clients/gui/apps/console/src/views/Triggers.tsx
   - clients/gui/apps/console/src/views/Organisation.tsx
   - clients/gui/apps/console/src/views/PermissionRules.tsx
-  - clients/gui/apps/console/test/coverage.test.ts
-  - clients/gui/apps/console/test/triggers.test.tsx
-  - clients/gui/apps/console/test/organisation.test.tsx
   - clients/gui/packages/client/src/rules.ts
   - clients/gui/packages/client/src/admin.ts
-  - clients/gui/packages/client/test/rules.test.ts
-  - clients/gui/packages/client/test/support/admin.ts
-  - apps/troupe_protocol/test/support/permission_rules.json
-  - apps/troupe_protocol/test/troupe/protocol/permission_rule_test.exs
   - apps/troupe_plane/lib/troupe/plane/admin.ex
-  - apps/troupe_plane/test/troupe/plane/channel_servers_test.exs
-  - docs/admin/console.md
 symbols:
   - Troupe.Plane.Admin.profile_put/2
   - Troupe.Protocol.PermissionRule.parse/1

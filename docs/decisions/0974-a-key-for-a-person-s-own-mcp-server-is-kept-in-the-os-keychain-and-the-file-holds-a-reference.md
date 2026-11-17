@@ -14,13 +14,11 @@ paths:
   - apps/troupe_gateway/lib/troupe/gateway/local_sources.ex
   - apps/troupe_gateway/lib/troupe/gateway/dispatch.ex
   - apps/troupe_protocol/lib/troupe/protocol/schema.ex
-  - PROTOCOL.md
   - clients/tui/lib/troupe/ui/tui/server.ex
   - clients/tui/lib/troupe/ui/tui/view.ex
   - clients/tui/lib/troupe/client/daemon.ex
   - clients/gui/packages/client/src/servers.ts
   - clients/gui/apps/desktop/src/views/ConnectScreen.tsx
-  - docs/user/mcp.md
 symbols:
   - Troupe.MCP.Secrets.ref/3
   - Troupe.MCP.Tool.said/1

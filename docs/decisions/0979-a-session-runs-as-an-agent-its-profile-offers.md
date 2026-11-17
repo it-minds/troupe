@@ -6,18 +6,11 @@ status: accepted
 issue: 882
 paths:
   - apps/troupe_plane/lib/troupe/plane/harness.ex
-  - apps/troupe_plane/test/troupe/plane/session_agent_test.exs
   - apps/troupe_worker/lib/troupe/worker/plane/commands.ex
-  - apps/troupe_worker/test/troupe/worker/unrestorable_test.exs
   - clients/gui/packages/client/src/newSession.ts
-  - clients/gui/packages/client/test/new-session.test.ts
-  - clients/gui/packages/client/test/support/plane.ts
   - clients/gui/apps/desktop/src/views/StartSession.tsx
-  - clients/gui/apps/desktop/test/new-session.test.tsx
   - clients/tui/lib/troupe/ui/new_session.ex
   - clients/tui/lib/troupe/ui/tui/new_session_page.ex
-  - clients/tui/test/troupe/new_session_screen_test.exs
-  - PROTOCOL.md
 gist: "No agent is ever left to the pod's own default: create resolves build-if-offered-else-first onto the row, every activation sends it, agent_not_here parks the session; a profile with no pod is idle, not full"
 ---
 

@@ -21,12 +21,6 @@ paths:
   - charts/troupe/templates/_helpers.tpl
   - charts/troupe/values.yaml
   - dev/kind/values.yaml
-  - apps/troupe_plane/test/troupe/plane/control_tls_test.exs
-  - apps/troupe_worker/test/troupe/worker/machine_link_test.exs
-  - apps/troupe_operator/test/troupe/operator/resources_test.exs
-  - apps/troupe_operator/test/troupe/operator/reconciler_test.exs
-  - apps/troupe_operator/test/troupe/operator/settings_test.exs
-  - apps/troupe_operator/test/e2e/enrolment_test.exs
 symbols:
   - Troupe.Plane.Control.Replay
   - Troupe.Plane.Control.TLS.required?/0

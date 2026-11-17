@@ -9,9 +9,6 @@ paths:
   - clients/tui/lib/troupe/ui/headless/printer.ex
   - clients/tui/lib/troupe/ui/tui/model.ex
   - clients/tui/lib/troupe/ui/tui/server.ex
-  - clients/tui/test/troupe/budget_answer_test.exs
-  - clients/tui/test/troupe/cli_test.exs
-  - clients/tui/test/troupe/remote_translate_test.exs
 gist: The budget question is drawn as the question it rides on — the harness's words, its options numbered and picked with a digit, or an amount typed
 ---
 

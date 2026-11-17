@@ -11,7 +11,6 @@ paths:
   - clients/vscode/src/extension.ts
   - clients/vscode/src/folder.ts
   - clients/vscode/package.json
-  - clients/vscode/test/vscode/startup.ts
 symbols:
   - whenFolderOpens
   - restore

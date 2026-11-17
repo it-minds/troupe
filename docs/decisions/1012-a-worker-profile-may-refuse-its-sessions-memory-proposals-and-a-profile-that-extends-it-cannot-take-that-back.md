@@ -15,8 +15,6 @@ paths:
   - charts/troupe/crds/workerprofile.yaml
   - clients/gui/apps/console/src/views/Profiles.tsx
   - clients/gui/packages/client/src/admin.ts
-  - clients/gui/packages/client/test/support/extends.ts
-  - docs/admin/profile-options.md
 symbols:
   - Troupe.Plane.Memory.Proposals.propose/5
   - Troupe.Plane.Memory.Proposals.off_reason/1

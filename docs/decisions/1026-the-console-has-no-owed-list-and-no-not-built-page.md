@@ -8,7 +8,6 @@ supersedes: [912]
 paths:
   - clients/gui/apps/console/src/nav.ts
   - clients/gui/apps/console/src/views/Shell.tsx
-  - docs/admin/console.md
 gist: No owed.ts, no Unbuilt page, no built flag; a method the plane serves without a screen here fails coverage.test.ts
 ---
 

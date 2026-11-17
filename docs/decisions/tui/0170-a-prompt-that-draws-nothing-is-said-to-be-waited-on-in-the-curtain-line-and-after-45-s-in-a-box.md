@@ -9,12 +9,9 @@ paths:
   - clients/tui/lib/troupe/ui/headless/printer.ex
   - clients/tui/lib/troupe/remote/translate.ex
   - clients/tui/lib/troupe/settings.ex
-  - clients/tui/test/troupe/first_prompt_wait_test.exs
   - clients/gui/apps/desktop/src/frames.ts
   - clients/gui/apps/desktop/src/views/Session.tsx
-  - clients/gui/apps/desktop/test/model-wait.test.tsx
   - clients/gui/packages/client/src/transcript.ts
-  - docs/user/terminal-screen.md
 symbols:
   - Troupe.UI.TUI.Model.waiting/3
   - Troupe.UI.TUI.Model.wait_lines/3

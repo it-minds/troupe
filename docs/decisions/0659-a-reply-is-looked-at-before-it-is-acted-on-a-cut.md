@@ -9,8 +9,6 @@ paths:
   - apps/troupe_core/lib/troupe/llm/provider.ex
   - apps/troupe_core/lib/troupe/llm/providers/anthropic.ex
   - apps/troupe_core/lib/troupe/llm/providers/openai.ex
-  - apps/troupe_core/test/troupe/agent/limits_test.exs
-  - apps/troupe_core/test/troupe/llm/provider_errors_test.exs
   - apps/troupe_protocol/lib/troupe/protocol/schema.ex
   - clients/gui/packages/client/src/transcript.ts
   - clients/tui/lib/troupe/remote/translate.ex

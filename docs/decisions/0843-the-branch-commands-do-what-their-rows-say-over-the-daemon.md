@@ -10,7 +10,6 @@ paths:
   - clients/tui/lib/troupe/client/remote.ex
   - apps/troupe_gateway/lib/troupe/gateway/worktrees.ex
   - apps/troupe_core/lib/troupe/tools/read_branch.ex
-  - clients/tui/test/troupe/branch_commands_test.exs
 gist: "/cancel discards Troupe's tree at rest; worktree_name; local changes no conflict; landed merge stays one; own window stays; read_branch lists no parent"
 ---
 

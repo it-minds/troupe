@@ -5,7 +5,6 @@ date: 2026-10-08
 status: accepted
 issue: 484
 paths:
-  - PROTOCOL.md
   - apps/troupe_protocol/lib/troupe/sessions/fork.ex
   - apps/troupe_protocol/lib/troupe/protocol/schema.ex
   - apps/troupe_core/lib/troupe.ex
@@ -17,9 +16,6 @@ paths:
   - clients/tui/lib/troupe/cli/runner.ex
   - clients/tui/lib/troupe/client.ex
   - clients/tui/lib/troupe/ui/headless/printer.ex
-  - apps/troupe_core/test/troupe/session/fork_session_test.exs
-  - apps/troupe_gateway/test/troupe/gateway/fork_test.exs
-  - clients/tui/test/troupe/resume_cli_test.exs
 symbols:
   - Troupe.fork_session/2
   - Troupe.Sessions.Fork.chain/3

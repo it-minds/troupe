@@ -5,14 +5,10 @@ date: 2026-10-27
 status: accepted
 paths:
   - apps/troupe_core/lib/troupe/update.ex
-  - apps/troupe_core/test/troupe/update_test.exs
   - clients/gui/apps/desktop/src-tauri/src/update.rs
   - clients/gui/apps/desktop/src/shell.ts
   - clients/gui/apps/desktop/src/views/Update.tsx
-  - clients/gui/apps/desktop/test/updates.test.tsx
   - clients/tui/lib/troupe/cli.ex
-  - docs/user/updating.md
-  - docs/user/cli-reference.md
 symbols:
   - Troupe.Update.desktop_version/2
   - Troupe.Update.extension_version/2

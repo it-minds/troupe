@@ -8,7 +8,6 @@ supersedes: [934]
 paths:
   - apps/troupe_plane/lib/troupe/plane/kms_check.ex
   - apps/troupe_plane/lib/troupe/plane/github.ex
-  - apps/troupe_plane/test/troupe/plane/kms_check_test.exs
 gist: The App's grant is required once GitHub.configured? holds (id, key, installation), optional before; the check, not Policy's list, decides
 ---
 

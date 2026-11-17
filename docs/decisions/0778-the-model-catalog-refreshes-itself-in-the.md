@@ -11,16 +11,9 @@ paths:
   - apps/troupe_core/lib/troupe/doctor.ex
   - apps/troupe_core/lib/troupe/llm/catalog/refresher.ex
   - apps/troupe_core/lib/troupe/llm/catalog/store.ex
-  - apps/troupe_core/test/support/fake_gateway.exs
-  - apps/troupe_core/test/troupe/config/prices_test.exs
-  - apps/troupe_core/test/troupe/llm/catalog_store_test.exs
-  - apps/troupe_daemon/README.md
   - apps/troupe_daemon/lib/troupe/daemon/cli.ex
-  - clients/tui/README.md
-  - docs/user/models.md
   - clients/tui/config/test.exs
   - clients/tui/lib/troupe/cli/runner.ex
-  - clients/tui/test/troupe/models_cli_test.exs
   - config/config.exs
   - scripts/verify-local.ps1
 gist: The model catalog refreshes itself in the background, says what it fetched from where and when, and a model the configured provider does not serve…

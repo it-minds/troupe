@@ -5,20 +5,12 @@ date: 2026-10-04
 status: accepted
 issue: 76
 paths:
-  - PROTOCOL.md
   - apps/troupe_core/lib/troupe/setup.ex
   - apps/troupe_core/lib/troupe/start_at_login.ex
-  - apps/troupe_core/test/test_helper.exs
-  - apps/troupe_core/test/troupe/start_at_login_test.exs
-  - apps/troupe_daemon/README.md
   - apps/troupe_daemon/lib/troupe/daemon/cli.ex
-  - apps/troupe_daemon/test/troupe/daemon/cli_test.exs
-  - apps/troupe_gateway/test/test_helper.exs
   - clients/gui/apps/desktop/src/views/Onboarding/Daemon.tsx
   - clients/gui/packages/client/src/setup.ts
-  - clients/gui/packages/client/test/support/daemon.ts
   - clients/tui/lib/troupe/cli/config_setup.ex
-  - clients/tui/test/troupe/config_setup_test.exs
 gist: "The daemon starts at login when a person says so: one module writes the platform's own per-user entry, removes it and says whether it is there, and…"
 ---
 

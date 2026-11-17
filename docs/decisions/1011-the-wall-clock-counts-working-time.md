@@ -12,10 +12,6 @@ paths:
   - apps/troupe_core/lib/troupe/tools.ex
   - apps/troupe_core/lib/troupe/tools/ask_user.ex
   - apps/troupe_core/lib/troupe/config/schema.ex
-  - apps/troupe_core/test/troupe/budget_test.exs
-  - apps/troupe_core/test/troupe/agent/budget_question_test.exs
-  - apps/troupe_core/test/troupe/agent/headroom_test.exs
-  - PROTOCOL.md
 gist: wall_clock_ms is time worked, not time awake; rest and waits on a person stop the clock; a restart keeps only a question's used
 ---
 

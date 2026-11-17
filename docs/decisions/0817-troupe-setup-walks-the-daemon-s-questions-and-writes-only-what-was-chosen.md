@@ -8,9 +8,7 @@ supersedes:
   - 705
 paths:
   - apps/troupe_core/lib/troupe/setup.ex
-  - apps/troupe_core/test/troupe/setup_test.exs
   - clients/tui/lib/troupe/ui/setup.ex
-  - clients/tui/test/troupe/setup_screen_daemon_test.exs
 symbols:
   - Troupe.Setup
   - Troupe.UI.Setup

@@ -8,7 +8,6 @@ paths:
   - apps/troupe_core/lib/troupe/agent/server.ex
   - apps/troupe_core/lib/troupe/agent/state.ex
   - apps/troupe_core/lib/troupe/config.ex
-  - apps/troupe_core/test/troupe/agent/headroom_test.exs
   - apps/troupe_protocol/lib/troupe/protocol/schema.ex
   - clients/tui/lib/troupe/remote/translate.ex
 gist: A limit is announced before it stops the agent, once, and a client can draw the gauge

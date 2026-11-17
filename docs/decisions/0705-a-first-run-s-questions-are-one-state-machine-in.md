@@ -5,26 +5,19 @@ date: 2026-09-27
 status: accepted
 issue: 76
 paths:
-  - PROTOCOL.md
   - apps/troupe_core/lib/troupe/config/model_settings.ex
   - apps/troupe_core/lib/troupe/doctor.ex
   - apps/troupe_core/lib/troupe/setup.ex
-  - apps/troupe_core/test/troupe/doctor_test.exs
-  - apps/troupe_core/test/troupe/setup_test.exs
   - apps/troupe_gateway/lib/troupe/gateway/dispatch.ex
   - apps/troupe_gateway/lib/troupe/gateway/setup.ex
-  - apps/troupe_gateway/test/troupe/gateway/setup_test.exs
   - apps/troupe_protocol/lib/troupe/protocol/schema.ex
   - clients/gui/apps/desktop/src/App.tsx
   - clients/gui/apps/desktop/src/views/Onboarding/FirstRun.tsx
   - clients/gui/apps/desktop/src/views/Onboarding/Setup.tsx
   - clients/gui/apps/desktop/src/views/Onboarding/hooks.ts
   - clients/gui/apps/desktop/src/views/Session.tsx
-  - clients/gui/apps/desktop/test/launcher.test.tsx
-  - clients/gui/apps/desktop/test/onboarding.test.tsx
   - clients/gui/packages/client/src/daemon.ts
   - clients/gui/packages/client/src/setup.ts
-  - clients/gui/packages/client/test/support/daemon.ts
 gist: A first run's questions are one state machine in the harness, asked over the protocol, so both clients ask the same things and a run done in one is…
 ---
 

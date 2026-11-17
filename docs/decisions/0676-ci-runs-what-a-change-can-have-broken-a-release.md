@@ -6,8 +6,6 @@ status: accepted
 paths:
   - .github/workflows/prerelease.yml
   - .github/workflows/release.yml
-  - docs/developer/ci.md
-  - docs/developer/deployment.md
   - scripts/release
 gist: CI runs what a change can have broken; a release runs everything; a pre-release runs nothing
 ---

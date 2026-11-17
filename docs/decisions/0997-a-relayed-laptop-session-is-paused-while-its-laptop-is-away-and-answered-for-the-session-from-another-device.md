@@ -18,13 +18,10 @@ paths:
   - apps/troupe_core/lib/troupe/session/approvals.ex
   - clients/gui/packages/client/src/transcript.ts
   - clients/gui/packages/client/src/session.ts
-  - clients/gui/packages/client/test/support/plane.ts
-  - clients/gui/packages/client/test/support/worker.ts
   - clients/gui/apps/console/src/views/Remote.tsx
   - clients/gui/apps/desktop/src/views/Session.tsx
   - clients/gui/apps/desktop/src/views/Approval.tsx
   - clients/tui/lib/troupe/remote/worker.ex
-  - PROTOCOL.md
 symbols:
   - Troupe.Protocol.Relay.paused_reasons/0
   - Troupe.Protocol.Relay.paused_refusal/0

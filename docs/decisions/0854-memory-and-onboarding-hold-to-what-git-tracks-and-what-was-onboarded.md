@@ -19,11 +19,7 @@ paths:
   - apps/troupe_core/lib/troupe/setup.ex
   - apps/troupe_gateway/lib/troupe/gateway/dispatch.ex
   - apps/troupe_protocol/lib/troupe/protocol/endpoint.ex
-  - PROTOCOL.md
   - mix.lock
-  - apps/troupe_core/test/troupe/memory/facts_tracked_test.exs
-  - apps/troupe_core/test/troupe/onboard/leftovers_test.exs
-  - apps/troupe_gateway/test/troupe/gateway/memory_scope_test.exs
 symbols:
   - Troupe.Memory.Facts.list/2
   - Troupe.Instructions.glob?/1

@@ -6,7 +6,6 @@ status: accepted
 issue: 147
 paths:
   - apps/troupe_plane/lib/troupe/plane/harness.ex
-  - apps/troupe_plane/test/troupe/plane/github_lineage_test.exs
 gist: "session.spawn and session.fork pass the parent's repository to the create path, which checks it against the App and the new profile; refused if it no longer passes"
 ---
 

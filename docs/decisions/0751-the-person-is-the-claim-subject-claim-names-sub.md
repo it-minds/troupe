@@ -12,10 +12,7 @@ paths:
   - apps/troupe_plane/lib/troupe/plane/settings.ex
   - apps/troupe_plane/priv/repo/migrations/20261002000754_scim_user_name.exs
   - apps/troupe_plane/priv/repo/migrations/20261002000755_person_kms_name.exs
-  - apps/troupe_plane/test/troupe/plane/scim_entra_test.exs
-  - apps/troupe_plane/test/troupe/plane/subject_claim_test.exs
   - config/runtime.exs
-  - docs/admin/configuration.md
 gist: The person is the claim `subject_claim` names, `sub` by default and `oid` for Entra ID, and a plane switched to another claim moves each person it…
 ---
 

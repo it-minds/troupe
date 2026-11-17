@@ -25,7 +25,6 @@ paths:
   - clients/tui/lib/troupe/ui/tui/model.ex
   - clients/tui/lib/troupe/cli/remote.ex
   - clients/gui/apps/console/src/views/Team.tsx
-  - PROTOCOL.md
 symbols:
   - Troupe.Keyring
   - Troupe.Keyring.Steering

@@ -8,7 +8,6 @@ paths:
   - apps/troupe_operator/lib/troupe/operator/resources.ex
   - apps/troupe_operator/lib/troupe/operator/reconciler.ex
   - apps/troupe_operator/lib/troupe/operator/settings.ex
-  - apps/troupe_operator/test/e2e/pod_security_test.exs
   - charts/troupe/values.yaml
   - charts/troupe/templates/namespace.yaml
   - charts/troupe/templates/_helpers.tpl
@@ -27,11 +26,6 @@ paths:
   - apps/troupe_plane/priv/repo/migrations/20261024000934_group_last_seen.exs
   - clients/gui/apps/console/src/views/Overview.tsx
   - clients/gui/apps/console/src/views/Teams.tsx
-  - docs/admin/openbao.md
-  - docs/admin/installing.md
-  - docs/admin/security.md
-  - docs/admin/routine-tasks.md
-  - docs/admin/worker-sandbox.md
 symbols:
   - Troupe.Operator.Settings.pod_security_level/1
   - Troupe.KMS.Policy.plane_grants/1

@@ -7,9 +7,7 @@ paths:
   - clients/gui/apps/desktop/src/views/StartSession.tsx
   - clients/gui/apps/desktop/src/App.tsx
   - clients/gui/apps/desktop/src/styles.css
-  - clients/gui/apps/desktop/test/new-session.test.tsx
   - clients/gui/packages/client/src/newSession.ts
-  - clients/gui/packages/client/test/new-session.test.ts
   - clients/gui/packages/client/src/plane.ts
   - clients/gui/packages/client/src/daemon.ts
   - apps/troupe_plane/lib/troupe/plane/harness.ex
@@ -26,9 +24,6 @@ paths:
   - clients/tui/lib/troupe/ui/new_session.ex
   - clients/tui/lib/troupe/ui/tui/new_session_page.ex
   - clients/tui/lib/troupe/cli/run_target.ex
-  - PROTOCOL.md
-  - docs/user/sessions.md
-  - clients/gui/README.md
 symbols:
   - autoPickProfile
   - messageTokens

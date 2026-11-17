@@ -16,9 +16,7 @@ paths:
   - apps/troupe_worker/lib/troupe/worker/github/tree.ex
   - clients/gui/apps/console/src/views/Profiles.tsx
   - clients/gui/apps/desktop/src-tauri/src/daemon.rs
-  - clients/gui/packages/client/test/support/daemon.ts
   - apps/troupe_core/lib/mix/tasks/troupe.config.schema.ex
-  - clients/gui/packages/client/test/support/provider-types.ts
 symbols:
   - Troupe.Plane.Admin.preview/2
   - Troupe.Plane.Admin.team_enable/4

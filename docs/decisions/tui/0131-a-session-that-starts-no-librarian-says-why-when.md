@@ -6,7 +6,6 @@ status: accepted
 issue: 246
 paths:
   - clients/tui/lib/troupe/client/daemon.ex
-  - clients/tui/test/troupe/memory_client_test.exs
 gist: A session that starts no librarian says why, when the reason is one a person would want
 ---
 

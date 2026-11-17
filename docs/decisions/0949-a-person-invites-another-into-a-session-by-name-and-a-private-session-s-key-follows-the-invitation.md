@@ -11,7 +11,6 @@ paths:
   - apps/troupe_plane/lib/troupe/plane/remote/watch.ex
   - apps/troupe_plane/lib/troupe/plane/sessions/session.ex
   - apps/troupe_plane/priv/repo/migrations/20261025000949_session_invites.exs
-  - apps/troupe_plane/test/troupe/plane/invites_test.exs
   - apps/troupe_protocol/lib/troupe/kms.ex
   - apps/troupe_protocol/lib/troupe/kms/open_bao.ex
   - apps/troupe_protocol/lib/troupe/kms/policy.ex
@@ -23,7 +22,6 @@ paths:
   - apps/troupe_gateway/lib/troupe/gateway/invites.ex
   - apps/troupe_gateway/lib/troupe/gateway/private.ex
   - apps/troupe_gateway/lib/troupe/gateway/dispatch.ex
-  - apps/troupe_gateway/test/troupe/gateway/invites_test.exs
   - apps/troupe_core/lib/troupe/commands.ex
   - clients/tui/lib/troupe/client/invites.ex
   - clients/tui/lib/troupe/client/daemon.ex
@@ -35,9 +33,6 @@ paths:
   - clients/gui/apps/desktop/src/views/Invites.tsx
   - clients/gui/apps/console/src/views/Invited.tsx
   - clients/gui/apps/console/src/views/Remote.tsx
-  - docs/user/sessions-shared.md
-  - docs/admin/roles-and-permissions.md
-  - PROTOCOL.md
 symbols:
   - Troupe.Plane.Invites
   - Troupe.Gateway.Invites

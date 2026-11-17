@@ -7,10 +7,6 @@ paths:
   - apps/troupe_core/lib/troupe/paths.ex
   - clients/tui/lib/troupe/client.ex
   - clients/tui/lib/troupe/codec.ex
-  - clients/tui/test/troupe/branch_client_test.exs
-  - clients/tui/test/troupe/memory_client_test.exs
-  - clients/tui/test/troupe/unit_test.exs
-  - clients/tui/test/troupe/window_attention_test.exs
   - config/runtime.exs
 gist: The TUI logs beside the daemon, a headless run waits for a line queued mid-turn, and the session picker lists what the daemon has
 ---

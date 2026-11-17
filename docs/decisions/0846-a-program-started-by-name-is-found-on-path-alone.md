@@ -16,15 +16,12 @@ paths:
   - apps/troupe_core/lib/troupe/watch/file_system_backend.ex
   - apps/troupe_protocol/lib/troupe/protocol/daemon.ex
   - apps/troupe_daemon/lib/troupe/daemon/cli.ex
-  - apps/troupe_protocol/test/troupe/executable_test.exs
-  - apps/troupe_core/test/troupe/path_only_lookup_test.exs
   - clients/tui/lib/troupe/os/process.ex
   - clients/tui/lib/troupe/browser.ex
   - clients/tui/lib/troupe/cli/daemon.ex
   - clients/tui/lib/troupe/editor.ex
   - clients/tui/lib/mix/tasks/troupe.xref.ex
   - clients/tui/.credo.exs
-  - clients/tui/test/troupe/path_only_lookup_test.exs
 symbols:
   - Troupe.Executable.find/2
   - Troupe.Executable.resolve/3

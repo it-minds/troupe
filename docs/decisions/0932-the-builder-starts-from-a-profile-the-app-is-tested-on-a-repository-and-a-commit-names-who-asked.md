@@ -13,11 +13,6 @@ paths:
   - apps/troupe_plane/lib/troupe/plane/github.ex
   - apps/troupe_plane/lib/troupe/plane/control/connection.ex
   - apps/troupe_worker/lib/troupe/worker/github.ex
-  - apps/troupe_plane/test/support/fake_github.ex
-  - apps/troupe_plane/test/troupe/plane/admin_test.exs
-  - apps/troupe_plane/test/troupe/plane/github_test.exs
-  - apps/troupe_plane/test/troupe/plane/github_requested_by_test.exs
-  - apps/troupe_worker/test/troupe/worker/github_fix_loop_test.exs
   - clients/gui/packages/client/src/admin.ts
   - clients/gui/apps/console/src/views/Bundles.tsx
   - clients/gui/apps/console/src/views/ProfileAgents.tsx
@@ -25,10 +20,6 @@ paths:
   - clients/gui/apps/console/src/views/Integrations.tsx
   - clients/gui/apps/desktop/src/views/Agents.tsx
   - clients/gui/apps/desktop/src/views/AgentPicker.tsx
-  - PROTOCOL.md
-  - docs/admin/github.md
-  - docs/admin/bundles-and-triggers.md
-  - docs/admin/github-runs.md
 symbols:
   - Troupe.Plane.Admin.profile_agents/2
   - Troupe.Plane.Admin.profile_choices/2

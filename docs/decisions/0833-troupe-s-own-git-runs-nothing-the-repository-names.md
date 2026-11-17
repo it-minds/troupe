@@ -13,8 +13,6 @@ paths:
   - apps/troupe_core/lib/troupe/mounts.ex
   - apps/troupe_core/lib/troupe/onboard.ex
   - apps/troupe_gateway/lib/troupe/gateway/worktrees.ex
-  - apps/troupe_core/test/troupe/git_test.exs
-  - apps/troupe_gateway/test/troupe/gateway/worktrees_test.exs
 symbols:
   - Troupe.Git.run/3
   - Troupe.Workspace.git_dir?/2

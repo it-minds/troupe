@@ -9,9 +9,6 @@ paths:
   - apps/troupe_plane/lib/troupe/plane/harness.ex
   - apps/troupe_gateway/lib/troupe/gateway/artifacts.ex
   - apps/troupe_gateway/lib/troupe/gateway/memory.ex
-  - apps/troupe_gateway/test/troupe/gateway/plane_memory_test.exs
-  - apps/troupe_plane/test/troupe/plane/artifact_comment_edits_test.exs
-  - PROTOCOL.md
 symbols:
   - Troupe.Plane.Artifacts.Comments.since/2
   - Troupe.Gateway.Artifacts.heard/2

@@ -6,9 +6,7 @@ status: accepted
 issue: 387
 paths:
   - apps/troupe_core/lib/troupe/config/models.ex
-  - apps/troupe_core/test/troupe/config/models_test.exs
   - clients/tui/lib/troupe/cli/runner.ex
-  - clients/tui/test/troupe/models_cli_test.exs
 gist: "`troupe models --json` prints what `troupe models` says as one JSON object for a program: the models with their prices as numbers, the roles, what…"
 ---
 

@@ -16,8 +16,6 @@ paths:
   - apps/troupe_plane/lib/troupe/plane/application.ex
   - apps/troupe_plane/lib/troupe/plane/settings.ex
   - apps/troupe_plane/priv/repo/migrations/20261025000948_artifacts.exs
-  - apps/troupe_plane/test/troupe/plane/artifacts_test.exs
-  - apps/troupe_plane/test/troupe/plane/artifacts_host_test.exs
   - apps/troupe_core/lib/troupe/artifacts.ex
   - apps/troupe_core/lib/troupe/tools/publish_artifact.ex
   - apps/troupe_gateway/lib/troupe/gateway/artifacts.ex
@@ -30,11 +28,6 @@ paths:
   - charts/troupe/templates/plane-deployment.yaml
   - charts/troupe/templates/network-policy.yaml
   - config/runtime.exs
-  - PROTOCOL.md
-  - docs/user/artifacts.md
-  - docs/admin/configuration.md
-  - docs/admin/console.md
-  - docs/admin/installing.md
 symbols:
   - Troupe.Plane.Artifacts
   - Troupe.Plane.Web.Artifacts

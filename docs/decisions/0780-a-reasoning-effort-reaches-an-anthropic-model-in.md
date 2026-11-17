@@ -12,9 +12,6 @@ paths:
   - apps/troupe_core/lib/troupe/llm/providers/anthropic.ex
   - apps/troupe_core/lib/troupe/llm/providers/openai.ex
   - apps/troupe_core/lib/troupe/llm/request.ex
-  - apps/troupe_core/test/support/prompt_cache_stand_in.ex
-  - apps/troupe_core/test/troupe/agent/thinking_form_test.exs
-  - apps/troupe_core/test/troupe/llm/thinking_test.exs
 gist: "A reasoning effort reaches an Anthropic model in the form the model takes: adaptive thinking with an effort level from Claude Opus 4.7 on, a…"
 ---
 

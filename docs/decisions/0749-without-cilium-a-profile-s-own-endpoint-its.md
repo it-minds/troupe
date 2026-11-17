@@ -6,13 +6,9 @@ status: accepted
 issue: 268
 paths:
   - apps/troupe_operator/lib/troupe/operator/reconciler.ex
-  - apps/troupe_operator/test/troupe/operator/reconciler_test.exs
   - apps/troupe_plane/lib/troupe/plane/bundles.ex
   - apps/troupe_plane/lib/troupe/plane/reach.ex
-  - apps/troupe_plane/test/troupe/plane/reach_test.exs
   - apps/troupe_protocol/lib/troupe/worker_profile/reach.ex
-  - apps/troupe_protocol/test/troupe/worker_profile/reach_test.exs
-  - docs/admin/profiles-and-policy.md
 gist: Without Cilium, a profile's own endpoint its workers cannot reach is refused where it is set up, and reported on the profile where nothing could…
 ---
 

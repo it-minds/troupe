@@ -24,8 +24,6 @@ paths:
   - clients/gui/packages/client/src/fleet.ts
   - clients/gui/packages/client/src/session.ts
   - clients/gui/packages/client/src/transcript.ts
-  - PROTOCOL.md
-  - docs/admin/console.md
 symbols:
   - Troupe.Plane.Remote.Watch
   - Troupe.Plane.Remote.changed/1

@@ -12,7 +12,6 @@ paths:
   - clients/tui/lib/troupe/client.ex
   - clients/tui/lib/troupe/client/daemon.ex
   - clients/tui/lib/troupe/client/remote.ex
-  - clients/tui/test/troupe/scratch_tui_test.exs
 symbols:
   - Troupe.UI.TUI.Model.scratch_documents/1
   - Troupe.UI.TUI.Model.scratch_note/1

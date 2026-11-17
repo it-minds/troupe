@@ -8,8 +8,6 @@ supersedes: [139]
 paths:
   - clients/tui/lib/troupe/ui/tui/model.ex
   - clients/tui/lib/troupe/ui/tui/view.ex
-  - clients/tui/test/troupe/side_box_cost_test.exs
-  - clients/tui/README.md
 symbols:
   - Troupe.UI.TUI.Model.turn_box/2
   - Troupe.UI.TUI.Model.session_box/2

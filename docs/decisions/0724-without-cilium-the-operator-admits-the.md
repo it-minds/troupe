@@ -6,9 +6,7 @@ status: accepted
 issue: 257
 paths:
   - apps/troupe_operator/lib/troupe/operator/resources.ex
-  - apps/troupe_operator/test/troupe/operator/resources_test.exs
   - apps/troupe_protocol/lib/troupe/worker_profile/reach.ex
-  - apps/troupe_protocol/test/troupe/worker_profile/reach_test.exs
 gist: "Without Cilium, the operator admits the installation's own OpenBao and object store outside the cluster on the port they name: an address as that…"
 ---
 

@@ -13,7 +13,6 @@ paths:
   - apps/troupe_plane/lib/troupe/plane/settings/setting.ex
   - apps/troupe_plane/lib/troupe/plane/application.ex
   - apps/troupe_plane/priv/repo/migrations/20261116001019_artifact_opened_at.exs
-  - apps/troupe_plane/test/troupe/plane/artifact_retention_test.exs
   - clients/gui/packages/client/src/retention.ts
   - clients/gui/packages/client/src/artifacts.ts
   - clients/gui/apps/desktop/src/views/Artifacts.tsx
@@ -21,9 +20,6 @@ paths:
   - clients/gui/apps/console/src/views/PublishedArtifacts.tsx
   - clients/gui/apps/console/src/views/settingUnits.tsx
   - clients/tui/lib/troupe/ui/tui/artifacts_page.ex
-  - PROTOCOL.md
-  - docs/admin/console.md
-  - docs/user/artifacts.md
 symbols:
   - Troupe.Plane.Artifacts.Retention
   - Troupe.Plane.Artifacts.Retention.sweep/1

@@ -28,10 +28,6 @@ paths:
   - clients/gui/apps/desktop/src-tauri/src/agent_file.rs
   - clients/gui/apps/desktop/src-tauri/capabilities/default.json
   - clients/gui/apps/console/src/views/Bundles.tsx
-  - apps/troupe_gateway/test/troupe/gateway/agents_picker_test.exs
-  - clients/gui/apps/desktop/test/agent-picker.test.tsx
-  - clients/gui/apps/console/test/bundles.test.tsx
-  - PROTOCOL.md
 symbols:
   - Troupe.Protocol.AgentCheck.check/2
   - Troupe.Agent.Local.origin/1

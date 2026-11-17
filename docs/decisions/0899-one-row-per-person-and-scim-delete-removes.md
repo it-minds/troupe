@@ -17,12 +17,7 @@ paths:
   - apps/troupe_plane/lib/troupe/plane/admin/console.ex
   - apps/troupe_plane/lib/troupe/plane/web/router.ex
   - apps/troupe_plane/priv/repo/migrations/20261013000899_one_row_per_person.exs
-  - apps/troupe_plane/test/troupe/plane/one_row_per_person_test.exs
-  - apps/troupe_plane/test/troupe/plane/scim_answers_test.exs
-  - apps/troupe_plane/test/troupe/plane/scim_entra_test.exs
   - clients/gui/apps/console/src/views/Teams.tsx
-  - docs/admin/authentik.md
-  - docs/admin/integrations.md
 symbols:
   - Troupe.Plane.SCIM.delete_user/1
   - Troupe.Plane.SCIM.delete_group/1

@@ -5,10 +5,7 @@ date: 2026-10-04
 status: accepted
 issue: 399
 paths:
-  - ARCHITECTURE.md
   - apps/troupe_core/lib/troupe/agent/server.ex
-  - apps/troupe_core/test/troupe/agent/compaction_test.exs
-  - apps/troupe_core/test/troupe/llm/fake_script_test.exs
 gist: A compaction never cuts between a tool call and its results, a summary that fails leaves the conversation as it was, and `compacted` keeps a large…
 ---
 

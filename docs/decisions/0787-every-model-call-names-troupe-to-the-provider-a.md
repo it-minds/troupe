@@ -5,7 +5,6 @@ date: 2026-10-05
 status: accepted
 issue: 419
 paths:
-  - PROTOCOL.md
   - apps/troupe_core/lib/troupe.ex
   - apps/troupe_core/lib/troupe/agent/server.ex
   - apps/troupe_core/lib/troupe/config.ex
@@ -14,18 +13,10 @@ paths:
   - apps/troupe_core/lib/troupe/llm/providers/anthropic.ex
   - apps/troupe_core/lib/troupe/llm/providers/openai.ex
   - apps/troupe_core/lib/troupe/llm/request.ex
-  - apps/troupe_core/test/support/fake_openai.exs
-  - apps/troupe_core/test/troupe/agent/identify_test.exs
-  - apps/troupe_core/test/troupe/doctor_test.exs
-  - apps/troupe_core/test/troupe/llm/attribution_test.exs
-  - apps/troupe_core/test/troupe/llm/identify_test.exs
   - apps/troupe_gateway/lib/troupe/gateway/dispatch.ex
-  - apps/troupe_gateway/test/troupe/gateway/identify_test.exs
   - apps/troupe_worker/lib/troupe/worker/session/restore.ex
-  - apps/troupe_worker/test/troupe/worker/identify_test.exs
   - clients/tui/lib/troupe/cli/runner.ex
   - clients/tui/lib/troupe/client/daemon/link.ex
-  - clients/tui/test/troupe/cli_test.exs
 gist: "Every model call names Troupe to the provider: a User-Agent with the version, the client and the platform everywhere, LiteLLM's tags and spend-log…"
 ---
 

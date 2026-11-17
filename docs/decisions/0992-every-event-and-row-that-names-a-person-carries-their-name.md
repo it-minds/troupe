@@ -12,7 +12,6 @@ paths:
   - apps/troupe_gateway/lib/troupe/gateway/dispatch.ex
   - apps/troupe_core/lib/troupe.ex
   - apps/troupe_protocol/lib/troupe/protocol/schema.ex
-  - PROTOCOL.md
   - clients/gui/packages/client/src/people.ts
   - clients/gui/packages/client/src/transcript.ts
   - clients/gui/packages/client/src/fleet.ts

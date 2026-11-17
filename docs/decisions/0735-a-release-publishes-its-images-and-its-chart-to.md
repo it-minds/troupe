@@ -8,7 +8,6 @@ supersedes: [669]
 paths:
   - .github/workflows/images.yml
   - .github/workflows/release.yml
-  - docs/developer/ci.md
   - scripts/release
 gist: A release publishes its images and its chart to `ghcr.io`, public, and deploys nothing
 ---

@@ -6,7 +6,6 @@ status: accepted
 issue: 516
 supersedes: [820]
 paths:
-  - PROTOCOL.md
   - apps/troupe_core/lib/troupe/agent/definition.ex
   - apps/troupe_core/lib/troupe/agent/definitions.ex
   - apps/troupe_core/lib/troupe/config/toml.ex
@@ -14,17 +13,7 @@ paths:
   - apps/troupe_core/lib/troupe/mcp/import.ex
   - apps/troupe_core/lib/troupe/mcp/local.ex
   - apps/troupe_core/lib/troupe/session.ex
-  - apps/troupe_core/test/troupe/agent/workspace_permissions_test.exs
-  - apps/troupe_core/test/troupe/config/toml_test.exs
-  - apps/troupe_core/test/troupe/mcp/import_test.exs
-  - apps/troupe_core/test/troupe/mcp/local_test.exs
   - apps/troupe_gateway/lib/troupe/gateway/dispatch.ex
-  - apps/troupe_gateway/test/troupe/gateway/agents_trust_test.exs
-  - apps/troupe_gateway/test/troupe/gateway/local_sources_test.exs
-  - clients/tui/README.md
-  - docs/user/configuration.md
-  - docs/user/mcp.md
-  - docs/user/agents.md
 symbols:
   - Troupe.Agent.Definition.permission/3
   - Troupe.Agent.Definition.trust/3

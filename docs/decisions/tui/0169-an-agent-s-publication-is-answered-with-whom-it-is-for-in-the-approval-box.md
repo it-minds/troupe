@@ -16,10 +16,6 @@ paths:
   - clients/tui/lib/troupe/client/artifacts.ex
   - clients/tui/lib/troupe/cli/artifacts.ex
   - clients/tui/lib/troupe/cli.ex
-  - clients/tui/test/troupe/publish_gate_test.exs
-  - clients/tui/test/troupe/artifacts_cli_test.exs
-  - clients/tui/test/troupe/artifacts_screen_test.exs
-  - docs/user/terminal-screen.md
 symbols:
   - Troupe.UI.TUI.Model.publish_choices/2
   - Troupe.UI.TUI.Model.publish_draft/3

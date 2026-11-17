@@ -30,7 +30,6 @@ paths:
   - clients/gui/apps/console/src/views/Profiles.tsx
   - clients/gui/apps/console/src/views/bits.tsx
   - clients/gui/apps/console/src/nav.ts
-  - PROTOCOL.md
 symbols:
   - Troupe.Protocol.Memory
   - Troupe.Plane.Memory

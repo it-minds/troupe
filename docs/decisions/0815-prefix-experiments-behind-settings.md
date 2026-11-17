@@ -18,11 +18,6 @@ paths:
   - apps/troupe_core/lib/troupe/bench/live_scenarios.ex
   - apps/troupe_core/lib/troupe/bench/scenario.ex
   - apps/troupe_core/lib/mix/tasks/troupe.prefix.ex
-  - apps/troupe_core/test/support/fake_openai.exs
-  - apps/troupe_core/test/troupe/agent/stable_prompt_test.exs
-  - apps/troupe_core/test/troupe/bench_live_test.exs
-  - apps/troupe_core/test/troupe/bench/prefix_test.exs
-  - apps/troupe_core/test/troupe/llm/thinking_test.exs
   - apps/troupe_protocol/lib/troupe/protocol/schema.ex
 symbols:
   - Troupe.Bench.Prefix.count/1

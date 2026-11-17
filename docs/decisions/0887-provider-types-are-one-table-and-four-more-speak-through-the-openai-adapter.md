@@ -22,9 +22,6 @@ paths:
   - apps/troupe_core/lib/troupe/config/open_code.ex
   - apps/troupe_core/lib/mix/tasks/troupe.config.schema.ex
   - apps/troupe_protocol/lib/troupe/protocol/organisation.ex
-  - apps/troupe_core/test/troupe/llm/provider_types_test.exs
-  - apps/troupe_core/test/support/fake_providers.exs
-  - docs/user/configuration.md
 symbols:
   - Troupe.LLM.ProviderType.all/0
   - Troupe.LLM.Providers.Compatible.url/1

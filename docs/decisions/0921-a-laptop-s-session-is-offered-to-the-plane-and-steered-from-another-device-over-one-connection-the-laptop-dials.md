@@ -28,7 +28,6 @@ paths:
   - clients/gui/apps/desktop/src/views/Remote.tsx
   - clients/gui/apps/desktop/src/hooks.ts
   - clients/gui/apps/console/src/views/Remote.tsx
-  - PROTOCOL.md
 symbols:
   - Troupe.Protocol.Relay
   - Troupe.Gateway.Remote

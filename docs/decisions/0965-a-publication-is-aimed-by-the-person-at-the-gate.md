@@ -13,8 +13,6 @@ paths:
   - apps/troupe_gateway/lib/troupe/gateway/artifacts.ex
   - apps/troupe_worker/lib/troupe/worker/artifacts.ex
   - apps/troupe_protocol/lib/troupe/protocol/schema.ex
-  - PROTOCOL.md
-  - apps/troupe_core/test/troupe/tools/publish_artifact_test.exs
 symbols:
   - Troupe.Tools.PublishArtifact.must_ask?/1
   - Troupe.Tools.PublishArtifact.publication/1

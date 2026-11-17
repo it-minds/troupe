@@ -8,14 +8,8 @@ supersedes: [827]
 paths:
   - apps/troupe_core/lib/troupe/onboard/notice.ex
   - apps/troupe_core/lib/troupe/onboard/start.ex
-  - apps/troupe_core/priv/agents/librarian.md
   - apps/troupe_gateway/lib/troupe/gateway/dispatch.ex
   - apps/troupe_protocol/lib/troupe/protocol/schema.ex
-  - PROTOCOL.md
-  - apps/troupe_core/test/troupe/onboard/notice_test.exs
-  - apps/troupe_core/test/troupe/onboard/librarian_test.exs
-  - apps/troupe_core/test/troupe/tools/onboard_write_test.exs
-  - apps/troupe_gateway/test/troupe/gateway/onboard_test.exs
   - clients/tui/lib/troupe/client/daemon/start.ex
   - clients/gui/packages/client/src/onboard.ts
   - clients/gui/apps/desktop/src/views/Onboard.tsx

@@ -27,9 +27,6 @@ paths:
   - clients/gui/packages/client/src/admin.ts
   - clients/gui/apps/console/src/views/Memory.tsx
   - clients/gui/apps/console/src/views/Sessions.tsx
-  - PROTOCOL.md
-  - docs/user/memory.md
-  - docs/admin/console.md
 symbols:
   - Troupe.Protocol.Memory.stamp/1
   - Troupe.Plane.Memory.turn/2

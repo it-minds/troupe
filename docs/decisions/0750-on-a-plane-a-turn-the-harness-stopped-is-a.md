@@ -8,13 +8,9 @@ paths:
   - apps/troupe_plane/lib/troupe/plane/control/connection.ex
   - apps/troupe_plane/lib/troupe/plane/sessions/session.ex
   - apps/troupe_plane/priv/repo/migrations/20261001000750_session_failed_reason.exs
-  - apps/troupe_worker/test/troupe/worker/stopped_turn_test.exs
   - clients/gui/apps/desktop/src/views/bits.tsx
-  - clients/gui/apps/desktop/test/team-failed.test.tsx
   - clients/gui/packages/client/src/fleet.ts
   - clients/gui/packages/client/src/plane.ts
-  - clients/gui/packages/client/test/fleet.test.ts
-  - clients/gui/packages/client/test/support/plane.ts
   - clients/gui/scripts/fake-deployment.ts
 gist: "On a plane, a turn the harness stopped is a failed turn: the row says why, the run is failed and its target is told, and a pod whose session…"
 ---

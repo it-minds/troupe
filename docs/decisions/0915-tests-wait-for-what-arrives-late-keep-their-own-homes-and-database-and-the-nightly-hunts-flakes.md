@@ -4,24 +4,12 @@ title: "A test waits for what arrives after an async step rather than asserting 
 date: 2026-10-16
 status: accepted
 paths:
-  - clients/gui/apps/desktop/test/support.ts
-  - clients/gui/apps/console/test/support.ts
-  - clients/gui/apps/desktop/test/waits.test.tsx
-  - clients/gui/apps/console/test/waits.test.tsx
-  - clients/gui/packages/client/test/support/waits.ts
-  - clients/gui/packages/client/test/support/image-reads.ts
-  - clients/gui/packages/client/test/image-reads.test.ts
-  - clients/gui/packages/client/test/support/daemon.ts
-  - clients/gui/packages/client/test/fakes.test.ts
   - clients/gui/apps/desktop/vitest.config.ts
   - clients/gui/apps/console/vitest.config.ts
   - apps/troupe_protocol/credo/async_env.ex
   - .credo.exs
   - clients/tui/.credo.exs
   - config/config.exs
-  - apps/troupe_plane/test/support/test_database.exs
-  - apps/troupe_plane/test/test_helper.exs
-  - apps/troupe_worker/test/test_helper.exs
   - scripts/flake-hunt
   - .github/workflows/ci.yml
   - .github/workflows/nightly.yml

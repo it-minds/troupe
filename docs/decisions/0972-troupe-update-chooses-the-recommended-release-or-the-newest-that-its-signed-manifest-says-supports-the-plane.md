@@ -16,7 +16,6 @@ paths:
   - clients/gui/apps/desktop/src-tauri/src/update.rs
   - clients/gui/apps/desktop/src/updates.ts
   - clients/gui/apps/desktop/src/views/Update.tsx
-  - docs/user/updating.md
 symbols:
   - Troupe.Release.Manifest.compatibility/1
   - Troupe.Release.Manifest.supports?/2

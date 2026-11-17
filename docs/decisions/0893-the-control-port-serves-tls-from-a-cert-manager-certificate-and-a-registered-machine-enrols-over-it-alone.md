@@ -18,11 +18,6 @@ paths:
   - charts/troupe/values.yaml
   - dev/kind/values.yaml
   - scripts/remote-up
-  - docs/admin/single-machine.md
-  - apps/troupe_plane/test/support/control_tls_fixture.ex
-  - apps/troupe_plane/test/troupe/plane/control_tls_test.exs
-  - apps/troupe_worker/test/troupe/worker/machine_link_test.exs
-  - apps/troupe_operator/test/e2e/enrolment_test.exs
 symbols:
   - Troupe.Plane.Control.TLS
   - Troupe.Plane.Admin.host_register/3

@@ -6,7 +6,6 @@ status: accepted
 issue: 184
 paths:
   - clients/tui/lib/troupe/remote/worker.ex
-  - docs/developer/architecture.md
 gist: A remote session the plane moves to another pod is followed there, and a worker that cannot find it stops after ten tries and says so
 ---
 

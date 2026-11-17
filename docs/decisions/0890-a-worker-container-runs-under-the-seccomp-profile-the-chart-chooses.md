@@ -8,7 +8,6 @@ supersedes: [832]
 paths:
   - apps/troupe_operator/lib/troupe/operator/settings.ex
   - apps/troupe_operator/lib/troupe/operator/resources.ex
-  - apps/troupe_operator/test/troupe/operator/settings_test.exs
   - config/runtime.exs
   - charts/troupe/files/worker-seccomp.json
   - charts/troupe/templates/worker-profiles.yaml

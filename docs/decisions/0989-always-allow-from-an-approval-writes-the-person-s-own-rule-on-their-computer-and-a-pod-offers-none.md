@@ -13,14 +13,8 @@ paths:
   - apps/troupe_core/lib/troupe.ex
   - apps/troupe_protocol/lib/troupe/protocol/relay.ex
   - apps/troupe_protocol/lib/troupe/protocol/schema.ex
-  - apps/troupe_gateway/test/troupe/gateway/allow_always_test.exs
-  - apps/troupe_worker/test/troupe/worker/harness_auth_test.exs
-  - PROTOCOL.md
   - clients/gui/apps/desktop/src/views/Approval.tsx
   - clients/gui/packages/client/src/transcript.ts
-  - clients/gui/packages/client/test/support/daemon.ts
-  - clients/gui/packages/client/test/support/worker.ts
-  - clients/gui/docs/design/DESIGN.md
 symbols:
   - Troupe.Config.Settings.allow_rule/3
   - Troupe.Session.Approvals.lasting/2

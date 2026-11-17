@@ -5,13 +5,10 @@ date: 2026-11-15
 status: accepted
 issue: 911
 paths:
-  - docs/design/lines.json
-  - docs/design/frames.md
   - clients/gui/scripts/lines.ts
   - clients/gui/scripts/lines-rule.ts
   - clients/gui/packages/client/src/lines.ts
   - clients/gui/docs/design/lines.order.json
-  - clients/gui/packages/client/test/lines.test.ts
   - clients/gui/apps/desktop/src/frames.ts
   - clients/gui/apps/desktop/src/views/StartSession.tsx
   - clients/gui/apps/console/src/views/bits.tsx
@@ -19,7 +16,6 @@ paths:
   - clients/tui/lib/troupe/ui/lines.ex
   - clients/tui/lib/troupe/ui/tui/model.ex
   - clients/tui/lib/troupe/ui/tui/new_session_page.ex
-  - clients/tui/test/troupe/lines_test.exs
 symbols:
   - Troupe.UI.Lines.order/2
   - Troupe.UI.Lines.pick/3

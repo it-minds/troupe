@@ -9,7 +9,6 @@ paths:
   - apps/troupe_core/lib/troupe/config/schema.ex
   - apps/troupe_core/lib/troupe/doctor.ex
   - clients/tui/lib/troupe/cli.ex
-  - clients/tui/test/troupe/cli_reference_test.exs
 gist: "`troupe --help` is written from the command-line table beside the parser and the harness's command table, and `Troupe.Commands` is a door the TUI…"
 ---
 

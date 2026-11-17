@@ -17,11 +17,6 @@ paths:
   - apps/troupe_gateway/lib/troupe/gateway/dispatch.ex
   - apps/troupe_gateway/lib/troupe/gateway/worktrees.ex
   - apps/troupe_protocol/lib/troupe/protocol/schema.ex
-  - apps/troupe_core/test/troupe/agent/switch_test.exs
-  - apps/troupe_core/test/troupe/agent/validate_test.exs
-  - apps/troupe_core/test/troupe/agent/local_test.exs
-  - apps/troupe_gateway/test/troupe/gateway/agents_api_test.exs
-  - PROTOCOL.md
 symbols:
   - Troupe.Agent.Validate.check/2
   - Troupe.Agent.Local.put/5

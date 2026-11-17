@@ -18,14 +18,10 @@ paths:
   - apps/troupe_plane/lib/troupe/plane/triggers/notify.ex
   - apps/troupe_plane/lib/troupe/plane/admin.ex
   - apps/troupe_plane/priv/repo/migrations/20261016000905_github_webhook.exs
-  - apps/troupe_plane/test/troupe/plane/github_webhook_test.exs
   - apps/troupe_worker/lib/troupe/worker/plane/commands.ex
-  - apps/troupe_worker/test/troupe/worker/github_fix_loop_test.exs
   - apps/troupe_protocol/lib/troupe/kms/policy.ex
   - clients/gui/apps/console/src/views/Runs.tsx
   - clients/gui/apps/console/src/views/Triggers.tsx
-  - docs/admin/github.md
-  - docs/admin/github-runs.md
 symbols:
   - Troupe.Plane.GitHub.Webhook.take/2
   - Troupe.Plane.GitHub.WebhookSecret.check/3

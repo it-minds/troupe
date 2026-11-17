@@ -15,17 +15,13 @@ paths:
   - apps/troupe_plane/lib/troupe/plane/triggers.ex
   - apps/troupe_plane/lib/troupe/plane/fleet/extends.ex
   - apps/troupe_plane/priv/repo/migrations/20261016000911_team_github.exs
-  - apps/troupe_plane/test/support/fake_github.ex
-  - apps/troupe_plane/test/troupe/plane/github_policy_test.exs
   - apps/troupe_worker/lib/troupe/worker/github.ex
   - apps/troupe_worker/lib/troupe/worker/github/api.ex
   - apps/troupe_worker/lib/troupe/worker/github/secrets.ex
   - apps/troupe_worker/lib/troupe/worker/git_credentials.ex
-  - apps/troupe_worker/test/troupe/worker/github_fix_loop_test.exs
   - charts/troupe/crds/workerprofile.yaml
   - clients/gui/apps/console/src/views/Profiles.tsx
   - clients/gui/apps/console/src/views/Team.tsx
-  - docs/admin/github.md
 symbols:
   - Troupe.PushPaths.denied/2
   - Troupe.Plane.GitHub.Policy.listed/3

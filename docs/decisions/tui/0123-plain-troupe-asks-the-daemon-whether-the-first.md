@@ -7,8 +7,6 @@ issue: 76
 paths:
   - clients/tui/lib/troupe/cli/config_setup.ex
   - clients/tui/lib/troupe/cli/doctor.ex
-  - clients/tui/test/troupe/config_setup_test.exs
-  - clients/tui/test/troupe/doctor_test.exs
 gist: Plain `troupe` asks the daemon whether the first run is done before it asks its own questions, and `troupe doctor` prints the harness's checks
 ---
 

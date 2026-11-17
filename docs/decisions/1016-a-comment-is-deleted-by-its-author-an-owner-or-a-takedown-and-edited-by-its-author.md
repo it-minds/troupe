@@ -10,7 +10,6 @@ paths:
   - apps/troupe_plane/lib/troupe/plane/artifacts/comment.ex
   - apps/troupe_plane/lib/troupe/plane/harness.ex
   - apps/troupe_plane/priv/repo/migrations/20261116001016_artifact_comment_edits.exs
-  - apps/troupe_plane/test/troupe/plane/artifact_comment_edits_test.exs
   - apps/troupe_gateway/lib/troupe/gateway/artifacts.ex
   - apps/troupe_gateway/lib/troupe/gateway/dispatch.ex
   - apps/troupe_protocol/lib/troupe/protocol/schema.ex
@@ -19,8 +18,6 @@ paths:
   - clients/gui/packages/client/src/daemon.ts
   - clients/gui/apps/desktop/src/views/Artifacts.tsx
   - clients/gui/apps/console/src/views/ArtifactComments.tsx
-  - PROTOCOL.md
-  - docs/user/artifacts.md
 symbols:
   - Troupe.Plane.Artifacts.delete_comment/4
   - Troupe.Plane.Artifacts.edit_comment/5

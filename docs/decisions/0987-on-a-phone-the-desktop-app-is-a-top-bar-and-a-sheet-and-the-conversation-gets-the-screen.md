@@ -12,9 +12,6 @@ paths:
   - clients/gui/apps/desktop/src/views/Session.tsx
   - clients/gui/apps/desktop/src/styles.css
   - clients/gui/apps/desktop/index.html
-  - clients/gui/apps/desktop/test/phone-layout.test.tsx
-  - clients/gui/apps/desktop/test/phone-filters.test.tsx
-  - clients/gui/docs/design/DESIGN.md
 symbols:
   - useNarrow
   - NARROW_QUERY

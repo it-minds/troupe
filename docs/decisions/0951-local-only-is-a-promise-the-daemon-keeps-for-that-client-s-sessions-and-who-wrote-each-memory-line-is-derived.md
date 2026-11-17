@@ -33,10 +33,6 @@ paths:
   - clients/tui/lib/troupe/cli/memory.ex
   - clients/tui/lib/troupe/client/daemon/link.ex
   - clients/tui/lib/troupe/remote/worker.ex
-  - PROTOCOL.md
-  - docs/user/sessions.md
-  - docs/user/configuration-settings.md
-  - docs/user/memory.md
 symbols:
   - Troupe.Gateway.LocalOnly
   - Troupe.LocalOnly

@@ -4,16 +4,12 @@ title: "A spent budget is a question for the person attached, not a stop: `allow
 date: 2026-09-20
 status: accepted
 paths:
-  - ARCHITECTURE.md
-  - PROTOCOL.md
   - apps/troupe_core/lib/troupe/agent/budget_question.ex
   - apps/troupe_core/lib/troupe/agent/server.ex
   - apps/troupe_core/lib/troupe/agent/state.ex
   - apps/troupe_core/lib/troupe/budget.ex
   - apps/troupe_core/lib/troupe/config.ex
   - apps/troupe_core/lib/troupe/sessions/index.ex
-  - apps/troupe_core/test/troupe/agent/budget_question_test.exs
-  - apps/troupe_core/test/troupe/agent/resilience_test.exs
   - apps/troupe_protocol/lib/troupe/protocol/schema.ex
   - apps/troupe_worker/lib/troupe/worker/session/restore.ex
   - clients/gui/apps/desktop/src/views/Question.tsx

@@ -13,7 +13,6 @@ paths:
   - clients/tui/lib/troupe/ui/tui/server.ex
   - clients/tui/lib/troupe/ui/tui/view.ex
   - clients/tui/lib/troupe/cli/onboard.ex
-  - clients/tui/test/troupe/start_onboarding_test.exs
 symbols:
   - Troupe.Client.Daemon.Start
   - Troupe.Client.answer_local/3

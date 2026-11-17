@@ -29,9 +29,6 @@ paths:
   - clients/tui/lib/troupe/client/own_memory.ex
   - clients/tui/lib/troupe/ui/tui/memory_page.ex
   - clients/tui/lib/mix/tasks/troupe.xref.ex
-  - PROTOCOL.md
-  - docs/user/memory.md
-  - docs/admin/console.md
 symbols:
   - Troupe.Protocol.Memory.Entries
   - Troupe.Plane.Memory.InEffect

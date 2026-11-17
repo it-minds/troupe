@@ -6,7 +6,6 @@ status: accepted
 issue: 407
 paths:
   - apps/troupe_core/lib/troupe/config.ex
-  - apps/troupe_core/test/troupe/config_test.exs
 gist: "A tool's result is cut at 32 KiB by default, not 60,000 bytes: what is cut is one `read_output` call away, and what is sent goes out again with…"
 ---
 

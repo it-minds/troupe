@@ -10,9 +10,6 @@ paths:
   - apps/troupe_core/lib/troupe/bench/live.ex
   - apps/troupe_core/lib/troupe/bench/live_scenarios.ex
   - apps/troupe_core/lib/troupe/bench/scenario.ex
-  - apps/troupe_core/test/support/fake_openai.exs
-  - apps/troupe_core/test/troupe/bench_live_test.exs
-  - docs/developer/bench.md
 gist: "`troupe bench --live` is a benchmark: a `standard` suite of ten tasks beside the four-task `smoke`, each run's tool calls in its record, a score…"
 ---
 

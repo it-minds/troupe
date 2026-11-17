@@ -8,7 +8,6 @@ paths:
   - apps/troupe_plane/lib/troupe/plane/harness.ex
   - apps/troupe_plane/lib/troupe/plane/identity.ex
   - apps/troupe_plane/lib/troupe/plane/sessions.ex
-  - apps/troupe_plane/test/troupe/plane/grant_enforcement_test.exs
 gist: "A team's grant on a profile holds wherever one of its sessions could run or start: on the pod running it, in what that pod reports afterwards, when…"
 ---
 

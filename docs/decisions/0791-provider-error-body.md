@@ -8,7 +8,6 @@ paths:
   - apps/troupe_core/lib/troupe/llm/providers/anthropic.ex
   - apps/troupe_core/lib/troupe/llm/providers/openai.ex
   - apps/troupe_core/lib/troupe/llm/provider.ex
-  - apps/troupe_core/test/support/fake_transport.ex
 symbols:
   - Troupe.LLM.Provider.collect_error/2
   - Troupe.LLM.Provider.error_text/2

@@ -11,10 +11,7 @@ paths:
   - clients/tui/lib/troupe/client.ex
   - clients/tui/lib/troupe/client/daemon.ex
   - clients/tui/lib/troupe/client/daemon/link.ex
-  - clients/tui/test/troupe/unlink_command_test.exs
-  - clients/tui/test/troupe/private_link_test.exs
   - clients/gui/apps/desktop/src/views/CommandPalette.tsx
-  - docs/user/cli-reference.md
 gist: "/unlink asks, /unlink yes does: owner scope; drops link, plane token, steering sign-in, memory copy; keeps sessions, pinned key; terminal's other sign-in links next"
 ---
 

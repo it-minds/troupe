@@ -6,11 +6,7 @@ status: accepted
 issue: 588
 paths:
   - apps/troupe_plane/lib/troupe/plane/triggers/notify.ex
-  - apps/troupe_plane/test/troupe/plane/trigger_notify_test.exs
   - apps/troupe_protocol/lib/troupe/worker_profile/reach.ex
-  - apps/troupe_protocol/test/troupe/worker_profile/reach_test.exs
-  - apps/troupe_operator/test/troupe/operator/resources_test.exs
-  - docs/admin/bundles-and-triggers.md
 symbols:
   - Troupe.WorkerProfile.Reach.refusal/1
   - Troupe.WorkerProfile.Reach.ipv4/1

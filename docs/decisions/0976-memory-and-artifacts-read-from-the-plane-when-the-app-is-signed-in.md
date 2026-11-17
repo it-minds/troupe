@@ -11,10 +11,6 @@ paths:
   - clients/gui/apps/desktop/src/views/Artifacts.tsx
   - clients/gui/apps/desktop/src/views/bits.tsx
   - clients/gui/apps/desktop/src/hooks.ts
-  - clients/gui/apps/desktop/test/daemon-redial.test.tsx
-  - clients/gui/apps/desktop/test/own-things-from-the-plane.test.tsx
-  - docs/user/memory.md
-  - docs/user/artifacts.md
 symbols:
   - PlaneOwn
   - OwnPlane

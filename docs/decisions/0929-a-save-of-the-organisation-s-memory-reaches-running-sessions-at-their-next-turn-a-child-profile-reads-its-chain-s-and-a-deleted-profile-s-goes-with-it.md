@@ -28,7 +28,6 @@ paths:
   - clients/gui/apps/desktop/src/views/Instructions.tsx
   - clients/gui/apps/desktop/src/views/Session.tsx
   - clients/gui/apps/console/src/views/Memory.tsx
-  - PROTOCOL.md
 symbols:
   - Troupe.Session.PlaneMemory
   - Troupe.Gateway.Memory

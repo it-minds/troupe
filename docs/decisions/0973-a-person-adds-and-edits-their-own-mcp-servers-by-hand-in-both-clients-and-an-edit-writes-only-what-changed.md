@@ -13,7 +13,6 @@ paths:
   - clients/gui/packages/client/src/daemon.ts
   - clients/gui/apps/desktop/src/views/ConnectScreen.tsx
   - clients/gui/apps/desktop/src/views/SessionServers.tsx
-  - docs/user/mcp.md
 symbols:
   - Troupe.UI.TUI.Server.parse_server/1
 gist: "Add and edit a server without a file to import: a drawer in the desktop app, /mcp add and /mcp try in the TUI; an edit is the difference, merged as RFC 7396; no value comes back"
