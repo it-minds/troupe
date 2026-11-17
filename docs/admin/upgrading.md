@@ -4,7 +4,7 @@ From the release you run to the next one: what to do, in order, what to watch wh
 rolls, how to go back, and how to restore when going back is not enough. The commands
 assume the release `troupe` in `troupe-system`, with `$chart` and `$version` as in
 [installing.md §2](installing.md#2-crds-then-the-chart). A release's own steps, where it
-has any, are under [Upgrade in routine-tasks.md](routine-tasks.md#upgrade); read the ones
+has any, are in its release notes, under *Before you upgrade a plane*; read the ones
 between your release and the next before you start.
 
 ## One release at a time
@@ -73,7 +73,8 @@ kubectl -n troupe-system logs job/troupe-plane-migrate
    version and commit must be the ones you rolled, or the rollout has not finished or a tag
    did not move. `kubectl -n troupe-system get pods -o
    custom-columns='POD:.metadata.name,IMAGE:.status.containerStatuses[0].imageID'` shows
-   the digest each pod runs.
+   the digest each pod runs: a tag that already existed with `IfNotPresent` leaves the old
+   image serving while Helm reports success.
 3. **The workers.** A profile whose image is `release` follows the chart: the plane writes
    it again with the new image, the profile reports `UpgradePending`, and each pod is
    replaced once it holds no active session, by the plane draining it and the operator
@@ -96,13 +97,10 @@ missing where an administrator looks:
   `PlaneCAMissing` and `EndpointUnreachable` each name what is missing and what to do
   ([profiles-and-policy.md, status conditions](profiles-and-policy.md#status-conditions)).
 - **What OpenBao grants the plane**, checked when the plane starts and on the console's
-  Overview, and answered by `admin.overview` as `openbao`: the plane asks OpenBao, look-only,
-  what its own token may do at each path it needs, and for each grant it lacks says in one
-  sentence what fails without it and gives the `bao` lines that grant it, with the
-  deployment's own mounts, key names and role. The list is
-  [openbao.md](openbao.md), generated from the same code. Nothing in it is something the
-  upgrade did; each is a grant the release needs that the installation does not yet give,
-  and its lines are the step, run by whoever holds an OpenBao administrator's token.
+  Overview, and answered by `admin.overview` as `openbao` ([openbao.md](openbao.md)).
+  Nothing in it is something the upgrade did; each is a grant the release needs that the
+  installation does not yet give, and its lines are the step, run by whoever holds an
+  OpenBao administrator's token.
 - **Pod Security levels** are the chart's and the operator's to set (`podSecurity` in the
   values): the chart labels `troupe-system` where it makes the namespace, and the operator
   labels each worker namespace at every pass, one made before the upgrade included, so an
@@ -112,8 +110,8 @@ missing where an administrator looks:
 - **The plane's log** at start, where a check could not be made at all (OpenBao or the
   identity provider not answering): that is the installation, not the release.
 
-A precondition the release newly needs is in its notes and under its heading in
-[routine-tasks.md](routine-tasks.md#upgrade), before the upgrade rather than after.
+A precondition the release newly needs is in its notes, before the upgrade rather than
+after.
 
 ## 6. Going back
 

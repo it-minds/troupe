@@ -1,0 +1,42 @@
+name: Stage 1 gate
+description: The record of one release's walk of the Stage 1 gate. Stage 1 is tagged when all eight rows pass on one release.
+title: "Stage 1 gate: v<version>"
+body:
+  - type: markdown
+    attributes:
+      value: |
+        One issue per release. Each row walked gets one comment: **PASS** or **FAIL**, the date, the machine and its operating system, what was run and what it printed. Each failure is an issue, neutrally worded, and the row's comment names it; it is fixed or filed before the record moves on, never left as known.
+
+        **The desk half.** Install the release with its installers from its release page, never from a checkout, then from a clone at its tag run `sh scripts/gate-check --board --keep` (Windows: `scripts\gate-check.ps1 -Board -Keep`) on scratch homes. Its whole output goes into the comments of rows 1, 3, 5, 6, 7 and 8; each line it prints names its row.
+
+        **What needs a person, the live plane or a real account** is each row's second half below, walked after the desk half is recorded here.
+
+        **A row is walked again only where a change touched it**: a pull request merged since its last pass changed what its steps run or what the decisions on those files govern (`mix troupe.decisions --for`), or fixed a failure filed from it. Otherwise its comment says the result is carried and links the comment it was walked in. A failure fixed is a new release and that row walked again on it.
+
+        **Private evidence stays out.** Live-plane output goes in with host, cluster, account and identity-provider names replaced by `example.com`; the raw output and any recording stay in the deployment's private records, unnamed. Nothing from a person's own home, keychain or settings goes in.
+  - type: input
+    id: release
+    attributes:
+      label: Release
+      description: The version walked, as its release page names it.
+      placeholder: 0.42.0-beta
+    validations:
+      required: true
+  - type: textarea
+    id: rows
+    attributes:
+      label: The rows
+      description: Fill the result column as each row's comment is posted.
+      value: |
+        | | the row | the desk half (`gate-check`) | what needs a person | result |
+        | --- | --- | --- | --- | --- |
+        | 1 | A cloned repository makes Troupe do nothing unasked | a trapped clone's config, MCP server, git hooks and look-alike programs neither hold nor run until `troupe config trust` | on the kept clone, in the TUI and the desktop app: onboarding and the MCP server asked and refused, a shell call asked and refused, `troupe config --explain` lists the keys ignored, the clone's `marks` stays empty | |
+        | 2 | A worker is isolated from neighbours and the cloud | none (the cluster suite covers kind) | on the live plane, in a session's shell mode: `/proc/1/comm` is `bwrap`, the metadata addresses blocked, a host the profile names reached and others not (with Cilium); the pod's seccomp, AppArmor and user namespace are the chart's, its OpenBao role its profile's | |
+        | 3 | A fresh Anthropic account finishes a session | `troupe doctor --bench`, offline, also inside a repository whose `AGENTS.md` it must not read | the quick start word for word with a new account's key, then a task of tens of tool calls and one desktop turn: each ends with the agent's summary and a cost line, a rate limit shows as a wait; record the account's tier | |
+        | 4 | The seam is proven once, on camera | none | one take, about six minutes: a signed-in MCP server on the laptop offered to a session on a pod, a call approved and answered, the marker every participant sees, the tools gone once the person leaves; no token on screen; record the file's length and checksum | |
+        | 5 | An organisation rolls out once and stays current | `troupe update --check` finds the release signed by the release key and refuses another key | the console recommends the release, `troupe update` and the desktop app follow it without a reinstall, a client below `minimum` is refused, `troupe-daemon login on` survives a reboot and `login off` leaves nothing | |
+        | 6 | An organisation sets config once for everyone | an organisation's enforced `max_turns` and `approvals` hold a user file's value, and `--explain` names the organisation | the console's settings for people's machines, `troupe config pull`, the settings page's "set by your organisation", the managed file listed as `org` | |
+        | 7 | The docs describe the product that ships | the installed `troupe --help` is the command reference, and the clone's `VERSION` the installed one | the release commit's CI green; the quick start, first run, updating, installing and security read against what the laptop did; every place rows 1 to 6 found the docs wrong | |
+        | 8 | The board tells the truth | with `--board`: every open issue on the board and not Done, every completed one Done | each `Part of #N` and each `#N` in the release notes still described as to do; each issue closed without a pull request shipped or folded; no open title the release already does | |
+    validations:
+      required: true

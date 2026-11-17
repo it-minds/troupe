@@ -116,7 +116,7 @@ nowhere to dial.
 signed, for the name it dials. Without it, a worker holding a machine's secret does not
 dial and logs why, and a plane sent a machine's secret in plaintext refuses it before
 looking at it and logs that it must be rotated
-([a worker's isolation and egress](security-worker.md)).
+([a worker's isolation and egress](security.md#3-a-worker-isolation-and-egress)).
 
 The chart does not expose the control port outside the cluster: no Ingress, and its
 NetworkPolicy admits the port only from worker namespaces and the operator. Reaching

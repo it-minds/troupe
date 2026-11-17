@@ -40,8 +40,6 @@ export function unitOf(setting: Named): Unit {
   return { unit: "text", choices: [] };
 }
 
-const DAY = 86_400;
-
 /** A value as the plane keeps it, in the words of its unit: `$500.00`, `30 min`, `12 days`, `on`. */
 export function inUnit(u: Unit, value: unknown): string {
   if (value === null || value === undefined || value === "") return "—";

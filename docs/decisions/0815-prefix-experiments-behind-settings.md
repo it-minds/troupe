@@ -24,7 +24,6 @@ paths:
   - apps/troupe_core/test/troupe/bench/prefix_test.exs
   - apps/troupe_core/test/troupe/llm/thinking_test.exs
   - apps/troupe_protocol/lib/troupe/protocol/schema.ex
-  - docs/developer/prompt-prefix.md
 symbols:
   - Troupe.Bench.Prefix.count/1
 gist: "Both of issue 465's options stay off by default; a stable system prompt only ever appends to the conversation; llm_request and llm_response carry the counts"
@@ -36,8 +35,8 @@ Troupe changes that conversation between turns: the task list (792), the instruc
 files and the brief (798) and the goal (678) are in the top-level system prompt, and a
 compaction rewrites the history. Since Decision 805 such a block, refused, costs one
 refused request and a resend without any thinking. The two ways out, and what each needs
-answered, are in [docs/developer/prompt-prefix.md](../developer/prompt-prefix.md), with
-the offline numbers and the commands for the live ones.
+answered, were in `docs/developer/prompt-prefix.md` (in git history), with the offline
+numbers and the commands for the live ones.
 
 - **Settings, not a choice.** `thinking_binding: default | drop_block` and
   `system_prompt: per_turn | stable`, flat keys any layer may set, each with an

@@ -597,19 +597,17 @@ defmodule Troupe.Plane.Artifacts do
     end
   end
 
-  @doc """
-  A path as an artifact keeps it, or why it is refused: relative, `/`-separated, no empty,
-  `.` or `..` segment nor one past 255 bytes, and not starting with a segment the host's addresses take (`v<n>`).
-  """
+  # A path as an artifact keeps it, or why it is refused: relative, `/`-separated, no empty,
+  # `.` or `..` segment nor one past 255 bytes, and not starting with a segment the host's addresses take (`v<n>`).
   @spec normalise_path(term()) :: {:ok, String.t()} | {:error, String.t()}
-  def normalise_path(path) when is_binary(path) do
+  defp normalise_path(path) when is_binary(path) do
     case Enum.find(path_rules(), fn {refused?, _why} -> refused?.(path) end) do
       nil -> {:ok, path}
       {_refused?, why} -> {:error, why.(path)}
     end
   end
 
-  def normalise_path(other), do: {:error, "a path is a string, not #{inspect(other)}"}
+  defp normalise_path(other), do: {:error, "a path is a string, not #{inspect(other)}"}
 
   # Each a test that refuses a path and the sentence that says why, in the order they hold.
   defp path_rules do
@@ -669,8 +667,7 @@ defmodule Troupe.Plane.Artifacts do
     with {:ok, _size} <- within_file(path, %{size: byte_size(body)}), do: :ok
   end
 
-  @doc false
-  def within_version(total) when total > @max_version_bytes,
+  defp within_version(total) when total > @max_version_bytes,
     do:
       {:error,
        Error.new(:payload_too_large, %{
@@ -678,7 +675,7 @@ defmodule Troupe.Plane.Artifacts do
          reason: "a version is at most #{@max_version_bytes} bytes"
        })}
 
-  def within_version(_total), do: :ok
+  defp within_version(_total), do: :ok
 
   @doc false
   def content_type(%{"content_type" => type}, _path) when is_binary(type) and type != "" do
@@ -1582,9 +1579,6 @@ defmodule Troupe.Plane.Artifacts do
       _no -> :error
     end
   end
-
-  @doc false
-  def entry_path(artifact, version, path), do: file_path(artifact, version, path)
 
   @doc "The version an artifact's address serves: the one its owner pinned, else the newest."
   @spec current(Artifact.t()) :: pos_integer()

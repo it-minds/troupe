@@ -122,16 +122,15 @@ defmodule Troupe.KMS do
   def invited_prefix(name, session_id), do: person_prefix(name) <> "/invited/#{session_id}/"
 
   @doc """
-  One generation of a session's key, put for one invitee, at a path of its own: the
-  generation and a random part nobody can guess, so nobody could have put something there
-  first.
+  One generation of a session's key, put for one invitee, at a path of its own under the
+  `invited_prefix/2` the plane names: the generation and a random part nobody can guess,
+  so nobody could have put something there first.
 
-      iex> Troupe.KMS.invited_slot("idp|bea", "s-2", 2, "Xy")
+      iex> Troupe.KMS.invited_slot("troupe/people/idp|bea/invited/s-2/", 2, "Xy")
       "troupe/people/idp|bea/invited/s-2/k2-Xy"
   """
-  @spec invited_slot(String.t(), session_id(), pos_integer(), String.t()) :: String.t()
-  def invited_slot(name, session_id, version, nonce),
-    do: invited_prefix(name, session_id) <> "k#{version}-#{nonce}"
+  @spec invited_slot(String.t(), pos_integer(), String.t()) :: String.t()
+  def invited_slot(prefix, version, nonce), do: prefix <> "k#{version}-#{nonce}"
 
   @doc """
   Where a person's credential for one MCP server's slot lives.

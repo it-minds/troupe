@@ -104,12 +104,12 @@ export function isRefused(link: AppLink | RefusedLink): link is RefusedLink {
   return "refused" in link;
 }
 
-/** The host a plane's address names, as a sentence says it. */
-export function planeHost(plane: string): string {
+/** The host an address names, without the scheme, as a sentence says it; the text itself when it is not one. */
+export function hostOf(url: string): string {
   try {
-    return new URL(plane).host;
+    return new URL(url).host;
   } catch {
-    return plane;
+    return url;
   }
 }
 

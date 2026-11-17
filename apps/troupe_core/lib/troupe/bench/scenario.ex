@@ -110,14 +110,6 @@ defmodule Troupe.Bench.Scenario do
   end
 
   @doc """
-  The `PATH` a command outcome runs with: this VM's, less `erts_bin`
-  (`Troupe.Reaper.path_without/2`, which every command started through reaper gets since
-  Decision 776).
-  """
-  @spec command_path(String.t(), Path.t() | nil) :: String.t()
-  def command_path(path, erts_bin), do: Troupe.Reaper.path_without(path, erts_bin)
-
-  @doc """
   Whether a file of the workspace holds `content`, as a `{:file, ...}` outcome is judged:
   the text, line endings and trailing whitespace aside. A check beside an outcome asks it
   of another file (Decision 775).

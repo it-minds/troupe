@@ -1,9 +1,9 @@
 defmodule Troupe.CommandAuditTest do
   @moduledoc """
-  The audit of every command (issue #502, part B; `docs/history/command-audit.md`): what
-  the rows of the harness's table do when they are typed, from the command line and from
-  the palette over an activated window, on this machine and on a pod, where the audit
-  found them wrong or nothing else held them.
+  The audit of every command (issue #502, part B): what the rows of the harness's table do
+  when they are typed, from the command line and from the palette over an activated
+  window, on this machine and on a pod, where the audit found them wrong or nothing else
+  held them.
   """
 
   use ExUnit.Case, async: false
@@ -227,7 +227,7 @@ defmodule Troupe.CommandAuditTest do
           id: "s-pod",
           profile: "build",
           title: "on a pod",
-          events: [%{"type" => "message.completed", "data" => %{"text" => "first line"}}]
+          events: [%{"type" => "llm_response", "data" => FakeRemote.said("first line")}]
         )
 
       {remote, url} = start_remote!(sessions: [session])

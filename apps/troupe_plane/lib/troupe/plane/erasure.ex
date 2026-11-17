@@ -40,7 +40,7 @@ defmodule Troupe.Plane.Erasure do
   alias Troupe.KMS
   alias Troupe.ObjectStore
   alias Troupe.Plane.Control.Router
-  alias Troupe.Plane.{Drain, Fleet, Identity, Invites, Memory, Repo, Sessions}
+  alias Troupe.Plane.{Drain, Fleet, Identity, Invites, Memory, Repo, Sessions, Tokens}
   alias Troupe.Plane.Identity.Team
   alias Troupe.Plane.Sessions.{Session, Tombstone}
   alias Troupe.Plane.Tokens.Credential
@@ -270,7 +270,7 @@ defmodule Troupe.Plane.Erasure do
       options = [
         token: token,
         address: config[:address],
-        mount: Application.get_env(:troupe_plane, :kms_mount, "secret")
+        mount: Tokens.kv_mount()
       ]
 
       case destroy_generations(owner, session, options) do

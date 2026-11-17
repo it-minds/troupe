@@ -4,7 +4,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
-  awaitingApproval,
   awaitingYou,
   claimable,
   describeUnseen,
@@ -19,7 +18,6 @@ import {
   rowFromPlane,
   syncState,
   syncWords,
-  totalCostMicros,
   unseenSummary,
 } from "../src/index.js";
 import type { FleetRow, FleetSource, Invitation, SessionKind, SessionRow } from "../src/index.js";
@@ -202,7 +200,7 @@ describe("the fleet store", () => {
     assert.deepEqual(store.current.rows.map((r) => r.id).sort(), ["b", "c"]);
   });
 
-  it("filters, counts approvals and sums cost", () => {
+  it("filters and counts approvals", () => {
     const rows = [
       row("a", "team", { status: "waiting", pendingApprovals: 2, costMicros: 100 }),
       row("b", "local", { status: "idle", pendingApprovals: 0, costMicros: 50, profile: "ux" }),
@@ -213,8 +211,6 @@ describe("the fleet store", () => {
     assert.deepEqual(filterRows(rows, { profile: "ux" }).map((r) => r.id), ["b"]);
     assert.deepEqual(filterRows(rows, { needsApproval: true }).map((r) => r.id), ["a", "c"]);
     assert.deepEqual(filterRows(rows, { query: "NIGHTLY" }).map((r) => r.id), ["c"]);
-    assert.deepEqual(awaitingApproval(rows).map((r) => r.id), ["a", "c"]);
-    assert.equal(totalCostMicros(rows), 150);
   });
 
   // The inbox is every session waiting on its person, whichever way it asked.
@@ -227,7 +223,7 @@ describe("the fleet store", () => {
     ];
 
     assert.deepEqual(awaitingYou(rows).map((r) => r.id), ["a", "b", "d"]);
-    assert.deepEqual(awaitingApproval(rows).map((r) => r.id), ["a", "d"]);
+    assert.deepEqual(filterRows(rows, { needsApproval: true }).map((r) => r.id), ["a", "d"]);
   });
 
   it("reads the plane's row without inventing anything", () => {

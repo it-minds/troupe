@@ -869,12 +869,12 @@ defmodule Troupe.Plane.Settings do
   defp source(_setting, _stored, nil), do: :unset
   defp source(_setting, _stored, _value), do: :deployed
 
-  @doc "What the effect atom means, in a sentence a person reads next to the field."
+  # What the effect atom means, in a sentence a person reads next to the field.
   @spec effect_description(atom()) :: String.t()
-  def effect_description(:immediate), do: "Takes effect on the next request."
-  def effect_description(:next_team), do: "Applies to teams enabled after the change."
-  def effect_description(:next_session), do: "Applies to sessions started after the change."
-  def effect_description(:restart), do: "Set at deploy time; changing it needs a rollout."
+  defp effect_description(:immediate), do: "Takes effect on the next request."
+  defp effect_description(:next_team), do: "Applies to teams enabled after the change."
+  defp effect_description(:next_session), do: "Applies to sessions started after the change."
+  defp effect_description(:restart), do: "Set at deploy time; changing it needs a rollout."
 
   @doc """
   Change a setting.

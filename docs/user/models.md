@@ -50,6 +50,21 @@ page.
 
 ## What a call costs
 
+One thing you type is often many model calls, each sending the whole
+conversation again. When a turn ends, the desktop app says what it cost in one line under
+it, and `troupe run --headless` prints the same line:
+`turn: 12 calls · ↑ 48.2k sent · 610.4k cached · ↓ 6.3k received · $0.41`, its
+subagents' calls included, and the one that summarises the conversation when it is
+compacted; the TUI says it in its side panel
+([tokens and cost](terminal-screen.md#tokens-and-cost)). `sent` is input billed in
+full, `cached` what the provider's prompt cache served at a fraction of the price, and the
+money is what the gateway said or what the model's price comes to (`no price` when nothing
+prices it). The session's log keeps the
+same figures for every turn, and for every call what its prompt was made of: the system
+prompt, the instruction files and brief when the system prompt carries them
+(`system_prompt: per_turn`; by default they go with the turn and count in the
+conversation), the tool definitions, the conversation and the tool results.
+
 What the gateway says a call cost wins; then the catalog's price (the provider's own
 list); then `models.prices`, in dollars per million tokens by the name the model is
 addressed with, for a model the catalog does not price, such as one a LiteLLM gateway

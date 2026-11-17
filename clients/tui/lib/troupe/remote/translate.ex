@@ -88,7 +88,7 @@ defmodule Troupe.Remote.Translate do
     data = data(event)
 
     case event["type"] do
-      type when type in ["llm.delta", "llm_delta"] ->
+      "llm_delta" ->
         reasoning? = Map.get(data, "reasoning") == true or data["kind"] in ["reasoning", "thinking"]
         text = %{text: text_of(data)}
         text = if reasoning?, do: Map.put(text, :reasoning, true), else: text
@@ -339,8 +339,8 @@ defmodule Troupe.Remote.Translate do
         {[emit.(:user_shell, user_shell(data, memory))], memory}
 
       # A line sent while the agent works comes back twice, queued and then taken, and both
-      # copies name the send's command id; the window draws it once (Decision 117).
-      type when type in ["input.queued", "input_queued", "user_input"] ->
+      # copies name the send's command id; the window draws it once.
+      type when type in ["input_queued", "user_input"] ->
         {[
            emit.(
              :input,
@@ -358,10 +358,10 @@ defmodule Troupe.Remote.Translate do
            )
          ], memory}
 
-      type when type in ["input.accepted", "input_accepted"] ->
+      "input_accepted" ->
         {[emit.(:input_accepted, %{command_id: cid})], memory}
 
-      type when type in ["message.completed", "llm_response"] ->
+      "llm_response" ->
         {[emit.(:assistant_message, message(data))], memory}
 
       # The request carries the model it went to, which the window names when nothing
@@ -376,7 +376,7 @@ defmodule Troupe.Remote.Translate do
            emit.(:llm_error, llm_error(data["reason"] || "the model call failed", memory.isolation))
          ], memory}
 
-      type when type in ["tool.started", "tool_call_started"] ->
+      "tool_call_started" ->
         {[
            emit.(:tool_started, %{
              call_id: call_id(data),
@@ -385,7 +385,7 @@ defmodule Troupe.Remote.Translate do
            })
          ], memory}
 
-      type when type in ["tool.completed", "tool_call_completed"] ->
+      "tool_call_completed" ->
         {[emit.(:tool_call_completed, completed(data))], memory}
 
       # What the prompt was read from (`instructions_loaded`) is `/context`'s to show, not a
@@ -399,10 +399,10 @@ defmodule Troupe.Remote.Translate do
            ] ->
         {[], memory}
 
-      # A delegation a person asked to see first (root Decision 850) carries what the gate
-      # shows, as the daemon wrote it: the agent, its definition, the brief, the tools, the
-      # budget and the depth, and the subagents it could go to instead.
-      type when type in ["approval.requested", "approval_requested"] ->
+      # A delegation a person asked to see first carries what the gate shows, as the daemon
+      # wrote it: the agent, its definition, the brief, the tools, the budget and the depth,
+      # and the subagents it could go to instead.
+      "approval_requested" ->
         {[
            emit.(:approval_requested, %{
              call_id: call_id(data),
@@ -417,7 +417,7 @@ defmodule Troupe.Remote.Translate do
            })
          ], memory}
 
-      type when type in ["approval.resolved", "approval_decided"] ->
+      "approval_decided" ->
         {[emit.(:approval_answered, %{call_id: call_id(data), decision: decision(data)})], memory}
 
       # `ask_user` (troupe-remote Decision 651): the agent hands a decision to the person
@@ -554,11 +554,8 @@ defmodule Troupe.Remote.Translate do
       "approval_resolved" ->
         {[], memory}
 
-      type when type in ["todo.changed", "todo_updated"] ->
+      "todo_updated" ->
         {[emit.(:todo_updated, %{items: todos(data)})], memory}
-
-      "agent.state" ->
-        {[emit.(:agent_state, %{to: state_atom(data["to"] || data["state"])})], memory}
 
       # What the window runs is named by the agent itself, whatever the window is called
       # (TUI Decision 156).
@@ -698,28 +695,28 @@ defmodule Troupe.Remote.Translate do
       "trigger_fired" = type ->
         {[emit.(:remote_note, %{text: generic(type, data)})], memory}
 
-      type when type in ["session.activated", "session_activated"] ->
+      "session_activated" ->
         {[
            emit.(:remote_note, %{text: "session woke on the platform"}),
            emit.(:remote_status, %{state: :active})
          ], memory}
 
-      type when type in ["session.resumed", "session_resumed"] ->
+      "session_resumed" ->
         {[
            emit.(:remote_note, %{text: "session resumed" <> on(data)}),
            emit.(:remote_status, %{state: :active})
          ], memory}
 
-      type when type in ["session.dormant", "session_dormant"] ->
+      "session_dormant" ->
         {[
            emit.(:remote_note, %{text: "session went to sleep"}),
            emit.(:remote_status, %{state: :dormant})
          ], memory}
 
-      type when type in ["config.upgraded", "config_upgraded"] ->
+      "config_upgraded" ->
         {[emit.(:remote_note, %{text: "config upgraded" <> version(data)})], memory}
 
-      type when type in ["fs.changed", "fs_changed"] ->
+      "fs_changed" ->
         {[emit.(:fs_changed, %{paths: paths(data)})], memory}
 
       # A file the agent made for the person (`write_file` with `deliverable`, root issue
@@ -732,13 +729,13 @@ defmodule Troupe.Remote.Translate do
       "scratch_updated" ->
         {[emit.(:scratch_updated, scratch(data))], memory}
 
-      type when type in ["acl.granted", "acl_granted"] ->
+      "acl_granted" ->
         {[emit.(:remote_note, %{text: "access granted" <> subject(data)})], memory}
 
-      type when type in ["acl.revoked", "acl_revoked"] ->
+      "acl_revoked" ->
         {[emit.(:remote_note, %{text: "access revoked" <> subject(data)})], memory}
 
-      type when type in ["session.tainted", "session_tainted"] ->
+      "session_tainted" ->
         {[emit.(:remote_note, %{text: tainted(data)})], memory}
 
       # Written beside the taint each time somebody's tools are offered, and when their

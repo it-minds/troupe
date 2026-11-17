@@ -175,23 +175,20 @@ pass admission and the operator.
 
 ## 8. OpenBao policies
 
-Rendered by `Troupe.KMS.Policy`, so the tested string and the installed one are the same:
+Rendered by `Troupe.KMS.Policy`, so the tested string and the installed one are the same.
+What the plane's own role must carry, with the lines that write it, is
+[openbao.md](openbao.md), generated from the same module; the workers' and people's
+policies, which the plane cannot check, are these:
 
 | Policy | Grants |
 |---|---|
 | `troupe-worker-<profile>` | create, read, update on `<mount>/data/troupe/teams/<team>/sessions/*` and read, list on the metadata path, per granted team; never delete |
-| `troupe-plane` | delete, list, read on `<mount>/metadata/troupe/teams/+/sessions/*` and `<mount>/metadata/troupe/people/+/sessions/*`, list and read on `<mount>/metadata/troupe/people/+/mcp/*`, and nothing on the data path: it destroys an erased session's key, a team's or a person's (Decisions 756 and 811), says whether a person has connected a server, and reads no value |
 | `troupe-person` | create, read, update on `<mount>/data/troupe/people/<name>/*` and read, list on its metadata, templated on the name OpenBao's JWT auth vouched for: a person's own daemon, logging in at the `jwt` auth path with an assertion the plane signs (audience `troupe-kms`), for their private sessions' keys and their own MCP credentials; and create, nothing else, on `<mount>/data/troupe/people/+/invited/*`, where the owner of a private session puts its key for a person invited into it, and which only that person reads (Decision 949). Rewrite it when upgrading: a policy written before has no such rule, and inviting anybody into a private session is refused by OpenBao |
-| `troupe-plane-invites` | delete on `<mount>/metadata/troupe/people/+/invited/*` (`Policy.invites/1`): the plane destroys a copy of a private session's key in an invitee's slot when the invitation is taken back or the session erased, and reads none. Without it such an erasure stays `erasure_pending` |
-| signing | create, update on `transit/sign/troupe-session-tokens`, read on its key; not exportable |
-| the plane's signing key | create, read and update on `transit/keys/troupe-plane-signing`, update on its `rotate`, create and update on `transit/sign/troupe-plane-signing` (`Policy.plane_signing/2`): the plane makes the key on first use, `ed25519` and not exportable, signs what it tells people's machines with it, and rotates it from the console; nothing exports it. Without it the plane's answers go out unsigned, which a machine that pinned the key refuses |
-| the GitHub App's key and webhook secret | import, sign (or HMAC), read and delete on `transit/keys/troupe-github-app` and `transit/keys/troupe-github-webhook`, and read on `transit/wrapping_key` (`Policy.github_app/3`, the paths in [github.md §4](github.md#4-give-the-plane-the-app)): the plane imports both once, signs the App's JWT, checks each delivery's signature, and deletes both when the App is removed; nothing exports either |
 | `troupe-worker-mcp-identity` | update on `transit/sign/<the pod's namespace>.*`, templated on the namespace Kubernetes auth vouched for (`Policy.mcp_identity/2`, Decision 747): a pod signs its profile's MCP assertions with the keys named after its own namespace and with no other, never the session-token key |
 
 The Kubernetes-auth roles in `dev/kind/dependencies.yaml` (`troupe-worker` for the
 ServiceAccount of that name in any namespace, audience `troupe-kms`; `troupe-plane` in
-`troupe-system`) are the shape production needs. A production plane role needs the plane
-policy **and** the signing policy, the plane's signing key's, the invitations', and the GitHub App's where the plane has one. A worker role whose profiles call an MCP server as
+`troupe-system`) are the shape production needs. A worker role whose profiles call an MCP server as
 themselves also needs `troupe-worker-mcp-identity`, written once with the Kubernetes auth
 mount's accessor (`bao read -field=accessor sys/auth/kubernetes`), as the dev manifest
 writes it.

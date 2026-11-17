@@ -85,7 +85,8 @@ function same(a: ArtifactTab, b: ArtifactTab): boolean {
 
 const KIND: Record<string, string> = { html: "HTML page", markdown: "Markdown", file: "File" };
 
-function kindWords(kind: string): string {
+/** What an artifact is, in the words its kind has here: an HTML page, Markdown, a file. */
+export function kindWords(kind: string): string {
   return KIND[kind] ?? kind;
 }
 

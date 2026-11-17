@@ -6,7 +6,7 @@
 
 import assert from "node:assert/strict";
 import { after, afterEach, before, beforeEach, describe, it } from "node:test";
-import { DaemonClient, emptyTranscript, fold, scratchLine, scratchSize } from "../src/index.js";
+import { DaemonClient, emptyTranscript, fold, scratchSize, scratchVersion } from "../src/index.js";
 import type { DurableEvent, Entry, TranscriptState, TroupeEvent } from "../src/index.js";
 import { FakeDaemon } from "./support/daemon.js";
 import { startHarness, type Harness } from "./support/harness.js";
@@ -19,6 +19,14 @@ function durable(type: string, data: Record<string, unknown> = {}, agent = ["roo
 }
 const foldAll = (events: TroupeEvent[], from: TranscriptState = emptyTranscript) => events.reduce((s, e) => fold(s, e), from);
 const cards = (state: TranscriptState) => state.entries.filter((e): e is Extract<Entry, { kind: "scratch" }> => e.kind === "scratch");
+
+/** A card in one line, its title, name, size and which write it is, each once it is known. */
+function scratchLine(card: { title: string; name: string; size: number | undefined; version: number | undefined }): string {
+  const size = card.size === undefined ? undefined : scratchSize(card.size);
+  return [card.title || card.name || "a document", card.name && card.name !== card.title ? card.name : undefined, size, scratchVersion(card.version)]
+    .filter((part): part is string => Boolean(part))
+    .join(" · ");
+}
 
 const PLAN = "# Migration plan\n\n" + "- move the ledger table\n".repeat(97);
 const PLAN_SIZE = Buffer.byteLength(PLAN);

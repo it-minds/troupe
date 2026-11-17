@@ -397,14 +397,12 @@ defmodule Troupe.MCP.OAuth do
   end
 
   @doc """
-  Where Troupe's client ID metadata document is: `opts`' `client_metadata_url`, else
-  `:troupe_core, :mcp_client_metadata_url`, else the one Troupe publishes.
+  Where Troupe's client ID metadata document is: `opts`' `client_metadata_url`, else the
+  one Troupe publishes.
   """
   @spec client_metadata_url(keyword()) :: String.t()
-  def client_metadata_url(opts \\ []) do
-    Keyword.get(opts, :client_metadata_url) ||
-      Application.get_env(:troupe_core, :mcp_client_metadata_url, @client_metadata_url)
-  end
+  def client_metadata_url(opts \\ []),
+    do: Keyword.get(opts, :client_metadata_url) || @client_metadata_url
 
   @doc """
   What Troupe registers itself as, for one redirect: its name and home, the loopback

@@ -67,12 +67,10 @@ defmodule Troupe.Plane.Remote do
 
   # -- the team's switch --------------------------------------------------------
 
-  @doc """
-  `:ok` where `user` may offer a laptop session, and `forbidden` naming the team where a
-  team they are in does not allow it. The strictest of a person's teams holds.
-  """
+  # `:ok` where `user` may offer a laptop session, and `forbidden` naming the team where a
+  # team they are in does not allow it. The strictest of a person's teams holds.
   @spec offering_allowed(User.t()) :: :ok | {:error, Error.t()}
-  def offering_allowed(%User{} = user) do
+  defp offering_allowed(%User{} = user) do
     case Enum.find(Identity.teams_for(user), &(&1.remote_offering_allowed == false)) do
       nil ->
         :ok

@@ -85,10 +85,6 @@ defmodule Troupe.Gitignore do
   @spec empty() :: t()
   def empty, do: %__MODULE__{rules: []}
 
-  @doc "Build a matcher from pattern lines. Tests, and callers with no repo on disk."
-  @spec from_string(String.t()) :: t()
-  def from_string(contents), do: %__MODULE__{rules: parse(contents, "")}
-
   @doc """
   Whether a workspace-relative path is ignored.
 

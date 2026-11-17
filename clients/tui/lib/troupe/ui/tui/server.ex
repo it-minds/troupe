@@ -224,7 +224,7 @@ defmodule Troupe.UI.TUI.Server do
   @typedoc """
   Files-panel state: the mount and directory being listed, what `fs.list`
   answered, where the cursor sits, and the file being previewed. `version` is
-  the model's `files_version` as of the last listing, so an `fs.changed` that
+  the model's `files_version` as of the last listing, so an `fs_changed` that
   arrives while the panel is open reloads it.
   """
   @type files :: %{
@@ -3254,7 +3254,7 @@ defmodule Troupe.UI.TUI.Server do
     end
   end
 
-  # `fs.changed` bumps the model's version; an open panel reloads from it, which
+  # `fs_changed` bumps the model's version; an open panel reloads from it, which
   # is the whole of "live-updated" and costs nothing while the panel is closed.
   defp refresh_files(%{files: nil} = state), do: state
 

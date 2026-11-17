@@ -244,9 +244,13 @@ does not reproduce it, stop with `cannot-reproduce` and what was tried.
   own), under the number the coordinator reserved, never an entry appended to a shared
   file, so two fixes that each decide something do not conflict. Its front matter has
   `number`, `title` (the decision in one sentence), `date`, `status: accepted`, `issue`,
-  `paths` (globs of the files it governs, each matching something) and `gist` (at most
-  about 150 characters: what someone changing those paths must not undo), optionally
-  `supersedes:` and `symbols:`; the body is the reasoning, the choices and the proof.
+  `paths` (at most eight globs of the code where it would be undone, never a test, each
+  matching something) and `gist` (at most about 150 characters: what someone changing
+  those paths must not undo), optionally `supersedes:` and `symbols:`; the body is at most
+  40 lines that are not blank: the decision, what was not chosen, what breaks if it is
+  undone. The log's README has a `next` line, the first number not yet reserved; the
+  coordinator moves it past the chunk's block on the chunk's branch, and a fixer never
+  edits it.
   `mix troupe.decisions --check` checks it, as CI does
   ([decisions/README.md](../decisions/README.md) has an example).
 

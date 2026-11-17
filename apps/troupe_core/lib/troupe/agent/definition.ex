@@ -88,10 +88,6 @@ defmodule Troupe.Agent.Definition do
           acp: map() | nil
         }
 
-  @doc "Whether the harness starts this agent for a job of its own, never a person's pick."
-  @spec function?(t()) :: boolean()
-  def function?(%__MODULE__{mode: mode}), do: mode == :function
-
   @doc """
   The sentence a request is refused with when it names this function agent as a session's
   agent (`Troupe.Protocol.AgentDefinition.function_refusal/2`).
@@ -254,9 +250,9 @@ defmodule Troupe.Agent.Definition do
     end
   end
 
-  @doc "Build the struct from what the shared parser returned."
+  # Build the struct from what the shared parser returned.
   @spec from_parsed(AgentDefinition.t(), source()) :: t()
-  def from_parsed(parsed, source) do
+  defp from_parsed(parsed, source) do
     %__MODULE__{
       name: parsed.name,
       prompt: parsed.prompt,

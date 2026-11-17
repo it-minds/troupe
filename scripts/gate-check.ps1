@@ -2,9 +2,9 @@
 .SYNOPSIS
   The parts of the Stage 1 gate a machine checks by itself, against the installed troupe.
 .DESCRIPTION
-  docs/developer/gate-walk.md is the runbook; its "What runs locally" says which part of
-  each row this is and what still needs a person. scripts/gate-check is the same for Linux
-  and macOS.
+  The gate is walked in an issue from .github/ISSUE_TEMPLATE/stage-1-gate.yml, whose rows
+  say which part of each this is and what still needs a person. scripts/gate-check is the
+  same for Linux and macOS.
 
   Every troupe it runs has scratch homes: HOME, USERPROFILE, HOMEDRIVE and HOMEPATH,
   LOCALAPPDATA (where a daemon writes its discovery file) and Troupe's config and state

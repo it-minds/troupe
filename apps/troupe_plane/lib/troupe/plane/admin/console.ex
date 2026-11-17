@@ -192,12 +192,6 @@ defmodule Troupe.Plane.Admin.Console do
   @spec placement(atom()) :: placement() | nil
   def placement(function), do: Map.get(@placements, function)
 
-  @doc "The functions an area claims to reach."
-  @spec reached_by(atom()) :: [atom()]
-  def reached_by(area) do
-    for {function, {:area, ^area}} <- @placements, do: function
-  end
-
   @doc """
   Everything reachable from no area, with the reason it is not.
 

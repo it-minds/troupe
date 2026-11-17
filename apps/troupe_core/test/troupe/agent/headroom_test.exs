@@ -26,7 +26,6 @@ defmodule Troupe.Agent.HeadroomTest do
     # The gauge reads the time worked, not the time since the agent began.
     assert Headroom.of(%{budget | worked_ms: 90_000, wall_clock_ms: 120_000}, 0, 1).wall ==
              %{used: 90_000, limit: 120_000, fraction: 0.75}
-    assert {:turns, %{fraction: 0.8}} = Headroom.tightest(headroom)
 
     assert Headroom.of(budget, 5, 0).context == %{used: 5, limit: 1, fraction: 0.0}
   end

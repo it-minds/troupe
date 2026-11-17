@@ -20,7 +20,7 @@ import { href, useRoute } from "../route";
 import type { Route } from "../route";
 import { useConsole } from "../console";
 import { shownMode, useMode } from "../theme";
-import { appLink } from "@troupe/client";
+import { appLink, hostOf } from "@troupe/client";
 import { Wordmark } from "./brand";
 import { AppBanner } from "./AppBanner";
 import { ArtifactLink, ArtifactOpen, ArtifactPage, Artifacts, artifactPlace } from "./Artifacts";
@@ -48,7 +48,6 @@ import { RemoteSession } from "./Remote";
 import { Sessions } from "./Sessions";
 import { Team } from "./Team";
 import { Teams } from "./Teams";
-import { Unbuilt } from "./Unbuilt";
 
 /**
  * A laptop's session was steered from `#/sessions/remote/<id>` before it was a person's own,
@@ -141,14 +140,8 @@ export function Shell(): JSX.Element {
             <div key={g.label} className="group">
               <span className="screen">{g.label}</span>
               {g.areas.map((a) => (
-                <a key={a.id} href={href({ page: a.id })} aria-current={a.id === here.page ? "page" : undefined} className={a.built ? "built" : "later"}>
+                <a key={a.id} href={href({ page: a.id })} aria-current={a.id === here.page ? "page" : undefined}>
                   {a.label}
-                  {!a.built && (
-                    <span className="later-mark" title="Not in this console yet">
-                      <span aria-hidden="true"> ○</span>
-                      <span className="visually-hidden"> (not in this console yet)</span>
-                    </span>
-                  )}
                 </a>
               ))}
             </div>
@@ -278,13 +271,5 @@ function Screen({ route }: { route: Route }): JSX.Element {
   if (route.page === "budgets") return <Budgets />;
   if (route.page === "published") return <PublishedArtifacts />;
   if (route.page === "connections") return <Connections />;
-  return <Unbuilt area={area(route.page)!} />;
-}
-
-function hostOf(url: string): string {
-  try {
-    return new URL(url).host;
-  } catch {
-    return url;
-  }
+  return <p className="page">There is no such page.</p>;
 }

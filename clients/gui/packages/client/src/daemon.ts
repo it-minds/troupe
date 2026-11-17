@@ -814,10 +814,6 @@ export class DaemonClient implements OwnPlane {
     return this.call("workspace.recent");
   }
 
-  searchWorkspaces(query: string, limit = 20): Promise<{ workspaces: Array<{ path: string; score: number }> }> {
-    return this.call("workspace.search", { query, limit });
-  }
-
   /**
    * The worktrees of a workspace's repository, or of every live session's with none named.
    * `status: false` asks for the trees alone, without reading how each stands, which in a

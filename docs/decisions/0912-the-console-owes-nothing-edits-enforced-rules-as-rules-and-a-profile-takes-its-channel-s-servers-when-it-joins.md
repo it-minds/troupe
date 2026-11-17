@@ -5,7 +5,6 @@ date: 2026-10-16
 status: accepted
 issue: 722
 paths:
-  - clients/gui/apps/console/src/owed.ts
   - clients/gui/apps/console/src/views/Triggers.tsx
   - clients/gui/apps/console/src/views/Organisation.tsx
   - clients/gui/apps/console/src/views/PermissionRules.tsx

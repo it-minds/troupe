@@ -5,4 +5,6 @@ one per deviation from the plan that named it or from what a reader would expect
 numbering stopped at 6, when the daemon became an application of the umbrella; later
 decisions about the daemon are the [repository's](../README.md).
 
+<!-- next: 7 -->
+
 <!-- decisions:index -->

@@ -9,7 +9,7 @@
 
 import assert from "node:assert/strict";
 import { after, before, describe, it } from "node:test";
-import { awaitingApproval, awaitingYou, DaemonClient, DaemonSource, FleetStore, filterRows, isDurable, rowFromDaemon } from "../src/index.js";
+import { awaitingYou, DaemonClient, DaemonSource, FleetStore, filterRows, isDurable, rowFromDaemon } from "../src/index.js";
 import type { DaemonEndpoint, FleetRow, FleetSource, TroupeEvent } from "../src/index.js";
 import { FakeDaemon } from "./support/daemon.js";
 
@@ -117,7 +117,7 @@ describe("the inbox in local mode", () => {
     const store = new FleetStore([new DaemonSource(client)]);
     await store.refresh();
 
-    const inbox = awaitingApproval(store.current.rows);
+    const inbox = filterRows(store.current.rows, { needsApproval: true });
     assert.deepEqual(
       inbox.map((r) => r.id),
       [waiting.id],
@@ -125,7 +125,6 @@ describe("the inbox in local mode", () => {
     assert.equal(inbox[0]?.kind, "local");
     assert.equal(inbox[0]?.pendingApprovals, 1);
     assert.equal(inbox[0]?.status, "waiting");
-    assert.deepEqual(filterRows(store.current.rows, { needsApproval: true }), inbox);
   });
 
   // A session waiting on a question — an `ask_user`, or the budget's or the failure
@@ -148,7 +147,7 @@ describe("the inbox in local mode", () => {
     assert.equal(asked?.status, "waiting");
 
     // The approvals alone are still there for whatever wants only those.
-    assert.ok(!awaitingApproval(store.current.rows).some((r) => r.id === question.id));
+    assert.ok(!filterRows(store.current.rows, { needsApproval: true }).some((r) => r.id === question.id));
   });
 });
 

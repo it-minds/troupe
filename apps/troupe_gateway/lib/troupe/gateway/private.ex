@@ -820,8 +820,7 @@ defmodule Troupe.Gateway.Private do
   # What the person will see in a list of their devices when two of them have a session.
   # A name they chose, or the machine's, which is better than nothing and not checked.
   defp device(opts) do
-    opts[:device] || Application.get_env(:troupe_gateway, :device_name) ||
-      (:inet.gethostname() |> elem(1) |> to_string())
+    opts[:device] || :inet.gethostname() |> elem(1) |> to_string()
   end
 end
 

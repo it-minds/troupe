@@ -52,7 +52,7 @@ defmodule Troupe.RemoteClientToolsTest do
     session =
       FakeRemote.session(
         id: "s-tools",
-        events: [%{"type" => "message.completed", "data" => %{"text" => "ready"}}]
+        events: [%{"type" => "llm_response", "data" => FakeRemote.said("ready")}]
       )
 
     {remote, plane} = start_remote!(sessions: [session])

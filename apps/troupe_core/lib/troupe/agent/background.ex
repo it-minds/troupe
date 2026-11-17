@@ -59,9 +59,9 @@ defmodule Troupe.Agent.Background do
   def reported(path, {:ok, summary, _spent}), do: ended(path, "finished", summary)
   def reported(path, {:partial, summary, _spent}), do: ended(path, "cut_short", summary)
 
-  @doc "An end as the child's `agent_done` says it."
+  # An end as the child's `agent_done` says it.
   @spec from_done([String.t()], map()) :: ended()
-  def from_done(path, data) do
+  defp from_done(path, data) do
     ended = if data["reason"] in @own, do: data["reason"], else: "cut_short"
     ended(path, ended, data["summary"] || "(no report)")
   end

@@ -1332,8 +1332,8 @@ defmodule Troupe.BenchLiveTest do
     bin = "/opt/troupe/erts-16.4/bin"
     path = Enum.join([bin, "/usr/local/bin", "/opt/troupe/erts-16.4/bin/", "/usr/bin"], ":")
 
-    assert Scenario.command_path(path, bin) == "/usr/local/bin:/usr/bin"
-    assert Scenario.command_path(path, nil) == path
+    assert Troupe.Reaper.path_without(path, bin) == "/usr/local/bin:/usr/bin"
+    assert Troupe.Reaper.path_without(path, nil) == path
   end
 
   defp line(bench, version, model, cost, ok, n) do

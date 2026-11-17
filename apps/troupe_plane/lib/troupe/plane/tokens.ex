@@ -257,6 +257,10 @@ defmodule Troupe.Plane.Tokens do
   @spec mount(keyword()) :: String.t()
   def mount(opts \\ []), do: config(opts)[:mount] || "transit"
 
+  @doc "Where the key-value engine the plane destroys session and invite keys in is mounted."
+  @spec kv_mount() :: String.t()
+  def kv_mount, do: "secret"
+
   defp key_name(opts), do: config(opts)[:key] || @key_name
 
   defp issuer, do: Application.get_env(:troupe_plane, :issuer)

@@ -375,12 +375,10 @@ defmodule Troupe.Plane.Artifacts.Markdown do
     end
   end
 
-  @doc """
-  An address a link or an image may have: the web's, mail's, or one within the artifact (a
-  path or a fragment). Anything else, `javascript:` and `data:` among them, is refused.
-  """
+  # An address a link or an image may have: the web's, mail's, or one within the artifact (a
+  # path or a fragment). Anything else, `javascript:` and `data:` among them, is refused.
   @spec safe_href(String.t()) :: {:ok, String.t()} | :error
-  def safe_href(href) do
+  defp safe_href(href) do
     scheme = Regex.run(~r/\A([A-Za-z][A-Za-z0-9+.-]*):/, href)
 
     case scheme do

@@ -102,12 +102,15 @@ nav:
   - Using Troupe:
       - user/README.md
       - Quick start: quick-start.md
+      - Setting up and checking a machine: user/setup.md
       - Why Troupe: why-troupe.md
       - The principles, in pictures: https://it-minds.github.io/troupe/principles/
       - The diagrams, one by one: diagrams/README.md
       - The terminal client: clients/tui/README.md
       - "The terminal client's screen": user/terminal-screen.md
       - Command reference: user/cli-reference.md
+      - Sessions: user/sessions.md
+      - Reading a transcript: user/transcript.md
       - Sharing a session by name: user/sessions-shared.md
       - Updating: user/updating.md
       - In VS Code: user/vscode.md
@@ -158,7 +161,6 @@ nav:
       - Monitoring: admin/monitoring.md
       - Routine tasks: admin/routine-tasks.md
       - Security, for a reviewer: admin/security.md
-      - "Security: a worker's isolation and egress": admin/security-worker.md
       - The A2A facade: a2a.md
       - What Troupe dials: egress-allowlist.md
   - Contributing:
@@ -172,7 +174,6 @@ nav:
       - Local setup: developer/local-setup.md
       - Testing: developer/testing.md
       - The bench: developer/bench.md
-      - What changes in front of a prompt: developer/prompt-prefix.md
       - Conventions: developer/conventions.md
       - Build: developer/build.md
       - CI and releases: developer/ci.md
@@ -181,8 +182,6 @@ nav:
       - Deployment: developer/deployment.md
       - Tech stack: developer/tech-stack.md
       - Fixing issues: developer/fixing-issues.md
-      - Walking the Stage 1 gate: developer/gate-walk.md
-      - The gate's rows: developer/gate-walk-rows.md
       - Decisions:
           - decisions/README.md
           - The TUI's: decisions/tui/README.md
@@ -193,13 +192,7 @@ nav:
           - Throughput: clients/gui/docs/bench.md
           - Design: clients/gui/docs/design/DESIGN.md
           - Themes: clients/gui/docs/design/themes/THEMES.md
-      - The console's design: design/admin/DESIGN.md
       - Frames for rendered output: design/frames.md
-      # Records kept as they were written, not instruction.
-      - History:
-          - The admin surface, as built: history/admin-surface.md
-          - The console, as planned: history/control-panel.md
-          - The command audit of 0.10.0: history/command-audit.md
   - Writing a client:
       - The protocol: PROTOCOL.md
       - The JSON Schema: https://github.com/it-minds/troupe/tree/main/protocol/schema/v1

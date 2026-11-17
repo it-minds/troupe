@@ -721,10 +721,6 @@ defmodule Troupe.Client do
   @spec artifact_audience(Artifacts.audience(), String.t() | nil) :: {String.t(), String.t()}
   def artifact_audience(audience, organisation \\ nil), do: Artifacts.label(audience, organisation)
 
-  @doc "The four audiences, in the gallery's order."
-  @spec artifact_audiences() :: [Artifacts.audience()]
-  def artifact_audiences, do: Artifacts.audiences()
-
   @doc "A row's audience."
   @spec audience_of(map()) :: Artifacts.audience()
   def audience_of(row), do: Artifacts.audience_of(row)
@@ -749,10 +745,6 @@ defmodule Troupe.Client do
   @spec artifact_owner(map()) :: String.t()
   def artifact_owner(row), do: Artifacts.owner(row)
 
-  @doc "Hand an artifact to a team (`team:<name>`) or take it back (`me`): `Troupe.Client.Artifacts.transfer/2`."
-  @spec transfer_artifact(String.t(), String.t()) :: {:ok, map()} | {:error, String.t()}
-  def transfer_artifact(id, to), do: Artifacts.transfer(id, to)
-
   @doc "Publish one file of this machine (`/publish`): `Troupe.Client.Artifacts.publish/3`."
   @spec publish_file(Path.t(), String.t(), keyword()) :: {:ok, map()} | {:error, String.t()}
   def publish_file(path, visibility, opts \\ []), do: Artifacts.publish(path, visibility, opts)
@@ -773,11 +765,6 @@ defmodule Troupe.Client do
   @doc "The person's own memory on the plane, through the daemon: `Troupe.Client.OwnMemory.own/1`."
   @spec own_memory(keyword()) :: {:ok, map()} | {:error, String.t()}
   def own_memory(opts \\ []), do: OwnMemory.own(opts)
-
-  @doc "Save the person's own memory over the version it was edited from, or the version that came first."
-  @spec save_own_memory(String.t(), non_neg_integer()) ::
-          {:ok, map()} | {:conflict, map()} | {:error, String.t()}
-  def save_own_memory(text, version), do: OwnMemory.save(text, version)
 
   @doc "The person's own memory's versions, and two of their texts side by side."
   @spec memory_history(keyword()) :: {:ok, map()} | {:error, String.t()}

@@ -104,9 +104,9 @@ defmodule Troupe.Loop do
     "loop-#{Enum.count(events, &(&1.type == "loop_started")) + 1}"
   end
 
-  @doc "The command id an iteration's input carries: the loop's id and the iteration."
+  # The command id an iteration's input carries: the loop's id and the iteration.
   @spec input_id(String.t(), pos_integer()) :: String.t()
-  def input_id(loop_id, iteration), do: "#{loop_id}.#{iteration}"
+  defp input_id(loop_id, iteration), do: "#{loop_id}.#{iteration}"
 
   # -- decisions --------------------------------------------------------------
 

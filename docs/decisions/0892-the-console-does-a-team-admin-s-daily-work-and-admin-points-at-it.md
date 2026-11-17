@@ -5,7 +5,6 @@ date: 2026-10-13
 status: accepted
 issue: 56
 paths:
-  - clients/gui/apps/console/src/owed.ts
   - clients/gui/apps/console/test/coverage.test.ts
   - clients/gui/apps/console/src/views/Team.tsx
   - clients/gui/apps/console/src/views/Teams.tsx

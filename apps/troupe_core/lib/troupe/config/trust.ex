@@ -32,9 +32,9 @@ defmodule Troupe.Config.Trust do
   def trusted?(_workspace, []), do: false
   def trusted?(workspace, entries), do: covering(workspace, entries) != []
 
-  @doc "The entries that trust `workspace`: it, a directory above it, or its checkout."
+  # The entries that trust `workspace`: it, a directory above it, or its checkout.
   @spec covering(Path.t(), [String.t()]) :: [String.t()]
-  def covering(workspace, entries) do
+  defp covering(workspace, entries) do
     candidates = workspace |> candidates() |> Enum.map(&Workspace.compare_key/1)
 
     Enum.filter(entries, fn entry ->

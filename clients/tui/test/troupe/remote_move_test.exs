@@ -29,8 +29,8 @@ defmodule Troupe.RemoteMoveTest do
           id: "s-moving",
           profile: "code",
           events: [
-            %{"type" => "input.queued", "data" => %{"text" => "build it"}, "actor" => "alice"},
-            %{"type" => "message.completed", "data" => %{"text" => "on it"}}
+            %{"type" => "input_queued", "data" => %{"text" => "build it"}, "actor" => "alice"},
+            %{"type" => "llm_response", "data" => FakeRemote.said("on it")}
           ]
         ],
         fields
@@ -60,7 +60,7 @@ defmodule Troupe.RemoteMoveTest do
       assert activate_calls(remote) == []
 
       for n <- 1..3,
-          do: FakeRemote.emit(remote, "s-moving", "message.completed", %{"text" => "after #{n}"})
+          do: FakeRemote.emit(remote, "s-moving", "llm_response", FakeRemote.said("after #{n}"))
 
       eventually(fn -> length(seqs(sid)) == length(server_seqs(remote, "s-moving")) end)
       assert seqs(sid) == server_seqs(remote, "s-moving")
@@ -89,7 +89,7 @@ defmodule Troupe.RemoteMoveTest do
       assert endpoint(sid) =~ "/worker/w2"
 
       accepted =
-        for %{"type" => "input.accepted", "command_id" => ^id} <- FakeRemote.log(remote, "s-moving"),
+        for %{"type" => "input_accepted", "command_id" => ^id} <- FakeRemote.log(remote, "s-moving"),
             do: id
 
       assert accepted == [id]

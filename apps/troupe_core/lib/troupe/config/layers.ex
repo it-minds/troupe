@@ -1202,15 +1202,13 @@ defmodule Troupe.Config.Layers do
   def show(value) when is_list(value), do: "a list"
   def show(value), do: inspect(value)
 
-  @doc """
-  The line a key is on, found in the text by indentation — close enough to point a
-  person at it, and `nil` when it is written inline (`models: {default: x}` points at
-  `models`).
-  """
+  # The line a key is on, found in the text by indentation — close enough to point a
+  # person at it, and `nil` when it is written inline (`models: {default: x}` points at
+  # `models`).
   @spec line_of(String.t() | nil, [String.t()]) :: pos_integer() | nil
-  def line_of(nil, _key_path), do: nil
+  defp line_of(nil, _key_path), do: nil
 
-  def line_of(text, key_path) do
+  defp line_of(text, key_path) do
     lines = text |> String.split("\n") |> Enum.with_index(1)
     find_line(lines, key_path, -1, nil)
   end

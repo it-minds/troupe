@@ -504,12 +504,8 @@ defmodule Troupe.Gateway.Memory do
     "admin.memory.put" => ~w(scope name text entries version)
   }
 
-  @doc "The organisation's levels' methods the daemon sends on, as its person (`admin/2`)."
-  @spec admin_methods() :: [String.t()]
-  def admin_methods, do: Map.keys(@admin_arguments)
-
   @doc """
-  One of `admin_methods/0`, sent to the plane as this daemon's person with the arguments it
+  One of the `admin.memory.*` methods above, sent to the plane as this daemon's person with the arguments it
   takes and nothing else: what a team admin edits their team's memory with, and a platform
   admin the organisation's, from their own app. The plane decides who may: a refusal comes
   back as it gave it. A save asks for the copy here again, so the sessions running here read
@@ -532,8 +528,7 @@ defmodule Troupe.Gateway.Memory do
     :ok = Troupe.UserMemory.install(&__MODULE__.append/3)
     :ok = Troupe.UserMemory.install_proposer(&__MODULE__.propose/4)
 
-    every =
-      Keyword.get(opts, :poll_ms, Application.get_env(:troupe_gateway, :memory_poll_ms, @poll_ms))
+    every = Keyword.get(opts, :poll_ms, @poll_ms)
 
     {:ok, schedule(%{every: every})}
   end

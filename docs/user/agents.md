@@ -7,6 +7,10 @@ one wins where two share a name is [the ladder](configuration-layers.md#which-on
 
 ## Agents
 
+A session starts with `build`, or `plan` for a proposal first, which may
+delegate to others, waiting for each or letting it work in the background while it goes
+on; it can look in on one at work and stop it, and cancelling the turn stops them too.
+
 An agent is a Markdown file whose front matter says what it is and what it may do, and
 whose body is its instruction; the [recipe](configuration/mcp-agents-skills.md#a-custom-agent)
 is a complete one. The file name is the agent's name. One in `<workspace>/.troupe/agents/`
