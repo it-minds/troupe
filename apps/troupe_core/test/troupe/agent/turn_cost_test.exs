@@ -203,7 +203,7 @@ defmodule Troupe.Agent.TurnCostTest do
     assert ended.data["turn"]["cost_micros"] > done.data["turn"]["cost_micros"]
   end
 
-  # D65: what the subagent reported was added to the parent's turn live only, so a restart
+  # What the subagent reported was added to the parent's turn live only, so a restart
   # after the delegation came back rebuilt the turn from the parent's own calls.
   test "a delegation's call says what its subagent spent, and a restart after it keeps it",
        context do

@@ -21,8 +21,8 @@ defmodule Troupe.LLM.ProviderErrorsTest do
     assert {:rate_limited, _} = Provider.classify({:retries_exhausted, {:http_status, 429, ""}})
   end
 
-  # What the provider said with its last 429 or 5xx is what the person reads (D74,
-  # Decision 805), where it once said only "gave up after retrying: {:http_status, 503}".
+  # What the provider said with its last 429 or 5xx is what the person reads,
+  # where it once said only "gave up after retrying: {:http_status, 503}".
   test "a 429 or a 5xx the retries outlast says what the provider said with it" do
     limit = "Number of request tokens has exceeded your per-minute rate limit"
 

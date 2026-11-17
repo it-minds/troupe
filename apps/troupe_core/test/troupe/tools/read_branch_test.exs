@@ -44,7 +44,7 @@ defmodule Troupe.Tools.ReadBranchTest do
     ctx = ctx(parent, context)
 
     # With none finished the listing says so, rather than leave the states to be read as
-    # though one had (D105).
+    # though one had.
     assert {:ok, listing} = ReadBranch.run(%{}, ctx)
     assert listing =~ branch.id
     refute listing =~ "  finished  "

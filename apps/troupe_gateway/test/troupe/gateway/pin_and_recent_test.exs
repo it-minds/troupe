@@ -1,6 +1,6 @@
 defmodule Troupe.Gateway.PinAndRecentTest do
   @moduledoc """
-  Two of a daemon's answers about its sessions (D125): `session.pin` marks a session
+  Two of a daemon's answers about its sessions: `session.pin` marks a session
   pinned whether it is running or dormant, and the mark is kept beside its log, so it
   outlives the session going dormant; and `workspace.recent` answers at most `limit`
   workspaces.

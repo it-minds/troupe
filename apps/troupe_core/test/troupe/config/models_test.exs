@@ -169,7 +169,7 @@ defmodule Troupe.Config.ModelsTest do
     assert nearest == ["qwen3.6-35b", "qwen3-235b", "gpt-oss-120b", "mistral-small-3.2"]
   end
 
-  # Defects D70, Decision 799: what `Config.models/1` gives a model no window is said for is
+  # What `Config.models/1` gives a model no window is said for is
   # `context_window`'s fallback, and a model its provider does not serve has no window.
   test "a model its provider does not serve has no window, whether a role names it or not",
        ctx do

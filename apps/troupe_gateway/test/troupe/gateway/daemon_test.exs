@@ -245,7 +245,7 @@ defmodule Troupe.Gateway.DaemonTest do
       assert detail =~ "Protocol.UndefinedError"
     end
 
-    # D48: woken by input, the root fails its very first start, inside the session's own
+    # Woken by input, the root fails its very first start, inside the session's own
     # start. Its Node never gets to start it again, so that start is its last.
     @tag :capture_log
     test "input.send to a session whose root cannot start again answers why, as its log does",

@@ -265,7 +265,7 @@ this row. Besides that:
    [installing](../admin/installing.md) and [security](../admin/security.md). Each claim
    either happened or is listed.
 4. #422's done-when holds, as `scripts/doc-size.exs` checks in CI: no hand-written page over
-   400 lines but the protocol, and `defects.md` lists only open defects.
+   400 lines but the protocol.
 
 **Pass.** Nothing listed. **Fail:** each item listed, with the page and the line; a doc fix
 is a new release, then this row again.

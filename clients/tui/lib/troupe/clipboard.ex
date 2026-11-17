@@ -18,7 +18,7 @@ defmodule Troupe.Clipboard do
   avoid clobbering the clipboard of whoever is running them. It is used as a
   shell command with the staged file redirected into it, so it needs a shell
   with `<`: on Windows without Git Bash the shell is PowerShell, and the command
-  is refused with a sentence saying so (D115).
+  is refused with a sentence saying so.
   """
 
   alias Troupe.OS
@@ -114,8 +114,8 @@ defmodule Troupe.Clipboard do
 
   @doc """
   The bytes `name` is given for `text` on `os_type`. Windows' `clip` reads a file with no
-  byte-order mark in the console's code page, so anything but ASCII could arrive garbled
-  (D115); it is given UTF-16LE with the mark, which is how it is told the text is Unicode,
+  byte-order mark in the console's code page, so anything but ASCII could arrive garbled;
+  it is given UTF-16LE with the mark, which is how it is told the text is Unicode,
   whatever the code page. Every other command gets the text as it is, in UTF-8.
   """
   @spec staged(String.t(), String.t(), {atom(), atom()}) :: binary()
@@ -146,7 +146,7 @@ defmodule Troupe.Clipboard do
   @doc """
   The line the platform shell `shell` (its program's name) is given to feed `command` the
   file at `path`, or why it cannot be: PowerShell, Windows' shell without Git Bash, has no
-  `<`, and a `clipboard_command` failed there with its parser's error (D115).
+  `<`, and a `clipboard_command` failed there with its parser's error.
   """
   @spec shell_line(String.t(), Path.t(), String.t()) :: {:ok, String.t()} | {:error, String.t()}
   def shell_line(command, path, shell) do
@@ -162,7 +162,7 @@ defmodule Troupe.Clipboard do
 
   @doc """
   What cmd.exe is given to feed `name` the file at `path`, which it runs in the file's
-  directory (D109): the command by its path on `PATH`, so cmd.exe does not look for it in
+  directory: the command by its path on `PATH`, so cmd.exe does not look for it in
   a directory of its own choosing, and the file by its name, in arguments of their own.
   `clip < "<path>"` as one argument reached cmd.exe with its quotes escaped the way Erlang
   escapes them, which cmd.exe does not read: "The filename, directory name, or volume label

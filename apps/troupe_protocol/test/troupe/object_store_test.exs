@@ -153,7 +153,7 @@ defmodule Troupe.ObjectStoreTest do
       assert {:ok, []} = ObjectStore.list_versions(store, prefix)
     end
 
-    # D71: each version's `DELETE` was sent and its answer dropped, so a refused one was
+    # Each version's `DELETE` was sent and its answer dropped, so a refused one was
     # counted with the rest and an erasure said it was done while the version stayed.
     test "a version the store refuses to delete is said to be left, and the rest go", context do
       %{store: store, prefix: prefix} = requires_store(context)

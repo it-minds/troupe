@@ -1,6 +1,6 @@
 defmodule Troupe.RemoteMoveTest do
   @moduledoc """
-  A session the plane moves to another pod is followed there (defects.md D21, issue
+  A session the plane moves to another pod is followed there (issue
   #184): a drain, a lost pod and an activation elsewhere all leave the pod the client is
   connected to without the session, and the client asks the plane where it is now.
   """

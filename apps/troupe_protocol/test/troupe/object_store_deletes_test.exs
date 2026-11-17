@@ -33,7 +33,7 @@ defmodule Troupe.ObjectStoreDeletesTest do
     assert Enum.map(deletes, & &1.query["versionId"]) == Enum.map(versions, & &1.version_id)
   end
 
-  # D71: the answer to each delete was dropped, so a store that failed every one of them
+  # The answer to each delete was dropped, so a store that failed every one of them
   # was said to have deleted them all.
   test "a store that fails the delete is said to have deleted nothing" do
     stand_in =

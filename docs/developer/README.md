@@ -22,7 +22,6 @@ looked things up in.
 | [gate-walk.md](gate-walk.md) | Walking a release gate on a fresh laptop, a fresh account and the live plane, and what `scripts/gate-check` checks locally |
 | [gate-walk-rows.md](gate-walk-rows.md) | The gate's eight rows: what proves each, its steps, a pass and a fail |
 | [code-signing.md](code-signing.md) | Buying and setting up OS code signing (Apple Developer ID, a Windows signing service) and the secrets a release needs |
-| [defects.md](defects.md) | Defects found in passing and not fixed yet |
 
 Records that are no longer instruction are in `docs/history/`, kept as they were written:
 [the command audit](../history/command-audit.md) of 0.10.0, and the console's two plans,

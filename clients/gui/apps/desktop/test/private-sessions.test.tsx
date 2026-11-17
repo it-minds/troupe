@@ -1,4 +1,4 @@
-// Private sessions in the list (D61, D59): the daemon's `session.list` says a session is
+// Private sessions in the list: the daemon's `session.list` says a session is
 // private and how its sealing stands here (troupe Decision 785), so the list says so,
 // rather than "This computer"; one waiting to be erased says that; and one another device
 // sealed last offers Claim, which takes it over on this computer. The app rendered, the
@@ -68,7 +68,7 @@ describe("a private session in the list", () => {
     expect(button("Claim", entry("/home/ada/letters")!)).toBeNull();
   });
 
-  // D71: the session's own head says it as well, not only the list.
+  // The session's own head says it as well, not only the list.
   it("says in the session's head how its sealing stands, as its row does", async () => {
     daemon.seed("/home/ada/letters", { kind: "private", sync: "elsewhere", device: "ada-laptop" });
 

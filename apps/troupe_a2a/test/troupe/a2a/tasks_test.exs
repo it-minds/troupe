@@ -223,7 +223,7 @@ defmodule Troupe.A2A.TasksTest do
       assert text =~ "overloaded"
     end
 
-    # D42: the row is idle and carries no reason; the log says the agent kept crashing.
+    # The row is idle and carries no reason; the log says the agent kept crashing.
     test "a task whose agent kept crashing is failed, saying what it raised", context do
       StubPlane.put_row(context.plane, "s-7b", %{"status" => "idle", "last_seq" => 4})
 

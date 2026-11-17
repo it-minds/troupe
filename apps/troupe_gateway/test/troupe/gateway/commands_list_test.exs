@@ -144,7 +144,7 @@ defmodule Troupe.Gateway.CommandsListTest do
   end
 
   # A pod's session runs its bundle's agents, narrowed by the team's grant, and its
-  # palette offers those rather than the ones this build ships (defects D29): the table
+  # palette offers those rather than the ones this build ships: the table
   # lists the agents the session was started with.
   test "a session on a bundle lists the bundle's agents, as its grant narrows them", context do
     bundle = Path.join(Path.dirname(context.workspace), "bundle")

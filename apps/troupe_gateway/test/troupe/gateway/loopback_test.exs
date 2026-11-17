@@ -108,7 +108,7 @@ defmodule Troupe.Gateway.LoopbackTest do
       assert {:error, _reason} = connect_ws(context.ws, token: "not-the-token")
     end
 
-    # D108: `initialize` said 64 MiB, the connection's own limit, and the socket closed at
+    # `initialize` said 64 MiB, the connection's own limit, and the socket closed at
     # its 16 MiB frame ceiling, so a client that believed it lost the connection and every
     # call waiting on it. Over a WebSocket the largest message is the socket's ceiling.
     @tag max_frame_bytes: 65_536

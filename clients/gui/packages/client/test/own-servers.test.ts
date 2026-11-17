@@ -200,7 +200,7 @@ describe("the person's own servers, offered to a pod session", () => {
     assert.equal(daemon.calls.filter((c) => c.method === "mcp.list").length, listed, "the next socket listed the servers again");
   });
 
-  // D50: a server signed in to while attached was offered only on the next attachment.
+  // A server signed in to while attached was offered only on the next attachment.
   it("asks again about a server signed in to while attached, with what was offered still ticked", async () => {
     await attach();
     await until("the offer", settled("offered"));

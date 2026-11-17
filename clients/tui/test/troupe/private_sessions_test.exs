@@ -1,6 +1,6 @@
 defmodule Troupe.PrivateSessionsTest do
   @moduledoc """
-  D61 and D59, root Decision 785: the session picker lists a private session as private,
+  The session picker lists a private session as private,
   with how its sealing stands as the daemon's `session.list` says it, one waiting to be
   erased as such, and `c` takes one another device sealed last over on this machine; a
   plane's row waiting to be erased is that state, not none.

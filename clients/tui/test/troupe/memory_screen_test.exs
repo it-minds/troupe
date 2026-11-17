@@ -184,7 +184,7 @@ defmodule Troupe.MemoryScreenTest do
   end
 
   # A plane from before memory was entries has no `memory.in_effect`: the page says once,
-  # above the list, why nothing is changed here, and changes nothing (#894, D138).
+  # above the list, why nothing is changed here, and changes nothing (#894).
   test "a plane older than 0.29 is said, and memory is read-only there", ctx do
     %{pid: pid, session: session, remote: remote} = ctx
 

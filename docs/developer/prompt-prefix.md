@@ -249,7 +249,7 @@ and `goal_complete` with a loop's turns (679): a cache write each, nothing refus
 
 **What a change at the boundary costs on an enforcing account.** Every later call carries a
 block made under the tools before it, so each is refused once and sent again without its
-thinking, for the rest of the session or until a compaction (805; D92 in `defects.md` says
+thinking, for the rest of the session or until a compaction (805; #1048 and #1050 say
 what would end it). Against the stand-in as Claude Sonnet 5.5 with `thinking_binding: error`
 (`StableToolsTest`): three turns of three, two and one calls, and a person's tool offered
 while the first turn's first call ran.

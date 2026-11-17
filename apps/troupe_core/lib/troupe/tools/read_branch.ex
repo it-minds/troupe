@@ -96,7 +96,7 @@ defmodule Troupe.Tools.ReadBranch do
   # -- listing -----------------------------------------------------------------
 
   # A listing where nothing has finished says so: `/ask`, asked before any branch had, read
-  # the states and answered as if one had (D105).
+  # the states and answered as if one had.
   defp list(ctx) do
     case Enum.map(family(ctx), &line(&1, ctx)) do
       [] ->

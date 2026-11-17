@@ -253,7 +253,7 @@ defmodule Troupe.Plane.PrivateErasureTest do
       assert done["deleting"] == false
     end
 
-    # D71: one `DELETE` a version, inside the call. A thousand took seconds, so twenty
+    # One `DELETE` a version, inside the call. A thousand took seconds, so twenty
     # thousand outlasted the fifteen seconds a daemon waits for its answer
     # (`Troupe.Gateway.Plane`), which then said the plane had not been told.
     @tag timeout: 600_000
@@ -278,7 +278,7 @@ defmodule Troupe.Plane.PrivateErasureTest do
       assert {:ok, %{"erasures" => []}} = erasures(ada, "ada-laptop")
     end
 
-    # D71: each version's answer was dropped, so a version the store refused was counted
+    # Each version's answer was dropped, so a version the store refused was counted
     # as deleted, the device recorded, and nothing ever tried again.
     test "keeps telling its daemon while the store refuses a version, until it is gone",
          %{ada: ada, root: root} do

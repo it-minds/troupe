@@ -195,7 +195,7 @@ defmodule Troupe.Remote.Worker do
     do: call(session_id, {:upload_artifact, artifact, version})
 
   @doc """
-  Whether a file of `size` bytes can go in one `fs.upload` (D115): the sentence `fs_upload/3`
+  Whether a file of `size` bytes can go in one `fs.upload`: the sentence `fs_upload/3`
   would answer once it had been read, when it is larger than the server's message. A frame
   is larger than the file, so one that fits here may still be refused as sent. `:ok` as well
   where nothing can say yet: before `initialize`, or with no connection to ask.
@@ -686,7 +686,7 @@ defmodule Troupe.Remote.Worker do
   end
 
   # A message larger than the server said it takes would be cut off at its socket, and the
-  # connection with it, every call waiting on it lost (D108): it is not sent, and the caller
+  # connection with it, every call waiting on it lost: it is not sent, and the caller
   # is told why. The size is the frame's, which is the file's and then some for an upload.
   defp too_large(%{max_message: limit} = state, frame) when is_integer(limit) do
     size = IO.iodata_length(frame)
@@ -1637,7 +1637,7 @@ defmodule Troupe.Remote.Worker do
 
   # A worker that starts again, after a crash or with its parent's session opened again,
   # resumes past what it had seen, so a request asked of the one before it is not seen
-  # again: what the branch's journal says it still asks is registered as it starts (D113).
+  # again: what the branch's journal says it still asks is registered as it starts.
   defp remember_asked(%{as: {_sid, _window}} = state) do
     state.session_id
     |> Journal.all()

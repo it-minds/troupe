@@ -28,7 +28,7 @@ defmodule Troupe.CLI.Daemon do
 
   `opts[:reaper]` is the reaper to run it under (`{:ok, path}`), or `:none`: by default the
   reaper on Windows and none elsewhere. `open` runs under none, whatever it is given: the
-  daemon it starts is to outlive it (D115).
+  daemon it starts is to outlive it.
   """
   @spec run([String.t()], keyword()) :: non_neg_integer()
   def run(args, opts \\ []) do
@@ -126,7 +126,7 @@ defmodule Troupe.CLI.Daemon do
   # `open` starts the daemon if none is answering, detached, and returns. Under the reaper
   # that daemon was in the reaper's job, which ends everything in it once the command it
   # ran has exited: `troupe daemon open` said the daemon was running and left none, where
-  # `troupe-daemon open` kept it (D115). So `open` runs as a person runs it, and its daemon
+  # `troupe-daemon open` kept it. So `open` runs as a person runs it, and its daemon
   # starts as a client starts one (Decision 802). A Ctrl-C while it waits ends troupe and
   # leaves `open` to finish on its own, which it does within its own timeouts.
   defp reaper(["open" | _], _opts), do: :none

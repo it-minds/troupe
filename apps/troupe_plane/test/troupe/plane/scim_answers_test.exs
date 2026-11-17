@@ -42,7 +42,7 @@ defmodule Troupe.Plane.SCIMAnswersTest do
       assert group["displayName"] == "Engineering"
     end
 
-    # D57: a body with neither raised in `put_group` and answered 500.
+    # A body with neither raised in `put_group` and answered 500.
     test "of a group with neither externalId nor id is refused 400, saying why", context do
       body = Map.drop(group("eng"), ["externalId"])
 

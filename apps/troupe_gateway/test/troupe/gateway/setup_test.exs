@@ -102,7 +102,7 @@ defmodule Troupe.Gateway.SetupTest do
                answer(ctx.client, "c-7", "daemon", %{"at_login" => true})
 
       # Sent with no command id, which every client sends today and the handler took for
-      # granted to name the first session's (D95): the session is made all the same.
+      # granted to name the first session's: the session is made all the same.
       assert {:ok, %{"step" => "done", "session" => %{"session_id" => session_id} = session}} =
                Client.call(ctx.client, "setup.answer", %{"step" => "finish", "answer" => %{}})
 

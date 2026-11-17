@@ -2,7 +2,7 @@ defmodule Troupe.BenchMeasureTest do
   @moduledoc """
   What the offline bench says a request's system prompt weighs is all of it: the prompt
   and what follows it (`system_tail`, the task list among it), as the log counts a
-  request's system bytes, and not the first part alone (D65).
+  request's system bytes, and not the first part alone.
   """
 
   use ExUnit.Case, async: true

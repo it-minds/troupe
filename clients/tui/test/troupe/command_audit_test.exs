@@ -30,7 +30,7 @@ defmodule Troupe.CommandAuditTest do
     hd(notices(pid))
   end
 
-  describe "Tab on the command line (D93)" do
+  describe "Tab on the command line" do
     # A line without a slash is said to the agent (TUI Decision 101), so a name Tab
     # completes there carries its slash: Enter then runs the command it shows.
     test "completing a command name puts its slash in" do

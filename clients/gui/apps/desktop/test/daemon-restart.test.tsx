@@ -1,5 +1,5 @@
-// The daemon on this computer going away and coming back while the app is open (defects.md
-// D41). A daemon that restarts publishes a new port and a new token — the kernel picks the
+// The daemon on this computer going away and coming back while the app is open.
+// A daemon that restarts publishes a new port and a new token — the kernel picks the
 // one and the other is random — so the app reads where it is again before it dials, as the
 // Find button does, and says it is connected once a dial works, rather than "not answering"
 // until somebody presses Find.

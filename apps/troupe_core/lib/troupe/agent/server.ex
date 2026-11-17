@@ -4180,7 +4180,7 @@ defmodule Troupe.Agent.Server do
   # thinking block in it is bound to a conversation no later request has: on a model that
   # binds its thinking, an account the check is enforced for would refuse every call after
   # the compaction once, until a later one summarised the blocks away. Kept without them,
-  # as the API asks of a compaction's tail (D92, Decision 867). On any other model a block
+  # as the API asks of a compaction's tail. On any other model a block
   # still holds, and an Anthropic model thinking with an effort set may need its last one.
   # Its config's `binds_thinking` before its name (Decision 871).
   defp binds_thinking?(state), do: Config.binds_thinking?(state.config, state.definition.model)

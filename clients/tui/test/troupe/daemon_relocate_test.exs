@@ -1,6 +1,6 @@
 defmodule Troupe.DaemonRelocateTest do
   @moduledoc """
-  A window or a headless run on a daemon session follows a daemon that restarted (D46): the
+  A window or a headless run on a daemon session follows a daemon that restarted: the
   daemon's loopback takes a new port and a random token at every start, so the pair the
   attach was given names nothing once it has. After a failure the session's connection asks
   where the daemon says it is now, and goes there.
