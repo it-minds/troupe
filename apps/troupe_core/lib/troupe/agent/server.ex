@@ -331,6 +331,7 @@ defmodule Troupe.Agent.Server do
       # The wall clock is not running: it counts working time, from a turn's start. A
       # restarted agent's starts again from nothing; the time worked before is forgiven.
       budget: Keyword.get(opts, :budget, Config.budget(config)),
+      turn: %Spend{},
       fake: Keyword.get(opts, :fake),
       restart_limit: limit
     }

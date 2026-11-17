@@ -33,6 +33,10 @@ defmodule Troupe.Session.Watcher do
     :backend_module,
     :forced_backend,
     :timer,
+    # What each trigger is sent to: `Branch.start/2`, or a stand-in in a test of the
+    # watcher alone. Set in `init/1`, not defaulted here: a capture as a default is made
+    # while this module compiles, which would recompile it with every change to the branch.
+    :dispatch,
     enabled?: false,
     # A pod's session never watches (Decision 844): watching is for the files on the
     # person's own machine, and a branch it started there would be a session no plane
@@ -43,11 +47,9 @@ defmodule Troupe.Session.Watcher do
     pending: MapSet.new(),
     expected: %{},
     ignore: nil,
-    # `watch_auto_approve`, and what the session was started with, for its branches;
-    # `dispatch` stands in for `Branch.start/2` in a test of the watcher alone.
+    # `watch_auto_approve`, and what the session was started with, for its branches.
     auto_approve: false,
     branch: [],
-    dispatch: &Branch.start/2,
     # The markers a branch is working on, `{file, comment} => session id`, until it ends
     # its turn or its session goes; and the monitor on each branch's session.
     working: %{},
