@@ -226,9 +226,15 @@ team's back with `--to me` as its administrator; the listing says `transferable`
 may) and `link` are the same from the command line ([the command reference](cli-reference.md)).
 
 The artifact is served from a host of its own, not the plane's. A page there runs sandboxed:
-its scripts are only its own `.js` files (no inline script), it cannot read a cookie or call
-the plane as you, and it cannot fetch anything from anywhere else. A page that relied on a
-script from the web, or on inline script, needs those moved into files of its own.
+it cannot read a cookie or call the plane as you, and it may load only its own files. A
+stylesheet, script, font, image or frame from another site, an inline `<script>`, an
+`onclick=` and a `fetch` to another site are all blocked; inline styles and `data:` images
+and fonts are not. The plane reads each page, stylesheet and script as it is published, and
+the publish says what the host will block, file by file, so an agent can publish a corrected
+version straight away; it is published all the same. The artifact's page in the console and
+the desktop app then says how many references its version has that are blocked, with the list
+on request, and the terminal's `/artifacts` says the count on its row. A page that relies on
+one needs it moved into a file of its own, published beside it.
 
 Opening one signs you in to that host for an hour, through the plane. If you open an
 artifact's address, or follow a link to one, while signed out, you are sent to the console to

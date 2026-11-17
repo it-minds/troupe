@@ -27,7 +27,7 @@
 
 import { useEffect, useState } from "react";
 import type { JSX } from "react";
-import { ArtifactApi, TroupeRpcError, appLink, bytes, ownerWords, teamOwned, visibilityWords as audienceWords } from "@troupe/client";
+import { ArtifactApi, TroupeRpcError, appLink, blockedKindWords, blockedWords, bytes, ownerWords, teamOwned, visibilityWords as audienceWords } from "@troupe/client";
 import { OpenInApp } from "./AppBanner";
 import type { Artifact, ArtifactDetail, ArtifactFilter, ArtifactList, ArtifactPerson } from "@troupe/client";
 import { goesLine, goesSentence, versionGoes, versionsSentence } from "@troupe/client";
@@ -241,6 +241,37 @@ export function ArtifactPage({ id }: { id: string }): JSX.Element {
   );
 }
 
+/**
+ * What the artifacts host blocks in the version its address serves, as the plane read its
+ * files at publish: one line, and the references themselves on request.
+ */
+function Blocked({ artifact: a, current }: { artifact: ArtifactDetail; current: number }): JSX.Element | null {
+  const line = blockedWords(a.blocked_count);
+  if (!line) return null;
+  const found = a.versions.find((v) => v.n === current)?.blocked ?? [];
+  return (
+    <div className="note blocked" role="note">
+      <p>{line}</p>
+      {found.length > 0 && (
+        <details>
+          <summary>What is blocked</summary>
+          <ul>
+            {found.map((b, i) => (
+              <li key={i}>
+                <code>
+                  {b.file}
+                  {b.line ? `:${b.line}` : ""}
+                </code>{" "}
+                {b.reference} ({blockedKindWords(b.kind)})
+              </li>
+            ))}
+          </ul>
+        </details>
+      )}
+    </div>
+  );
+}
+
 function Detail({ artifact: a, reload }: { artifact: ArtifactDetail; reload: () => void }): JSX.Element {
   const { me, notify, reserveTab, plane } = useConsole();
   const api = useArtifacts();
@@ -322,6 +353,7 @@ function Detail({ artifact: a, reload }: { artifact: ArtifactDetail; reload: () 
         ]}
       />
       {a.goes_at && <p className="muted">{goesSentence(a)}</p>}
+      <Blocked artifact={a} current={current} />
       <Region>Where it came from</Region>
       <Origin artifact={a} />
       <div className="actions">

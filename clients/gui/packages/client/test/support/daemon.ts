@@ -41,6 +41,7 @@ import { PROVIDER_TYPES, SETUP_KINDS } from "./provider-types.js";
 import { FakeScratch } from "./scratch.js";
 import type { ProfileView } from "../../src/profile.js";
 import { PRIVATE_OFFER_SENTENCE } from "../../src/fleet.js";
+import { fakeBlocked, type FakeBlocked } from "./blocked.js";
 
 /** A document's entries as the plane answers them: each with the version, who saved it, when, and how many sessions used it. */
 function entriesOf(text: string, version: number, by: string): Array<Record<string, unknown>> {
@@ -730,6 +731,8 @@ evoked where nothing is set and there was a sign-in. */
   artifacts: Array<Record<string, unknown>> | null = null;
   /** Every `artifact.publish` asked, in order. */
   readonly publishedArtifacts: Array<Record<string, unknown>> = [];
+  /** What the artifacts host blocks in each artifact's newest version, by id, as a publish here found it. */
+  readonly artifactBlocked = new Map<string, FakeBlocked[]>();
   memoryAutoRefresh = true;
   /** The agent files of every layer (troupe Decision 841): the built-ins, the person's and each workspace's. */
   readonly agents: FakeAgents;
@@ -2124,7 +2127,7 @@ evoked where nothing is set and there was a sign-in. */
           this.artifactCalls.push({ method, params });
           const found = mine.find((a) => a["id"] === params["id"]);
           if (!found) return reply(ws, id, null, { code: -32005, message: "not_found", data: { id: params["id"] } });
-          const versions = Array.from({ length: Number(found["version"]) }, (_, i) => Number(found["version"]) - i).map((n) => ({ n, note: n === 1 ? null : `Version ${n}'s note`, published_at: "2026-10-26T08:00:00Z", url: `https://artifacts.example.test/a/${String(found["id"])}/v${n}/`, files: artifactFiles(found).map((f) => ({ path: f.path, sha256: "sha256:fake", content_type: "text/markdown", bytes: f.text.length })), hash: `sha256:${n}`, bytes: 10, published_by: { subject: "ada@example.test" }, goes_at: (found["version_goes_at"] as Record<string, string> | undefined)?.[String(n)] ?? null }));
+          const versions = Array.from({ length: Number(found["version"]) }, (_, i) => Number(found["version"]) - i).map((n) => ({ n, note: n === 1 ? null : `Version ${n}'s note`, published_at: "2026-10-26T08:00:00Z", url: `https://artifacts.example.test/a/${String(found["id"])}/v${n}/`, files: artifactFiles(found).map((f) => ({ path: f.path, sha256: "sha256:fake", content_type: "text/markdown", bytes: f.text.length })), hash: `sha256:${n}`, bytes: 10, blocked: n === Number(found["version"]) ? (this.artifactBlocked.get(String(found["id"])) ?? []) : [], published_by: { subject: "ada@example.test" }, goes_at: (found["version_goes_at"] as Record<string, string> | undefined)?.[String(n)] ?? null }));
           const owner = found["mine"] === true;
           switch (method) {
             // A version's text file, from the files the test gave the artifact.
@@ -2253,7 +2256,11 @@ evoked where nothing is set and there was a sign-in. */
           ? Object.assign(existing, { version: Number(existing["version"]) + 1 })
           : { id: `art-fake${mine.length + 1}`, title: params["title"], kind: params["kind"], visibility: params["visibility"], version: 1, mine: true, owner_team: this.ownerTeamOf(params) };
         if (!existing) mine.push(published);
-        return reply(ws, id, { ...published, url: `https://artifacts.example.test/a/${String(published["id"])}/`, plane_url: "https://plane.example.test" });
+        const sent = ((params["files"] as Array<{ path: string; bytes: string }> | undefined) ?? []).map((f) => ({ path: f.path, content: Buffer.from(f.bytes, "base64").toString("utf8") }));
+        const blocked = fakeBlocked(sent);
+        this.artifactBlocked.set(String(published["id"]), blocked);
+        published["blocked_count"] = blocked.length;
+        return reply(ws, id, { ...published, blocked, url: `https://artifacts.example.test/a/${String(published["id"])}/`, plane_url: "https://plane.example.test" });
       }
 
       // What a session's next prompt is read from (troupe #55): what a test set, or the

@@ -213,6 +213,23 @@ describe("artifacts", () => {
     expect(methods.filter((m) => m.startsWith("admin.") && m !== "admin.teams.list")).toEqual([]);
   });
 
+  it("says on its page what the artifacts host blocks in the version it serves, with the list on request", async () => {
+    await open("#/artifacts/art-carol-weekly", PEOPLE.carol);
+    await sees("This version references 1 thing the artifacts host blocks, so it may look or work broken. An artifact may load only its own files.");
+    const list = await waitFor(() => document.querySelector<HTMLDetailsElement>(".note.blocked details"), "the list on request");
+    expect(list.open).toBe(false);
+    expect(list.querySelector("summary")?.textContent).toBe("What is blocked");
+    expect([...list.querySelectorAll("li")].map((li) => li.textContent)).toEqual(["index.html:1 <script> window.reached = true (an inline script)"]);
+    // The page's own text is still never drawn: the reference is the plane's words for it.
+    expect(document.body.innerHTML).not.toContain("Week forty-three in full");
+
+    // One the host blocks nothing of says nothing of it.
+    unmount?.();
+    await open("#/artifacts/art-alice-notes", PEOPLE.carol);
+    await sees("Release notes");
+    expect(document.querySelector(".note.blocked")).toBeNull();
+  });
+
   it("says on each card and on its page when one goes, only where an administrator set a retention period", async () => {
     // Both periods off: no card and no page says anything of going.
     await open("#/artifacts/organisation", PEOPLE.carol);

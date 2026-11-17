@@ -1494,10 +1494,12 @@ defmodule Troupe.FakeRemote do
       "mine" => true,
       "role" => "owner",
       "owner_team" => owner_team,
-      "may_transfer" => true
+      "may_transfer" => true,
+      "blocked_count" => 0
     }
 
-    {{:ok, Map.put(row, "url", "http://127.0.0.1:#{state.port}/a/#{id}/")},
+    # What the artifacts host blocks in it, which the plane reads from the files: none here.
+    {{:ok, Map.merge(row, %{"url" => "http://127.0.0.1:#{state.port}/a/#{id}/", "blocked" => []})},
      %{state | artifacts: [row | state.artifacts]}}
   end
 

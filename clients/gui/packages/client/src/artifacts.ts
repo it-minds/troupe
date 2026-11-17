@@ -96,6 +96,12 @@ export interface Artifact {
    * absent where none was sent, or from a plane from before thumbnails.
    */
   thumbnail_url?: string | null;
+  /**
+   * How many references the artifacts host blocks in the version its address serves (a
+   * stylesheet from another site, an inline script), read from its files at publish. Zero
+   * for one published before that check; absent from an older plane.
+   */
+  blocked_count?: number;
   created_at: string;
   published_at: string;
   /** Whether this caller may delete it: its owner, or a platform admin taking it down. */
@@ -150,6 +156,63 @@ export interface ArtifactVersion {
   /** When it is removed for its age (`artifacts_keep_versions_days`); null for the newest, the pinned one, and every one while that is off. */
   goes_at?: string | null;
   url: string;
+  /** What the artifacts host blocks in it, read from its files at publish. Absent from an older plane. */
+  blocked?: ArtifactBlocked[];
+}
+
+/** The kinds of reference the artifacts host blocks. */
+export type ArtifactBlockedKind =
+  | "stylesheet"
+  | "script"
+  | "image"
+  | "font"
+  | "media"
+  | "frame"
+  | "object"
+  | "connect"
+  | "inline_script"
+  | "event_handler";
+
+/** One reference in a version's file that the artifacts host will block. */
+export interface ArtifactBlocked {
+  file: string;
+  kind: ArtifactBlockedKind | string;
+  reference: string;
+  line?: number;
+}
+
+/** What a kind of blocked reference is, in words: "a stylesheet from another site". */
+export function blockedKindWords(kind: string): string {
+  switch (kind) {
+    case "stylesheet":
+      return "a stylesheet from another site";
+    case "script":
+      return "a script from another site";
+    case "image":
+      return "an image from another site";
+    case "font":
+      return "a font from another site";
+    case "media":
+      return "a sound or film from another site";
+    case "frame":
+      return "a page from another site in a frame";
+    case "object":
+      return "an embedded object";
+    case "connect":
+      return "a connection to another site";
+    case "inline_script":
+      return "an inline script";
+    case "event_handler":
+      return "an inline event handler";
+    default:
+      return kind;
+  }
+}
+
+/** The line an artifact's page says of its blocked references, or null for none. */
+export function blockedWords(count: number | null | undefined): string | null {
+  if (!count) return null;
+  return `This version references ${count} ${count === 1 ? "thing" : "things"} the artifacts host blocks, so it may look or work broken. An artifact may load only its own files.`;
 }
 
 /** Somebody the plane signed in through a link, and when. */

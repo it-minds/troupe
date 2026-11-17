@@ -348,6 +348,15 @@ defmodule Troupe.UI.TUI.ArtifactsPage do
   # `p`: `/publish`'s line, typed on the page — a path in the workspace, who it is for,
   # Only you where nothing is named, and `me` where a team publication is to stay the
   # person's own rather than the team's.
+  # What the artifacts host will block of what was just published: an artifact may load only
+  # its own files.
+  defp blocked_words([_ | _] = found),
+    do:
+      "; the artifacts host will block #{length(found)} of what it loads (" <>
+        Enum.map_join(found, ", ", &"#{&1["file"]}: #{&1["reference"]}") <> ")"
+
+  defp blocked_words(_none), do: ""
+
   defp prompt_key(page, %{code: "esc"}), do: {:ok, %{page | prompt: nil}}
 
   defp prompt_key(page, %{code: "backspace"}),
@@ -367,7 +376,8 @@ defmodule Troupe.UI.TUI.ArtifactsPage do
           case Client.publish_file(local, visibility, session_id: page.session_id, owner: owner) do
             {:ok, artifact} ->
               "published #{path} as #{artifact["id"]} version #{artifact["version"]}" <>
-                if(artifact["owner_team"], do: " (team #{artifact["owner_team"]}'s)", else: "")
+                if(artifact["owner_team"], do: " (team #{artifact["owner_team"]}'s)", else: "") <>
+                blocked_words(artifact["blocked"])
 
             {:error, reason} ->
               "#{path} not published: #{reason}"
@@ -603,9 +613,16 @@ defmodule Troupe.UI.TUI.ArtifactsPage do
         [
           Span.new(String.pad_trailing(title, title_w + 1)),
           Span.new(rest, style: Theme.style(:muted))
-        ] ++ going(row)
+        ] ++ blocked(row) ++ going(row)
     )
   end
+
+  # How many references the artifacts host blocks in the version it serves, as the plane
+  # read its files at publish; nothing where it blocks none.
+  defp blocked(%{"blocked_count" => n}) when is_integer(n) and n > 0,
+    do: [Span.new("  #{n} blocked by the host", style: Theme.style(:error))]
+
+  defp blocked(_row), do: []
 
   # When a retention period removes it, beside the row's other pieces; nothing where none is set.
   defp going(row) do
