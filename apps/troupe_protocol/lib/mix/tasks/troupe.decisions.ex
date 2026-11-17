@@ -54,10 +54,10 @@ defmodule Mix.Tasks.Troupe.Decisions do
   reader which to read. The ones before that day are left as they were written; `--report`
   lists them.
 
-  Each log's README holds `<!-- next: N -->`, the number the next decision in that log
-  takes, and `--check` fails unless N is above every number in the log. A decision that is
-  deleted leaves no file behind, and the marker is what keeps its number from being taken
-  again; a new decision moves it on.
+  Each log's README holds `<!-- next: N -->`, the first number in that log not yet
+  reserved, and `--check` fails unless N is above every number in the log. A decision that
+  is deleted leaves no file behind, and the marker is what keeps its number from being
+  taken again; a chunk's coordinator moves it past the block reserved for the chunk.
 
   ## --report
 

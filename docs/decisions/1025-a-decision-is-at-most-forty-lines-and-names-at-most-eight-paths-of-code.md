@@ -36,8 +36,9 @@ over the cap, over eight paths, with a test path or superseded, for trimming by 
 Each log's README carries `<!-- next: N -->`, and `--check` fails unless N is above every
 number in the log. Once a decision can be deleted, the highest file no longer says which
 numbers were used, and a reused number makes an old citation point at the wrong decision.
-The line is one every new decision's number must pass, so a chunk's coordinator moves it
-past the numbers it reserves before the fixers start, and two fixers do not both edit it.
+The marker is the first number not yet reserved: a chunk's coordinator moves it past the
+block reserved for the chunk on the chunk's branch, and a fixer never edits it, so two
+fixers' pull requests do not both change one line.
 
 This replaces 790's "the body is written as an entry was" and its paths naming every page
 that mentions the log; the rest of 790 stands.

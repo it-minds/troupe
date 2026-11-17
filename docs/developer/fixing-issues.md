@@ -248,8 +248,9 @@ does not reproduce it, stop with `cannot-reproduce` and what was tried.
   matching something) and `gist` (at most about 150 characters: what someone changing
   those paths must not undo), optionally `supersedes:` and `symbols:`; the body is at most
   40 lines that are not blank: the decision, what was not chosen, what breaks if it is
-  undone. The log's README has a `next` line above every number used; the coordinator
-  moves it past the numbers it reserves.
+  undone. The log's README has a `next` line, the first number not yet reserved; the
+  coordinator moves it past the chunk's block on the chunk's branch, and a fixer never
+  edits it.
   `mix troupe.decisions --check` checks it, as CI does
   ([decisions/README.md](../decisions/README.md) has an example).
 

@@ -10,10 +10,11 @@ and checked as the repository's are ([decisions/](../README.md)), and
 One is short, as the repository's are: what was decided, what was not chosen and why, and
 what breaks if it is undone, in at most 40 lines that are not blank; no list of tests, no
 history of the issue, no restatement of the code. Its `paths` are where it would be undone,
-at most eight globs of code, never a test. The line below stays above every
-number the log has used and moves past each new one, so a number stays taken after its
-file is deleted:
+at most eight globs of code, never a test. The line below is
+the first number not yet reserved, so a number stays taken after its file is deleted: a
+chunk's coordinator moves it past the block reserved for the chunk on the chunk's branch,
+and a fixer never edits it:
 
-<!-- next: 176 -->
+<!-- next: 180 -->
 
 <!-- decisions:index -->

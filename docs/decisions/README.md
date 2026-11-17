@@ -21,12 +21,12 @@ Read the ones that bear on the change; a change that undoes one says so.
 ## Writing one
 
 A decision is a new file here, `<number, four digits>-<slug>.md`, numbered above every
-number this log has used and below the line that says which number is next. A chunk's
-coordinator reserves one for each fixer and moves the line past them before the fixers
-start, so two pull requests that each decide something touch no file in common; a
-decision taken outside a chunk moves it on itself:
+number this log has used and below the line that says which number is next. That line is
+the first number not yet reserved: a chunk's coordinator reserves a block of numbers for
+the chunk and moves the line past the block on the chunk's branch, and a fixer never
+edits it, so two pull requests that each decide something touch no file in common:
 
-<!-- next: 1026 -->
+<!-- next: 1040 -->
 
 A decision is short: what was decided, what was not chosen and why, and what breaks if it
 is undone, in at most 40 lines that are not blank. It does not list the tests that prove

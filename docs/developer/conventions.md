@@ -66,8 +66,8 @@ the same pull request as the client change that needs it.
   restatement of the code. `paths` are where it would be undone: at most eight globs of
   code, never a test. One that is superseded, or whose reasoning the code's comments now
   carry, is deleted or marked `superseded`, and its number is never reused: each log's
-  README says `<!-- next: N -->`, above every number the log has used, and moves past each
-  new one.
+  README says `<!-- next: N -->`, the first number not yet reserved, which the coordinator
+  moves past a chunk's block on the chunk's branch and a fixer never edits.
   `docs/decisions/tui/` and `docs/decisions/daemon/` hold those two projects' own,
   numbered on their own. `mix troupe.decisions --for <path>` lists the decisions that
   govern a path; `--check`, which CI runs, fails on a duplicate number, a number at or
