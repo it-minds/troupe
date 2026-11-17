@@ -70,11 +70,12 @@ defmodule Troupe.LLM.ProviderType do
   @type t :: %__MODULE__{}
 
   # What speaking to each type takes, in `Troupe.Protocol.ProviderTypes`' order; the rest
-  # of a row is that list's.
+  # of a row is that list's. A row names its adapter by the wire shape it speaks, which
+  # `adapter_module/1` turns into the module when a type is read.
   @speaking [
     %{
       name: :anthropic,
-      adapter: Troupe.LLM.Providers.Anthropic,
+      adapter: :anthropic,
       vendor_url: "https://api.anthropic.com",
       listing: :anthropic,
       identify: :gateway,
@@ -95,7 +96,7 @@ defmodule Troupe.LLM.ProviderType do
     },
     %{
       name: :openai,
-      adapter: Troupe.LLM.Providers.OpenAI,
+      adapter: :openai,
       vendor_url: "https://api.openai.com",
       listing: :openai,
       identify: :gateway,
@@ -118,7 +119,7 @@ defmodule Troupe.LLM.ProviderType do
     },
     %{
       name: :ollama,
-      adapter: Troupe.LLM.Providers.OpenAI,
+      adapter: :openai,
       listing: :openai,
       endpoint:
         "Ollama's OpenAI-compatible endpoint, at `http://localhost:11434` unless `base_url` says.",
@@ -134,7 +135,7 @@ defmodule Troupe.LLM.ProviderType do
     },
     %{
       name: :openrouter,
-      adapter: Troupe.LLM.Providers.OpenAI,
+      adapter: :openai,
       vendor_url: "https://openrouter.ai",
       listing: :openrouter,
       identify: :openrouter,
@@ -155,7 +156,7 @@ defmodule Troupe.LLM.ProviderType do
     },
     %{
       name: :azure_openai,
-      adapter: Troupe.LLM.Providers.OpenAI,
+      adapter: :openai,
       listing: nil,
       endpoint:
         "Your Azure OpenAI resource, which `base_url` names: `https://<resource>.openai.azure.com`. A call goes to " <>
@@ -175,7 +176,7 @@ defmodule Troupe.LLM.ProviderType do
     },
     %{
       name: :gemini,
-      adapter: Troupe.LLM.Providers.OpenAI,
+      adapter: :openai,
       vendor_url: "https://generativelanguage.googleapis.com",
       listing: :gemini,
       identify: :gateway,
@@ -193,7 +194,7 @@ defmodule Troupe.LLM.ProviderType do
     },
     %{
       name: :fake,
-      adapter: Troupe.LLM.Providers.Fake,
+      adapter: :fake,
       endpoint:
         "None: scripted answers, for a packaged binary's smoke test. The session-wide `provider` only.",
       auth: "None.",
@@ -247,7 +248,7 @@ defmodule Troupe.LLM.ProviderType do
 
   @doc "Every type, in the reference's order."
   @spec all() :: [t()]
-  def all, do: Enum.map(@table, &struct!(__MODULE__, &1))
+  def all, do: Enum.map(@table, &type/1)
 
   @doc "The session-wide `provider`'s names, `fake` among them."
   @spec names() :: [String.t()]
@@ -263,12 +264,21 @@ defmodule Troupe.LLM.ProviderType do
 
   def fetch(name) when is_binary(name) do
     case Map.fetch(@by_name, name) do
-      {:ok, type} -> struct!(__MODULE__, type)
+      {:ok, type} -> type(type)
       :error -> nil
     end
   end
 
   def fetch(_name), do: nil
+
+  defp type(row), do: struct!(__MODULE__, %{row | adapter: adapter_module(row.adapter)})
+
+  # The adapters are named here, in a function, and not in the table: the table is built
+  # while this module compiles, so a module named there would recompile this one, and
+  # everything that compiles against it, with every change to an adapter.
+  defp adapter_module(:anthropic), do: Troupe.LLM.Providers.Anthropic
+  defp adapter_module(:openai), do: Troupe.LLM.Providers.OpenAI
+  defp adapter_module(:fake), do: Troupe.LLM.Providers.Fake
 
   @doc "The atom a type's name is, or `nil`: never an atom made from a name nobody implements."
   @spec atom(String.t() | atom() | nil) :: atom() | nil

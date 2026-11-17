@@ -27,8 +27,6 @@ defmodule Troupe.Plane.Artifacts.Shares do
 
   alias Troupe.Plane.Artifacts.People
 
-  @roles People.roles()
-
   # A public link is a bearer anybody may forward; it does not outlive a quarter.
   @max_public_days 90
 
@@ -73,8 +71,13 @@ defmodule Troupe.Plane.Artifacts.Shares do
     end
   end
 
-  defp role(role) when role in @roles, do: {:ok, role}
-  defp role(other), do: {:error, invalid("a link's role is view, comment or edit, not #{inspect(other)}")}
+  # A person's roles are the ones a link may give. Read when a link is made, not while this
+  # module compiles, so that it does not recompile with `People` and everything it reaches.
+  defp role(role) do
+    if role in People.roles(),
+      do: {:ok, role},
+      else: {:error, invalid("a link's role is view, comment or edit, not #{inspect(role)}")}
+  end
 
   defp expires(nil), do: {:ok, nil}
 

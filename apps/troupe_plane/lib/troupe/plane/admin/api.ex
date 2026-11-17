@@ -92,7 +92,7 @@ defmodule Troupe.Plane.Admin.API do
     %Argument{
       name: "provisioner",
       type: :string,
-      values: Provisioner.names(),
+      values: :provisioners,
       description:
         "What makes the workers exist: kubernetes (the default; the operator runs pods) or ssh (machines registered with admin.host.register, which dial the plane; nothing is written to the cluster). A profile on ssh gives none of the cluster's guarantees, and a team may be granted it only once a platform admin has allowed that team unenforced workers."
     },
@@ -223,7 +223,7 @@ defmodule Troupe.Plane.Admin.API do
     %Argument{
       name: "budget_period",
       type: :string,
-      values: Team.budget_periods(),
+      values: :budget_periods,
       description:
         "What the ceiling is measured over: monthly, which turns over on the 1st of the month (UTC), or never for one that does not turn over."
     },
@@ -398,7 +398,7 @@ defmodule Troupe.Plane.Admin.API do
         %Argument{
           name: "kind",
           type: :string,
-          values: Trigger.source_kinds(),
+          values: :source_kinds,
           required: true,
           description:
             "schedule (fired by cron), webhook (fired at POST /trigger/<id> with its own key, minted when the trigger is created and answered once; or, naming a repository, by the GitHub App's signed deliveries) or manual (fired only by hand)."
@@ -1429,7 +1429,7 @@ defmodule Troupe.Plane.Admin.API do
           name: "component",
           type: :string,
           required: true,
-          values: ClientVersions.components(),
+          values: :client_components,
           description:
             "Which client: tui (the terminal, troupe), daemon (troupe-daemon) or desktop (the desktop app)."
         },
@@ -1979,15 +1979,41 @@ defmodule Troupe.Plane.Admin.API do
 
   @doc "Every admin method, keyed by name."
   @spec methods() :: %{String.t() => Method.t()}
-  def methods, do: @by_name
+  def methods, do: Map.new(@methods, &{&1.name, resolved(&1)})
 
   @doc "Every admin method, in the order the table declares them."
   @spec list() :: [Method.t()]
-  def list, do: @methods
+  def list, do: Enum.map(@methods, &resolved/1)
 
   @doc "One method, or `nil`."
   @spec method(String.t()) :: Method.t() | nil
-  def method(name), do: Map.get(@by_name, name)
+  def method(name) do
+    case Map.fetch(@by_name, name) do
+      {:ok, method} -> resolved(method)
+      :error -> nil
+    end
+  end
+
+  # The table is built while this module compiles, so a closed set of values another plane
+  # module owns is named in it by an atom and read here, when a method is asked for:
+  # calling that module from the table would recompile this one with it, and with
+  # everything it reaches, which includes this module.
+  defp resolved(%Method{arguments: arguments} = method),
+    do: %{method | arguments: Enum.map(arguments, &resolved/1)}
+
+  defp resolved(%Argument{values: values, properties: properties} = argument) do
+    %{
+      argument
+      | values: values(values),
+        properties: properties && Enum.map(properties, &resolved/1)
+    }
+  end
+
+  defp values(:provisioners), do: Provisioner.names()
+  defp values(:budget_periods), do: Team.budget_periods()
+  defp values(:source_kinds), do: Trigger.source_kinds()
+  defp values(:client_components), do: ClientVersions.components()
+  defp values(values), do: values
 
   @doc "Whether a method name is an admin one."
   @spec admin_method?(String.t()) :: boolean()

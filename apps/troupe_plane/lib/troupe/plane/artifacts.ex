@@ -2380,9 +2380,12 @@ defmodule Troupe.Plane.Artifacts do
 
   # The plane's own secret, with salts of these two alone, so neither a ticket nor the
   # artifacts host's cookie is anything the plane's own cookies would take, or the other way.
+  # The endpoint's name is only the key its config is under, so it is made from a string:
+  # named as a module, it would tie this module to the endpoint, which compiles against the
+  # router, which reaches this module.
   defp secret do
     :troupe_plane
-    |> Application.get_env(Troupe.Plane.Web.Endpoint, [])
+    |> Application.get_env(Module.concat(["Troupe.Plane.Web.Endpoint"]), [])
     |> Keyword.fetch!(:secret_key_base)
   end
 
