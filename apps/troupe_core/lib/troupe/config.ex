@@ -415,6 +415,9 @@ defmodule Troupe.Config do
   def as_run_by(text, "troupe"), do: text
   def as_run_by(text, command), do: String.replace(text, "`troupe config", "`#{command} config")
 
+  @doc "Write a config file the way every writer does: `Troupe.Config.Migrate.write/2`."
+  defdelegate write_file(path, map), to: Migrate, as: :write
+
   @doc "Remove the old spellings of one setting: `Troupe.Config.Migrate.drop_spellings/2`."
   defdelegate drop_spellings(map, path), to: Migrate
 
