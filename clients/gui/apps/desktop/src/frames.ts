@@ -163,7 +163,7 @@ export function layout(entries: Entry[], opts: { detail: Detail; opened: Readonl
   const stop = entries.findIndex((e) => (e.kind === "system" && e.type === "budget_exhausted") || (e.kind === "question" && e.asked === "budget"));
   const openFrom = stop < 0 ? Infinity : stop;
 
-  return turns(entries).flatMap((t) => {
+  const drawn = turns(entries).flatMap((t) => {
     const level = opts.opened.has(t.key) ? flip(opts.detail) : opts.detail;
     const at = (i: number): Detail => (i >= openFrom ? "everything" : level);
     const indices = Array.from({ length: t.end - t.start }, (_, k) => t.start + k);
@@ -193,7 +193,16 @@ export function layout(entries: Entry[], opts: { detail: Detail; opened: Readonl
       return { entry: entries[i]!, role, level: drawnAt, hidden, strip: i === stripAt ? strip : null, turn: t.key };
     });
   });
+
+  // A run of sleeping and waking notes is its latest line below everything: each wake of a
+  // pod session writes four, and only the last says where the session stands.
+  return drawn.map((d, i) => (d.level !== "everything" && isLifecycle(d.entry) && isLifecycle(drawn[i + 1]?.entry) ? { ...d, hidden: true } : d));
 }
+
+/** The notes a session's sleeping, waking and replaying write, which a run of folds to its latest. */
+export const LIFECYCLE_NOTES: ReadonlySet<string> = new Set(["session_dormant", "session_activated", "session_resumed", "agent_restarted"]);
+
+const isLifecycle = (e: Entry | undefined): boolean => e?.kind === "system" && LIFECYCLE_NOTES.has(e.type);
 
 type ToolEntry = Extract<Entry, { kind: "tool" }>;
 
