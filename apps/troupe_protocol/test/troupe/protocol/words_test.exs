@@ -47,6 +47,16 @@ defmodule Troupe.Protocol.WordsTest do
     end
   end
 
+  describe "duration/2 adjective" do
+    test "is a limit's size before its noun, hours only when whole" do
+      assert Words.duration(45_000, :adjective) == "45-second"
+      assert Words.duration(30 * 60_000, :adjective) == "30-minute"
+      assert Words.duration(90 * 60_000, :adjective) == "90-minute"
+      assert Words.duration(7_200_000, :adjective) == "2-hour"
+      assert Words.duration(7_200_000.0, :adjective) == "2-hour"
+    end
+  end
+
   describe "ago/2" do
     @now ~U[2026-11-17 12:00:00Z]
 

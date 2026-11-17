@@ -65,12 +65,12 @@ defmodule Troupe.RemoteTranslateTest do
           durable("input_after_done", %{"source" => "user"})
         ])
 
-      assert [%{data: %{why: "its working limit of 30 min is spent"}}] =
+      assert [%{data: %{why: "its 30-minute working limit is spent"}}] =
                Enum.filter(events, &(&1.type == :stopped))
 
       assert List.last(notes(events)) ==
                "Your message was not taken: the session had stopped " <>
-                 "(its working limit of 30 min is spent). Start a new session to continue."
+                 "(its 30-minute working limit is spent). Start a new session to continue."
 
       refute Enum.any?(notes(events), &(&1 =~ "picked"))
     end
@@ -115,7 +115,7 @@ defmodule Troupe.RemoteTranslateTest do
 
     test "each limit is said with its size where the session said it" do
       assert Translate.limit_words("wall_clock", %{"wall" => 7_200_000}) ==
-               "its working limit of 2 h"
+               "its 2-hour working limit"
 
       assert Translate.limit_words("max_turns", %{"turns" => 40}) == "its 40-turn limit"
 

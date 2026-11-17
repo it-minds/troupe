@@ -1008,8 +1008,8 @@ defmodule Troupe.Remote.Translate do
   end
 
   @doc """
-  A spent budget limit in words, with its size where the session said it: "its working
-  limit of 30 min", "its 40-turn limit", "its 6M input-token limit"; "its budget" for a
+  A spent budget limit in words, with its size where the session said it: "its 30-minute
+  working limit", "its 40-turn limit", "its 6M input-token limit"; "its budget" for a
   limit this client does not know.
   """
   @spec limit_words(String.t() | nil, map()) :: String.t()
@@ -1018,7 +1018,7 @@ defmodule Troupe.Remote.Translate do
     n = dim && Map.get(limits, dim)
 
     case {dim, n} do
-      {"wall", n} when is_number(n) -> "its working limit of #{Words.duration(n)}"
+      {"wall", n} when is_number(n) -> "its #{Words.duration(n, :adjective)} working limit"
       {"wall", _} -> "its working-time limit"
       {"turns", n} when is_number(n) -> "its #{n}-turn limit"
       {"turns", _} -> "its turn limit"

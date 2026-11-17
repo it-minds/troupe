@@ -18,12 +18,22 @@ defmodule Troupe.Protocol.Words do
 
   `:short` is the terminal's compact form, for a strip or a header: `0s`, `14s`, `1m`,
   `4m 2s`, `1h 1m`, whole seconds always.
+
+  `:adjective` is a limit's size before its noun, as the stop sentence says it ("its
+  30-minute working limit"): `45-second`, `30-minute`, `90-minute`, `2-hour`; hours only
+  when they are whole, minutes and seconds rounded.
   """
-  @spec duration(number(), :words | :short) :: String.t()
+  @spec duration(number(), :words | :short | :adjective) :: String.t()
   def duration(ms, style \\ :words)
 
   def duration(ms, style) when is_float(ms), do: duration(trunc(ms), style)
   def duration(ms, style) when ms < 0, do: duration(0, style)
+
+  def duration(ms, :adjective) when ms >= 3_600_000 and rem(ms, 3_600_000) == 0,
+    do: "#{div(ms, 3_600_000)}-hour"
+
+  def duration(ms, :adjective) when ms >= 60_000, do: "#{round(ms / 60_000)}-minute"
+  def duration(ms, :adjective), do: "#{round(ms / 1000)}-second"
 
   def duration(ms, :words) when ms < 59_950, do: tenths(round(ms / 100)) <> " s"
   def duration(ms, :words), do: ms |> div(1000) |> max(60) |> parts(["h", "min", "s"], " ")

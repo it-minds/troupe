@@ -1568,7 +1568,7 @@ defmodule Troupe.UI.TUI.Model do
 
   @doc """
   What the input line says in its place while the window's agent takes no more input —
-  "This session has stopped: its working limit of 30 min is spent. Start a new session to
+  "This session has stopped: its 30-minute working limit is spent. Start a new session to
   continue." — or `nil` while input reaches it.
   """
   @spec stopped(t(), String.t()) :: String.t() | nil
