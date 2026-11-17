@@ -19,7 +19,7 @@
 
 import { useEffect, useState } from "react";
 import type { JSX } from "react";
-import { configKey, servesKeys } from "@troupe/client";
+import { configKey, errorText, servesKeys } from "@troupe/client";
 import type { DaemonClient } from "@troupe/client";
 import { DEFAULT_DETAIL, isDetail } from "../frames";
 import type { Detail } from "../frames";
@@ -274,7 +274,7 @@ function TranscriptDetail({ daemon }: { daemon: DaemonClient }): JSX.Element | n
   const choose = (level: Detail): void => {
     setError(null);
     setShown({ level, layer: "user" });
-    daemon.setSetting("transcript.detail", level).catch((e: unknown) => setError(`Not kept: ${e instanceof Error ? e.message : String(e)}`));
+    daemon.setSetting("transcript.detail", level).catch((e: unknown) => setError(`Not kept: ${errorText(e)}`));
   };
   return (
     <section className="detail">

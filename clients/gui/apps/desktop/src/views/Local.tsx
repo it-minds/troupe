@@ -14,7 +14,7 @@
 
 import { useCallback, useState } from "react";
 import type { JSX } from "react";
-import { firstLine, hostOf } from "@troupe/client";
+import { errorText, firstLine, hostOf } from "@troupe/client";
 import type { AuthSession, DaemonClient, DaemonEndpoint, DaemonIdentity, RecentWorkspace, Worktree } from "@troupe/client";
 import { useAdminQuery } from "../hooks";
 import type { MachineUser } from "../hooks";
@@ -235,7 +235,7 @@ function WhoAmI({
         await daemon.unlink();
       }
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errorText(e));
     } finally {
       setBusy(false);
     }
@@ -339,7 +339,7 @@ function Worktrees({ client }: { client: DaemonClient }): JSX.Element {
       setRemoving(null);
       setRound((n) => n + 1);
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errorText(e));
     } finally {
       setBusy(false);
     }

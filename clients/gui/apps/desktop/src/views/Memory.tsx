@@ -18,7 +18,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import type { JSX } from "react";
-import { factStatusLine, factsByKind, isDurable, learnedBy, librarianDone, mayNoLongerBeTrue, refreshNow } from "@troupe/client";
+import { errorText, factStatusLine, factsByKind, isDurable, learnedBy, librarianDone, mayNoLongerBeTrue, refreshNow } from "@troupe/client";
 import type { DaemonClient, MemoryBrief, MemoryFact, TroupeEvent } from "@troupe/client";
 import { Loading, Pill, When } from "./bits";
 
@@ -76,7 +76,7 @@ export function MemoryPane({
     try {
       setBrief(await daemon.memory(workspace));
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errorText(e));
     }
   }, [daemon, workspace]);
 
@@ -140,7 +140,7 @@ export function MemoryPane({
       setChosen(null);
       await load();
     } catch (e) {
-      setError(`Could not forget the brief: ${e instanceof Error ? e.message : String(e)}`);
+      setError(`Could not forget the brief: ${errorText(e)}`);
     } finally {
       setBusy(false);
     }
@@ -216,7 +216,7 @@ export function MemoryPane({
               setChosen(null);
               await load();
             } catch (e) {
-              setError(`Could not forget it: ${e instanceof Error ? e.message : String(e)}`);
+              setError(`Could not forget it: ${errorText(e)}`);
             }
           }}
         />

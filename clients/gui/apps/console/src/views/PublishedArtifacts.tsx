@@ -10,11 +10,11 @@
 
 import { useState } from "react";
 import type { JSX } from "react";
-import { goesDate, visibilityWords } from "@troupe/client";
+import { bytes, goesDate, visibilityWords } from "@troupe/client";
 import type { AdminArtifact } from "@troupe/client";
 import { useConsole, useLoad } from "../console";
 import { kindWords } from "./Artifacts";
-import { AuditNote, Empty, Loaded, Preview, bytes, useChange, when } from "./bits";
+import { AuditNote, Empty, Loaded, Preview, useChange, when } from "./bits";
 
 /** Whose it is: the team that owns it, with who first published it, or the person. */
 function ownerWords(a: AdminArtifact): string {

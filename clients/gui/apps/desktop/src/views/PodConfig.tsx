@@ -9,7 +9,7 @@
 
 import { useEffect, useState } from "react";
 import type { JSX } from "react";
-import { keySource, ruleScope } from "@troupe/client";
+import { errorText, keySource, ruleScope } from "@troupe/client";
 import type { SessionConfig, SessionView } from "@troupe/client";
 import { Loading, Table } from "./bits";
 
@@ -23,7 +23,7 @@ export function PodConfig({ view }: { view: SessionView | null }): JSX.Element {
     view
       .config()
       .then((c) => live && setConfig(c))
-      .catch((e: unknown) => live && setError(e instanceof Error ? e.message : String(e)));
+      .catch((e: unknown) => live && setError(errorText(e)));
     return () => {
       live = false;
     };

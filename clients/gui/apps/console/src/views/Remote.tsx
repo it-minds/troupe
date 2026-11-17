@@ -41,6 +41,7 @@ import {
   callEvidence,
   callHeadline,
   callScopedLabel,
+  decisionWords,
   emptyTranscript,
   fold,
   invitationsFrom,
@@ -55,6 +56,7 @@ import {
   roleWords,
   ruleScope,
   SessionAttachment,
+  sessionStateWords,
   toolGlyph,
   toolOutcome,
   toolTarget,
@@ -263,8 +265,8 @@ export function statusWords(status: AttachStatus, detail: string | null, state: 
     case "closed":
       return "Closed";
     default:
-      if (needsYou(state)) return opts.steer ? "Waiting for you" : "Waiting for an answer";
-      return isBusy(state) ? "Working" : "Idle";
+      if (needsYou(state)) return opts.steer ? sessionStateWords("waiting") : "Waiting for an answer";
+      return sessionStateWords(isBusy(state) ? "working" : "idle");
   }
 }
 
@@ -292,7 +294,7 @@ type QuestionEntry = Extract<Entry, { kind: "question" }>;
 
 /** An answered approval as its line in the transcript: who answered it, and what it was. */
 function decisionLine(a: ApprovalEntry, nameOf: (subject: string | undefined) => string): string {
-  const verb = a.decision === "deny" ? "Denied" : a.decision === "allow_session" ? "Allowed for this session" : a.decision === "allow_always" ? "Always allowed" : "Allowed";
+  const verb = decisionWords(a.decision);
   const what = callHeadline(a.tool).replace(/\?$/, "").toLowerCase();
   const target = toolTarget(a.tool, a.args);
   return `${verb} by ${nameOf(a.resolvedBy ?? a.decidedBy)}: ${what}${target ? ` · ${target}` : ""}${a.decision === "deny" ? ". Nothing was changed." : ""}`;

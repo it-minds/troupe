@@ -8,7 +8,8 @@ import type { JSX } from "react";
 import type { AdminGroup, AdminTeam } from "@troupe/client";
 import { href } from "../route";
 import { recorded, useConsole, useLoad } from "../console";
-import { AuditNote, Empty, Field, Loaded, Preview, Region, Status, money, when } from "./bits";
+import { AuditNote, Empty, Field, Loaded, Preview, Region, Status, when } from "./bits";
+import { moneyWords } from "@troupe/client";
 
 export function Teams(): JSX.Element {
   const { admin, role } = useConsole();
@@ -95,7 +96,7 @@ function matches(t: AdminTeam, q: string): boolean {
 /** What a team has spent against its ceiling, and whether it is past it. */
 export function Spend({ team }: { team: Pick<AdminTeam, "budget_micros" | "spent_micros"> }): JSX.Element {
   const budget = team.budget_micros && team.budget_micros > 0 ? team.budget_micros : null;
-  const spent = `${money(team.spent_micros)}${budget ? ` of ${money(budget)}` : ""}`;
+  const spent = `${moneyWords(team.spent_micros)}${budget ? ` of ${moneyWords(budget)}` : ""}`;
   if (!budget) return <Status kind="muted" glyph="○">{spent} · no ceiling</Status>;
   const over = team.spent_micros >= budget;
   return (

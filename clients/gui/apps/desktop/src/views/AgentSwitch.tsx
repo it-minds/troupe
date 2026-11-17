@@ -21,7 +21,7 @@
 
 import { useEffect, useState } from "react";
 import type { JSX } from "react";
-import { onThisComputer } from "@troupe/client";
+import { errorText, onThisComputer } from "@troupe/client";
 import type { AgentRow, AuthSession, DaemonClient, SessionKind, SessionView } from "@troupe/client";
 import type { SessionHandle } from "../hooks";
 import { AgentPicker } from "./AgentPicker";
@@ -73,7 +73,7 @@ function useRows(view: SessionHandle, daemon: DaemonClient | null, kind: Session
         setRows(r);
         setError(null);
       })
-      .catch((e: unknown) => live && setError(e instanceof Error ? e.message : String(e)));
+      .catch((e: unknown) => live && setError(errorText(e)));
     return () => {
       live = false;
     };

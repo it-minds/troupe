@@ -19,7 +19,7 @@
 
 import { useEffect, useState } from "react";
 import type { JSX } from "react";
-import { findingsFor, parseAgent, permissionsOf, widenedAutos, withBody, withFields } from "@troupe/client";
+import { errorText, findingsFor, parseAgent, permissionsOf, widenedAutos, withBody, withFields } from "@troupe/client";
 import type { AgentCheck, AgentDefinition, AgentFields, AgentFinding, AgentScope, DaemonClient } from "@troupe/client";
 
 /** Where a scope's file is, in words. */
@@ -121,7 +121,7 @@ export function AgentEditor({
       const findings = await client.validateAgent({ source: editing.text, ...(editing.name ? { name: editing.name } : {}), ...(workspace ? { workspace } : {}) });
       onChange({ ...editing, findings, checked: true });
     } catch (e) {
-      setCheckError(e instanceof Error ? e.message : String(e));
+      setCheckError(errorText(e));
     } finally {
       setChecking(false);
     }

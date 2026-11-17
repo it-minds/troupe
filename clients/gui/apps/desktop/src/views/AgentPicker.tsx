@@ -19,7 +19,7 @@
 
 import { useMemo, useState } from "react";
 import type { JSX } from "react";
-import { AGENT_ORIGINS, originOf } from "@troupe/client";
+import { AGENT_ORIGINS, errorText, originOf } from "@troupe/client";
 import type { AgentRow } from "@troupe/client";
 import { shell } from "../shell";
 
@@ -61,7 +61,7 @@ export async function runAgent(row: AgentRow, action: PickerAction): Promise<str
     await action(row.name);
     return null;
   } catch (e) {
-    return e instanceof Error ? e.message : String(e);
+    return errorText(e);
   }
 }
 
@@ -193,7 +193,7 @@ export function AgentPicker({
       await open(row.path);
       setSaid({ text: `${row.path} is open in your editor: what you save there is read at the next start or switch`, refused: false });
     } catch (e) {
-      setSaid({ text: e instanceof Error ? e.message : String(e), refused: true });
+      setSaid({ text: errorText(e), refused: true });
     } finally {
       setBusy(false);
     }

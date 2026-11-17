@@ -31,6 +31,7 @@ import type { ProfileView } from "./profile.js";
 import type { SetupAnswer, SetupFlow, SetupStepName } from "./setup.js";
 import type { ConfigChanged, EventEnvelope, Principal, SessionCreateResult, ToolInvoke, TroupeEvent } from "./types.js";
 import { ErrorCodes } from "./types.js";
+import { errorText } from "./words.js";
 
 /** `watch.get`: whether a workspace is watched, how, and by which session (troupe Decision 844). */
 export interface WatchState {
@@ -1396,7 +1397,7 @@ export function claimRefusal(e: unknown): string {
     if (reason === "not_registered") return "It is not registered yet; it is once this computer is signed in";
     if (reason === "unlinked") return "Sign in on this computer to claim it";
   }
-  return e instanceof Error ? e.message : String(e);
+  return errorText(e);
 }
 
 export function rowFromDaemon(row: DaemonSessionRow, source = "daemon"): FleetRow {

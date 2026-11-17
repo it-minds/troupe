@@ -30,7 +30,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { JSX } from "react";
-import { agentConflict, agentRefusal, agentTemplate, layerOf, layerWords, onThisComputer, permissionsOf, widenedAutos } from "@troupe/client";
+import { agentConflict, agentRefusal, agentTemplate, errorText, layerOf, layerWords, onThisComputer, permissionsOf, widenedAutos } from "@troupe/client";
 import type { AgentDefinition, AgentLayer, AgentRow, AgentScope, AgentSkippedFile, DaemonClient, FleetRow, SessionKind } from "@troupe/client";
 import { useAdminQuery } from "../hooks";
 import { shell } from "../shell";
@@ -260,7 +260,7 @@ function Manager({
         // Said, and the edit kept; its next save is over the file as it is now.
         setEditing((ed) => (ed ? { ...ed, conflict: conflict.reason, elsewhere: null, base: { scope: target.scope, hash: conflict.hash } } : ed));
       } else if (refused && target.fromEditor) setEditing((ed) => (ed ? { ...ed, findings: refused } : ed));
-      else setError(conflict ? conflict.reason : refused ? refused.reason : e instanceof Error ? e.message : String(e));
+      else setError(conflict ? conflict.reason : refused ? refused.reason : errorText(e));
     } finally {
       saving.current = false;
       setBusy(false);
@@ -291,7 +291,7 @@ function Manager({
         reason: broken.reason,
       });
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errorText(e));
     }
   };
 
@@ -320,7 +320,7 @@ function Manager({
       if (!gone.layer) setSelected(null);
       setRound((n) => n + 1);
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errorText(e));
       setDeleting(null);
     } finally {
       setBusy(false);
@@ -490,7 +490,7 @@ function useAgent(client: DaemonClient, name: string | null, workspace: string, 
         if (!live) return;
         // A daemon older than the manager lists agents and cannot give one whole.
         const old = e instanceof Error && /method_not_found/.test(e.message);
-        setState({ def: null, error: old ? "This daemon is older than the agents manager: update Troupe on this computer to read and change an agent here." : e instanceof Error ? e.message : String(e) });
+        setState({ def: null, error: old ? "This daemon is older than the agents manager: update Troupe on this computer to read and change an agent here." : errorText(e) });
       });
     return () => {
       live = false;

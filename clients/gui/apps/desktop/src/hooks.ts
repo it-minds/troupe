@@ -9,6 +9,7 @@ import {
   daemonUrl,
   dropPending,
   emptyTranscript,
+  errorText,
   fold,
   DaemonClient,
   DaemonSource,
@@ -315,7 +316,7 @@ export function useDaemon(auth: AuthSession | null = null): {
       .catch((e: unknown) => {
         if (!live) return;
         setStatus("error");
-        setError(e instanceof Error ? e.message : String(e));
+        setError(errorText(e));
       });
     return () => {
       live = false;
@@ -395,7 +396,7 @@ export function useDaemon(auth: AuthSession | null = null): {
       .catch((e: unknown) => {
         if (!live) return;
         setStatus("error");
-        setError(locate ? (e instanceof Error ? e.message : String(e)) : unreachable(endpoint, e));
+        setError(locate ? (errorText(e)) : unreachable(endpoint, e));
       });
 
     return () => {
@@ -516,7 +517,7 @@ export function useProfiles(auth: AuthSession | null): { profiles: ProfileOfferi
     auth
       .withToken((plane, token) => plane.listProfiles(token))
       .then((r) => live && setProfiles(r.profiles))
-      .catch((e: unknown) => live && setError(e instanceof Error ? e.message : String(e)));
+      .catch((e: unknown) => live && setError(errorText(e)));
     return () => {
       live = false;
     };
@@ -712,7 +713,7 @@ export function useSessionView(
         });
 
     void opened.catch((e: unknown) => {
-      const why = e instanceof Error ? e.message : String(e);
+      const why = errorText(e);
       settle(null, why);
       if (live) setError(why);
     });
@@ -953,7 +954,7 @@ export function useAdminQuery<T>(run: (() => Promise<T>) | null, deps: unknown[]
         setData(d);
         setError(null);
       })
-      .catch((e: unknown) => live && setError(e instanceof Error ? e.message : String(e)))
+      .catch((e: unknown) => live && setError(errorText(e)))
       .finally(() => live && setLoading(false));
     return () => {
       live = false;

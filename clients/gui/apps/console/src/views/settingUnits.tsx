@@ -9,8 +9,8 @@
 import type { JSX } from "react";
 import type { AuditChanges, SettingNaming } from "@troupe/client";
 import { show } from "../console";
-import { bytes, duration, money } from "./bits";
 import type { DiffLine, FieldProps } from "./bits";
+import { bytes, durationWords, moneyWords } from "@troupe/client";
 
 /** What a setting is read in here: the plane's unit, or what an older plane's type implies. */
 export interface Unit {
@@ -46,10 +46,10 @@ export function inUnit(u: Unit, value: unknown): string {
   const n = typeof value === "number" ? value : Number(value);
   switch (u.unit) {
     case "dollars":
-      return Number.isFinite(n) ? (n === 0 ? "no ceiling" : money(n)) : show(value);
+      return Number.isFinite(n) ? (n === 0 ? "no ceiling" : moneyWords(n)) : show(value);
     case "minutes":
     case "seconds":
-      return Number.isFinite(n) ? duration(n) : show(value);
+      return Number.isFinite(n) ? durationWords(n * 1000) : show(value);
     case "days":
       return Number.isFinite(n) ? (n === 1 ? "1 day" : `${n} days`) : show(value);
     case "days_or_off":

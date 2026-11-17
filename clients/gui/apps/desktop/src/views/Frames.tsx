@@ -14,7 +14,7 @@ import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import type { JSX, ReactNode } from "react";
 import { Lexer } from "marked";
 import type { Token, Tokens } from "marked";
-import { BRIEF_PARTS, FINISH_PARTS, isBlobRef, partsOf } from "@troupe/client";
+import { BRIEF_PARTS, FINISH_PARTS, errorText, isBlobRef, partsOf } from "@troupe/client";
 import type { BlobRef, Entry } from "@troupe/client";
 import { bytes, cut, dataOf, diffOf, fenceOf, moreLines, numberedSource, saidInHead, stripParts, toolHead, took } from "../frames";
 import type { CurtainLine, Detail, Strip } from "../frames";
@@ -205,7 +205,7 @@ function MermaidFrame({ text, full, className }: { text: string; full: boolean; 
 
 /** The first line of why something failed, without the parser's own trailing colon. */
 function firstWords(e: unknown): string {
-  const message = e instanceof Error ? e.message : typeof e === "string" ? e : "Mermaid could not read it";
+  const message = errorText(e, "Mermaid could not read it");
   return (message.split("\n").find((l) => l.trim() !== "") ?? "Mermaid could not read it").trim().replace(/:$/, "");
 }
 
@@ -483,7 +483,7 @@ function LargeResult({ reference, readBlob, full }: { reference: BlobRef; readBl
               setError(null);
               readBlob(reference.blob)
                 .then(setWhole)
-                .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)))
+                .catch((e: unknown) => setError(errorText(e)))
                 .finally(() => setBusy(false));
             }}
           >

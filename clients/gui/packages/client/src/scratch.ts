@@ -43,14 +43,6 @@ export function foldScratch(docs: ScratchDocument[], d: DurableEvent): ScratchDo
   return docs.map((x, i) => (i === at ? doc : x));
 }
 
-/** A document's size the way a person reads one: `512 bytes`, `2.3 KB`, `1.4 MB`. */
-export function scratchSize(bytes: number): string {
-  if (bytes === 1) return "1 byte";
-  if (bytes < 1024) return `${bytes} bytes`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
-}
-
 /** Which write of its name a version is: `new` for the first, `updated N times` after. */
 export function scratchVersion(version: number | undefined): string | undefined {
   if (version === undefined) return undefined;
