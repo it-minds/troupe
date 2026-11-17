@@ -228,6 +228,35 @@ describe("the levels", () => {
     await waitFor(() => document.querySelector(".palette .notice")?.textContent === "usage: /detail [quiet | tools | everything]", "the usage");
   });
 
+  // Each wake of a pod session writes four notes (troupe #1001): two sleeps between two
+  // turns drew eight lines a person scrolled past. Below everything a run is its latest.
+  it("folds a run of sleeping and waking notes to its latest line, and draws them all at everything", async () => {
+    const session = daemon.seed(WORKSPACE);
+    turn(session);
+    for (const replayed of [60, 65]) {
+      session.log.append("session_dormant", {});
+      session.log.append("agent_restarted", { replayed_events: replayed });
+      session.log.append("session_resumed", {});
+      session.log.append("session_activated", {});
+    }
+    turn(session, { ids: "u" });
+    session.log.append("session_dormant", {});
+    await open(session);
+    await waitFor(() => stream().querySelectorAll(".note.turn-cost").length === 2, "both turns");
+
+    const notes = (): string[] =>
+      [...stream().querySelectorAll<HTMLElement>("p.note:not(.turn-cost)")].map((n) => n.textContent ?? "").filter((t) => /^session (went|woke|resumed)|^agent restarted/.test(t));
+    // One line between the turns, the latest, and the lone note after the last.
+    expect(notes()).toEqual(["session woke on the platform", "session went to sleep"]);
+
+    await palette("detail everything");
+    await waitFor(() => notes().length === 9, "every note");
+    expect(notes().slice(0, 4)).toEqual(["session went to sleep", "agent restarted, replaying 60 events", "session resumed", "session woke on the platform"]);
+
+    await palette("detail tools");
+    await waitFor(() => notes().length === 2, "folded again at tools");
+  });
+
   // A finish's changed line is Troupe's count, in the person's words (troupe #968): the
   // summary beside the report ends it on the read_branch call the delegating agent reads
   // the diff with, which no person can make.

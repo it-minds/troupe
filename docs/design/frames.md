@@ -138,6 +138,14 @@ block inside prose is cut the same way; the prose around it is not. A person's o
 keeps its last 20 lines, `… 42 earlier lines`, because the end of a command's output is
 what a person ran it to read. At `everything` nothing is cut.
 
+**Sleeping and waking.** A session that sleeps and wakes writes notes for it: `session went
+to sleep`, `agent restarted, replaying n events`, `session resumed`, `session woke on the
+platform`, four for each wake of a pod session. Below `everything`, a run of them with
+nothing between is drawn as its latest line, which says where the session stands; at
+`everything` every one is drawn. Notes that need a person (a model error, a budget, a
+failed agent) are not among them and are never folded. The desktop app does this
+(Decision 1021); the terminal UI draws them all still.
+
 **Past 500 lines** a frame is to be a card that opens the viewer (§9) instead of a body in
 the transcript, as a scratchpad document is already a card that opens the scratchpad (TUI
 Decision 159). Until the viewer exists, both clients cut such a frame as above.
