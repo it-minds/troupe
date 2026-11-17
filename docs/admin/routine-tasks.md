@@ -19,7 +19,9 @@ it this way, from wherever it keeps its own values.
 ## Teams
 
 - **Add**: a group must have been seen — in somebody's token at sign-in, or pushed by
-  SCIM — before `admin.team.enable` can make it a team. Edit budget, period (`monthly` or
+  SCIM — before `admin.team.enable` can make it a team; `admin.groups.list` lists every
+  group seen, whether a team draws on it and when it was last seen, and `admin.teams.list`
+  the teams, with their grants, budgets, volumes, retention and spend. Edit budget, period (`monthly` or
   `never`), idle timeout and retention with `admin.team.update`. A team can draw its members
   from more groups: `admin.team.link`, `admin.team.unlink` (with `admin.team.unlink.preview`).
 - **Remove**: `admin.team.disable.preview` says what goes with it — grants, admins,
@@ -29,14 +31,16 @@ it this way, from wherever it keeps its own values.
   person in two teams that hold it is asked which team a new session is for, once per
   profile on each app, since it decides whose budget pays. `admin.team.revoke` makes the team's sessions on it read-only: the running ones are put
   to sleep on their pods, and the ones waiting for a worker are never started.
-- **Team admins**: `admin.team.admin.add` / `remove`, by subject — the string the provider
-  issues as the person.
+- **Team admins**: `admin.team.admin.add` and `admin.team.admin.remove`, by subject — the
+  string the provider issues as the person. Removed, they stay a member of the team.
 
 ## Service principals
 
 `admin.principal.create` with the team, a name and the profiles it may use; the secret is
 in the answer once. `admin.principal.rotate` (the old secret stops at once) and
 `admin.principal.disable`. Tell every trigger and A2A caller that used the old secret.
+`admin.principals.list {team}` shows a team's principals: what each may use, when it was
+last used and whether it still works.
 
 ## Bundles and MCP servers
 
@@ -48,7 +52,8 @@ in the answer once. `admin.principal.rotate` (the old secret stops at once) and
    then `kubectl -n troupe-system label secret troupe-mcp-<server> troupe.dev/worker-secret=true`
 3. Add the server to the bundle with a `credential_ref`, then `admin.bundle.validate` and
    `admin.bundle.publish {channel, content}`. Pods on the channel are told at once;
-   `admin.bundle.get` shows adoption per pod. `admin.bundle.retire` takes a version out of
+   `admin.bundle.get` shows adoption per pod, and `admin.bundles.list {channel}` every
+   version of the channel, newest first. `admin.bundle.retire` takes a version out of
    service for new sessions. The new MCP variable is a new StatefulSet revision, which waits
    for the restart below.
 
@@ -132,7 +137,8 @@ Mirror releases into the plane and point machines at it:
    names into its object store under `releases/v<version>/`, each held to the manifest's size
    and sha256, and the manifest last. The release is listed as mirrored once its manifest is
    there. Audited as `release.mirror`, then `release.mirrored` or `release.mirror_failed`.
-   The plane needs to reach GitHub for this; the machines do not.
+   The plane needs to reach GitHub for this; the machines do not. `admin.releases.list`
+   lists what is mirrored, newest first, with any copy still under way.
 2. Under **Policy**, set *Where people's machines get releases* (`client_release_url`) to
    this plane's `https://<plane>/downloads`, and recommend the mirrored version here.
 

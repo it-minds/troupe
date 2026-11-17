@@ -348,7 +348,8 @@ pod is `session:/` and `skills:/`, so `publish` and `import` have nowhere to go 
 
 `plane.provisioningMode` (`TROUPE_PROVISIONING_MODE`) decides who writes a profile's
 `WorkerProfile`. It is the deployment's: the console's **Policy and settings** shows it and
-cannot change it.
+cannot change it, and `admin.provisioning.mode` answers it before a write that the mode
+would refuse.
 
 | Mode | The profiles are | The plane writes | Reported |
 |---|---|---|---|

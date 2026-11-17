@@ -16,14 +16,13 @@ defmodule Troupe.Plane.Web.Docs do
 
   * the map, the session lifecycle, the approval, the plane's row beside the pod's log,
     and the three steps of a sign-in — `Troupe.Plane.Web.Diagrams`;
-  * the nine words from `docs/user/overview.md` a person meets in the first hour;
-  * the four sentences from the same file that begin "it never", which are the trust
-    story and were three screens down;
+  * nine of the words in `docs/glossary.md`, the ones a person meets in the first hour;
+  * four of the sentences under "What Troupe never does" in `docs/user/README.md`, which
+    are the trust story;
   * the same three install steps as `/`, written against this plane's URL.
 
   **Not on it, on purpose.** This page has no authentication in front of it, so the line
-  is a disclosure boundary and not only an editorial one: nothing from `docs/AUDIT.md`
-  (open questions and findings), nothing from `docs/admin/configuration.md` (the
+  is a disclosure boundary and not only an editorial one: nothing from `docs/admin/configuration.md` (the
   environment and Helm inventory), no roles-and-permissions detail, and none of the
   developer track. The endpoint table on `/` is the whole of the surface either page
   names, and it named all of it before.
@@ -202,8 +201,8 @@ defmodule Troupe.Plane.Web.Docs do
 
   # -- the glossary -----------------------------------------------------------
 
-  # The nine from `docs/user/overview.md` § "Words you will meet", cut to a card each.
-  # Anything that needed a second paragraph there was either shortened until it did not
+  # Nine of the words in `docs/glossary.md`, cut to a card each. Anything that needed a
+  # second paragraph there was either shortened until it did not
   # or left out; a glossary a person will not finish is not a glossary.
   @terms [
     {"Plane",

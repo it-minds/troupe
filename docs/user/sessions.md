@@ -68,7 +68,7 @@ window, and the status line names who is there. At your first offer the daemon s
 for itself and keeps that sign-in in your computer's credential store, so the offer stays
 online after you close the terminal or the app, and the daemon does not stop while
 something is offered. After a restart the offer comes back where the daemon starts when
-you log in (`troupe-daemon login on`); otherwise it is shown as offered *until this
+you log in (`troupe daemon login on`); otherwise it is shown as offered *until this
 machine restarts*, and comes back only once something starts the daemon again. `/steer
 off`, or *Withdraw*, ends every remote view at once; with
 the last one withdrawn, signing out or `troupe logout`, the daemon lets its sign-in go.

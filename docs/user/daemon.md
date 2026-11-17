@@ -66,7 +66,7 @@ beyond what the tarball carries.
 
 ### Start at login
 
-`troupe-daemon login on` has the daemon start every time you log in, and `login off` takes
+`troupe daemon login on` has the daemon start every time you log in, and `login off` takes
 that back; `login status` says which. The installers ask the same thing once the daemon
 is installed, and so do the first run's questions, in the desktop app and in
 `troupe config`; `--uninstall` (`-Uninstall`) runs `login off` before it removes anything
