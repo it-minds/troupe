@@ -12,8 +12,8 @@ the copy on your machine goes the next time your client signs your daemon in. Er
 on your machine needs that sign-in: without it the daemon erases nothing and says which
 plane it is sealed at.
 
-Inviting somebody into a session, archiving one and links into the desktop app are on
-[sharing a session by name](sessions-shared.md).
+Inviting somebody into a session, archiving, renaming and keeping one at the top, its task
+list, and links into the desktop app are on [sharing a session by name](sessions-shared.md).
 
 ## Starting a session
 
