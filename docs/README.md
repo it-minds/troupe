@@ -237,9 +237,5 @@ You write a program that talks to a daemon or a worker pod, in any language.
 ### Also here
 
 [third-party-licences.md](third-party-licences.md) (generated): what Troupe depends on,
-under which licences. [design/admin/](design/admin/DESIGN.md): the console's design.
-`history/`: records kept as they were written, not instruction -
-[the admin surface as it was built](history/admin-surface.md) and
-[the console's plan](history/control-panel.md), which the console's open work (#56)
-builds on, and [the command audit](history/command-audit.md) of 0.10.0.
+under which licences.
 [SECURITY.md](../SECURITY.md): reporting a vulnerability.

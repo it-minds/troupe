@@ -15,7 +15,6 @@ paths:
   - apps/troupe_core/lib/troupe/bench/live_scenarios.ex
   - apps/troupe_core/test/troupe/agent/scratch_compaction_test.exs
   - apps/troupe_core/test/troupe/bench_live_test.exs
-  - docs/developer/prompt-prefix.md
   - docs/user/README.md
 symbols:
   - Troupe.Tools.Show.left_out/1

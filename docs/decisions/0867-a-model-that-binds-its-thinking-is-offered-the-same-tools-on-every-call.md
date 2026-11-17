@@ -17,7 +17,6 @@ paths:
   - apps/troupe_core/test/support/fake_openai.exs
   - apps/troupe_core/test/troupe/agent/bound_thinking_test.exs
   - apps/troupe_core/test/troupe/agent/task_list_offer_test.exs
-  - docs/developer/prompt-prefix.md
 symbols:
   - Troupe.LLM.Catalog.binds_thinking?/1
   - Troupe.Tool.Ctx
