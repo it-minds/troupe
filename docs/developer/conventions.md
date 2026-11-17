@@ -105,7 +105,7 @@ the same pull request as the client change that needs it.
 `Troupe.Plane.Admin.API` with a summary ending in a full stop, typed and described
 `%Argument{}`s, a `risk`, and `confirm` when destructive; its place on an area of the console's
 map in `Troupe.Plane.Admin.Console`; and in the console (`clients/gui/apps/console`), the
-client's call and a screen that makes it, or an entry in `src/owed.ts`. The MCP tool appears by
+client's call and a screen that makes it. The MCP tool appears by
 itself. Run `admin_parity_test.exs`, `console_coverage_test.exs` and the console's
 `test/coverage.test.ts`.
 

@@ -15,7 +15,6 @@ paths:
   - apps/troupe_plane/test/troupe/plane/console_coverage_test.exs
   - apps/troupe_plane/test/troupe/plane/console_walkthrough_test.exs
   - clients/gui/apps/console/src/nav.ts
-  - clients/gui/apps/console/src/owed.ts
   - clients/gui/apps/console/src/views/Integrations.tsx
   - clients/gui/apps/console/src/views/Identity.tsx
   - clients/gui/apps/console/src/views/IdentityProvider.tsx
@@ -24,7 +23,6 @@ paths:
   - clients/gui/apps/console/src/views/Hosts.tsx
   - clients/gui/apps/console/src/views/Budgets.tsx
   - clients/gui/apps/console/src/views/Connections.tsx
-  - clients/gui/apps/console/src/views/Unbuilt.tsx
   - clients/gui/apps/console/test/coverage.test.ts
   - clients/gui/packages/client/test/support/admin.ts
   - docs/admin/console.md

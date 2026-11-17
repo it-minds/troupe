@@ -11,10 +11,7 @@ import assert from "node:assert/strict";
 import { after, afterEach, before, beforeEach, describe, it } from "node:test";
 import {
   DaemonClient,
-  LIBRARIAN_FIRST_PROMPT,
   LIBRARIAN_PROMPT,
-  LIBRARIAN_REWRITING,
-  LIBRARIAN_WRITING,
   StartQuestions,
   TroupeRpcError,
   factStatusLine,
@@ -27,6 +24,8 @@ import {
   refreshStep,
 } from "../src/index.js";
 import type { MemoryFact, StartState } from "../src/index.js";
+import { LIBRARIAN_FIRST_PROMPT } from "../src/memory.js";
+import { LIBRARIAN_REWRITING, LIBRARIAN_WRITING } from "../src/onboard.js";
 import { FakeDaemon, exampleFacts, exampleOnboarding } from "./support/daemon.js";
 
 const REPO = "/home/ada/repo";

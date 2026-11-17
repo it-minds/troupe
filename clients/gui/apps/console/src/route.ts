@@ -9,7 +9,7 @@ export const TEAM_TABS = ["members", "access", "admins", "limits", "github", "da
 export type TeamTab = (typeof TEAM_TABS)[number];
 
 export interface Route {
-  /** A nav entry's id: `teams`, `clients`, `organisation`, or an area not built yet. */
+  /** A nav entry's id: `teams`, `clients`, `organisation`, and so on. */
   page: string;
   team?: string;
   tab?: TeamTab;

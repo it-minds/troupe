@@ -14,7 +14,7 @@ import { WebSocket as NodeWebSocket } from "ws";
 import { LINES, pickLine } from "@troupe/client";
 import { App } from "../src/App";
 import { FakeDaemon } from "../../../packages/client/test/support/daemon.js";
-import { button, externalResources, render, startOnTheList, type, waitFor } from "./support";
+import { externalResources, render, startOnTheList, type, waitFor } from "./support";
 
 /** A session the fake daemon keeps. */
 type Session = ReturnType<FakeDaemon["seed"]>;

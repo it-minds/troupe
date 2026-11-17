@@ -451,7 +451,7 @@ export function StartSession({
 
           {shownPicker === "folder" && local && daemon && (
             <PickerPanel title="WHICH FOLDER" hint="RECENT">
-              <LocalControls
+              <FolderOptions
                 daemon={daemon}
                 linked={linked}
                 folder={folder}
@@ -679,7 +679,7 @@ function Option({
  * A session on this computer: the folder (recent ones, Choose…, a typed path), whether it
  * gets its own checkout, watch mode, and private where the daemon can seal one.
  */
-function LocalControls({
+function FolderOptions({
   daemon,
   linked,
   folder,

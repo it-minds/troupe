@@ -21,7 +21,6 @@ paths:
   - apps/troupe_plane/test/troupe/plane/scim_answers_test.exs
   - apps/troupe_plane/test/troupe/plane/scim_entra_test.exs
   - clients/gui/apps/console/src/views/Teams.tsx
-  - clients/gui/apps/console/src/owed.ts
   - docs/admin/authentik.md
   - docs/admin/integrations.md
 symbols:

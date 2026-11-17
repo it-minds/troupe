@@ -48,7 +48,6 @@ import type {
   Entry,
   FleetRow,
   LoopInfo,
-  LoopState,
   OwnPlane,
   ScratchDocument,
   SessionKind,

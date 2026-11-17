@@ -25,7 +25,7 @@ import { normalizeEndpoint } from "./plane.js";
 import type { Attachment } from "./plane.js";
 import { SessionView } from "./session.js";
 import type { SessionViewHooks } from "./session.js";
-import type { EventEnvelope, ToolInvoke, TroupeEvent } from "./types.js";
+import type { EventEnvelope, ToolInvoke } from "./types.js";
 
 export interface AttachOptions {
   sessionId: string;
@@ -216,9 +216,4 @@ export class SessionAttachment {
     });
     return this.reconnecting;
   }
-}
-
-/** Convenience for a caller that only wants to wait for something on the view. */
-export function waitOn(a: SessionAttachment, pred: (e: TroupeEvent) => boolean, timeoutMs?: number): Promise<TroupeEvent> {
-  return a.view.waitFor(pred, timeoutMs);
 }

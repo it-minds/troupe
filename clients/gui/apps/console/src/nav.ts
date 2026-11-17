@@ -3,11 +3,10 @@
 // on its Policy page (the clients' versions and the organisation's document) as entries of
 // their own.
 //
-// Every area is listed whether this console draws it yet or not. One it does not is a
-// page that says what it will do and how it is done meanwhile, over the plane's admin API.
-// The plane's own pages under `/admin` are its break-glass page and nothing else, so no
-// area here points at them. An area a team admin cannot use is not shown to one: the brief
-// hides what a role cannot do rather than showing it disabled.
+// Every area has a screen here. The plane's own pages under `/admin` are its break-glass
+// page and nothing else, so no area here points at them. An area a team admin cannot use
+// is not shown to one: the brief hides what a role cannot do rather than showing it
+// disabled.
 //
 // The plane holds this map too, in `Troupe.Plane.Admin.Console`, where every
 // administrative method is placed on one of these areas; `test/coverage.test.ts` holds the
@@ -26,12 +25,8 @@ export type Role = "platform_admin" | "team_admin" | "member";
 export interface Area {
   id: string;
   label: string;
-  /** Drawn by this console. */
-  built: boolean;
   /** Shown to a team admin as well as a platform admin. */
   teamAdmin: boolean;
-  /** What it is for, in a sentence, for an area not built yet. */
-  lead: string;
 }
 
 export interface Group {
@@ -43,41 +38,41 @@ export const NAV: Group[] = [
   {
     label: "Watch",
     areas: [
-      { id: "overview", label: "Overview", built: true, teamAdmin: true, lead: "What needs attention, how each profile's fleet is doing, and what every team has spent against its budget." },
-      { id: "sessions", label: "Sessions", built: true, teamAdmin: true, lead: "Every session's owner, team, profile, state, size and cost, and never what was said in it." },
-      { id: "connections", label: "Connections", built: true, teamAdmin: false, lead: "Which MCP servers each session is talking to, and which identity its calls go out as." },
-      { id: "runs", label: "Runs and review", built: true, teamAdmin: true, lead: "Trigger runs, what fired them, how they ended and what they cost, and who has read them." },
+      { id: "overview", label: "Overview", teamAdmin: true },
+      { id: "sessions", label: "Sessions", teamAdmin: true },
+      { id: "connections", label: "Connections", teamAdmin: false },
+      { id: "runs", label: "Runs and review", teamAdmin: true },
     ],
   },
   {
     label: "Configure",
     areas: [
-      { id: "profiles", label: "Profiles", built: true, teamAdmin: true, lead: "What a session runs on: its image, size, model, egress and MCP servers." },
-      { id: "bundles", label: "Configuration bundles", built: true, teamAdmin: true, lead: "Versioned agents, skills and MCP servers that sessions pick up from a channel." },
-      { id: "triggers", label: "Triggers", built: true, teamAdmin: true, lead: "Scheduled and webhook runs per team, each as a named service principal." },
-      { id: "integrations", label: "Integrations", built: true, teamAdmin: true, lead: "The GitHub App, every external host anything dials, and which profiles share which servers." },
+      { id: "profiles", label: "Profiles", teamAdmin: true },
+      { id: "bundles", label: "Configuration bundles", teamAdmin: true },
+      { id: "triggers", label: "Triggers", teamAdmin: true },
+      { id: "integrations", label: "Integrations", teamAdmin: true },
     ],
   },
   {
     label: "Operate",
     areas: [
-      { id: "pods", label: "Pods", built: true, teamAdmin: false, lead: "The pods behind each profile, with their state, version, bundle, sessions and disk." },
-      { id: "hosts", label: "Provisioners and hosts", built: true, teamAdmin: false, lead: "What each provisioner guarantees, and the machines registered to run workers." },
-      { id: "budgets", label: "Budgets", built: true, teamAdmin: true, lead: "Every team's spend against its ceiling, per-person caps, and which ceiling binds." },
-      { id: "published", label: "Published artifacts", built: true, teamAdmin: true, lead: "Every artifact published here, or a team admin's teams' own, with a takedown for each." },
+      { id: "pods", label: "Pods", teamAdmin: false },
+      { id: "hosts", label: "Provisioners and hosts", teamAdmin: false },
+      { id: "budgets", label: "Budgets", teamAdmin: true },
+      { id: "published", label: "Published artifacts", teamAdmin: true },
     ],
   },
   {
     label: "Govern",
     areas: [
-      { id: "teams", label: "Teams", built: true, teamAdmin: true, lead: "" },
-      { id: "identity", label: "Identity", built: true, teamAdmin: true, lead: "Who administers the platform, the groups the identity provider sends, and the service principals." },
-      { id: "signin", label: "Sign-in", built: true, teamAdmin: false, lead: "The identity provider's connection and SCIM provisioning." },
-      { id: "policy", label: "Policy and settings", built: true, teamAdmin: true, lead: "Every platform setting, where its value came from, and the ladder it is decided on." },
-      { id: "clients", label: "Client versions", built: true, teamAdmin: true, lead: "" },
-      { id: "organisation", label: "Organisation", built: true, teamAdmin: true, lead: "" },
-      { id: "audit", label: "Audit", built: true, teamAdmin: true, lead: "Who changed what and when, field by field, and a check that the record is whole." },
-      { id: "memory", label: "Company memory", built: true, teamAdmin: true, lead: "What the troupe remembers about the organisation, its teams and its profiles." },
+      { id: "teams", label: "Teams", teamAdmin: true },
+      { id: "identity", label: "Identity", teamAdmin: true },
+      { id: "signin", label: "Sign-in", teamAdmin: false },
+      { id: "policy", label: "Policy and settings", teamAdmin: true },
+      { id: "clients", label: "Client versions", teamAdmin: true },
+      { id: "organisation", label: "Organisation", teamAdmin: true },
+      { id: "audit", label: "Audit", teamAdmin: true },
+      { id: "memory", label: "Company memory", teamAdmin: true },
     ],
   },
 ];
@@ -86,8 +81,8 @@ export const NAV: Group[] = [
 export const MINE: Group = {
   label: "Mine",
   areas: [
-    { id: "mine", label: "Mine", built: true, teamAdmin: true, lead: "Your sessions, the laptops' sessions offered to you, your clients' versions and your memory." },
-    { id: "artifacts", label: "Artifacts", built: true, teamAdmin: true, lead: "The pages and files you, your organisation, your teams and your profiles' people have published." },
+    { id: "mine", label: "Mine", teamAdmin: true },
+    { id: "artifacts", label: "Artifacts", teamAdmin: true },
   ],
 };
 

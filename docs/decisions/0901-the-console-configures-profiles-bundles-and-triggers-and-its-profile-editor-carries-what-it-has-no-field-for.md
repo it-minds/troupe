@@ -11,7 +11,6 @@ paths:
   - clients/gui/apps/console/src/views/bits.tsx
   - clients/gui/apps/console/src/nav.ts
   - clients/gui/apps/console/src/route.ts
-  - clients/gui/apps/console/src/owed.ts
   - clients/gui/apps/console/test/profiles.test.tsx
   - clients/gui/apps/console/test/bundles.test.tsx
   - clients/gui/apps/console/test/triggers.test.tsx

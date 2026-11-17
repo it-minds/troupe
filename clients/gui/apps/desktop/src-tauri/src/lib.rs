@@ -75,7 +75,6 @@ pub fn run() {
         .manage(update::Updates::default())
         .invoke_handler(tauri::generate_handler![
             secrets::secret_get,
-            secrets::secret_set,
             secrets::secret_delete,
             agent_file::agent_file_open,
             artifact_window::artifact_window_open,

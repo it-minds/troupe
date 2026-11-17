@@ -103,11 +103,10 @@ export function ApprovalPanel({
   if (entry.publication && entry.decision === undefined) {
     return <PublishPanel entry={entry} publication={entry.publication} audiences={audiences ?? null} canAnswer={canAnswer} others={others} onAnswer={onAnswer} onceOnly={onceOnly} />;
   }
-  // A delegation a person asked to see first has five answers, not three (troupe Decision 850).
+  // A delegation a person asked to see first has five answers, not three.
   if (entry.delegation && entry.decision === undefined) {
     return (
       <DelegationPanel
-        entry={entry}
         gate={entry.delegation}
         canAnswer={canAnswer}
         others={others}
@@ -287,7 +286,6 @@ function ToolApproval({
  * linked, never edited here: an edit for one run would be a fork nobody finds again.
  */
 function DelegationPanel({
-  entry,
   gate,
   canAnswer,
   others,
@@ -295,7 +293,6 @@ function DelegationPanel({
   onDefinition,
   onceOnly,
 }: {
-  entry: Approval;
   gate: DelegationGate;
   canAnswer: boolean;
   others: string[];
