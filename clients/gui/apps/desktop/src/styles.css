@@ -5877,6 +5877,21 @@ pre.instruction {
   padding: 0;
   margin-top: 0;
 }
+/* A skill a line, its name and what it does; one with a SKILL.md opens to it in place. */
+.profile-view ul.skill-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+.profile-view ul.skill-list > li + li {
+  margin-top: var(--space-2);
+}
+.profile-view details.skill > summary {
+  cursor: pointer;
+}
+.profile-view details.skill[open] > .frame {
+  margin-top: var(--space-2);
+}
 .profile-link {
   margin-left: var(--space-2);
 }

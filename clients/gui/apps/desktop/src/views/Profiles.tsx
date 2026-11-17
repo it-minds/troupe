@@ -8,15 +8,16 @@
 // and works none of it out, so what it says is what a session gets. A plane is the only
 // thing that knows, so the screen is offered only while signed in to one.
 //
-// Six plain sections in reading order, tables where there are columns to compare; a table
+// Seven plain sections in reading order, tables where there are columns to compare; a table
 // scrolls inside itself on a narrow window rather than the page sideways.
 
 import { useEffect, useState } from "react";
 import type { JSX } from "react";
 import { FUNCTIONS_HEADING, TroupeRpcError, accessWords, askWords, budgetWords, capacityWords, keyWords, missingWords, profileSummary, ruleAccessWords, whoseWords } from "@troupe/client";
-import type { AuthSession, ProfileView } from "@troupe/client";
+import type { AuthSession, ProfileView, ProfileViewSkill } from "@troupe/client";
 import { useProfiles } from "../hooks";
 import { Loading, Table } from "./bits";
+import { ProseFrame } from "./Frames";
 
 /** A profile's answer, or why there is none: one the person may not use is `not_found`. */
 type Read = { view: ProfileView } | { missing: true } | { error: string } | null;
@@ -81,7 +82,7 @@ function Summary({ auth, name }: { auth: AuthSession; name: string }): JSX.Eleme
   return <span className="micro muted">{line}</span>;
 }
 
-/** One profile, in six sections: agents, tools, model, reach, limits and who. */
+/** One profile, in seven sections: agents, skills, tools, model, reach, limits and who. */
 export function ProfilePage({ auth, name, onBack }: { auth: AuthSession; name: string; onBack: () => void }): JSX.Element {
   const read = useProfileView(auth, name);
   return (
@@ -109,6 +110,44 @@ export function ProfilePage({ auth, name, onBack }: { auth: AuthSession; name: s
         )}
       </div>
     </>
+  );
+}
+
+/**
+ * The skills the grant leaves, each with what it does, and its SKILL.md to read in place,
+ * rendered as a reply is. A plane before the details sends the names alone.
+ */
+function Skills({ view }: { view: ProfileView }): JSX.Element {
+  const details: ProfileViewSkill[] = view.skill_details ?? view.skills.map((name) => ({ name, description: null, body: null, truncated: false }));
+  return (
+    <section className="group skills">
+      <h3>Skills</h3>
+      {details.length === 0 ? (
+        <p className="note">No skill.</p>
+      ) : (
+        <ul className="skill-list">
+          {details.map((s) => (
+            <li key={s.name}>
+              {s.body === null ? (
+                <p>
+                  <span className="mono">{s.name}</span>
+                  {s.description && <span className="muted"> · {s.description}</span>}
+                </p>
+              ) : (
+                <details className="skill">
+                  <summary>
+                    <span className="mono">{s.name}</span>
+                    {s.description && <span className="muted"> · {s.description}</span>}
+                  </summary>
+                  <ProseFrame text={s.body} full />
+                  {s.truncated && <p className="note">The rest of its SKILL.md is past what the page shows.</p>}
+                </details>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
   );
 }
 
@@ -148,22 +187,9 @@ function ProfileSections({ view }: { view: ProfileView }): JSX.Element {
             </Table>
           </>
         )}
-        {view.agents_not_here.length > 0 && (
-          <>
-            <p className="note">Not here</p>
-            <Table head={["Agent", "Mode", "Why not"]}>
-              {view.agents_not_here.map((a) => (
-                <tr key={a.name} className="muted">
-                  <td className="mono">{a.name}</td>
-                  <td>{a.mode}</td>
-                  <td>{missingWords(a.why)}</td>
-                </tr>
-              ))}
-            </Table>
-          </>
-        )}
-        {view.skills.length > 0 && <p className="note">Skills: {view.skills.join(", ")}</p>}
       </section>
+
+      <Skills view={view} />
 
       <section className="group">
         <h3>Tools</h3>

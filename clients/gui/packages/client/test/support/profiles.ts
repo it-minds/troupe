@@ -28,6 +28,8 @@ export interface FakeProfileSpec {
     agents: Array<{ name: string; mode: "primary" | "subagent" | "function"; description: string }>;
     skills: string[];
     mcp_servers: FakeBundleServer[];
+    /** What each skill does and its SKILL.md after the front matter, by name; one not here has neither. */
+    skill_files?: Record<string, { description: string; body: string | null }>;
   };
   /** `spec.agents`: deny over allow, an absent allow is every agent. */
   agentRule?: { allow?: string[]; deny?: string[] };
@@ -78,6 +80,7 @@ export function exampleProfiles(): FakeProfileSpec[] {
       bundle: {
         agents: [{ name: "reviewer", mode: "subagent", description: "Reads a diff and comments on it" }],
         skills: ["review"],
+        skill_files: { review: { description: "read a diff and comment", body: "## Reviewing\n\nRead the **whole** diff before the first comment." } },
         mcp_servers: [
           { name: "github", url: "https://api.githubcopilot.com/mcp/", credential_mode: "person", permission: "ask", tools: "all" },
           { name: "jira", url: "https://mcp.example.com/jira", credential_mode: "profile", permission: "auto", tools: ["search_issues", "get_issue"] },
@@ -178,6 +181,10 @@ export function composeProfile(
       .filter((a) => !byRule(a.name) || (a.mode !== "function" && !byGrant(a.name)))
       .map((a) => ({ name: a.name, mode: a.mode, from: a.from, why: byRule(a.name) ? "grant" : "profile" })),
     skills: spec.bundle.skills,
+    skill_details: spec.bundle.skills.map((name) => {
+      const file = spec.bundle.skill_files?.[name];
+      return { name, description: file?.description ?? null, body: file?.body ?? null, truncated: false };
+    }),
     tools: {
       // A pod reads no organisation layer, so every rule the plane lists is the profile's.
       rules: rules("profile", spec.permissions ?? {}),

@@ -93,11 +93,23 @@ export interface ProfileView {
   functions?: ProfileViewFunction[];
   agents_not_here: ProfileViewMissing[];
   skills: string[];
+  /** The same skills with what each does and its SKILL.md; absent from a plane before them. */
+  skill_details?: ProfileViewSkill[];
   tools: { rules: ProfileViewRule[]; mcp: ProfileViewServer[] };
   reach: string[];
   limits: ProfileViewLimits;
   terms: Record<string, unknown> | null;
   [k: string]: unknown;
+}
+
+/** A skill the grant leaves: what it does, and the body of its SKILL.md after the front matter. */
+export interface ProfileViewSkill {
+  name: string;
+  description: string | null;
+  /** Null for a skill whose bundle entry has no SKILL.md. */
+  body: string | null;
+  /** The body was cut, at 64 KiB. */
+  truncated: boolean;
 }
 
 /** The heading the function agents are shown under, in both apps and the terminal. */

@@ -47,7 +47,7 @@ const section = (title: string): Promise<HTMLElement> =>
   waitFor(() => [...document.querySelectorAll<HTMLElement>("section.group")].find((s) => s.querySelector("h3")?.textContent === title), `the ${title} section`);
 
 describe("profiles", () => {
-  it("are a rail entry, a row each with what it gives, and a page in six sections", async () => {
+  it("are a rail entry, a row each with what it gives, and a page in seven sections", async () => {
     unmount = render(<App />).unmount;
     (await waitFor(() => nav("Profiles"), "the rail's Profiles")).click();
     await sees("3 you may use");
@@ -58,9 +58,9 @@ describe("profiles", () => {
     (await row("dev")).click();
     const titles = await waitFor(() => {
       const t = [...document.querySelectorAll(".profile-view section.group > h3")].map((h) => h.textContent);
-      return t.length === 6 && t;
-    }, "the six sections");
-    expect(titles).toEqual(["Agents", "Tools", "Model", "Reach", "Limits", "Who"]);
+      return t.length === 7 && t;
+    }, "the seven sections");
+    expect(titles).toEqual(["Agents", "Skills", "Tools", "Model", "Reach", "Limits", "Who"]);
 
     const agents = await section("Agents");
     expect(agents.textContent).toContain("Reads a diff and comments on it");
@@ -68,6 +68,15 @@ describe("profiles", () => {
     // The harness's own jobs, under a heading of their own with each one's line.
     expect(agents.textContent).toContain("What the harness may run here");
     expect(agents.textContent).toContain("Surveys the repository for its brief");
+    // Each skill says what it does, and opens its SKILL.md rendered (troupe #1003).
+    const skills = await section("Skills");
+    expect(skills.textContent).toContain("review · read a diff and comment");
+    const skill = skills.querySelector<HTMLDetailsElement>("details.skill")!;
+    expect(skill.open).toBe(false);
+    // jsdom does not toggle a <details> from its summary; a browser does.
+    skill.open = true;
+    await waitFor(() => skill.open && skill.querySelector(".md h3")?.textContent === "Reviewing", "the SKILL.md, rendered");
+    expect(skill.querySelector(".md strong")?.textContent).toBe("whole");
     const tools = await section("Tools");
     expect(tools.textContent).toContain("git push *");
     expect(tools.textContent).toContain("refused");
@@ -89,10 +98,12 @@ describe("profiles", () => {
 
     (await seesButton("All profiles")).click();
     (await row("ux")).click();
-    await sees("Not here");
-    const missing = await section("Agents");
-    await waitFor(() => missing.textContent?.includes("the profile does not have it"), "build, left out by the profile");
-    expect(missing.textContent).toContain("your team's grant leaves it out");
+    // The agents a person will not get are not listed: the page says what a session has.
+    const here = await section("Agents");
+    await waitFor(() => here.textContent?.includes("Works from the design files"), "ux's agents");
+    expect(here.textContent).not.toContain("Not here");
+    expect(here.textContent).not.toContain("the profile does not have it");
+    expect((await section("Skills")).textContent).toContain("No skill.");
     expect((await section("Limits")).textContent).toContain("no cap");
   });
 
@@ -126,6 +137,6 @@ describe("profiles", () => {
     (await showBackstage(), await waitFor(() => button("Settings", backstage()), "the Settings tab")).click();
     (await seesButton("What this profile can reach", backstage())).click();
     await waitFor(() => document.querySelector(".screen-head h1")?.textContent === "ux", "ux's page");
-    await sees("the profile does not have it");
+    await sees("Works from the design files and the component library");
   });
 });
