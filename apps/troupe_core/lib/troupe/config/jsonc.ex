@@ -6,8 +6,7 @@ defmodule Troupe.Config.JSONC do
     text |> strip_comments() |> strip_trailing_commas() |> Jason.decode()
   end
 
-  @doc false
-  def strip_comments(text), do: do_strip(text, :code, [])
+  defp strip_comments(text), do: do_strip(text, :code, [])
 
   # states: :code | :string | :line_comment | :block_comment
   defp do_strip(<<>>, _state, acc), do: acc |> Enum.reverse() |> IO.iodata_to_binary()
@@ -27,6 +26,5 @@ defmodule Troupe.Config.JSONC do
   defp do_strip(<<"*/", rest::binary>>, :block_comment, acc), do: do_strip(rest, :code, acc)
   defp do_strip(<<_::utf8, rest::binary>>, :block_comment, acc), do: do_strip(rest, :block_comment, acc)
 
-  @doc false
-  def strip_trailing_commas(text), do: Regex.replace(~r/,(\s*[}\]])/, text, "\\1")
+  defp strip_trailing_commas(text), do: Regex.replace(~r/,(\s*[}\]])/, text, "\\1")
 end

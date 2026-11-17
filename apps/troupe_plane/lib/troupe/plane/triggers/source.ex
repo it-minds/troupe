@@ -27,9 +27,9 @@ defmodule Troupe.Plane.Triggers.Source do
   def dump(%{} = source), do: {:ok, source}
   def dump(_other), do: :error
 
-  @doc "The source with its zone under `tz`, and no blank one."
+  # The source with its zone under `tz`, and no blank one.
   @spec spelled(map()) :: map()
-  def spelled(source) do
+  defp spelled(source) do
     {timezone, source} = Map.pop(source, "timezone")
     {tz, source} = Map.pop(source, "tz")
 

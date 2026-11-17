@@ -165,9 +165,9 @@ defmodule Troupe.Workflow do
     end
   end
 
-  @doc "Path a named workflow's definition is read from."
+  # Path a named workflow's definition is read from.
   @spec workflow_path(Path.t(), String.t()) :: Path.t()
-  def workflow_path(workspace, name) do
+  defp workflow_path(workspace, name) do
     Path.join([workspace, ".troupe", "workflows", name <> ".json"])
   end
 

@@ -9,7 +9,7 @@ defmodule Troupe.Gateway.Invites do
   manager, which the plane cannot read. Inviting somebody hands them that key the only way
   the plane cannot see it: this daemon, signed in at the key manager as its owner, puts each
   generation of the key the session has been sealed under into the invitee's own slot
-  (`Troupe.KMS.invited_slot/4`), where its credential may create a key and may not read one
+  (`Troupe.KMS.invited_slot/3`), where its credential may create a key and may not read one
   back, and then tells the plane where (`session.invite` with `keys`). The plane says first
   whether the person may be invited at all and where their slot is (`session.invite_slot`),
   so nothing is put anywhere for somebody it refuses.
@@ -251,7 +251,7 @@ defmodule Troupe.Gateway.Invites do
 
   defp put_key(prefix, version, key, manager, opts) do
     nonce = 18 |> :crypto.strong_rand_bytes() |> Base.url_encode64(padding: false)
-    path = prefix <> "k#{version}-#{nonce}"
+    path = KMS.invited_slot(prefix, version, nonce)
 
     case kms(opts).put_at(path, key, manager[:options]) do
       :ok -> {:ok, path}

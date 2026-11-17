@@ -387,9 +387,5 @@ defmodule Troupe.Plane.Drain do
 
   defp answerable_for(%{owner_subject: subject}), do: subject
 
-  @doc "Put a pod back into service, because the drain was called off."
-  @spec undrain(Worker.t()) :: {:ok, Worker.t()} | {:error, term()}
-  def undrain(%Worker{} = worker), do: Fleet.drain(worker, false)
-
   defp drain_timeout_ms, do: Fleet.drain_deadline_ms()
 end

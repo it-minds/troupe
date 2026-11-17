@@ -1303,10 +1303,4 @@ defmodule Troupe.Plane.Sessions do
     presented = secret_hash(salt, secret)
     byte_size(presented) == byte_size(hash) and :crypto.hash_equals(presented, hash)
   end
-
-  @doc "Everyone explicitly on a session."
-  @spec access_list(String.t()) :: [ACL.t()]
-  def access_list(session_id) do
-    Repo.all(from(a in ACL, where: a.session_id == ^session_id, order_by: a.subject))
-  end
 end

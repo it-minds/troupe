@@ -111,30 +111,6 @@ defmodule Troupe.Setup do
 
   defp kind_of(id), do: Enum.find(kinds(), &(&1["id"] == id))
 
-  @doc """
-  The two ways a session may treat a tool call, each in two sentences, and the safe
-  default first. What the `workspace` step shows.
-  """
-  @spec approval_choices() :: [%{id: String.t(), label: String.t(), consequence: String.t()}]
-  def approval_choices do
-    [
-      %{
-        id: "ask",
-        label: "Ask me first",
-        consequence:
-          "The agent reads freely, and asks before it writes a file or runs a command. " <>
-            "You allow once, allow for the session, or deny, and nothing changes on disk until you say so."
-      },
-      %{
-        id: "auto",
-        label: "Run everything without asking",
-        consequence:
-          "Every write and every command runs as soon as the agent asks for it. " <>
-            "For a directory whose changes you can afford to throw away, and never for one you cannot."
-      }
-    ]
-  end
-
   # -- the record -------------------------------------------------------------------
 
   @doc "Where a finished first run is recorded: beside the sessions, like the identity."
@@ -248,12 +224,10 @@ defmodule Troupe.Setup do
     end
   end
 
-  @doc """
-  Where a key this flow is given ends up: the user's file, there being no keychain here.
-  The path as a person on this platform writes it, since a screen shows it.
-  """
+  # Where a key this flow is given ends up: the user's file, there being no keychain here.
+  # The path as a person on this platform writes it, since a screen shows it.
   @spec key_storage() :: map()
-  def key_storage,
+  defp key_storage,
     do: %{"kind" => "file", "path" => Troupe.Paths.display(Config.user_path()), "keychain" => false}
 
   # -- the report -----------------------------------------------------------------

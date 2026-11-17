@@ -40,7 +40,6 @@ defmodule Troupe.Gateway.ACP do
   the turn running, and the next client to attach sees all of it.
   """
 
-  alias Troupe.Gateway.Dispatch
   alias Troupe.Protocol.{Error, Event}
 
   @typedoc "What this adapter knows about one ACP client between its requests."
@@ -390,17 +389,4 @@ defmodule Troupe.Gateway.ACP do
   # a no-op. ACP has no such notion, so the adapter supplies it.
   defp command_id,
     do: "acp-" <> (8 |> :crypto.strong_rand_bytes() |> Base.url_encode64(padding: false))
-
-  @doc false
-  # Kept for the connection: the methods ACP defines that this does not implement, so a
-  # refusal can say so rather than looking like a typo.
-  @spec unimplemented?(String.t()) :: boolean()
-  def unimplemented?(method) do
-    method not in @methods and
-      String.starts_with?(method, ["session/", "fs/", "terminal/", "elicitation/"])
-  end
-
-  @doc false
-  @spec dispatch_methods() :: %{String.t() => atom()}
-  def dispatch_methods, do: Dispatch.methods()
 end

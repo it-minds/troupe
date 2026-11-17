@@ -41,7 +41,7 @@ paths:
 symbols:
   - Troupe.Plane.Invites
   - Troupe.Gateway.Invites
-  - Troupe.KMS.invited_slot/4
+  - Troupe.KMS.invited_slot/3
   - Troupe.KMS.generation/2
   - Troupe.Sessions.Sealer.rekey/4
 gist: "Invite = grant made visible; a private session's key goes into the invitee's own slot from its owner's daemon, the plane holding paths it cannot read; revoke re-keys forward"

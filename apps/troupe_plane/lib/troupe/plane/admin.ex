@@ -1010,9 +1010,9 @@ defmodule Troupe.Plane.Admin do
     |> Enum.sort_by(& &1.team)
   end
 
-  @doc "Each size class with what it is for, as the console and a model both read it."
+  # Each size class with what it is for, as the console and a model both read it.
   @spec size_class_summaries() :: [map()]
-  def size_class_summaries do
+  defp size_class_summaries do
     Enum.map(SizeClass.names(), fn name ->
       class = SizeClass.get(name)
 

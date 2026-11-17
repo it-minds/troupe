@@ -31,7 +31,6 @@ defmodule Troupe.Plane.Triggers.Run do
   @primary_key {:id, :binary_id, autogenerate: true}
   @foreign_key_type :binary_id
 
-  @states ~w(created running waiting done failed skipped)
   @stored_states ~w(created failed skipped)
 
   # How the firing arrived. Seven, closed, and the same seven the durable `trigger_fired`
@@ -70,10 +69,6 @@ defmodule Troupe.Plane.Triggers.Run do
   end
 
   @type t :: %__MODULE__{}
-
-  @doc "Every state a run can be reported in, stored or derived."
-  @spec states() :: [String.t()]
-  def states, do: @states
 
   @doc "Every way a firing can arrive."
   @spec sources() :: [String.t()]

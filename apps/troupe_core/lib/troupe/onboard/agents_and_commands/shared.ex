@@ -312,13 +312,11 @@ defmodule Troupe.Onboard.AgentsAndCommands.Shared do
     |> Enum.map(&"#{&1} is left out: #{Map.get(reasons, &1, unknown)}.")
   end
 
-  @doc """
-  What a command's body holds that Troupe will not fill or run, said once each: argument
-  placeholders other than `$ARGUMENTS`, and shell lines the other tool runs before it
-  sends the prompt.
-  """
+  # What a command's body holds that Troupe will not fill or run, said once each: argument
+  # placeholders other than `$ARGUMENTS`, and shell lines the other tool runs before it
+  # sends the prompt.
   @spec body_notes(String.t()) :: [String.t()]
-  def body_notes(body) do
+  defp body_notes(body) do
     placeholders =
       ~r/\$(?:ARGUMENTS\[\d+\]|\d+)/
       |> Regex.scan(body)

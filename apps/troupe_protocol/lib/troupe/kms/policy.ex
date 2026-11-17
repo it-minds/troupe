@@ -69,7 +69,7 @@ defmodule Troupe.KMS.Policy do
   Read and write, no `delete`, exactly as a pod has: a person must not be able to make
   their own session unreadable outside erasure, for the same reason a pod must not.
 
-  And one rule for invitations into a private session (`Troupe.KMS.invited_slot/4`):
+  And one rule for invitations into a private session (`Troupe.KMS.invited_slot/3`):
   `create`, and nothing else, under every person's `invited/`, which is how the owner's
   daemon hands the session's key to the person invited, into that person's own subtree. It
   can put a key there and cannot read one back or overwrite one, its own included; the
@@ -250,10 +250,6 @@ defmodule Troupe.KMS.Policy do
     }
     """
   end
-
-  @doc "The name the MCP identity policy is installed under."
-  @spec mcp_identity_policy_name() :: String.t()
-  def mcp_identity_policy_name, do: "troupe-worker-mcp-identity"
 
   @doc "The name a profile's policy is installed under."
   @spec worker_policy_name(String.t()) :: String.t()

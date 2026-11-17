@@ -57,9 +57,9 @@ defmodule Troupe.Plane.Enrolment do
   # pod of the same profile would be two machines claiming to be one row.
   @host_namespace_prefix "ssh:"
 
-  @doc "The namespace a host's workers are recorded under, which is not a Kubernetes one."
+  # The namespace a host's workers are recorded under, which is not a Kubernetes one.
   @spec host_namespace(String.t()) :: String.t()
-  def host_namespace(profile), do: @host_namespace_prefix <> profile
+  defp host_namespace(profile), do: @host_namespace_prefix <> profile
 
   @doc "The audience a worker's enrolment token must have been projected for."
   @spec audience() :: String.t()

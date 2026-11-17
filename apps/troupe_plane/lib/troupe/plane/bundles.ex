@@ -600,12 +600,10 @@ defmodule Troupe.Plane.Bundles do
     end
   end
 
-  @doc """
-  The profiles whose bundle the plane composes with `channel` among its layers, each after
-  the profiles it extends (`Troupe.Plane.Bundles.Effective`).
-  """
+  # The profiles whose bundle the plane composes with `channel` among its layers, each after
+  # the profiles it extends (`Troupe.Plane.Bundles.Effective`).
   @spec composed_on(String.t()) :: [String.t()]
-  def composed_on(channel) do
+  defp composed_on(channel) do
     for profile <- Fleet.list_profiles(),
         Effective.reserved?(profile.config_bundle_channel),
         {:ok, resolved} <- [Extends.resolve(profile.name)],

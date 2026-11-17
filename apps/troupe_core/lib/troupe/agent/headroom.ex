@@ -17,10 +17,6 @@ defmodule Troupe.Agent.Headroom do
 
   @dimensions [:turns, :input, :output, :wall, :context]
 
-  @doc "Every dimension this module knows, in the order they are reported."
-  @spec dimensions() :: [atom()]
-  def dimensions, do: @dimensions
-
   @doc """
   The five fractions. `prompt_tokens` is the size of the last prompt the model saw —
   every token it contained, cached or not, which is `Troupe.LLM.Usage.total_input/1` and
@@ -52,13 +48,6 @@ defmodule Troupe.Agent.Headroom do
   def dimension(:max_input_tokens), do: :input
   def dimension(:max_output_tokens), do: :output
   def dimension(:wall_clock), do: :wall
-
-  @doc "The dimension closest to its ceiling."
-  @spec tightest(t()) :: {atom(), entry()}
-  def tightest(headroom) do
-    dim = Enum.max_by(@dimensions, &headroom[&1].fraction)
-    {dim, headroom[dim]}
-  end
 
   @doc """
   Dimensions that have crossed `threshold` and are not in `already`, tightest first: what
@@ -99,9 +88,9 @@ defmodule Troupe.Agent.Headroom do
     "#{label(dim)} #{value(dim, used)}/#{value(dim, limit)} (#{percent(fraction)})"
   end
 
-  @doc "A fraction as a whole-number percentage."
+  # A fraction as a whole-number percentage.
   @spec percent(float()) :: String.t()
-  def percent(fraction), do: "#{round(fraction * 100)}%"
+  defp percent(fraction), do: "#{round(fraction * 100)}%"
 
   defp value(:wall, ms), do: duration(ms)
   defp value(:turns, n), do: Integer.to_string(n)

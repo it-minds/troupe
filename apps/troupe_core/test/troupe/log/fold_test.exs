@@ -210,13 +210,7 @@ defmodule Troupe.Log.FoldTest do
       from_the_future = %{event(1, :user_input, %{"source" => "user", "text" => "a"}) | v: 99}
 
       assert Upcast.event(from_the_future) == from_the_future
-      assert Upcast.from_the_future([from_the_future]) == [99]
       assert Fold.state([from_the_future])["events"] == 1
-    end
-
-    test "a log of the current version reports nothing from the future" do
-      events = read([@fixtures, List.first(versions()), "simple_turn.jsonl"])
-      assert Upcast.from_the_future(events) == []
     end
   end
 

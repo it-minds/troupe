@@ -130,12 +130,10 @@ defmodule Troupe.Registry do
   @spec watcher_pid(String.t()) :: pid() | nil
   def watcher_pid(session_id), do: whereis({:watcher, session_id})
 
-  @doc """
-  Every registered key belonging to a session, for diagnostics and for asserting
-  that a killed subtree left nothing behind.
-  """
+  # Every registered key belonging to a session, for diagnostics and for asserting
+  # that a killed subtree left nothing behind.
   @spec keys_for_session(String.t()) :: [tuple()]
-  def keys_for_session(session_id) do
+  defp keys_for_session(session_id) do
     Registry.select(@registry, [
       {{:"$1", :"$2", :"$3"}, [], [:"$1"]}
     ])

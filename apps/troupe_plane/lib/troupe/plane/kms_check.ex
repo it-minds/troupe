@@ -113,7 +113,7 @@ defmodule Troupe.Plane.KMSCheck do
     transit = Application.get_env(:troupe_plane, :transit, [])
 
     [
-      kv_mount: Application.get_env(:troupe_plane, :kms_mount, "secret"),
+      kv_mount: Tokens.kv_mount(),
       transit_mount: Tokens.mount(),
       session_key: transit[:key] || "troupe-session-tokens",
       signing_key: Signing.name(),

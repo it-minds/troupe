@@ -88,9 +88,8 @@ defmodule Troupe.Tools.EditFile do
   defp count_matches(_contents, ""), do: 0
   defp count_matches(contents, needle), do: length(:binary.matches(contents, needle))
 
-  @doc false
   @spec detect_eol(String.t()) :: :crlf | :lf
-  def detect_eol(contents) do
+  defp detect_eol(contents) do
     if String.contains?(contents, "\r\n"), do: :crlf, else: :lf
   end
 
