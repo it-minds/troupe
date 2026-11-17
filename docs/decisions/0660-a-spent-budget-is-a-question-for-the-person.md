@@ -5,16 +5,8 @@ date: 2026-09-20
 status: accepted
 paths:
   - apps/troupe_core/lib/troupe/agent/budget_question.ex
-  - apps/troupe_core/lib/troupe/agent/server.ex
   - apps/troupe_core/lib/troupe/agent/state.ex
   - apps/troupe_core/lib/troupe/budget.ex
-  - apps/troupe_core/lib/troupe/config.ex
-  - apps/troupe_core/lib/troupe/sessions/index.ex
-  - apps/troupe_protocol/lib/troupe/protocol/schema.ex
-  - apps/troupe_worker/lib/troupe/worker/session/restore.ex
-  - clients/gui/apps/desktop/src/views/Question.tsx
-  - clients/gui/packages/client/src/transcript.ts
-  - clients/tui/lib/troupe/remote/translate.ex
 gist: "A spent budget is a question for the person attached, not a stop: `allow` buys the same slice again, `always` lifts that limit for the agent and…"
 ---
 

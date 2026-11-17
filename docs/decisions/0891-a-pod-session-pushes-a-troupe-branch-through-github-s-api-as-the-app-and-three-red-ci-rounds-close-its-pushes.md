@@ -6,21 +6,9 @@ status: accepted
 issue: 147
 paths:
   - apps/troupe_worker/lib/troupe/worker/github.ex
-  - apps/troupe_worker/lib/troupe/worker/github/
-  - apps/troupe_worker/lib/troupe/worker/tools/
-  - apps/troupe_worker/lib/troupe/worker/git_credentials.ex
-  - apps/troupe_worker/lib/troupe/worker/session/clone.ex
-  - apps/troupe_worker/lib/troupe/worker/session/manager.ex
-  - apps/troupe_plane/lib/troupe/plane/github.ex
-  - apps/troupe_plane/lib/troupe/plane/control/connection.ex
-  - apps/troupe_plane/lib/troupe/plane/fleet/profile.ex
-  - clients/gui/apps/console/src/views/Profiles.tsx
-  - clients/gui/apps/console/src/views/Sessions.tsx
-  - apps/troupe_plane/priv/repo/migrations/20261013000891_github_run.exs
-  - apps/troupe_core/lib/troupe/tool.ex
-  - apps/troupe_core/lib/troupe/tools.ex
-  - charts/troupe/crds/workerprofile.yaml
-  - config/runtime.exs
+  - apps/troupe_worker/lib/troupe/worker/github/api.ex
+  - apps/troupe_worker/lib/troupe/worker/tools/git_push.ex
+  - apps/troupe_worker/lib/troupe/worker/tools/pr_checks.ex
 symbols:
   - Troupe.Worker.GitHub.push/5
   - Troupe.Worker.GitHub.open_pull_request/4

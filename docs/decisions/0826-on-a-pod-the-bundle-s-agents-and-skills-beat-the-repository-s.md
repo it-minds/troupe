@@ -7,16 +7,8 @@ issue: 516
 paths:
   - apps/troupe_core/lib/troupe/agent/definitions.ex
   - apps/troupe_core/lib/troupe/skills.ex
-  - apps/troupe_core/lib/troupe/worktree.ex
   - apps/troupe_core/lib/troupe/onboard/pod.ex
-  - apps/troupe_core/lib/troupe/session.ex
-  - apps/troupe_core/lib/troupe.ex
   - apps/troupe_worker/lib/troupe/worker/plane/commands.ex
-  - apps/troupe_plane/lib/troupe/plane/harness.ex
-  - apps/troupe_plane/lib/troupe/plane/fleet/profile.ex
-  - clients/gui/apps/console/src/views/Profiles.tsx
-  - apps/troupe_protocol/lib/troupe/protocol/schema.ex
-  - charts/troupe/crds/workerprofile.yaml
 symbols:
   - Troupe.Agent.Definitions.bundle_wins?/1
   - Troupe.Agent.Definitions.load/2

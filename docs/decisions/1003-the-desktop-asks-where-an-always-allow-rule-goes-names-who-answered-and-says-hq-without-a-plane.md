@@ -10,11 +10,6 @@ paths:
   - clients/gui/apps/desktop/src/views/Question.tsx
   - clients/gui/apps/desktop/src/views/Session.tsx
   - clients/gui/apps/desktop/src/views/StartSession.tsx
-  - clients/gui/apps/desktop/src/views/CommandPalette.tsx
-  - clients/gui/apps/desktop/src/styles.css
-  - clients/gui/packages/client/src/transcript.ts
-  - clients/gui/packages/client/src/types.ts
-  - apps/troupe_core/lib/troupe/commands.ex
 symbols:
   - severalSteer
   - Troupe.Commands.for_client/2

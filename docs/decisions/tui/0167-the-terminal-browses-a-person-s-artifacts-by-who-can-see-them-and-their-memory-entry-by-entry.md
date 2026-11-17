@@ -7,21 +7,10 @@ issue: 62
 paths:
   - clients/tui/lib/troupe/ui/tui/artifacts_page.ex
   - clients/tui/lib/troupe/ui/tui/memory_page.ex
-  - clients/tui/lib/troupe/ui/tui/server.ex
-  - clients/tui/lib/troupe/ui/tui/view.ex
-  - clients/tui/lib/troupe/ui/hq.ex
-  - clients/tui/lib/troupe/client.ex
   - clients/tui/lib/troupe/client/artifacts.ex
   - clients/tui/lib/troupe/client/own_memory.ex
-  - clients/tui/lib/troupe/client/remote.ex
   - clients/tui/lib/troupe/cli/artifacts.ex
   - clients/tui/lib/troupe/cli/memory.ex
-  - clients/tui/lib/troupe/cli.ex
-  - clients/tui/lib/troupe/clipboard.ex
-  - clients/tui/lib/troupe/browser.ex
-  - apps/troupe_core/lib/troupe/commands.ex
-  - apps/troupe_gateway/lib/troupe/gateway/artifacts.ex
-  - apps/troupe_gateway/lib/troupe/gateway/memory.ex
 symbols:
   - Troupe.UI.TUI.ArtifactsPage
   - Troupe.UI.TUI.MemoryPage

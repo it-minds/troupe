@@ -9,16 +9,9 @@ paths:
   - apps/troupe_core/lib/troupe/instructions.ex
   - apps/troupe_core/lib/troupe/config/permissions.ex
   - apps/troupe_core/lib/troupe/agent/local.ex
-  - apps/troupe_gateway/lib/troupe/gateway/dispatch.ex
   - apps/troupe_worker/lib/troupe/worker/session/restore.ex
-  - apps/troupe_plane/lib/troupe/plane/control/connection.ex
-  - clients/gui/packages/client/src/config.ts
-  - clients/gui/packages/client/src/instructions.ts
-  - clients/gui/packages/client/src/transcript.ts
   - clients/gui/apps/console/src/nav.ts
   - clients/gui/apps/console/src/views/bits.tsx
-  - clients/gui/apps/console/src/views/Mine.tsx
-  - clients/tui/lib/troupe/remote/translate.ex
 symbols:
   - inReadersWords
   - SessionState

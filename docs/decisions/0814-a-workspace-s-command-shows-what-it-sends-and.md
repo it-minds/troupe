@@ -9,14 +9,6 @@ paths:
   - apps/troupe_core/lib/troupe/commands/trust.ex
   - apps/troupe_core/lib/troupe/session/approvals.ex
   - apps/troupe_core/lib/troupe/session/questions.ex
-  - apps/troupe_gateway/lib/troupe/gateway/dispatch.ex
-  - apps/troupe_protocol/lib/troupe/protocol/schema.ex
-  - clients/tui/lib/troupe/remote/translate.ex
-  - clients/tui/lib/troupe/ui/tui/model.ex
-  - clients/tui/lib/troupe/ui/tui/view.ex
-  - clients/gui/apps/desktop/src/views/CommandPalette.tsx
-  - clients/gui/apps/desktop/src/views/Question.tsx
-  - clients/gui/packages/client/src/transcript.ts
 symbols:
   - Troupe.Commands.run/4
   - Troupe.Commands.Trust

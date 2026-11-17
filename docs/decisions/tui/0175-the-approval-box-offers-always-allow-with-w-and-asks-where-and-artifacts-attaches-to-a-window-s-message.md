@@ -5,15 +5,10 @@ date: 2026-11-16
 status: accepted
 issue: 956
 paths:
-  - clients/tui/lib/troupe/ui/tui/server.ex
-  - clients/tui/lib/troupe/ui/tui/view.ex
   - clients/tui/lib/troupe/ui/tui/model.ex
-  - clients/tui/lib/troupe/ui/tui/artifacts_page.ex
+  - clients/tui/lib/troupe/ui/tui/view.ex
   - clients/tui/lib/troupe/remote/worker.ex
-  - clients/tui/lib/troupe/remote/translate.ex
-  - clients/tui/lib/troupe/client.ex
   - clients/tui/lib/troupe/client/daemon.ex
-  - clients/tui/lib/troupe/client/remote.ex
 symbols:
   - Troupe.UI.TUI.Model.always_allow?/1
   - Troupe.UI.TUI.Model.attach_artifact?/1

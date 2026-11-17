@@ -11,11 +11,6 @@ paths:
   - apps/troupe_core/lib/troupe/workflow.ex
   - apps/troupe_core/lib/troupe/skills/local.ex
   - apps/troupe_core/lib/troupe/skills.ex
-  - apps/troupe_core/lib/troupe/session.ex
-  - apps/troupe_core/lib/troupe/tools.ex
-  - apps/troupe_core/lib/troupe.ex
-  - apps/troupe_gateway/lib/troupe/gateway/dispatch.ex
-  - apps/troupe_gateway/lib/troupe/gateway/local_sources.ex
 symbols:
   - Troupe.Workspace.within?/2
   - Troupe.Workspace.files_within/3

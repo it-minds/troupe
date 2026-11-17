@@ -7,7 +7,6 @@ issue: 123
 supersedes: [706]
 paths:
   - apps/troupe_core/lib/troupe/instructions.ex
-  - apps/troupe_core/lib/troupe/agent/server.ex
   - apps/troupe_core/lib/troupe/agent/state.ex
   - apps/troupe_gateway/lib/troupe/gateway/dispatch.ex
   - apps/troupe_core/lib/troupe/session/memory.ex

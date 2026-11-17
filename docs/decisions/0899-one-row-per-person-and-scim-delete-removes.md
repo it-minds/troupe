@@ -9,15 +9,7 @@ paths:
   - apps/troupe_plane/lib/troupe/plane/scim.ex
   - apps/troupe_plane/lib/troupe/plane/login.ex
   - apps/troupe_plane/lib/troupe/plane/identity.ex
-  - apps/troupe_plane/lib/troupe/plane/identity/user.ex
   - apps/troupe_plane/lib/troupe/plane/identity/tombstone.ex
-  - apps/troupe_plane/lib/troupe/plane/sessions.ex
-  - apps/troupe_plane/lib/troupe/plane/erasure.ex
-  - apps/troupe_plane/lib/troupe/plane/admin.ex
-  - apps/troupe_plane/lib/troupe/plane/admin/console.ex
-  - apps/troupe_plane/lib/troupe/plane/web/router.ex
-  - apps/troupe_plane/priv/repo/migrations/20261013000899_one_row_per_person.exs
-  - clients/gui/apps/console/src/views/Teams.tsx
 symbols:
   - Troupe.Plane.SCIM.delete_user/1
   - Troupe.Plane.SCIM.delete_group/1

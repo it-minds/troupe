@@ -4,7 +4,6 @@ title: Re-registering a `call_id` with `Approvals` demonitors the process it rep
 date: 2026-09-15
 status: accepted
 paths:
-  - apps/troupe_core/lib/troupe/agent/server.ex
   - apps/troupe_core/lib/troupe/agent/state.ex
   - apps/troupe_core/lib/troupe/session/approvals.ex
 gist: Re-registering a `call_id` with `Approvals` demonitors the process it replaces, and a restarted agent re-registers its budget question under the…

@@ -7,21 +7,7 @@ issue: 62
 paths:
   - apps/troupe_plane/lib/troupe/plane/artifacts.ex
   - apps/troupe_plane/lib/troupe/plane/admin.ex
-  - apps/troupe_plane/lib/troupe/plane/admin/api.ex
-  - apps/troupe_plane/lib/troupe/plane/admin/console.ex
-  - apps/troupe_plane/lib/troupe/plane/harness.ex
-  - apps/troupe_plane/lib/troupe/plane/settings.ex
-  - apps/troupe_core/lib/troupe/tools/publish_artifact.ex
-  - apps/troupe_core/lib/troupe/commands.ex
   - apps/troupe_gateway/lib/troupe/gateway/artifacts.ex
-  - apps/troupe_protocol/lib/troupe/protocol/schema.ex
-  - clients/tui/lib/troupe/ui/tui/server.ex
-  - clients/gui/apps/desktop/src/views/Publish.tsx
-  - clients/gui/apps/console/src/views/Artifacts.tsx
-  - clients/gui/apps/console/src/views/PublishedArtifacts.tsx
-  - clients/gui/apps/console/src/nav.ts
-  - clients/gui/packages/client/src/artifacts.ts
-  - clients/gui/packages/client/src/admin.ts
 symbols:
   - Troupe.Plane.Artifacts.visible/3
   - Troupe.Plane.Artifacts.admin_list/1

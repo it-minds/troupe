@@ -4,15 +4,9 @@ title: A model call the agent gives up on is stopped, at its timeout in a turn o
 date: 2026-10-05
 status: accepted
 paths:
-  - apps/troupe_core/lib/troupe/agent/server.ex
-  - apps/troupe_core/lib/troupe/agent/state.ex
-  - apps/troupe_core/lib/troupe/bench/live.ex
   - apps/troupe_core/lib/troupe/llm/provider.ex
   - apps/troupe_core/lib/troupe/llm/providers/anthropic.ex
   - apps/troupe_core/lib/troupe/llm/providers/openai.ex
-  - apps/troupe_core/lib/troupe/session/usage.ex
-  - apps/troupe_core/lib/troupe/sessions/index.ex
-  - apps/troupe_protocol/lib/troupe/protocol/schema.ex
 gist: A model call the agent gives up on is stopped, at its timeout in a turn or in a compaction and on a cancel alike, and what the provider had…
 ---
 

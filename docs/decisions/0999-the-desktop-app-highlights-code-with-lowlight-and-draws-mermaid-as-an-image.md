@@ -10,11 +10,6 @@ paths:
   - clients/gui/apps/desktop/src/grammars.ts
   - clients/gui/apps/desktop/src/diagram.ts
   - clients/gui/apps/desktop/src/views/Frames.tsx
-  - clients/gui/apps/desktop/src/views/Appearance.tsx
-  - clients/gui/apps/desktop/src/styles.css
-  - clients/gui/apps/desktop/package.json
-  - clients/gui/docs/design/themes/afterglow.tokens.json
-  - clients/gui/packages/client/src/transcript.ts
 symbols:
   - useHighlight
   - drawMermaid

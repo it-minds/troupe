@@ -6,19 +6,9 @@ status: accepted
 issue: 465
 supersedes: [815]
 paths:
-  - apps/troupe_core/lib/troupe/config.ex
   - apps/troupe_core/lib/troupe/config/schema.ex
-  - apps/troupe_core/lib/troupe/config/layers.ex
-  - apps/troupe_core/lib/troupe/agent/server.ex
-  - apps/troupe_core/lib/troupe/agent/state.ex
-  - apps/troupe_core/lib/troupe/log/fold.ex
-  - apps/troupe_core/lib/troupe/llm/providers/anthropic.ex
   - apps/troupe_core/lib/troupe/llm/request.ex
-  - apps/troupe_core/lib/troupe/bench/live.ex
-  - apps/troupe_core/lib/troupe/bench/model.ex
-  - apps/troupe_core/lib/troupe/bench/onboarding.ex
-  - apps/troupe_core/lib/troupe/bench/memory.ex
-  - apps/troupe_protocol/lib/troupe/protocol/schema.ex
+  - apps/troupe_core/lib/troupe/llm/providers/anthropic.ex
 gist: "system_prompt defaults to stable (per_turn by name, read as written); turn context logged on llm_request and folded; drop_block opt-in, error asks for the 400; prefix_mismatch in the API's words"
 ---
 

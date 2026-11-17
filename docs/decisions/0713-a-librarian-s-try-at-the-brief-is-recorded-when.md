@@ -4,7 +4,6 @@ title: A librarian's try at the brief is recorded when it starts, and one that b
 date: 2026-09-27
 status: accepted
 paths:
-  - apps/troupe_core/lib/troupe/agent/server.ex
   - apps/troupe_core/lib/troupe/session/memory.ex
 gist: A librarian's try at the brief is recorded when it starts, and one that built nothing holds off the next automatic refresh for `memory_max_age_days`
 ---

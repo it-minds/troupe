@@ -5,19 +5,9 @@ date: 2026-10-10
 status: accepted
 issue: 502
 paths:
-  - apps/troupe_core/lib/troupe.ex
   - apps/troupe_core/lib/troupe/watch.ex
   - apps/troupe_core/lib/troupe/watch/branch.ex
   - apps/troupe_core/lib/troupe/session/watcher.ex
-  - apps/troupe_core/lib/troupe/session.ex
-  - apps/troupe_core/lib/troupe/session/mcp.ex
-  - apps/troupe_core/lib/troupe/agent/server.ex
-  - apps/troupe_core/lib/troupe/config/schema.ex
-  - apps/troupe_gateway/lib/troupe/gateway/dispatch.ex
-  - apps/troupe_protocol/lib/troupe/protocol/schema.ex
-  - clients/tui/lib/troupe/client/daemon.ex
-  - clients/tui/lib/troupe/remote/translate.ex
-  - clients/tui/lib/troupe/ui/tui/server.ex
 symbols:
   - Troupe.Watch.Branch.start/2
   - Troupe.Watch.Branch.hold_auto/1

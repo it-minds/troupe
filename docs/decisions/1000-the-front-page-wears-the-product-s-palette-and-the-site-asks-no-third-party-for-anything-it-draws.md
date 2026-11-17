@@ -5,15 +5,11 @@ date: 2026-11-15
 status: accepted
 issue: 189
 paths:
-  - docs/README.md
   - docs/overrides/landing.html
   - docs/overrides/main.html
   - docs/overrides/partials/search.html
   - docs/assets/landing.css
   - docs/assets/site.css
-  - docs/assets/afterglow.css
-  - docs/assets/social-card.png
-  - docs/llms.txt
   - mkdocs.yml
   - clients/gui/scripts/tokens.ts
   - clients/gui/scripts/social-card.ts

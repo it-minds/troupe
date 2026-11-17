@@ -4,23 +4,12 @@ title: "A worker profile says which agents exist on it in spec.agents, built-ins
 date: 2026-10-29
 status: accepted
 paths:
-  - charts/troupe/crds/workerprofile.yaml
   - apps/troupe_protocol/lib/troupe/protocol/agent_rule.ex
-  - apps/troupe_protocol/lib/troupe/protocol/schema.ex
-  - apps/troupe_plane/lib/troupe/plane/gitops/profiles.ex
   - apps/troupe_plane/lib/troupe/plane/bundles.ex
-  - apps/troupe_plane/lib/troupe/plane/harness.ex
-  - apps/troupe_plane/lib/troupe/plane/admin.ex
-  - apps/troupe_plane/lib/troupe/plane/admin/api.ex
+  - apps/troupe_core/lib/troupe/agent/definitions.ex
   - apps/troupe_plane/lib/troupe/plane/fleet/profile.ex
   - apps/troupe_plane/lib/troupe/plane/fleet/extends.ex
-  - apps/troupe_core/lib/troupe/agent/definitions.ex
-  - apps/troupe_core/lib/troupe/session.ex
-  - apps/troupe_core/lib/troupe.ex
   - apps/troupe_worker/lib/troupe/worker/plane/commands.ex
-  - clients/gui/apps/console/src/views/Profiles.tsx
-  - clients/gui/apps/console/src/views/ProfileAgents.tsx
-  - clients/gui/packages/client/src/admin.ts
 symbols:
   - Troupe.Protocol.AgentRule
   - Troupe.Plane.Bundles.offering/3

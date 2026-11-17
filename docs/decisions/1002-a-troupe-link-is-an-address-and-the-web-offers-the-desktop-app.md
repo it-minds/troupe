@@ -7,18 +7,8 @@ issue: 959
 paths:
   - clients/gui/packages/client/src/deeplink.ts
   - clients/gui/apps/desktop/src-tauri/src/deep_link.rs
-  - clients/gui/apps/desktop/src-tauri/src/lib.rs
-  - clients/gui/apps/desktop/src-tauri/Cargo.toml
-  - clients/gui/apps/desktop/src-tauri/tauri.conf.json
-  - clients/gui/apps/desktop/src-tauri/capabilities/default.json
   - clients/gui/apps/desktop/src/links.ts
-  - clients/gui/apps/desktop/src/App.tsx
-  - clients/gui/apps/desktop/src/views/SignIn.tsx
   - clients/gui/apps/console/src/views/AppBanner.tsx
-  - clients/gui/apps/console/src/views/Shell.tsx
-  - apps/troupe_plane/lib/troupe/plane/client_versions.ex
-  - apps/troupe_plane/lib/troupe/plane/web/router.ex
-  - docs/overrides/main.html
 symbols:
   - parseAppLink
   - appLink

@@ -7,20 +7,8 @@ issue: 957
 supersedes: []
 paths:
   - apps/troupe_plane/lib/troupe/plane/fleet/scaler.ex
-  - apps/troupe_plane/lib/troupe/plane/admin.ex
-  - apps/troupe_plane/lib/troupe/plane/admin/api.ex
-  - apps/troupe_plane/lib/troupe/plane/client_versions.ex
   - apps/troupe_plane/lib/troupe/plane/harness.ex
-  - apps/troupe_plane/lib/troupe/plane/scim.ex
-  - apps/troupe_plane/lib/troupe/plane/web/router.ex
-  - clients/gui/packages/client/src/admin.ts
-  - clients/gui/packages/client/src/plane.ts
-  - clients/gui/apps/console/src/console.ts
-  - clients/gui/apps/console/src/views/Audit.tsx
-  - clients/gui/apps/console/src/views/ClientVersions.tsx
   - clients/gui/apps/console/src/views/Profiles.tsx
-  - clients/gui/apps/console/src/views/Team.tsx
-  - clients/tui/lib/troupe/client/remote.ex
 symbols:
   - Troupe.Plane.Fleet.Scaler.at_once/2
   - Troupe.Plane.ClientVersions.put/4

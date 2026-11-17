@@ -8,16 +8,7 @@ paths:
   - apps/troupe_plane/lib/troupe/plane/control/tls.ex
   - apps/troupe_plane/lib/troupe/plane/control/connection.ex
   - apps/troupe_plane/lib/troupe/plane/control/listener.ex
-  - apps/troupe_plane/lib/troupe/plane/admin.ex
-  - clients/gui/apps/console/src/views/Hosts.tsx
   - apps/troupe_worker/lib/troupe/worker/plane/link.ex
-  - config/runtime.exs
-  - charts/troupe/templates/plane-control-tls.yaml
-  - charts/troupe/templates/plane-deployment.yaml
-  - charts/troupe/templates/_helpers.tpl
-  - charts/troupe/values.yaml
-  - dev/kind/values.yaml
-  - scripts/remote-up
 symbols:
   - Troupe.Plane.Control.TLS
   - Troupe.Plane.Admin.host_register/3

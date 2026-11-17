@@ -5,14 +5,8 @@ date: 2026-11-10
 status: accepted
 paths:
   - apps/troupe_gateway/lib/troupe/gateway/local_sources.ex
-  - apps/troupe_core/lib/troupe/commands.ex
-  - clients/tui/lib/troupe/ui/tui/server.ex
-  - clients/tui/lib/troupe/ui/tui/view.ex
-  - clients/tui/lib/troupe/client/daemon.ex
   - clients/gui/packages/client/src/servers.ts
-  - clients/gui/packages/client/src/daemon.ts
   - clients/gui/apps/desktop/src/views/ConnectScreen.tsx
-  - clients/gui/apps/desktop/src/views/SessionServers.tsx
 symbols:
   - Troupe.UI.TUI.Server.parse_server/1
 gist: "Add and edit a server without a file to import: a drawer in the desktop app, /mcp add and /mcp try in the TUI; an edit is the difference, merged as RFC 7396; no value comes back"

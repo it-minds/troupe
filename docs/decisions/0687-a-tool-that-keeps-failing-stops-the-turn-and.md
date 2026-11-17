@@ -5,21 +5,9 @@ date: 2026-09-25
 status: accepted
 issue: 117
 paths:
-  - apps/troupe_a2a/lib/troupe/a2a/events.ex
   - apps/troupe_core/lib/troupe/agent/budget_question.ex
-  - apps/troupe_core/lib/troupe/agent/server.ex
   - apps/troupe_core/lib/troupe/agent/state.ex
   - apps/troupe_core/lib/troupe/budget.ex
-  - apps/troupe_core/lib/troupe/config.ex
-  - apps/troupe_core/lib/troupe/session/loop.ex
-  - apps/troupe_core/lib/troupe/sessions/index.ex
-  - apps/troupe_plane/lib/troupe/plane/triggers.ex
-  - apps/troupe_protocol/lib/troupe/protocol/schema.ex
-  - apps/troupe_worker/lib/troupe/worker/session/manager.ex
-  - clients/gui/apps/desktop/src/views/Question.tsx
-  - clients/gui/packages/client/src/transcript.ts
-  - clients/tui/lib/troupe/remote/translate.ex
-  - scripts/live-check
 gist: A tool that keeps failing stops the turn and asks, whatever the budget says; `always` lifts only the limit it was asked about
 ---
 

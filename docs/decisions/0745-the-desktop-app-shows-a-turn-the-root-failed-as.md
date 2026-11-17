@@ -4,7 +4,9 @@ title: The desktop app shows a turn the root failed as a failure, and follows a 
 date: 2026-10-01
 status: accepted
 paths:
-  - clients/gui/apps/desktop/test/team-failed.test.tsx
+  - clients/gui/packages/client/src/transcript.ts
+  - clients/gui/packages/client/src/daemon.ts
+  - clients/gui/apps/desktop/src/notify.ts
 gist: The desktop app shows a turn the root failed as a failure, and follows a daemon that restarted to where it is now
 ---
 

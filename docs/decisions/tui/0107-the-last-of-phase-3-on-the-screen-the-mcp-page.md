@@ -4,7 +4,7 @@ title: "The last of phase 3 on the screen: the `/mcp` page reads the daemon, a n
 date: 2026-09-20
 status: accepted
 paths:
-  - clients/tui/test/troupe/phase3_client_test.exs
+  - clients/tui/lib/troupe/client/daemon.ex
 gist: "The last of phase 3 on the screen: the `/mcp` page reads the daemon, a near limit is a warning, and three settings gain a row"
 ---
 

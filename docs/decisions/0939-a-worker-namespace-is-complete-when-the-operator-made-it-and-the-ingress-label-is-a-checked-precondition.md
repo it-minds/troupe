@@ -7,22 +7,8 @@ issue: 765
 paths:
   - apps/troupe_operator/lib/troupe/operator/worker_secrets.ex
   - apps/troupe_operator/lib/troupe/operator/ingress_check.ex
-  - apps/troupe_operator/lib/troupe/operator/reconciler.ex
-  - apps/troupe_operator/lib/troupe/operator/settings.ex
   - apps/troupe_protocol/lib/mix/tasks/troupe.openbao.policy.ex
-  - charts/troupe/crds/workerprofile.yaml
-  - charts/troupe/templates/operator-rbac.yaml
-  - charts/troupe/templates/operator-deployment.yaml
-  - charts/troupe/values.yaml
-  - charts/troupe/values.example.yaml
-  - charts/troupe/values.small.yaml
-  - config/runtime.exs
-  - dev/kind/values.yaml
-  - dev/kind/dependencies.yaml
   - dev/kind/openbao-plane.yaml
-  - scripts/kind-up
-  - scripts/remote-up
-  - clients/gui/apps/console/src/views/Overview.tsx
 symbols:
   - Troupe.Operator.WorkerSecrets
   - Troupe.Operator.IngressCheck

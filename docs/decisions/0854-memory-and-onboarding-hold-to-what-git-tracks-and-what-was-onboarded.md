@@ -12,14 +12,8 @@ paths:
   - apps/troupe_core/lib/troupe/tools/remember.ex
   - apps/troupe_core/lib/troupe/instructions.ex
   - apps/troupe_core/lib/troupe/onboard.ex
-  - apps/troupe_core/lib/troupe/onboard/instructions.ex
   - apps/troupe_core/lib/troupe/onboard/source.ex
   - apps/troupe_core/lib/troupe/onboard/start.ex
-  - apps/troupe_core/lib/troupe/config/open_code.ex
-  - apps/troupe_core/lib/troupe/setup.ex
-  - apps/troupe_gateway/lib/troupe/gateway/dispatch.ex
-  - apps/troupe_protocol/lib/troupe/protocol/endpoint.ex
-  - mix.lock
 symbols:
   - Troupe.Memory.Facts.list/2
   - Troupe.Instructions.glob?/1

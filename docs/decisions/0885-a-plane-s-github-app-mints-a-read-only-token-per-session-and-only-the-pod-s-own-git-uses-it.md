@@ -6,20 +6,9 @@ status: accepted
 issue: 147
 paths:
   - apps/troupe_plane/lib/troupe/plane/github.ex
-  - apps/troupe_plane/lib/troupe/plane/github/
-  - apps/troupe_plane/lib/troupe/plane/control/connection.ex
-  - apps/troupe_plane/lib/troupe/plane/harness.ex
-  - apps/troupe_plane/lib/troupe/plane/admin.ex
-  - apps/troupe_plane/lib/troupe/plane/admin/api.ex
-  - apps/troupe_plane/lib/troupe/plane/admin/console.ex
-  - apps/troupe_plane/lib/troupe/plane/sessions/session.ex
+  - apps/troupe_plane/lib/troupe/plane/github/app.ex
   - apps/troupe_plane/lib/troupe/plane/tokens.ex
-  - apps/troupe_plane/priv/repo/migrations/20261012000885_github_app.exs
-  - apps/troupe_protocol/lib/troupe/kms/policy.ex
   - apps/troupe_worker/lib/troupe/worker/git_credentials.ex
-  - apps/troupe_worker/lib/troupe/worker/session/clone.ex
-  - apps/troupe_worker/lib/troupe/worker/session/manager.ex
-  - apps/troupe_worker/lib/troupe/worker/plane/link.ex
 symbols:
   - Troupe.Plane.GitHub.credential/2
   - Troupe.Plane.GitHub.repository/2

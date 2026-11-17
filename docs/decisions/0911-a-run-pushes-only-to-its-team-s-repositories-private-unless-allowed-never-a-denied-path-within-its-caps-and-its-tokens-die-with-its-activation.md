@@ -9,19 +9,10 @@ paths:
   - apps/troupe_plane/lib/troupe/plane/github/policy.ex
   - apps/troupe_plane/lib/troupe/plane/github.ex
   - apps/troupe_plane/lib/troupe/plane/identity/team.ex
-  - apps/troupe_plane/lib/troupe/plane/admin.ex
-  - apps/troupe_plane/lib/troupe/plane/admin/api.ex
-  - apps/troupe_plane/lib/troupe/plane/harness.ex
-  - apps/troupe_plane/lib/troupe/plane/triggers.ex
-  - apps/troupe_plane/lib/troupe/plane/fleet/extends.ex
-  - apps/troupe_plane/priv/repo/migrations/20261016000911_team_github.exs
   - apps/troupe_worker/lib/troupe/worker/github.ex
   - apps/troupe_worker/lib/troupe/worker/github/api.ex
   - apps/troupe_worker/lib/troupe/worker/github/secrets.ex
   - apps/troupe_worker/lib/troupe/worker/git_credentials.ex
-  - charts/troupe/crds/workerprofile.yaml
-  - clients/gui/apps/console/src/views/Profiles.tsx
-  - clients/gui/apps/console/src/views/Team.tsx
 symbols:
   - Troupe.PushPaths.denied/2
   - Troupe.Plane.GitHub.Policy.listed/3

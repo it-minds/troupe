@@ -8,15 +8,9 @@ paths:
   - .github/workflows/native.yml
   - .github/workflows/release.yml
   - .github/workflows/signing.yml
-  - .github/workflows/ci.yml
-  - .github/workflows/dev-check.yml
   - scripts/signing/
   - apps/troupe_core/lib/troupe/release/os_signing.ex
-  - apps/troupe_daemon/mix.exs
-  - clients/tui/mix.exs
   - clients/gui/apps/desktop/src-tauri/tauri.signing.conf.json
-  - install.sh
-  - install.ps1
 symbols:
   - Troupe.Release.OSSigning
 gist: "native.yml signs only with sign: release (release.yml), in the release environment; absent secrets build unsigned and say so; every Mach-O/PE a payload unpacks is signed before it is packed; signing.yml tests it self-signed"

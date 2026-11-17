@@ -8,15 +8,7 @@ paths:
   - apps/troupe_protocol/lib/troupe/protocol/organisation.ex
   - apps/troupe_core/lib/troupe/config/org.ex
   - apps/troupe_core/lib/troupe/config/layers.ex
-  - apps/troupe_core/lib/troupe/config/schema.ex
-  - apps/troupe_core/lib/troupe/config/explain.ex
-  - apps/troupe_core/lib/troupe/config/settings.ex
-  - apps/troupe_core/lib/troupe/config.ex
-  - apps/troupe_gateway/lib/troupe/gateway/dispatch.ex
   - apps/troupe_plane/lib/troupe/plane/settings.ex
-  - apps/troupe_plane/lib/troupe/plane/harness.ex
-  - clients/tui/lib/troupe/cli/model_config.ex
-  - clients/tui/lib/troupe/settings.ex
 symbols:
   - Troupe.Protocol.Organisation
   - Troupe.Config.Org

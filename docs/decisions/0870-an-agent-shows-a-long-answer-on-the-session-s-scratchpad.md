@@ -7,19 +7,7 @@ issue: 472
 paths:
   - apps/troupe_core/lib/troupe/scratch.ex
   - apps/troupe_core/lib/troupe/tools/show.ex
-  - apps/troupe_core/lib/troupe/tools.ex
   - apps/troupe_core/lib/troupe/mounts.ex
-  - apps/troupe_core/lib/troupe/config.ex
-  - apps/troupe_core/lib/troupe/config/schema.ex
-  - apps/troupe_core/lib/troupe.ex
-  - apps/troupe_core/lib/troupe/commands.ex
-  - apps/troupe_core/priv/bench/budgets.json
-  - apps/troupe_core/lib/troupe/bench/live_scenarios.ex
-  - apps/troupe_gateway/lib/troupe/gateway/dispatch.ex
-  - apps/troupe_protocol/lib/troupe/protocol/schema.ex
-  - clients/gui/packages/client/src/scratch.ts
-  - clients/gui/packages/client/src/transcript.ts
-  - clients/gui/apps/desktop/src/views/Session.tsx
 symbols:
   - Troupe.Scratch
   - Troupe.Tools.Show

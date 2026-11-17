@@ -5,14 +5,9 @@ date: 2026-10-11
 status: accepted
 issue: 66
 paths:
-  - .github/workflows/release.yml
-  - scripts/release-manifest.exs
-  - scripts/release-vectors.exs
-  - scripts/release-installers
-  - apps/troupe_core/lib/troupe/release/
+  - apps/troupe_core/lib/troupe/release/keys.ex
   - apps/troupe_core/lib/troupe/update.ex
-  - apps/troupe_core/priv/release-keys.txt
-  - apps/troupe_gateway/lib/troupe/gateway/idle.ex
+  - scripts/release-manifest.exs
   - install.sh
   - install.ps1
 symbols:

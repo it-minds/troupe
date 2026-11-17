@@ -6,14 +6,11 @@ status: accepted
 issue: 600
 paths:
   - deploy/plane-light/compose.yml
-  - deploy/plane-light/.env.example
   - deploy/plane-light/bootstrap/bootstrap.py
   - deploy/plane-light/openbao/entrypoint.sh
   - deploy/plane-light/caddy/Caddyfile
-  - deploy/plane-light/dex/config.yaml
   - scripts/plane-light
   - scripts/plane-light-check
-  - config/runtime.exs
 symbols:
   - TROUPE_WORKER_ENDPOINT
 gist: "One compose file is a supported plane: published images, Dex bundled, OpenBao persistent and self-unsealing, the worker a registered machine; one box by design"

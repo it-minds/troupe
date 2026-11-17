@@ -4,7 +4,7 @@ title: "`troupe config` with nothing to report sets the model up instead"
 date: 2026-09-24
 status: accepted
 paths:
-  - clients/tui/test/troupe/config_setup_test.exs
+  - clients/tui/lib/troupe/cli/config_setup.ex
 gist: "`troupe config` with nothing to report sets the model up instead"
 ---
 

@@ -5,23 +5,11 @@ date: 2026-10-01
 status: accepted
 issue: 315
 paths:
-  - apps/troupe_core/lib/troupe/mcp.ex
   - apps/troupe_core/lib/troupe/mcp/tool.ex
-  - apps/troupe_operator/lib/troupe/operator/names.ex
-  - apps/troupe_operator/lib/troupe/operator/reconciler.ex
-  - apps/troupe_operator/lib/troupe/operator/resources.ex
-  - apps/troupe_plane/lib/troupe/plane/admin.ex
-  - apps/troupe_plane/lib/troupe/plane/bundles.ex
-  - apps/troupe_plane/lib/troupe/plane/provision.ex
   - apps/troupe_protocol/lib/troupe/kms/open_bao.ex
   - apps/troupe_protocol/lib/troupe/kms/policy.ex
-  - apps/troupe_protocol/lib/troupe/mcp/server.ex
   - apps/troupe_protocol/lib/troupe/protocol/bundle.ex
-  - apps/troupe_protocol/lib/troupe/worker_profile.ex
   - apps/troupe_worker/lib/troupe/worker/client_credentials.ex
-  - charts/troupe/templates/operator-rbac.yaml
-  - config/runtime.exs
-  - dev/kind/dependencies.yaml
 gist: A worker calls an MCP server as its profile's own identity, by OAuth client credentials with an assertion signed through OpenBao transit
 ---
 

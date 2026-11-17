@@ -6,21 +6,10 @@ status: accepted
 issue: 739
 paths:
   - apps/troupe_core/lib/troupe/config/explain.ex
-  - apps/troupe_core/lib/troupe/config/settings.ex
-  - apps/troupe_gateway/lib/troupe/gateway/dispatch.ex
-  - clients/gui/apps/desktop/src/views/PodConfig.tsx
-  - clients/gui/packages/client/src/config.ts
   - clients/gui/packages/client/src/connection.ts
   - clients/gui/packages/client/src/daemon.ts
   - clients/tui/lib/troupe/ui/setup.ex
-  - clients/tui/lib/troupe/cli/config_setup.ex
-  - clients/tui/lib/troupe/remote/worker.ex
   - clients/tui/lib/troupe/client/daemon.ex
-  - apps/troupe_worker/lib/troupe/worker/plane/commands.ex
-  - apps/troupe_core/lib/troupe/tools/output.ex
-  - apps/troupe_operator/lib/troupe/operator/resources.ex
-  - apps/troupe_protocol/lib/troupe/kms/open_bao.ex
-  - charts/troupe/templates/operator-deployment.yaml
 symbols:
   - Troupe.Config.Explain.withhold/2
   - Troupe.UI.Setup

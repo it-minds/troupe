@@ -9,12 +9,8 @@ paths:
   - apps/troupe_core/lib/troupe/instructions.ex
   - apps/troupe_core/lib/troupe/instructions/front_matter.ex
   - apps/troupe_core/lib/troupe/instructions/check.ex
-  - apps/troupe_core/lib/troupe/config.ex
   - apps/troupe_core/lib/troupe/config/open_code.ex
   - apps/troupe_core/lib/troupe/config/model_settings.ex
-  - clients/tui/lib/troupe/cli/config_setup.ex
-  - install.sh
-  - install.ps1
 symbols:
   - Troupe.Instructions.load/3
   - Troupe.Instructions.FrontMatter

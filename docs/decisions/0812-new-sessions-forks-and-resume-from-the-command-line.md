@@ -6,16 +6,8 @@ status: accepted
 issue: 484
 paths:
   - apps/troupe_protocol/lib/troupe/sessions/fork.ex
-  - apps/troupe_protocol/lib/troupe/protocol/schema.ex
-  - apps/troupe_core/lib/troupe.ex
-  - apps/troupe_core/lib/troupe/session/log.ex
-  - apps/troupe_core/lib/troupe/commands.ex
-  - apps/troupe_gateway/lib/troupe/gateway/dispatch.ex
-  - apps/troupe_worker/lib/troupe/worker/auth.ex
   - clients/tui/lib/troupe/cli.ex
   - clients/tui/lib/troupe/cli/runner.ex
-  - clients/tui/lib/troupe/client.ex
-  - clients/tui/lib/troupe/ui/headless/printer.ex
 symbols:
   - Troupe.fork_session/2
   - Troupe.Sessions.Fork.chain/3

@@ -9,14 +9,6 @@ paths:
   - apps/troupe_core/lib/troupe/tools/recall.ex
   - apps/troupe_core/lib/troupe/memory/facts.ex
   - apps/troupe_core/lib/troupe/memory.ex
-  - apps/troupe_gateway/lib/troupe/gateway/dispatch.ex
-  - apps/troupe_protocol/lib/troupe/protocol/schema.ex
-  - clients/tui/lib/troupe/client/daemon.ex
-  - clients/tui/lib/troupe/ui/tui/view.ex
-  - clients/tui/lib/troupe/ui/tui/server.ex
-  - clients/tui/lib/mix/tasks/troupe.palette.ex
-  - clients/gui/packages/client/src/memory.ts
-  - clients/gui/apps/desktop/src/views/Memory.tsx
 symbols:
   - Troupe.Tools.Remember.run/2
   - Troupe.Memory.survey_version/0

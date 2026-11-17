@@ -7,13 +7,9 @@ issue: 308
 paths:
   - apps/troupe_core/lib/troupe/mcp/tool.ex
   - apps/troupe_core/lib/troupe/session/mcp.ex
-  - apps/troupe_gateway/lib/troupe/gateway/dispatch.ex
   - apps/troupe_gateway/lib/troupe/gateway/local_sources.ex
-  - apps/troupe_protocol/lib/troupe/protocol/schema.ex
-  - clients/gui/apps/desktop/src/hooks.ts
-  - clients/gui/apps/desktop/src/views/Offer.tsx
-  - clients/gui/packages/client/src/daemon.ts
   - clients/gui/packages/client/src/offer.ts
+  - clients/gui/apps/desktop/src/views/Offer.tsx
 gist: A person's own signed-in servers are offered to a pod session they open in the desktop app, as tools the app hosts, and the daemon makes every call…
 ---
 

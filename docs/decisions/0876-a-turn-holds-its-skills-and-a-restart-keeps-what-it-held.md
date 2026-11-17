@@ -7,14 +7,9 @@ issue: 617
 supersedes: [871]
 paths:
   - apps/troupe_core/lib/troupe/agent/hold.ex
-  - apps/troupe_core/lib/troupe/agent/server.ex
   - apps/troupe_core/lib/troupe/agent/state.ex
   - apps/troupe_core/lib/troupe/skills.ex
-  - apps/troupe_core/lib/troupe/tools.ex
-  - apps/troupe_core/lib/troupe/tool.ex
   - apps/troupe_core/lib/troupe/log/fold.ex
-  - apps/troupe_protocol/lib/troupe/protocol/schema.ex
-  - protocol/schema/v1/events/llm_request.json
 symbols:
   - Troupe.Agent.Hold
   - Troupe.Skills.found/3

@@ -6,22 +6,11 @@ status: accepted
 issue: 932
 paths:
   - apps/troupe_protocol/lib/troupe/protocol/relay.ex
-  - apps/troupe_protocol/lib/troupe/protocol/schema.ex
   - apps/troupe_plane/lib/troupe/plane/remote.ex
   - apps/troupe_plane/lib/troupe/plane/remote/laptop.ex
   - apps/troupe_plane/lib/troupe/plane/remote/viewer.ex
-  - apps/troupe_plane/lib/troupe/plane/remote/offer.ex
-  - apps/troupe_plane/priv/repo/migrations/20261115000997_remote_sessions_paused.exs
   - apps/troupe_gateway/lib/troupe/gateway/remote.ex
-  - apps/troupe_gateway/lib/troupe/gateway/connection.ex
-  - apps/troupe_core/lib/troupe/tools.ex
   - apps/troupe_core/lib/troupe/session/approvals.ex
-  - clients/gui/packages/client/src/transcript.ts
-  - clients/gui/packages/client/src/session.ts
-  - clients/gui/apps/console/src/views/Remote.tsx
-  - clients/gui/apps/desktop/src/views/Session.tsx
-  - clients/gui/apps/desktop/src/views/Approval.tsx
-  - clients/tui/lib/troupe/remote/worker.ex
 symbols:
   - Troupe.Protocol.Relay.paused_reasons/0
   - Troupe.Protocol.Relay.paused_refusal/0

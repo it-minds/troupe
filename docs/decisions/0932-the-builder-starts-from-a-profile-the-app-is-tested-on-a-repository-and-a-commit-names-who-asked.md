@@ -6,20 +6,9 @@ status: accepted
 issue: 594
 paths:
   - apps/troupe_plane/lib/troupe/plane/admin.ex
-  - apps/troupe_plane/lib/troupe/plane/admin/api.ex
-  - apps/troupe_plane/lib/troupe/plane/admin/console.ex
-  - apps/troupe_plane/lib/troupe/plane/bundles.ex
   - apps/troupe_plane/lib/troupe/plane/ledger.ex
   - apps/troupe_plane/lib/troupe/plane/github.ex
-  - apps/troupe_plane/lib/troupe/plane/control/connection.ex
   - apps/troupe_worker/lib/troupe/worker/github.ex
-  - clients/gui/packages/client/src/admin.ts
-  - clients/gui/apps/console/src/views/Bundles.tsx
-  - clients/gui/apps/console/src/views/ProfileAgents.tsx
-  - clients/gui/apps/console/src/views/Profiles.tsx
-  - clients/gui/apps/console/src/views/Integrations.tsx
-  - clients/gui/apps/desktop/src/views/Agents.tsx
-  - clients/gui/apps/desktop/src/views/AgentPicker.tsx
 symbols:
   - Troupe.Plane.Admin.profile_agents/2
   - Troupe.Plane.Admin.profile_choices/2

@@ -5,7 +5,7 @@ date: 2026-09-29
 status: accepted
 issue: 251
 paths:
-  - apps/troupe_operator/test/troupe/operator/resources_test.exs
+  - apps/troupe_operator/lib/troupe/operator/resources.ex
 gist: With Cilium, an allowed host that is an IP address is admitted as that one address, by a `toCIDR` rule
 ---
 

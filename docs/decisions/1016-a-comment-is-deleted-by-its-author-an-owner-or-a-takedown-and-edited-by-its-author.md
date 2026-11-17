@@ -5,17 +5,10 @@ date: 2026-11-16
 status: accepted
 issue: 979
 paths:
-  - apps/troupe_plane/lib/troupe/plane/artifacts.ex
   - apps/troupe_plane/lib/troupe/plane/artifacts/comments.ex
   - apps/troupe_plane/lib/troupe/plane/artifacts/comment.ex
-  - apps/troupe_plane/lib/troupe/plane/harness.ex
-  - apps/troupe_plane/priv/repo/migrations/20261116001016_artifact_comment_edits.exs
+  - apps/troupe_plane/lib/troupe/plane/artifacts.ex
   - apps/troupe_gateway/lib/troupe/gateway/artifacts.ex
-  - apps/troupe_gateway/lib/troupe/gateway/dispatch.ex
-  - apps/troupe_protocol/lib/troupe/protocol/schema.ex
-  - clients/gui/packages/client/src/artifacts.ts
-  - clients/gui/packages/client/src/own.ts
-  - clients/gui/packages/client/src/daemon.ts
   - clients/gui/apps/desktop/src/views/Artifacts.tsx
   - clients/gui/apps/console/src/views/ArtifactComments.tsx
 symbols:

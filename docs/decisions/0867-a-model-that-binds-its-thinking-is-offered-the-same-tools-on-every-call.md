@@ -10,7 +10,6 @@ paths:
   - apps/troupe_core/lib/troupe/tool.ex
   - apps/troupe_core/lib/troupe/tools/todo.ex
   - apps/troupe_core/lib/troupe/llm/catalog.ex
-  - apps/troupe_core/lib/troupe/agent/server.ex
   - apps/troupe_core/lib/troupe/bench/live_scenarios.ex
 symbols:
   - Troupe.LLM.Catalog.binds_thinking?/1

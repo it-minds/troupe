@@ -6,15 +6,8 @@ status: accepted
 paths:
   - clients/tui/lib/troupe/ui/profile_view.ex
   - clients/tui/lib/troupe/ui/tui/profiles_page.ex
-  - clients/tui/lib/troupe/ui/tui/server.ex
-  - clients/tui/lib/troupe/ui/tui/view.ex
-  - clients/tui/lib/troupe/ui/headless/printer.ex
   - clients/tui/lib/troupe/client/profiles.ex
-  - clients/tui/lib/troupe/client/remote.ex
-  - clients/tui/lib/troupe/client.ex
   - clients/tui/lib/troupe/cli/profiles.ex
-  - clients/tui/lib/troupe/cli.ex
-  - apps/troupe_core/lib/troupe/commands.ex
 symbols:
   - Troupe.UI.ProfileView
   - Troupe.UI.TUI.ProfilesPage

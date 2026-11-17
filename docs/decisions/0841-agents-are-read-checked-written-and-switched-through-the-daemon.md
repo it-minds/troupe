@@ -9,14 +9,7 @@ paths:
   - apps/troupe_core/lib/troupe/agent/local.ex
   - apps/troupe_core/lib/troupe/agent/definitions.ex
   - apps/troupe_core/lib/troupe/agent/definition.ex
-  - apps/troupe_core/lib/troupe/agent/server.ex
-  - apps/troupe_core/lib/troupe/onboard.ex
-  - apps/troupe_core/lib/troupe/sessions/index.ex
-  - apps/troupe_core/lib/troupe.ex
   - apps/troupe_gateway/lib/troupe/gateway/agents.ex
-  - apps/troupe_gateway/lib/troupe/gateway/dispatch.ex
-  - apps/troupe_gateway/lib/troupe/gateway/worktrees.ex
-  - apps/troupe_protocol/lib/troupe/protocol/schema.ex
 symbols:
   - Troupe.Agent.Validate.check/2
   - Troupe.Agent.Local.put/5

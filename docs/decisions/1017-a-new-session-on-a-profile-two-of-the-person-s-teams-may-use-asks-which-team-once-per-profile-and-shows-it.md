@@ -8,18 +8,10 @@ supersedes: []
 paths:
   - apps/troupe_plane/lib/troupe/plane/harness.ex
   - clients/gui/packages/client/src/newSession.ts
-  - clients/gui/packages/client/src/index.ts
-  - clients/gui/scripts/fake-deployment.ts
   - clients/gui/apps/desktop/src/views/StartSession.tsx
+  - clients/tui/lib/troupe/client/team_choice.ex
   - clients/tui/lib/troupe/ui/new_session.ex
   - clients/tui/lib/troupe/ui/tui/new_session_page.ex
-  - clients/tui/lib/troupe/ui/tui/server.ex
-  - clients/tui/lib/troupe/client/team_choice.ex
-  - clients/tui/lib/troupe/client.ex
-  - clients/tui/lib/troupe/client/remote.ex
-  - clients/tui/lib/troupe/cli.ex
-  - clients/tui/lib/troupe/cli/run_target.ex
-  - clients/tui/lib/troupe/cli/runner.ex
 symbols:
   - teamsToChoose
   - chosenTeam

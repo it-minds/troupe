@@ -9,11 +9,6 @@ paths:
   - apps/troupe_core/lib/troupe/tools/finish.ex
   - apps/troupe_core/lib/troupe/agent/writes.ex
   - apps/troupe_core/lib/troupe/tools/read_branch.ex
-  - apps/troupe_core/lib/troupe/agent/server.ex
-  - apps/troupe_core/priv/agents/
-  - apps/troupe_protocol/lib/troupe/protocol/schema.ex
-  - clients/gui/packages/client/src/transcript.ts
-  - clients/gui/apps/desktop/src/views/Session.tsx
 symbols:
   - Troupe.Tools.Delegate.brief/1
   - Troupe.Tools.Finish.parts/1

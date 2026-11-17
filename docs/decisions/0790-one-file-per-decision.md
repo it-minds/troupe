@@ -5,15 +5,8 @@ date: 2026-10-05
 status: accepted
 issue: 437
 paths:
-  - docs/decisions/
   - apps/troupe_protocol/lib/mix/tasks/troupe.decisions.ex
   - scripts/split-decisions.exs
-  - docs/overrides/hooks.py
-  - mkdocs.yml
-  - .github/workflows/ci.yml
-  - .github/workflows/dev-check.yml
-  - AGENTS.md
-  - docs/developer/fixing-issues.md
 gist: One file per decision, never an appended log or a committed index; paths must match; --check needs no compile, so CI runs it on every change
 ---
 

@@ -6,15 +6,10 @@ status: accepted
 issue: 920
 supersedes: [986]
 paths:
-  - apps/troupe_gateway/lib/troupe/gateway/dispatch.ex
-  - apps/troupe_gateway/lib/troupe/gateway/connection.ex
   - apps/troupe_core/lib/troupe/session/approvals.ex
   - apps/troupe_core/lib/troupe/config/settings.ex
-  - apps/troupe_core/lib/troupe.ex
   - apps/troupe_protocol/lib/troupe/protocol/relay.ex
-  - apps/troupe_protocol/lib/troupe/protocol/schema.ex
   - clients/gui/apps/desktop/src/views/Approval.tsx
-  - clients/gui/packages/client/src/transcript.ts
 symbols:
   - Troupe.Config.Settings.allow_rule/3
   - Troupe.Session.Approvals.lasting/2

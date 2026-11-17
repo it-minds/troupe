@@ -4,7 +4,6 @@ title: A librarian's run stamps the brief it checked, whether or not it rewrote 
 date: 2026-09-26
 status: accepted
 paths:
-  - apps/troupe_core/lib/troupe/agent/server.ex
   - apps/troupe_core/lib/troupe/session/memory.ex
 gist: A librarian's run stamps the brief it checked, whether or not it rewrote any of it
 ---

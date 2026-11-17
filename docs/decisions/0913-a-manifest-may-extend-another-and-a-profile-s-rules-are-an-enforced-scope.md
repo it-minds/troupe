@@ -5,27 +5,14 @@ date: 2026-10-16
 status: accepted
 issue: 655
 paths:
-  - charts/troupe/crds/workerprofile.yaml
-  - charts/troupe/templates/admission-policy.yaml
-  - charts/troupe/templates/plane-rbac.yaml
   - apps/troupe_protocol/lib/troupe/worker_profile.ex
-  - apps/troupe_operator/lib/troupe/operator/reconciler.ex
   - apps/troupe_operator/lib/troupe/operator/skip_observed.ex
-  - apps/troupe_operator/lib/troupe/operator/watch.ex
-  - apps/troupe_plane/lib/troupe/plane/gitops.ex
   - apps/troupe_plane/lib/troupe/plane/gitops/profiles.ex
   - apps/troupe_plane/lib/troupe/plane/provision.ex
   - apps/troupe_plane/lib/troupe/plane/fleet/extends.ex
   - apps/troupe_plane/lib/troupe/plane/fleet/profile.ex
-  - apps/troupe_plane/lib/troupe/plane/harness.ex
-  - apps/troupe_plane/lib/troupe/plane/admin.ex
   - apps/troupe_core/lib/troupe/config/permissions.ex
   - apps/troupe_core/lib/troupe/session/shell.ex
-  - apps/troupe_worker/lib/troupe/worker/session/restore.ex
-  - clients/tui/lib/troupe/ui/tui/model.ex
-  - clients/gui/packages/client/src/config.ts
-  - clients/gui/apps/console/src/views/Profiles.tsx
-  - clients/gui/apps/console/src/views/RuleLists.tsx
 symbols:
   - Troupe.WorkerProfile.in_effect/1
   - Troupe.Plane.Gitops.Profiles.order/1

@@ -8,18 +8,6 @@ paths:
   - apps/troupe_plane/lib/troupe/plane/artifacts.ex
   - apps/troupe_plane/lib/troupe/plane/artifacts/*.ex
   - apps/troupe_plane/lib/troupe/plane/web/artifacts.ex
-  - apps/troupe_plane/lib/troupe/plane/harness.ex
-  - apps/troupe_plane/lib/troupe/plane/settings.ex
-  - apps/troupe_plane/priv/repo/migrations/20261025000950_artifact_versions_and_links.exs
-  - apps/troupe_core/lib/troupe/tools/publish_artifact.ex
-  - apps/troupe_gateway/lib/troupe/gateway/artifacts.ex
-  - clients/gui/apps/console/src/views/Artifacts.tsx
-  - clients/gui/apps/console/src/views/ArtifactEditor.tsx
-  - clients/gui/apps/console/src/views/ArtifactLinks.tsx
-  - clients/gui/apps/console/src/console.ts
-  - clients/gui/apps/desktop/src/views/Publish.tsx
-  - clients/gui/packages/client/src/artifacts.ts
-  - clients/gui/docker/headers.conf
 symbols:
   - Troupe.Plane.Artifacts.Shares
   - Troupe.Plane.Artifacts.Uploads

@@ -9,16 +9,7 @@ paths:
   - apps/troupe_core/lib/troupe/start_at_login.ex
   - clients/tui/lib/troupe/client/steering.ex
   - clients/tui/lib/troupe/client/remote.ex
-  - clients/tui/lib/troupe/remote/worker.ex
-  - clients/tui/lib/troupe/remote/capability.ex
   - clients/tui/lib/troupe/ui/tui/model.ex
-  - clients/tui/lib/troupe/ui/tui/view.ex
-  - clients/tui/lib/troupe/ui/tui/server.ex
-  - clients/gui/packages/client/src/fleet.ts
-  - clients/gui/apps/desktop/src/views/Remote.tsx
-  - clients/gui/apps/desktop/src/views/Approval.tsx
-  - clients/gui/apps/console/src/views/Remote.tsx
-  - .github/workflows/native.yml
 symbols:
   - Troupe.StartAtLogin.enabled?/1
   - Troupe.Client.Steering.state/1

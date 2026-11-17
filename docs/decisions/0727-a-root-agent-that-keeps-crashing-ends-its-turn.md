@@ -4,24 +4,8 @@ title: A root agent that keeps crashing ends its turn saying why, and its sessio
 date: 2026-09-29
 status: accepted
 paths:
-  - apps/troupe_a2a/lib/troupe/a2a/events.ex
   - apps/troupe_core/lib/troupe/agent/node.ex
-  - apps/troupe_core/lib/troupe/agent/server.ex
   - apps/troupe_core/lib/troupe/agent/state.ex
-  - apps/troupe_core/lib/troupe/session.ex
-  - apps/troupe_core/lib/troupe/session/log.ex
-  - apps/troupe_core/lib/troupe/sessions/index.ex
-  - apps/troupe_protocol/lib/troupe/protocol/schema.ex
-  - apps/troupe_worker/lib/troupe/worker/session/manager.ex
-  - clients/gui/apps/desktop/src/notify.ts
-  - clients/gui/apps/desktop/src/views/Session.tsx
-  - clients/gui/apps/desktop/src/views/bits.tsx
-  - clients/gui/packages/client/src/daemon.ts
-  - clients/gui/packages/client/src/fleet.ts
-  - clients/gui/packages/client/src/transcript.ts
-  - clients/tui/lib/troupe/remote/translate.ex
-  - clients/tui/lib/troupe/ui/headless/printer.ex
-  - clients/tui/lib/troupe/ui/tui/model.ex
 gist: A root agent that keeps crashing ends its turn saying why, and its session stops instead of starting it again
 ---
 

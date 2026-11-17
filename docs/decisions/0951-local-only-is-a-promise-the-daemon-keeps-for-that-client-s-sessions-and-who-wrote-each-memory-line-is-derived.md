@@ -6,33 +6,12 @@ status: accepted
 issue: 55
 paths:
   - apps/troupe_gateway/lib/troupe/gateway/local_only.ex
-  - apps/troupe_gateway/lib/troupe/gateway/connection.ex
-  - apps/troupe_gateway/lib/troupe/gateway/dispatch.ex
   - apps/troupe_gateway/lib/troupe/gateway/memory.ex
-  - apps/troupe_gateway/lib/troupe/gateway/policy.ex
   - apps/troupe_gateway/lib/troupe/gateway/plane.ex
   - apps/troupe_gateway/lib/troupe/gateway/daemon.ex
-  - apps/troupe_gateway/lib/troupe/gateway/artifacts.ex
   - apps/troupe_core/lib/troupe/local_only.ex
-  - apps/troupe_core/lib/troupe/agent/server.ex
-  - apps/troupe_core/lib/troupe/config/schema.ex
-  - apps/troupe_core/lib/troupe/doctor.ex
-  - apps/troupe_protocol/lib/troupe/protocol/schema.ex
   - apps/troupe_plane/lib/troupe/plane/memory.ex
-  - apps/troupe_plane/lib/troupe/plane/harness.ex
-  - apps/troupe_plane/lib/troupe/plane/admin.ex
-  - apps/troupe_plane/lib/troupe/plane/control/connection.ex
-  - apps/troupe_worker/lib/troupe/worker/user_memory.ex
-  - clients/gui/packages/client/src/daemon.ts
-  - clients/gui/apps/desktop/src/hooks.ts
-  - clients/gui/apps/desktop/src/App.tsx
-  - clients/gui/apps/console/src/views/Memory.tsx
   - clients/tui/lib/troupe/cli/local_only.ex
-  - clients/tui/lib/troupe/cli/runner.ex
-  - clients/tui/lib/troupe/cli/doctor.ex
-  - clients/tui/lib/troupe/cli/memory.ex
-  - clients/tui/lib/troupe/client/daemon/link.ex
-  - clients/tui/lib/troupe/remote/worker.ex
 symbols:
   - Troupe.Gateway.LocalOnly
   - Troupe.LocalOnly

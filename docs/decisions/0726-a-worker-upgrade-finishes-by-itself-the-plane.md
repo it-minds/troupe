@@ -7,14 +7,8 @@ issue: 258
 paths:
   - apps/troupe_operator/lib/troupe/operator/reconciler.ex
   - apps/troupe_plane/lib/troupe/plane/enrolment.ex
-  - apps/troupe_plane/lib/troupe/plane/fleet.ex
-  - apps/troupe_plane/lib/troupe/plane/fleet/scaler.ex
   - apps/troupe_plane/lib/troupe/plane/fleet/upgrade.ex
   - apps/troupe_plane/lib/troupe/plane/fleet/worker.ex
-  - apps/troupe_plane/lib/troupe/plane/placement.ex
-  - apps/troupe_plane/lib/troupe/plane/provision.ex
-  - apps/troupe_plane/priv/repo/migrations/20260929000033_worker_upgrade_pending.exs
-  - apps/troupe_protocol/lib/troupe/worker_profile.ex
 gist: "A worker upgrade finishes by itself: the plane drains a pod behind once it holds no active session and records that on the profile, and the…"
 ---
 

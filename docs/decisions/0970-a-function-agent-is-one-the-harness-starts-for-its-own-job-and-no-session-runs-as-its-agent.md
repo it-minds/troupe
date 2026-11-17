@@ -6,18 +6,10 @@ status: accepted
 paths:
   - apps/troupe_protocol/lib/troupe/protocol/agent_definition.ex
   - apps/troupe_protocol/lib/troupe/protocol/agent_check.ex
-  - apps/troupe_protocol/lib/troupe/protocol/bundle.ex
   - apps/troupe_core/lib/troupe/agent/definition.ex
   - apps/troupe_core/lib/troupe/agent/definitions.ex
-  - apps/troupe_core/lib/troupe/session.ex
-  - apps/troupe_core/lib/troupe.ex
-  - apps/troupe_gateway/lib/troupe/gateway/dispatch.ex
   - apps/troupe_plane/lib/troupe/plane/bundles.ex
   - apps/troupe_plane/lib/troupe/plane/profile_view.ex
-  - apps/troupe_plane/lib/troupe/plane/harness.ex
-  - clients/tui/lib/troupe/client/daemon.ex
-  - clients/tui/lib/troupe/ui/profile_view.ex
-  - clients/gui/packages/client/src/profile.ts
 symbols:
   - Troupe.Agent.Definitions.functions/1
   - Troupe.Agent.Definitions.ruled_out?/2

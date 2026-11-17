@@ -8,7 +8,6 @@ paths:
   - apps/troupe_core/lib/troupe/tools/shell.ex
   - apps/troupe_core/lib/troupe/tool.ex
   - apps/troupe_core/lib/troupe/tools.ex
-  - apps/troupe_core/lib/troupe/agent/server.ex
   - apps/troupe_core/lib/troupe/log/fold.ex
   - apps/troupe_protocol/lib/troupe/protocol/schema.ex
 symbols:

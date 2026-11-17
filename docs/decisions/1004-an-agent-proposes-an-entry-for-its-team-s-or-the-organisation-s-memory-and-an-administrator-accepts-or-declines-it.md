@@ -7,31 +7,11 @@ status: accepted
 issue: 55
 paths:
   - apps/troupe_core/lib/troupe/tools/remember.ex
-  - apps/troupe_core/lib/troupe/user_memory.ex
   - apps/troupe_core/lib/troupe/plane_memory.ex
-  - apps/troupe_core/lib/troupe/agent/server.ex
-  - apps/troupe_protocol/lib/troupe/protocol/schema.ex
-  - apps/troupe_plane/lib/troupe/plane/memory.ex
   - apps/troupe_plane/lib/troupe/plane/memory/proposal.ex
   - apps/troupe_plane/lib/troupe/plane/memory/proposals.ex
-  - apps/troupe_plane/priv/repo/migrations/20261116001004_memory_proposals.exs
-  - apps/troupe_plane/lib/troupe/plane/control/connection.ex
-  - apps/troupe_plane/lib/troupe/plane/harness.ex
-  - apps/troupe_plane/lib/troupe/plane/admin.ex
-  - apps/troupe_plane/lib/troupe/plane/admin/api.ex
-  - apps/troupe_plane/lib/troupe/plane/admin/console.ex
-  - apps/troupe_plane/lib/troupe/plane/settings.ex
-  - apps/troupe_plane/lib/troupe/plane/fleet.ex
-  - apps/troupe_plane/lib/troupe/plane/erasure.ex
-  - apps/troupe_worker/lib/troupe/worker/user_memory.ex
-  - apps/troupe_worker/lib/troupe/worker/plane/commands.ex
-  - apps/troupe_gateway/lib/troupe/gateway/memory.ex
-  - clients/gui/packages/client/src/admin.ts
-  - clients/gui/packages/client/src/instructions.ts
-  - clients/gui/packages/client/src/own.ts
+  - apps/troupe_plane/lib/troupe/plane/memory.ex
   - clients/gui/apps/console/src/views/Memory.tsx
-  - clients/gui/apps/console/src/views/Overview.tsx
-  - clients/gui/apps/desktop/src/views/OwnMemory.tsx
 ---
 
 #55's last slice. Decisions 922, 929, 943, 947, 951, 954, 957 and 976 gave every level a

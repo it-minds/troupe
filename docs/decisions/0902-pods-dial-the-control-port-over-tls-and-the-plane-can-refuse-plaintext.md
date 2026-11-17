@@ -12,15 +12,6 @@ paths:
   - apps/troupe_plane/lib/troupe/plane/control/tls.ex
   - apps/troupe_worker/lib/troupe/worker/plane/link.ex
   - apps/troupe_operator/lib/troupe/operator/settings.ex
-  - apps/troupe_operator/lib/troupe/operator/resources.ex
-  - apps/troupe_operator/lib/troupe/operator/reconciler.ex
-  - apps/troupe_operator/lib/troupe/operator/names.ex
-  - config/runtime.exs
-  - charts/troupe/templates/operator-deployment.yaml
-  - charts/troupe/templates/plane-deployment.yaml
-  - charts/troupe/templates/_helpers.tpl
-  - charts/troupe/values.yaml
-  - dev/kind/values.yaml
 symbols:
   - Troupe.Plane.Control.Replay
   - Troupe.Plane.Control.TLS.required?/0

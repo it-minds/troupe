@@ -6,16 +6,11 @@ status: accepted
 issue: 248
 supersedes: [649, 696]
 paths:
-  - apps/troupe_core/lib/troupe/memory.ex
   - apps/troupe_core/lib/troupe/memory/facts.ex
   - apps/troupe_core/lib/troupe/memory/facts/store.ex
   - apps/troupe_core/lib/troupe/session/memory.ex
   - apps/troupe_core/lib/troupe/tools/recall.ex
-  - apps/troupe_core/lib/troupe/instructions.ex
-  - apps/troupe_core/lib/troupe/agent/server.ex
-  - apps/troupe_core/lib/troupe/application.ex
-  - apps/troupe_core/lib/troupe/onboard/notice.ex
-  - apps/troupe_core/lib/troupe/bench/memory.ex
+  - apps/troupe_core/lib/troupe/memory.ex
 symbols:
   - Troupe.Memory.Facts
   - Troupe.Memory.Facts.Store

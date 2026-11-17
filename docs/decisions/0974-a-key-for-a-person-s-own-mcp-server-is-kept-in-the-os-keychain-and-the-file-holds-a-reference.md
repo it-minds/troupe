@@ -7,18 +7,7 @@ supersedes: [820]
 paths:
   - apps/troupe_core/lib/troupe/mcp/secrets.ex
   - apps/troupe_core/lib/troupe/mcp/local.ex
-  - apps/troupe_core/lib/troupe/mcp/tool.ex
-  - apps/troupe_core/lib/troupe/mcp/stdio.ex
-  - apps/troupe_core/lib/troupe/session/mcp.ex
-  - apps/troupe_core/lib/troupe/skills/local.ex
   - apps/troupe_gateway/lib/troupe/gateway/local_sources.ex
-  - apps/troupe_gateway/lib/troupe/gateway/dispatch.ex
-  - apps/troupe_protocol/lib/troupe/protocol/schema.ex
-  - clients/tui/lib/troupe/ui/tui/server.ex
-  - clients/tui/lib/troupe/ui/tui/view.ex
-  - clients/tui/lib/troupe/client/daemon.ex
-  - clients/gui/packages/client/src/servers.ts
-  - clients/gui/apps/desktop/src/views/ConnectScreen.tsx
 symbols:
   - Troupe.MCP.Secrets.ref/3
   - Troupe.MCP.Tool.said/1

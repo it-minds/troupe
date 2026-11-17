@@ -6,31 +6,13 @@ status: accepted
 issue: 147
 paths:
   - apps/troupe_plane/lib/troupe/plane/github/issues.ex
-  - apps/troupe_plane/lib/troupe/plane/github/issue.ex
   - apps/troupe_plane/lib/troupe/plane/github/review.ex
-  - apps/troupe_plane/lib/troupe/plane/github/webhook.ex
   - apps/troupe_plane/lib/troupe/plane/github/policy.ex
-  - apps/troupe_plane/lib/troupe/plane/github/app.ex
   - apps/troupe_plane/lib/troupe/plane/github.ex
   - apps/troupe_plane/lib/troupe/plane/gitops/github_app.ex
-  - apps/troupe_plane/lib/troupe/plane/gitops.ex
   - apps/troupe_plane/lib/troupe/plane/triggers.ex
-  - apps/troupe_plane/lib/troupe/plane/triggers/run.ex
-  - apps/troupe_plane/lib/troupe/plane/triggers/scheduler.ex
-  - apps/troupe_plane/lib/troupe/plane/admin.ex
-  - apps/troupe_plane/lib/troupe/plane/admin/api.ex
-  - apps/troupe_plane/lib/troupe/plane/fleet/extends.ex
-  - apps/troupe_plane/priv/repo/migrations/20261018000917_github_sweep_and_gitops.exs
   - apps/troupe_core/lib/troupe/git.ex
   - apps/troupe_worker/lib/troupe/worker/github/tree.ex
-  - charts/troupe/crds/githubapp.yaml
-  - charts/troupe/crds/trigger.yaml
-  - charts/troupe/crds/workerprofile.yaml
-  - charts/troupe/templates/plane-rbac.yaml
-  - clients/gui/apps/console/src/views/Triggers.tsx
-  - clients/gui/apps/console/src/views/Integrations.tsx
-  - clients/gui/apps/console/src/views/Team.tsx
-  - clients/gui/apps/console/src/views/Runs.tsx
 symbols:
   - Troupe.Plane.GitHub.Issues.sweep/2
   - Troupe.Plane.GitHub.Issues.fix/3

@@ -10,7 +10,6 @@ paths:
   - apps/troupe_core/lib/troupe/tools/read_file.ex
   - apps/troupe_core/lib/troupe/tool.ex
   - apps/troupe_core/lib/troupe/scratch.ex
-  - apps/troupe_core/lib/troupe/agent/server.ex
   - apps/troupe_core/lib/troupe/bench/live.ex
   - apps/troupe_core/lib/troupe/bench/live_scenarios.ex
 symbols:

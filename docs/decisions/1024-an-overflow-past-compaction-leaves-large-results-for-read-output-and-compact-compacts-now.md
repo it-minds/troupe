@@ -6,21 +6,10 @@ status: accepted
 issue: 1006
 supersedes: [659, 771]
 paths:
-  - apps/troupe_core/lib/troupe/agent/server.ex
-  - apps/troupe_core/lib/troupe/agent/state.ex
   - apps/troupe_core/lib/troupe/tools/output.ex
   - apps/troupe_core/lib/troupe/tools/read_output.ex
-  - apps/troupe_core/lib/troupe/llm/providers/fake.ex
+  - apps/troupe_core/lib/troupe/agent/state.ex
   - apps/troupe_core/lib/troupe/commands.ex
-  - apps/troupe_core/lib/troupe.ex
-  - apps/troupe_gateway/lib/troupe/gateway/dispatch.ex
-  - apps/troupe_protocol/lib/troupe/protocol/schema.ex
-  - apps/troupe_worker/lib/troupe/worker/auth.ex
-  - clients/gui/apps/desktop/src/views/CommandPalette.tsx
-  - clients/gui/packages/client/src/session.ts
-  - clients/gui/packages/client/src/transcript.ts
-  - clients/tui/lib/troupe/remote/worker.ex
-  - clients/tui/lib/troupe/ui/tui/server.ex
 symbols:
   - Troupe.Agent.Server.compact/2
   - Troupe.compact/3

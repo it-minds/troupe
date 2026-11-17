@@ -5,10 +5,6 @@ date: 2026-10-01
 status: accepted
 issue: 300
 paths:
-  - apps/troupe_core/lib/troupe/application.ex
-  - apps/troupe_core/lib/troupe/config.ex
-  - apps/troupe_core/lib/troupe/config/schema.ex
-  - apps/troupe_core/lib/troupe/mcp/import.ex
   - apps/troupe_core/lib/troupe/mcp/local.ex
   - apps/troupe_core/lib/troupe/mcp/oauth.ex
   - apps/troupe_core/lib/troupe/mcp/oauth/sign_in.ex
@@ -16,17 +12,6 @@ paths:
   - apps/troupe_core/lib/troupe/mcp/oauth/tokens.ex
   - apps/troupe_core/lib/troupe/mcp/tool.ex
   - apps/troupe_core/lib/troupe/session/mcp.ex
-  - apps/troupe_gateway/lib/troupe/gateway/dispatch.ex
-  - apps/troupe_gateway/lib/troupe/gateway/local_sources.ex
-  - apps/troupe_protocol/lib/troupe/mcp/client.ex
-  - apps/troupe_protocol/lib/troupe/mcp/server.ex
-  - apps/troupe_protocol/lib/troupe/protocol/schema.ex
-  - clients/gui/apps/desktop/src/views/ConnectScreen.tsx
-  - clients/gui/packages/client/src/daemon.ts
-  - clients/tui/lib/troupe/client/daemon.ex
-  - clients/tui/lib/troupe/browser.ex
-  - clients/tui/lib/troupe/ui/tui/server.ex
-  - clients/tui/lib/troupe/ui/tui/view.ex
 gist: A person's own MCP server that wants them signed in, rather than a machine, is signed in to by the daemon, with PKCE and a loopback redirect, and…
 ---
 

@@ -4,7 +4,7 @@ title: The plane may see that a slot has a version, and nothing more
 date: 2026-09-15
 status: accepted
 paths:
-  - apps/troupe_plane/test/troupe/plane/person_credentials_test.exs
+  - apps/troupe_protocol/lib/troupe/kms/policy.ex
 gist: The plane may see that a slot has a version, and nothing more
 ---
 

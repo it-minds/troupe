@@ -5,7 +5,6 @@ date: 2026-09-20
 status: accepted
 paths:
   - apps/troupe_core/lib/troupe/agent/headroom.ex
-  - apps/troupe_core/lib/troupe/agent/server.ex
   - apps/troupe_core/lib/troupe/budget.ex
   - apps/troupe_core/lib/troupe/llm/message.ex
   - apps/troupe_core/lib/troupe/llm/providers/anthropic.ex

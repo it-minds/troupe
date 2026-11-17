@@ -9,14 +9,7 @@ paths:
   - apps/troupe_plane/lib/troupe/plane/identity.ex
   - apps/troupe_plane/lib/troupe/plane/login.ex
   - apps/troupe_plane/lib/troupe/plane/scim.ex
-  - apps/troupe_plane/lib/troupe/plane/web/router.ex
-  - apps/troupe_plane/lib/troupe/plane/control/connection.ex
-  - apps/troupe_plane/lib/troupe/plane/control/listener.ex
   - apps/troupe_plane/lib/troupe/plane/control/refusals.ex
-  - apps/troupe_operator/lib/troupe/operator/reconciler.ex
-  - charts/troupe/values.yaml
-  - charts/troupe/templates/_helpers.tpl
-  - clients/gui/apps/console/src/views/Profiles.tsx
 symbols:
   - Troupe.Plane.Identity.adoption/3
   - Troupe.Plane.Identity.lookalikes/0

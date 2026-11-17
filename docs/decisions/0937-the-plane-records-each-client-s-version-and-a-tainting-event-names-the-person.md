@@ -6,22 +6,11 @@ status: accepted
 issue: 657
 paths:
   - apps/troupe_plane/lib/troupe/plane/clients_seen.ex
-  - apps/troupe_plane/priv/repo/migrations/20261024000937_clients_seen.exs
-  - apps/troupe_plane/lib/troupe/plane/harness.ex
-  - apps/troupe_plane/lib/troupe/plane/admin.ex
   - apps/troupe_gateway/lib/troupe/gateway/plane.ex
-  - clients/gui/apps/console/src/views/ClientVersions.tsx
-  - clients/gui/apps/console/src/views/Overview.tsx
-  - clients/gui/packages/client/src/admin.ts
   - apps/troupe_protocol/lib/troupe/keyring/os.ex
-  - clients/gui/apps/desktop/src-tauri/src/secrets.rs
   - .github/workflows/keyring.yml
-  - apps/troupe_core/lib/troupe/session/client_tools.ex
-  - clients/tui/lib/troupe/remote/translate.ex
-  - clients/gui/packages/client/src/transcript.ts
   - clients/gui/packages/client/src/offer.ts
   - clients/gui/apps/desktop/src/views/Offer.tsx
-  - clients/gui/apps/desktop/src/hooks.ts
 symbols:
   - Troupe.Plane.ClientsSeen
 gist: "clients_seen: one row per (person, component) at a served initialize, no history; keyring CI on real stores, mac parts past one line; taint has display_name; offer re-asks, per server"

@@ -8,15 +8,7 @@ supersedes: [679, 861]
 paths:
   - apps/troupe_core/lib/troupe/tools.ex
   - apps/troupe_core/lib/troupe/tool.ex
-  - apps/troupe_core/lib/troupe/tools/goal_complete.ex
-  - apps/troupe_core/lib/troupe/agent/server.ex
   - apps/troupe_core/lib/troupe/agent/state.ex
-  - apps/troupe_core/lib/troupe/config.ex
-  - apps/troupe_core/lib/troupe/config/schema.ex
-  - apps/troupe_core/lib/troupe/llm/catalog.ex
-  - apps/troupe_core/lib/troupe/bench/live.ex
-  - apps/troupe_core/lib/troupe/bench/live_scenarios.ex
-  - apps/troupe_core/lib/troupe/bench/scenario.ex
 symbols:
   - Troupe.Tools.mcp/1
   - Troupe.Config.binds_thinking?/2

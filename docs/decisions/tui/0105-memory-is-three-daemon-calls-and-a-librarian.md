@@ -4,7 +4,7 @@ title: "`/memory` is three daemon calls and a librarian branch"
 date: 2026-09-20
 status: accepted
 paths:
-  - clients/tui/test/troupe/memory_client_test.exs
+  - clients/tui/lib/troupe/client/daemon.ex
 gist: "`/memory` is three daemon calls and a librarian branch"
 ---
 

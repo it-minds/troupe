@@ -5,20 +5,12 @@ date: 2026-10-12
 status: accepted
 issue: 66
 paths:
-  - .github/workflows/release.yml
-  - .github/workflows/native.yml
   - scripts/release-desktop-update.exs
   - apps/troupe_protocol/lib/troupe/release/manifest.ex
   - apps/troupe_protocol/lib/troupe/protocol/client_update.ex
   - clients/gui/apps/desktop/src-tauri/src/release.rs
   - clients/gui/apps/desktop/src-tauri/src/update.rs
-  - clients/gui/apps/desktop/src-tauri/tauri.conf.json
-  - clients/gui/apps/desktop/src-tauri/Cargo.toml
   - clients/gui/apps/desktop/src/updates.ts
-  - clients/gui/apps/desktop/src/views/Update.tsx
-  - clients/gui/packages/client/src/update.ts
-  - clients/tui/lib/troupe/remote/plane.ex
-  - clients/tui/lib/troupe/ui/hq.ex
 symbols:
   - Troupe.Protocol.ClientUpdate.suggestion/2
 gist: "One release key signs the desktop update too; the app trusts only keys compiled in, checks the manifest first, never moves back, asks before restarting"

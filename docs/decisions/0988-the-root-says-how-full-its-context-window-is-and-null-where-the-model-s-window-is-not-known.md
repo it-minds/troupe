@@ -6,7 +6,6 @@ status: accepted
 issue: 920
 supersedes: [986]
 paths:
-  - apps/troupe_core/lib/troupe/agent/server.ex
   - apps/troupe_core/lib/troupe/agent/state.ex
   - apps/troupe_core/lib/troupe/config.ex
   - apps/troupe_protocol/lib/troupe/protocol/schema.ex

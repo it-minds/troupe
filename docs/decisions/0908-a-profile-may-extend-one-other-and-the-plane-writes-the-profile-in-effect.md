@@ -8,13 +8,7 @@ paths:
   - apps/troupe_plane/lib/troupe/plane/fleet/extends.ex
   - apps/troupe_plane/lib/troupe/plane/fleet/profile.ex
   - apps/troupe_plane/lib/troupe/plane/admin.ex
-  - apps/troupe_plane/lib/troupe/plane/admin/api.ex
-  - apps/troupe_plane/lib/troupe/plane/bundles.ex
   - apps/troupe_plane/lib/troupe/plane/provision.ex
-  - apps/troupe_plane/lib/troupe/plane/gitops/profiles.ex
-  - apps/troupe_plane/priv/repo/migrations/20261016000908_profile_extends.exs
-  - clients/gui/apps/console/src/views/Profiles.tsx
-  - clients/gui/packages/client/src/admin.ts
 symbols:
   - Troupe.Plane.Fleet.Extends
   - Troupe.Plane.Admin.profile_put/2

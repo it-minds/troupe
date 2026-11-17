@@ -6,30 +6,10 @@ status: accepted
 issue: 55
 paths:
   - apps/troupe_protocol/lib/troupe/protocol/memory.ex
-  - apps/troupe_protocol/lib/troupe/protocol/plane_signature.ex
   - apps/troupe_plane/lib/troupe/plane/memory.ex
   - apps/troupe_plane/lib/troupe/plane/memory/document.ex
-  - apps/troupe_plane/priv/repo/migrations/20261018000922_memory_documents.exs
-  - apps/troupe_plane/lib/troupe/plane/admin.ex
-  - apps/troupe_plane/lib/troupe/plane/admin/api.ex
-  - apps/troupe_plane/lib/troupe/plane/admin/console.ex
-  - apps/troupe_plane/lib/troupe/plane/audit.ex
-  - apps/troupe_plane/lib/troupe/plane/harness.ex
   - apps/troupe_core/lib/troupe/plane_memory.ex
-  - apps/troupe_core/lib/troupe/plane_keys.ex
-  - apps/troupe_core/lib/troupe/config.ex
-  - apps/troupe_core/lib/troupe/config/layers.ex
-  - apps/troupe_core/lib/troupe/config/explain.ex
   - apps/troupe_core/lib/troupe/instructions.ex
-  - apps/troupe_gateway/lib/troupe/gateway/dispatch.ex
-  - apps/troupe_worker/lib/troupe/worker/plane/commands.ex
-  - apps/troupe_worker/lib/troupe/worker/session/restore.ex
-  - clients/tui/lib/troupe/client/instructions.ex
-  - clients/gui/packages/client/src/admin.ts
-  - clients/gui/apps/console/src/views/Memory.tsx
-  - clients/gui/apps/console/src/views/Profiles.tsx
-  - clients/gui/apps/console/src/views/bits.tsx
-  - clients/gui/apps/console/src/nav.ts
 symbols:
   - Troupe.Protocol.Memory
   - Troupe.Plane.Memory

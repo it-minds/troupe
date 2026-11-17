@@ -6,28 +6,9 @@ status: accepted
 issue: 55
 paths:
   - apps/troupe_core/lib/troupe/session/plane_memory.ex
-  - apps/troupe_core/lib/troupe/session.ex
   - apps/troupe_core/lib/troupe/plane_memory.ex
-  - apps/troupe_core/lib/troupe/agent/server.ex
-  - apps/troupe_protocol/lib/troupe/protocol/schema.ex
   - apps/troupe_gateway/lib/troupe/gateway/memory.ex
-  - apps/troupe_gateway/lib/troupe/gateway/daemon.ex
-  - apps/troupe_gateway/lib/troupe/gateway/dispatch.ex
-  - apps/troupe_worker/lib/troupe/worker/plane/commands.ex
   - apps/troupe_plane/lib/troupe/plane/memory.ex
-  - apps/troupe_plane/lib/troupe/plane/fleet.ex
-  - apps/troupe_plane/lib/troupe/plane/admin.ex
-  - apps/troupe_plane/lib/troupe/plane/admin/api.ex
-  - clients/tui/lib/troupe/cli/model_config.ex
-  - clients/tui/lib/troupe/client/remote.ex
-  - clients/tui/lib/troupe/remote/translate.ex
-  - clients/gui/packages/client/src/instructions.ts
-  - clients/gui/packages/client/src/session.ts
-  - clients/gui/packages/client/src/transcript.ts
-  - clients/gui/packages/client/src/admin.ts
-  - clients/gui/apps/desktop/src/views/Instructions.tsx
-  - clients/gui/apps/desktop/src/views/Session.tsx
-  - clients/gui/apps/console/src/views/Memory.tsx
 symbols:
   - Troupe.Session.PlaneMemory
   - Troupe.Gateway.Memory

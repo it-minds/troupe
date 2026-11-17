@@ -4,7 +4,7 @@ title: A question is answered as a question, not typed as input
 date: 2026-09-20
 status: accepted
 paths:
-  - clients/tui/test/troupe/question_client_test.exs
+  - clients/tui/lib/troupe/client/daemon.ex
 gist: A question is answered as a question, not typed as input
 ---
 

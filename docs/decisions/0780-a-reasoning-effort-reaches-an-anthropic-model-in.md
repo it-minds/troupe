@@ -5,7 +5,6 @@ date: 2026-10-05
 status: accepted
 issue: 396
 paths:
-  - apps/troupe_core/lib/troupe/agent/server.ex
   - apps/troupe_core/lib/troupe/config.ex
   - apps/troupe_core/lib/troupe/llm/catalog.ex
   - apps/troupe_core/lib/troupe/llm/provider.ex

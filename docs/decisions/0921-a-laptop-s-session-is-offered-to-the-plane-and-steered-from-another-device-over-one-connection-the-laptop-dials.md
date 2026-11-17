@@ -6,28 +6,11 @@ status: accepted
 issue: 58
 paths:
   - apps/troupe_protocol/lib/troupe/protocol/relay.ex
-  - apps/troupe_protocol/lib/troupe/protocol/endpoint.ex
-  - apps/troupe_protocol/lib/troupe/protocol/event.ex
-  - apps/troupe_protocol/lib/troupe/protocol/client.ex
   - apps/troupe_gateway/lib/troupe/gateway/remote.ex
   - apps/troupe_gateway/lib/troupe/gateway/remote/viewer.ex
-  - apps/troupe_gateway/lib/troupe/gateway/connection.ex
-  - apps/troupe_gateway/lib/troupe/gateway/dispatch.ex
   - apps/troupe_gateway/lib/troupe/gateway/plane.ex
   - apps/troupe_plane/lib/troupe/plane/remote.ex
   - apps/troupe_plane/lib/troupe/plane/remote/*.ex
-  - apps/troupe_plane/lib/troupe/plane/harness.ex
-  - apps/troupe_plane/lib/troupe/plane/web/router.ex
-  - apps/troupe_plane/priv/repo/migrations/20261018000921_remote_sessions.exs
-  - apps/troupe_core/lib/troupe/commands.ex
-  - apps/troupe_core/lib/troupe/agent/server.ex
-  - clients/tui/lib/troupe/client/steering.ex
-  - clients/tui/lib/troupe/ui/tui/server.ex
-  - clients/gui/packages/client/src/remote.ts
-  - clients/gui/packages/client/src/fleet.ts
-  - clients/gui/apps/desktop/src/views/Remote.tsx
-  - clients/gui/apps/desktop/src/hooks.ts
-  - clients/gui/apps/console/src/views/Remote.tsx
 symbols:
   - Troupe.Protocol.Relay
   - Troupe.Gateway.Remote

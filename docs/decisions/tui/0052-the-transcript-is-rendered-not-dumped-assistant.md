@@ -4,7 +4,7 @@ title: "The transcript is rendered, not dumped: assistant messages are markdown,
 date: 2026-09-11
 status: accepted
 paths:
-  - clients/tui/test/troupe/transcript_rows_test.exs
+  - clients/tui/lib/troupe/ui/tui/model.ex
 gist: "The transcript is rendered, not dumped: assistant messages are markdown, code is syntax-highlighted, and a file read is shown as numbered source"
 ---
 

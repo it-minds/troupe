@@ -7,14 +7,8 @@ issue: 965
 supersedes: [1004]
 paths:
   - apps/troupe_plane/lib/troupe/plane/memory/proposals.ex
-  - apps/troupe_plane/lib/troupe/plane/control/connection.ex
   - apps/troupe_plane/lib/troupe/plane/fleet/extends.ex
   - apps/troupe_plane/lib/troupe/plane/fleet/profile.ex
-  - apps/troupe_plane/lib/troupe/plane/admin.ex
-  - apps/troupe_plane/lib/troupe/plane/admin/api.ex
-  - charts/troupe/crds/workerprofile.yaml
-  - clients/gui/apps/console/src/views/Profiles.tsx
-  - clients/gui/packages/client/src/admin.ts
 symbols:
   - Troupe.Plane.Memory.Proposals.propose/5
   - Troupe.Plane.Memory.Proposals.off_reason/1

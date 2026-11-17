@@ -7,18 +7,8 @@ issue: 705
 paths:
   - charts/troupe/files/worker-apparmor
   - charts/troupe/templates/worker-profiles.yaml
-  - charts/troupe/templates/operator-deployment.yaml
-  - charts/troupe/templates/_helpers.tpl
-  - charts/troupe/values.yaml
   - apps/troupe_operator/lib/troupe/operator/settings.ex
   - apps/troupe_operator/lib/troupe/operator/resources.ex
-  - config/runtime.exs
-  - docker/Dockerfile
-  - dev/kind/values.yaml
-  - dev/kind/cri-containerd.apparmor.d
-  - scripts/kind-up
-  - scripts/remote-up
-  - .github/workflows/cluster.yml
 symbols:
   - Troupe.Operator.Settings.worker_apparmor/1
 gist: "worker.appArmor: Localhost troupe-worker (containerd default + mount/pivot_root, abi 3.0, more denials), loaded by the DaemonSet's MAC_ADMIN container; never Unconfined; sysctl untouched"

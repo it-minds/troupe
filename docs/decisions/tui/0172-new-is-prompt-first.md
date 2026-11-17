@@ -6,15 +6,7 @@ status: accepted
 paths:
   - clients/tui/lib/troupe/ui/tui/new_session_page.ex
   - clients/tui/lib/troupe/ui/new_session.ex
-  - clients/tui/lib/troupe/ui/tui/server.ex
-  - clients/tui/lib/troupe/ui/tui/view.ex
-  - clients/tui/lib/troupe/ui/hq.ex
-  - clients/tui/lib/troupe/ui/tui/agent_chooser.ex
-  - clients/tui/lib/troupe/client/remote.ex
-  - clients/tui/lib/troupe/client/daemon.ex
   - clients/tui/lib/troupe/cli/run_target.ex
-  - clients/tui/lib/troupe/cli/runner.ex
-  - clients/tui/lib/troupe/cli.ex
 symbols:
   - Troupe.UI.TUI.NewSessionPage
   - Troupe.CLI.RunTarget

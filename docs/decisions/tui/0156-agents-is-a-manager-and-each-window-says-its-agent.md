@@ -7,14 +7,7 @@ issue: 503
 paths:
   - clients/tui/lib/troupe/ui/tui/agents.ex
   - clients/tui/lib/troupe/ui/tui/agent_chooser.ex
-  - clients/tui/lib/troupe/editor.ex
-  - clients/tui/lib/troupe/client.ex
-  - clients/tui/lib/troupe/client/daemon.ex
-  - clients/tui/lib/troupe/client/remote.ex
-  - clients/tui/lib/troupe/remote/translate.ex
   - clients/tui/lib/troupe/ui/tui/model.ex
-  - clients/tui/lib/troupe/ui/tui/server.ex
-  - clients/tui/lib/troupe/ui/tui/view.ex
 symbols:
   - Troupe.UI.TUI.Agents
   - Troupe.UI.TUI.Agents.widened/2

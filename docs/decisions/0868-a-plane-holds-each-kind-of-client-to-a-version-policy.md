@@ -6,14 +6,8 @@ status: accepted
 issue: 66
 paths:
   - apps/troupe_plane/lib/troupe/plane/client_versions.ex
-  - apps/troupe_plane/priv/repo/migrations/20261011000868_client_versions.exs
-  - apps/troupe_plane/lib/troupe/plane/harness.ex
-  - clients/gui/apps/console/src/views/Policy.tsx
   - apps/troupe_protocol/lib/troupe/protocol/client_update.ex
-  - apps/troupe_gateway/lib/troupe/gateway/plane.ex
   - apps/troupe_core/lib/troupe/update.ex
-  - clients/tui/lib/troupe/remote/plane.ex
-  - clients/tui/lib/troupe/cli/remote.ex
 symbols:
   - Troupe.Plane.ClientVersions
   - Troupe.Protocol.ClientUpdate

@@ -6,21 +6,11 @@ status: accepted
 issue: 765
 paths:
   - apps/troupe_plane/lib/troupe/plane/drain.ex
-  - apps/troupe_plane/lib/troupe/plane/control/connection.ex
-  - apps/troupe_plane/lib/troupe/plane/reach.ex
   - apps/troupe_worker/lib/troupe/worker/drain.ex
-  - apps/troupe_worker/lib/troupe/worker/plane/commands.ex
-  - apps/troupe_worker/lib/troupe/worker/plane/link.ex
   - apps/troupe_operator/lib/troupe/operator/skip_observed.ex
-  - apps/troupe_operator/lib/troupe/operator/reconciler.ex
-  - apps/troupe_operator/lib/troupe/operator/watch.ex
-  - apps/troupe_operator/lib/troupe/operator/resources.ex
   - apps/troupe_protocol/lib/troupe/policy.ex
   - apps/troupe_protocol/lib/troupe/worker_profile.ex
   - apps/troupe_protocol/lib/troupe/worker_profile/reach.ex
-  - charts/troupe/crds/workerprofile.yaml
-  - charts/troupe/templates/admission-policy.yaml
-  - dev/kind/values.yaml
 symbols:
   - Troupe.Plane.Drain.pod/2
   - Troupe.Plane.Drain.progress/2

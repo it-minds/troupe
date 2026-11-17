@@ -5,15 +5,6 @@ date: 2026-10-05
 status: accepted
 paths:
   - apps/troupe_gateway/lib/troupe/gateway/private.ex
-  - apps/troupe_protocol/lib/troupe/protocol/schema.ex
-  - clients/gui/apps/desktop/src/App.tsx
-  - clients/gui/apps/desktop/src/views/bits.tsx
-  - clients/gui/packages/client/src/daemon.ts
-  - clients/gui/packages/client/src/fleet.ts
-  - clients/tui/lib/troupe/client.ex
-  - clients/tui/lib/troupe/client/daemon.ex
-  - clients/tui/lib/troupe/ui/tui/server.ex
-  - clients/tui/lib/troupe/ui/tui/view.ex
 gist: A daemon's `session.list` says a private session is private and how its sealing stands here, and `session.claim` takes one another device sealed…
 ---
 

@@ -9,13 +9,6 @@ paths:
   - apps/troupe_core/lib/troupe/tools/patch.ex
   - apps/troupe_core/lib/troupe/tools/show.ex
   - apps/troupe_core/lib/troupe/scratch.ex
-  - apps/troupe_core/lib/troupe/tools.ex
-  - apps/troupe_core/lib/troupe/tool.ex
-  - apps/troupe_core/lib/troupe/agent/server.ex
-  - apps/troupe_core/priv/bench/budgets.json
-  - apps/troupe_core/lib/troupe/bench/live.ex
-  - apps/troupe_core/lib/troupe/bench/live_scenarios.ex
-  - apps/troupe_core/lib/troupe/bench/scenarios.ex
 symbols:
   - Troupe.Tools.Patch
   - Troupe.Scratch.patch/4
