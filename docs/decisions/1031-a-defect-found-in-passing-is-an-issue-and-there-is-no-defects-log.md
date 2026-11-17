@@ -27,8 +27,8 @@ release or chunk that left them, so the only way to find a file's defects was to
 its path. Lines went in faster than they came out, the defects were tracked twice (in the
 log and in the issue tracker, which is already triaged by rank), and CI had about 90 lines
 of checks that existed only to keep the log consistent. For #1010 every item was checked
-against the code. The ones still true are filed as issues #1041 to #1071, and the pull
-request lists what happened to each of the others.
+against the code. The ones still true are filed as issues, and the pull request lists them
+and what happened to each of the others.
 
 **Not chosen.** Keeping the log and regrouping it by component: it would still be a second
 tracker, and its items would still miss the triage the issues get. One issue per entry:
