@@ -43,6 +43,8 @@ defmodule Troupe.Bench.Model do
     Usage
   }
 
+  alias Troupe.Protocol.Digest
+
   @type step ::
           {:text, String.t()}
           | {:tools, [{String.t(), map()}]}
@@ -273,7 +275,7 @@ defmodule Troupe.Bench.Model do
   defp bound_to(%Request{} = request) do
     names = request.tools |> Enum.map(& &1.name) |> Enum.sort()
     prefix = [Request.system_text(request), names]
-    :crypto.hash(:sha256, :erlang.term_to_binary(prefix)) |> Base.encode16(case: :lower)
+    Digest.sha256(:erlang.term_to_binary(prefix))
   end
 
   @doc "Tokens for a number of bytes, as this model counts them: four bytes each, rounded up."

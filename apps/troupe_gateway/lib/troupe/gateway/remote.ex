@@ -1213,7 +1213,7 @@ defmodule Troupe.Gateway.Remote do
   end
 
   defp narrow(session_id, method, %{"sessions" => sessions} = result)
-       when method in ["session.list", "fleet.get"] and is_list(sessions) do
+       when method == "session.list" and is_list(sessions) do
     %{result | "sessions" => Enum.filter(sessions, &(&1["id"] == session_id))}
   end
 
@@ -1315,20 +1315,16 @@ defmodule Troupe.Gateway.Remote do
   end
 
   defp persist(state) do
-    temporary = state.path <> ".#{System.unique_integer([:positive])}.tmp"
-
     text =
       Jason.encode!(%{"version" => @version, "device" => state.device, "offers" => state.offers},
         pretty: true
       )
 
-    with :ok <- File.mkdir_p(Path.dirname(state.path)),
-         :ok <- File.write(temporary, text <> "\n"),
-         :ok <- File.rename(temporary, state.path) do
-      :ok
-    else
+    case Troupe.Paths.write_atomic(state.path, text <> "\n") do
+      :ok ->
+        :ok
+
       {:error, reason} ->
-        File.rm(temporary)
         Logger.warning("troupe-daemon: #{state.path} could not be written: #{inspect(reason)}")
     end
   end

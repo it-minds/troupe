@@ -127,7 +127,7 @@ defmodule Troupe.PrivateLinkTest do
     refute daemon_token()
   end
 
-  # D71: a second person on the same login takes the daemon over from the terminal.
+  # A second person on the same login takes the daemon over from the terminal.
   describe "/unlink" do
     test "takes the daemon from the person it was linked to, and links whoever is signed in here" do
       {remote, url} = start_remote!(transport: :http)

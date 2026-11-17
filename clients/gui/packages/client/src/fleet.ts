@@ -380,12 +380,12 @@ export class RemoteSource implements FleetSource {
     const token = await this.token();
     const [offered, invited] = await Promise.all([
       this.plane
-        .rpc<{ sessions: Record<string, unknown>[] }>(token, "remote.list", {})
+        .remoteSessions(token)
         .then(({ sessions }) => (sessions ?? []).map((s) => rowFromRemote(s, this.id)))
         // A plane from before #58 relays nothing, which is no sessions rather than a fault.
         .catch(none),
       this.plane
-        .rpc<{ invites: unknown }>(token, "invites.list", {})
+        .listInvites(token)
         .then(({ invites }) => invitationsFrom(invites).map((i) => rowFromInvite(i, this.id)))
         // Nor does a plane from before #765 invite anybody.
         .catch(none),
@@ -498,11 +498,6 @@ export class FleetStore {
     this.sources = this.sources.filter((s) => s.id !== id);
     this.bySource.delete(id);
     this.recompute();
-  }
-
-  /** Whether a watched source is being told what changes now. */
-  isLive(id: string): boolean {
-    return this.live.has(id);
   }
 
   private watchOne(source: FleetSource): void {
@@ -768,11 +763,6 @@ export function filterRows(rows: FleetRow[], filter: FleetFilter): FleetRow[] {
   });
 }
 
-/** Every session with an approval waiting. */
-export function awaitingApproval(rows: FleetRow[]): FleetRow[] {
-  return rows.filter((r) => r.pendingApprovals > 0);
-}
-
 /**
  * Every session waiting on its person, which is what the inbox is a list of: an approval
  * or a question, the agent's or the harness's. A session waiting on a question used to
@@ -780,10 +770,6 @@ export function awaitingApproval(rows: FleetRow[]): FleetRow[] {
  */
 export function awaitingYou(rows: FleetRow[]): FleetRow[] {
   return rows.filter((r) => r.pendingApprovals > 0 || r.pendingQuestions > 0);
-}
-
-export function totalCostMicros(rows: FleetRow[]): number {
-  return rows.reduce((n, r) => n + (r.costMicros ?? 0), 0);
 }
 
 /** Whether a row has anything to say about while nobody was reading it. */

@@ -31,7 +31,7 @@ defmodule Troupe.Plane.Triggers do
   alias Troupe.Plane.Identity.{Team, User}
   alias Troupe.Plane.Sessions.Session
   alias Troupe.Plane.Triggers.{Notify, Revision, Run, Template, Trigger}
-  alias Troupe.Protocol.{Canonical, Error, Origin, Principal}
+  alias Troupe.Protocol.{Canonical, Digest, Error, Origin, Principal}
 
   require Logger
 
@@ -461,7 +461,7 @@ defmodule Troupe.Plane.Triggers do
   end
 
   defp key_hash(salt, key),
-    do: :sha256 |> :crypto.hash(salt <> key) |> Base.encode16(case: :lower)
+    do: Digest.sha256(salt <> key)
 
   defp key_matches?(%Trigger{key_hash: hash, key_salt: salt}, key) do
     presented = key_hash(salt, key)

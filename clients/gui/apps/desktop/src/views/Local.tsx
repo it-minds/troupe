@@ -14,11 +14,11 @@
 
 import { useCallback, useState } from "react";
 import type { JSX } from "react";
-import { firstLine } from "@troupe/client";
+import { firstLine, hostOf } from "@troupe/client";
 import type { AuthSession, DaemonClient, DaemonEndpoint, DaemonIdentity, RecentWorkspace, Worktree } from "@troupe/client";
 import { useAdminQuery } from "../hooks";
 import type { MachineUser } from "../hooks";
-import { Confirm, Failed, hostOf, Loading, Pill, Table, When } from "./bits";
+import { Confirm, Failed, Loading, Pill, Table, When } from "./bits";
 import { Models } from "./Models";
 import { Rules } from "./Rules";
 

@@ -163,13 +163,13 @@ function Connect({ client, initialProject }: { client: DaemonClient; initialProj
     return () => clearTimeout(timer);
   }, [signingIn, data]);
 
-  const scoped = (server: LocalServer): { workspace?: string } => (ws ? { workspace: ws } : {});
+  const scoped: { workspace?: string } = ws ? { workspace: ws } : {};
   const layerOf = (server: LocalServer): SourceScope => (server.layer === "workspace" ? "workspace" : "user");
 
   const check = async (server: LocalServer): Promise<void> => {
     setChecking((c) => new Set(c).add(server.name));
     try {
-      const { server: result } = await client.checkServer({ ...scoped(server), name: server.name });
+      const { server: result } = await client.checkServer({ ...scoped, name: server.name });
       setLive((l) => ({ ...l, [server.name]: result }));
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -198,7 +198,7 @@ function Connect({ client, initialProject }: { client: DaemonClient; initialProj
 
   const signIn = (server: LocalServer): Promise<void> =>
     act(async () => {
-      const started = await client.signInServer({ ...scoped(server), name: server.name });
+      const started = await client.signInServer({ ...scoped, name: server.name });
       forget(server.name);
       await openExternal(started.url);
       return `${server.name}: finish signing in in your browser. Sessions waiting for it carry on once you have.`;
@@ -206,7 +206,7 @@ function Connect({ client, initialProject }: { client: DaemonClient; initialProj
 
   const signOut = (server: LocalServer): Promise<void> =>
     act(async () => {
-      const out = await client.signOutServer({ ...scoped(server), name: server.name });
+      const out = await client.signOutServer({ ...scoped, name: server.name });
       forget(server.name);
       return `${server.name}: signed out on this computer; ${revocationText(out.revocation)}.`;
     });

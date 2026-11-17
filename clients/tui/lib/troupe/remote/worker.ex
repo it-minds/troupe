@@ -10,7 +10,7 @@ defmodule Troupe.Remote.Worker do
       reconnect, a `resync_required` and a move to another pod all produce the
       same transcript as an unbroken connection;
     * nothing pushes back on the stream — durable events are published the
-      moment they arrive, `llm.delta` is coalesced into one event per frame
+      moment they arrive, `llm_delta` is coalesced into one event per frame
       interval with a byte cap, and a TUI that cannot keep up costs this
       process nothing;
     * an activating action on a session that is not active opens it through the
@@ -195,7 +195,7 @@ defmodule Troupe.Remote.Worker do
     do: call(session_id, {:upload_artifact, artifact, version})
 
   @doc """
-  Whether a file of `size` bytes can go in one `fs.upload` (D115): the sentence `fs_upload/3`
+  Whether a file of `size` bytes can go in one `fs.upload`: the sentence `fs_upload/3`
   would answer once it had been read, when it is larger than the server's message. A frame
   is larger than the file, so one that fits here may still be refused as sent. `:ok` as well
   where nothing can say yet: before `initialize`, or with no connection to ask.
@@ -406,7 +406,7 @@ defmodule Troupe.Remote.Worker do
     state = ensure_window(state)
 
     # The line goes on screen now, tagged with the command id the server will
-    # echo back; `input.accepted` is what clears the tag, and the window draws
+    # echo back; `input_accepted` is what clears the tag, and the window draws
     # none of the durable copies of the line, which carry the same id.
     notify(state, state.agent, :input, %{
       content: text,
@@ -686,7 +686,7 @@ defmodule Troupe.Remote.Worker do
   end
 
   # A message larger than the server said it takes would be cut off at its socket, and the
-  # connection with it, every call waiting on it lost (D108): it is not sent, and the caller
+  # connection with it, every call waiting on it lost: it is not sent, and the caller
   # is told why. The size is the frame's, which is the file's and then some for an upload.
   defp too_large(%{max_message: limit} = state, frame) when is_integer(limit) do
     size = IO.iodata_length(frame)
@@ -1042,10 +1042,10 @@ defmodule Troupe.Remote.Worker do
        when is_binary(plane) and current in [:active, :dormant] do
     if (Translate.seq(event) || 0) > state.cursor do
       case type do
-        type when type in ["session_dormant", "session.dormant"] ->
+        "session_dormant" ->
           %{state | session_state: :dormant}
 
-        type when type in ~w(session_activated session.activated session_resumed session.resumed) ->
+        type when type in ["session_activated", "session_resumed"] ->
           %{state | session_state: :active}
 
         _other ->
@@ -1349,7 +1349,7 @@ defmodule Troupe.Remote.Worker do
     %{state | notes: []}
   end
 
-  defp ephemeral(state, %{"type" => type} = params) when type in ["llm.delta", "llm_delta"] do
+  defp ephemeral(state, %{"type" => "llm_delta"} = params) do
     agent = Translate.agent_of(params) || state.agent || "session"
     data = params["data"] || %{}
 
@@ -1637,7 +1637,7 @@ defmodule Troupe.Remote.Worker do
 
   # A worker that starts again, after a crash or with its parent's session opened again,
   # resumes past what it had seen, so a request asked of the one before it is not seen
-  # again: what the branch's journal says it still asks is registered as it starts (D113).
+  # again: what the branch's journal says it still asks is registered as it starts.
   defp remember_asked(%{as: {_sid, _window}} = state) do
     state.session_id
     |> Journal.all()

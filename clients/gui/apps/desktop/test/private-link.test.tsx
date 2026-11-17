@@ -12,7 +12,7 @@ import { App } from "../src/App";
 import { FakeDaemon } from "../../../packages/client/test/support/daemon.js";
 import { startHarness } from "../../../packages/client/test/support/harness.js";
 import type { Harness } from "../../../packages/client/test/support/harness.js";
-import { button, hereIn, nav, render, says, sees, seesButton, sleep, startOnTheList, type, waitFor } from "./support";
+import { button, hereIn, nav, render, says, sees, seesButton, sleep, startOnTheList, waitFor } from "./support";
 
 Element.prototype.scrollIntoView = function scrollIntoView() {};
 globalThis.WebSocket = NodeWebSocket as unknown as typeof WebSocket;

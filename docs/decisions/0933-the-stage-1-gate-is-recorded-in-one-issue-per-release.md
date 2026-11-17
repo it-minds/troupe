@@ -2,11 +2,9 @@
 number: 933
 title: The Stage 1 gate is recorded in one public issue per release, a row is walked again on a new release only where a change since its pass touched it, a failure fixed is a new release and that row walked again, and live-plane evidence stays in the deployment's private records
 date: 2026-10-24
-status: accepted
+status: superseded by 1028
 issue: 765
 paths:
-  - docs/developer/gate-walk.md
-  - docs/developer/gate-walk-rows.md
   - scripts/gate-check
   - scripts/gate-check.ps1
 gist: One issue per release, Stage 1 gate v<version>; carry a PASS only if nothing since touched the row; a fix is a new release; private evidence never in the issue

@@ -9,9 +9,9 @@ this adds only what an agent working in the repository must not miss.
   checked with `scripts/verify-local.ps1`, and put up as a pull request into the run's
   `development-<date>` branch, never straight into `main`. It has a coordinator role
   (triage, the queue, the chunk) and a fixer role (one issue).
-- **Defects found in passing** go in [docs/developer/defects.md](docs/developer/defects.md)
-  (where, what, severity, who found it): an entry on its last page, a row in its table.
-  Read the entries before touching code they name (`rg <path> docs/developer/defects/`).
+- **A defect found in passing** is a GitHub issue: where, what and how bad, worded neutrally,
+  with its component label (`plane`, `harness`, `tui`, `gui`, `documentation`) and `bug` when
+  it is wrong behaviour. Before touching code, search the open issues for its path.
 - **Decisions.** Before changing a file, run `mix troupe.decisions --for <path>` at the
   repository root: it lists the decisions that govern the path, number and one-line gist,
   superseded ones marked. Read the ones that bear on the change in

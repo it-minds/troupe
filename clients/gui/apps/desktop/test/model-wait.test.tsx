@@ -38,7 +38,7 @@ afterEach(async () => {
   await daemon.stop();
 });
 
-async function open(session: Session): Promise<void> {
+async function open(): Promise<void> {
   unmount = render(<App />).unmount;
   const row = await waitFor(() => document.querySelector<HTMLButtonElement>("button.row"), "the session in the list");
   row.click();
@@ -52,7 +52,7 @@ const prompt = (session: Session): void => {
 describe("a prompt that draws nothing", () => {
   it("says the daemon has not sent the request from 10 s, until the request goes", async () => {
     const session = daemon.seed("/home/ada/parser");
-    await open(session);
+    await open();
     prompt(session);
     await sees("fix the parser");
     expect(says("has not sent the model request")).toBe(false);
@@ -67,7 +67,7 @@ describe("a prompt that draws nothing", () => {
 
   it("says nothing is back from 20 s after the request, until the first byte", async () => {
     const session = daemon.seed("/home/ada/parser");
-    await open(session);
+    await open();
     prompt(session);
     await sees("fix the parser");
     session.log.append("llm_request", { model: "claude" });
@@ -86,7 +86,7 @@ describe("a prompt that draws nothing", () => {
 
   it("says nothing of a turn that ended, or one waiting on a person", async () => {
     const session = daemon.seed("/home/ada/parser");
-    await open(session);
+    await open();
     prompt(session);
     await sees("fix the parser");
     session.log.append("llm_request", { model: "claude" });

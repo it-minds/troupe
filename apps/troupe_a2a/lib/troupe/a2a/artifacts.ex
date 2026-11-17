@@ -12,6 +12,7 @@ defmodule Troupe.A2A.Artifacts do
   """
 
   alias Troupe.A2A.{Error, Events, HTTP, Plane, Stream, Tasks, Worker}
+  alias Troupe.Protocol.Digest
   alias Troupe.Protocol.Error, as: PlaneError
 
   @spec serve(Plug.Conn.t(), Plane.caller(), String.t(), String.t()) :: Plug.Conn.t()
@@ -22,7 +23,7 @@ defmodule Troupe.A2A.Artifacts do
          {:ok, acc} <- replay(caller, task_id),
          {:ok, artifact} <- find(acc, hex, task_id),
          {:ok, bytes} <- fetch(caller, task_id, artifact, hex) do
-      if digest(bytes) == hex do
+      if Digest.sha256(bytes) == hex do
         conn
         |> Plug.Conn.put_resp_content_type(mime_of(artifact), nil)
         |> Plug.Conn.put_resp_header("etag", ~s("sha256-#{hex}"))
@@ -87,5 +88,4 @@ defmodule Troupe.A2A.Artifacts do
   defp mime_of(%{"parts" => [%{"file" => %{"mimeType" => mime}} | _rest]}), do: mime
   defp mime_of(_artifact), do: "application/octet-stream"
 
-  defp digest(bytes), do: :sha256 |> :crypto.hash(bytes) |> Base.encode16(case: :lower)
 end

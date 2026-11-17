@@ -33,6 +33,7 @@ defmodule Troupe.Client.Daemon.Start do
   alias Troupe.Client.Daemon
   alias Troupe.Client.Daemon.Link
   alias Troupe.Config
+  alias Troupe.Protocol.Words
   alias Troupe.Remote.{Journal, Worker}
 
   require Logger
@@ -127,7 +128,7 @@ defmodule Troupe.Client.Daemon.Start do
   defp onboarding(sid, workspace, _onboarding, _refusal, brief), do: brief(sid, workspace, brief)
 
   defp onboarding_question("first", onboarding, items) do
-    "Onboard #{count(length(items), "file")} from #{tools(onboarding["tools"])} into " <>
+    "Onboard #{Words.count(length(items), "file")} from #{tools(onboarding["tools"])} into " <>
       "Troupe's own?"
   end
 
@@ -136,12 +137,7 @@ defmodule Troupe.Client.Daemon.Start do
       "(v#{onboarding["recorded"]} to v#{onboarding["version"]}). Re-run now?"
   end
 
-  defp tools([_ | _] = names) do
-    case Enum.split(names, -1) do
-      {[], [only]} -> only
-      {rest, [last]} -> Enum.join(rest, ", ") <> " and " <> last
-    end
-  end
+  defp tools([_ | _] = names), do: Words.and_list(names)
 
   defp tools(_none), do: "other tools"
 
@@ -175,7 +171,7 @@ defmodule Troupe.Client.Daemon.Start do
       {:ok, %{"declined" => n}} ->
         note(
           sid,
-          "left out #{count(n, "file")}; not asked again at a start, and " <>
+          "left out #{Words.count(n, "file")}; not asked again at a start, and " <>
             "`troupe onboard --all` offers #{if n == 1, do: "it", else: "them"} again"
         )
 
@@ -441,9 +437,6 @@ defmodule Troupe.Client.Daemon.Start do
   end
 
   defp command_id, do: Troupe.Remote.RPC.command_id()
-
-  defp count(1, noun), do: "1 #{noun}"
-  defp count(n, noun), do: "#{n} #{noun}s"
 
   defp message(reason) when is_binary(reason), do: reason
   defp message(%{message: text}) when is_binary(text), do: text

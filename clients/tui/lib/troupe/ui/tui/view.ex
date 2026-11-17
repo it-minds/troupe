@@ -2217,7 +2217,7 @@ defmodule Troupe.UI.TUI.View do
 
   # One row per branch: its digit and mark, the window, its agent, its state, how long it
   # has gone, the last thing it said or did, and the model it runs (as its agent's replies
-  # name it: `quick`'s is the cheap one, D113) with what it has used and cost.
+  # name it: `quick`'s is the cheap one) with what it has used and cost.
   defp branch_lines(_state, [], _width), do: []
 
   defp branch_lines(state, windows, width) do

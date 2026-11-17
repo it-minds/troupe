@@ -368,7 +368,7 @@ defmodule Troupe.Tools.DelegateContractTest do
       assert described =~ "and 2 more"
     end
 
-    # D125: a command whose approval was refused never ran, so it changed nothing and is
+    # A command whose approval was refused never ran, so it changed nothing and is
     # not one whose changes went uncounted.
     test "a refused command is not counted as one that ran" do
       agent = ["root", "general#1"]

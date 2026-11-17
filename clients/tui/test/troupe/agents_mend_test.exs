@@ -1,6 +1,6 @@
 defmodule Troupe.AgentsMendTest do
   @moduledoc """
-  What `/agents` could not do after TUI Decision 156 (D107, D112, D114; root Decision 852):
+  What `/agents` could not do after TUI Decision 156:
   list the subagents a person may change, each saying it is one; refuse a save over a file
   another client saved while the edit was open, and warn when that save is announced; open
   a file that does not parse and save it mended where it is. And a headless run prints the

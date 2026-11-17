@@ -27,7 +27,7 @@ defmodule Troupe.Log.Fold do
   """
 
   alias Troupe.Log.Upcast
-  alias Troupe.Protocol.{Canonical, Event}
+  alias Troupe.Protocol.{Canonical, Digest, Event}
   alias Troupe.Session.Summary
 
   @empty %{
@@ -92,7 +92,7 @@ defmodule Troupe.Log.Fold do
   def hash(events) when is_list(events), do: events |> state() |> hash()
 
   def hash(%{} = state) do
-    "sha256:" <> (:sha256 |> :crypto.hash(Canonical.encode(state)) |> Base.encode16(case: :lower))
+    Digest.tagged(Canonical.encode(state))
   end
 
   @doc "Read a JSONL log from disk and fold it."

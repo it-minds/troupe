@@ -34,7 +34,7 @@ describe("the plane's word on the desktop app's version", () => {
     assert.equal(suggestion(current.clientUpdate, "0.15.0-beta"), null);
   });
 
-  // D134: the daemon's handshake said where it runs and the desktop app's did not.
+  // The daemon's handshake said where it runs and the desktop app's did not.
   it("says where the app runs beside its version, where the shell says it", async () => {
     h = await startHarness({ plane: { clientVersions: { desktop: { recommended: "0.15.0-beta" } } } });
     const auth = await h.signIn();

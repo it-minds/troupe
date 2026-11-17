@@ -415,12 +415,6 @@ label code {
   background: var(--bg-hover);
   text-decoration: none;
 }
-.rail .group a.later {
-  color: var(--text-muted);
-}
-.rail .group a .later-mark {
-  color: var(--text-muted);
-}
 
 .visually-hidden {
   position: absolute;

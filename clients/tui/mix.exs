@@ -46,11 +46,9 @@ defmodule Troupe.MixProject do
       {:mint_web_socket, "~> 1.0.6"},
       {:mint, "~> 1.11"},
       {:jason, "~> 1.4"},
-      {:telemetry, "~> 1.4"},
       {:yaml_elixir, "~> 2.12"},
       {:ex_ratatui, "~> 0.13"},
       {:burrito, "~> 1.6", runtime: false},
-      {:stream_data, "~> 1.4", only: [:test]},
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false}
     ]
   end

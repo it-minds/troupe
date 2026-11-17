@@ -60,7 +60,7 @@ defmodule Troupe.Protocol.PeopleNamedTest do
     assert Actor.to_json(Actor.user("idp|7f3a")) == %{"kind" => "user", "subject" => "idp|7f3a"}
   end
 
-  # A row's first cell, `acl_granted` / `acl_revoked`, as the type names it lists.
+  # A row's first cell, `session_invited` / `session_uninvited`, as the type names it lists.
   defp event_types(cell) do
     ~r/`([a-z_]+)`/
     |> Regex.scan(cell)

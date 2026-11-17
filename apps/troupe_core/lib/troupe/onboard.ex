@@ -51,7 +51,7 @@ defmodule Troupe.Onboard do
   alias Troupe.Config.Migrate
   alias Troupe.Onboard.{Pod, Source}
   alias Troupe.{Paths, Workspace}
-  alias Troupe.Protocol.AgentDefinition
+  alias Troupe.Protocol.{AgentDefinition, Digest}
 
   # The sources `troupe onboard` asks, in this order. A source registers itself here, one
   # line.
@@ -285,7 +285,7 @@ defmodule Troupe.Onboard do
 
   defp put_at(place, content, expected) do
     current = read(place.real)
-    hash = current && "sha256:" <> sha256(current)
+    hash = current && Digest.tagged(current)
 
     if is_binary(expected) and hash != expected,
       do: {:error, {:changed, %{shown: place.shown, hash: hash}}},
@@ -341,7 +341,7 @@ defmodule Troupe.Onboard do
 
     with {:ok, file} <- source_file(target, source, Path.expand(workspace), opts) do
       case File.read(file) do
-        {:ok, bytes} -> {:ok, sha256(bytes)}
+        {:ok, bytes} -> {:ok, Digest.sha256(bytes)}
         {:error, :enoent} -> {:error, "`#{source}` is not there"}
         {:error, reason} -> {:error, "cannot read `#{source}`: #{:file.format_error(reason)}"}
       end
@@ -967,16 +967,9 @@ defmodule Troupe.Onboard do
   end
 
   defp replace(file, content) do
-    tmp = file <> ".onboard-#{System.unique_integer([:positive])}.tmp"
-
-    with :ok <- File.mkdir_p(Path.dirname(file)),
-         :ok <- File.write(tmp, content),
-         :ok <- File.rename(tmp, file) do
-      :ok
-    else
-      {:error, reason} ->
-        _ = File.rm(tmp)
-        {:error, "cannot write #{Paths.display(file)}: #{:file.format_error(reason)}"}
+    case Paths.write_atomic(file, content) do
+      :ok -> :ok
+      {:error, reason} -> {:error, "cannot write #{Paths.display(file)}: #{:file.format_error(reason)}"}
     end
   end
 
@@ -1284,7 +1277,7 @@ defmodule Troupe.Onboard do
   end
 
   defp compared({:ok, bytes}, hash) do
-    if sha256(bytes) == hash,
+    if Digest.sha256(bytes) == hash,
       do: [],
       else: ["has changed since; `troupe onboard` shows what changed"]
   end
@@ -1330,8 +1323,6 @@ defmodule Troupe.Onboard do
   end
 
   defp key(path), do: Workspace.compare_key(path)
-
-  defp sha256(bytes), do: :sha256 |> :crypto.hash(bytes) |> Base.encode16(case: :lower)
 
   defp defaults(opts) do
     opts

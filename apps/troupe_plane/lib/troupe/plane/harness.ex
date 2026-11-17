@@ -58,7 +58,7 @@ defmodule Troupe.Plane.Harness do
   alias Troupe.Plane.Settings.Ladder
   alias Troupe.Plane.{Tokens, Triggers}
   alias Troupe.Plane.Triggers.Run
-  alias Troupe.Protocol.{AgentDefinition, AgentRule}
+  alias Troupe.Protocol.{AgentDefinition, AgentRule, Digest}
   alias Troupe.Protocol.Bundle, as: Document
 
   alias Troupe.Protocol.{
@@ -3862,8 +3862,7 @@ defmodule Troupe.Plane.Harness do
   defp policy_revision do
     %{"versions" => client_versions_body(), "defaults" => client_defaults_answer()}
     |> Canonical.encode()
-    |> then(&:crypto.hash(:sha256, &1))
-    |> Base.encode16(case: :lower)
+    |> Digest.sha256()
   end
 
   # The organisation's defaults for `me.client_defaults` (Decision 869): only what is set,

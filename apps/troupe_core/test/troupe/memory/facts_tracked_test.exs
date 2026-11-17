@@ -1,6 +1,6 @@
 defmodule Troupe.Memory.FactsTrackedTest do
   @moduledoc """
-  Repository memory's leftovers after #553 and #557 (D111, Decision 854): an anchor read
+  Repository memory's leftovers after #553 and #557: an anchor read
   back from a committed `facts.jsonl` is held to what git tracks before it is hashed, as a
   write is, with git asked once while the index stands still; a fact's `scope` is a glob;
   on Windows an anchor typed in another case than the committed name is that file; and
@@ -36,7 +36,7 @@ defmodule Troupe.Memory.FactsTrackedTest do
   end
 
   # On the chunk's tip the `.env` anchor read `current`: its hash was taken again at every
-  # read, and a committed hash that matched said so (D111).
+  # read, and a committed hash that matched said so.
   test "an anchor git ignores or does not track, read back from facts.jsonl, is missing and never hashed",
        context do
     ws = context.workspace
@@ -120,7 +120,7 @@ defmodule Troupe.Memory.FactsTrackedTest do
 
   if @windows do
     # git's pathspecs compare case, and Windows' file names do not: `MIX.EXS` is mix.exs
-    # there, and was refused as untracked (D111).
+    # there, and was refused as untracked.
     test "on Windows an anchor typed in another case is the committed file, stored by its name",
          context do
       ws = context.workspace

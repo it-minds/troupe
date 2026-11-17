@@ -142,24 +142,6 @@ export interface Unseen {
   [k: string]: unknown;
 }
 
-export interface SessionSummary {
-  id: string;
-  workspace: string;
-  branch?: string | null;
-  profile?: string;
-  state: "active" | "dormant" | "read_only" | "erased" | string;
-  status?: string;
-  tokens?: number;
-  cost?: number;
-  created_at?: string;
-  last_active_at?: string;
-  pinned?: boolean;
-  /** Hidden from the session list by its owner and kept whole; absent from a daemon before it. */
-  archived?: boolean;
-  unseen?: Unseen;
-  [k: string]: unknown;
-}
-
 export interface SubscribeResult {
   subscription_id: string;
   head_seq: number;

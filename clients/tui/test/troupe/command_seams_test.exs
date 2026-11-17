@@ -1,7 +1,7 @@
 defmodule Troupe.CommandSeamsTest do
   @moduledoc """
-  Command mode's seams after #556 and #560 (D113, and what D105 and D107 left), TUI
-  Decision 158: an approval a branch asked before its worker connection restarted, answered
+  Command mode's seams after #556 and #560:
+  an approval a branch asked before its worker connection restarted, answered
   from the parent's screen; `/new --branch` with the work in the branches; what the screen
   says after a merge that conflicted; where the focus is once a window the palette closed
   has gone; what a branch's row and a dismissed branch's picker row say. Everything runs
@@ -47,7 +47,7 @@ defmodule Troupe.CommandSeamsTest do
     Integer.to_string(index + 1)
   end
 
-  describe "an approval a branch asked before its worker restarted (D113)" do
+  describe "an approval a branch asked before its worker restarted" do
     # `Client.Daemon.call_target/2` found the branch by a registration its worker made as
     # the request went by, and that died with the worker. A worker that starts again
     # resumes past the request, so nothing made it again: `y` on the parent's screen went to
@@ -190,7 +190,7 @@ defmodule Troupe.CommandSeamsTest do
     end
   end
 
-  describe "the focus after a window command from the palette (D105)" do
+  describe "the focus after a window command from the palette" do
     test "/merge, /discard and /dismiss leave the screen on the command line" do
       {sid, _ws} = repo_with_fake!([{:text, "done"}])
       {pid, _session} = ready(sid)

@@ -218,12 +218,6 @@ export function describeCheck(check: SetupCheck | null, opts: { keyless?: boolea
   return `The key could not be confirmed: ${check.reason ?? "the provider did not answer"}. You can go on and type a model id.`;
 }
 
-/** The step after `step` on this flow's path, or null at the end. */
-export function nextStep(flow: Pick<SetupFlow, "steps">, step: SetupStepName): SetupStepName | null {
-  const at = flow.steps.findIndex((s) => s.name === step);
-  return at >= 0 && at + 1 < flow.steps.length ? flow.steps[at + 1]!.name : null;
-}
-
 /** The step before `step` on this flow's path, or null at the start. */
 export function previousStep(flow: Pick<SetupFlow, "steps">, step: SetupStepName): SetupStepName | null {
   const at = flow.steps.findIndex((s) => s.name === step);

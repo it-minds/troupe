@@ -180,12 +180,7 @@ defmodule Troupe.Protocol.Bundle do
 
   @doc "The hash of a document: `sha256:` over its canonical JSON."
   @spec hash(map()) :: String.t()
-  def hash(content) when is_map(content) do
-    "sha256:" <>
-      (:sha256
-       |> :crypto.hash(Canonical.encode(content))
-       |> Base.encode16(case: :lower))
-  end
+  def hash(content) when is_map(content), do: Canonical.hash(content)
 
   @doc """
   Check a document and return its parsed form.

@@ -619,9 +619,18 @@ export class AuthSession {
     }
   }
 
-  /** One authenticated plane call, with the token renewed first if it is due. */
-  async rpc<T = unknown>(method: string, params: unknown = {}): Promise<T> {
+  /**
+   * One authenticated plane call made by a `PlaneClient` method, with the token renewed first
+   * if it is due: `auth.withToken((plane, token) => plane.reviewSession(token, id))`. A view
+   * asks the plane this way, so every call has its typed wrapper and its unreachable sentence.
+   */
+  async withToken<T>(call: (plane: PlaneClient, token: string) => Promise<T>): Promise<T> {
     const token = await this.token();
-    return this.reachable(() => this.plane.rpc<T>(token, method, params));
+    return this.reachable(() => call(this.plane, token));
+  }
+
+  /** One authenticated plane call by method name, for a client of its own (`AdminApi`, `PlaneOwn`) that types its methods. */
+  rpc<T = unknown>(method: string, params: unknown = {}): Promise<T> {
+    return this.withToken((plane, token) => plane.rpc<T>(token, method, params));
   }
 }

@@ -153,7 +153,7 @@ defmodule Troupe.Gateway.MemoryFactsTest do
     assert kept["id"] == fact["id"]
   end
 
-  # D126: the facts file was rewritten without the fact, and then the brief's view could
+  # The facts file was rewritten without the fact, and then the brief's view could
   # not be removed. The fact is forgotten, so the answer is not that there was no such
   # fact: it is the daemon's failure to finish, saying the fact went and what was left.
   test "memory.forget of a fact it forgot, when memory.md cannot be removed after, is not not_found",

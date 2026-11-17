@@ -28,7 +28,7 @@ function useProfileView(auth: AuthSession, name: string): Read {
     let live = true;
     setRead(null);
     auth
-      .rpc<ProfileView>("profile.get", { name })
+      .withToken((plane, token) => plane.profile(token, name))
       .then((view) => live && setRead({ view }))
       .catch((e: unknown) => {
         if (!live) return;

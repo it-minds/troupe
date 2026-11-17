@@ -45,6 +45,7 @@ defmodule Troupe.Gateway.Dispatch do
   alias Troupe.Mounts
   alias Troupe.Onboard.Start, as: Onboarding
   alias Troupe.PlaneKeys
+  alias Troupe.Protocol.Digest
   alias Troupe.Protocol.Error
   alias Troupe.Protocol.Event
   alias Troupe.Session.{ClientTools, Log}
@@ -92,7 +93,6 @@ defmodule Troupe.Gateway.Dispatch do
     "session.list" => :observe,
     "session.get" => :observe,
     "blob.get" => :observe,
-    "fleet.get" => :observe,
     "fs.list" => :observe,
     "fs.read" => :observe,
     "fs.upload" => :control,
@@ -532,11 +532,6 @@ defmodule Troupe.Gateway.Dispatch do
     end
   end
 
-  defp handle("fleet.get", _params, _context) do
-    sessions = Troupe.list_live_sessions(%{"archived" => false})
-    {:ok, %{"sessions" => Enum.map(sessions, &session_json/1)}}
-  end
-
   # -- files ------------------------------------------------------------------
   #
   # Resolved through the session's mount table, like every file tool, so a client is
@@ -568,7 +563,7 @@ defmodule Troupe.Gateway.Dispatch do
          "content" => contents,
          "size" => byte_size(contents),
          # The same hash `fs_changed` carries, so a client can check the two agree.
-         "hash" => "sha256:" <> (:sha256 |> :crypto.hash(contents) |> Base.encode16(case: :lower))
+         "hash" => Digest.tagged(contents)
        }}
     end
   end
@@ -615,7 +610,7 @@ defmodule Troupe.Gateway.Dispatch do
         %{
           "path" => Workspace.relative(workspace, resolved),
           "hash" =>
-            "sha256:" <> (:sha256 |> :crypto.hash(content) |> Base.encode16(case: :lower)),
+            Digest.tagged(content),
           "size" => byte_size(content)
         },
         actor(context)
@@ -1500,7 +1495,7 @@ defmodule Troupe.Gateway.Dispatch do
 
   # git's refusal is answered as merge and discard answer theirs, `internal_error` with
   # git's words, and a git that did not run in Troupe's own words: never an inspected
-  # term (D113).
+  # term.
   defp handle("worktree.remove", params, _context) do
     with {:ok, path} <- fetch(params, "path") do
       case Worktrees.remove(path, Map.get(params, "force", false)) do
@@ -2959,7 +2954,7 @@ defmodule Troupe.Gateway.Dispatch do
   defp written_json(workspace, resolved, body) do
     %{
       "path" => Workspace.relative(workspace, resolved),
-      "hash" => "sha256:" <> (:sha256 |> :crypto.hash(body) |> Base.encode16(case: :lower)),
+      "hash" => Digest.tagged(body),
       "size" => byte_size(body)
     }
   end

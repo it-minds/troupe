@@ -158,7 +158,7 @@ describe("a reload keeps you signed in", () => {
   });
 
   // The provider has already exchanged the code when the store refuses the token (Windows'
-  // Credential Manager refused one past its size, D5): the sign-in stands, and the person
+  // Credential Manager refused one past its size): the sign-in stands, and the person
   // is told in a sentence that the next launch will ask again.
   it("signs in when the store cannot keep the token, and says the next launch will ask again", async (t) => {
     const logged = warnings(t);

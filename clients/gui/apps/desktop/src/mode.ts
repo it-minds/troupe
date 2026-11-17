@@ -15,8 +15,8 @@
 // person chose to carry on here for now, the setting is untouched, and the app goes back
 // to the plane by itself when it answers again.
 //
-// The setting lives in this browser's preferences for now, beside the theme. Shared
-// settings (issue #57) are where it moves, so the TUI and the GUI agree about it.
+// The setting lives in this window's preferences alone, beside the plane it last used. It
+// is not one of the shared settings (`shared.ts`) the daemon keeps for every client.
 
 import { prefs } from "./shell";
 

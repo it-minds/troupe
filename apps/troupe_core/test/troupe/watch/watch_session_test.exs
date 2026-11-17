@@ -36,7 +36,7 @@ defmodule Troupe.Watch.WatchSessionTest do
     assert {:ok, :off} = Troupe.watch(session.id, false)
   end
 
-  # D106: no client could ask whether a session watches, so a status line showed what that
+  # No client could ask whether a session watches, so a status line showed what that
   # client last set.
   test "a client hears watch go on and off, and the workspace says which session watches",
        context do

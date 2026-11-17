@@ -16,6 +16,8 @@ defmodule Troupe.UI.NewSession do
   person did is what holds.
   """
 
+  alias Troupe.Protocol.Words
+
   @profile ~r/(^|\s)@([\w.-]+)/u
   @agent ~r/(^|\s)#([\w.-]+)/u
   @where ~r/(^|\s)\/(local|platform)(?=\s|$)/u
@@ -170,23 +172,16 @@ defmodule Troupe.UI.NewSession do
     end
   end
 
-  @doc ~S|"A", "A and B", "A, B and C".|
-  @spec and_list([String.t()]) :: String.t()
-  def and_list([]), do: ""
-  def and_list([one]), do: one
-
-  def and_list(names) do
-    {init, [last]} = Enum.split(names, -1)
-    Enum.join(init, ", ") <> " and " <> last
-  end
-
   @doc """
   Who can open it, as the sentence ends: it follows from where it runs. Private is this
   computer's: a platform session from the screen is the team's, `--private` or not.
   """
   @spec who(:local | :platform, [String.t()] | nil, boolean()) :: String.t()
   def who(:local, _teams, _private?), do: "only you can open it"
-  def who(:platform, [_ | _] = teams, _private?), do: "everyone on #{and_list(teams)} can open it"
+
+  def who(:platform, [_ | _] = teams, _private?),
+    do: "everyone on #{Words.and_list(teams)} can open it"
+
   def who(:platform, _none, _private?), do: "your team can open it"
 
   @doc ~S|"Set from your message: /local @dev #plan.", or nil with no token.|
@@ -317,7 +312,7 @@ defmodule Troupe.UI.NewSession do
   def team_question(profile, teams) do
     all = if length(teams) == 2, do: "both", else: "all"
 
-    "#{and_list(teams)} can #{all} use #{profile}. " <>
+    "#{Words.and_list(teams)} can #{all} use #{profile}. " <>
       "Choose the team it is for: its budget pays, and everyone on it can open it."
   end
 end

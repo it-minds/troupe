@@ -378,7 +378,7 @@ defmodule Troupe.Protocol.Client do
 
   # A call the connection did not outlive is answered, whatever ended it: the server
   # closing it, the owner going, `close/1`. Without an answer the caller's `call/4` exited
-  # with this process, and a caller that did not catch it went too (D115).
+  # with this process, and a caller that did not catch it went too.
   @impl GenServer
   def terminate(_reason, state) do
     Enum.each(state.pending, fn {_id, from} -> GenServer.reply(from, {:error, @closed}) end)
@@ -389,7 +389,7 @@ defmodule Troupe.Protocol.Client do
   @doc """
   Whether `error` is this client's own answer to a call its connection ended with, rather
   than one the server sent: `unavailable`, with the reason `closed`. A caller that keeps a
-  client for its next call starts a new one after it (D115).
+  client for its next call starts a new one after it.
   """
   @spec closed?(term()) :: boolean()
   def closed?(%Error{} = error), do: error == @closed

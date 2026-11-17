@@ -17,7 +17,7 @@
 ├── config/                  config.exs (compile time) and runtime.exs (prod only)
 ├── dev/                     docker-compose.yml, kind/ (dependencies, values), toolbox/, known-local-failures
 ├── docker/Dockerfile        the four server images
-├── docs/                    the user, admin and developer tracks, decisions/ (a file per decision), design/, history/ (records, not instruction); overrides/ is the site's theme and hooks
+├── docs/                    the user, admin and developer tracks, decisions/ (a file per decision), design/; overrides/ is the site's theme and hooks
 ├── fixtures/sample_repo/    a small Mix project the core's workspace tests read
 ├── install.sh, install.ps1  install troupe and troupe-daemon from a release
 ├── mix.exs, mix.lock        the umbrella: the check alias, four releases, credo
@@ -56,7 +56,6 @@ and `priv/` where it ships data, and shares the root's `_build`, `deps`, `mix.lo
 | `apps/troupe_gateway/test/conformance/` | the Python conformance client, a test fixture |
 | `apps/troupe_daemon/` | its own `config/runtime.exs` and README |
 | `charts/troupe/crds/` | `WorkerProfile`, `TeamVolume`, `TroupePolicy`, `Trigger`, hand-written; the admission policy is a template |
-| `docs/design/admin/tokens.json` | the design tokens the plane's LiveView console was generated from, kept as the record of it ([design/admin](../design/admin/DESIGN.md)) |
 | `clients/gui/docs/design/themes/*.tokens.json` | the four themes: the GUI's and the TUI's, and the front page's (Signal), one copy |
 
 Generated files and what writes them: [build.md §3](build.md#3-generated-committed-files).

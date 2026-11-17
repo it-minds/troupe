@@ -10,6 +10,7 @@ defmodule Troupe.Worker.Tools.GitPush do
 
   @behaviour Troupe.Tool
 
+  alias Troupe.Protocol.Words
   alias Troupe.Worker.GitHub
 
   @impl Troupe.Tool
@@ -69,7 +70,7 @@ defmodule Troupe.Worker.Tools.GitPush do
 
         {:ok,
          "Pushed #{String.slice(pushed.commit, 0, 7)} to #{pushed.branch} " <>
-           "(#{pushed.files} #{if pushed.files == 1, do: "file", else: "files"} changed#{verified}): " <>
+           "(#{Words.count(pushed.files, "file")} changed#{verified}): " <>
            "#{pushed.url}." <> pr}
 
       {:error, reason} ->

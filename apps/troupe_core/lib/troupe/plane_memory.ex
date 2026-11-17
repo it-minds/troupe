@@ -227,15 +227,11 @@ defmodule Troupe.PlaneMemory do
   end
 
   defp write(path, cached) do
-    temporary = path <> ".#{System.unique_integer([:positive])}.tmp"
+    case Troupe.Paths.write_atomic(path, Jason.encode!(cached, pretty: true) <> "\n") do
+      :ok ->
+        :ok
 
-    with :ok <- File.mkdir_p(Path.dirname(path)),
-         :ok <- File.write(temporary, Jason.encode!(cached, pretty: true) <> "\n"),
-         :ok <- File.rename(temporary, path) do
-      :ok
-    else
       {:error, reason} ->
-        File.rm(temporary)
         {:error, "#{Troupe.Paths.display(path)} could not be written: #{:file.format_error(reason)}"}
     end
   end

@@ -1,6 +1,6 @@
 defmodule Troupe.Gateway.WatchTest do
   @moduledoc """
-  Watch mode over the protocol (Decision 844, D106): `watch.get` says whether a workspace
+  Watch mode over the protocol: `watch.get` says whether a workspace
   is watched, how and by which session, and `observe` may ask; `watch.set` takes the
   session that watches, a second session may not take it, off turns off whichever watches,
   and `watch_changed` follows each change. A pod's session never watches.

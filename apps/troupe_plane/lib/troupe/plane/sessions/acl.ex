@@ -1,10 +1,12 @@
 defmodule Troupe.Plane.Sessions.ACL do
   @moduledoc """
-  Who may see a session, mirrored from its log.
+  Who may see a session, beside its owner and its team.
 
-  The log is the source of truth: `acl_granted` and `acl_revoked` are durable events,
-  and this table is a projection so that "the sessions I can see" is one query rather
-  than a scan of every log. A rebuild from object storage reconstructs it.
+  This table is the record: `session.grant` and an invitation write a row, taking the
+  invitation back deletes it, and each change is pushed to the pod holding the session
+  (`acl.changed`), whose mirror is fed by nothing else. "The sessions I can see" is one
+  query over it. A rebuild of the index from object storage does not touch it: like the
+  rest of the grants, it comes back from a backup of the database.
   """
 
   use Ecto.Schema

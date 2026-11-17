@@ -1,4 +1,4 @@
-// A team session whose turn the harness stopped (defects.md D53; Decision 750). A plane's
+// A team session whose turn the harness stopped. A plane's
 // row says why in `failed_reason`, `tool_failures` or `agent_failed`, from that turn's end
 // until the next input, and nothing else: a plane holds no content. The app says such a
 // session failed, and why in words, in the list and the launcher's recent rows, as it

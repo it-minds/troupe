@@ -34,6 +34,7 @@ defmodule Troupe.Plane.SCIM.Connector do
   import Ecto.Query
 
   alias Troupe.Plane.Repo
+  alias Troupe.Protocol.Digest
 
   @primary_key {:id, :binary_id, autogenerate: true}
 
@@ -188,5 +189,5 @@ defmodule Troupe.Plane.SCIM.Connector do
   end
 
   defp hash(salt, token),
-    do: :crypto.hash(:sha256, salt <> token) |> Base.encode16(case: :lower)
+    do: Digest.sha256(salt <> token)
 end

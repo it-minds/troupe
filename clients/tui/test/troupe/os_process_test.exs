@@ -1,6 +1,6 @@
 defmodule Troupe.OS.ProcessTest do
   @moduledoc """
-  How the TUI starts a program under the reaper (D109). On Windows the reaper hands the
+  How the TUI starts a program under the reaper. On Windows the reaper hands the
   command line on as Erlang built it, and `System.find_executable/1` answers
   `c:/WINDOWS/system32/cmd.exe`: cmd.exe read the forward slashes in its own name as
   switches and answered "The syntax of the command is incorrect." to everything, which is

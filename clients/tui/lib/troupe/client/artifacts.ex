@@ -23,6 +23,7 @@ defmodule Troupe.Client.Artifacts do
   """
 
   alias Troupe.Client.Daemon.Link
+  alias Troupe.Protocol.Words
   alias Troupe.Remote.RPC
 
   @type audience :: :organisation | :team | :shared | :private
@@ -243,7 +244,7 @@ defmodule Troupe.Client.Artifacts do
 
   def ago(at, now) when is_binary(at) do
     case DateTime.from_iso8601(at) do
-      {:ok, then, _} -> words(DateTime.diff(now, then), then)
+      {:ok, then, _} -> Words.ago(then, now)
       _ -> naive(at, now)
     end
   end
@@ -257,13 +258,6 @@ defmodule Troupe.Client.Artifacts do
       _ -> ""
     end
   end
-
-  defp words(s, _then) when s < 60, do: "just now"
-  defp words(s, _then) when s < 3600, do: "#{div(s, 60)} min ago"
-  defp words(s, _then) when s < 86_400, do: "#{div(s, 3600)} h ago"
-  defp words(s, _then) when s < 2 * 86_400, do: "yesterday"
-  defp words(s, _then) when s < 30 * 86_400, do: "#{div(s, 86_400)} days ago"
-  defp words(_s, then), do: then |> DateTime.to_date() |> Date.to_iso8601()
 
   ## New to you
 

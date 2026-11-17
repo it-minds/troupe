@@ -100,7 +100,7 @@ defmodule Troupe.RunProfileTest do
       end)
 
     assert {_in, out} = StringIO.contents(io)
-    assert out =~ "troupe: waiting for a free place in code; asking again in 1 s"
+    assert out =~ "troupe: waiting for a free place in code; asking again in 0.1 s"
     :ok = FakeRemote.place(remote, pending)
     assert {:ok, ^pending} = Task.await(task, 10_000)
     on_exit(fn -> Client.stop_session(pending) end)

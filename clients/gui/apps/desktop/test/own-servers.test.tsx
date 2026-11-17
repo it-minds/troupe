@@ -112,7 +112,7 @@ describe("your own servers in a team session", () => {
     await sees("bob@example.com's 2 tools are no longer offered to the session, because their client left: client.mail.read, client.mail.send");
   });
 
-  // D50: a server signed in to while the session is open was offered only at the next
+  // A server signed in to while the session is open was offered only at the next
   // attachment, and every signed-in server went or none did.
   it("asks again about a server signed in to while the session is open, and offers only the ones you tick", async () => {
     harness.plane.seed("alice@example.com", { id: "team-5", title: "Two servers", profile: "dev" });

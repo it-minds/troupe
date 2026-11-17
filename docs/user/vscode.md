@@ -257,8 +257,8 @@ declares, the models the config names or prices, and what each provider's own li
 - **The default, cheap and expensive models** are starred and say which they are. A role
   you have not set is the default model's, so that one says all three.
 - **A model its provider does not serve** has a warning and says so, with what the
-  provider does serve on hover. It shows no window: `troupe models` gives it none, and
-  before 0.8.6 gave it Troupe's fallback, which no provider said. A turn on it would fail.
+  provider does serve on hover. It shows no window: `troupe models` gives it none. A turn
+  on it would fail.
 - **Each provider's list**: how many models it listed and when, or, when it did not
   answer, why, and what is still kept from before.
 

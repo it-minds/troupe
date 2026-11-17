@@ -7,7 +7,8 @@ defmodule Troupe.Paths do
   session logs — in `$XDG_STATE_HOME/troupe` or `%LOCALAPPDATA%\\troupe`. Nothing Troupe
   writes ever lands in the user's repository, which is why every caller goes through here
   instead of joining paths itself. `docs/user/configuration/files.md` is the page that
-  says where each file is.
+  says where each file is. Every state file Troupe keeps is written through
+  `write_atomic/3`.
   """
 
   @app "troupe"
@@ -71,6 +72,35 @@ defmodule Troupe.Paths do
       {nil, nil} -> nil
       {nil, home} -> Path.join(home, ".config")
       {dir, _home} -> dir
+    end
+  end
+
+  @doc """
+  Write `content` to `path` whole or not at all, the directory made first: into a file
+  beside it with a name of its own, then renamed over it. A reader, or a crash, sees the
+  old file or the new one and never half of one; the temporary file is in the same
+  directory because a rename is only atomic within one filesystem, and it is removed
+  whenever the write does not complete. `:ok`, or the `File` error that stopped it.
+
+  `owner_only: true` makes the file readable by its owner alone (`Troupe.OwnerOnly`)
+  before anything is in it, so a secret is at no moment in a file another account could
+  read, and the rename keeps that access. `:rename` stands in for `File.rename/2`.
+  """
+  @spec write_atomic(Path.t(), iodata(), keyword()) :: :ok | {:error, File.posix()}
+  def write_atomic(path, content, opts \\ []) do
+    temporary = "#{path}.#{Base.url_encode64(:crypto.strong_rand_bytes(6))}.tmp"
+    rename = Keyword.get(opts, :rename, &File.rename/2)
+
+    with :ok <- File.mkdir_p(Path.dirname(path)),
+         :ok <- File.write(temporary, "", [:exclusive]),
+         :ok <- if(opts[:owner_only], do: Troupe.OwnerOnly.restrict(temporary), else: :ok),
+         :ok <- File.write(temporary, content),
+         :ok <- rename.(temporary, path) do
+      :ok
+    else
+      {:error, _reason} = error ->
+        _ = File.rm(temporary)
+        error
     end
   end
 

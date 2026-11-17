@@ -10,9 +10,9 @@ import assert from "node:assert/strict";
 import { after, before, describe, it } from "node:test";
 import {
   addPending,
-  awaitingApproval,
   dropPending,
   emptyTranscript,
+  filterRows,
   fold,
   FleetStore,
   isBlobRef,
@@ -254,7 +254,7 @@ describe("stage 1, done item 4: the approvals inbox", () => {
     // The inbox is a fold over the plane's index — no log was replayed to build it.
     const store = new FleetStore([new PlaneSource(alice.plane, () => alice.token())]);
     await store.refresh();
-    const waiting: FleetRow[] = awaitingApproval(store.current.rows);
+    const waiting: FleetRow[] = filterRows(store.current.rows, { needsApproval: true });
     assert.equal(waiting.length, 3);
     assert.deepEqual(waiting.map((r) => r.id).sort(), [...ids].sort());
     assert.ok(waiting.every((r) => r.pendingApprovals === 1));

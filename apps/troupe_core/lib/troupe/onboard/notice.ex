@@ -41,6 +41,7 @@ defmodule Troupe.Onboard.Notice do
 
   alias Troupe.{Config, Memory, Onboard, Paths, Workspace}
   alias Troupe.Onboard.Pod
+  alias Troupe.Protocol.Words
   alias Troupe.Session.Memory, as: Brief
 
   # The state file `Troupe.Onboard` keeps declines in, under the same lock.
@@ -325,16 +326,12 @@ defmodule Troupe.Onboard.Notice do
   end
 
   defp listed(counts) do
-    words =
+    Words.and_list(
       for {kind, n} <- counts do
         {^kind, one, many} = List.keyfind(@kinds, kind, 0)
-        if n == 1, do: "1 #{one}", else: "#{n} #{many}"
+        Words.count(n, one, many)
       end
-
-    case Enum.split(words, -1) do
-      {[], [only]} -> only
-      {rest, [last]} -> Enum.join(rest, ", ") <> " and " <> last
-    end
+    )
   end
 
   ## State
@@ -364,16 +361,10 @@ defmodule Troupe.Onboard.Notice do
 
     :global.trans({{Onboard, file}, self()}, fn ->
       map = fun.(state(opts))
-      tmp = file <> ".#{System.unique_integer([:positive])}.tmp"
 
-      with :ok <- File.mkdir_p(Path.dirname(file)),
-           :ok <- File.write(tmp, Jason.encode!(map, pretty: true) <> "\n"),
-           :ok <- File.rename(tmp, file) do
-        :ok
-      else
-        {:error, reason} ->
-          _ = File.rm(tmp)
-          {:error, "cannot write #{Paths.display(file)}: #{:file.format_error(reason)}"}
+      case Paths.write_atomic(file, Jason.encode!(map, pretty: true) <> "\n") do
+        :ok -> :ok
+        {:error, reason} -> {:error, "cannot write #{Paths.display(file)}: #{:file.format_error(reason)}"}
       end
     end)
   end

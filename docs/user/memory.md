@@ -69,7 +69,7 @@ made elsewhere meanwhile is said rather than overwritten:
 - **`troupe memory`** prints it; `troupe memory --edit` opens it in your editor (`VISUAL`,
   then `EDITOR`) and saves what you leave there; `troupe memory --clear` empties it. Inside
   the terminal client, `/memory` is the same page as the desktop app's *Memory*, entry by
-  entry ([the terminal client's screen](terminal-screen.md#memory)).
+  entry (below).
 - **The desktop app**: *Memory* in the rail (below), read from the plane the app is signed
   in to, or through this computer's daemon and its sign-in when the app is not. A session's
   *Instructions* pane lists it as *Your memory* and opens *Memory* for it.
@@ -112,12 +112,25 @@ here. Not signed in (the plane not answering, say), it all goes through the daem
 person it is signed in as; with no daemon either, the view says which of the two is
 missing. Under *Local only* it asks the plane nothing and says what this computer holds.
 
-**In the terminal**, `/memory` is the same by role: on the ◉ organisation's and each ◎
-team's tab, `a`, `e` and `f` add, edit and forget where you may change that level, and the
-tab says `· read` where you may not, with who can. The clash warnings, the line saying
-where a save goes and what it reaches, and who last changed each entry and in how many
-sessions it was used are the desktop app's. The versions, `h`, and who wrote each line,
-`b`, are *Only you*'s.
+**In the terminal**, `/memory` is what every new session of yours starts knowing, entry by
+entry: each `## Topic` of a level's memory. **In effect** shows, for one of your teams (`t`
+picks another), the closest level's entry on each topic and what it replaces: yours over
+your team's, your team's over the organisation's. **◉ Everyone at** your organisation, **◎**
+each of your teams and **○ Only you** list each level's; one you cannot change here says
+`· read`, and says who can. Enter reads an entry whole. On a level you can change (Only
+you; a team's you administer; the organisation's if you are a platform admin), `a` adds
+one, its topic typed on the page and its words in your editor (`VISUAL`, then `EDITOR`) or,
+with neither set, in a box here (Ctrl-S saves); `e` edits one and `f` forgets one after a
+confirm line. A topic the level has already is refused, and one a lower level has is said
+to be replaced. The line under says where it saves to and, on a team's or the
+organisation's, how many running sessions it reaches. A save names the version it was made
+on: one saved elsewhere first is shown beside yours, and `l` reloads it. On Only you, `h`
+lists the versions (Space marks one, Enter shows two side by side, `r` saves an old
+one again), `b` who wrote each line, `s` where this machine's copy stands. A save, an
+agent's entry or one from another machine is on the page when it arrives. Under Local only
+every level is read from this machine's copy and nothing is changed. `/memory facts` is the
+repository brief's facts, as before. Who last changed each entry and in how many sessions
+it was used are the desktop app's.
 
 ## Which version a session ran under
 

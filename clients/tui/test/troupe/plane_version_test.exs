@@ -38,7 +38,7 @@ defmodule Troupe.PlaneVersionTest do
                   "client_info" => %{
                     "name" => "troupe",
                     "version" => @version,
-                    # Where it runs, as the daemon's own handshake says it (D134).
+                    # Where it runs, as the daemon's own handshake says it.
                     "platform" => "" <> _
                   }
                 }},

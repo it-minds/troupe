@@ -66,10 +66,6 @@ function groupOf(picker: ParentNode, name: string): string | null {
   return option(picker, name)?.closest('[role="group"]')?.getAttribute("aria-label") ?? null;
 }
 
-async function alertIn(picker: ParentNode, text: string): Promise<void> {
-  await waitFor(() => picker.querySelector('[role="alert"]')?.textContent?.includes(text), `"${text}" said`);
-}
-
 describe("the agent picker", () => {
   it("on the start screen is a plain pick: each agent with what it does, the default marked, nothing to switch or edit", async () => {
     daemon.seed("/home/ada/notes");

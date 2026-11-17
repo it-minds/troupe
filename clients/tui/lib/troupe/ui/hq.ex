@@ -22,6 +22,7 @@ defmodule Troupe.UI.HQ do
   alias ExRatatui.Text.{Line, Span}
   alias ExRatatui.Widgets.{Block, List, Paragraph}
   alias Troupe.Client
+  alias Troupe.Protocol.Words
   alias Troupe.UI.TUI.{Model, Theme, View}
 
   @type column :: :inbox | :teams | :profiles | :sessions
@@ -547,7 +548,7 @@ defmodule Troupe.UI.HQ do
           "✉ #{who} invited you to #{role} “#{Model.one_line(invite["title"] || invite["session_id"] || "")}” · Enter opens it"
 
         {:shared, n} ->
-          "◐ #{n} artifact#{if n == 1, do: "", else: "s"} shared with you · Enter opens /artifacts"
+          "◐ #{Words.count(n, "artifact")} shared with you · Enter opens /artifacts"
       end)
 
     %List{

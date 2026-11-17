@@ -318,7 +318,7 @@ defmodule Troupe.Config.LayersTest do
       refute json =~ "literal-key-1234567890"
     end
 
-    # D63: an unset `{env:VAR}` inside a list was handed to JSON as the tuple it is kept as.
+    # An unset `{env:VAR}` inside a list was handed to JSON as the tuple it is kept as.
     test "--explain --json says an unset {env:VAR} in a server's args as written", ctx do
       var = "TROUPE_TEST_UNSET_D63_#{System.unique_integer([:positive])}"
       System.delete_env(var)

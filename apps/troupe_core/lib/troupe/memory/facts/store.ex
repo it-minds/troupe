@@ -36,6 +36,7 @@ defmodule Troupe.Memory.Facts.Store do
 
   alias Troupe.Memory
   alias Troupe.Memory.Facts
+  alias Troupe.Protocol.Digest
   alias Troupe.Session.Memory, as: Brief
   alias Troupe.Workspace
 
@@ -121,7 +122,7 @@ defmodule Troupe.Memory.Facts.Store do
 
     case File.read(file) do
       {:ok, bytes} ->
-        hash = :sha256 |> :crypto.hash(bytes) |> Base.encode16(case: :lower)
+        hash = Digest.sha256(bytes)
         :ets.insert(tables.hashes, {file, size, mtime, at, hash})
         {:ok, hash, DateTime.from_unix!(mtime)}
 
@@ -503,16 +504,9 @@ defmodule Troupe.Memory.Facts.Store do
   end
 
   defp write(path, text) do
-    tmp = path <> ".#{System.unique_integer([:positive])}.tmp"
-
-    with :ok <- File.mkdir_p(Path.dirname(path)),
-         :ok <- File.write(tmp, text),
-         :ok <- File.rename(tmp, path) do
-      :ok
-    else
-      {:error, reason} ->
-        _ = File.rm(tmp)
-        {:error, "cannot write #{path}: #{:file.format_error(reason)}"}
+    case Troupe.Paths.write_atomic(path, text) do
+      :ok -> :ok
+      {:error, reason} -> {:error, "cannot write #{path}: #{:file.format_error(reason)}"}
     end
   end
 

@@ -13,7 +13,8 @@ defmodule Troupe.ObjectStore do
   afterwards, including prior versions.
   """
 
-  alias Troupe.ObjectStore.Signed
+  alias Troupe.ObjectStore.{Head, Signed}
+  alias Troupe.Protocol.Digest
 
   @enforce_keys [:endpoint, :bucket, :access_key_id, :secret_access_key]
   defstruct [:endpoint, :bucket, :access_key_id, :secret_access_key, region: "us-east-1"]
@@ -99,38 +100,7 @@ defmodule Troupe.ObjectStore do
   @spec head(store(), String.t()) :: {:ok, map()} | {:error, :not_found | term()}
   def head(%Signed{} = signed, key), do: Signed.head(signed, key)
 
-  def head(%__MODULE__{} = store, key) do
-    case request(store, :head, key, [], "", []) do
-      {:ok, %{status: status} = response} when status in 200..299 ->
-        {:ok, %{key: key, bytes: content_length(response), metadata: metadata_of(response)}}
-
-      {:ok, %{status: 404}} ->
-        {:error, :not_found}
-
-      {:ok, response} ->
-        {:error, {:unexpected_status, response.status, response.body}}
-
-      {:error, reason} ->
-        {:error, reason}
-    end
-  end
-
-  defp content_length(response) do
-    case header(response, "content-length") do
-      nil -> 0
-      value -> String.to_integer(value)
-    end
-  end
-
-  defp metadata_of(response) do
-    response.headers
-    |> Enum.flat_map(fn
-      {"x-amz-meta-" <> name, [value | _]} -> [{name, value}]
-      {"x-amz-meta-" <> name, value} when is_binary(value) -> [{name, value}]
-      _ -> []
-    end)
-    |> Map.new()
-  end
+  def head(%__MODULE__{} = store, key), do: Head.answer(key, request(store, :head, key, [], "", []))
 
   @doc """
   A URL that carries its own authorisation, for a caller who has no credential.
@@ -462,7 +432,7 @@ defmodule Troupe.ObjectStore do
         body,
         # S3 wants the payload hash in the signature rather than `UNSIGNED-PAYLOAD`,
         # and MinIO enforces it.
-        body_digest: :crypto.hash(:sha256, body) |> Base.encode16(case: :lower),
+        body_digest: Digest.sha256(body),
         # S3 is the service that does *not* double-encode the path, and the library's
         # default is the other way. The key is encoded once here, and signing it again
         # would produce a signature for a URL nobody is going to request.

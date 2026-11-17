@@ -1,10 +1,10 @@
 defmodule Mix.Tasks.Troupe.DecisionsTest do
   @moduledoc """
-  The decisions are a file each, checked and looked up by `mix troupe.decisions`
-  (issue #437, Decision 790).
+  The decisions are a file each, checked and looked up by `mix troupe.decisions`.
 
   What CI fails on (a duplicate number, a missing field, a glob that matches nothing, a
-  front matter YAML would read otherwise), what `--for` lists, the repository's own
+  front matter YAML would read otherwise, a new decision out of shape, a log's `next`
+  marker not above its numbers), what `--for` and `--report` list, the repository's own
   decisions passing, and `scripts/split-decisions.exs` turning a log into files, against
   a log appended to after the split as well.
   """
@@ -24,7 +24,20 @@ defmodule Mix.Tasks.Troupe.DecisionsTest do
     path = Path.join([dir, "docs/decisions", log, name])
     File.mkdir_p!(Path.dirname(path))
     File.write!(path, "---\n" <> front <> "---\n\n" <> body)
+
+    for log <- Enum.uniq(["", log]),
+        not File.exists?(readme_path(dir, log)),
+        do: readme(dir, log, 9999)
   end
+
+  # A log's README, with the number its next decision takes.
+  defp readme(dir, log, next) do
+    path = readme_path(dir, log)
+    File.mkdir_p!(Path.dirname(path))
+    File.write!(path, "# Decisions\n\n<!-- next: #{next} -->\n")
+  end
+
+  defp readme_path(dir, log), do: Path.join([dir, "docs/decisions", log, "README.md"])
 
   defp front(number, extra \\ "") do
     """
@@ -157,6 +170,121 @@ defmodule Mix.Tasks.Troupe.DecisionsTest do
     end
   end
 
+  describe "the shape, from 2026-11-18" do
+    defp dated(front, date), do: String.replace(front, "2026-10-05", date)
+
+    defp with_paths(front, paths) do
+      String.replace(front, "  - lib/a.ex\n", Enum.map_join(paths, &"  - #{&1}\n"))
+    end
+
+    test "a body over 40 lines that are not blank fails from the day; before it, it passes",
+         %{tmp_dir: dir} do
+      code(dir)
+      long = Enum.map_join(1..41, "\n\n", &"Line #{&1}.") <> "\n"
+      forty = Enum.map_join(1..40, "\n\n", &"Line #{&1}.") <> "\n"
+
+      decision(dir, "", "0001-before.md", front(1) |> dated("2026-11-17"), long)
+      decision(dir, "", "0002-after.md", front(2) |> dated("2026-11-18"), long)
+      decision(dir, "", "0003-forty.md", front(3) |> dated("2026-11-18"), forty)
+
+      assert Decisions.check(dir) == [
+               {"docs/decisions/0002-after.md",
+                "the body is 41 lines that are not blank; at most 40"}
+             ]
+    end
+
+    test "nine paths fail, eight pass", %{tmp_dir: dir} do
+      files = for n <- 1..9, do: "lib/f#{n}.ex"
+      Enum.each(files, &code(dir, &1))
+
+      decision(dir, "0001-nine.md", front(1) |> dated("2026-11-18") |> with_paths(files))
+
+      decision(
+        dir,
+        "0002-eight.md",
+        front(2) |> dated("2026-11-18") |> with_paths(Enum.take(files, 8))
+      )
+
+      assert messages(dir) == ["paths: 9 entries; at most 8"]
+    end
+
+    test "a test among the paths fails, whichever way it is named", %{tmp_dir: dir} do
+      tests = ~w(test/a_test.exs apps/x/test lib/__tests__ lib/a_test.exs src/a.test.ts)
+      Enum.each(tests, &code(dir, if(Path.extname(&1) == "", do: &1 <> "/k.ex", else: &1)))
+
+      for {path, n} <- Enum.with_index(tests, 1) do
+        decision(
+          dir,
+          "000#{n}-t.md",
+          front(n) |> dated("2026-11-18") |> with_paths(["lib/a.ex", path])
+        )
+      end
+
+      code(dir)
+      assert length(Decisions.check(dir)) == 5
+
+      assert Enum.all?(messages(dir), &(&1 =~ "is a test, and a test is not where it is undone"))
+    end
+
+    test "--report lists the older ones out of shape and the superseded, and fails nothing",
+         %{tmp_dir: dir} do
+      code(dir)
+      long = Enum.map_join(1..41, "\n", &"Line #{&1}.") <> "\n"
+      decision(dir, "", "0001-long.md", front(1), long)
+      decision(dir, "0002-old.md", front(2) |> String.replace("accepted", "superseded"))
+      decision(dir, "0003-fine.md", front(3))
+      assert Decisions.check(dir) == []
+
+      out = capture_io(fn -> Decisions.run(["--report", "--root", dir]) end)
+
+      assert out =~ "docs/decisions/0001-long.md: the body is 41 lines"
+      assert out =~ "docs/decisions/0002-old.md: superseded"
+      refute out =~ "0003-fine.md"
+      assert out =~ "decisions: 3; 2 to look at"
+      assert out =~ ~r/over 40 lines: +1\n/
+      assert out =~ ~r/superseded: +1/
+    end
+  end
+
+  describe "a log's next number" do
+    test "a marker above every number passes; at or below the highest, it fails",
+         %{tmp_dir: dir} do
+      code(dir)
+      decision(dir, "0007-seven.md", front(7))
+      decision(dir, "tui", "0003-three.md", front(3))
+
+      readme(dir, "", 8)
+      readme(dir, "tui", 4)
+      assert Decisions.check(dir) == []
+
+      readme(dir, "", 7)
+
+      assert Decisions.check(dir) == [
+               {"docs/decisions/README.md",
+                "next is 7, and 7 is taken; next is above every number"}
+             ]
+    end
+
+    test "a file numbered above the marker fails", %{tmp_dir: dir} do
+      code(dir)
+      readme(dir, "", 5)
+      decision(dir, "0004-four.md", front(4))
+      assert Decisions.check(dir) == []
+
+      decision(dir, "0009-nine.md", front(9))
+      assert messages(dir) == ["next is 5, and 9 is taken; next is above every number"]
+    end
+
+    test "a log whose README has no marker fails", %{tmp_dir: dir} do
+      code(dir)
+      decision(dir, "0001-one.md", front(1))
+      File.write!(readme_path(dir, ""), "# Decisions\n")
+
+      assert [{"docs/decisions/README.md", "no `<!-- next: N -->` line" <> _}] =
+               Decisions.check(dir)
+    end
+  end
+
   describe "--for" do
     setup %{tmp_dir: dir} do
       code(dir)
@@ -230,6 +358,7 @@ defmodule Mix.Tasks.Troupe.DecisionsTest do
       )
 
       code(dir, "lib/plane.ex")
+      readme(dir, "", 9999)
 
       File.write!(
         Path.join(dir, "lib/plane.ex"),

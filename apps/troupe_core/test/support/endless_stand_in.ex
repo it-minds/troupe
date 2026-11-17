@@ -1,6 +1,6 @@
 defmodule Troupe.Test.EndlessStandIn do
   @moduledoc """
-  A model provider on a loopback port whose reply never ends (D69, Decision 788): it
+  A model provider on a loopback port whose reply never ends: it
   streams a text delta every `every_ms` for as long as the connection stays open, and
   tells the test when the client has closed it. Only a request that is stopped ends.
 

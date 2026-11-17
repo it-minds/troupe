@@ -10,8 +10,22 @@ session, `/settings` shows the same things as that session has them.
 
 You read it in three places, each asking the plane the same question (`profile.get`):
 
-- the terminal's `/profiles`, and `troupe profiles` on the command line;
-- the desktop app's **Profiles** view.
+- the desktop app's **Profiles** in the rail (there while you are signed in to a plane),
+  which lists each profile you may use with a line saying its agents, its MCP servers and
+  the hosts it reads, and how much room it has now. *What this profile can reach* leads
+  there from the start screen's profile picker and from a running team session's
+  *Settings*;
+- the terminal's `/profiles`, one line each: how many agents it offers, its MCP servers,
+  the hosts it reaches and the sessions on it of those it has room for (`code  3 agents ·
+  severa, sursen · reaches github.com · 2 of 8 sessions`). Enter on a row, or `/profile
+  <name>`, opens the page, in a frame drawn as the settings page's is, in six groups:
+  Agents, Tools (the skills last), Model, Reach, Limits and Who. What the plane does not say is shown as *not said*, never filled in. ↑↓,
+  PgUp/PgDn, Home/End and the wheel scroll it; `q` or Esc goes back to the list, or closes
+  the frame `/profile` opened. It is asked with the terminal's own sign-in (`troupe
+  login`); under Local only nothing is asked;
+- `troupe profiles` on the command line, which prints the list, and `troupe profiles
+  <name>` the page as plain lines, `--json` the plane's answer as it came
+  ([the command reference](cli-reference.md)).
 
 Only profiles you may use are shown: one granted to a team you are in. Any other is not
 found, as if it did not exist.
@@ -21,7 +35,8 @@ found, as if it did not exist.
 A session belongs to one team, which pays for it and whose grant decides what it may use.
 When one team of yours may use the profile, that is the session's team. When several may,
 the view lists them all and names none until you choose one, as starting a session would
-ask you to; until then what it shows is what any of them would give you.
+ask you to; until then what it shows is what any of them would give you. The terminal's
+page names the profile's bundle and the channel it follows there too.
 
 ## Agents
 

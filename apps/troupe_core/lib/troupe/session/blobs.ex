@@ -17,6 +17,7 @@ defmodule Troupe.Session.Blobs do
   """
 
   alias Troupe.Paths
+  alias Troupe.Protocol.{Digest, Text}
 
   @inline_limit 16 * 1024
   @preview_bytes 4 * 1024
@@ -123,19 +124,10 @@ defmodule Troupe.Session.Blobs do
 
   @doc "The `sha256:` digest used as a blob's name."
   @spec digest(binary()) :: String.t()
-  def digest(content) do
-    "sha256:" <> (:sha256 |> :crypto.hash(content) |> Base.encode16(case: :lower))
-  end
+  def digest(content), do: Digest.tagged(content)
 
-  defp preview(content) do
-    content |> binary_part(0, min(byte_size(content), @preview_bytes)) |> scrub()
-  end
-
-  # A cut at an arbitrary byte can land mid-codepoint, and a client should never have
-  # to deal with invalid UTF-8 from us.
-  defp scrub(binary) do
-    if String.valid?(binary), do: binary, else: scrub(binary_part(binary, 0, byte_size(binary) - 1))
-  end
+  # A client should never have to deal with invalid UTF-8 from us.
+  defp preview(content), do: Text.cut(content, @preview_bytes)
 
   defp blob_path(session_id, workspace_root, state_dir, "sha256:" <> hex) do
     Path.join([Paths.session_dir(workspace_root, session_id, state_dir), "blobs", hex])

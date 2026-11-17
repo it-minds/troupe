@@ -73,7 +73,7 @@ defmodule Troupe.OS.Process do
 
   A name is looked up on `PATH` alone, never in the current directory and never in a
   relative entry, and on Windows with those of `PATHEXT`'s extensions a process starts
-  from (`.com`, `.exe`, `.bat`, `.cmd`) and spelled with backslashes (D109).
+  from (`.com`, `.exe`, `.bat`, `.cmd`) and spelled with backslashes.
   `System.find_executable/1` looks in the current directory first there, which is the
   repository the TUI was started in, so a `clip.bat` or a `cmd.exe` the repository carries
   would have been what ran. And it answers with forward slashes, which cmd.exe reads as

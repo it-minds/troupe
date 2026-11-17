@@ -11,6 +11,7 @@ defmodule Troupe.Onboard.AgentsAndCommands.Shared do
 
   alias Troupe.Agent.Definition
   alias Troupe.Protocol.AgentDefinition
+  alias Troupe.Protocol.Digest
   alias Troupe.Workspace
 
   @typedoc "Another file a proposal depends on, named and hashed as its source is."
@@ -84,7 +85,7 @@ defmodule Troupe.Onboard.AgentsAndCommands.Shared do
 
   @doc "The lowercase hex sha256 of a source's bytes."
   @spec hash(binary()) :: String.t()
-  def hash(bytes), do: :sha256 |> :crypto.hash(bytes) |> Base.encode16(case: :lower)
+  def hash(bytes), do: Digest.sha256(bytes)
 
   @doc """
   Frontmatter as Claude Code and opencode write it: YAML, and failing that a line per key,
