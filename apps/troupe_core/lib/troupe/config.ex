@@ -588,9 +588,12 @@ defmodule Troupe.Config do
   defp string(_value), do: nil
 
   # The schema has already said the value is one of these.
-  @enum_atoms Enum.map(ProviderType.all(), & &1.name) ++ [:api_key, :bearer, :wait, :deny]
   defp enum_atom(value) when is_atom(value), do: value
-  defp enum_atom(value), do: Enum.find(@enum_atoms, &(Atom.to_string(&1) == value))
+  defp enum_atom(value), do: Enum.find(enum_atoms(), &(Atom.to_string(&1) == value))
+
+  # Read when a value is, not while this module compiles, so that the config does not
+  # recompile with the provider types and everything they reach.
+  defp enum_atoms, do: Enum.map(ProviderType.all(), & &1.name) ++ [:api_key, :bearer, :wait, :deny]
 
   # -- the command line -----------------------------------------------------------
 
