@@ -1082,7 +1082,7 @@ jobs:
           otp-version: ${{ env.OTP_VERSION }}
       - run: elixir scripts/version.exs check
       - run: elixir scripts/doc-links.exs
-      # No hand-written page past 400 lines, and the known defects only open ones.
+      # No hand-written page past 400 lines.
       - run: elixir scripts/doc-size.exs
       - run: elixir scripts/check-neutral.exs
       # Code states its own invariants and cites no decision by number; the citations

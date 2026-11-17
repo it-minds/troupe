@@ -357,7 +357,7 @@ defmodule Troupe.BenchLiveTest do
       assert table =~ "| write_file | runs | none earlier | 2, 0.8.2-beta, openai/a |  |"
     end
 
-    # D125: a live bench writes its history under the configured `state_dir`, and the
+    # A live bench writes its history under the configured `state_dir`, and the
     # comparison read the default one, so it said nothing was recorded.
     test "is read where the configured state_dir keeps it, where a live bench writes it",
          %{tmp_dir: dir} do

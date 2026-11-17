@@ -1,5 +1,5 @@
 // What the desktop app's palette, agents manager, watch box and transcript left undone
-// after troupe #503 and #502 (#565, D107, D112, D114; Decision 852), driven against the
+// after troupe #503 and #502 (#565), driven against the
 // fake daemon over a real socket: the palette draws a command, an agent and a file's
 // command as three kinds, each agent with its facts and a row that cannot run saying why;
 // the manager lists the subagents and edits them, refuses a save over a file another
@@ -132,7 +132,7 @@ describe("the palette's kinds (#565)", () => {
   });
 });
 
-describe("the agents manager after #503 (D107, D112)", () => {
+describe("the agents manager after #503", () => {
   it("lists the subagents under the primaries, and copies and edits one, its save naming the file it replaces", async () => {
     daemon.seed(REPO);
     await openManager();
@@ -221,7 +221,7 @@ describe("the agents manager after #503 (D107, D112)", () => {
   });
 });
 
-describe("the watch box (D114)", () => {
+describe("the watch box", () => {
   it("shows what watch.get says, and follows each watch_changed, as the terminal's /watch turns it on and off", async () => {
     daemon.seed(REPO);
     await openSession();

@@ -418,7 +418,7 @@ defmodule Troupe.RemoteTranslateTest do
     assert [%{type: :agent_state, data: %{to: :thinking}}] =
              translate(durable("llm_request", %{"model" => "m"}))
 
-    # The note first: a headless run ends at the state (D42).
+    # The note first: a headless run ends at the state.
     assert [
              %{type: :remote_note, data: %{text: "done: all green"}},
              %{type: :agent_state, data: %{to: :done, reason: "finished"}}
@@ -907,7 +907,7 @@ defmodule Troupe.RemoteTranslateTest do
     assert blank.data.text =~ "00u1a2b3c4 offered tools"
   end
 
-  # D126: written beside `session_tainted` each time a person's tools are offered, and
+  # Written beside `session_tainted` each time a person's tools are offered, and
   # taken away when their connection goes; drawn raw and logged as unknown until now.
   test "tools registered and unregistered are sentences saying whose and which" do
     registered = %{

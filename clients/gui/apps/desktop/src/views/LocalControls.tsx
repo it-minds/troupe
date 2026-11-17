@@ -6,7 +6,7 @@
 // session in the same workspace already watching — is shown as the sentence it is rather
 // than as a failed toggle that springs back.
 //
-// What the box shows is the daemon's, never its own record (troupe D114, Decision 852):
+// What the box shows is the daemon's, never its own record:
 // `watch.get` when the controls open, then each `watch_changed` the session writes, so a
 // watch the terminal's `/watch` turned on or off is shown here as it happens, and one
 // another session holds says which.

@@ -599,7 +599,7 @@ defmodule Troupe.Client do
   @doc """
   Whether a file of `size` bytes can go in one `fs_upload/3`: `:ok`, or the sentence saying
   it is larger than the daemon or worker takes in one message. Asked before the file is
-  read, so one that could never be sent is not read whole (D115).
+  read, so one that could never be sent is not read whole.
   """
   @spec upload_fits(session_id(), non_neg_integer()) :: :ok | {:error, String.t()}
   def upload_fits(sid, size), do: impl(sid).upload_fits(sid, size)

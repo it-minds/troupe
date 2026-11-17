@@ -13,7 +13,7 @@ defmodule Troupe.Test.PromptCacheStandIn do
   repeats. With `gateway: :litellm` it is a LiteLLM gateway in front of an Anthropic model
   instead, set to mark the prompt up to the last message: what it writes it reports as
   Anthropic does, in Anthropic's names and in `prompt_tokens_details`, all three input
-  figures counted in `prompt_tokens` (D65, Decision 780).
+  figures counted in `prompt_tokens`.
 
   A token here is four bytes of a block's JSON with its mark taken out. The numbers are
   no model's, but they add up the way a provider's do, which is all the tests read. Every

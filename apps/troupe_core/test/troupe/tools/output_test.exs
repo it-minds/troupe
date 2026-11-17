@@ -61,7 +61,7 @@ defmodule Troupe.Tools.OutputTest do
     end
   end
 
-  # A cut result names `read_output` only to an agent that can call it (D66): `explore`,
+  # A cut result names `read_output` only to an agent that can call it: `explore`,
   # `answer`, `ask` and the librarian are offered no such call.
   describe "cap/3 and cap_tail/3" do
     setup do

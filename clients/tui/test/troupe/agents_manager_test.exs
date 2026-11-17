@@ -122,7 +122,7 @@ defmodule Troupe.AgentsManagerTest do
     text = screen_text(pid, session)
 
     # Built-ins and the repository's own, each with where it comes from in the four words;
-    # `worktree` is a command, not an agent (D107).
+    # `worktree` is a command, not an agent.
     assert text =~ ~r/build +(● *)?Shipped +· primary/u
     assert text =~ ~r/plan +Shipped +· primary/
     assert text =~ ~r/careful +This repository's +· primary/

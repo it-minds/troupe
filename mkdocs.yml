@@ -16,11 +16,9 @@ exclude_docs: |
   /overrides/
   /requirements.txt
 # A decision is a page of its own and is reached from its log's index, which the nav names
-# and the hook fills in; three hundred of them in the nav would be a list nobody reads. The
-# known defects' pages are reached the same way, from the table in developer/defects.md.
+# and the hook fills in; three hundred of them in the nav would be a list nobody reads.
 not_in_nav: |
   /decisions/**/[0-9]*.md
-  /developer/defects/*.md
 
 theme:
   name: material
@@ -184,7 +182,6 @@ nav:
       - Deployment: developer/deployment.md
       - Tech stack: developer/tech-stack.md
       - Fixing issues: developer/fixing-issues.md
-      - Known defects: developer/defects.md
       - Decisions:
           - decisions/README.md
           - The TUI's: decisions/tui/README.md

@@ -179,9 +179,9 @@ start at once; one that installs takes the lock (see above). Tell the person
 | `cannot-reproduce`, `too-large`, `duplicate` | note it; next issue |
 | `verify-failed` | make sure the install was rolled back (`.\scripts\install-local.ps1 -Rollback`); next issue. Two in a row means the machine or the toolchain is wrong, not the issues: stop and report |
 
-`noticed` items that are defects go into [defects.md](defects.md), with where, what,
-a severity and who found them. The ones worth an issue are offered for filing at the
-end, not filed unasked.
+`noticed` items that name a defect become issues, offered for filing at the end, not
+filed unasked: each with where, what and how bad, worded neutrally, its component label and
+`bug` when it is wrong behaviour; one issue per mechanism, not one per chunk.
 `learned` items - a new trap about this machine or repo - are worth writing down where
 the harness keeps durable notes (Troupe's project brief, Claude's memory), or in this
 page if they are about the process.

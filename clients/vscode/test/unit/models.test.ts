@@ -28,7 +28,7 @@ const model = (m: Partial<Model> & { id: string }): Model => ({
 const json = {
   models: [
     model({ id: "gpt-oss-120b", context: 131_072, input: 0.1, output: 0.5, price_source: "catalog", source: "catalog" }),
-    // Troupe's fallback window, beside `served: false`: not a window anyone said (D70).
+    // Troupe's fallback window, beside `served: false`: not a window anyone said.
     model({ id: "house-model", context: 200_000, input: 0.5, output: 1.5, price_source: "config", served: false, nearest: ["qwen3-235b"] }),
     model({ id: "llama-local", context: 32_768, input: 0.05, output: 0.1, price_source: "config", source: "catalog" }),
     model({ id: "qwen3.5", context: 200_000, served: false, nearest: ["qwen3.6-35b", "qwen3-235b"] }),

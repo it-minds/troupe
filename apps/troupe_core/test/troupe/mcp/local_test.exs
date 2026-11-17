@@ -532,7 +532,7 @@ defmodule Troupe.MCP.LocalTest do
     end
   end
 
-  describe "opencode's opencode.json, linked (D100)" do
+  describe "opencode's opencode.json, linked" do
     test "a linked opencode.json gives its servers, its mcp block read as an import reads it",
          context do
       from = Path.join(context.base, "project/opencode.json")

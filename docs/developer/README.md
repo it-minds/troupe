@@ -20,7 +20,6 @@ looked things up in.
 | [fixing-issues.md](fixing-issues.md) | Working through GitHub issues in chunks: triage, fix, install locally, verify, pull request |
 | [stage-1-gate.yml](../../.github/ISSUE_TEMPLATE/stage-1-gate.yml) | The Stage 1 gate: the issue template a release's walk is recorded in, its eight rows, and `scripts/gate-check` for the half a desk runs |
 | [code-signing.md](code-signing.md) | Buying and setting up OS code signing (Apple Developer ID, a Windows signing service) and the secrets a release needs |
-| [defects.md](defects.md) | Defects found in passing and not fixed yet |
 
 The design: [../../ARCHITECTURE.md](../../ARCHITECTURE.md),
 [the decisions](../decisions/README.md), [../../PROTOCOL.md](../../PROTOCOL.md). The

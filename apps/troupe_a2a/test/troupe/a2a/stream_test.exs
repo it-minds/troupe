@@ -135,7 +135,7 @@ defmodule Troupe.A2A.StreamTest do
     refute_receive {:worker_command, _method, _params}
   end
 
-  # D42: an idle row says a turn ended, not who ended it. One the harness stopped (a tool
+  # An idle row says a turn ended, not who ended it. One the harness stopped (a tool
   # that kept failing, Decision 687; an agent that kept crashing, Decision 727) was
   # reported `completed` from the row; the log says `failed`, and why.
   test "a task at rest whose turn the harness stopped is failed, saying why", context do

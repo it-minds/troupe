@@ -127,7 +127,7 @@ defmodule Troupe.MCP.Stdio do
     config = Keyword.fetch!(opts, :config)
     Process.set_label("troupe mcp #{name} #{session_id}")
     # A port that fails ends with an exit signal of its own: on Windows a write to a server
-    # that has exited, or closed its input, ends it with `epipe` (D115). That is the
+    # that has exited, or closed its input, ends it with `epipe`. That is the
     # server's status, read in `handle_info/2`, not a reason for this process to go too.
     Process.flag(:trap_exit, true)
 
@@ -362,7 +362,7 @@ defmodule Troupe.MCP.Stdio do
       else: closed(state)
   end
 
-  # A port already closed is `badarg` (D115): the server has exited, and its exit status,
+  # A port already closed is `badarg`: the server has exited, and its exit status,
   # which comes before the port closes, is already on its way here and says more.
   defp sent?(port, message) do
     Port.command(port, [Jason.encode!(message), "\n"])

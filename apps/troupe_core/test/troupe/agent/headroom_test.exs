@@ -47,7 +47,7 @@ defmodule Troupe.Agent.HeadroomTest do
     assert Headroom.describe(:wall, %{used: 125_000, limit: 1_800_000, fraction: 0.07}) == "working time 2m/30m (7%)"
     assert Headroom.describe(:turns, %{used: 3, limit: 40, fraction: 0.075}) == "turns 3/40 (8%)"
 
-    # D70: no figure in an exponent's notation, and one that rounds to a thousand thousands is 1.0M.
+    # No figure in an exponent's notation, and one that rounds to a thousand thousands is 1.0M.
     assert Headroom.describe(:input, %{used: 999_960, limit: 1_000_000_000, fraction: 0.001}) ==
              "input tokens 1.0M/1000.0M (0%)"
 

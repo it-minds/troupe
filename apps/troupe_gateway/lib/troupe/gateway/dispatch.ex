@@ -1500,7 +1500,7 @@ defmodule Troupe.Gateway.Dispatch do
 
   # git's refusal is answered as merge and discard answer theirs, `internal_error` with
   # git's words, and a git that did not run in Troupe's own words: never an inspected
-  # term (D113).
+  # term.
   defp handle("worktree.remove", params, _context) do
     with {:ok, path} <- fetch(params, "path") do
       case Worktrees.remove(path, Map.get(params, "force", false)) do

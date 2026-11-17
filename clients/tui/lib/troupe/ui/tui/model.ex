@@ -570,7 +570,7 @@ defmodule Troupe.UI.TUI.Model do
         |> update_agent(path, &%{&1 | name: d.name})
 
       # A subagent is named by the agent it runs as it starts, so the window's side panel
-      # says `explore#1 (explore)`, not the window's own agent (D113).
+      # says `explore#1 (explore)`, not the window's own agent.
       :agent_named when is_binary(d.name) ->
         w |> ensure_agent(path) |> update_agent(path, &%{&1 | name: d.name})
 
@@ -1329,7 +1329,7 @@ defmodule Troupe.UI.TUI.Model do
   defp summarize_input(_, input), do: input |> Jason.encode!() |> String.slice(0, 60)
 
   # What `read_branch` was asked to read, in words: the list, a branch, a subagent of it,
-  # and its diff when that was asked for, rather than the call's JSON (D113).
+  # and its diff when that was asked for, rather than the call's JSON.
   defp read_branch_input(input) do
     what =
       case {input["session_id"], input["child"]} do

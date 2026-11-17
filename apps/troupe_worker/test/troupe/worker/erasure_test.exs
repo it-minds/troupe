@@ -206,7 +206,7 @@ defmodule Troupe.Worker.ErasureTest do
     assert Erasure.pending_for("dev", "troupe-w-dev-0") == []
   end
 
-  # D71: the pod's objects went through a delete whose answers were dropped, and it
+  # The pod's objects went through a delete whose answers were dropped, and it
   # answered the erasure carried out whatever the store said, so the plane recorded it and
   # no pod was ever told again.
   test "a pod the store refuses an object is not recorded, and its next enrolment finishes it",

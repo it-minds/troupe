@@ -166,7 +166,7 @@ defmodule Troupe.Gateway.Web do
     # `initialize` nobody has shown a token yet. So the socket itself has a ceiling,
     # well under the connection's, and Bandit closes the frame before it is assembled.
     # That ceiling is what a connection here says it takes at `initialize` (Decision 845):
-    # a client told 64 MiB sent 20 and lost the connection (D108). Bandit counts a frame's
+    # a client told 64 MiB sent 20 and lost the connection. Bandit counts a frame's
     # header against it, and a message in fragments against a limit of its own, so both are
     # set from the one number.
     Supervisor.child_spec(

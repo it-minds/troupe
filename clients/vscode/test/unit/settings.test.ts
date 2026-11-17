@@ -168,7 +168,7 @@ async function failing(out: string, err = "") {
   }
 }
 
-// Defects D76, Decision 799: a config that does not load is `config --explain --json`
+// A config that does not load is `config --explain --json`
 // exiting 1 with `errors` on standard output and nothing on standard error.
 test("a config that does not load shows its errors as troupe reports them, each opening its file at its line", async () => {
   const errors = [

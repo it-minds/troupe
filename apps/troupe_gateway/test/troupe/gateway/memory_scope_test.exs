@@ -1,7 +1,7 @@
 defmodule Troupe.Gateway.MemoryScopeTest do
   @moduledoc """
-  The start-up flow's leftovers over the protocol after #546, #544 and #550 (D110, Decision
-  854): `memory.get` answers the brief at whatever path it is given, so it takes `control`,
+  The start-up flow's leftovers over the protocol after #546, #544 and #550:
+  `memory.get` answers the brief at whatever path it is given, so it takes `control`,
   not what watching a session takes; it says whether a model can be asked under the
   workspace's own config, which `setup.get`'s machine-wide `usable` cannot; and
   `onboard.apply` and `onboard.decline` refuse outside a git repository, as the plan is due

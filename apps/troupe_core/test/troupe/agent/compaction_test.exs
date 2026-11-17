@@ -304,7 +304,7 @@ defmodule Troupe.Agent.CompactionTest do
       assert read =~ "the parser reads a tab as two spaces"
     end
 
-    # D66. As an agent's own call is given up on after `llm_timeout_ms`; the summary then
+    # As an agent's own call is given up on after `llm_timeout_ms`; the summary then
     # fails as a refused one does, and changes nothing (Decision 774).
     test "one that never answers is given up on after llm_timeout_ms", context do
       steps =

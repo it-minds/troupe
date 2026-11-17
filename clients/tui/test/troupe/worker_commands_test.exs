@@ -64,7 +64,7 @@ defmodule Troupe.WorkerCommandsTest do
     assert File.read!(Path.join(ws, "after.txt")) == "still connected"
   end
 
-  # D108: a file larger than the daemon's socket takes in one message went out whole, the
+  # A file larger than the daemon's socket takes in one message went out whole, the
   # daemon closed the connection at its frame ceiling, and the upload said "the daemon is
   # not reachable". `initialize` says how large a message may be, and nothing larger is sent.
   test "fs.upload refuses a file over the daemon's 16 MiB a message, and the connection stays up" do
@@ -82,7 +82,7 @@ defmodule Troupe.WorkerCommandsTest do
     assert File.read!(Path.join(ws, "after.txt")) == "still connected"
   end
 
-  # D115: `/upload` asks a file's size before it reads it, so one the daemon would refuse
+  # `/upload` asks a file's size before it reads it, so one the daemon would refuse
   # is never read whole. The answer is the size against the limit `initialize` gave.
   test "a file's size is weighed against what the daemon takes before it is read" do
     {sid, _, _} = start_session!(script: [])
@@ -198,7 +198,7 @@ defmodule Troupe.WorkerCommandsTest do
       assert File.read!(Path.join(ws, "notes.md")) == "from this machine"
     end
 
-    # D108, as the audit ran it: a 20 MB `/upload` said "the daemon is not reachable".
+    # As the audit ran it: a 20 MB `/upload` said "the daemon is not reachable".
     test "/upload of a file larger than the daemon takes says so, and the window stays connected" do
       {sid, _, ws} = start_session!(script: [])
       eventually(fn -> Client.capability(sid).up? end)
@@ -217,7 +217,7 @@ defmodule Troupe.WorkerCommandsTest do
       assert Client.capability(sid).up?
     end
 
-    # D115: the same file, which this user may not read. The size is asked first, so the
+    # The same file, which this user may not read. The size is asked first, so the
     # answer is that it is too large, not that it could not be read: nothing read it.
     test "/upload refuses a file larger than the daemon takes before reading it" do
       {sid, _, ws} = start_session!(script: [])

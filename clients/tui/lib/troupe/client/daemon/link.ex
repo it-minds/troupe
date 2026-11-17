@@ -45,7 +45,7 @@ defmodule Troupe.Client.Daemon.Link do
   Call a daemon method, starting or finding the daemon first.
 
   Answers, whatever happened to the connection or to this process: a terminal UI waits on
-  these calls, and an exit here would be its own (D108).
+  these calls, and an exit here would be its own.
   """
   @spec call(String.t(), map()) :: {:ok, term()} | {:error, term()}
   def call(method, params), do: ask({:call, method, params}, @call_timeout + 5_000)
@@ -256,8 +256,8 @@ defmodule Troupe.Client.Daemon.Link do
   # A daemon that has not answered in time has answered too: the caller gets an error it
   # can print, and this process, the one link to the daemon, lives on for the next call
   # rather than dying of the caller's (#231). So does one that closed the connection with
-  # the call in it, which the protocol client answers `unavailable` as it ends (D115), or
-  # ended with before (D108): the next call connects again, as it does after the daemon
+  # the call in it, which the protocol client answers `unavailable` as it ends, or
+  # ended with before: the next call connects again, as it does after the daemon
   # restarts.
   defp request(client, method, params) do
     case Client.call(client, method, params, @call_timeout) do

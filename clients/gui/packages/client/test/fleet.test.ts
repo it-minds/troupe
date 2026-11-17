@@ -247,7 +247,7 @@ describe("the fleet store", () => {
   });
 });
 
-// D61 and D59: a private session as the daemon's `session.list` says it (troupe Decision
+// A private session as the daemon's `session.list` says it (troupe Decision
 // 785), and one waiting to be erased as a plane's row says it (Decision 756).
 describe("a private session", () => {
   const daemonRow = (over: Record<string, unknown> = {}) =>

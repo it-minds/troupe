@@ -1,6 +1,6 @@
 defmodule Troupe.WatchClientTest do
   @moduledoc """
-  Watch mode in the TUI against the daemon (root Decision 844, D106): a saved `AI!`
+  Watch mode in the TUI against the daemon: a saved `AI!`
   comment opens a `quick` branch's window rather than reaching the session's own agent,
   the line under the screen says which file and comment started which window, and the
   branch's write asks though the workspace auto-approves; the status line shows a watch
