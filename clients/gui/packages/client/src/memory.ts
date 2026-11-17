@@ -21,6 +21,7 @@
 
 import { configKey } from "./config.js";
 import type { DaemonClient } from "./daemon.js";
+import { errorText } from "./words.js";
 
 export type FactKind = "command" | "convention" | "overview" | "layout" | "note" | "negative";
 export type FactStatus = "current" | "moved" | "missing" | "unanchored";
@@ -140,10 +141,6 @@ export interface LibrarianBarred {
   say: boolean;
 }
 
-function message(e: unknown): string {
-  return e instanceof Error ? e.message : String(e);
-}
-
 /**
  * Whether a librarian may start by itself in `workspace`, decided as the terminal client
  * decides it (`Troupe.Client.Daemon.Start`): memory and `memory_auto_refresh` on in the
@@ -190,7 +187,7 @@ export async function refreshStep(daemon: DaemonClient, workspace: string): Prom
   try {
     brief = await daemon.memory(workspace);
   } catch (e) {
-    return { why: `the daemon did not say whether one is due: ${message(e)}`, say: true };
+    return { why: `the daemon did not say whether one is due: ${errorText(e)}`, say: true };
   }
   const due = brief.status === "absent" || brief.status === "stale";
   if (brief.refresh_due === false) {
@@ -222,7 +219,7 @@ export async function refreshNow(daemon: DaemonClient, workspace: string, parent
   try {
     status = (await daemon.memory(workspace)).status;
   } catch (e) {
-    return { librarian: null, said: `No librarian for the project brief: the daemon did not say where the brief stands: ${message(e)}.` };
+    return { librarian: null, said: `No librarian for the project brief: the daemon did not say where the brief stands: ${errorText(e)}.` };
   }
   if (status === "disabled") return { librarian: null, said: "No librarian for the project brief: memory is off (memory: false in the workspace's config)." };
   try {
@@ -233,7 +230,7 @@ export async function refreshNow(daemon: DaemonClient, workspace: string, parent
       said: `The librarian is ${status === "absent" ? "writing" : "rewriting"} the project brief, in a session of its own.`,
     };
   } catch (e) {
-    return { librarian: null, said: `No librarian for the project brief: the daemon did not start it: ${message(e)}.` };
+    return { librarian: null, said: `No librarian for the project brief: the daemon did not start it: ${errorText(e)}.` };
   }
 }
 

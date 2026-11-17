@@ -8,7 +8,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { App } from "../src/App";
-import { duration, money } from "../src/views/bits";
+import { durationWords, moneyWords } from "@troupe/client";
 import { outcomeWords } from "../src/views/Integrations";
 import { PEOPLE, button, field, freshBrowser, render, says, sees, seesButton, signedInAs, startFake, type, visit, waitFor } from "./support";
 import type { FakeDeployment } from "./support";
@@ -61,15 +61,15 @@ describe("a confirm's way out", () => {
 
 describe("units and limits", () => {
   it("shows money in dollars and time in minutes and hours", () => {
-    expect(money(12_500_000)).toBe("$12.50");
-    expect(money(1_473_500_000)).toBe("$1,473.50");
-    expect(money(0)).toBe("$0.00");
-    expect(money(null)).toBe("—");
-    expect(duration(1200)).toBe("20 min");
-    expect(duration(45)).toBe("45 s");
-    expect(duration(5400)).toBe("1 h 30 min");
-    expect(duration(7200)).toBe("2 h");
-    expect(duration(90)).toBe("1 min 30 s");
+    expect(moneyWords(12_500_000)).toBe("$12.50");
+    expect(moneyWords(1_473_500_000)).toBe("$1,473.50");
+    expect(moneyWords(0)).toBe("$0.00");
+    expect(moneyWords(null)).toBe("—");
+    expect(durationWords(1_200_000)).toBe("20 min");
+    expect(durationWords(45_000)).toBe("45 s");
+    expect(durationWords(5_400_000)).toBe("1 h 30 min");
+    expect(durationWords(7_200_000)).toBe("2 h");
+    expect(durationWords(90_000)).toBe("1 min 30 s");
   });
 
   it("says what the platform allows of a switch in words, and the budget's unit", async () => {
@@ -107,7 +107,7 @@ describe("states, counts and outcomes", () => {
     const states = [...table.querySelectorAll("tbody tr")].map((r) => r.lastElementChild?.textContent ?? "").filter(Boolean);
     expect(states.length).toBeGreaterThan(0);
     expect(states.filter((s) => /_|\bread_only\b/.test(s))).toEqual([]);
-    for (const s of states) expect(["active", "asleep", "read-only", "erasure pending"].some((w) => s.includes(w))).toBe(true);
+    for (const s of states) expect(["Active", "Asleep", "Read only", "Erasure pending"].some((w) => s.includes(w))).toBe(true);
   });
 
   it("says what the plane did with a delivery as a sentence, not by its field", () => {

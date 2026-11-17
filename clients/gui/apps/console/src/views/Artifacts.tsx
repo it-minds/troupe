@@ -27,7 +27,7 @@
 
 import { useEffect, useState } from "react";
 import type { JSX } from "react";
-import { ArtifactApi, TroupeRpcError, appLink, ownerWords, teamOwned, visibilityWords as audienceWords } from "@troupe/client";
+import { ArtifactApi, TroupeRpcError, appLink, bytes, ownerWords, teamOwned, visibilityWords as audienceWords } from "@troupe/client";
 import { OpenInApp } from "./AppBanner";
 import type { Artifact, ArtifactDetail, ArtifactFilter, ArtifactList, ArtifactPerson } from "@troupe/client";
 import { goesLine, goesSentence, versionGoes, versionsSentence } from "@troupe/client";
@@ -37,7 +37,7 @@ import type { Route } from "../route";
 import { ArtifactEditor, editableFiles } from "./ArtifactEditor";
 import { ArtifactComments, ArtifactPeople } from "./ArtifactComments";
 import { ArtifactLinks } from "./ArtifactLinks";
-import { Empty, Fields, Loaded, Preview, Region, Status, bytes, count, when } from "./bits";
+import { Empty, Fields, Loaded, Preview, Region, Status, count, when } from "./bits";
 
 /** Which artifacts a tab lists. */
 export type ArtifactTab = { kind: "mine" } | { kind: "shared" } | { kind: "organisation" } | { kind: "teams" } | { kind: "profile"; name: string };

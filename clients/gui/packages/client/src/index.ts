@@ -20,7 +20,7 @@ export type {
   ProfileOffering,
   WorkerPod,
 } from "./plane.js";
-export { FUNCTIONS_HEADING, accessWords, askWords, budgetWords, capacityWords, keyWords, missingWords, moneyWords, profileSummary, ruleAccessWords, whoseWords } from "./profile.js";
+export { FUNCTIONS_HEADING, accessWords, askWords, budgetWords, capacityWords, keyWords, missingWords, profileSummary, ruleAccessWords, whoseWords } from "./profile.js";
 export type { ProfileView, ProfileViewAgent, ProfileViewFunction, ProfileViewLimits, ProfileViewMissing, ProfileViewModel, ProfileViewRule, ProfileViewServer, ProfileViewSkill, RuleAccess, ServerAccess } from "./profile.js";
 export {
   LOCAL_DOWN_SENTENCE,
@@ -43,7 +43,7 @@ export {
 export type { AutoPick, MessageTokens, NewSessionWhere, ProfileRoom, ProfileRoomRow, TokenNames } from "./newSession.js";
 export { ALLOW_ALWAYS, RELAYED_ALLOW_SESSION, UPLOAD_ARTIFACT, SessionView, createLocalSession, turnCompleted } from "./session.js";
 export type { ApprovalDecision, ArtifactAttached, SessionViewHooks, TurnResult } from "./session.js";
-export { AuthSession, PlaneUnreachableError, memoryReachedMarks, memoryTokenStore, webTokenStore } from "./auth.js";
+export { AuthSession, PlaneUnreachableError, memoryReachedMarks, memoryTokenStore, unregisteredRedirect, webTokenStore } from "./auth.js";
 export type { AuthSessionOptions, ReachedMarks, SignInProgress, TokenStore, UnreachableContext } from "./auth.js";
 export { beginRedirect, completeRedirect, hasRedirectAnswer, scrubRedirect, idpMetadata, pkcePair } from "./pkce.js";
 export type { BeginRedirectOptions, IdpMetadata, PkcePair, PendingRedirect, RedirectResult } from "./pkce.js";
@@ -108,9 +108,10 @@ export {
   FINISH_PARTS,
   LEGACY_BUDGET_OPTIONS,
 } from "./transcript.js";
-export { ONCE_ONLY_SENTENCE, bytes, callConsequence, callEvidence, callHeadline, callScopedLabel, counted, toolGlyph, toolOutcome, toolTarget } from "./calls.js";
+export { ONCE_ONLY_SENTENCE, callConsequence, callEvidence, callHeadline, callScopedLabel, counted, decisionWords, toolGlyph, toolOutcome, toolTarget } from "./calls.js";
 export type { CallEvidence, CallWhere } from "./calls.js";
-export { foldScratch, scratchDocumentOf, scratchSize, scratchVersion } from "./scratch.js";
+export { foldScratch, scratchDocumentOf, scratchVersion } from "./scratch.js";
+export { ago, bytes, durationWords, errorText, moneyWords, sessionStateWords } from "./words.js";
 export type {
   Entry,
   DelegationGate,

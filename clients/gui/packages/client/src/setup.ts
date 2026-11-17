@@ -9,6 +9,7 @@
 import { TroupeRpcError } from "./connection.js";
 import type { ModelOffer, ModelRole } from "./config.js";
 import { ErrorCodes } from "./types.js";
+import { errorText } from "./words.js";
 
 export type SetupStepName = "where" | "provider" | "key" | "models" | "workspace" | "daemon" | "finish";
 
@@ -258,9 +259,5 @@ export function setupUnsupported(e: unknown): boolean {
  */
 export function setupError(e: unknown): string {
   if (setupUnsupported(e)) return "This daemon does not know the first run's questions yet; update troupe-daemon.";
-  if (e instanceof TroupeRpcError) {
-    const reason = e.data?.["reason"];
-    if (typeof reason === "string") return reason;
-  }
-  return e instanceof Error ? e.message : String(e);
+  return errorText(e);
 }

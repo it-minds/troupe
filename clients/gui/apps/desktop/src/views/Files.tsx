@@ -8,6 +8,7 @@ import { useCallback, useEffect, useState } from "react";
 import type { JSX } from "react";
 import type { FsEntry, SessionView } from "@troupe/client";
 import { Loading } from "./bits";
+import { errorText } from "@troupe/client";
 
 export function Files({ view }: { view: SessionView | null }): JSX.Element {
   const [path, setPath] = useState(".");
@@ -26,7 +27,7 @@ export function Files({ view }: { view: SessionView | null }): JSX.Element {
         setPath(r.path);
         setEntries([...r.entries].sort(byKindThenName));
       } catch (e) {
-        setError(e instanceof Error ? e.message : String(e));
+        setError(errorText(e));
       } finally {
         setLoading(false);
       }
@@ -53,7 +54,7 @@ export function Files({ view }: { view: SessionView | null }): JSX.Element {
       const file = await view.fsRead(entry.path);
       setOpen({ path: file.path, content: file.content, hash: file.hash });
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errorText(e));
     }
   };
 

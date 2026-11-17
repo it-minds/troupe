@@ -27,9 +27,9 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { JSX } from "react";
-import { besideRows, replacedBy, topicKey, writtenBy } from "@troupe/client";
+import { ago, besideRows, errorText, replacedBy, topicKey, writtenBy } from "@troupe/client";
 import type { DaemonClient, EntryLevel, MemoryEntry, MemoryInEffect, MemoryProposal, MemoryStatus, OwnMemory, OwnMemoryHistory, OwnPlane } from "@troupe/client";
-import { Loading, relative, unreachedWords } from "./bits";
+import { Loading, unreachedWords } from "./bits";
 
 type View = "effect" | string;
 
@@ -49,12 +49,6 @@ interface Level {
 
 /** A level's name in a sentence: "Everyone at Example", "Team core", "Only you". */
 const titleOf = (l: Level): string => (l.level.scope === "team" ? `Team ${l.label}` : l.label);
-
-function message(e: unknown): string {
-  const data = (e as { data?: { reason?: unknown } } | null)?.data;
-  if (data && typeof data.reason === "string") return data.reason;
-  return e instanceof Error ? e.message : String(e);
-}
 
 const isConflict = (e: unknown): boolean => (e as { message?: unknown } | null)?.message === "conflict" || (e as { code?: unknown } | null)?.code === -32006;
 
@@ -176,7 +170,7 @@ export function MemoryScreen({
           setWhy(null);
           setOwn(o);
         },
-        (e: unknown) => live && setWhy(message(e)),
+        (e: unknown) => live && setWhy(errorText(e)),
       );
     }
     return () => {
@@ -211,7 +205,7 @@ export function MemoryScreen({
         setEffectWhy(null);
         setInEffect(e);
       },
-      (e: unknown) => live && setEffectWhy(message(e)),
+      (e: unknown) => live && setEffectWhy(errorText(e)),
     );
     return () => {
       live = false;
@@ -245,7 +239,7 @@ export function MemoryScreen({
         {status && (
           <p className="muted">
             {mine ? `This computer holds version ${mine.version} of your memory` : "This computer holds no copy of your memory"}
-            {status.fetched_at ? `, fetched ${relative(Date.parse(status.fetched_at))}` : ""}. {status.reason ?? ""}
+            {status.fetched_at ? `, fetched ${ago(Date.parse(status.fetched_at))}` : ""}. {status.reason ?? ""}
           </p>
         )}
       </div>
@@ -473,7 +467,7 @@ function LevelView({
       (e: unknown) => {
         if (!live) return;
         setReach(null);
-        setError(message(e));
+        setError(errorText(e));
       },
     );
     return () => {
@@ -494,7 +488,7 @@ function LevelView({
         const theirs = above ? await via.levelMemory(above, level.level.name).catch(() => null) : await via.ownMemory().catch(() => null);
         if (theirs) setConflict({ version: theirs.version ?? 0, text: theirs.text, mine: draft });
       }
-      setError(message(e));
+      setError(errorText(e));
     };
     const sent = above
       ? via.putLevelMemory(above, level.level.name, { entries: wire(entries) }, level.version).then((saved) => {
@@ -652,7 +646,7 @@ function LevelView({
                   <div className="entry-meta">
                     {writer && (
                       <span className="micro">
-                        {by} · {writer.at ? relative(Date.parse(writer.at)).toUpperCase() : `VERSION ${writer.version ?? "?"}`}
+                        {by} · {writer.at ? ago(Date.parse(writer.at)).toUpperCase() : `VERSION ${writer.version ?? "?"}`}
                         {used}
                       </span>
                     )}
@@ -732,7 +726,7 @@ function Proposed({ level, proposals }: { level: Level; proposals: MemoryProposa
               <p>{p.entry}</p>
               <div className="entry-meta">
                 <span className="micro">
-                  {(p.agent ?? "an agent").replace(/^agent:/, "").toUpperCase()} IN A SESSION · {relative(Date.parse(p.at)).toUpperCase()}
+                  {(p.agent ?? "an agent").replace(/^agent:/, "").toUpperCase()} IN A SESSION · {ago(Date.parse(p.at)).toUpperCase()}
                 </span>
               </div>
               {p.state === "pending" ? (
@@ -787,7 +781,7 @@ function Versions({
           setLeft(h.against);
         }
       },
-      (e: unknown) => live && setError(message(e)),
+      (e: unknown) => live && setError(errorText(e)),
     );
     return () => {
       live = false;
@@ -800,7 +794,7 @@ function Versions({
     via
       .rollbackOwnMemory(to, own.version)
       .then((saved) => onRolledBack(saved.user, `Rolled back: version ${to}'s text is version ${saved.user.version} now.`))
-      .catch((e: unknown) => setError(message(e)))
+      .catch((e: unknown) => setError(errorText(e)))
       .finally(() => setBusy(false));
   };
 
@@ -822,7 +816,7 @@ function Versions({
         <ul className="session-reads">
           {status.sessions.map((s) => (
             <li key={s.session_id}>
-              <span className="mono">{s.session_id}</span> read {mine(s.documents) === null ? "none of your memory" : `version ${mine(s.documents)}`} at its last turn, {relative(Date.parse(s.turn_at))}:{" "}
+              <span className="mono">{s.session_id}</span> read {mine(s.documents) === null ? "none of your memory" : `version ${mine(s.documents)}`} at its last turn, {ago(Date.parse(s.turn_at))}:{" "}
               <span className={s.current ? "current" : "behind"}>{s.current ? "current" : "behind"}</span>
             </li>
           ))}
@@ -841,7 +835,7 @@ function Versions({
                 <span className="n">v{v.version}</span>
                 <span>{v.changed_by ?? ""}</span>
                 <span className="micro" title={v.changed_at}>
-                  {relative(Date.parse(v.changed_at))}
+                  {ago(Date.parse(v.changed_at))}
                 </span>
                 {v.version !== own.version && (
                   <button type="button" className="link" disabled={busy} onClick={() => rollback(v.version)}>

@@ -313,20 +313,20 @@ describe("artifacts' storage", () => {
     await open("#/budgets", PEOPLE.alice);
     const table = () => document.querySelector('section[aria-label="Every team"]');
     await sees("Artifacts' storage", table);
-    await sees("12.0 MiB of 100.0 MiB", table);
-    await sees("0 B · no quota", table);
+    await sees("12 MiB of 100 MiB", table);
+    await sees("0 bytes · no quota", table);
   });
 
   it("changes a team's quota on its Limits tab, sent as artifact_quota_bytes", async () => {
     await open("#/teams/core/limits", PEOPLE.alice);
     await sees("Artifacts' storage quota");
-    await sees("100.0 MiB");
+    await sees("100 MiB");
     (await seesButton("Change core's limits")).click();
     const quota = await seesField("Artifacts' storage quota");
     expect(quota.value).toBe("100");
     type(quota, "250");
     (await seesButton("Preview")).click();
-    await sees("core's artifacts may hold 250.0 MiB in all");
+    await sees("core's artifacts may hold 250 MiB in all");
     (await waitFor(() => confirm("Apply"), "the confirm")).click();
     await sees("Recorded in the audit as team.update on core");
     await sees("artifact_quota_bytes");

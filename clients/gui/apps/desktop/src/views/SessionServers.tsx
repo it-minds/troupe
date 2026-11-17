@@ -14,6 +14,7 @@ import { useCallback, useEffect, useState } from "react";
 import type { JSX } from "react";
 import type { DaemonClient, LocalServer } from "@troupe/client";
 import { shell } from "../shell";
+import { errorText } from "@troupe/client";
 
 const READ_EVERY_MS = 5_000;
 
@@ -89,7 +90,7 @@ export function SessionServers({
       setSaid(await run());
       await read();
     } catch (e) {
-      setSaid(e instanceof Error ? e.message : String(e));
+      setSaid(errorText(e));
     } finally {
       setBusy(null);
     }

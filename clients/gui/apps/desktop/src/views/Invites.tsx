@@ -14,7 +14,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { JSX } from "react";
-import { emptyTranscript, fold, inviteRefusal, personName, removedSentence, roleWords } from "@troupe/client";
+import { emptyTranscript, errorText, fold, inviteRefusal, personName, removedSentence, roleWords } from "@troupe/client";
 import type { AuthSession, DaemonClient, FleetRow, Invitee, InviteRole, Person, TranscriptState, TroupeEvent } from "@troupe/client";
 import { copyText } from "../clipboard";
 import { sessionLinkText } from "../links";
@@ -239,7 +239,7 @@ function CopySessionLink({ auth, row }: { auth: AuthSession; row: FleetRow }): J
       await copyText(sessionLinkText(row.id, auth.planeUrl, console, row.kind === "private"));
       setSaid("Link copied");
     } catch (e) {
-      setSaid(`Not copied: ${e instanceof Error ? e.message : String(e)}`);
+      setSaid(`Not copied: ${errorText(e)}`);
     }
   };
   return (
@@ -279,7 +279,7 @@ export function InvitedSession({ daemon, row, onBack }: { daemon: DaemonClient |
           for (const e of events) if (typeof e.seq === "number") seen.current = Math.max(seen.current, e.seq);
           if (events.length > 0) setState((s) => events.reduce((acc, e) => fold(acc, e, { now: Date.now() }), s));
         })
-        .catch((e: unknown) => live && setError(e instanceof Error ? e.message : String(e)))
+        .catch((e: unknown) => live && setError(errorText(e)))
         .finally(() => live && setReading(false));
     };
     read();

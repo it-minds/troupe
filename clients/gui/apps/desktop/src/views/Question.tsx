@@ -14,7 +14,7 @@
 import { useState } from "react";
 import type { JSX } from "react";
 import type { Entry } from "@troupe/client";
-import { LEGACY_BUDGET_OPTIONS } from "@troupe/client";
+import { LEGACY_BUDGET_OPTIONS, errorText } from "@troupe/client";
 import { Pill } from "./bits";
 import { Mask } from "./brand";
 
@@ -58,7 +58,7 @@ export function QuestionPanel({
     try {
       await onAnswer(value);
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errorText(e));
     } finally {
       setBusy(null);
     }

@@ -133,11 +133,18 @@ describe("signing in to the console", () => {
     await seesLink("Teams");
   });
 
-  it("says plainly when the plane does not answer", async () => {
+  it("says plainly when the plane does not answer, as an alert that asks again from where it stands", async () => {
     unmount = render(<App navigate={() => undefined} />).unmount;
     type(await waitFor(() => field("The plane's address"), "the sign-in screen"), "http://127.0.0.1:1");
     button("Sign in")!.click();
-    await waitFor(() => document.querySelector(".banner.error"), "the error");
+    const alert = await waitFor(() => document.querySelector<HTMLElement>(".banner.error[role=alert]"), "the error, as an alert");
     await sees("The plane at http://127.0.0.1:1 did not answer. Check the address and try again.");
+    const retry = await waitFor(() => button("Try again", alert), "the retry");
+    // Asking again clears the alert and asks the same address, which says the same again.
+    retry.click();
+    await waitFor(() => {
+      const again = document.querySelector<HTMLElement>(".banner.error[role=alert]");
+      return again && again !== alert && button("Try again", again);
+    }, "a new alert from the second try, with its retry");
   });
 });

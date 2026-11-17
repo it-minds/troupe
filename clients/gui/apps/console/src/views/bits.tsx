@@ -4,7 +4,7 @@
 
 import { useEffect, useId, useRef, useState } from "react";
 import type { JSX, ReactNode } from "react";
-import { firstLine } from "@troupe/client";
+import { firstLine, sessionStateWords } from "@troupe/client";
 import { describeError, recorded, show, useConsole } from "../console";
 import type { Load } from "../console";
 
@@ -109,16 +109,16 @@ export function Status({ kind, glyph, children }: { kind: StatusKind; glyph: str
   );
 }
 
-const SESSION_STATES: Record<string, { kind: StatusKind; glyph: string; word: string }> = {
-  active: { kind: "running", glyph: "●", word: "active" },
-  dormant: { kind: "dormant", glyph: "◑", word: "asleep" },
-  read_only: { kind: "muted", glyph: "◇", word: "read-only" },
-  erasure_pending: { kind: "denied", glyph: "✕", word: "erasure pending" },
+const SESSION_STATES: Record<string, { kind: StatusKind; glyph: string }> = {
+  active: { kind: "running", glyph: "●" },
+  dormant: { kind: "dormant", glyph: "◑" },
+  read_only: { kind: "muted", glyph: "◇" },
+  erasure_pending: { kind: "denied", glyph: "✕" },
 };
 
-/** A session's state as every page says it: one glyph and one word per state, never the plane's key. */
+/** A session's state as every page says it: one glyph and the library's word, which the desktop app says too, never the plane's key. */
 export function sessionState(state: string): { kind: StatusKind; glyph: string; word: string } {
-  return SESSION_STATES[state] ?? { kind: "muted", glyph: "○", word: state.replace(/_/g, " ") };
+  return { ...(SESSION_STATES[state] ?? { kind: "muted", glyph: "○" }), word: sessionStateWords(state) };
 }
 
 /** A session's state, as a status. */
@@ -492,41 +492,6 @@ export function changed(before: Record<string, unknown>, after: Record<string, u
   return Object.keys(after)
     .filter((k) => JSON.stringify(before[k] ?? null) !== JSON.stringify(after[k] ?? null))
     .map((k) => ({ field: k, from: before[k] ?? null, to: after[k] ?? null }));
-}
-
-/**
- * Money in millionths of a dollar, as the plane keeps it, in dollars: `$12.50`, `$1,473.50`.
- * One unit wherever the console shows a spend, a reservation or a ceiling.
- */
-export function money(micros: number | null | undefined): string {
-  if (micros === null || micros === undefined) return "—";
-  const dollars = (Math.abs(micros) / 1_000_000).toLocaleString("en", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  return `${micros < 0 ? "−" : ""}$${dollars}`;
-}
-
-/** A length of time the plane keeps in seconds, in hours, minutes and seconds, leaving out what is nought: `45 s`, `20 min`, `1 h 30 min`. */
-export function duration(seconds: number | null | undefined): string {
-  if (seconds === null || seconds === undefined || !Number.isFinite(seconds)) return "—";
-  const total = Math.max(0, Math.round(seconds));
-  if (total === 0) return "0 s";
-  const h = Math.floor(total / 3600);
-  const m = Math.floor((total % 3600) / 60);
-  const s = total % 60;
-  return [h ? `${h} h` : "", m ? `${m} min` : "", s ? `${s} s` : ""].filter(Boolean).join(" ");
-}
-
-/** Bytes, in binary units, as a volume and a disk are measured and `kubectl` shows them. */
-export function bytes(count: number | null | undefined): string {
-  if (count === null || count === undefined) return "—";
-  if (count < 1024) return `${count} B`;
-  const units = ["KiB", "MiB", "GiB", "TiB"];
-  let n = count / 1024;
-  let unit = 0;
-  while (n >= 1024 && unit < units.length - 1) {
-    n /= 1024;
-    unit += 1;
-  }
-  return `${n.toFixed(1)} ${units[unit]}`;
 }
 
 /** How many of something, with the word in the right number: `1 fork`, `3 forks`. */

@@ -8,7 +8,7 @@
 
 import { useEffect, useState } from "react";
 import type { JSX } from "react";
-import { ErrorCodes, loopEnding, TroupeRpcError } from "@troupe/client";
+import { ErrorCodes, errorText, loopEnding, TroupeRpcError } from "@troupe/client";
 import type { LoopState } from "@troupe/client";
 import { Pill } from "./bits";
 
@@ -21,11 +21,7 @@ export function loopError(e: unknown): string {
   if (e instanceof TroupeRpcError && e.code === ErrorCodes.invalid_params && e.data?.["field"] === "max_iterations") {
     return "The number of iterations is a whole number, one or more.";
   }
-  return e instanceof Error ? e.message : String(e);
-}
-
-function message(e: unknown): string {
-  return e instanceof Error ? e.message : String(e);
+  return errorText(e);
 }
 
 /**
@@ -66,7 +62,7 @@ export function GoalLine({
     if (mode === "loop" && !goal) setMode("show");
   }
 
-  const act = async (what: () => Promise<void>, refusal: (e: unknown) => string = message): Promise<boolean> => {
+  const act = async (what: () => Promise<void>, refusal: (e: unknown) => string = errorText): Promise<boolean> => {
     setBusy(true);
     setError(null);
     try {
@@ -231,7 +227,7 @@ export function LoopStatus({ loop, canStop, onStop }: { loop: LoopState | undefi
             setError(null);
             onStop().catch((e: unknown) => {
               setStopping(false);
-              setError(message(e));
+              setError(errorText(e));
             });
           }}
         >

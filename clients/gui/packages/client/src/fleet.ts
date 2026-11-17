@@ -18,6 +18,7 @@ import type { PlaneClient, SessionRow, SessionsFilter } from "./plane.js";
 import { watchRemote } from "./remote.js";
 import { ErrorCodes } from "./types.js";
 import type { Unseen } from "./types.js";
+import { errorText } from "./words.js";
 
 /**
  * Where a session runs, which is the one thing a person must be able to see at a glance.
@@ -575,7 +576,7 @@ export class FleetStore {
           bySource.set(s.id, await s.listArchived());
           sources[s.id] = { at: Date.now(), error: null };
         } catch (e) {
-          sources[s.id] = { at: 0, error: e instanceof Error ? e.message : String(e) };
+          sources[s.id] = { at: 0, error: errorText(e) };
         }
       }),
     );
@@ -629,7 +630,7 @@ export class FleetStore {
         } catch (e) {
           // Keep what the source last said. A list that empties because a token expired
           // is worse than a list that is briefly stale and says so.
-          next[s.id] = { at: next[s.id]?.at ?? 0, error: e instanceof Error ? e.message : String(e) };
+          next[s.id] = { at: next[s.id]?.at ?? 0, error: errorText(e) };
         }
       }),
     );
@@ -728,7 +729,7 @@ export function archiveRefusal(e: unknown, archiving = true): string {
   if (e instanceof TroupeRpcError && e.code === ErrorCodes.forbidden) {
     return `Only its owner can ${archiving ? "archive" : "unarchive"} this session`;
   }
-  return e instanceof Error ? e.message : String(e);
+  return errorText(e);
 }
 
 /**

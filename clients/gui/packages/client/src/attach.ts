@@ -28,6 +28,7 @@ import { openRemote } from "./remote.js";
 import { SessionView } from "./session.js";
 import type { SessionViewHooks } from "./session.js";
 import type { EventEnvelope, ToolInvoke } from "./types.js";
+import { errorText } from "./words.js";
 
 /**
  * How a session on the plane is opened and its pod token renewed, for `SessionAttachment.open`.
@@ -209,7 +210,7 @@ export class SessionAttachment {
     } catch (e) {
       // Not fatal on its own: the socket is still open until `exp`, and the close that
       // follows is what triggers the reconnect. Say so rather than tearing it down now.
-      this.set("live", `could not refresh the token: ${e instanceof Error ? e.message : String(e)}`);
+      this.set("live", `could not refresh the token: ${errorText(e)}`);
     }
   }
 
@@ -226,7 +227,7 @@ export class SessionAttachment {
           await this.connect(mode);
           return;
         } catch (e) {
-          reason = e instanceof Error ? e.message : String(e);
+          reason = errorText(e);
         }
       }
       this.set("failed", reason);
