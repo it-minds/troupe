@@ -146,6 +146,9 @@ defmodule Troupe.Gateway.Dispatch do
     "session.loop.start" => :control,
     "session.loop.stop" => :control,
     "session.loop.get" => :observe,
+    # Compacting now rewrites what the agent goes on with, as a turn may on its own, and
+    # costs a model call: what input takes.
+    "session.compact" => :control,
     "approval.respond" => :control,
     "question.answer" => :control,
     "todo.edit" => :control,
@@ -158,6 +161,7 @@ defmodule Troupe.Gateway.Dispatch do
     "tools.unregister" => :control,
     "session.create" => :admin,
     "session.archive" => :admin,
+    "session.unarchive" => :admin,
     "session.pin" => :admin,
     "session.title.set" => :admin,
     "session.unpin" => :admin,
@@ -328,7 +332,7 @@ defmodule Troupe.Gateway.Dispatch do
   # it runs (`Troupe.Gateway.LocalOnly`). A session is put under it, or taken out, by the
   # client that last gave it work: before the work, so a turn it starts is already under it,
   # and after a create, whose session there was no id for before.
-  @work ~w(input.send commands.run session.goal.set session.loop.start)
+  @work ~w(input.send commands.run session.goal.set session.loop.start session.compact)
   @invites ~w(session.invite session.uninvite session.invites session.read_sealed)
   @forwarded_artifacts ~w(artifact.get artifact.open artifact.read artifact.share artifact.unshare artifact.comments artifact.comment artifact.comment.delete artifact.comment.edit people.search artifact.rollback artifact.pin artifact.put artifact.transfer)
 
@@ -515,8 +519,9 @@ defmodule Troupe.Gateway.Dispatch do
 
   # -- reads ------------------------------------------------------------------
 
+  # The list is the sessions not archived unless the filter asks for `archived: true`.
   defp handle("session.list", params, _context) do
-    filter = Map.get(params, "filter", %{})
+    filter = (Map.get(params, "filter") || %{}) |> Map.update("archived", false, &(&1 == true))
     {:ok, %{"sessions" => Enum.map(Troupe.list_live_sessions(filter), &session_json/1)}}
   end
 
@@ -528,7 +533,8 @@ defmodule Troupe.Gateway.Dispatch do
   end
 
   defp handle("fleet.get", _params, _context) do
-    {:ok, %{"sessions" => Enum.map(Troupe.list_live_sessions(%{}), &session_json/1)}}
+    sessions = Troupe.list_live_sessions(%{"archived" => false})
+    {:ok, %{"sessions" => Enum.map(sessions, &session_json/1)}}
   end
 
   # -- files ------------------------------------------------------------------
@@ -1035,6 +1041,37 @@ defmodule Troupe.Gateway.Dispatch do
     end
   end
 
+  # Compact the conversation now (`/compact`). Activating, like the goal: the root agent
+  # is what compacts. The answer is the acknowledgement; `compacted` with `reason: manual`,
+  # carrying this `command_id`, is the effect. Refused while a turn runs, and while there
+  # is too little to compact, with what to do instead.
+  defp handle("session.compact", params, context) do
+    with {:ok, session_id} <- fetch(params, "session_id"),
+         :ok <- activate(session_id, context) do
+      case Troupe.compact(session_id, actor(context), command_opts(params)) do
+        :ok ->
+          {:ok, %{"accepted" => true}}
+
+        {:error, :busy} ->
+          {:error,
+           Error.new(:conflict, %{
+             reason: "the agent is in the middle of a turn: compact once it has finished, or cancel it first"
+           })}
+
+        {:error, :too_little} ->
+          {:error,
+           Error.new(:conflict, %{
+             reason:
+               "there is too little to compact yet: a compaction keeps the last few messages " <>
+                 "as they are, and there is nothing before them to summarise"
+           })}
+
+        {:error, :no_session} ->
+          {:error, Error.new(:unavailable, %{reason: "the session is not running"})}
+      end
+    end
+  end
+
   # A loop towards the goal (Decision 679). Starting one activates the session, since its
   # iterations are the root agent's turns; the answer names the loop and its cap, and the
   # effect is `loop_started`, carrying this `command_id`, then the iterations. A session
@@ -1293,14 +1330,25 @@ defmodule Troupe.Gateway.Dispatch do
     end
   end
 
+  # Dormant, and out of the session list until `session.unarchive`, kept whole: the mark
+  # is a file beside the log, as a pin is. Marked first, so a session that has no log is
+  # refused before anything is stopped.
   defp handle("session.archive", params, _context) do
-    with {:ok, session_id} <- fetch(params, "session_id") do
+    with {:ok, session_id} <- fetch(params, "session_id"),
+         :ok <- archived(session_id, true) do
       Troupe.stop_session(session_id)
       # After the tree, so that `session_dormant` is in the log this seals, and a private
       # session is written down before the daemon says it is dormant. A local session has
       # no sealer and this is a no-op.
       Private.stop(session_id)
-      {:ok, %{"session_id" => session_id, "state" => "dormant"}}
+      {:ok, %{"session_id" => session_id, "state" => "dormant", "archived" => true}}
+    end
+  end
+
+  defp handle("session.unarchive", params, _context) do
+    with {:ok, session_id} <- fetch(params, "session_id"),
+         :ok <- archived(session_id, false) do
+      {:ok, %{"session_id" => session_id, "archived" => false}}
     end
   end
 
@@ -2474,6 +2522,14 @@ defmodule Troupe.Gateway.Dispatch do
     end
   end
 
+  defp archived(session_id, archived?) do
+    case Troupe.archive_session(session_id, archived?) do
+      :ok -> :ok
+      {:error, :not_found} -> {:error, Error.new(:not_found, %{session_id: session_id})}
+      {:error, reason} -> {:error, Error.new(:internal_error, %{reason: reason})}
+    end
+  end
+
   defp pin(params, pinned?) do
     with {:ok, session_id} <- fetch(params, "session_id") do
       case Troupe.pin_session(session_id, pinned?) do
@@ -3093,6 +3149,7 @@ defmodule Troupe.Gateway.Dispatch do
       "created_at" => Map.get(session, :created_at),
       "last_active_at" => Map.get(session, :last_active_at),
       "pinned" => Map.get(session, :pinned, false),
+      "archived" => Map.get(session, :archived, false),
       # What the person called it, or nil, and the client shows the workspace.
       "title" => Map.get(session, :title),
       # Offered to the plane for steering from another device: to whom, whether the plane

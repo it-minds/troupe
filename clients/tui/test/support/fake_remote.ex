@@ -41,7 +41,8 @@ defmodule Troupe.FakeRemote do
           cost: float(),
           updated_at: integer(),
           worker: String.t(),
-          events: [map()]
+          events: [map()],
+          archived: boolean()
         }
 
   ## API
@@ -353,7 +354,8 @@ defmodule Troupe.FakeRemote do
       worker: Keyword.get(fields, :worker, "w1"),
       events: Keyword.get(fields, :events, []),
       kind: Keyword.get(fields, :kind, "team"),
-      device: Keyword.get(fields, :device)
+      device: Keyword.get(fields, :device),
+      archived: Keyword.get(fields, :archived, false)
     }
   end
 
@@ -770,7 +772,7 @@ defmodule Troupe.FakeRemote do
   @addressed ~w(approval.respond blob.get fs.list fs.read fs.upload input.send presence.set
                 profile.switch session.archive session.erase session.get session.pin
                 session.unpin todo.edit tools.register tools.unregister turn.cancel
-                shell.run shell.cancel)
+                shell.run shell.cancel session.compact)
 
   # What `Troupe.Gateway.Dispatch` refuses a command without, beyond `session_id`, for the
   # commands this client sends. Accepting any spelling is how `profile.switch`,
@@ -967,6 +969,28 @@ defmodule Troupe.FakeRemote do
             "token" => token(id),
             "state" => "active"
           }}, state}
+
+      :error ->
+        {{:error, -32_005, "no such session"}, state}
+    end
+  end
+
+  # The plane's archive: the owner's alone, refused to anybody else as the plane refuses it.
+  # A running session is put to sleep first; work in it later does not bring it back.
+  defp dispatch(state, :plane, method, %{"session_id" => id}, _pid)
+       when method in ["session.archive", "session.unarchive"] do
+    archived? = method == "session.archive"
+    me = state.principal["sub"]
+
+    case Map.fetch(state.sessions, id) do
+      {:ok, %{owner: ^me} = session} ->
+        session = %{session | state: if(archived?, do: "dormant", else: session.state)}
+        session = Map.put(session, :archived, archived?)
+        state = put_in(state.sessions[id], session)
+        {{:ok, live_summary(session)}, state}
+
+      {:ok, _theirs} ->
+        {{:error, -32_004, "forbidden", %{"required_role" => "owner"}}, state}
 
       :error ->
         {{:error, -32_005, "no such session"}, state}
@@ -1339,7 +1363,13 @@ defmodule Troupe.FakeRemote do
   end
 
   defp dispatch(state, _kind, method, _params, _pid)
-       when method in ["turn.cancel", "approval.respond", "todo.edit", "profile.switch"],
+       when method in [
+              "turn.cancel",
+              "approval.respond",
+              "todo.edit",
+              "profile.switch",
+              "session.compact"
+            ],
        do: {{:ok, %{"accepted" => true}}, state}
 
   # Laptops' sessions offered for steering (root #58), as `offer/3` set them.
@@ -1942,9 +1972,11 @@ defmodule Troupe.FakeRemote do
     end
   end
 
+  # An archived session is listed only when archived ones are asked for, and then alone.
   defp matches?(session, params) do
     (params["team"] in [nil, session.team] or params["team"] == "") and
-      params["state"] in [nil, session.state, ""]
+      params["state"] in [nil, session.state, ""] and
+      Map.get(session, :archived, false) == (params["archived"] == true)
   end
 
   defp summary(session) do
@@ -1958,7 +1990,8 @@ defmodule Troupe.FakeRemote do
       "status" => session.status,
       "tokens" => session.tokens,
       "cost" => session.cost,
-      "updated_at" => session.updated_at
+      "updated_at" => session.updated_at,
+      "archived" => Map.get(session, :archived, false)
     }
   end
 
@@ -2137,7 +2170,8 @@ defmodule Troupe.FakeRemote do
       "your_role" => "owner",
       # One of the person's own private sessions, listed beside the team's.
       "kind" => Map.get(session, :kind, "team"),
-      "device" => Map.get(session, :device)
+      "device" => Map.get(session, :device),
+      "archived" => Map.get(session, :archived, false)
     }
   end
 

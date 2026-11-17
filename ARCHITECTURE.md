@@ -87,11 +87,12 @@ is counted for the usage the provider had reported (Decision 788).
 | State | Event | Next |
 |---|---|---|
 | idle | input | log it; budget check; start the stream → thinking (or done, budget) |
+| idle | `session.compact` | compacting, then back to idle; refused while there is too little to compact, and in any other state |
 | thinking | stream done with tool calls | acting |
 | thinking | text only | done (`finished`) — an implicit finish |
 | thinking | prompt over the compaction threshold | compacting |
 | thinking | cut at the output cap, or empty | note it and re-issue once, then done (`output_truncated`, `empty_reply`) |
-| thinking | refusal, model error, timeout | done (`refused`); a root's failed request rests it idle, a subagent's is done (`llm_error`) and hands its parent what it has; a context overflow compacts once and retries |
+| thinking | refusal, model error, timeout | done (`refused`); a root's failed request rests it idle, a subagent's is done (`llm_error`) and hands its parent what it has; a context overflow compacts once and retries, then retries once more with every large tool result left for `read_output`, the turn's own included |
 | acting | each call | allowlist and permission check → error result, approval request, or a task |
 | acting | approval, answer, tool result, child result, a task's `DOWN` | record it, and stop a child that has reported; when none are outstanding, the next turn |
 | compacting | summary, model error, timeout | carry on the interrupted turn, or come to rest; without a summary the conversation is unchanged |

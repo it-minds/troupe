@@ -49,7 +49,7 @@ defmodule Troupe.Worker.Auth do
     input.send turn.cancel profile.switch approval.respond question.answer todo.edit
     shell.run shell.cancel
     session.goal.set session.goal.get session.goal.clear
-    session.loop.start session.loop.stop session.loop.get
+    session.loop.start session.loop.stop session.loop.get session.compact
     fs.list fs.read fs.upload scratch.list blob.get mcp.status context.get presence.set
     tools.register tools.unregister
   )
@@ -66,7 +66,7 @@ defmodule Troupe.Worker.Auth do
   # objects and the row. A client asks the plane, whose erasure reaches this pod over the
   # control channel (`Troupe.Worker.Plane.Commands`), which this guard is not on. A fork
   # is a new row, key and placement too, so it is the plane's `session.fork` (Decision 812).
-  @plane_methods ~w(session.archive session.pin session.unpin session.erase session.fork
+  @plane_methods ~w(session.archive session.unarchive session.pin session.unpin session.erase session.fork
                     session.title.set)
 
   @enforce_keys [:worker_id]

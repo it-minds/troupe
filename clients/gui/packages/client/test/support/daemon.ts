@@ -75,6 +75,8 @@ interface Session {
   readers?: number;
   /** `private` for one sealed under the person's key (troupe Decision 785); local otherwise. */
   kind?: "local" | "private";
+  /** Hidden from `session.list` unless its filter asks for archived ones. */
+  archived?: boolean;
   /** How a private session's sealing stands here, as `session.list` says it. */
   sync?: "current" | "behind" | "paused" | "elsewhere" | "erasure_pending";
   /** The other device that holds a private one, where `sync` is `elsewhere`. */
@@ -535,6 +537,8 @@ export class FakeDaemon {
   token: string;
   /** The command table `commands.list` answers; a test may add a row of its own. */
   commands: typeof COMMANDS = [...COMMANDS];
+  /** What `session.compact` is refused with, as the daemon's `conflict` reason; `null` compacts. */
+  compactRefusal: string | null = null;
   readonly sessions = new Map<string, Session>();
   readonly calls: Array<{ method: string; params: Record<string, unknown> }> = [];
   /** Who the daemon says its user is. `null` until somebody links an identity. */
@@ -1365,9 +1369,11 @@ evoked where nothing is set and there was a sign-in. */
       }
 
       case "session.list": {
-        const filter = (params["filter"] ?? {}) as { kind?: string; workspace?: string };
+        const filter = (params["filter"] ?? {}) as { kind?: string; workspace?: string; archived?: boolean };
         const sessions = [...this.sessions.values()]
           .filter((s) => !filter.workspace || s.workspace === filter.workspace)
+          // Archived ones only when asked for, and then nothing else.
+          .filter((s) => Boolean(s.archived) === (filter.archived === true))
           .map((s) => this.rowOf(s));
         return reply(ws, id, { sessions });
       }
@@ -1463,6 +1469,21 @@ evoked where nothing is set and there was a sign-in. */
       case "remote.withdraw": {
         if (session) session.remote = null;
         return reply(ws, id, { session_id: sessionId, remote: null });
+      }
+
+      // Hidden from the list and kept whole; a running one is put to sleep first, and only
+      // `session.unarchive` brings it back.
+      case "session.archive": {
+        if (!session) return reply(ws, id, null, { code: -32005, message: "not_found", data: { kind: "session", id: sessionId } });
+        session.archived = true;
+        session.state = "dormant";
+        return reply(ws, id, { session_id: sessionId, state: "dormant", archived: true });
+      }
+
+      case "session.unarchive": {
+        if (!session) return reply(ws, id, null, { code: -32005, message: "not_found", data: { kind: "session", id: sessionId } });
+        session.archived = false;
+        return reply(ws, id, { session_id: sessionId, archived: false });
       }
 
       // A private session another device holds, taken over here (troupe Decision 785).
@@ -1651,6 +1672,20 @@ evoked where nothing is set and there was a sign-in. */
         if (!session) return reply(ws, id, null, { code: -32005, message: "not_found" });
         session.goal = null;
         session.log.append("goal_cleared", { command_id: params["command_id"] }, { kind: "user", subject: this.principal.subject });
+        return reply(ws, id, { accepted: true });
+      }
+
+      // Compacting now, as the root agent does it between turns: refused while a turn runs or
+      // when a test says so, else `compacted` with `reason: manual` and the command's id.
+      case "session.compact": {
+        if (!session) return reply(ws, id, null, { code: -32005, message: "not_found" });
+        const refusal = this.compactRefusal ?? (session.status !== "idle" ? "the agent is in the middle of a turn: compact once it has finished, or cancel it first" : null);
+        if (refusal) return reply(ws, id, null, { code: -32006, message: "conflict", data: { reason: refusal } });
+        session.log.append(
+          "compacted",
+          { summary: "the earlier work, summarised", reason: "manual", conversation: [], command_id: params["command_id"] },
+          { kind: "user", subject: this.principal.subject },
+        );
         return reply(ws, id, { accepted: true });
       }
 
@@ -3151,6 +3186,7 @@ evoked where nothing is set and there was a sign-in. */
       created_at: s.createdAt,
       last_active_at: s.lastActiveAt,
       pinned: false,
+      archived: Boolean(s.archived),
       title: s.title ?? null,
       kind: s.kind ?? "local",
       sync: s.kind === "private" ? (s.sync ?? "paused") : null,

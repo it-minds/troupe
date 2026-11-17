@@ -19,7 +19,7 @@ export type {
   WorkerPod,
 } from "./plane.js";
 export { FUNCTIONS_HEADING, accessWords, askWords, budgetWords, capacityWords, keyWords, missingWords, moneyWords, profileSummary, ruleAccessWords, whoseWords } from "./profile.js";
-export type { ProfileView, ProfileViewAgent, ProfileViewFunction, ProfileViewLimits, ProfileViewMissing, ProfileViewModel, ProfileViewRule, ProfileViewServer, RuleAccess, ServerAccess } from "./profile.js";
+export type { ProfileView, ProfileViewAgent, ProfileViewFunction, ProfileViewLimits, ProfileViewMissing, ProfileViewModel, ProfileViewRule, ProfileViewServer, ProfileViewSkill, RuleAccess, ServerAccess } from "./profile.js";
 export {
   LOCAL_DOWN_SENTENCE,
   andList,
@@ -162,6 +162,8 @@ export {
   RESTART_SENTENCE,
   PRIVATE_OFFER_SENTENCE,
   onThisComputer,
+  mayArchive,
+  archiveRefusal,
 } from "./fleet.js";
 export { invitationWords, invitationsFrom, inviteRefusal, personName, removedSentence, roleWords, steerWords } from "./invites.js";
 export type { Invitation, Invitee, InviteRole, Person, SealedEvent, SealedRead } from "./invites.js";

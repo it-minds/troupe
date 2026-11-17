@@ -63,6 +63,9 @@ defmodule Troupe.SessionCase do
          # And one that refuses a tool call or result in a request that defines no tools,
          # as Anthropic's does.
          strict_tools: Keyword.get(opts, :strict_tools, true),
+         # A context window, in bytes of the messages, past which the model refuses the
+         # prompt as too long; none unless a test gives one.
+         window_bytes: Keyword.get(opts, :window_bytes),
          # `nil` is a gateway that reports no cost, which is every gateway on a streamed
          # response.
          cost_micros: Keyword.get(opts, :cost_micros, :derived)},

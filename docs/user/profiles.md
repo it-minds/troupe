@@ -28,7 +28,8 @@ ask you to; until then what it shows is what any of them would give you.
 The agents a session may start as (the primaries) and the ones those may hand work to (the
 subagents), each with where it comes from: the profile's bundle, or Troupe itself.
 
-Beside them, the agents that exist and that your session will **not** have, each with why:
+In the terminal, beside them, the agents that exist and that your session will **not**
+have, each with why (the desktop app lists only what your session gets):
 
 - **profile**: the profile says that agent does not exist on its pods, for anybody;
 - **grant**: your team's grant on the profile leaves it out.
@@ -47,7 +48,9 @@ and the profile decides whether they may replace its own ([agents](agents.md)).
 
 ## Skills
 
-The bundle's skills your team's grant leaves the session, by name.
+The bundle's skills your team's grant leaves the session. The desktop app gives each one
+with what it does, and opens its `SKILL.md` in place, rendered; the terminal lists them by
+name.
 
 ## Tools
 

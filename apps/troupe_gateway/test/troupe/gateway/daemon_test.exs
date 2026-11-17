@@ -623,6 +623,67 @@ defmodule Troupe.Gateway.DaemonTest do
     end
   end
 
+  describe "session.compact" do
+    test "is acknowledged, and its effect is a manual compacted carrying the command id",
+         context do
+      steps = Enum.map(1..4, &{:text, "answer #{&1}"}) ++ [{:text, "what happened so far"}]
+      %{session: session} = start_session(context, steps)
+      client = connect(context)
+      {:ok, _} = Client.subscribe(client, "session:#{session.id}")
+
+      for n <- 1..4 do
+        {:ok, _} =
+          Client.call(client, "input.send", %{"session_id" => session.id, "text" => "turn #{n}"})
+
+        collect_until(&(&1.type == "turn_ended"))
+      end
+
+      command_id = Client.command_id()
+
+      assert {:ok, %{"accepted" => true}} =
+               Client.call(client, "session.compact", %{
+                 "command_id" => command_id,
+                 "session_id" => session.id
+               })
+
+      compacted = collect_until(&(&1.type == "compacted")) |> List.last()
+      assert compacted.type == "compacted"
+      assert compacted.data["reason"] == "manual"
+      assert compacted.data["command_id"] == command_id
+      assert compacted.data["summary"] == "what happened so far"
+      assert compacted.actor.subject =~ "local:"
+    end
+
+    test "is refused while there is too little to compact, and while a turn runs", context do
+      %{session: session} =
+        start_session(context, [{:text, "hi"}, {:delay, 1_000, {:text, "slow"}}])
+
+      client = connect(context)
+      {:ok, _} = Client.subscribe(client, "session:#{session.id}")
+      params = fn -> %{"command_id" => Client.command_id(), "session_id" => session.id} end
+
+      {:ok, _} = Client.call(client, "input.send", %{"session_id" => session.id, "text" => "hi"})
+      collect_until(&(&1.type == "turn_ended"))
+
+      assert {:error, %Error{message: "conflict", data: %{"reason" => too_little}}} =
+               Client.call(client, "session.compact", params.())
+
+      assert too_little =~ "there is too little to compact yet"
+
+      {:ok, _} =
+        Client.call(client, "input.send", %{"session_id" => session.id, "text" => "slowly"})
+
+      collect_until(&(&1.type == "agent_state" and &1.data["state"] == "thinking"))
+
+      assert {:error, %Error{message: "conflict", data: %{"reason" => busy}}} =
+               Client.call(client, "session.compact", params.())
+
+      assert busy =~ "the agent is in the middle of a turn"
+      await_idle(session.id)
+      refute Enum.any?(Troupe.events(session.id), &(&1.type == "compacted"))
+    end
+  end
+
   describe "the session's goal" do
     test "set is acknowledged, its effect is a goal_set carrying the command id, and get and clear follow",
          context do

@@ -274,6 +274,18 @@ defmodule Troupe.CommandAuditTest do
       refute Enum.any?(FakeRemote.calls(remote), &match?({"input.send", _}, &1))
     end
 
+    # Compacting a pod's conversation is the pod's to do: the client asks it, and says so.
+    test "/compact asks the pod's session to compact its conversation" do
+      {remote, _sid, pid} = on_a_pod()
+
+      assert answer(pid, "/compact") == "compacting the conversation"
+
+      assert Enum.any?(
+               FakeRemote.calls(remote),
+               &match?({"session.compact", %{"session_id" => "s-pod", "command_id" => _}}, &1)
+             )
+    end
+
     # A file the pod's agent made, saved on this machine (root issue #765): read with fs.read
     # where the session runs, written into the directory named, under its own name.
     test "/save reads a file of the pod's workspace and writes it here" do

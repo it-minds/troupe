@@ -154,6 +154,8 @@ export interface SessionSummary {
   created_at?: string;
   last_active_at?: string;
   pinned?: boolean;
+  /** Hidden from the session list by its owner and kept whole; absent from a daemon before it. */
+  archived?: boolean;
   unseen?: Unseen;
   [k: string]: unknown;
 }

@@ -184,6 +184,7 @@ defmodule Troupe.Plane.ProfileView do
       "functions" => functions,
       "agents_not_here" => not_here,
       "skills" => Enum.map(offered.skills, & &1.name),
+      "skill_details" => skill_details(parsed, offered.skills),
       "tools" => %{"rules" => rules(row), "mcp" => servers(parsed, offered)},
       "reach" => reach(name, row),
       "limits" => limits(user, name, row, team),
@@ -204,6 +205,47 @@ defmodule Troupe.Plane.ProfileView do
   end
 
   defp bundle_of(_row), do: nil
+
+  # -- skills ----------------------------------------------------------------------
+
+  # The most of a SKILL.md the answer carries; past it the body is cut and says so.
+  @skill_body_cap 65_536
+
+  # Each skill the grant leaves, in `skills`' order, with what it does and the body of its
+  # SKILL.md after the front matter, which says the name and description already given.
+  # A skill with no SKILL.md in the bundle has a `nil` body.
+  defp skill_details(parsed, offered) do
+    files = for skill <- skills_of(parsed), into: %{}, do: {skill.name, skill.files}
+
+    Enum.map(offered, fn skill ->
+      body = files |> Map.get(skill.name, %{}) |> Map.get("SKILL.md") |> skill_body()
+      cut? = is_binary(body) and byte_size(body) > @skill_body_cap
+
+      %{
+        "name" => skill.name,
+        "description" => skill.description,
+        "body" => if(cut?, do: cut(body, @skill_body_cap), else: body),
+        "truncated" => cut?
+      }
+    end)
+  end
+
+  defp skills_of(%{skills: skills}), do: skills
+  defp skills_of(_parsed), do: []
+
+  defp skill_body(text) when is_binary(text) do
+    case Regex.run(~r/\A---\r?\n.*?\r?\n---\r?\n?(.*)\z/s, text) do
+      [_, rest] -> String.trim_leading(rest)
+      nil -> text
+    end
+  end
+
+  defp skill_body(_text), do: nil
+
+  # Cut on a character boundary, so the body stays valid UTF-8.
+  defp cut(text, bytes) do
+    text |> binary_part(0, bytes) |> String.chunk(:valid) |> Enum.take_while(&String.valid?/1) |> Enum.join()
+  end
 
   # -- agents ----------------------------------------------------------------------
 

@@ -3,7 +3,7 @@
 // needs an argument, one a pod cannot run, one the desktop app has no runner for
 // (`/watch`), the terminal client's own (`/upload`, `/quit`, and `/merge`, whose own
 // requirement there is a session on that machine),
-// one with the terminal's words beside the neutral ones (`/cancel`), an agent, `/goal` with the `/loop` whose
+// one with the terminal's words beside the neutral ones (`/cancel`), an agent, `/compact`, `/goal` with the `/loop` whose
 // summary names the goal too, `/memory`, which opens the desktop app's memory view, and a
 // command a repository's `.troupe/commands/review.md` defines, which the fakes run as
 // `commands.run` does: its prompt, `$ARGUMENTS` replaced, as the session's input.
@@ -30,6 +30,30 @@ const arg = (name: string, required: boolean, kind: string) => ({ name, required
 
 export const COMMANDS: CommandEntry[] = [
   {
+    name: "archive",
+    aliases: [],
+    section: "session",
+    summary: "Archive this session: hide it from the session list, for everyone who sees it",
+    usage: "/archive",
+    args: [],
+    availability: "always",
+    source: "builtin",
+    detail: "Kept whole, and asleep. Its owner brings it back with /unarchive; anybody who could open it still can.",
+    example: "/archive",
+  },
+  {
+    name: "unarchive",
+    aliases: [],
+    section: "session",
+    summary: "Unarchive this session: put it back in the session list",
+    usage: "/unarchive",
+    args: [],
+    availability: "always",
+    source: "builtin",
+    detail: "Only its owner can unarchive it.",
+    example: "/unarchive",
+  },
+  {
     name: "cancel",
     aliases: [],
     section: "session",
@@ -55,6 +79,18 @@ export const COMMANDS: CommandEntry[] = [
     source: "builtin",
     detail: "Commits what the branch left uncommitted and merges its branch into the checkout.",
     example: "/merge 2",
+  },
+  {
+    name: "compact",
+    aliases: [],
+    section: "session",
+    summary: "Compact the conversation now, to make room",
+    usage: "/compact",
+    args: [],
+    availability: "always",
+    source: "builtin",
+    detail: "Summarises the older part of the session's conversation now, between turns, and keeps the last few messages as they are. Refused while a turn runs, and while there is too little to compact.",
+    example: "/compact",
   },
   {
     name: "goal",

@@ -165,20 +165,26 @@ defmodule Troupe.Agent.State do
     turn: %Spend{},
     # Dimensions already warned about (Decision 655): one `budget_warning` each.
     headroom_warned: MapSet.new(),
-    # At-most-once guards for the two recoveries a turn makes on its own (Decision 659):
-    # one more request after a reply the output cap cut or that said nothing, one
-    # compaction after a prompt the provider refused as too long. Not replayed — a
-    # restart forgets them and grants the retry again, which errs towards finishing.
+    # At-most-once guards for the recoveries a turn makes on its own: one more request
+    # after a reply the output cap cut or that said nothing; after a prompt the provider
+    # refused as too long, one compaction, and then once more with every large tool result
+    # left out for `read_output`, the turn's own included. Not replayed — a restart
+    # forgets them and grants the retry again, which errs towards finishing.
     truncation_retried: false,
     overflow_retried: false,
+    overflow_left_out: false,
     # Why the compaction in flight was started, and what the summariser's prompt was made
-    # of (Decision 769), for the `compacted` event.
+    # of, for the `compacted` event; and for one a person asked for, who and under which
+    # `command_id`.
     compact_reason: nil,
     compact_prompt: nil,
-    # How many messages at the head of the conversation the last compaction left behind it
-    # (Decision 771): up to the model's last reply, so a result it had not answered yet is
-    # not among them. A large tool result among them is sent as a stub naming its
-    # `read_output` call. Folded from `compacted`.
+    compact_command: nil,
+    # How many messages at the head of the conversation are behind: up to the model's last
+    # reply in what the last compaction kept, so a result it had not answered yet is not
+    # among them, or the whole conversation once a prompt too long for the window was sent
+    # again with the turn's own large results left out. A large tool result among them is
+    # sent as a stub naming its `read_output` call. Folded from `compacted`, and from the
+    # `llm_request` whose `behind` moved it.
     compacted_through: 0,
     # The budget question (Decision 660): the `call_id` of the one outstanding, the task
     # waiting on its answer, how many have been asked (the id is that count, so a replay
@@ -277,8 +283,10 @@ defmodule Troupe.Agent.State do
           turn: Spend.t(),
           truncation_retried: boolean(),
           overflow_retried: boolean(),
+          overflow_left_out: boolean(),
           compact_reason: String.t() | nil,
           compact_prompt: map() | nil,
+          compact_command: {Troupe.Protocol.Event.Actor.t() | nil, String.t() | nil} | nil,
           compacted_through: non_neg_integer(),
           budget_ask_pending: String.t() | nil,
           budget_ask_task: pid() | nil,

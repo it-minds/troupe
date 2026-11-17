@@ -117,6 +117,8 @@ row, and on a page past 400 lines; a full page is closed and the next one,
 | [D139](defects/d130.md#d139---the-daemons-release-variables-reach-every-program-it-starts-low) | The daemon's release variables reach every program it starts | low |
 | [D140](defects/d130.md#d140---a-max_turns-sessions-fake-model-is-asked-three-times-on-main-low) | A `max_turns` session's fake model is asked three times, on main | low |
 | [D141](defects/d130.md#d141---a-person-in-two-teams-is-listed-what-the-narrower-grant-leaves-medium) | A person in two teams is listed what the narrower grant leaves | medium |
+| [D143](defects/d130.md#d143---three-unattended-session-worker-tests-fail-on-the-chunk-without-any-change-low) | Three unattended-session worker tests fail on the chunk without any change | low |
+| [D142](defects/d130.md#d142---two-desktop-tests-fail-on-the-chunk-without-any-change-low) | Two desktop tests fail on the chunk without any change | low |
 
 The pages: [D8 to D62](defects/d008.md), [D63 to D89](defects/d063.md),
 [D90 to D120](defects/d090.md), [D121 to D129](defects/d121.md) and

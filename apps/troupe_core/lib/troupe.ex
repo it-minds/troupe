@@ -21,7 +21,7 @@ defmodule Troupe do
   alias Troupe.Onboard.Notice
   alias Troupe.Protocol.Origin
   alias Troupe.Session.{Approvals, Blobs, Log, Questions, Watcher}
-  alias Troupe.Sessions.{Fork, Index, Pin, Title, Unseen}
+  alias Troupe.Sessions.{Archive, Fork, Index, Pin, Title, Unseen}
 
   require Logger
 
@@ -425,6 +425,21 @@ defmodule Troupe do
           :ok | {:error, :no_session}
   def set_goal(session_id, text, actor \\ nil, opts \\ []) when is_binary(text) and text != "" do
     with_root(session_id, &Agent.set_goal(&1, text, actor, opts))
+  end
+
+  @doc """
+  Compact the session's conversation now, between turns (`/compact`): the root agent asks
+  its summariser and writes `compacted` with `reason: "manual"` under `actor`, carrying
+  `:command_id` from `opts`. Refused while a turn runs (`:busy`), and while there is
+  nothing old enough to summarise (`:too_little`).
+  """
+  @spec compact(String.t(), Troupe.Protocol.Event.Actor.t() | nil, keyword()) ::
+          :ok | {:error, :no_session | :busy | :too_little}
+  def compact(session_id, actor \\ nil, opts \\ []) do
+    with_root(
+      session_id,
+      &Agent.compact(&1, actor: actor, command_id: Keyword.get(opts, :command_id))
+    )
   end
 
   @doc "Clear the session's goal; the root agent writes `goal_cleared` if it had one."
@@ -948,6 +963,17 @@ defmodule Troupe do
   def pin_session(session_id, pinned?) do
     with :ok <- Pin.put(session_id, pinned?, state_dirs()) do
       Index.update(session_id, %{pinned: pinned?})
+    end
+  end
+
+  @doc """
+  Archive a session, or bring it back, running or dormant (`Troupe.Sessions.Archive`): out
+  of the session list unless the list asks for the archived ones, and kept whole.
+  """
+  @spec archive_session(String.t(), boolean()) :: :ok | {:error, :not_found | String.t()}
+  def archive_session(session_id, archived?) do
+    with :ok <- Archive.put(session_id, archived?, state_dirs()) do
+      Index.update(session_id, %{archived: archived?})
     end
   end
 

@@ -193,6 +193,17 @@ defmodule Troupe.Agent.Server do
   def goal(pid), do: :gen_statem.call(pid, :goal, 5_000)
 
   @doc """
+  Compact the conversation now, between turns: `:ok` once the summariser is asked, written
+  as `compacted` with `reason: "manual"` when it answers. Refused with `:busy` while the
+  agent is anywhere but resting, and with `:too_little` while the conversation is no longer
+  than what a compaction keeps. `opts`: `:actor` and `:command_id`, written on `compacted`.
+  """
+  @spec compact(pid(), keyword()) :: :ok | {:error, :busy | :too_little}
+  def compact(pid, opts \\ []) do
+    :gen_statem.call(pid, {:compact, Keyword.get(opts, :actor), Keyword.get(opts, :command_id)}, 5_000)
+  end
+
+  @doc """
   Every agent definition this agent's session was started with: on a pod its bundle's,
   narrowed by the team's grant, which nothing outside the session can work out again.
   """
@@ -434,7 +445,7 @@ defmodule Troupe.Agent.Server do
   # (Decision 876). A call that put or took neither, and a log written before them, fold as
   # they did.
   defp fold_event(%Event{type: "llm_request", data: data}, state),
-    do: state |> fold_context(data) |> fold_hold(data)
+    do: state |> fold_context(data) |> fold_hold(data) |> fold_behind(data)
 
   # The note a root's failed request left in its conversation (Decision 693). A log written
   # before the note was, has none, and replays as it always did. A call the agent gave up
@@ -522,6 +533,13 @@ defmodule Troupe.Agent.Server do
   # list the prompt shows is the turn's either way.
   defp fold_input(state, %{"source" => "shell"}), do: %{state | shell_notes: []}
   defp fold_input(state, _data), do: state |> show_todos() |> let_go()
+
+  # A request sent again after the provider refused it as too long, with every large tool
+  # result left out, says where that left the boundary.
+  defp fold_behind(state, %{"behind" => behind}) when is_integer(behind),
+    do: %{state | compacted_through: behind}
+
+  defp fold_behind(state, _data), do: state
 
   defp fold_context(state, %{"turn_context_block" => %{} = put}), do: put_context(state, put)
   defp fold_context(state, _data), do: state
@@ -901,6 +919,21 @@ defmodule Troupe.Agent.Server do
 
   def idle({:call, from}, :snapshot, state), do: reply_snapshot(from, :idle, state)
 
+  # A compaction a person asked for, while nothing runs: the summariser's call, and back to
+  # rest. One with nothing old enough to summarise is refused rather than started, so the
+  # person hears why nothing happened.
+  def idle({:call, from}, {:compact, actor, command_id}, state) do
+    {_keep, drop} = state |> shown_left_out(state.conversation) |> split_for_compaction()
+
+    if drop == [] do
+      {:keep_state_and_data, [{:reply, from, {:error, :too_little}}]}
+    else
+      state = %{state | compact_reason: "manual", compact_command: {actor, command_id}}
+      {:next_state, name, state} = enter_compaction(state, :idle)
+      {:next_state, name, state, [{:reply, from, :ok}]}
+    end
+  end
+
   # An iteration of a loop that has stopped since it was sent, or of one this agent was
   # never told about. Dropped: nothing is asking for it any more.
   def idle(:info, {:input, :loop, %{loop: loop}, _actor, _meta}, %State{loop: current})
@@ -1256,6 +1289,9 @@ defmodule Troupe.Agent.Server do
     {:keep_state_and_data, []}
   end
 
+  defp common({:call, from}, {:compact, _actor, _command_id}, _state_name, _state),
+    do: {:keep_state_and_data, [{:reply, from, {:error, :busy}}]}
+
   defp common({:call, from}, request, _state_name, state) do
     Logger.debug("troupe agent #{State.label(state)} got unknown call #{inspect(request)}")
     {:keep_state_and_data, [{:reply, from, {:error, :unknown_request}}]}
@@ -1528,6 +1564,7 @@ defmodule Troupe.Agent.Server do
           |> Map.merge(changed)
           |> put_attached(attached)
           |> put_held(held)
+          |> put_behind(state)
         )
 
         :telemetry.execute(
@@ -1546,6 +1583,11 @@ defmodule Troupe.Agent.Server do
         {:next_state, :thinking, state}
     end
   end
+
+  defp put_behind(data, %State{overflow_left_out: true, compacted_through: behind}),
+    do: Map.put(data, "behind", behind)
+
+  defp put_behind(data, _state), do: data
 
   # Whether this call's system prompt and tools are those of the agent's call before it
   # (issue #465, Decision 815): what a kept thinking block and the cached prefix are bound
@@ -1682,9 +1724,10 @@ defmodule Troupe.Agent.Server do
     |> aim(state, definition.model)
   end
 
-  # The conversation, but for a large tool result the last compaction left behind: that
-  # goes as a stub naming the `read_output` call that returns it (Decision 771), when this
-  # turn offers the call. The conversation and the log keep the result whole.
+  # The conversation, but for a large tool result behind the boundary, the last
+  # compaction's or a refused prompt's: that goes as a stub naming the `read_output` call
+  # that returns it, when this turn offers the call. The conversation and the log keep the
+  # result whole.
   defp sent_conversation(state, tools, ctx) do
     if Enum.any?(tools, &(&1.name == ReadOutput.name())),
       do: Output.stub_behind(state.conversation, state.compacted_through, ctx),
@@ -2217,7 +2260,8 @@ defmodule Troupe.Agent.Server do
       | conversation: let_thinking_go(state.conversation, data) ++ [message],
         budget: Budget.charge_turn(state.budget),
         last_input_tokens: Usage.total_input(response.usage),
-        overflow_retried: false
+        overflow_retried: false,
+        overflow_left_out: false
     }
     |> warn_headroom()
     |> context_status()
@@ -2511,23 +2555,65 @@ defmodule Troupe.Agent.Server do
 
   # The prompt no longer fits. The conversation is not lost — it is all in the log — but
   # the only recovery a client could offer was more input, which rebuilds the same
-  # oversized prompt and fails identically. So compact once and send the turn again; if
-  # that is not possible, or was already done, fail with a line that says what to do
-  # rather than the provider's raw 400 (Decision 659).
+  # oversized prompt and fails identically. So compact once and send the turn again. What
+  # a compaction keeps is the last few messages whole, and a turn that fetched a lot has
+  # its own calls and results there, which may not fit on their own: then send it once
+  # more with every large tool result left for `read_output`, the turn's own that the model
+  # has not read yet included, which costs no model call. A conversation too short to
+  # compact goes straight to that. Only if the prompt still does not fit, or there is
+  # nothing left to do, does the turn fail, with a line that says what to do rather than
+  # the provider's raw 400; the guards go with the turn.
   defp context_overflow(state, {:context_overflow, _detail} = overflow) do
     {_keep, drop} = split_for_compaction(state.conversation)
     described = Provider.describe_error(overflow)
 
     cond do
+      state.overflow_left_out ->
+        overflow_failed(state, described <> still_too_long(state))
+
+      (state.overflow_retried or drop == []) and leaves_more_out?(state) ->
+        start_turn(%{
+          state
+          | overflow_retried: true,
+            overflow_left_out: true,
+            compacted_through: length(state.conversation)
+        })
+
       state.overflow_retried ->
-        llm_failed(state, described <> " — already compacted once this turn; lower compact_at or start a new session")
+        overflow_failed(state, described <> still_too_long(state))
 
       drop == [] ->
-        llm_failed(state, described <> " — too few messages to compact; start a new session")
+        overflow_failed(state, described <> " — too few messages to compact; start a new session")
 
       true ->
         enter_compaction(%{state | overflow_retried: true, compact_reason: "context_overflow"}, :thinking)
     end
+  end
+
+  defp overflow_failed(state, message),
+    do: llm_failed(%{state | overflow_retried: false, overflow_left_out: false}, message)
+
+  # Whether sending every large result as a stub would change the prompt: the agent is
+  # offered `read_output`, without which a stub is a result lost, and some result not
+  # behind yet is over the size a stub is for.
+  defp leaves_more_out?(state) do
+    ctx = base_ctx(state, "")
+    tools = Tools.specs(effective_definition(state), ctx)
+
+    Enum.any?(tools, &(&1.name == ReadOutput.name())) and
+      Output.stubs_any?(Enum.drop(state.conversation, state.compacted_through))
+  end
+
+  # What is too large once nothing more can be left out: the turn's own tool results when
+  # they are what the conversation ends with, which only fetching less makes smaller.
+  defp still_too_long(%State{conversation: conversation}) do
+    if match?(%Message{}, List.last(conversation)) and tool_results?(List.last(conversation)),
+      do:
+        " — this turn's own tool results do not fit the model's context window, even after " <>
+          "compacting; fetch less per call (fewer records, a narrower query), or start a new session",
+      else:
+        " — the latest message does not fit the model's context window, even after compacting; " <>
+          "send less at once, or start a new session"
   end
 
   # A subagent ends `llm_error` and hands its parent what it has: resting, as a root does,
@@ -4057,15 +4143,20 @@ defmodule Troupe.Agent.Server do
     said = "Summary of earlier work in this session:\n\n" <> summary <> on_the_pad(state)
     conversation = [Message.user(said) | keep]
 
-    log(state, :compacted, %{
-      "summary" => summary,
-      "reason" => state.compact_reason || "threshold",
-      "conversation" => Enum.map(conversation, &store_results(state, &1)),
-      "model" => response.model || state.llm_model,
-      "prompt_bytes" => state.compact_prompt,
-      "usage" => Usage.to_json(response.usage),
-      "gateway" => gateway
-    })
+    {actor, command_id} = state.compact_command || {nil, nil}
+
+    data =
+      Map.merge(command_data(command_id), %{
+        "summary" => summary,
+        "reason" => state.compact_reason || "threshold",
+        "conversation" => Enum.map(conversation, &store_results(state, &1)),
+        "model" => response.model || state.llm_model,
+        "prompt_bytes" => state.compact_prompt,
+        "usage" => Usage.to_json(response.usage),
+        "gateway" => gateway
+      })
+
+    log(state, :compacted, data, actor)
 
     state = count_call(state, response.usage, gateway, %{summariser: true})
 
@@ -4136,13 +4227,24 @@ defmodule Troupe.Agent.Server do
 
   # A failed summarisation is not fatal: keep the conversation as it stands and go on. The
   # next turn may exceed the window, and the provider will say so.
+  # One a person asked for says so, since they are waiting to hear: an `llm_error` with no
+  # note, which leaves the conversation as it is on a replay too.
   defp summary_failed(state, reason) do
     Logger.warning("troupe: compaction failed: #{inspect(reason)}")
+
+    if state.compact_reason == "manual" do
+      log(state, :llm_error, %{
+        "reason" =>
+          "the compaction failed: #{Provider.describe_error(reason)}; " <>
+            "the conversation is as it was"
+      })
+    end
+
     resume_after_compaction(state)
   end
 
   defp resume_after_compaction(state) do
-    state = %{state | compact_reason: nil, compact_prompt: nil}
+    state = %{state | compact_reason: nil, compact_prompt: nil, compact_command: nil}
 
     case state.compact_resume do
       :thinking -> start_turn(%{state | compact_resume: :idle})

@@ -5526,6 +5526,8 @@ defmodule Troupe.Plane.Admin do
       workspace_bytes: session.workspace_bytes,
       pinned: session.pinned,
       pinned_by: session.pinned_by,
+      archived: session.archived,
+      archived_by: session.archived_by,
       last_active_at: session.last_active_at,
       # The repository it was created with, and its branch, last commit and draft pull
       # request there: metadata the pod reported, never what the session said.
