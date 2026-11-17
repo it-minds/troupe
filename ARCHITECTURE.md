@@ -146,8 +146,18 @@ the provider's prompt cache. The prompt is ordered for the cache: tools in a fix
 system prompt that stays the same through the session (the definition, the environment and
 the skills), then an append-only history. The instruction files, the brief, the goal and
 the task list ride in the conversation as turn context, each put again only when it
-changed ([what changes in front of a prompt](docs/developer/prompt-prefix.md), Decision
-863).
+changed (Decision 863).
+
+The prefix matters beyond the cache. A model that binds its thinking to the conversation
+it was made in (Fable 5.1, Opus 5.5, Sonnet 5.5) refuses, on an enforced account, a
+thinking block sent back after the system prompt, the tools or an earlier message changed,
+and Troupe sends that call again without thinking (Decision 805). So on such a model the
+task list's tools and `goal_complete` are offered from a turn's first call (867), a tool or
+skill that comes or goes waits for the next turn (871, 876), and a compaction's tail goes
+without the blocks made before what it summarises (867, 878). For what a stable system
+prompt still cannot keep the same, `thinking_binding: drop_block` has the API drop a stale
+block instead of refusing it, and `system_prompt: per_turn` is the prompt as it was before
+0.13.0 (Decision 815; both in [the key table](docs/user/configuration.md#model-and-provider)).
 
 ### 2.4 Failure matrix
 

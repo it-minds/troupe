@@ -42,12 +42,10 @@ defmodule SplitDecisions do
   @home %{tui: "clients/tui", daemon: "apps/troupe_daemon"}
 
   # What cites a decision without being governed by it: the logs, the decisions themselves,
-  # the defects list and its pages (which say where a decision was not kept), the records in
-  # docs/history/ and this script.
+  # the defects list and its pages (which say where a decision was not kept) and this script.
   @not_citations [
     "docs/decisions/",
     "docs/developer/defects",
-    "docs/history/",
     "scripts/split-decisions.exs"
   ]
 
