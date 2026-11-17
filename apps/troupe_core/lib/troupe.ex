@@ -3,7 +3,7 @@ defmodule Troupe do
   The client API: start a session, feed it input, watch what happens.
 
   These are the only synchronous calls into a session from outside. Everything the
-  agents do among themselves is async `send` plus monitors — see `ARCHITECTURE.md`
+  agents do among themselves is async `send` plus monitors — see `docs/developer/architecture.md`
   for why (mutual calls between a parent and a child deadlock the moment both are
   busy).
 

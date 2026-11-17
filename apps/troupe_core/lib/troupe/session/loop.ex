@@ -28,7 +28,7 @@ defmodule Troupe.Session.Loop do
   nobody saw how it ended, unless the log shows its `goal_complete`, and the next one
   starts. Coming back with the whole tree — a daemon that died, a session activated from
   dormancy — the loop is marked `interrupted`, for the reason a session that was mid-turn
-  comes back interrupted (ARCHITECTURE.md §2.4): a loop that resumed by itself after a
+  comes back interrupted (docs/developer/architecture.md §1.4): a loop that resumed by itself after a
   crash would spend money nobody is watching. `resume_on_restart: true` opts back in, as
   it does for the agent.
 

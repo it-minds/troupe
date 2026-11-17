@@ -7,7 +7,8 @@ looked things up in.
 | File | What it covers |
 |---|---|
 | [tour.md](tour.md) | Where things live, running the suite, adding a tool, how the event log works |
-| [architecture.md](architecture.md) | The apps and releases, the enforced boundaries, supervision trees, transports, where state lives, the TUI and GUI internals |
+| [architecture.md](architecture.md) | The harness and its clients: a session, the agent, tools, the failure matrix, the wire, lifecycle, the core's and the daemon's trees, the TUI and GUI internals |
+| [architecture-remote.md](architecture-remote.md) | The plane, the pods, the operator and the admin surface; bundles, triggers, cost, entitlements, what belongs to a person; their trees |
 | [repo-structure.md](repo-structure.md) | The tree, where things live, what the image build sees |
 | [tech-stack.md](tech-stack.md) | Every runtime, library and binary, and why |
 | [local-setup.md](local-setup.md) | Prerequisites, the toolbox, development services, a plane on kind, development variables |
@@ -21,7 +22,7 @@ looked things up in.
 | [stage-1-gate.yml](../../.github/ISSUE_TEMPLATE/stage-1-gate.yml) | The Stage 1 gate: the issue template a release's walk is recorded in, its eight rows, and `scripts/gate-check` for the half a desk runs |
 | [code-signing.md](code-signing.md) | Buying and setting up OS code signing (Apple Developer ID, a Windows signing service) and the secrets a release needs |
 
-The design: [../../ARCHITECTURE.md](../../ARCHITECTURE.md),
+The design: [../../ARCHITECTURE.md](../../ARCHITECTURE.md) (the map: the apps, the boundaries, the transports, where state lives),
 [the decisions](../decisions/README.md), [../../PROTOCOL.md](../../PROTOCOL.md). The
 clients: [clients/tui](../../clients/tui/README.md) (and its
 [decisions](../decisions/tui/README.md)), [clients/gui](../../clients/gui/README.md),

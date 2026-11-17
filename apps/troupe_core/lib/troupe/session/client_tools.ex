@@ -23,7 +23,7 @@ defmodule Troupe.Session.ClientTools do
   the grace is up (`grace_ms/0`). Answered from the new registration, it is the same call;
   not answered, it fails once, naming the tool, and the tool is off the model's list by
   then. The grace is one rung of the ladder from a running turn to the daemon's exit:
-  [troupe-daemon](../../../../troupe_daemon/README.md#how-long-it-stays-up).
+  [the daemon](../../../../../docs/user/daemon.md#how-long-it-stays-up).
 
   **The taint is durable and visible.** `session_tainted` goes in the log and into the
   summary projection, because a tool executing outside the pod is something the other

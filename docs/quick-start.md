@@ -101,7 +101,7 @@ troupe run plan "Read add.py and say in one sentence what is wrong with it." --h
 `troupe run` starts a session in this directory, its [workspace](glossary.md#workspace),
 and prints what the [agent](glossary.md#agent) does, a line for each event, until it comes
 to rest. `plan` is the agent that reads and never writes, so nothing in this run needs you;
-the exit code says how it ended ([the codes](../clients/tui/README.md#use)).
+the exit code says how it ended ([the codes](user/terminal-client.md#use)).
 
 Now have it fixed, in the terminal UI:
 

@@ -3,13 +3,13 @@
 ```
 .
 ├── AGENTS.md                notes for coding agents; points at fixing-issues.md
-├── ARCHITECTURE.md          the design, and the contract between daemon, plane and clients
+├── ARCHITECTURE.md          the map of the design: the apps, their boundaries, the transports, where state lives
 ├── PROTOCOL.md              the normative wire document for client authors
 ├── README.md                the front door
 ├── VERSION                  the one version of everything released (Decision 668)
 ├── mkdocs.yml               the documentation site: docs/ and the documents its nav names (Decision 739)
 ├── .github/                 the workflows (ci.md) and Dependabot
-├── apps/                    the umbrella: eight Mix projects (architecture.md §1)
+├── apps/                    the umbrella: eight Mix projects (ARCHITECTURE.md §2)
 ├── charts/troupe/           the Helm chart (platform and GUI), its CRDs, values.small/example
 ├── clients/tui/             the terminal client: its own Mix project, the harness by path
 ├── clients/gui/             the graphical client: a pnpm workspace (client, bench, desktop)

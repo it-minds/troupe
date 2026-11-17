@@ -5,6 +5,18 @@ because a worker verifies session tokens offline against a JWKS on disk; hand it
 you hold the private half of and it will accept your tokens exactly as it would the
 plane's. This is for measuring, never for a deployment.
 
+A worker with no plane, no object store and the scripted `fake` model measures a
+*client*: the path from a frame to the session actor and back, without a model's latency.
+It runs as one Docker container, dialled with tokens the bench mints itself
+(`packages/bench/src/devToken.ts`). The sections below are the key pair, the `docker run`,
+the run and its variables.
+
+Each client opens its own socket and its own session (five clients on one session would
+measure the model's serialisation, not the transport) and sends its prompts one at a
+time. Every prompt is timed from just before `input.send` to the ack, `input_accepted`,
+the first `llm_delta`, the durable `llm_response` and the end of the turn. Results are
+printed and written as JSON under `packages/bench/bench-results/`.
+
 ## 1. A key pair and a JWKS
 
 ```sh
@@ -76,3 +88,18 @@ budget ends a session in a way that looks exactly like a throughput problem.
 
 `packages/bench/src/trace.ts` connects once, sends one prompt and prints every frame;
 use it when something in the run above does not add up.
+
+## 4. What it measured
+
+Measured on 2026-09-12, Docker Desktop on a Windows laptop, worker image built from
+commit `2f85e39` of the platform's former repository, fake model:
+
+| clients × prompts | connect+init p50 | input_accepted p50 / p95 | llm_response p50 / p95 | turn end p50 / p95 | turns/s |
+| --- | --- | --- | --- | --- | --- |
+| 5 × 20 | 13 ms | 0.6 / 1.3 ms | 1.1 / 3.7 ms | 1.3 / 9.1 ms | ~900 |
+| 20 × 10 | 44 ms | 0.9 / 2.1 ms | 3.7 / 5.6 ms | 4.1 / 7.2 ms | ~1000 |
+
+All 300 turns completed; the fake model answers instantly, so these numbers are the
+harness and the transport, not a model. `BENCH_MODE=plane` runs the same test through a
+plane; that path has not been measured, since it needs Postgres, OpenBao and an identity
+provider behind it.
