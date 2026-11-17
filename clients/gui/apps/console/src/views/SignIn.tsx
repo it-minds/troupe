@@ -14,7 +14,7 @@
 
 import { useEffect, useState } from "react";
 import type { JSX } from "react";
-import { AuthSession, PlaneUnreachableError } from "@troupe/client";
+import { AuthSession, PlaneUnreachableError, hostOf } from "@troupe/client";
 import { likelyPlaneUrl, newSession, redirectUri, rememberPlace, rememberPlane, restorePlace } from "../plane";
 import { Wordmark } from "./brand";
 import { Field } from "./bits";
@@ -216,12 +216,4 @@ function SignInError({ message }: { message: string }): JSX.Element {
 function describe(e: unknown): string {
   if (e instanceof PlaneUnreachableError) return e.message;
   return e instanceof Error ? e.message : String(e);
-}
-
-function hostOf(url: string): string {
-  try {
-    return new URL(url).host;
-  } catch {
-    return url;
-  }
 }

@@ -4,7 +4,7 @@
 // rail, and the offer under a refused key. And each screen on its own, with a flow
 // fixture and a spy for what it sends.
 
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { WebSocket as NodeWebSocket } from "ws";
 import { LINES } from "@troupe/client";
 import type { DaemonClient, SetupFlow, SetupStepName } from "@troupe/client";

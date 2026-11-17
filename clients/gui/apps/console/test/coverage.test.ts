@@ -1,8 +1,8 @@
 // Every administrative method the plane serves is reached from a screen of this console,
-// or owed with the area it belongs on and a reason (`src/owed.ts`), and the plane's own
-// placement of each (`Troupe.Plane.Admin.Console`, which its `console_coverage_test` holds
-// to every method) is kept here on the same area. A method added to the plane is a
-// question somebody answers here rather than a capability nobody can click.
+// and the plane's own map of them (`Troupe.Plane.Admin.Console`, which its
+// `console_coverage_test` holds to every method) has the areas this console draws. A
+// method added to the plane fails here until a screen calls it, so it is a question
+// somebody answers here rather than a capability nobody can click.
 //
 // Read from the files rather than trusted: the plane's method table, the client's one
 // call per method, and the console's own sources. A screen reaches a method when it calls
@@ -12,8 +12,7 @@ import { readFileSync, readdirSync, statSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { AREAS, NAV } from "../src/nav";
-import { OWED } from "../src/owed";
+import { NAV } from "../src/nav";
 
 const gui = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 const repo = resolve(gui, "../..");
@@ -38,7 +37,7 @@ function sources(dir: string): string[] {
   return readdirSync(dir).flatMap((name) => {
     const path = join(dir, name);
     if (statSync(path).isDirectory()) return sources(path);
-    return /\.tsx?$/.test(name) && name !== "owed.ts" ? [path] : [];
+    return /\.tsx?$/.test(name) ? [path] : [];
   });
 }
 
@@ -69,8 +68,6 @@ function planeAreas(): Array<{ group: string; areas: string[] }> {
   return [...text.matchAll(/@(watch|configure|operate|govern)\s+~w\(([^)]*)\)a/g)].map((m) => ({ group: m[1]!, areas: m[2]!.trim().split(/\s+/) }));
 }
 
-const owed = new Map(OWED.flatMap((o) => o.methods.map((m) => [m, o] as const)));
-
 describe("the console covers the plane's administrative surface", () => {
   it("reads the plane's table, the client and its own sources, so the checks below mean something", () => {
     expect(served().size).toBeGreaterThan(60);
@@ -78,38 +75,16 @@ describe("the console covers the plane's administrative surface", () => {
     expect(reached().get("admin.teams.list")).toContain(join("views", "Teams.tsx"));
   });
 
-  it("reaches every method the plane serves from a screen, or owes it with a reason", () => {
+  it("reaches every method the plane serves from a screen", () => {
     const here = reached();
-    const missing = [...served().keys()].filter((m) => !here.has(m) && !owed.has(m));
-    expect(missing, "reached from no screen and owed nowhere: build the screen, or add it to src/owed.ts with its area and why").toEqual([]);
+    const missing = [...served().keys()].filter((m) => !here.has(m));
+    expect(missing, "reached from no screen: a method the plane serves needs its screen here").toEqual([]);
   });
 
-  it("owes nothing: every method the plane serves is called from a screen", () => {
-    expect(OWED, "src/owed.ts lists methods again; this console had none left to draw").toEqual([]);
-    const here = reached();
-    expect([...served().keys()].filter((m) => !here.has(m))).toEqual([]);
-  });
-
-  it("owes nothing a screen already reaches, so the list only shrinks", () => {
-    const here = reached();
-    const settled = [...owed.keys()].filter((m) => here.has(m)).map((m) => `${m} is reached from ${here.get(m)!.join(", ")}; delete it from src/owed.ts`);
-    expect(settled).toEqual([]);
-  });
-
-  it("names, owes and calls nothing the plane does not serve", () => {
+  it("calls nothing the plane does not serve", () => {
     const plane = served();
-    expect([...owed.keys()].filter((m) => !plane.has(m)), "owed, and not served by the plane").toEqual([]);
     expect([...reached().keys()].filter((m) => !plane.has(m)), "called, and not served by the plane").toEqual([]);
     expect([...client().values()].filter((m) => !plane.has(m)), "in the client, and not served by the plane").toEqual([]);
-  });
-
-  it("owes each method once, on an area of the map, with a reason a person can act on", () => {
-    const listed = OWED.flatMap((o) => o.methods);
-    expect(listed.length).toBe(new Set(listed).size);
-    for (const o of OWED) {
-      expect(AREAS.some((a) => a.id === o.area), `${o.area} is not an area of the map`).toBe(true);
-      expect(o.why.length, `the reason for ${o.area} is too short to be one`).toBeGreaterThan(40);
-    }
   });
 
   it("draws the same map the plane places its methods on", () => {
@@ -118,20 +93,15 @@ describe("the console covers the plane's administrative surface", () => {
     expect(groups.map((g) => ({ group: g.group, areas: g.areas }))).toEqual(NAV.map((g) => ({ group: g.label.toLowerCase(), areas: g.areas.map((a) => a.id) })));
   });
 
-  it("keeps every placement the plane makes: called from a screen here, or owed on that area", () => {
+  it("keeps every placement the plane makes: called from a screen here", () => {
     const byFunction = new Map([...served()].map(([method, fn]) => [fn, method]));
     const here = reached();
     const placed = placements();
     expect(placed.length, "Admin.Console's placements could not be read").toBeGreaterThan(60);
     const broken = placed
       .map(({ fn, area }) => ({ method: byFunction.get(fn) ?? fn, area }))
-      .filter(({ method, area }) => !here.has(method) && owed.get(method)?.area !== area)
-      .map(({ method, area }) => `${method} is placed on ${area} by the plane, and neither reached nor owed there here`);
+      .filter(({ method }) => !here.has(method))
+      .map(({ method, area }) => `${method} is placed on ${area} by the plane, and reached from no screen here`);
     expect(broken).toEqual([]);
-    const elsewhere = [...owed]
-      .map(([method, o]) => ({ method, o, at: placed.find((p) => byFunction.get(p.fn) === method)?.area }))
-      .filter(({ o, at }) => at !== undefined && at !== o.area)
-      .map(({ method, o, at }) => `${method} is owed on ${o.area} here and placed on ${at} by the plane`);
-    expect(elsewhere).toEqual([]);
   });
 });

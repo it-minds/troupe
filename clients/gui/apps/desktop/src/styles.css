@@ -4637,18 +4637,6 @@ button.danger {
 .table tr[aria-selected="true"] {
   background: var(--running-bg);
 }
-/* The name opens the agent; a session id opens its window, written as it is. */
-.table th button.agent-name,
-.table td button.session-id {
-  min-height: 0;
-  padding: 0;
-  font: var(--t-code);
-  text-transform: none;
-  letter-spacing: 0;
-}
-.table td button.session-id + button.session-id {
-  margin-left: var(--space-2);
-}
 .chip.permission-auto {
   border-color: var(--waiting-solid);
   color: var(--text-primary);

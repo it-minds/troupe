@@ -500,11 +500,6 @@ export class FleetStore {
     this.recompute();
   }
 
-  /** Whether a watched source is being told what changes now. */
-  isLive(id: string): boolean {
-    return this.live.has(id);
-  }
-
   private watchOne(source: FleetSource): void {
     if (!source.watch || this.watches.has(source.id)) return;
     const stop = source.watch(
@@ -768,11 +763,6 @@ export function filterRows(rows: FleetRow[], filter: FleetFilter): FleetRow[] {
   });
 }
 
-/** Every session with an approval waiting. */
-export function awaitingApproval(rows: FleetRow[]): FleetRow[] {
-  return rows.filter((r) => r.pendingApprovals > 0);
-}
-
 /**
  * Every session waiting on its person, which is what the inbox is a list of: an approval
  * or a question, the agent's or the harness's. A session waiting on a question used to
@@ -780,10 +770,6 @@ export function awaitingApproval(rows: FleetRow[]): FleetRow[] {
  */
 export function awaitingYou(rows: FleetRow[]): FleetRow[] {
   return rows.filter((r) => r.pendingApprovals > 0 || r.pendingQuestions > 0);
-}
-
-export function totalCostMicros(rows: FleetRow[]): number {
-  return rows.reduce((n, r) => n + (r.costMicros ?? 0), 0);
 }
 
 /** Whether a row has anything to say about while nobody was reading it. */

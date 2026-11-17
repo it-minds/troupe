@@ -7,7 +7,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { App } from "../src/App";
 import { writtenBy } from "@troupe/client";
-import { PEOPLE, button, freshBrowser, render, says, sees, seesButton, seesField, signedInAs, startFake, type, visit, waitFor } from "./support";
+import { PEOPLE, button, freshBrowser, render, sees, seesButton, seesField, signedInAs, startFake, type, visit, waitFor } from "./support";
 import type { FakeDeployment } from "./support";
 
 let fake: FakeDeployment;

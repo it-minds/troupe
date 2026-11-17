@@ -82,10 +82,14 @@ describe("the shell", () => {
     expect([...document.querySelectorAll("a")].filter((a) => a.href.includes("/admin"))).toEqual([]);
   });
 
-  it("draws every area the plane places a method on", async () => {
+  // Every area of the map has a screen, so an address that names none opens where the role
+  // starts, and no page says that one is missing.
+  it("opens where the role starts at an address that names no page", async () => {
+    visit("#/no-such-area");
     await open();
-    const later = [...rail().querySelectorAll("a.later")].map((a) => (a.textContent ?? "").replace(/\s*○.*$/, "").trim());
-    expect(later).toEqual([]);
+    await waitFor(() => heading() === "Overview", "the Overview instead");
+    expect(says("There is no such page")).toBe(false);
+    expect(document.querySelector(".banner.refused"), "an address naming no page is not one refused for the role").toBeNull();
   });
 
   it("opens straight at a deep link, a team's tab included, and keeps it across a reload", async () => {

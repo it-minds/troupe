@@ -114,11 +114,9 @@ repository*, with where they come from and what the plane made of each, and offe
 change, since the plane refuses one. A profile or trigger the cluster has no resource for
 can still be deleted.
 
-The console calls every administrative method the plane serves. `apps/console/src/owed.ts`
-is where one the plane adds before its screen is drawn is listed, with the area it belongs
-on; the plane places every method on an area of the console's map
-(`Troupe.Plane.Admin.Console`), and a test fails when the plane serves a method the console
-neither calls nor owes there.
+The console calls every administrative method the plane serves. The plane places every
+method on an area of the console's map (`Troupe.Plane.Admin.Console`), and a test fails when
+the plane serves a method no screen of the console calls.
 
 ## Trying it without a cluster
 

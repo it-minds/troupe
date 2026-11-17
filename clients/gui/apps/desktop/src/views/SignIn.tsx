@@ -21,7 +21,7 @@
 
 import { useEffect, useState } from "react";
 import type { JSX } from "react";
-import { AuthSession, PlaneUnreachableError, planeAddress } from "@troupe/client";
+import { AuthSession, PlaneUnreachableError, hostOf, planeAddress } from "@troupe/client";
 import type { DeviceAuthorization, Discovery } from "@troupe/client";
 import { copyText } from "../clipboard";
 import { throughTheGate } from "../mode";
@@ -352,12 +352,4 @@ function describe(e: unknown): string {
 
 function samePlane(a: string, b: string): boolean {
   return (planeAddress(a) ?? a) === (planeAddress(b) ?? b);
-}
-
-function hostOf(url: string): string {
-  try {
-    return new URL(url).host;
-  } catch {
-    return url;
-  }
 }
