@@ -156,6 +156,8 @@ defmodule Troupe.Client do
               {:ok, String.t()} | {:error, term()}
   @callback invites(session_id(), invite_verb()) :: {:ok, String.t()} | {:error, term()}
   @callback archive(session_id(), boolean()) :: {:ok, String.t()} | {:error, String.t()}
+  @callback rename(session_id(), String.t()) :: {:ok, String.t()} | {:error, String.t()}
+  @callback keep(session_id(), boolean()) :: {:ok, String.t()} | {:error, String.t()}
   @callback fs_list(session_id(), String.t()) :: {:ok, [map()]} | {:error, term()}
   @callback fs_read(session_id(), String.t()) :: {:ok, String.t()} | {:error, term()}
   @callback scratch_read(session_id(), String.t() | nil, String.t()) ::
@@ -562,6 +564,24 @@ defmodule Troupe.Client do
   """
   @spec archive(session_id(), boolean()) :: {:ok, String.t()} | {:error, String.t()}
   def archive(sid, archived?), do: impl(sid).archive(sid, archived?)
+
+  @doc """
+  Name a session, for everyone who sees it, which only its owner may do; an empty name
+  takes it off. A pod session is named at the plane. Answers the sentence to show.
+  """
+  @spec rename(session_id(), String.t()) :: {:ok, String.t()} | {:error, String.t()}
+  def rename(sid, title), do: impl(sid).rename(sid, title)
+
+  @doc """
+  Keep a session at the top of the session list (`true`) or let it go, which only its owner
+  may do (`session.pin`). A pod session is kept at the plane. Answers the sentence to show.
+  """
+  @spec keep(session_id(), boolean()) :: {:ok, String.t()} | {:error, String.t()}
+  def keep(sid, kept?), do: impl(sid).keep(sid, kept?)
+
+  @doc "What `/keep` names after the command: nothing to keep it, `off` to let it go."
+  @spec keep_args(String.t()) :: {:ok, boolean()} | {:error, String.t()}
+  defdelegate keep_args(text), to: Troupe.Client.Marks
 
   @doc """
   What `/invite` names after the command: a person, and `observe` (the default) or

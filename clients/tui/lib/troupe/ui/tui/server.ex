@@ -1279,7 +1279,7 @@ defmodule Troupe.UI.TUI.Server do
   # equal, so a command added to the table without a clause here fails a test rather
   # than being dispatched as an agent.
   @builtins ~w(new cancel dismiss merge discard compact goal loop steer invite uninvite sessions archive
-               unarchive back hq observer files
+               unarchive rename keep back hq observer files
                scratch upload save publish artifacts profiles profile copy memory context watch settings
                models mcp
                skills help
@@ -1606,6 +1606,21 @@ defmodule Troupe.UI.TUI.Server do
 
   defp builtin("unarchive", _args, state, _target),
     do: notice_of(Client.archive(state.session_id, false))
+
+  # Its name and its place at the top of the list, the owner's for everyone who sees it.
+  defp builtin("rename", args, state, _target) do
+    case String.trim(args) do
+      "" -> notice_of({:error, "usage: /rename <name>"})
+      title -> notice_of(Client.rename(state.session_id, title))
+    end
+  end
+
+  defp builtin("keep", args, state, _target) do
+    case Client.keep_args(args) do
+      {:ok, kept?} -> notice_of(Client.keep(state.session_id, kept?))
+      {:error, _said} = refused -> notice_of(refused)
+    end
+  end
 
   defp builtin("new", args, _state, _target), do: {:new, args}
   defp builtin("back", _args, _state, _target), do: :back

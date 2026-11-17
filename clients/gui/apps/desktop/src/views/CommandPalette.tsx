@@ -76,6 +76,13 @@ export interface PaletteActions {
    * everyone who sees it, or put it back. A sentence back is a notice; undefined closes the palette.
    */
   archive?: ((on: boolean) => Promise<string | undefined>) | undefined;
+  /**
+   * `/rename`: name this session, for everyone who sees it; without a name, the title in the
+   * head becomes a field. A sentence back is a notice; undefined closes the palette.
+   */
+  rename?: ((name: string) => Promise<string | undefined>) | undefined;
+  /** `/keep` (`true`) and `/keep off`: keep this session at the top of the session list, or let it go. */
+  keep?: ((on: boolean) => Promise<string | undefined>) | undefined;
 }
 
 interface RunContext extends PaletteActions {
@@ -167,10 +174,17 @@ const RUNNERS: Record<string, (ctx: RunContext, args: string) => Promise<string 
   help: () => "",
   archive: ({ archive }) => (archive ? archive(true) : "this session cannot be archived from here"),
   unarchive: ({ archive }) => (archive ? archive(false) : "this session cannot be unarchived from here"),
+  rename: ({ rename }, args) => (rename ? rename(args) : "only its owner can rename this session"),
+  keep: ({ keep }, args) => {
+    if (!keep) return "only its owner can keep this session at the top";
+    if (args === "") return keep(true);
+    if (args === "off") return keep(false);
+    return `unknown /keep ${args}; use /keep or /keep off`;
+  },
 };
 
-/** The built-ins this app asks its arguments of in a dialog of their own, rather than on the line. */
-const ASKS_ITSELF = new Set(["publish"]);
+/** The built-ins this app asks its arguments of in a dialog or a field of their own, rather than on the line. */
+const ASKS_ITSELF = new Set(["publish", "rename"]);
 
 /** Why a built-in has no runner here: said on its row, not hidden. */
 const NOT_HERE: Record<string, string> = {

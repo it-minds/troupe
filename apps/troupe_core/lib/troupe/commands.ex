@@ -447,6 +447,29 @@ defmodule Troupe.Commands do
             "sees it, where it was before it was archived.",
         example: "/unarchive"
       ),
+      entry("rename", "session", "Rename this session: the name the session list shows",
+        usage: "/rename <name>",
+        args: [arg("name", true, "text")],
+        detail:
+          "Its owner's to do. The name is the session's, for everyone who sees it, and at " <>
+            "most 200 bytes.",
+        usages: %{"desktop" => "/rename [name]"},
+        details: %{
+          "desktop" =>
+            "Its owner's to do. Without a name, the title in the head becomes a field: Enter " <>
+              "keeps what is typed, an empty one takes the name off, Esc leaves it as it was."
+        },
+        example: "/rename Fix the parser"
+      ),
+      entry("keep", "session", "Keep this session at the top of the session list",
+        aliases: ["pin"],
+        usage: "/keep [off]",
+        args: [arg("off", false, "text")],
+        detail:
+          "Its owner's to do. Kept, it is listed first, for everyone who sees it, and the " <>
+            "platform does not clear it away when it is old. /keep off lets it go from the top.",
+        example: "/keep"
+      ),
       entry("sessions", "navigate", "Your sessions, newest first",
         aliases: ["resume"],
         usage: "/sessions [archived | n | id]",

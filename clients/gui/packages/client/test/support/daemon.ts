@@ -77,6 +77,10 @@ interface Session {
   kind?: "local" | "private";
   /** Hidden from `session.list` unless its filter asks for archived ones. */
   archived?: boolean;
+  /** Kept at the top of the list (`session.pin`), as `session.list` says it. */
+  pinned?: boolean;
+  /** The task list, as the last `todo_updated` in its log left it. */
+  todos?: Array<{ id: string; content: string; status: string }>;
   /** How a private session's sealing stands here, as `session.list` says it. */
   sync?: "current" | "behind" | "paused" | "elsewhere" | "erasure_pending";
   /** The other device that holds a private one, where `sync` is `elsewhere`. */
@@ -1178,6 +1182,13 @@ evoked where nothing is set and there was a sign-in. */
     this.ephemeral(session, "context_status", { window_tokens: 200_000, used_tokens: 10 });
   }
 
+  /** Give a session a task list, as the agent's `todo_write` does. */
+  todos(sessionId: string, items: Array<{ id: string; content: string; status: string }>): LoggedEvent {
+    const session = this.sessions.get(sessionId)!;
+    session.todos = items;
+    return session.log.append("todo_updated", { items, source: "agent" });
+  }
+
   /** Make a session say something, so a test can watch it arrive on the right view. */
   say(sessionId: string, text: string): LoggedEvent {
     const session = this.sessions.get(sessionId)!;
@@ -1439,6 +1450,15 @@ evoked where nothing is set and there was a sign-in. */
         return reply(ws, id, { session_id: session.id, title: session.title });
       }
 
+      // Kept at the top of the list, running or dormant; the mark outlives both.
+      case "session.pin":
+      case "session.unpin": {
+        const session = this.sessions.get(String(params["session_id"] ?? ""));
+        if (!session) return reply(ws, id, null, { code: -32005, message: "not_found" });
+        session.pinned = method === "session.pin";
+        return reply(ws, id, { session_id: session.id, pinned: session.pinned });
+      }
+
       // A session offered to the plane for steering from another device, and taken back
       // (troupe #58): a private one only with its person's yes, and to the people it
       // invited with control (troupe #765), as the daemon offers it.
@@ -1596,6 +1616,30 @@ evoked where nothing is set and there was a sign-in. */
         const actor = { kind: "user", subject: this.principal.subject };
         session.log.append("input_queued", { command_id: commandId, author: this.principal.subject, text: params["text"] }, actor);
         session.log.append("input_accepted", { command_id: commandId, author: this.principal.subject }, actor);
+        return reply(ws, id, { accepted: true });
+      }
+
+      // A person's change to the task list, as the harness applies it: the list again, and
+      // the sentence the model is told, between turns or during one.
+      case "todo.edit": {
+        if (!session) return reply(ws, id, null, { code: -32005, message: "not_found" });
+        const action = String(params["action"] ?? "");
+        const todos = session.todos ?? [];
+        const actor = { kind: "user", subject: this.principal.subject };
+        let note: string;
+        if (action === "add" && typeof params["content"] === "string") {
+          const added = { id: `t${todos.length + 1}`, content: params["content"], status: "pending" };
+          session.todos = [...todos, added];
+          note = `The user added task ${added.id}: ${added.content}`;
+        } else if ((action === "cancel" || action === "complete") && typeof params["id"] === "string") {
+          const status = action === "cancel" ? "cancelled" : "completed";
+          session.todos = todos.map((t) => (t.id === params["id"] ? { ...t, status } : t));
+          note = `The user ${action === "cancel" ? "cancelled" : "marked"} task ${params["id"]}${action === "complete" ? " completed" : ""}.`;
+        } else {
+          return reply(ws, id, null, { code: -32602, message: "invalid_params", data: { field: "action" } });
+        }
+        session.log.append("todo_updated", { items: session.todos, source: "tui" });
+        session.log.append("user_input", { source: "tui_todo_edit", text: note, command_id: String(params["command_id"] ?? "") }, actor);
         return reply(ws, id, { accepted: true });
       }
 
@@ -3185,7 +3229,7 @@ evoked where nothing is set and there was a sign-in. */
       cost: 0.25,
       created_at: s.createdAt,
       last_active_at: s.lastActiveAt,
-      pinned: false,
+      pinned: Boolean(s.pinned),
       archived: Boolean(s.archived),
       title: s.title ?? null,
       kind: s.kind ?? "local",
