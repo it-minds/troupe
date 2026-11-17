@@ -84,7 +84,7 @@ export interface Standing {
  * is a member, whose console is what is theirs and none of the administrative areas.
  */
 export async function standing(auth: AuthSession, admin: AdminApi): Promise<Standing> {
-  const me = await auth.rpc<Me>("me");
+  const me = await auth.withToken((plane, token) => plane.me(token));
   if (me.platform_admin) return { role: "platform_admin", teams: [], me };
   try {
     const teams = await admin.teams();
@@ -103,7 +103,7 @@ export async function standing(auth: AuthSession, admin: AdminApi): Promise<Stan
  * grant narrows it.
  */
 export function memberView(auth: AuthSession, name: string): Promise<ProfileView> {
-  return auth.rpc<ProfileView>("profile.get", { name });
+  return auth.withToken((plane, token) => plane.profile(token, name));
 }
 
 /**

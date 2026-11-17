@@ -12,6 +12,7 @@ export type {
   PlaneCredential,
   Attachment,
   Me,
+  OwnClient,
   Team,
   SessionRow,
   SessionsFilter,
@@ -46,7 +47,7 @@ export { AuthSession, PlaneUnreachableError, memoryReachedMarks, memoryTokenStor
 export type { AuthSessionOptions, ReachedMarks, SignInProgress, TokenStore, UnreachableContext } from "./auth.js";
 export { beginRedirect, completeRedirect, hasRedirectAnswer, scrubRedirect, idpMetadata, pkcePair } from "./pkce.js";
 export type { BeginRedirectOptions, IdpMetadata, PkcePair, PendingRedirect, RedirectResult } from "./pkce.js";
-export { SessionAttachment } from "./attach.js";
+export { SessionAttachment, planeOpener } from "./attach.js";
 export type { AttachOptions, AttachStatus } from "./attach.js";
 export { ServerOffer } from "./offer.js";
 export { initials, named, nameOrSubject } from "./people.js";
@@ -330,7 +331,7 @@ export type { ClientUpdate, PlaneVersionWord, SignatureWord, UpdateRequired, Ver
 export { DaemonClient, DaemonSource, claimRefusal, daemonUrl, revocationText, rowFromDaemon } from "./daemon.js";
 export type { EntriesOrText } from "./daemon.js";
 export { PlaneOwn } from "./own.js";
-export type { OwnPlane } from "./own.js";
+export type { OwnPlane, PlaneDocument } from "./own.js";
 export type {
   ClaimResult,
   CreateLocalParams,

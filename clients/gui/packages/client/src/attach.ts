@@ -20,12 +20,31 @@
 // drain left asleep stays asleep until a command wakes it, and the command that the pod
 // refuses for it is what `retrying` follows in `activate` mode.
 
+import type { AuthSession } from "./auth.js";
 import { TroupeConnection, TroupeRpcError } from "./connection.js";
 import { normalizeEndpoint } from "./plane.js";
 import type { Attachment } from "./plane.js";
+import { openRemote } from "./remote.js";
 import { SessionView } from "./session.js";
 import type { SessionViewHooks } from "./session.js";
 import type { EventEnvelope, ToolInvoke } from "./types.js";
+
+/**
+ * How a session on the plane is opened and its pod token renewed, for `SessionAttachment.open`.
+ * A pod session is opened with `session.open` in the mode the attachment asks and renewed
+ * with `token.mint`. A laptop's session the plane relays is opened with `remote.open`, and
+ * renewed by opening it again, since the relay mints no token of its own.
+ */
+export function planeOpener(auth: AuthSession, sessionId: string, relayed = false): Pick<AttachOptions, "open" | "mint"> {
+  if (relayed) {
+    const open = (): Promise<Attachment> => openRemote((method, params) => auth.rpc(method, params), auth.planeUrl, sessionId);
+    return { open, mint: open };
+  }
+  return {
+    open: (mode) => auth.withToken((plane, token) => plane.openSession(token, sessionId, mode)),
+    mint: () => auth.withToken((plane, token) => plane.mintToken(token, sessionId)),
+  };
+}
 
 export interface AttachOptions {
   sessionId: string;

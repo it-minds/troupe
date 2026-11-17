@@ -38,9 +38,9 @@ function inviting(row: FleetRow, auth: AuthSession | null, daemon: DaemonClient 
   }
   if (row.kind === "team" && auth) {
     return {
-      list: () => auth.rpc<{ invites: Invitee[] }>("session.invites", { session_id: row.id }).then((r) => r.invites),
-      invite: (subject, role) => auth.rpc("session.invite", { session_id: row.id, subject, role }),
-      uninvite: (subject) => auth.rpc("session.uninvite", { session_id: row.id, subject }),
+      list: () => auth.withToken((plane, token) => plane.sessionInvites(token, row.id)).then((r) => r.invites),
+      invite: (subject, role) => auth.withToken((plane, token) => plane.inviteToSession(token, row.id, subject, role)),
+      uninvite: (subject) => auth.withToken((plane, token) => plane.uninviteFromSession(token, row.id, subject)),
     };
   }
   return null;
@@ -97,7 +97,7 @@ export function InviteControl({
     let live = true;
     const t = setTimeout(() => {
       auth
-        .rpc<{ people: Person[] }>("people.search", row.kind === "team" ? { query: q, session_id: row.id } : { query: q })
+        .withToken((plane, token) => plane.searchPeople(token, q, row.kind === "team" ? row.id : undefined))
         .then((r) => live && setFound(r.people.filter((p) => !invites.some((i) => i.subject === p.subject))))
         .catch(() => live && setFound([]));
     }, 150);

@@ -15,8 +15,8 @@ import {
   FleetStore,
   isDurable,
   onThisComputer,
-  openRemote,
   PlaneSource,
+  planeOpener,
   RemoteSource,
   ServerOffer,
   SessionAttachment,
@@ -514,7 +514,7 @@ export function useProfiles(auth: AuthSession | null): { profiles: ProfileOfferi
     if (!auth) return;
     let live = true;
     auth
-      .rpc<{ profiles: ProfileOffering[] }>("profiles.list", {})
+      .withToken((plane, token) => plane.listProfiles(token))
       .then((r) => live && setProfiles(r.profiles))
       .catch((e: unknown) => live && setError(e instanceof Error ? e.message : String(e)));
     return () => {
@@ -684,14 +684,7 @@ export function useSessionView(
           mode,
           // A relayed session is opened, and its token renewed, with `remote.open`; the
           // socket and everything on it are a pod's.
-          open: (m) =>
-            relayed
-              ? openRemote((method, params) => auth!.rpc(method, params), auth!.planeUrl, sessionId)
-              : auth!.rpc("session.open", { session_id: sessionId, mode: m }),
-          mint: () =>
-            relayed
-              ? openRemote((method, params) => auth!.rpc(method, params), auth!.planeUrl, sessionId)
-              : auth!.rpc("token.mint", { session_id: sessionId }),
+          ...planeOpener(auth!, sessionId, relayed),
           hooks: {
             onEvent: (e) => {
               if (!live) return;
