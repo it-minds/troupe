@@ -59,10 +59,10 @@ defmodule Troupe.Commands.Trust do
   defp save(state_dir, map) do
     file = path(state_dir)
 
-    with :ok <- File.mkdir_p(Path.dirname(file)),
-         :ok <- File.write(file, Jason.encode!(map, pretty: true) <> "\n") do
-      :ok
-    else
+    case Troupe.Paths.write_atomic(file, Jason.encode!(map, pretty: true) <> "\n") do
+      :ok ->
+        :ok
+
       {:error, reason} ->
         {:error, "could not write #{Troupe.Paths.display(file)}: #{:file.format_error(reason)}"}
     end

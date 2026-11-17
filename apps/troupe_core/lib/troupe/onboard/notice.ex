@@ -364,16 +364,10 @@ defmodule Troupe.Onboard.Notice do
 
     :global.trans({{Onboard, file}, self()}, fn ->
       map = fun.(state(opts))
-      tmp = file <> ".#{System.unique_integer([:positive])}.tmp"
 
-      with :ok <- File.mkdir_p(Path.dirname(file)),
-           :ok <- File.write(tmp, Jason.encode!(map, pretty: true) <> "\n"),
-           :ok <- File.rename(tmp, file) do
-        :ok
-      else
-        {:error, reason} ->
-          _ = File.rm(tmp)
-          {:error, "cannot write #{Paths.display(file)}: #{:file.format_error(reason)}"}
+      case Paths.write_atomic(file, Jason.encode!(map, pretty: true) <> "\n") do
+        :ok -> :ok
+        {:error, reason} -> {:error, "cannot write #{Paths.display(file)}: #{:file.format_error(reason)}"}
       end
     end)
   end

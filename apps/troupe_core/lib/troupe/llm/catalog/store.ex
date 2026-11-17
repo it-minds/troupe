@@ -545,20 +545,12 @@ defmodule Troupe.LLM.Catalog.Store do
         pretty: true
       )
 
-    File.mkdir_p!(Paths.config_dir())
-
-    # Written beside the cache and renamed over it: the daemon refreshes in the background
-    # while a client may be reading, and half a file reads as no catalog at all.
-    partial = path() <> ".#{System.unique_integer([:positive])}.partial"
-    File.write!(partial, body)
-
-    case File.rename(partial, path()) do
-      :ok ->
-        :ok
-
-      {:error, _held} ->
-        File.rm(partial)
-        File.write!(path(), body)
+    # Whole or not at all: the daemon refreshes in the background while a client may be
+    # reading, and half a file reads as no catalog at all. A cache another process holds
+    # open on Windows cannot be renamed over, and is written in place.
+    case Paths.write_atomic(path(), body) do
+      :ok -> :ok
+      {:error, _held} -> File.write!(path(), body)
     end
   end
 
