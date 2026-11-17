@@ -7,9 +7,8 @@
 // is one any client of the person's makes, never `admin.*`.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { App } from "../src/App";
 import { openInNewTab } from "../src/console";
-import { PEOPLE, button, freshBrowser, link, recordCalls, render, says, sees, seesButton, seesField, seesLink, signedInAs, startFake, type, visit, waitFor } from "./support";
+import { PEOPLE, button, freshBrowser, link, opener, recordCalls, says, sees, seesButton, seesField, seesLink, startFake, type, visit, waitFor } from "./support";
 import type { FakeDeployment } from "./support";
 import { exampleAdmin } from "../../../packages/client/test/support/admin.js";
 import { TINY_PNG, artifact } from "../../../packages/client/test/support/plane.js";
@@ -62,7 +61,6 @@ function artifacts(): FakeArtifact[] {
 }
 
 let fake: FakeDeployment;
-let unmount: (() => void) | null = null;
 let restore: (() => void) | null = null;
 let opened: string[] = [];
 
@@ -70,11 +68,7 @@ async function start(options: Partial<PlaneOptions> = {}): Promise<void> {
   fake = await startFake(exampleAdmin(), { artifacts: artifacts(), ...options });
 }
 
-async function open(hash: string, who: { subject: string; name: string }): Promise<void> {
-  await signedInAs(fake, who);
-  visit(hash);
-  unmount = render(<App openTab={(url) => opened.push(url)} />).unmount;
-}
+const { open, close } = opener(() => fake, { openTab: (url) => void opened.push(url) });
 
 const rail = (): HTMLElement => document.querySelector<HTMLElement>("nav.rail")!;
 const cards = (): HTMLElement | null => document.querySelector<HTMLElement>('ul[aria-label="Artifacts"]');
@@ -88,8 +82,7 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
-  unmount?.();
-  unmount = null;
+  close();
   restore?.();
   restore = null;
   await fake.stop();
@@ -169,8 +162,7 @@ describe("artifacts", () => {
     await sees("Somebody shares an artifact with you by name, and it shows here at once; or by sending its link, and it shows here once you have opened it.");
     expect(document.body.textContent).not.toContain("publish_artifact");
     expect(document.body.textContent).not.toContain("Nobody has given you a link");
-    unmount!();
-    unmount = null;
+    close();
     await fake.stop();
 
     await start({ artifactsEnabled: false });
@@ -229,8 +221,7 @@ describe("artifacts", () => {
     visit("#/artifacts/art-carol-weekly");
     await sees("Version 1", () => document.querySelector<HTMLElement>('section[aria-label="Versions"]'));
     expect(document.body.textContent).not.toMatch(/goes on|goes \d|Versions older than/i);
-    unmount!();
-    unmount = null;
+    close();
     await fake.stop();
 
     await start({ retention: { versions_days: 90, unopened_days: 60 } });

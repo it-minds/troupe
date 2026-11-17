@@ -7,14 +7,12 @@ import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { App } from "../src/App";
 import { durationWords, moneyWords } from "@troupe/client";
 import { outcomeWords } from "../src/views/Integrations";
-import { PEOPLE, button, field, freshBrowser, render, says, sees, seesButton, signedInAs, startFake, type, visit, waitFor } from "./support";
+import { PEOPLE, button, field, freshBrowser, opener, says, sees, seesButton, startFake, type, waitFor } from "./support";
 import type { FakeDeployment } from "./support";
 
 let fake: FakeDeployment;
-let unmount: (() => void) | null = null;
 
 beforeEach(async () => {
   freshBrowser();
@@ -22,16 +20,11 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
-  unmount?.();
-  unmount = null;
+  close();
   await fake.stop();
 });
 
-async function open(hash: string, as: { subject: string; name: string } = PEOPLE.alice): Promise<void> {
-  await signedInAs(fake, as);
-  visit(hash);
-  unmount = render(<App />).unmount;
-}
+const { open, close } = opener(() => fake);
 
 const heading = (): string => document.querySelector("h1")?.textContent ?? "";
 const css = readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), "../src/styles.css"), "utf8");

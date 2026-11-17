@@ -4,14 +4,12 @@
 // carries every other part of the spec through a save as it was loaded.
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { App } from "../src/App";
 import { budgetMicros, draftOf, keptOf, llmWithoutEndpoint } from "../src/views/Profiles";
-import { PEOPLE, button, field, freshBrowser, link, recordCalls, render, says, sees, seesButton, seesField, signedInAs, startFake, type, visit, waitFor } from "./support";
+import { PEOPLE, button, field, freshBrowser, link, opener, recordCalls, says, sees, seesButton, seesEnabled, seesField, startFake, type, visit, waitFor } from "./support";
 import { PROVIDER_TYPES } from "../../../packages/client/test/support/provider-types.js";
 import type { FakeDeployment } from "./support";
 
 let fake: FakeDeployment;
-let unmount: (() => void) | null = null;
 
 beforeEach(async () => {
   freshBrowser();
@@ -19,8 +17,7 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
-  unmount?.();
-  unmount = null;
+  close();
   await fake.stop();
 });
 
@@ -28,11 +25,7 @@ const heading = (): string => document.querySelector("h1")?.textContent ?? "";
 const row = (name: string): HTMLTableRowElement | null =>
   [...document.querySelectorAll<HTMLTableRowElement>("table.profiles tbody tr")].find((r) => (r.cells[0]?.textContent ?? "") === name) ?? null;
 
-async function open(hash: string, who: { subject: string; name: string } = PEOPLE.alice): Promise<void> {
-  await signedInAs(fake, who);
-  visit(hash);
-  unmount = render(<App />).unmount;
-}
+const { open, close } = opener(() => fake);
 
 describe("the profile list", () => {
   it("lists every profile with its state, its pods, its image and the teams it is granted to", async () => {
@@ -428,8 +421,7 @@ describe("a profile that extends another", () => {
     expect((field("How demanding") as HTMLSelectElement).value).toBe("");
     type(field("Allowed hosts")!, "wiki.example.com");
     // No image of its own: it is dev's.
-    expect((await seesButton("Preview")).disabled).toBe(false);
-    button("Preview")!.click();
+    (await seesEnabled("Preview")).click();
     await waitFor(() => says("What will happen") && says("extends"), "the preview");
     button("Create data-team")!.click();
     await waitFor(() => says("Recorded in the audit as profile.put on data-team"), "the audit's note");

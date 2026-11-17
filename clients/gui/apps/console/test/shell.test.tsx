@@ -27,6 +27,7 @@ afterEach(async () => {
   fake = null;
 });
 
+// Its own open, not support's: each test starts the deployment, with the organisation it needs, and waits for the rail.
 async function open(as: { subject: string; name: string } = PEOPLE.alice, admin?: FakeAdmin): Promise<FakeDeployment> {
   fake = await startFake(admin);
   await signedInAs(fake, as);

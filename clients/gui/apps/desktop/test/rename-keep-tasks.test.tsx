@@ -30,6 +30,7 @@ function key(target: EventTarget, key: string): void {
   target.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true }));
 }
 
+// Its own open, not support's: a row of the list already drawn, by its entry, answering the head.
 async function open(text: string): Promise<HTMLElement> {
   (await waitFor(() => entry(text)?.querySelector<HTMLButtonElement>("button.row"), `the row for ${text}`)).click();
   return waitFor(() => document.querySelector<HTMLElement>(".session-head"), "the session");

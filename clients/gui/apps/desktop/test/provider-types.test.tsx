@@ -12,7 +12,7 @@ import { App } from "../src/App";
 import { Key } from "../src/views/Onboarding/Key";
 import { Provider } from "../src/views/Onboarding/Provider";
 import { FakeDaemon, SETUP_KINDS } from "../../../packages/client/test/support/daemon.js";
-import { button, nav, render, says, sees, seesButton, startOnTheList, type, waitFor } from "./support";
+import { button, nav, render, says, sees, seesButton, seesEnabled, startOnTheList, type, waitFor } from "./support";
 
 // jsdom lays nothing out, so it has nothing to scroll; the transcript asks anyway.
 Element.prototype.scrollIntoView = function scrollIntoView() {};
@@ -108,8 +108,7 @@ describe("the first run's provider step", () => {
     const ollama = await waitFor(() => field("Address"), "Ollama's address");
     expect(ollama.placeholder).toBe("http://localhost:11434");
     await sees("leave empty for http://localhost:11434");
-    expect((await seesButton("Continue")).disabled).toBe(false);
-    button("Continue")!.click();
+    (await seesEnabled("Continue")).click();
     expect(onAnswer).toHaveBeenLastCalledWith({ provider: "ollama", kind: "ollama", base_url: null });
 
     // Azure: the resource's own address, which it cannot go without.

@@ -2,12 +2,10 @@
 // asked as the administrator, answered for no team, drawn as tables and nothing to change.
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { App } from "../src/App";
-import { PEOPLE, freshBrowser, recordCalls, render, says, sees, signedInAs, startFake, visit, waitFor } from "./support";
+import { freshBrowser, opener, recordCalls, says, sees, startFake, waitFor } from "./support";
 import type { FakeDeployment } from "./support";
 
 let fake: FakeDeployment;
-let unmount: (() => void) | null = null;
 
 beforeEach(async () => {
   freshBrowser();
@@ -15,18 +13,13 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
-  unmount?.();
-  unmount = null;
+  close();
   await fake.stop();
 });
 
 const member = (): HTMLElement | null => document.querySelector<HTMLElement>(".member-view");
 
-async function open(hash: string): Promise<void> {
-  await signedInAs(fake, PEOPLE.alice);
-  visit(hash);
-  unmount = render(<App />).unmount;
-}
+const { open, close } = opener(() => fake);
 
 describe("what a member sees", () => {
   it("is the plane's answer for a member's app, in tables, with whose access each server is called", async () => {

@@ -13,6 +13,11 @@
 // The supports wait for it (`await seesButton(…)`, `await waitFor(() => field(…), …)`) and
 // read it from what the wait found. Absence is not covered, a control's as a word's: a
 // check that something is not there cannot flake this way, only pass early.
+//
+// A control is drawn before it is enabled as often as not, so one waited for being there
+// is not yet one that may be pressed: `expect(<it>.disabled).toBe(false)` is refused on
+// any control, however found. The wait is for it enabled (`await seesEnabled(…)`,
+// `await waitFor(() => enabled(…), …)`).
 
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -28,6 +33,9 @@ const BARE: Array<{ call: string; matchers: RegExp }> = [
   { call: "field", matchers: CONTROL },
   { call: "row", matchers: CONTROL },
 ];
+
+// That a control found is enabled: `expect(<it>.disabled).toBe(false)`, whatever found it.
+const ENABLED = /expect\(.*\.disabled\)\.toBe\(\s*false\s*\)/;
 
 const MARK = "// at once:";
 
@@ -60,7 +68,14 @@ export function bareIn(text: string): string[] {
     if (lines[line - 1]!.includes(MARK) || (lines[line - 2] ?? "").includes(MARK)) continue;
     found.push(`${line}: ${lines[line - 1]!.trim()}`);
   }
-  return found;
+  // A control said to be enabled, read off one already found: found is not enabled yet.
+  lines.forEach((text, i) => {
+    if (!ENABLED.test(text) || /^\s*(\/\/|\*)/.test(text)) return;
+    if (text.includes(MARK) || (lines[i - 1] ?? "").includes(MARK)) return;
+    const hit = `${i + 1}: ${text.trim()}`;
+    if (!found.includes(hit)) found.push(hit);
+  });
+  return found.sort((a, b) => parseInt(a, 10) - parseInt(b, 10));
 }
 
 /** Every bare assertion in the test files of `dir`, as `<file>:<line>: <the line>`. */

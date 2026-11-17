@@ -4,12 +4,10 @@
 // `admin.setting.put`, `.reset`, `.effective` and `admin.identity.check`.
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { App } from "../src/App";
-import { PEOPLE, button, field, freshBrowser, render, says, sees, signedInAs, startFake, type, visit, waitFor } from "./support";
+import { PEOPLE, button, field, freshBrowser, opener, says, sees, startFake, type, waitFor } from "./support";
 import type { FakeDeployment } from "./support";
 
 let fake: FakeDeployment;
-let unmount: (() => void) | null = null;
 
 beforeEach(async () => {
   freshBrowser();
@@ -17,16 +15,11 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
-  unmount?.();
-  unmount = null;
+  close();
   await fake.stop();
 });
 
-async function open(who: { subject: string; name: string } = PEOPLE.alice): Promise<void> {
-  await signedInAs(fake, who);
-  visit("#/policy");
-  unmount = render(<App />).unmount;
-}
+const { open, close } = opener(() => fake);
 
 const row = (key: string): HTMLElement | null => document.querySelector<HTMLElement>(`.row[aria-label="${key}"]`);
 const ladderRow = (key: string): HTMLTableRowElement | null =>
@@ -34,7 +27,7 @@ const ladderRow = (key: string): HTMLTableRowElement | null =>
 
 describe("the settings", () => {
   it("are listed by panel with where each value came from, the deployment's read-only and a secret never shown", async () => {
-    await open();
+    await open("#/policy");
     await waitFor(() => row("platform_admin_group"), "the settings");
     await sees("Who administers this platform");
     await sees("from the deployment", () => row("platform_admin_group"));
@@ -51,7 +44,7 @@ describe("the settings", () => {
   });
 
   it("is changed and reset behind a preview, each shown as the audit recorded it", async () => {
-    await open();
+    await open("#/policy");
     button("Change", await waitFor(() => row("default_idle_timeout_seconds"), "the setting"))!.click();
     // Asked in minutes, the plane's seconds converted on the way out.
     type(await waitFor(() => field("Idle before a session goes to sleep"), "the field"), "15");
@@ -70,7 +63,7 @@ describe("the settings", () => {
   });
 
   it("is read by a team admin, who is offered nothing to change", async () => {
-    await open(PEOPLE.bob);
+    await open("#/policy", PEOPLE.bob);
     await waitFor(() => row("platform_admin_group"), "the settings");
     await sees("Read-only for you");
     expect(button("Change")).toBeNull();
@@ -81,7 +74,7 @@ describe("the settings", () => {
 describe("a setting in its unit", () => {
   it("is named by its label, with its key under it, and its value read in the unit", async () => {
     fake.admin.stored.set("platform_budget_micros", 500_000_000);
-    await open();
+    await open("#/policy");
     const budget = await waitFor(() => row("platform_budget_micros"), "the setting");
     expect(budget.querySelector(".name")?.textContent).toBe("Budget for the platform");
     expect(budget.querySelector("code.key")?.textContent).toBe("platform_budget_micros");
@@ -94,7 +87,7 @@ describe("a setting in its unit", () => {
 
   it("asks for money in dollars, previews and records the change in dollars, and sends millionths", async () => {
     fake.admin.stored.set("platform_budget_micros", 500_000_000);
-    await open();
+    await open("#/policy");
     button("Change", await waitFor(() => row("platform_budget_micros"), "the setting"))!.click();
     const amount = await waitFor(() => field("Budget for the platform"), "the dollars field");
     expect(amount.value).toBe("500");
@@ -121,7 +114,7 @@ describe("a setting in its unit", () => {
   });
 
   it("asks for a switch as on or off, and a choice by its words", async () => {
-    await open();
+    await open("#/policy");
     button("Change", await waitFor(() => row("default_budget_period"), "the setting"))!.click();
     const period = (await waitFor(() => field("A new team's budget counted over"), "the choice")) as HTMLSelectElement;
     expect([...period.options].map((o) => o.textContent)).toEqual(["monthly, from the 1st (UTC)", "never turns over"]);
@@ -137,7 +130,7 @@ describe("a setting in its unit", () => {
 
   it("falls back to the key and a text field on a plane that names no setting", async () => {
     fake.admin.named = false;
-    await open();
+    await open("#/policy");
     const idle = await waitFor(() => row("default_idle_timeout_seconds"), "the setting");
     expect(idle.querySelector(".name")).toBeNull();
     await sees("1800", idle);
@@ -153,7 +146,7 @@ describe("a setting in its unit", () => {
 
 describe("the group that decides who administers", () => {
   it("is saved only once the check has passed for the value in the field", async () => {
-    await open();
+    await open("#/policy");
     button("Change", await waitFor(() => row("platform_admin_group"), "the setting"))!.click();
     const value = await waitFor(() => field("Group that administers the platform"), "the field");
     type(value, "nobody-carries-this");
@@ -179,7 +172,7 @@ describe("the group that decides who administers", () => {
 
 describe("the ladder", () => {
   it("names the rung that decided each value and every opinion, above every team and for one", async () => {
-    await open();
+    await open("#/policy");
     const erase = await waitFor(() => ladderRow("default_erase_after_days"), "the ladder");
     await sees("the platform: what no team may exceed", erase);
     await sees("Erase a session after", erase);

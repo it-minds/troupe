@@ -14,7 +14,7 @@ import { FakeDaemon } from "../../../packages/client/test/support/daemon.js";
 import { artifact as planeArtifact } from "../../../packages/client/test/support/plane.js";
 import { startHarness } from "../../../packages/client/test/support/harness.js";
 import type { Harness } from "../../../packages/client/test/support/harness.js";
-import { button, render, sees, seesButton, startOnTheList, type, waitFor } from "./support";
+import { button, enabled, render, sees, seesButton, sessionOpener, startOnTheList, type, waitFor } from "./support";
 
 Element.prototype.scrollIntoView = function scrollIntoView() {};
 globalThis.WebSocket = NodeWebSocket as unknown as typeof WebSocket;
@@ -42,6 +42,7 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  page.close();
   unmount?.();
   unmount = null;
   location.hash = "";
@@ -60,15 +61,13 @@ async function signedIn(): Promise<Harness> {
   return harness;
 }
 
+const page = sessionOpener(() => daemon);
+
+// Its own open around support's: the session seeded and a plane signed in to first.
 async function open(): Promise<{ session: ReturnType<FakeDaemon["seed"]>; composer: HTMLTextAreaElement }> {
   const session = daemon.seed(WORKSPACE);
   await signedIn();
-  unmount = render(<App />).unmount;
-  const row = await waitFor(() => [...document.querySelectorAll<HTMLButtonElement>("button.row")].find((b) => b.textContent?.includes(WORKSPACE)), "the session in the list");
-  row.click();
-  const composer = await waitFor(() => document.querySelector<HTMLTextAreaElement>('textarea[aria-label="Message"]'), "the session");
-  await waitFor(() => daemon.calls.some((c) => c.method === "session.loop.get"), "the screen attached");
-  return { session, composer };
+  return { session, composer: await page.open(WORKSPACE) };
 }
 
 /** Pick files with the hidden file field, as Upload files does. */
@@ -286,11 +285,11 @@ describe("the voids", () => {
     expect(document.querySelector(".composer .ring-context")?.getAttribute("aria-label")).toMatch(/the window size is not reported yet\.$/);
 
     document.querySelector<HTMLButtonElement>('.composer button[aria-label="Add files"]')!.click();
-    const artifacts = await waitFor(() => plusItem("Add from artifacts"), "the + menu");
-    expect(artifacts.disabled).toBe(false);
+    // Drawn before the session's plane is known, and enabled once it is: waited for enabled.
+    const artifacts = await waitFor(() => enabled(plusItem("Add from artifacts")), "Add from artifacts, enabled");
     expect(plusItem("Add a folder")!.disabled).toBe(true);
     expect(plusItem("Add a folder")!.querySelector(".d")?.textContent).toBe("Only for sessions on this computer");
-    expect(plusItem("Upload files")!.disabled).toBe(false);
+    await waitFor(() => enabled(plusItem("Upload files")), "Upload files, enabled");
     artifacts.click();
     const picker = await waitFor(() => document.querySelector<HTMLElement>(".artifact-picker"), "the artifact picker");
     (await seesButton("Release plan", picker)).click();

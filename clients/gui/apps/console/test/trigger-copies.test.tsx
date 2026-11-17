@@ -6,7 +6,7 @@
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { App } from "../src/App";
-import { PEOPLE, button, freshBrowser, render, says, sees, signedInAs, startFake, visit, waitFor } from "./support";
+import { PEOPLE, button, freshBrowser, opener, render, says, sees, signedInAs, startFake, visit, waitFor } from "./support";
 import type { FakeDeployment } from "./support";
 
 let fake: FakeDeployment;
@@ -18,6 +18,7 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  close();
   unmount?.();
   unmount = null;
   await fake.stop();
@@ -30,11 +31,7 @@ const trigger = (team: string, name: string) => fake.admin.triggerRows.find((t) 
 
 const review = { principal: "svc:core/nightly", profile: "dev", source: { kind: "webhook", provider: "generic" }, prompt_template: "Review what changed." };
 
-async function open(hash: string, who: { subject: string; name: string } = PEOPLE.alice): Promise<void> {
-  await signedInAs(fake, who);
-  visit(hash);
-  unmount = render(<App />).unmount;
-}
+const { open, close } = opener(() => fake);
 
 describe("a direct plane's Trigger resources", () => {
   it("are listed beside the team's rows, with their generation and whether they pass", async () => {

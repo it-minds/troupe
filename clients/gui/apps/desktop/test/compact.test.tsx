@@ -5,15 +5,13 @@
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { WebSocket as NodeWebSocket } from "ws";
-import { App } from "../src/App";
 import { FakeDaemon } from "../../../packages/client/test/support/daemon.js";
-import { render, sees, startOnTheList, type, waitFor } from "./support";
+import { sees, sessionOpener, startOnTheList, type, waitFor } from "./support";
 
 Element.prototype.scrollIntoView = function scrollIntoView() {};
 globalThis.WebSocket = NodeWebSocket as unknown as typeof WebSocket;
 
 let daemon: FakeDaemon;
-let unmount: (() => void) | null = null;
 
 async function command(line: string): Promise<void> {
   if (!document.querySelector(".palette")) document.querySelector<HTMLButtonElement>('.composer button[aria-label="Commands"]')!.click();
@@ -23,13 +21,7 @@ async function command(line: string): Promise<void> {
   field.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
 }
 
-async function open(workspace: string): Promise<void> {
-  unmount = render(<App />).unmount;
-  const row = await waitFor(() => [...document.querySelectorAll<HTMLButtonElement>("button.row")].find((b) => b.textContent?.includes(workspace)), "the session in the list");
-  row.click();
-  await waitFor(() => document.querySelector('textarea[aria-label="Message"]'), "the session");
-  await waitFor(() => daemon.calls.some((c) => c.method === "session.loop.get"), "the screen attached");
-}
+const { open, close } = sessionOpener(() => daemon);
 
 beforeEach(async () => {
   localStorage.clear();
@@ -41,8 +33,7 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
-  unmount?.();
-  unmount = null;
+  close();
   location.hash = "";
   await daemon.stop();
 });

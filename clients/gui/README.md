@@ -6,12 +6,13 @@ throughput bench stand on. Living beside the platform gets it no private door in
 server: it speaks [`PROTOCOL.md`](../../PROTOCOL.md) over a WebSocket, as the TUI and the
 Python reference client do.
 
-Four packages in one pnpm workspace:
+Five packages in one pnpm workspace:
 
 | package | what |
 | --- | --- |
 | `packages/client` | `@troupe/client` — the protocol in TypeScript. JSON-RPC 2.0 over WebSocket, the plane's HTTP surface (discovery, device-grant login, `/auth/exchange`, `/rpc`), and a `SessionView` that folds events and turns "send a prompt, wait for the turn" into a promise. Runs in a browser or Node; no dependencies. |
 | `packages/bench` | `@troupe/bench` — the throughput test. N clients, one session each, K prompts each, every milestone timed. |
+| `packages/test-support` | `@troupe/test-support` — the page helpers both apps' tests drive their page with: render, wait, find a button by its words, type. Tests only. |
 | `apps/desktop` | The GUI. Vite + React, on the design system in [`docs/design/`](docs/design/DESIGN.md). Signs in through the plane (or, in local-only mode, talks to the daemon on this computer and nothing else), shows one list of every session — the team's on worker pods and the person's own on the daemon in front of them — streams a session, answers approvals, and reviews what ran unattended. The bundle is plain web; the Tauri shell in [`src-tauri/`](apps/desktop/src-tauri) loads it unchanged and adds the things a browser cannot do — see [`src/shell.ts`](apps/desktop/src/shell.ts). |
 | `apps/console` | `@troupe/console` — the administrative console, an app of its own ([docs/admin/console.md](../../docs/admin/console.md)). Vite + React on `@troupe/client`'s `admin.ts` and the same design tokens, and nothing of the desktop app's, nor the desktop app anything of its: a test reads both and fails on an import either way. Signs in with the plane's own sign-in and calls its `admin.*` methods and `me`, nothing else; served by the chart at `/console` on the plane's host, from the same image as the GUI (root Decision 886). |
 

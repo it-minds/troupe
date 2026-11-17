@@ -9,7 +9,7 @@ import { App } from "../src/App";
 import { FakeDaemon } from "../../../packages/client/test/support/daemon.js";
 import { startHarness } from "../../../packages/client/test/support/harness.js";
 import type { Harness } from "../../../packages/client/test/support/harness.js";
-import { render, showBackstage, startOnTheList, waitFor } from "./support";
+import { render, sessionOpener, showBackstage, startOnTheList, waitFor } from "./support";
 
 Element.prototype.scrollIntoView = function scrollIntoView() {};
 globalThis.WebSocket = NodeWebSocket as unknown as typeof WebSocket;
@@ -31,6 +31,7 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  page.close();
   unmount?.();
   unmount = null;
   location.hash = "";
@@ -40,17 +41,16 @@ afterEach(async () => {
   await daemon.stop();
 });
 
+const page = sessionOpener(() => daemon);
+
+// Its own open around support's: the session seeded and a plane signed in to first.
 async function open(): Promise<ReturnType<FakeDaemon["seed"]>> {
   const session = daemon.seed(WORKSPACE);
   harness = await startHarness();
   await harness.signIn({ store: webTokenStore() });
   localStorage.setItem("troupe.pref.planeUrl", harness.plane.baseUrl);
   localStorage.setItem("troupe.pref.appearance.chosen.alice@example.com", "yes");
-  unmount = render(<App />).unmount;
-  const row = await waitFor(() => [...document.querySelectorAll<HTMLButtonElement>("button.row")].find((b) => b.textContent?.includes(WORKSPACE)), "the session in the list");
-  row.click();
-  await waitFor(() => document.querySelector('textarea[aria-label="Message"]'), "the session");
-  await waitFor(() => daemon.calls.some((c) => c.method === "session.loop.get"), "the screen attached");
+  await page.open(WORKSPACE);
   return session;
 }
 

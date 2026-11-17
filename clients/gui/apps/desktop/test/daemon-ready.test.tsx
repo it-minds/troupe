@@ -66,6 +66,7 @@ afterEach(async () => {
 });
 
 /** Signed in to the plane, on the list; the daemon is linked once the hand-over lands. */
+// Its own open, not support's: signed in to a plane and the app drawn, no session opened.
 async function open(): Promise<void> {
   harness = await startHarness({ plane: { keeper: keptBy(daemon) } });
   await harness.signIn({ store: webTokenStore() });

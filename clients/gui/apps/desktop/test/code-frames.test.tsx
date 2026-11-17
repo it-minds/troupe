@@ -11,7 +11,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { WebSocket as NodeWebSocket } from "ws";
 import { App } from "../src/App";
 import { FakeDaemon } from "../../../packages/client/test/support/daemon.js";
-import { nav, render, startOnTheList, waitFor } from "./support";
+import { nav, render, sessionOpener, startOnTheList, waitFor } from "./support";
 
 type Session = ReturnType<FakeDaemon["seed"]>;
 
@@ -31,6 +31,7 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  close();
   unmount?.();
   unmount = null;
   location.hash = "";
@@ -39,15 +40,7 @@ afterEach(async () => {
 
 const WORKSPACE = "/home/ada/parser";
 
-async function open(session: Session): Promise<void> {
-  unmount = render(<App />).unmount;
-  const row = await waitFor(
-    () => [...document.querySelectorAll<HTMLButtonElement>("button.row")].find((b) => b.textContent?.includes(session.workspace)),
-    "the session in the list",
-  );
-  row.click();
-  await waitFor(() => daemon.calls.some((c) => c.method === "session.loop.get"), "the screen attached");
-}
+const { open, close } = sessionOpener(() => daemon);
 
 function reply(session: Session, content: Array<Record<string, unknown>>): void {
   session.log.append("llm_response", { message: { role: "assistant", content } }, undefined, ["root"]);
@@ -79,7 +72,7 @@ function rule(selector: string): string {
 describe("highlighted code (troupe #659)", () => {
   it("highlights a fence by its language in the palette's roles, and leaves one with no language, or an unknown one, as written", async () => {
     const session = daemon.seed(WORKSPACE);
-    await open(session);
+    await open(session.workspace);
     session.log.append("user_input", { source: "user", text: "show me" }, { kind: "user", subject: "ada" });
     const text = [
       "Here it is.",
@@ -132,7 +125,7 @@ describe("highlighted code (troupe #659)", () => {
   it("highlights a file a call read in its extension's language, its line numbers kept out of the tokens", async () => {
     daemon.transcript["transcript.detail"] = "tools";
     const session = daemon.seed(WORKSPACE);
-    await open(session);
+    await open(session.workspace);
     session.log.append("user_input", { source: "user", text: "read it" }, { kind: "user", subject: "ada" });
     session.log.append("tool_call_started", { call_id: "r", name: "read_file", args: { path: "lib/p.ex" } });
     session.log.append("tool_call_completed", { call_id: "r", name: "read_file", ok: true, content: "1\tdefmodule P do\n2\t  def parse(x), do: x\n3\tend" });
@@ -176,7 +169,7 @@ describe("highlighted code (troupe #659)", () => {
 describe("a Mermaid fence (troupe #659)", () => {
   it("that does not draw is its source, with one line saying it did not draw", async () => {
     const session = daemon.seed(WORKSPACE);
-    await open(session);
+    await open(session.workspace);
     session.log.append("user_input", { source: "user", text: "draw it" }, { kind: "user", subject: "ada" });
     const source = "flowchart TD\n  A[start] --> \n  this is not mermaid ))(";
     reply(session, [{ type: "text", text: `The flow:\n\n\`\`\`mermaid\n${source}\n\`\`\`` }]);
@@ -202,7 +195,7 @@ describe("reasoning on replay (troupe #659)", () => {
       { type: "reasoning", provider: "openai", text: "The parser drops its last line." },
       { type: "text", text: "Fixed." },
     ]);
-    await open(session);
+    await open(session.workspace);
 
     const frame = await waitFor(() => stream().querySelector<HTMLDetailsElement>(".reasoning-frame"), "the reasoning frame");
     expect(frame.querySelector("summary")?.textContent).toBe("thinking");

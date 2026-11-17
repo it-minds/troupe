@@ -10,7 +10,7 @@ import type { DurableEvent, FleetRow } from "@troupe/client";
 import { App } from "../src/App";
 import { ANSWER_MS, askPermission, noticeEvent, noticeRows, resetNotifications } from "../src/notify";
 import { FakeDaemon } from "../../../packages/client/test/support/daemon.js";
-import { button, render, sleep, startOnTheList, waitFor } from "./support";
+import { button, render, sessionOpener, sleep, startOnTheList, waitFor } from "./support";
 
 Element.prototype.scrollIntoView = function scrollIntoView() {};
 globalThis.WebSocket = NodeWebSocket as unknown as typeof WebSocket;
@@ -60,6 +60,7 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  close();
   unmount?.();
   unmount = null;
   location.hash = "";
@@ -70,12 +71,7 @@ afterEach(async () => {
 });
 
 /** Open a session from the list, and wait until the screen is reading it (see goal-loop.test.tsx). */
-async function open(workspace: string): Promise<void> {
-  unmount = render(<App />).unmount;
-  (await waitFor(() => row(workspace), "the session in the list")).click();
-  await waitFor(() => document.querySelector('textarea[aria-label="Message"]'), "the session");
-  await waitFor(() => daemon.calls.some((c) => c.method === "session.loop.get"), "the screen attached");
-}
+const { open, close } = sessionOpener(() => daemon);
 
 let nextSeq = 1;
 const event = (type: string, data: Record<string, unknown> = {}): DurableEvent => ({
