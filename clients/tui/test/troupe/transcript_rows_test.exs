@@ -156,7 +156,7 @@ defmodule Troupe.TranscriptRowsTest do
     |> Enum.map(&(&1 |> Model.line_text() |> String.trim_trailing()))
   end
 
-  # Decision 52's numbered body, which never appeared (defects D27): the TUI split a
+  # Decision 52's numbered body, which never appeared: the TUI split a
   # five-column number off each line while `read_file` writes `N<tab>line`. The tab's
   # stop moves as the number grows a digit, and the code keeps its own tab in both.
   test "a read_file result is drawn as source, its numbers in a gutter of their own" do
@@ -303,7 +303,7 @@ defmodule Troupe.TranscriptRowsTest do
              ] = Enum.slice(rows, start, 9)
 
       # A tab-indented file: its four lines and nothing else between the read and the
-      # finish, numbered in a gutter, with each line's own tab kept (defects D27).
+      # finish, numbered in a gutter, with each line's own tab kept.
       {read, [finish | _]} =
         rows
         |> Enum.drop(start + 9)

@@ -140,7 +140,7 @@ defmodule Troupe.SettingsTest do
     end
 
     # The help beside the settings named commands in prose that could drift from the
-    # table the palette is drawn from (defects D32); its commands are the table's now.
+    # table the palette is drawn from; its commands are the table's now.
     test "the help's commands are the setup section of the command table" do
       table = Troupe.Commands.list()
       lines = Settings.help_lines(table)

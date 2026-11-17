@@ -131,7 +131,7 @@ defmodule Troupe.Gateway.WorktreesTest do
   end
 
   # A git that refuses is answered as merge and discard answer it, `internal_error` with
-  # git's own words, not `invalid_params` with an inspected string (D113).
+  # git's own words, not `invalid_params` with an inspected string.
   test "worktree.remove answers git's refusal as an internal error in git's words", context do
     client = connect(context)
     plain = Path.join(context.workspace, "plain")
@@ -248,7 +248,7 @@ defmodule Troupe.Gateway.WorktreesTest do
 
     # One `status --porcelain=v2 --branch` a tree says how it stands and whether it is
     # dirty, and the lines are one `diff` from the merge base: no `rev-list`, no
-    # `merge-base`, no second status (D113).
+    # `merge-base`, no second status.
     calls = ran.()
     assert Enum.count(calls, &(&1 =~ "--porcelain=v2 --branch")) == 2
     assert Enum.count(calls, &(&1 =~ ~r/\bstatus\b/)) == 2

@@ -308,10 +308,7 @@ defmodule Troupe.Config.Migrate do
   def write_text(path, text) do
     with :ok <- File.mkdir_p(Path.dirname(path)),
          :ok <- keep_previous(path),
-         tmp = path <> ".tmp",
-         :ok <- File.write(tmp, text),
-         :ok <- restrict(tmp),
-         :ok <- File.rename(tmp, path) do
+         :ok <- Troupe.Paths.write_atomic(path, text, owner_only: true) do
       :ok
     else
       {:error, reason} -> {:error, "could not write #{shown(path)}: #{:file.format_error(reason)}"}

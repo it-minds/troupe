@@ -24,7 +24,7 @@ defmodule Mix.Tasks.Troupe.Theme do
   `mix troupe.palette` read as well (Decision 716); a copy here once drifted from them.
 
   The walk that turns a token document into declarations was written for the plane's
-  own console, whose `docs/design/admin/tokens.json` had the same shape; that console is
+  own console, whose tokens file had the same shape; that console is
   an app of its own now, with the GUI's tokens, and this is the one stylesheet the plane
   still generates.
 

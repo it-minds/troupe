@@ -390,9 +390,9 @@ defmodule Troupe.Reaper do
     if match?({:win32, _}, :os.type()), do: String.downcase(path), else: path
   end
 
-  @doc "The Zig target triple for the host, matching the `priv/reaper/` layout."
+  # The Zig target triple for the host, matching the `priv/reaper/` layout.
   @spec triple() :: String.t()
-  def triple do
+  defp triple do
     arch =
       case List.to_string(:erlang.system_info(:system_architecture)) do
         "aarch64" <> _ -> "aarch64"

@@ -149,7 +149,7 @@ describe("signing in to a plane", () => {
     expect(localStorage.getItem("troupe.pref.appearance.chosen.ada@example.com")).toBe("yes");
   });
 
-  // D134: the window said nothing of a sign-in the credential store refused; only the
+  // The window said nothing of a sign-in the credential store refused; only the
   // console did.
   it("says in the window that a sign-in the credential store refused will be asked for again", async () => {
     window.troupe = {

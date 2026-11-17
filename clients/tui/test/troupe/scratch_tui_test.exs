@@ -86,7 +86,7 @@ defmodule Troupe.ScratchTUITest do
   describe "/scratch" do
     @tag :remote
     test "lists the documents, opens one as a reply is drawn, and Esc goes back" do
-      asked = %{"type" => "message.completed", "data" => %{"text" => "on it"}}
+      asked = %{"type" => "llm_response", "data" => FakeRemote.said("on it")}
 
       {remote, url} =
         start_remote!(sessions: [FakeRemote.session(id: "s-pad", profile: "code", events: [asked])])

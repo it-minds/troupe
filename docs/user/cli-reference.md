@@ -186,4 +186,4 @@ Besides these, each agent is a command that starts a branch on it: `/build <prom
 `/plan <prompt>`, and whichever agents your config, your team's bundle or the
 repository's `.troupe/agents/` add (`/agents` manages them). So is each command you or the
 repository write as a markdown file, `/<name> [arguments]`, under `Custom` in the palette
-([your own commands](configuration.md#your-own-commands)).
+([your own commands](agents.md#your-own-commands)).

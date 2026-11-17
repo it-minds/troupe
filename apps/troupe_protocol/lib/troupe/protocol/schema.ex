@@ -600,9 +600,6 @@ defmodule Troupe.Protocol.Schema do
         # session may now see.
         "entitlements" => optional(:object)
       },
-      "session_read_only" => %{"reason" => required(:string)},
-      "session_archived" => %{},
-      "session_erased" => %{},
       "fs_changed" => %{
         "path" => required(:string),
         "hash" => required(:string),
@@ -651,12 +648,6 @@ defmodule Troupe.Protocol.Schema do
         "audience" => optional(:string)
       },
       "share_revoked" => %{"id" => required(:string), "reason" => optional(:string)},
-      # Whom, by subject and by name where the writer knew one.
-      "acl_granted" => %{
-        "subject" => required(:string),
-        "role" => required(:string),
-        "display_name" => optional(:string)
-      },
       # A person invited into this session by name, or the invitation taken back (#765):
       # whom, at which role (`observe` or `control`), and by whom. Durable, for the reason
       # a share is: who was let in to read what was said is part of what happened.
@@ -678,11 +669,6 @@ defmodule Troupe.Protocol.Schema do
       "artifact_commented" => %{
         "artifact" => required(:object),
         "comment" => required(:object)
-      },
-      "acl_revoked" => %{
-        "subject" => required(:string),
-        "role" => required(:string),
-        "display_name" => optional(:string)
       },
       # Client-hosted tools. Durable, all three, because a tool that ran on somebody's
       # laptop is part of what happened in this session and a replay that did not say so
@@ -962,7 +948,6 @@ defmodule Troupe.Protocol.Schema do
         "blob" => required(:string),
         "range" => optional(:array)
       },
-      "fleet.get" => %{},
       "workspace.recent" => %{"limit" => optional(:integer)},
       "workspace.search" => %{"query" => required(:string), "limit" => optional(:integer)},
       "workflows.list" => %{"workspace" => required(:string)},

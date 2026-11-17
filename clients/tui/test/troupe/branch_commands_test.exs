@@ -269,7 +269,7 @@ defmodule Troupe.BranchCommandsTest do
           id: "s-pod",
           profile: "build",
           title: "on a pod",
-          events: [%{"type" => "message.completed", "data" => %{"text" => "first line"}}]
+          events: [%{"type" => "llm_response", "data" => FakeRemote.said("first line")}]
         )
 
       {remote, url} = start_remote!(sessions: [session])

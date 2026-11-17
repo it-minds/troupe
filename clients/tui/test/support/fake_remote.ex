@@ -13,7 +13,7 @@ defmodule Troupe.FakeRemote do
 
       {:ok, remote} = FakeRemote.start_link(sessions: [...])
       FakeRemote.url(remote)                    # the plane URL to log in to
-      FakeRemote.emit(remote, sid, "message.completed", %{"text" => "hi"})
+      FakeRemote.emit(remote, sid, "llm_response", FakeRemote.said("hi"))
       FakeRemote.kill_workers(remote)           # drop every worker socket
       FakeRemote.plane(remote, :down)           # the plane stops answering
       FakeRemote.calls(remote)                  # every RPC the client made
@@ -179,12 +179,16 @@ defmodule Troupe.FakeRemote do
   def emit(remote, session_id, type, data \\ %{}, opts \\ []),
     do: GenServer.call(remote, {:emit, session_id, type, data, opts})
 
+  @doc "An `llm_response`'s data for a reply that says `text`, as the worker writes one."
+  @spec said(String.t()) :: map()
+  def said(text), do: %{"message" => %{"content" => [%{"type" => "text", "text" => text}]}}
+
   @doc "Pushes an ephemeral event, which subscribers may drop."
   @spec ephemeral(pid(), String.t(), String.t(), map(), keyword()) :: :ok
   def ephemeral(remote, session_id, type, data \\ %{}, opts \\ []),
     do: GenServer.call(remote, {:ephemeral, session_id, type, data, opts})
 
-  @doc "Pushes `n` `llm.delta` frames as fast as the socket takes them."
+  @doc "Pushes `n` `llm_delta` frames as fast as the socket takes them."
   @spec flood(pid(), String.t(), pos_integer(), String.t()) :: :ok
   def flood(remote, session_id, n, text \\ "x"),
     do: GenServer.call(remote, {:flood, session_id, n, text}, 120_000)
@@ -498,8 +502,8 @@ defmodule Troupe.FakeRemote do
       event = %{
         "ephemeral" => true,
         "agent" => agent,
-        "type" => "llm.delta",
-        "data" => %{"text" => text}
+        "type" => "llm_delta",
+        "data" => %{"kind" => "text", "text" => text}
       }
 
       push(state, session_id, notification(session_id, event))
@@ -1137,9 +1141,9 @@ defmodule Troupe.FakeRemote do
     command = params["command_id"]
 
     {queued, state} =
-      append(state, id, "input.queued", %{"text" => params["text"]}, command_id: command)
+      append(state, id, "input_queued", %{"text" => params["text"]}, command_id: command)
 
-    {accepted, state} = append(state, id, "input.accepted", %{}, command_id: command)
+    {accepted, state} = append(state, id, "input_accepted", %{}, command_id: command)
     push(state, id, notification(id, queued))
     push(state, id, notification(id, accepted))
 
@@ -1203,9 +1207,7 @@ defmodule Troupe.FakeRemote do
     case {Enum.find(state.artifacts, &(&1["id"] == artifact)), state.artifact_texts[artifact]} do
       {%{} = row, text} when is_binary(text) ->
         {event, state} =
-          append(state, id, "fs.changed", %{"paths" => ["index.md"]},
-            command_id: params["command_id"]
-          )
+          append(state, id, "fs_changed", %{"path" => "index.md"}, command_id: params["command_id"])
 
         push(state, id, notification(id, event))
 
@@ -1227,9 +1229,7 @@ defmodule Troupe.FakeRemote do
     id = session_of(state, pid)
 
     {event, state} =
-      append(state, id, "fs.changed", %{"paths" => [params["path"]]},
-        command_id: params["command_id"]
-      )
+      append(state, id, "fs_changed", %{"path" => params["path"]}, command_id: params["command_id"])
 
     push(state, id, notification(id, event))
     {{:ok, %{"path" => params["path"], "bytes" => byte_size(params["content"])}}, state}

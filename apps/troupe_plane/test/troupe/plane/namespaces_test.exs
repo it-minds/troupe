@@ -1,6 +1,6 @@
 defmodule Troupe.Plane.NamespacesTest do
   @moduledoc """
-  The chart's `namespace` and `policy.namespacePrefix` reach the plane (D125): where it
+  The chart's `namespace` and `policy.namespacePrefix` reach the plane: where it
   writes WorkerProfiles and Triggers (`Troupe.Plane.Provision.namespace/0`), and the prefix
   it takes off an enrolling pod's namespace to name its profile
   (`Troupe.Plane.Enrolment.namespace_prefix/0`). `config/runtime.exs` read as a release

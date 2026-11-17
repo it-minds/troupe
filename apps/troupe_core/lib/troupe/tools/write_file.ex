@@ -10,6 +10,7 @@ defmodule Troupe.Tools.WriteFile do
 
   @behaviour Troupe.Tool
 
+  alias Troupe.Protocol.Digest
   alias Troupe.{Session, Tool, Watch, Workspace}
   alias Troupe.Session.Log
 
@@ -72,7 +73,7 @@ defmodule Troupe.Tools.WriteFile do
       %{
         "path" => String.replace(relative, "\\", "/"),
         "size" => byte_size(content),
-        "hash" => "sha256:" <> Base.encode16(:crypto.hash(:sha256, content), case: :lower)
+        "hash" => Digest.tagged(content)
       }
       |> put_local(ctx.session_id, resolved)
 

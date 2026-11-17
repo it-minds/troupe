@@ -73,10 +73,6 @@ defmodule Troupe.Plane.Settings.Ladder do
   @spec laddered() :: %{String.t() => map()}
   def laddered, do: @laddered
 
-  @doc "The team column a laddered setting lands in, or `nil`."
-  @spec field_for(String.t()) :: atom() | nil
-  def field_for(key), do: get_in(@laddered, [key, :field])
-
   @doc """
   What this setting resolves to here, which rung decided it, and every rung that had an
   opinion.

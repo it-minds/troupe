@@ -1,4 +1,4 @@
-// A call that never hears its answer gives up (troupe #739's follow-up, D131): every call on
+// A call that never hears its answer gives up (troupe #739's follow-up): every call on
 // a connection has a stated wait, a method known to take longer has its own, a caller may
 // name another for one call, and a call past its wait rejects with a sentence that says
 // what was not answered, for how long, and that it may still have been done. An answer
@@ -24,7 +24,7 @@ describe("the wait each call has", () => {
   });
 });
 
-// Not about waiting, but about what two calls send (D50): the shapes the daemon reads.
+// Not about waiting, but about what two calls send: the shapes the daemon reads.
 describe("offering tools from the daemon client", () => {
   it("sends consent as the challenge answered, and names the tools to take back as tools", async () => {
     const daemon = new FakeDaemon();

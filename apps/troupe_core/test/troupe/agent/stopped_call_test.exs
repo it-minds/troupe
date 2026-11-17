@@ -1,7 +1,7 @@
 defmodule Troupe.Agent.StoppedCallTest do
   @moduledoc """
-  A model call the agent gives up on is stopped, and what it reported is counted (D69,
-  Decision 788). Req's `receive_timeout` limits only the gap between packets, so a reply
+  A model call the agent gives up on is stopped, and what it reported is counted.
+  Req's `receive_timeout` limits only the gap between packets, so a reply
   that keeps coming went on past `llm_timeout_ms`, generated and billed up to
   `max_tokens`, after the agent had moved on, and none of it was counted.
   """

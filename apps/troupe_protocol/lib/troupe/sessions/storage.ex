@@ -24,6 +24,7 @@ defmodule Troupe.Sessions.Storage do
   """
 
   alias Troupe.ObjectStore
+  alias Troupe.Protocol.Digest
   alias Troupe.Sessions.Cipher
 
   @type key :: binary()
@@ -327,7 +328,7 @@ defmodule Troupe.Sessions.Storage do
   @doc "Store a blob, content-addressed within this session and no other."
   @spec put_blob(ObjectStore.t(), String.t(), key(), binary()) :: {:ok, String.t()} | {:error, term()}
   def put_blob(store, session_id, data_key, content) do
-    digest = "sha256:" <> (:sha256 |> :crypto.hash(content) |> Base.encode16(case: :lower))
+    digest = Digest.tagged(content)
 
     case ObjectStore.put(store, blob_key(session_id, digest), Cipher.seal(data_key, session_id, content)) do
       {:ok, _} -> {:ok, digest}

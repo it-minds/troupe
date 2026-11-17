@@ -55,16 +55,4 @@ defmodule Troupe.Log.Upcast do
   @doc "Bring a whole log up to date, in order."
   @spec log([Event.t()]) :: [Event.t()]
   def log(events), do: Enum.map(events, &event/1)
-
-  @doc """
-  Whether a log is entirely from versions this build understands.
-
-  A log with an event from the future is still replayable — unknown fields are ignored —
-  but it is worth saying so, because a pod running an old image against a session an
-  newer one wrote is a deployment mistake rather than a data one.
-  """
-  @spec from_the_future([Event.t()]) :: [pos_integer()]
-  def from_the_future(events) do
-    events |> Enum.map(& &1.v) |> Enum.filter(&(&1 > @current)) |> Enum.uniq() |> Enum.sort()
-  end
 end

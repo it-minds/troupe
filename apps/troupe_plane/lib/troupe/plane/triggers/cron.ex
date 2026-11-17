@@ -110,9 +110,9 @@ defmodule Troupe.Plane.Triggers.Cron do
     end
   end
 
-  @doc "A time with its seconds and smaller dropped, which is the unit cron thinks in."
+  # A time with its seconds and smaller dropped, which is the unit cron thinks in.
   @spec floor_minute(DateTime.t()) :: DateTime.t()
-  def floor_minute(%DateTime{} = at), do: %{at | second: 0, microsecond: {0, 0}}
+  defp floor_minute(%DateTime{} = at), do: %{at | second: 0, microsecond: {0, 0}}
 
   # -- fields -----------------------------------------------------------------
 

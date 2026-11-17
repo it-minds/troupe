@@ -24,7 +24,7 @@ paths:
   - apps/troupe_core/test/troupe/release/desktop_update_test.exs
   - docs/developer/code-signing.md
   - docs/developer/signing-day.md
-  - docs/user/README.md
+  - docs/user/sessions.md
   - PROTOCOL.md
 symbols:
   - Troupe.StartAtLogin.enabled?/1

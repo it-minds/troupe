@@ -1,6 +1,6 @@
 defmodule Troupe.Gateway.AgentsMendTest do
   @moduledoc """
-  What the agents managers could not do after Decision 841 (D107, D112; Decision 852):
+  What the agents managers could not do after Decision 841:
   list the subagents a person may change (`agents.list` with `subagents: true`, each row
   saying its `mode`); tell two clients editing one agent apart (`agents.get`'s `hash`, and
   `agents.put`'s `if_hash`, a save over a file that changed meanwhile refused with a

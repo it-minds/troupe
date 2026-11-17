@@ -33,7 +33,7 @@ there, as the code's own comments give it.
 | `yaml_elixir`, `ymlr` | `yaml_elixir`: protocol, core, operator, plane, TUI; `ymlr`: plane | agent and skill frontmatter; GitOps manifests |
 | `file_system` | core | the native watch backend (`inotifywait`, `mac_listener`) |
 | `ex_ratatui`, `burrito` | TUI | the terminal UI (Rust ratatui through NIFs); one executable per platform |
-| `jason`; `telemetry`, `stream_data`; `credo` | `jason` everywhere; `telemetry` and `stream_data` in core, gateway and the TUI; `credo` at the root and in the TUI | JSON; `:telemetry` events, which only the live bench attaches to; property tests; the lint |
+| `jason`; `telemetry`, `stream_data`; `credo` | `jason` everywhere; `telemetry` in core, `stream_data` in core and the gateway; `credo` at the root and in the TUI | JSON; `:telemetry` events, which only the live bench attaches to; property tests; the lint |
 
 ## Binaries a session uses
 

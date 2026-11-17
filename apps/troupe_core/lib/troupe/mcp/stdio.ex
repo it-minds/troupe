@@ -127,7 +127,7 @@ defmodule Troupe.MCP.Stdio do
     config = Keyword.fetch!(opts, :config)
     Process.set_label("troupe mcp #{name} #{session_id}")
     # A port that fails ends with an exit signal of its own: on Windows a write to a server
-    # that has exited, or closed its input, ends it with `epipe` (D115). That is the
+    # that has exited, or closed its input, ends it with `epipe`. That is the
     # server's status, read in `handle_info/2`, not a reason for this process to go too.
     Process.flag(:trap_exit, true)
 
@@ -269,12 +269,12 @@ defmodule Troupe.MCP.Stdio do
   defp after_tools_list(_other, state), do: fail(state, "tools/list answered without tools")
 
   defp reply_tool(from, %{"result" => %{"isError" => true} = result}, state) do
-    GenServer.reply(from, {:error, render(result)})
+    GenServer.reply(from, {:error, Tool.render(result)})
     state
   end
 
   defp reply_tool(from, %{"result" => result}, state) do
-    GenServer.reply(from, {:ok, render(result)})
+    GenServer.reply(from, {:ok, Tool.render(result)})
     state
   end
 
@@ -309,22 +309,6 @@ defmodule Troupe.MCP.Stdio do
     do: Map.get(config, :files, :all) == :all or remote in config.files
 
   defp stores_files?(_config, _remote), do: false
-
-  defp render(%{"content" => blocks}) when is_list(blocks) do
-    blocks
-    |> Enum.map_join("\n", fn
-      %{"type" => "text", "text" => text} -> text
-      %{"type" => type} -> "[#{type} content]"
-      other -> inspect(other)
-    end)
-    |> String.trim()
-    |> case do
-      "" -> "(no output)"
-      text -> text
-    end
-  end
-
-  defp render(result), do: Jason.encode!(result)
 
   defp describe(%{"message" => message}), do: message
   defp describe(error), do: inspect(error)
@@ -362,7 +346,7 @@ defmodule Troupe.MCP.Stdio do
       else: closed(state)
   end
 
-  # A port already closed is `badarg` (D115): the server has exited, and its exit status,
+  # A port already closed is `badarg`: the server has exited, and its exit status,
   # which comes before the port closes, is already on its way here and says more.
   defp sent?(port, message) do
     Port.command(port, [Jason.encode!(message), "\n"])

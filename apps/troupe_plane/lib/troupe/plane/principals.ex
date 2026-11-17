@@ -19,6 +19,7 @@ defmodule Troupe.Plane.Principals do
 
   alias Troupe.Plane.{Identity, OIDC, Repo, Tokens}
   alias Troupe.Plane.Identity.{ServicePrincipal, Team, User}
+  alias Troupe.Protocol.Digest
   alias Troupe.Protocol.Token
 
   # -- lifecycle --------------------------------------------------------------
@@ -249,7 +250,7 @@ defmodule Troupe.Plane.Principals do
   end
 
   defp hash(salt, secret),
-    do: :crypto.hash(:sha256, salt <> secret) |> Base.encode16(case: :lower)
+    do: Digest.sha256(salt <> secret)
 
   defp secret_matches?(principal, secret) do
     presented = hash(principal.secret_salt, secret)

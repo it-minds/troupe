@@ -12,7 +12,7 @@ defmodule Troupe.UI.TUI.Server do
 
   alias ExRatatui.Event.{Key, Mouse, Paste, Resize}
   alias Troupe.Client
-  alias Troupe.Protocol.Glob
+  alias Troupe.Protocol.{Glob, Words}
   alias Troupe.Settings
   alias Troupe.UI.HQ
 
@@ -224,7 +224,7 @@ defmodule Troupe.UI.TUI.Server do
   @typedoc """
   Files-panel state: the mount and directory being listed, what `fs.list`
   answered, where the cursor sits, and the file being previewed. `version` is
-  the model's `files_version` as of the last listing, so an `fs.changed` that
+  the model's `files_version` as of the last listing, so an `fs_changed` that
   arrives while the panel is open reloads it.
   """
   @type files :: %{
@@ -1626,7 +1626,7 @@ defmodule Troupe.UI.TUI.Server do
   defp builtin("back", _args, _state, _target), do: :back
   defp builtin("hq", args, _state, _target), do: {:hq, args}
 
-  # Toggled from what the daemon says now (D106), not from what this screen last set: a
+  # Toggled from what the daemon says now, not from what this screen last set: a
   # watch the desktop app turned on is turned off here.
   defp builtin("watch", _args, state, _target),
     do: {:watch, toggle_watch(state.session_id, Client.watch_status(state.session_id).enabled)}
@@ -1864,7 +1864,7 @@ defmodule Troupe.UI.TUI.Server do
 
   # A new query starts on the row that matches it exactly, so `/q` + Enter quits as it
   # always did; else on the first whose name or alias it begins, so `wor` and Tab give
-  # `/worktree`, not `/merge` for the word in its description (D107); else on the first row.
+  # `/worktree`, not `/merge` for the word in its description; else on the first row.
   defp put_query(state, query) do
     state = put_palette(state, query: query, cursor: 0)
     {rows, _cursor} = View.palette_view(state)
@@ -1898,8 +1898,8 @@ defmodule Troupe.UI.TUI.Server do
 
   # A row that wants words after its name is put where they are typed: one that insists on
   # them, and a command a file defines whose file asks for them (its `argument-hint`, the
-  # usage the table writes from it), whose `$ARGUMENTS` would otherwise go out empty
-  # (D107). One that only may take them (`[arguments]`) runs, as it did.
+  # usage the table writes from it), whose `$ARGUMENTS` would otherwise go out empty.
+  # One that only may take them (`[arguments]`) runs, as it did.
   defp run_or_take(state, entry) do
     name = entry["name"]
 
@@ -1938,7 +1938,7 @@ defmodule Troupe.UI.TUI.Server do
   end
 
   # Opened over a window, the palette leaves what it takes in that window's box, where Enter
-  # runs it on that window as a command typed there is (D107, TUI Decisions 155 and 156);
+  # runs it on that window as a command typed there is;
   # else on the command line.
   defp to_line(%{palette: %{return_to: {:window, path}}} = state, text) do
     if Map.has_key?(state.model.windows, path),
@@ -1977,7 +1977,7 @@ defmodule Troupe.UI.TUI.Server do
   # session's own directory, or a local session's checkout, as `/upload`'s help says. The
   # path is read here rather than on the worker: the worker has no access to this machine.
   # Its size is asked first, so a file larger than the daemon takes in a message is
-  # refused without being read (D115).
+  # refused without being read.
   # `/publish <path> [private | organisation | team:<name> | profile:<name>]` publishes one
   # file from this machine as an artifact on the plane (root #62), as the person this
   # computer's daemon is signed in as: a page (`.html`), a document (`.md`) or a file, titled
@@ -2085,8 +2085,7 @@ defmodule Troupe.UI.TUI.Server do
   defp to_message(reason) when is_binary(reason), do: reason
 
   defp to_message({:choose_team, teams}),
-    do:
-      "#{Troupe.UI.NewSession.and_list(teams)} may each pay for it; /new asks which team it is for"
+    do: "#{Words.and_list(teams)} may each pay for it; /new asks which team it is for"
 
   defp to_message(reason), do: inspect(reason)
 
@@ -2264,7 +2263,7 @@ defmodule Troupe.UI.TUI.Server do
   end
 
   # Titled by what the branch was first asked, as the window was: the daemon's own title for
-  # it is the worktree it worked in (D113).
+  # it is the worktree it worked in.
   defp dismissed_branches(state, listed) do
     for %{window: window, session_id: id} = branch <- Client.dismissed_branches(state.session_id),
         not MapSet.member?(listed, id),
@@ -2638,7 +2637,7 @@ defmodule Troupe.UI.TUI.Server do
   # session; the session itself from its own window, or when its agent has work of its own
   # (a pod's, a `troupe run`'s). In command mode the session's own log holds no
   # conversation, the work being in its branches, so with no window activated it says which
-  # one it needs rather than fork an empty log (D113, TUI Decision 158).
+  # one it needs rather than fork an empty log.
   @own_log "this session's own log holds no conversation"
 
   defp fork_of(%{focus: {:window, path}} = state) do
@@ -3269,7 +3268,7 @@ defmodule Troupe.UI.TUI.Server do
     end
   end
 
-  # `fs.changed` bumps the model's version; an open panel reloads from it, which
+  # `fs_changed` bumps the model's version; an open panel reloads from it, which
   # is the whole of "live-updated" and costs nothing while the panel is closed.
   defp refresh_files(%{files: nil} = state), do: state
 
@@ -4477,7 +4476,7 @@ defmodule Troupe.UI.TUI.Server do
   end
 
   # A line in a window's box that names a command runs it, on this window where it takes
-  # one, as the command line would (TUI Decision 155, D107); one that does not is said to
+  # one, as the command line would; one that does not is said to
   # the window's agent, `/usr/bin is missing` included.
   defp window_key(%Key{code: "enter"}, _path, %{win_text: "/" <> line = text} = state)
        when line != "" do
@@ -4993,7 +4992,7 @@ defmodule Troupe.UI.TUI.Server do
       text ->
         report(
           text,
-          "#{String.length(text)} #{plural(String.length(text), "char")} from the selection"
+          "#{Words.count(String.length(text), "char")} from the selection"
         )
     end
   end
@@ -5008,7 +5007,7 @@ defmodule Troupe.UI.TUI.Server do
 
       text ->
         lines = length(String.split(text, "\n"))
-        report(text, "#{lines} #{plural(lines, "line")}")
+        report(text, Words.count(lines, "line"))
     end
   end
 
@@ -5018,9 +5017,6 @@ defmodule Troupe.UI.TUI.Server do
       {:error, msg} -> msg
     end
   end
-
-  defp plural(1, word), do: word
-  defp plural(_n, word), do: word <> "s"
 
   defp apply_event(state, event) do
     model = Model.apply(state.model, event)
@@ -5093,7 +5089,7 @@ defmodule Troupe.UI.TUI.Server do
 
   # A window that went while it was activated — `/merge`, `/discard` or `/dismiss` picked
   # from the palette over it, a cancel at rest — leaves the screen on the command line,
-  # not on a focus that names it until the next key (D105).
+  # not on a focus that names it until the next key.
   defp left_window(%{focus: {:window, path}} = state, %{type: :window_dismissed, agent_path: path}),
     do: to_command_line(state)
 
@@ -5211,7 +5207,7 @@ defmodule Troupe.UI.TUI.Server do
 
   What Tab completes is a command, so it comes back with its slash whether or not one was
   typed: a line without one is said to the agent (TUI Decision 101), and `mer` completed to
-  `merge ` used to send "merge" there on Enter (D93). A Tab that finds nothing leaves the
+  `merge ` used to send "merge" there on Enter. A Tab that finds nothing leaves the
   line as it was typed.
   """
   @spec complete_command(String.t(), map()) :: String.t()

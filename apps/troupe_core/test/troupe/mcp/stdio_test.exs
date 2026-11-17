@@ -1,7 +1,7 @@
 defmodule Troupe.MCP.StdioTest do
   @moduledoc """
   A stdio MCP server that is gone before Troupe has finished writing to it gets a status,
-  not a crash (D115). The server's process wrote `initialize` to a port whose program had
+  not a crash. The server's process wrote `initialize` to a port whose program had
   already exited: on Windows, where the server is a plain port, the write ended the port
   with `epipe`, and a write to a port already closed is `badarg` on every OS. Either took
   the server's process down, and with it `mcp.check`'s caller or the session's MCP
@@ -43,7 +43,7 @@ defmodule Troupe.MCP.StdioTest do
     end
   end
 
-  # D121: an answer with neither a result nor an error took the server's process down with
+  # An answer with neither a result nor an error took the server's process down with
   # a FunctionClauseError; it is a status like any other refusal.
   test "a server that answers initialize with neither a result nor an error has a status", context do
     if match?({:unix, _}, :os.type()) do

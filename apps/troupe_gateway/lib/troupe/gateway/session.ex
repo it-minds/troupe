@@ -41,7 +41,7 @@ defmodule Troupe.Gateway.Session do
   # what became of it, never enough to read its work.
   @lifecycle ~w(
     session_created agent_started agent_restarted agent_done session_dormant
-    session_activated session_resumed session_archived session_erased
+    session_activated session_resumed
     budget_exhausted cancelled approval_requested approval_decided approval_resolved
   )
 
@@ -70,11 +70,6 @@ defmodule Troupe.Gateway.Session do
   @spec delivery(Subscription.t()) :: :fleet | :session
   def delivery(%Subscription{topic: "fleet"}), do: :fleet
   def delivery(%Subscription{}), do: :session
-
-  @doc "Whether this topic carries anything worth keeping a cursor for."
-  @spec cursored?(String.t()) :: boolean()
-  def cursored?("presence:" <> _session_id), do: false
-  def cursored?(_topic), do: true
 
   @doc "Whether an event belongs on a subscription."
   @spec interested?(Subscription.t(), String.t(), Event.t()) :: boolean()

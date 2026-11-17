@@ -7,7 +7,7 @@ defmodule Troupe.Agent.CrashLoopTest do
 
   Both ways of crashing are here: a start that fails (`init/1` raises, so nothing after
   it is written) and a start that succeeds and then crashes on the turn it takes up
-  again, which writes `agent_restarted` every time, the loop D37 saw.
+  again, which writes `agent_restarted` every time, the loop it once fell into.
   """
 
   use Troupe.SessionCase, async: true

@@ -48,7 +48,7 @@ defmodule Troupe.Doctor do
   alias Troupe.{Config, Executable, Reaper}
   alias Troupe.LLM.{Catalog, Identify, Message, Provider, ProviderType, Request}
   alias Troupe.LLM.Catalog.Store
-  alias Troupe.Protocol.{Daemon, Endpoint}
+  alias Troupe.Protocol.{Daemon, Endpoint, Words}
 
   @type state :: :ok | :warn | :fail
   @type check :: %{name: String.t(), state: state(), detail: String.t()}
@@ -474,7 +474,7 @@ defmodule Troupe.Doctor do
       {:timeout, first_byte_ms} ->
         {:fail,
          "the model at #{Request.host(request)} began answering after #{first_byte_ms} ms " <>
-           "and had not finished in #{div(timeout_ms, 1_000)} s"}
+           "and had not finished in #{Words.duration(timeout_ms)}"}
     end
   end
 

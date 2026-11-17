@@ -6,7 +6,7 @@ a repository holds the `WorkerProfile` manifests; Flux, Argo CD or a pipeline ru
 `kubectl apply --server-side` applies them, and the plane never writes git and holds no
 credential for it (Decision 736). The same repository can hold the triggers
 ([bundles-and-triggers.md](bundles-and-triggers.md#triggers-from-a-repository)) and the
-GitHub App's settings ([github.md §10](github.md#10-the-app-from-a-repository)). Teams, their
+GitHub App's settings ([github.md §8](github.md#8-the-app-from-a-repository)). Teams, their
 grants and service principals stay in the plane's database.
 
 ## What the plane reads
@@ -253,7 +253,7 @@ has no triggers. Then redeploy the plane with `plane.provisioningMode: gitops` a
   `missing`, kept and still firing, until its manifest is committed or
   `admin.trigger.delete` deletes it.
 - And the GitHub App, as a `GitHubApp` named `github`, never its key or webhook secret
-  ([github.md §10](github.md#10-the-app-from-a-repository)). Until its manifest is
+  ([github.md §8](github.md#8-the-app-from-a-repository)). Until its manifest is
   committed the App is reported `missing` and goes on as it was; from the first pass that
   reads it, a team the manifest does not name lists no repository.
 

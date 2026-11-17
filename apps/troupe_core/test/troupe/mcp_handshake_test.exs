@@ -217,7 +217,7 @@ defmodule Troupe.MCPHandshakeTest do
       assert FakeMCP.sessions(context.fake) == %{}
     end
 
-    # D59: reloading after a server left `mcp.json` stopped it and left its session open at
+    # Reloading after a server left `mcp.json` stopped it and left its session open at
     # the server until the local session stopped.
     test "the session ends at the server when a reload finds it gone from the file", context do
       %{session: session} = with_server(context)

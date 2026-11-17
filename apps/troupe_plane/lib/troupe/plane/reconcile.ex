@@ -3,8 +3,8 @@ defmodule Troupe.Plane.Reconcile do
   Checking the ledger against the gateway that did the billing.
 
   Two records of the same spend, kept by two systems for different reasons: the gateway
-  bills, and the plane budgets. They are supposed to agree, and a nightly job here says
-  so or says by how much they do not.
+  bills, and the plane budgets. They are supposed to agree, and `mix troupe.ledger.reconcile`
+  says so or says by how much they do not.
 
   Drift is not one thing, so it is not reported as one number:
 
@@ -70,7 +70,7 @@ defmodule Troupe.Plane.Reconcile do
       extra: summarise(extra, ours),
       unmetered: summarise(unmetered, ours),
       mismatched: mismatched,
-      threshold_micros: Keyword.get(opts, :threshold_micros, threshold())
+      threshold_micros: Keyword.get(opts, :threshold_micros, @default_threshold_micros)
     })
   end
 
@@ -244,19 +244,4 @@ defmodule Troupe.Plane.Reconcile do
   defp micros_of(%{"spend" => spend}) when is_number(spend), do: round(spend * 1_000_000)
   defp micros_of(%{"cost" => cost}) when is_number(cost), do: round(cost * 1_000_000)
   defp micros_of(_record), do: 0
-
-  defp threshold do
-    Application.get_env(:troupe_plane, :reconcile_threshold_micros, @default_threshold_micros)
-  end
-
-  @doc "Run last night's reconcile: the twenty-four hours ending at midnight UTC today."
-  @spec nightly(keyword()) :: {:ok, map()} | {:error, term()}
-  def nightly(opts \\ []) do
-    to = Date.utc_today() |> DateTime.new!(~T[00:00:00.000000])
-    from = DateTime.add(to, -1, :day)
-
-    with {:ok, records} <- fetch(from, to, opts) do
-      {:ok, compare(records, from, to, opts)}
-    end
-  end
 end

@@ -1,6 +1,6 @@
 defmodule Troupe.UnlinkCommandTest do
   @moduledoc """
-  `/unlink` (D71): the terminal's way to stop using an account on this computer's daemon,
+  `/unlink`: the terminal's way to stop using an account on this computer's daemon,
   which the desktop app has as "Stop using my account here". Alone it says who the daemon
   records sessions as, and what unlinking drops and keeps; `/unlink yes` does it.
   """

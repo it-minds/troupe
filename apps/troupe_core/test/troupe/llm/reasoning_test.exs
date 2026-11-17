@@ -17,7 +17,6 @@ defmodule Troupe.LLM.ReasoningTest do
     assert [%ToolUse{id: "c1"}] = Message.tool_uses(message)
     assert [%Reasoning{text: "thinking out loud"}] = Message.reasoning_of(message, :openai)
     assert Message.reasoning_of(message, :anthropic) == []
-    assert [%Text{}, %ToolUse{}] = Message.without_reasoning(message).content
   end
 
   test "survives the log round trip, and a provider this build does not know still replays" do

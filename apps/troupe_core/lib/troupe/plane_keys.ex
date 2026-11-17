@@ -309,19 +309,14 @@ defmodule Troupe.PlaneKeys do
     end
   end
 
-  # Whole or not at all: beside it, then renamed over it.
   defp write(path, planes) do
-    temporary = path <> ".#{System.unique_integer([:positive])}.tmp"
     text = Jason.encode!(%{"version" => @version, "planes" => planes}, pretty: true) <> "\n"
 
-    with :ok <- File.mkdir_p(Path.dirname(path)),
-         :ok <- File.write(temporary, text),
-         :ok <- File.rename(temporary, path) do
-      :ok
-    else
-      {:error, reason} ->
-        File.rm(temporary)
+    case Troupe.Paths.write_atomic(path, text) do
+      :ok ->
+        :ok
 
+      {:error, reason} ->
         {:error,
          "#{Troupe.Paths.display(path)} could not be written: #{:file.format_error(reason)}"}
     end

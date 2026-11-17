@@ -1,4 +1,4 @@
-// The review queue and a run whose turn failed (defects.md D58): its row carries `failed`
+// The review queue and a run whose turn failed: its row carries `failed`
 // with the reason, and the queue sorted it with the runs that finished and said "Ended:
 // Idle", since only a budget or a model error counted as gone wrong. A failed turn counts
 // now, and says so.

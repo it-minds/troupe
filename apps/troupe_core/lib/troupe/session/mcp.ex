@@ -46,6 +46,7 @@ defmodule Troupe.Session.MCP do
 
   alias Troupe.Config
   alias Troupe.MCP.{Client, Local, OAuth, Server, Sessions, Stdio, Tool, Trust}
+  alias Troupe.Protocol.Digest
   alias Troupe.Session.Questions
 
   require Logger
@@ -379,8 +380,7 @@ defmodule Troupe.Session.MCP do
     |> Enum.map(&[&1.name, &1.fingerprint])
     |> Enum.sort()
     |> then(&Jason.encode!([session_id | &1]))
-    |> then(&:crypto.hash(:sha256, &1))
-    |> Base.encode16(case: :lower)
+    |> Digest.sha256()
     |> binary_part(0, 8)
   end
 

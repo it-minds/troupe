@@ -225,7 +225,7 @@ defmodule Troupe.Gateway.ContextTest do
     assert answer["used"] == String.length("From .agents.") + String.length("Root.")
     assert answer == Troupe.Instructions.provenance(ws, Troupe.Config.load(ws), ["lib/a.ex"])
 
-    # D99: one that is there and cannot be read is named too, with why.
+    # One that is there and cannot be read is named too, with why.
     File.chmod!(agents, 0o000)
     assert {:ok, answer} = Client.call(client, "context.get", %{"session_id" => session.id})
 

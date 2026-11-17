@@ -732,7 +732,7 @@ defmodule Troupe.Plane.SCIM do
 
   @doc """
   What this service does, as RFC 7643 §5 has a provider ask before it syncs: `PATCH`
-  supported, bulk not, a filter supported and answered with at most `max_results/0`
+  supported, bulk not, a filter supported and answered with at most `@max_results` (200)
   resources, `changePassword`, sorting and ETags not, and the connector's bearer token as
   the one way in. Fixed: nothing here depends on the request or the plane's state.
   """
@@ -788,12 +788,8 @@ defmodule Troupe.Plane.SCIM do
     }
   end
 
-  @doc "The most resources a filtered list answers, as `ServiceProviderConfig` says."
-  @spec max_results() :: pos_integer()
-  def max_results, do: @max_results
-
   @doc """
-  A filtered list's answer: the first `max_results/0` matches, with `totalResults` the
+  A filtered list's answer: the first `@max_results` matches, with `totalResults` the
   count of all of them, so a provider can tell a page from the whole.
   """
   @spec render_page([map()]) :: map()

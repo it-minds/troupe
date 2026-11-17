@@ -148,8 +148,7 @@ defmodule Troupe.Agent.DefinitionTest do
     test "a function agent is fetched by name though no list a person picks from has it",
          %{defs: defs} do
       for name <- ["answer", "ask", "librarian", "quick"] do
-        assert {:ok, %Definition{mode: :function} = definition} = Definitions.fetch(defs, name)
-        assert Definition.function?(definition)
+        assert {:ok, %Definition{mode: :function}} = Definitions.fetch(defs, name)
         refute name in Enum.map(Definitions.primaries(defs), & &1.name)
         refute name in Enum.map(Definitions.subagents(defs), & &1.name)
       end

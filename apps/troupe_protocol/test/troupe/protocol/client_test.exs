@@ -1,6 +1,6 @@
 defmodule Troupe.Protocol.ClientTest do
   @moduledoc """
-  A call the connection does not outlive is answered (D115). The client stopped `:normal`
+  A call the connection does not outlive is answered. The client stopped `:normal`
   with calls pending, so each caller's `GenServer.call` exited with it, and a caller that
   did not catch the exit went too. Each pending call is now answered `unavailable` before
   the client stops, whatever stops it: the server closing the connection, or `close/1`.

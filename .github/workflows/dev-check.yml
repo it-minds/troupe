@@ -62,6 +62,7 @@ jobs:
               - .credo.exs
               - protocol/**
               - docs/user/configuration.md
+              - PROTOCOL.md
             protocol:
               - apps/troupe_protocol/**
               - apps/troupe_gateway/**
@@ -150,6 +151,9 @@ jobs:
       # docs/user/configuration.md, both generated from Troupe.Config.Schema.
       - name: The committed config schema and its reference are current
         run: MIX_ENV=test mix troupe.config.schema --check
+      # PROTOCOL.md's admin method table, generated from Troupe.Plane.Admin.API.
+      - name: The committed admin method table is current
+        run: MIX_ENV=test mix troupe.admin.reference --check
       - name: The committed protocol schema is compatible and current
         if: needs.changes.outputs.protocol == 'true'
         run: |
@@ -182,8 +186,8 @@ jobs:
       # change that adds a decision number to code fails, in any part of the repository.
       - name: No change adds a decision number to code
         run: elixir scripts/decision-citations.exs --base HEAD^1
-      # Here too because a chunk's pull requests are where pages grow and defects are
-      # added: no hand-written page past 400 lines, and the known defects only open ones.
+      # Here too because a chunk's pull requests are where pages grow: no hand-written
+      # page past 400 lines.
       - name: Every page is the size a stranger reads
         run: elixir scripts/doc-size.exs
 

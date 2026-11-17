@@ -29,6 +29,7 @@ defmodule Troupe.UI.TUI.MemoryPage do
   alias ExRatatui.Text.{Line, Span}
   alias ExRatatui.Widgets.{Block, List, Paragraph}
   alias Troupe.Client
+  alias Troupe.Protocol.Words
   alias Troupe.UI.TUI.{ArtifactsPage, Model, Theme, View}
 
   @type t :: map()
@@ -303,8 +304,7 @@ defmodule Troupe.UI.TUI.MemoryPage do
           {:ok, n} ->
             %{
               page
-              | reach:
-                  "reaches #{n} running session#{if n == 1, do: "", else: "s"} at their next turn",
+              | reach: "reaches #{Words.count(n, "running session")} at their next turn",
                 status: nil
             }
 
@@ -911,7 +911,7 @@ defmodule Troupe.UI.TUI.MemoryPage do
       end)
   end
 
-  defp used(n) when is_integer(n), do: " · used in #{n} session#{if n == 1, do: "", else: "s"}"
+  defp used(n) when is_integer(n), do: " · used in #{Words.count(n, "session")}"
   defp used(_none), do: ""
 
   defp by_when(by, at) do

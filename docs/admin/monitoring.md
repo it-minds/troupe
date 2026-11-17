@@ -72,8 +72,8 @@ operator, workers and A2A log in Elixir's default text format. Lines worth alert
 | `troupe operator: pruning <kind>/<name>` | a scale-down, a revoked grant or `ciliumAvailable` switched off took an object away |
 | `sandbox: this worker runs every command in a sandbox and …, so no command will run` | the worker cannot start bubblewrap, and refuses every command until it can (Decision 832) |
 
-`troupe_core` also emits `:telemetry` events — `[:troupe, :llm, :start|:stop|:retry|:unpriced]`,
-`[:troupe, :tool, :stop]`, `[:troupe, :agent, :transition]` — and the plane's endpoint
+`troupe_core` also emits two `:telemetry` events, `[:troupe, :llm, :retry]`, which
+`troupe bench --live` counts, and `[:troupe, :llm, :unpriced]`, and the plane's endpoint
 Phoenix's own; nothing in a deployment attaches to them.
 
 ## 6. Fleet mechanics
@@ -117,7 +117,6 @@ operator replaces it within seconds, if the pod has stopped being Ready.
 | `unauthorized` pulling an image in a worker namespace | the pull secret is not named in `imagePullSecrets`, so the operator does not copy it |
 | Worker pod `CreateContainerConfigError` | the `llm.secretRef` Secret is missing in `troupe-w-<profile>`: `SecretMissing` says where it was looked for, and for one in `troupe-system` without `troupe.dev/worker-secret=true` gives the `kubectl label` line |
 | `PlaneCAMissing: True` | the operator reads no certificate from `TROUPE_PLANE_CONTROL_CA` yet: the `plane.controlTls` Secret has no `ca.crt` (cert-manager has not issued it, or a Secret of your own lacks it); the operator's log says the same once a pass |
-| `SecretMissing: True` with the Secrets present | an operator from before 0.26.0, whose role had no verb on Secrets; upgrade the chart |
 | A profile is saved but no `WorkerProfile` appears; `not_applied`, `no_cluster` | the plane has no Kubernetes connection (`TROUPE_KUBECONFIG`, or the in-pod ServiceAccount) |
 | `PolicyViolation: NoPolicy` on every profile | `policy.name` is not `default`, and nothing sets `TROUPE_POLICY_NAME` |
 | A profile keeps a pod more than its sessions need | a scale-down lowers the count only once the pods above it hold no active session. `did not drain for a scale-down: {:stranded, [...]}` in the plane's log names a session the pod never reported dormant; the pod stays until it is |
@@ -133,8 +132,8 @@ operator replaces it within seconds, if the pod has stopped being Ready.
 | Workers cannot write to a bucket outside `us-east-1`, the plane can | the worker pods have no `TROUPE_OBJECT_REGION` and sign for `us-east-1`: an operator from before it passed `objectStore.region` on to them |
 | Plane replicas do not cluster during a rolling image upgrade | the Erlang cookie is baked into each image build |
 | Team volumes never appear inside sessions | they are mounted on the pod, not into a session's mount table |
-| Every command on a profile's pods fails, "this worker runs every command in a sandbox" | the worker container's seccomp profile refuses bubblewrap its user namespace (`worker.seccomp.type: RuntimeDefault`, or an operator from before 0.17.0), the nodes do not allow unprivileged user namespaces, or the image lacks bubblewrap ([worker-sandbox.md](worker-sandbox.md#the-workers-seccomp-profile)) |
-| Every command on a profile's pods fails, "bubblewrap could not start one here (bwrap: ...)" | what bubblewrap names refused it: the table at the end of [the workers' sandbox](worker-sandbox.md#the-workers-user-namespaces) says what each message means and what fixes it (`Can't mount proc`: the pod has no user namespace of its own; `Failed to make / slave` or `setting up uid map`: AppArmor, `worker.appArmor.enabled: false` or an operator from before 0.19.0) |
+| Every command on a profile's pods fails, "this worker runs every command in a sandbox" | the worker container's seccomp profile refuses bubblewrap its user namespace (`worker.seccomp.type: RuntimeDefault`), the nodes do not allow unprivileged user namespaces, or the image lacks bubblewrap ([worker-sandbox.md](worker-sandbox.md#the-workers-seccomp-profile)) |
+| Every command on a profile's pods fails, "bubblewrap could not start one here (bwrap: ...)" | what bubblewrap names refused it: the table at the end of [the workers' sandbox](worker-sandbox.md#the-workers-user-namespaces) says what each message means and what fixes it (`Can't mount proc`: the pod has no user namespace of its own; `Failed to make / slave` or `setting up uid map`: AppArmor, `worker.appArmor.enabled: false`) |
 | Worker pods are not created, `FailedCreate` on the StatefulSet naming `procMount` or `seccompProfile` | the worker namespace's Pod Security level is `baseline` or `restricted`; workers need `privileged`, which the operator labels it with unless `podSecurity.labels` is off or something else rewrote the label ([worker-sandbox.md](worker-sandbox.md#the-workers-user-namespaces)) |
 | The plane's log or the console's Overview says its OpenBao role "may not" do something | the role lacks that grant; the line comes with the `bao` lines an OpenBao administrator runs to add it ([openbao.md](openbao.md)) |
 | Worker pods stay in `ContainerCreating` or `CreateContainerError` naming an idmapped mount | a volume's filesystem does not take idmapped mounts, as NFS does not ([worker-sandbox.md](worker-sandbox.md#the-workers-user-namespaces)) |

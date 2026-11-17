@@ -145,5 +145,4 @@ and [PROTOCOL.md](../../PROTOCOL.md).
 
 [conventions.md](conventions.md) for the gate, commit style and the other recipes (a
 command, an admin method, a setting, a GUI view); [fixing-issues.md](fixing-issues.md)
-for how issues are worked through; [defects.md](defects.md) before touching code it
-names; and [ARCHITECTURE.md](../../ARCHITECTURE.md) for why it is all this way.
+for how issues are worked through; and [ARCHITECTURE.md](../../ARCHITECTURE.md) for why it is all this way.

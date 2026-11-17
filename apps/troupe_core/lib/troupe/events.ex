@@ -119,9 +119,9 @@ defmodule Troupe.Events do
   @spec attached?(String.t()) :: boolean()
   def attached?(session_id), do: Registry.lookup(@registry, {:attached, session_id}) != []
 
-  @doc "Whether the calling process already follows this session."
+  # Whether the calling process already follows this session.
   @spec following?(String.t()) :: boolean()
-  def following?(session_id) do
+  defp following?(session_id) do
     @registry
     |> Registry.keys(self())
     |> Enum.member?(session_id)
@@ -155,8 +155,4 @@ defmodule Troupe.Events do
   def publish_ephemeral(session_id, type, agent, data) do
     publish(session_id, Event.ephemeral(type, agent, data))
   end
-
-  @doc "How many processes are subscribed. Test and diagnostics only."
-  @spec subscriber_count(String.t()) :: non_neg_integer()
-  def subscriber_count(session_id), do: Registry.count_match(@registry, session_id, :_)
 end

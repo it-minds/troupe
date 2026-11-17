@@ -26,6 +26,7 @@ defmodule Troupe.Plane.GitHub.Issue do
 
   alias Troupe.Plane.Triggers
   alias Troupe.Plane.Triggers.{Cron, Template}
+  alias Troupe.Protocol.Text
 
   @source_keys ~w(kind provider repository label command ref sweep query)
 
@@ -354,18 +355,7 @@ defmodule Troupe.Plane.GitHub.Issue do
   def cut(text, _max) when not is_binary(text), do: nil
   def cut(text, max) when byte_size(text) <= max, do: text
 
-  def cut(text, max) do
-    part = binary_part(text, 0, max)
-
-    valid =
-      case :unicode.characters_to_binary(part) do
-        bin when is_binary(bin) -> bin
-        {:incomplete, bin, _rest} -> bin
-        {:error, bin, _rest} -> bin
-      end
-
-    valid <> " [cut]"
-  end
+  def cut(text, max), do: Text.cut(text, max) <> " [cut]"
 
   # -- what the session is given -------------------------------------------------------
 
@@ -392,9 +382,9 @@ defmodule Troupe.Plane.GitHub.Issue do
     )
   end
 
-  @doc "The event a template is rendered against: the run's, with every piece of free text out."
+  # The event a template is rendered against: the run's, with every piece of free text out.
   @spec template_event(map()) :: map()
-  def template_event(event) do
+  defp template_event(event) do
     event
     |> update_in(["issue"], &Map.drop(&1 || %{}, ["title", "body"]))
     |> then(fn e ->

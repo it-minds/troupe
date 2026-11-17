@@ -40,6 +40,7 @@ defmodule Troupe.Instructions.Check do
 
   alias Troupe.{Executable, Gitignore, Instructions, Onboard, Paths, Reaper}
   alias Troupe.Instructions.Check.Text
+  alias Troupe.Protocol.Words
 
   @type kind :: :contradiction | :path | :command | :duplicate | :drift | :outdated
 
@@ -634,14 +635,14 @@ defmodule Troupe.Instructions.Check do
     lines =
       Enum.map_join(found, "\n", &"#{shown(&1.path, root)}:#{&1.line}: #{&1.kind}: #{&1.message}")
 
-    {lines <> "\n\n#{count(found, "finding")} in #{counted(result)}.\n", 1}
+    {lines <> "\n\n#{Words.count(length(found), "finding")} in #{counted(result)}.\n", 1}
   end
 
   # The files checked: the instruction files, and the onboarded ones when there are any.
-  defp counted(%{sources: sources, onboarded: []}), do: count(sources, "instruction file")
+  defp counted(%{sources: sources, onboarded: []}), do: Words.count(length(sources), "instruction file")
 
   defp counted(%{sources: sources, onboarded: onboarded}),
-    do: "#{count(sources, "instruction file")} and #{count(onboarded, "onboarded file")}"
+    do: "#{Words.count(length(sources), "instruction file")} and #{Words.count(length(onboarded), "onboarded file")}"
 
   defp unreadable(workspace, reason, json?) do
     message =
@@ -655,9 +656,6 @@ defmodule Troupe.Instructions.Check do
 
   defp status([]), do: 0
   defp status(_found), do: 1
-
-  defp count([_one], noun), do: "1 #{noun}"
-  defp count(list, noun), do: "#{length(list)} #{noun}s"
 
   # A file in the repository by its path from the root, as a forge and an editor name it;
   # the person's own, where it is.

@@ -149,7 +149,7 @@ defmodule Troupe.DaemonClientTest do
     end
   end
 
-  # D108: the daemon closing the link's connection in the middle of a call exited the link,
+  # The daemon closing the link's connection in the middle of a call exited the link,
   # and the caller's call with it, which took a terminal UI down. The call is an error now,
   # the link lives on, and the next call connects again as it does after a restart.
   describe "a connection the daemon drops in the middle of a call" do

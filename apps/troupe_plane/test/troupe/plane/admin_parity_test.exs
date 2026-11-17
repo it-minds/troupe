@@ -58,6 +58,30 @@ defmodule Troupe.Plane.AdminParityTest do
     end
   end
 
+  describe "the role a method declares" do
+    # The role is declared for the reference in PROTOCOL.md and checked nowhere at run time;
+    # the handler's own check is the authority. So the declaration is held to the handler:
+    # a method whose handler reaches `require_platform_admin` and never `require_admin` is a
+    # platform admin's, and every other one answers a team admin too (for their teams).
+    test "each method's role is the one its handler checks" do
+      reached = role_checks()
+
+      for {name, %Method{function: function, role: role}} <- API.methods() do
+        checks = Map.fetch!(reached, function)
+
+        expected =
+          if :require_platform_admin in checks and :require_admin not in checks,
+            do: :platform_admin,
+            else: :admin
+
+        assert role == expected, """
+        #{name} declares role #{inspect(role)}, and Admin.#{function} checks #{inspect(MapSet.to_list(checks))}:
+        declare role: #{inspect(expected)}.
+        """
+      end
+    end
+  end
+
   describe "the MCP surface" do
     test "every method is a tool, and every tool is a method" do
       tools = MapSet.new(MCP.tools(), & &1["name"])
@@ -205,6 +229,56 @@ defmodule Troupe.Plane.AdminParityTest do
                be a second source of truth for who is in a team.
                """
       end
+    end
+  end
+
+  # For each function of the context, the role checks it reaches: its own body and, through
+  # them, every function of the module it calls, read from the source.
+  defp role_checks do
+    {:ok, ast} =
+      "../../../lib/troupe/plane/admin.ex" |> Path.expand(__DIR__) |> File.read!() |> Code.string_to_quoted()
+
+    {_, bodies} = Macro.prewalk(ast, %{}, &collect_def/2)
+    calls = Map.new(bodies, fn {name, clauses} -> {name, local_calls(clauses)} end)
+
+    Map.new(calls, fn {name, _} ->
+      reached = reach([name], calls, MapSet.new())
+      {name, MapSet.intersection(reached, MapSet.new([:require_platform_admin, :require_admin]))}
+    end)
+  end
+
+  defp collect_def({kind, _, [head | body]} = node, acc) when kind in [:def, :defp] do
+    name =
+      case head do
+        {:when, _, [{name, _, _} | _]} -> name
+        {name, _, _} -> name
+      end
+
+    {node, Map.update(acc, name, [body], &[body | &1])}
+  end
+
+  defp collect_def(node, acc), do: {node, acc}
+
+  defp local_calls(clauses) do
+    {_, found} =
+      Macro.prewalk(clauses, MapSet.new(), fn
+        {name, _, args} = node, acc when is_atom(name) and is_list(args) ->
+          {node, MapSet.put(acc, name)}
+
+        node, acc ->
+          {node, acc}
+      end)
+
+    found
+  end
+
+  defp reach([], _calls, seen), do: seen
+
+  defp reach([name | rest], calls, seen) do
+    if MapSet.member?(seen, name) do
+      reach(rest, calls, seen)
+    else
+      reach(MapSet.to_list(Map.get(calls, name, MapSet.new())) ++ rest, calls, MapSet.put(seen, name))
     end
   end
 

@@ -20,29 +20,44 @@ Read the ones that bear on the change; a change that undoes one says so.
 
 ## Writing one
 
-A decision is a new file here, `<number, four digits>-<slug>.md`, numbered one past the
-highest ever used (a chunk's coordinator reserves one for each fixer), so two pull
-requests that each decide something never touch the same file. It starts with a front
-matter:
+A decision is a new file here, `<number, four digits>-<slug>.md`, numbered above every
+number this log has used and below the line that says which number is next. That line is
+the first number not yet reserved: a chunk's coordinator reserves a block of numbers for
+the chunk and moves the line past the block on the chunk's branch, and a fixer never
+edits it, so two pull requests that each decide something touch no file in common:
+
+<!-- next: 1060 -->
+
+A decision is short: what was decided, what was not chosen and why, and what breaks if it
+is undone, in at most 40 lines that are not blank. It does not list the tests that prove
+it, retell the issue's history or restate the code; the pull request and the code carry
+those. Its `paths` are where it would be undone, at most eight globs of code; never a test,
+which is not where a decision is undone, and a page under `docs/` only when the decision is
+about that page's own shape. It starts with a front matter:
 
 ```yaml
 ---
-number: 790
-title: A decision is a file of its own, naming the paths it governs and what must not be undone there
-date: 2026-10-05
+number: 1025
+title: A decision is at most forty lines and names at most eight paths of code, and a log's number is never taken twice
+date: 2026-11-17
 status: accepted
-issue: 437
+issue: 1011
+supersedes: [790]
 paths:
-  - docs/decisions/
   - apps/troupe_protocol/lib/mix/tasks/troupe.decisions.ex
-gist: One file per decision, never an appended log or a committed index; paths must match
+  - docs/decisions/README.md
+  - docs/decisions/tui/README.md
+  - docs/decisions/daemon/README.md
+  - docs/developer/conventions.md
+  - docs/developer/fixing-issues.md
+gist: Body <= 40 non-blank lines, <= 8 paths, no test path, from 2026-11-18; each log's README says its next number
 ---
 ```
 
 - **`title`**: the decision, in one sentence.
-- **`paths`**: globs, from the repository root, of the files and directories the
-  decision governs. A glob that no longer matches anything fails CI, so a move or a
-  rename breaks the decision's check rather than, silently, its meaning.
+- **`paths`**: globs, from the repository root, of the code where the decision would be
+  undone. A glob that no longer matches anything fails CI, so a move or a rename breaks
+  the decision's check rather than, silently, its meaning.
 - **`gist`**: at most about 150 characters, what someone changing those paths must not
   undo. It is what `--for` prints, so an agent can tell without reading the body whether
   the decision matters to what it is about to change.
@@ -51,20 +66,22 @@ gist: One file per decision, never an appended log or a committed index; paths m
   part.
 - Optional: `issue`, `pr`, `symbols` (modules and functions), `supersedes`.
 
-Then the body: the reasoning, the choices not made and why, and the proof. A `title` or
-`gist` that starts with a backtick or holds `: ` goes in double quotes, as YAML wants.
+A `title` or `gist` that starts with a backtick or holds `: ` goes in double quotes, as
+YAML wants.
 
 A decision that is superseded or reversed, or whose reasoning now lives in the code it
 governs, is marked `superseded` or deleted. Numbers are never reused, so a citation keeps
-meaning what it meant. `git log -p -- docs/decisions` has every one ever written; the
+meaning what it meant: the `next` line stays above every number a file ever had. `git log -p -- docs/decisions` has every one ever written; the
 three logs they were split from (`DECISIONS.md`, `clients/tui/DECISIONS.md` and
 `apps/troupe_daemon/DECISIONS.md`) are in the history before Decision 790, and
 `elixir scripts/split-decisions.exs` turns the entries a branch still appends to one into
 files.
 
 `mix troupe.decisions --check`, which CI runs on every pull request, fails on a front
-matter YAML would read otherwise, a missing field, a number used twice in one log, or a
-`paths` glob that matches nothing.
+matter YAML would read otherwise, a missing field, a number used twice in one log, a
+number at or above its log's `next`, or a `paths` glob that matches nothing, and, for a
+decision dated 2026-11-18 or later, a body over 40 lines, more than eight `paths` or a
+test among them. `--report` lists the older ones over those limits, and the superseded.
 
 ## The decisions
 

@@ -2,7 +2,7 @@ defmodule Troupe.Plane.ReconcileTest do
   @moduledoc """
   The ledger and the gateway, compared.
 
-  Two systems keep a record of the same spend for different reasons, and the nightly job
+  Two systems keep a record of the same spend for different reasons, and the reconcile
   says whether they agree. The done item asks for two things: that a gateway request id
   is accepted exactly once, and that injected drift is reported — so every test here
   injects a specific kind of disagreement and checks it is named rather than summed away.

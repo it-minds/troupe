@@ -16,7 +16,6 @@ paths:
   - apps/troupe_daemon/README.md
   - clients/tui/lib/troupe/ui/setup.ex
   - clients/gui/apps/desktop/src/views/Onboarding/Daemon.tsx
-  - docs/developer/gate-walk-rows.md
 symbols:
   - Troupe.StartAtLogin.entry/2
   - Troupe.StartAtLogin.refresh/1

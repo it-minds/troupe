@@ -11,15 +11,12 @@ defmodule Troupe.Agent.Headroom do
   """
 
   alias Troupe.Budget
+  alias Troupe.Protocol.Words
 
   @type entry :: %{used: non_neg_integer(), limit: pos_integer(), fraction: float()}
   @type t :: %{turns: entry(), input: entry(), output: entry(), wall: entry(), context: entry()}
 
   @dimensions [:turns, :input, :output, :wall, :context]
-
-  @doc "Every dimension this module knows, in the order they are reported."
-  @spec dimensions() :: [atom()]
-  def dimensions, do: @dimensions
 
   @doc """
   The five fractions. `prompt_tokens` is the size of the last prompt the model saw —
@@ -52,13 +49,6 @@ defmodule Troupe.Agent.Headroom do
   def dimension(:max_input_tokens), do: :input
   def dimension(:max_output_tokens), do: :output
   def dimension(:wall_clock), do: :wall
-
-  @doc "The dimension closest to its ceiling."
-  @spec tightest(t()) :: {atom(), entry()}
-  def tightest(headroom) do
-    dim = Enum.max_by(@dimensions, &headroom[&1].fraction)
-    {dim, headroom[dim]}
-  end
 
   @doc """
   Dimensions that have crossed `threshold` and are not in `already`, tightest first: what
@@ -99,17 +89,13 @@ defmodule Troupe.Agent.Headroom do
     "#{label(dim)} #{value(dim, used)}/#{value(dim, limit)} (#{percent(fraction)})"
   end
 
-  @doc "A fraction as a whole-number percentage."
+  # A fraction as a whole-number percentage.
   @spec percent(float()) :: String.t()
-  def percent(fraction), do: "#{round(fraction * 100)}%"
+  defp percent(fraction), do: "#{round(fraction * 100)}%"
 
-  defp value(:wall, ms), do: duration(ms)
+  defp value(:wall, ms), do: Words.duration(ms, :short)
   defp value(:turns, n), do: Integer.to_string(n)
   defp value(_dim, n), do: tokens(n)
-
-  defp duration(ms) when ms >= 3_600_000, do: "#{one_place(ms / 3_600_000)}h"
-  defp duration(ms) when ms >= 60_000, do: "#{div(ms, 60_000)}m"
-  defp duration(ms), do: "#{div(ms, 1000)}s"
 
   # A thousand thousands that rounds up to 1000.0k is 1.0M, and no figure is printed in
   # an exponent's notation.

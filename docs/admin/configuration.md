@@ -9,7 +9,8 @@ Every knob, in four layers, lowest first:
 4. **Secrets** the chart references but never creates (Part D), and the ports and labels the
    network depends on (Part E).
 
-A session also reads `config.yaml` files: a machine's and a workspace's (Part F).
+A session also reads `config.yaml` files, a machine's and a workspace's: [the config.yaml a
+session reads](client-config.md).
 
 ---
 
@@ -76,7 +77,7 @@ A session also reads `config.yaml` files: a machine's and a workspace's (Part F)
 | `RELEASE_DISTRIBUTION`, `TROUPE_NODE_BASENAME`, `TROUPE_PLANE_SELECTOR` | set by chart | `name` clusters replicas through libcluster's Kubernetes topology | `plane.distribution` |
 | `TROUPE_PLANE_CONTROL_PORT` | `4001` | the control listener workers dial | `plane.controlPort` |
 | `TROUPE_PLANE_CONTROL_TLS_DIR` | unset | where the control port's certificate is (`tls.crt`, `tls.key`, `ca.crt`, as cert-manager writes them), read at each handshake; a registered machine enrols over TLS only and is given `ca.crt` at registration. Unset: plaintext alone, and no machine can be registered | `/etc/troupe/control-tls` from `plane.controlTls.secretName`, with `plane.controlTls.enabled` |
-| `TROUPE_PLANE_CONTROL_REQUIRE_TLS` | unset: on where `TROUPE_PLANE_CONTROL_TLS_DIR` is set, off where it is not | `"true"`: the control port takes TLS only, a pod's connection included; a plaintext one is closed at its first byte, with a warning naming the peer once a minute per address and counting the rest. `"false"`: pods may dial in plaintext beside TLS, and the port warns so when it starts, as it does with no certificate. Each enrolment's log line says whether it came over TLS | `"true"` or `"false"` from `plane.controlTls.requireTls` with `plane.controlTls.enabled`, on by default from 0.20 |
+| `TROUPE_PLANE_CONTROL_REQUIRE_TLS` | unset: on where `TROUPE_PLANE_CONTROL_TLS_DIR` is set, off where it is not | `"true"`: the control port takes TLS only, a pod's connection included; a plaintext one is closed at its first byte, with a warning naming the peer once a minute per address and counting the rest. `"false"`: pods may dial in plaintext beside TLS, and the port warns so when it starts, as it does with no certificate. Each enrolment's log line says whether it came over TLS | `"true"` or `"false"` from `plane.controlTls.requireTls` with `plane.controlTls.enabled`, on by default |
 | `TROUPE_GROUPS_CLAIM` | `groups` | deployed `groups_claim` | `plane.groupsClaim` |
 | `TROUPE_PLATFORM_ADMIN_GROUP` | unset (nobody); the chart's is `troupe-platform-admins` | deployed `platform_admin_group` | `plane.platformAdminGroup` |
 | `TROUPE_DEPLOYMENT_BUDGET_MICROS` | `0` (no ceiling) | the deployment's monthly ceiling on everything the plane spends, in millionths; the console's `platform_budget_micros` may narrow it, never raise it | `plane.deploymentBudgetMicros` |
@@ -177,7 +178,7 @@ upgrade. Values that only feed a variable in Part A are listed there; these are 
 | `plane.artifactsHost`, `.artifactsPort`, `.artifactsTlsSecretName` | empty, `4003`, empty | the [artifacts](../user/artifacts.md) host: an Ingress of its own to the plane's artifacts port, with `plane.certIssuer`; never `plane.host`, which is refused |
 | `plane.ingressClassName`, `plane.certIssuer`, `plane.tlsSecretName` | `nginx`, `""`, `""` | the plane's Ingress class and TLS |
 | `plane.distPort`, `plane.maxPorts` | `9100`, `65536` | Erlang distribution port; `+Q` |
-| `plane.controlTls.enabled`, `.certManager`, `.issuer.{kind,name}`, `.secretName`, `.dnsNames`, `.ipAddresses`, `.requireTls` | `true`, `true`, the chart's own CA, `troupe-plane-control-tls`, `[]`, `[]`, `true` | TLS on the control port: a cert-manager `Certificate` for `troupe-plane-control` by its in-cluster names and these, from the named issuer (a CA, not ACME) or a CA the chart makes (ten years, its key kept on renewal), mounted into the plane; `certManager: false` mounts the Secret as you put it there. The operator copies its `ca.crt` into every worker namespace (`troupe-plane-ca`), so pods dial with TLS. `requireTls` closes a plaintext connection, a pod's included ([routine-tasks.md](routine-tasks.md#upgrade) before upgrading from 0.19). A string for any flag is refused, and so is `requireTls` without `enabled` |
+| `plane.controlTls.enabled`, `.certManager`, `.issuer.{kind,name}`, `.secretName`, `.dnsNames`, `.ipAddresses`, `.requireTls` | `true`, `true`, the chart's own CA, `troupe-plane-control-tls`, `[]`, `[]`, `true` | TLS on the control port: a cert-manager `Certificate` for `troupe-plane-control` by its in-cluster names and these, from the named issuer (a CA, not ACME) or a CA the chart makes (ten years, its key kept on renewal), mounted into the plane; `certManager: false` mounts the Secret as you put it there. The operator copies its `ca.crt` into every worker namespace (`troupe-plane-ca`), so pods dial with TLS. `requireTls` closes a plaintext connection, a pod's included. A string for any flag is refused, and so is `requireTls` without `enabled` |
 | `*.resources` | small requests and limits | container resources; `limits.cpu` also sets `+S` |
 | `gui.enabled`, `gui.replicas`, `gui.basePath` | `true`, `2`, `/app` | the GUI's Deployment, Service, Ingress on `plane.host` and NetworkPolicy. `basePath` must match the image's `TROUPE_GUI_BASE`; `/` is refused |
 | `console.enabled`, `console.basePath` | `true`, `/console` | the [console](console.md)'s Ingress on `plane.host`, to the GUI's Service, which runs while either is enabled. `basePath` must match the image's `TROUPE_CONSOLE_BASE`; `/` and `gui.basePath` are refused |
@@ -223,7 +224,7 @@ back as set or unset, never as values.
 
 The groups: **administration** (`platform_admin_group`, `groups_claim`, the platform
 budget), **provisioning** (`provisioning_mode` and `gitops_source`, the deployment's, shown
-and not editable; a stored value from before 0.7.0 is not read), **team defaults** (a team is enabled with
+and not editable), **team defaults** (a team is enabled with
 the budget, its period, the idle timeout and erase-after set here; cache eviction, pins,
 whether members may control sessions and a person's monthly ceiling hold for every team
 at once), **sessions** (managed permission rules and MCP servers only, the default
@@ -231,7 +232,7 @@ bundle channel), **sign in** (issuer, client, endpoints, scopes — the **Single
 card on the console's **Sign-in** page — and `subject_claim`, shown there and not editable), **client defaults**
 (the provider and models people's own machines take as their organisation's defaults,
 `client_key_help` and `client_key`, where a key comes from and one handed to everybody, and
-`client_enforced`, what those machines may not go past: [Part F](client-config.md#defaults-and-limits-for-peoples-machines)),
+`client_enforced`, what those machines may not go past: [the config.yaml a session reads](client-config.md#defaults-and-limits-for-peoples-machines)),
 and **deployment** keys that are shown but only change with a rollout.
 
 `admin.settings.list`, `admin.setting.effective`, `admin.setting.put` and
@@ -386,15 +387,3 @@ timeouts, `limit-connections: 50`. The controller of the worked example
 `proxy-body-size: 16m`, so an oversized `input.send` is refused by the worker rather than
 the proxy, and PROXY protocol where the load balancer sends it. The plane's JSON parser
 takes 4 MiB, control frames 8 MiB, worker frames 16 MiB.
-
----
-
-## Part F — The config.yaml a session reads
-
-Every session, on a pod or on a laptop, also reads settings from `config.yaml` files and the
-`TROUPE_*` variables. What an administrator needs from them is on a page of its own,
-[the config.yaml a session reads](client-config.md):
-
-- <a id="defaults-and-limits-for-peoples-machines"></a>[Defaults and limits for people's machines](client-config.md#defaults-and-limits-for-peoples-machines):
-  the organisation's defaults and its enforced ceilings for people's own machines, from a
-  plane's `client_defaults` and `client_enforced` or from a managed file.

@@ -30,7 +30,7 @@ paths:
   - clients/gui/apps/desktop/src/views/Remote.tsx
   - clients/gui/apps/console/src/views/Invited.tsx
   - clients/gui/apps/console/src/views/Remote.tsx
-  - docs/user/README.md
+  - docs/user/sessions.md
   - docs/user/sessions-shared.md
   - docs/admin/security.md
   - PROTOCOL.md

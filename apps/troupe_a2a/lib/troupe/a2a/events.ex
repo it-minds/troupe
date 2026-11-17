@@ -62,10 +62,6 @@ defmodule Troupe.A2A.Events do
     }
   end
 
-  @doc "Whether the task can change no further without another message."
-  @spec terminal?(acc()) :: boolean()
-  def terminal?(%{state: state}), do: state in @terminal
-
   @doc "Terminal, or waiting on the caller: either way a stream has nothing more to say."
   @spec at_rest?(acc()) :: boolean()
   def at_rest?(%{state: state}), do: state in @terminal or state == "input-required"

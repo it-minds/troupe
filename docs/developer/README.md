@@ -13,20 +13,13 @@ looked things up in.
 | [local-setup.md](local-setup.md) | Prerequisites, the toolbox, development services, a plane on kind, development variables |
 | [testing.md](testing.md) | Running the suites, what each needs, fixtures, the checks that are tests in all but name |
 | [bench.md](bench.md) | `troupe bench`: what a turn costs and does, held to budgets; reading the report, moving a budget, the report's schema; the live bench against a real model, its cap and its history |
-| [prompt-prefix.md](prompt-prefix.md) | Issue #465: what changes in front of a prompt between turns, the two ways out behind settings, the offline numbers, the gateway question, and the commands for the live ones |
 | [build.md](build.md) | The images, the native builds, the reaper, generated files, `VERSION` |
 | [ci.md](ci.md) | CI, pre-releases, releases, the nightly, and the documentation site |
 | [deployment.md](deployment.md) | What a release publishes, what a roll does, rolling back |
 | [conventions.md](conventions.md) | The gate, boundaries, the formatter's blind spot, commit style, naming, recipes |
 | [fixing-issues.md](fixing-issues.md) | Working through GitHub issues in chunks: triage, fix, install locally, verify, pull request |
-| [gate-walk.md](gate-walk.md) | Walking a release gate on a fresh laptop, a fresh account and the live plane, and what `scripts/gate-check` checks locally |
-| [gate-walk-rows.md](gate-walk-rows.md) | The gate's eight rows: what proves each, its steps, a pass and a fail |
+| [stage-1-gate.yml](../../.github/ISSUE_TEMPLATE/stage-1-gate.yml) | The Stage 1 gate: the issue template a release's walk is recorded in, its eight rows, and `scripts/gate-check` for the half a desk runs |
 | [code-signing.md](code-signing.md) | Buying and setting up OS code signing (Apple Developer ID, a Windows signing service) and the secrets a release needs |
-| [defects.md](defects.md) | Defects found in passing and not fixed yet |
-
-Records that are no longer instruction are in `docs/history/`, kept as they were written:
-[the command audit](../history/command-audit.md) of 0.10.0, and the console's two plans,
-[as it was built](../history/admin-surface.md) and [what it is to become](../history/control-panel.md).
 
 The design: [../../ARCHITECTURE.md](../../ARCHITECTURE.md),
 [the decisions](../decisions/README.md), [../../PROTOCOL.md](../../PROTOCOL.md). The

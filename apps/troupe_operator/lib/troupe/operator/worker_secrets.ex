@@ -47,10 +47,6 @@ defmodule Troupe.Operator.WorkerSecrets do
   @spec offered_label() :: String.t()
   def offered_label, do: "#{@offered}=true"
 
-  @doc "The annotation that narrows such a Secret to the profiles it lists, comma-separated."
-  @spec profiles_annotation() :: String.t()
-  def profiles_annotation, do: @profiles
-
   @doc "Where a copy says it came from, as `<namespace>/<name>`."
   @spec source_annotation() :: String.t()
   def source_annotation, do: "troupe.dev/copied-from"

@@ -4,7 +4,7 @@ defmodule Troupe.AgentsPaletteTest do
   an agent and a repository's own command apart, an agent's row says where it comes from
   and what it may do, and each window says which agent it runs and switches it with one
   key and a chooser, the transcript recording the switch. With the palette's rows the
-  command audit found wrong (D107).
+  command audit found wrong.
   """
 
   use ExUnit.Case, async: false
@@ -134,7 +134,7 @@ defmodule Troupe.AgentsPaletteTest do
     assert user_state(pid).focus == {:window, "build-1"}
   end
 
-  describe "the palette's rows the audit found wrong (D107)" do
+  describe "the palette's rows the audit found wrong" do
     test "Tab completes by name, not by a word in a description" do
       {sid, _, _} = start_session!(script: [])
       {pid, _session} = ready(sid)

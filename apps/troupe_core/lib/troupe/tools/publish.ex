@@ -16,6 +16,7 @@ defmodule Troupe.Tools.Publish do
   @behaviour Troupe.Tool
 
   alias Troupe.{Mounts, Session, Tool, Watch}
+  alias Troupe.Protocol.Digest
   alias Troupe.Session.Log
 
   @impl Troupe.Tool
@@ -106,7 +107,7 @@ defmodule Troupe.Tools.Publish do
   end
 
   defp digest(contents) do
-    "sha256:" <> (:sha256 |> :crypto.hash(contents) |> Base.encode16(case: :lower))
+    Digest.tagged(contents)
   end
 
   @doc false

@@ -12,7 +12,7 @@ defmodule Troupe.Agent.BoundThinkingTest do
   the stand-in as Claude Sonnet 5.5 asked with `thinking_binding: error` for the refusal an
   enforced account gets: the task list's tools offered at a long turn's eleventh call
   (issue #590, Decision 867), and the tail a compaction keeps, whose blocks were made in
-  front of what the summary replaced (D92).
+  front of what the summary replaced.
   """
 
   use Troupe.SessionCase, async: true
@@ -94,7 +94,7 @@ defmodule Troupe.Agent.BoundThinkingTest do
            } = Prefix.count(Troupe.events(session.id))
   end
 
-  # D92: a compaction keeps the last few messages as they were, thinking and all, behind a
+  # A compaction keeps the last few messages as they were, thinking and all, behind a
   # summary of what came before. Each kept block was made in front of the messages the
   # summary replaced, so it is bound to a conversation the request no longer has.
   test "after a compaction in the middle of a turn no call is refused", context do

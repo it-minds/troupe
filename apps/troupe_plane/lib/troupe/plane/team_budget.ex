@@ -1,41 +1,27 @@
 defmodule Troupe.Plane.TeamBudget do
   @moduledoc """
-  One actor per team, deciding whether there is money left.
+  The rung that decides whether a team has money left, and the only writer of what its
+  sessions actually cost.
 
   One rung of the ladder `Troupe.Plane.Budget` walks: the platform's ceiling above it,
-  a person's below. This one answers only for the team, and writes nothing — the
-  reservation row is `Budget`'s to write once every rung has said yes.
+  a person's below. Reserving is served by `Troupe.Plane.Budget.Rung`, as every rung's
+  is, and writes nothing — the reservation row is `Budget`'s to write once every rung has
+  said yes.
 
-  The same shape as `Troupe.Plane.Placement` and for the same reason: deciding whether
-  a reservation fits is a read-decide-write over the ledger, and two replicas doing it
-  at once is how a team spends more than it has.
-
-  Reserving is not spending. A session reserves a slice up front and the ledger records
-  what it actually cost; the reservation is released when the session goes dormant or
-  is erased. What is *committed* — the sum of usage records — is what a nightly
-  reconciliation against the gateway compares, and reservations never appear in it.
+  What is this rung's own is recording. Reserving is not spending. A session reserves a
+  slice up front and the ledger records what it actually cost; the reservation is
+  released when the session goes dormant or is erased. What is *committed* — the sum of
+  usage records — is what a nightly reconciliation against the gateway compares, and
+  reservations never appear in it. Charges are recorded through this one actor per team,
+  so the team's ledger cache is invalidated by its only writer.
   """
 
-  use GenServer
+  use Troupe.Plane.Budget.Rung
 
+  alias Troupe.Plane.Budget.Rung
   alias Troupe.Plane.Identity.Team
   alias Troupe.Plane.{Ledger, Singleton}
   alias Troupe.Plane.Ledger.Cache
-
-  @enforce_keys [:team_id]
-  defstruct [
-    :team_id,
-    :budget_micros,
-    :budget_period,
-    spent_micros: 0,
-    reserved_micros: 0,
-    reservations: %{}
-  ]
-
-  @spec start_link(keyword()) :: GenServer.on_start()
-  def start_link(opts) do
-    GenServer.start_link(__MODULE__, opts, name: Keyword.fetch!(opts, :name))
-  end
 
   @doc """
   Reserve a session's slice of a team's budget.
@@ -46,14 +32,12 @@ defmodule Troupe.Plane.TeamBudget do
   @spec reserve(Team.t() | Ecto.UUID.t(), String.t(), non_neg_integer()) ::
           {:ok, map()} | {:error, {:over_budget, map()}}
   def reserve(team, session_id, amount_micros) do
-    Singleton.call(__MODULE__, team_id(team), {:reserve, session_id, amount_micros})
+    Rung.reserve(__MODULE__, team_id(team), session_id, amount_micros)
   end
 
   @doc "Give a reservation back."
   @spec release(Team.t() | Ecto.UUID.t(), String.t()) :: :ok
-  def release(team, session_id) do
-    Singleton.call(__MODULE__, team_id(team), {:release, session_id})
-  end
+  def release(team, session_id), do: Rung.release(__MODULE__, team_id(team), session_id)
 
   @doc """
   Record what a model call actually cost.
@@ -84,70 +68,49 @@ defmodule Troupe.Plane.TeamBudget do
     Singleton.call(__MODULE__, team_id(team), {:record_batch, records})
   end
 
-  @doc "What this actor believes, reloaded, for the Budgets page, tests and diagnostics."
+  @doc """
+  What this actor believes, reloaded, for the Budgets page, tests and diagnostics. What it
+  spent is a figure for the period it was last loaded in, and the Budgets page asking
+  after midnight on the 1st would otherwise be shown last month's total.
+  """
   @spec inspect_state(Team.t() | Ecto.UUID.t()) :: map()
-  def inspect_state(team), do: Singleton.call(__MODULE__, team_id(team), :inspect)
+  def inspect_state(team), do: Rung.inspect_state(__MODULE__, team_id(team))
 
   defp team_id(%Team{id: id}), do: id
   defp team_id(id) when is_binary(id), do: id
 
-  @impl GenServer
-  def init(opts) do
-    team_id = Keyword.fetch!(opts, :key)
-    Process.set_label("troupe budget #{team_id}")
-    {:ok, %__MODULE__{team_id: team_id}, {:continue, :load}}
-  end
+  @impl Rung
+  def label(team_id), do: "troupe budget #{team_id}"
 
-  @impl GenServer
-  def handle_continue(:load, state), do: {:noreply, load(state)}
+  @impl Rung
+  def load(team_id) do
+    budget = Ledger.budget_micros(team_id)
 
-  @impl GenServer
-  def handle_call({:reserve, session_id, amount}, _from, state) do
-    # Reloaded rather than trusted. The count this actor last had is one a pod restart, a
-    # replica handover or another rung's release can have moved under it, and a ceiling
-    # decided from a stale count is a ceiling that is wrong for as long as the process
-    # lives — which is the fault the placement actor already taught us once.
-    state = load(state)
-
-    cond do
-      Map.has_key?(state.reservations, session_id) ->
-        # Reserving twice for one session is a retry, not a second slice.
-        {:reply, {:ok, summary(state)}, state}
-
-      unlimited?(state) or
-          state.spent_micros + state.reserved_micros + amount <= state.budget_micros ->
-        # Held, not written. One promise is one row, and `Troupe.Plane.Budget` writes it
-        # once every rung of the ladder has agreed — a row written here would be counted
-        # by the rungs after this one as though somebody else had made it.
-        state = %{
-          state
-          | reserved_micros: state.reserved_micros + amount,
-            reservations: Map.put(state.reservations, session_id, amount)
-        }
-
-        {:reply, {:ok, summary(state)}, state}
-
-      true ->
-        {:reply, {:error, {:over_budget, summary(state)}}, state}
-    end
-  end
-
-  def handle_call({:release, session_id}, _from, state) do
-    {amount, reservations} = Map.pop(state.reservations, session_id, 0)
-
-    state = %{
-      state
-      | reserved_micros: max(state.reserved_micros - amount, 0),
-        reservations: reservations
+    %{
+      ceiling: Rung.ceiling(budget),
+      budget_micros: budget,
+      budget_period: Ledger.budget_period(team_id),
+      spent_micros: Ledger.spent_micros(team_id),
+      reservations: Ledger.open_reservations(team_id)
     }
-
-    {:reply, :ok, state}
   end
 
-  def handle_call({:record, attrs}, _from, state) do
-    case Ledger.record(Map.put(attrs, :team_id, state.team_id)) do
+  # The period comes with the figure, because a spend without the period it covers cannot
+  # be read against anything: the Budgets page labels each ceiling's bar with it.
+  @impl Rung
+  def summary(team_id, loaded) do
+    %{
+      team_id: team_id,
+      budget_micros: loaded.budget_micros,
+      budget_period: loaded.budget_period
+    }
+  end
+
+  @impl Rung
+  def handle_call({:record, attrs}, _from, %Rung{key: team_id} = state) do
+    case Ledger.record(Map.put(attrs, :team_id, team_id)) do
       {:ok, record} ->
-        Cache.invalidate(state.team_id)
+        Cache.invalidate(team_id)
         {:reply, {:ok, record}, %{state | spent_micros: state.spent_micros + record.cost_micros}}
 
       # Already recorded: the same gateway request reported twice is one charge, so the
@@ -163,7 +126,7 @@ defmodule Troupe.Plane.TeamBudget do
   # Sequence order matters: the watermark that comes out of this is only meaningful if
   # everything below it was attempted, so a record that fails to insert stops the
   # watermark there rather than letting the ones after it carry it past a gap.
-  def handle_call({:record_batch, records}, _from, state) do
+  def handle_call({:record_batch, records}, _from, %Rung{key: team_id} = state) do
     {state, result} =
       records
       |> Enum.sort_by(& &1[:seq])
@@ -171,7 +134,7 @@ defmodule Troupe.Plane.TeamBudget do
                                                                               {acc, tally} ->
         {seq, attrs} = Map.pop(record, :seq, 0)
 
-        case Ledger.record(Map.put(attrs, :team_id, acc.team_id)) do
+        case Ledger.record(Map.put(attrs, :team_id, team_id)) do
           {:ok, stored} ->
             acc = %{acc | spent_micros: acc.spent_micros + stored.cost_micros}
             {:cont, {acc, %{tally | recorded: tally.recorded + 1, seq: max(tally.seq, seq)}}}
@@ -192,56 +155,8 @@ defmodule Troupe.Plane.TeamBudget do
         # Only where something was actually inserted. A batch of duplicates changes no
         # sum, and throwing the cache away for it would make a replaying pod cost every
         # panel in the building a fresh aggregate.
-        if tally.recorded > 0, do: Cache.invalidate(state.team_id)
+        if tally.recorded > 0, do: Cache.invalidate(team_id)
         {:reply, {:ok, tally}, state}
     end
-  end
-
-  # Reloaded too, as `PersonBudget` does. What it spent is a figure for the period it was
-  # last loaded in, and the Budgets page asking after midnight on the 1st would otherwise be
-  # shown last month's total until somebody next tried to start a session.
-  def handle_call(:inspect, _from, state) do
-    state = load(state)
-    {:reply, summary(state), state}
-  end
-
-  # -- state ------------------------------------------------------------------
-
-  # Reloaded from the ledger, which is what makes respawning on another replica safe.
-  # What this actor is already holding is merged over what the ledger knows, so a session
-  # granted a moment ago and not yet written is counted once rather than twice.
-  defp load(state) do
-    reservations = Map.merge(Ledger.open_reservations(state.team_id), state.reservations)
-
-    %{
-      state
-      | budget_micros: Ledger.budget_micros(state.team_id),
-        budget_period: Ledger.budget_period(state.team_id),
-        spent_micros: Ledger.spent_micros(state.team_id),
-        reserved_micros: reservations |> Map.values() |> Enum.sum(),
-        reservations: reservations
-    }
-  end
-
-  # A budget of zero means no limit rather than no money: a team that has not been
-  # given one should not be unable to work.
-  defp unlimited?(%__MODULE__{budget_micros: budget}), do: is_nil(budget) or budget <= 0
-
-  # The period comes with the figure, because a spend without the period it covers cannot
-  # be read against anything: the Budgets page labels each ceiling's bar with it.
-  defp summary(state) do
-    %{
-      team_id: state.team_id,
-      budget_micros: state.budget_micros,
-      budget_period: state.budget_period,
-      spent_micros: state.spent_micros,
-      reserved_micros: state.reserved_micros,
-      remaining_micros:
-        if(unlimited?(state),
-          do: :unlimited,
-          else: max(state.budget_micros - state.spent_micros - state.reserved_micros, 0)
-        ),
-      node: node()
-    }
   end
 end

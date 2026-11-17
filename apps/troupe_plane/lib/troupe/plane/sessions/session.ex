@@ -130,10 +130,6 @@ defmodule Troupe.Plane.Sessions.Session do
 
   @type t :: %__MODULE__{}
 
-  @doc "The states a session can be in."
-  @spec states() :: [String.t()]
-  def states, do: @states
-
   @doc "What a worker may say a session is doing."
   @spec statuses() :: [String.t()]
   def statuses, do: @statuses
@@ -145,10 +141,6 @@ defmodule Troupe.Plane.Sessions.Session do
   @doc "The kinds of thing that start a session."
   @spec origins() :: [String.t()]
   def origins, do: @origins
-
-  @doc "Why one session was forked from another."
-  @spec fork_reasons() :: [String.t()]
-  def fork_reasons, do: @fork_reasons
 
   @fields [
     :id,

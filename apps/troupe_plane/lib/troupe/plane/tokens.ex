@@ -257,6 +257,20 @@ defmodule Troupe.Plane.Tokens do
   @spec mount(keyword()) :: String.t()
   def mount(opts \\ []), do: config(opts)[:mount] || "transit"
 
+  @doc "The newest version of the transit key `name`: what a key imported beside it rotates."
+  @spec latest_version(String.t(), keyword()) :: {:ok, pos_integer()} | {:error, term()}
+  def latest_version(name, opts \\ []) do
+    case request(:get, "/v1/#{mount(opts)}/keys/#{name}", nil, opts) do
+      {:ok, %{"data" => %{"latest_version" => version}}} -> {:ok, version}
+      {:ok, other} -> {:error, {:unexpected_response, other}}
+      error -> error
+    end
+  end
+
+  @doc "Where the key-value engine the plane destroys session and invite keys in is mounted."
+  @spec kv_mount() :: String.t()
+  def kv_mount, do: "secret"
+
   defp key_name(opts), do: config(opts)[:key] || @key_name
 
   defp issuer, do: Application.get_env(:troupe_plane, :issuer)

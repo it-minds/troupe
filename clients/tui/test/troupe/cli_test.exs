@@ -327,7 +327,7 @@ defmodule Troupe.CLITest do
     refute contents(io) =~ "spawned /root"
   end
 
-  # D125: `branch_spawned` carries no `seq`, so the copy read back from the journal and the
+  # `branch_spawned` carries no `seq`, so the copy read back from the journal and the
   # copy published live were both printed. A branch is spawned once, so it is said once.
   test "a branch's spawned line is printed once, however many copies of it arrive" do
     {sid, _, _} = start_session!(script: [])
@@ -465,7 +465,7 @@ defmodule Troupe.CLITest do
     end
   end
 
-  # D26: a line another client sends while the agent works is queued, and the agent takes
+  # A line another client sends while the agent works is queued, and the agent takes
   # it as its next turn the moment this one ends. The run exited at that first rest, and
   # the reply to the line was never printed; it waits for that turn now.
   test "headless printer waits for a line queued mid-turn, and prints its reply" do
@@ -644,7 +644,7 @@ defmodule Troupe.CLITest do
 
   # Decision 727: a root agent that crashes as often as its Node restarts it ends its turn
   # with `agent_failed` and what it raised, and its session stops. A headless run took that
-  # for an ordinary rest and exited 0 (D42). The crash is the daemon's own, on the daemon
+  # for an ordinary rest and exited 0. The crash is the daemon's own, on the daemon
   # this VM embeds: tool results only the agent folds, and cannot, so every start fails, as
   # `crash_loop_test.exs` makes one.
   test "headless printer exits 1 when the agent kept crashing, and says what it raised" do
@@ -665,7 +665,7 @@ defmodule Troupe.CLITest do
     assert line =~ "(Protocol.UndefinedError)"
   end
 
-  # D42: the harness's notes reach a client as `remote_note`, and the printer had no clause
+  # The harness's notes reach a client as `remote_note`, and the printer had no clause
   # for one, so since the daemon move a headless run said nothing of a finish's summary, a
   # compaction, a budget, a reply cut or empty, or what the harness told the model then.
   # Printed before the run ends, which is where `troupe run` stops listening.
@@ -792,7 +792,7 @@ defmodule Troupe.CLITest do
 
   # The budget question is a question (Decision 120), and headless mode answers it
   # through the question path with its `stop` option: an approval sent on its id was
-  # answered by nothing (defects D32).
+  # answered by nothing.
   test "headless printer stops at the budget question and exits 1" do
     script = [{:tools, [{"todo_read", %{}}]}, {:tools, [{"todo_read", %{}}]}, {:text, "done"}]
     {sid, _, _} = start_session!(script: script, config: %{"max_turns" => 1})
@@ -803,7 +803,7 @@ defmodule Troupe.CLITest do
     assert %{data: %{decision: "deny"}} = await_event("root", :budget_ask_answered, 5_000)
     out = contents(io)
     assert [_once] = Regex.scan(~r/budget exhausted.*; headless mode stops here/, out)
-    # The harness's own word on it, as the window shows it, before the run ends (D42), and
+    # The harness's own word on it, as the window shows it, before the run ends, and
     # what the turn cost between the two.
     assert out =~
              ~r/root> done \(budget_exhausted\)\nroot> turn: 1 call · .*\nroot> exit 1: the agent ended budget_exhausted/

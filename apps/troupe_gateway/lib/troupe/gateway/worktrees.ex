@@ -608,7 +608,7 @@ defmodule Troupe.Gateway.Worktrees do
     end
   end
 
-  # One `git status` a tree (D113): its entries, each untracked file named (not its
+  # One `git status` a tree: its entries, each untracked file named (not its
   # directory), say whether it is dirty and which files a merge would add, and `--branch`
   # says how far its branch is from its upstream. For a linked tree's branch the upstream is,
   # for this one call, the checkout's branch (`branch.<name>.remote` `.`), so the same line

@@ -34,7 +34,7 @@ defmodule Troupe.Plane.ProfileView do
   alias Troupe.Plane.Fleet.Extends
   alias Troupe.Plane.Identity.{Team, User}
   alias Troupe.Policy
-  alias Troupe.Protocol.{AgentDefinition, AgentRule, Error, PermissionRule}
+  alias Troupe.Protocol.{AgentDefinition, AgentRule, Error, PermissionRule, Text}
   alias Troupe.WorkerProfile
   alias Troupe.WorkerProfile.Reach
 
@@ -224,7 +224,7 @@ defmodule Troupe.Plane.ProfileView do
       %{
         "name" => skill.name,
         "description" => skill.description,
-        "body" => if(cut?, do: cut(body, @skill_body_cap), else: body),
+        "body" => if(cut?, do: Text.cut(body, @skill_body_cap), else: body),
         "truncated" => cut?
       }
     end)
@@ -241,11 +241,6 @@ defmodule Troupe.Plane.ProfileView do
   end
 
   defp skill_body(_text), do: nil
-
-  # Cut on a character boundary, so the body stays valid UTF-8.
-  defp cut(text, bytes) do
-    text |> binary_part(0, bytes) |> String.chunk(:valid) |> Enum.take_while(&String.valid?/1) |> Enum.join()
-  end
 
   # -- agents ----------------------------------------------------------------------
 

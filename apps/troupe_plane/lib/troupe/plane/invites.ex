@@ -43,7 +43,7 @@ defmodule Troupe.Plane.Invites do
   import Ecto.Query
 
   alias Troupe.KMS
-  alias Troupe.Plane.{Admin, Audit, Identity, Remote, Repo}
+  alias Troupe.Plane.{Admin, Audit, Identity, Remote, Repo, Tokens}
   alias Troupe.Plane.Identity.{Membership, Team, TeamGroupLink, User}
   alias Troupe.Plane.Sessions
   alias Troupe.Plane.Sessions.Session
@@ -648,7 +648,7 @@ defmodule Troupe.Plane.Invites do
       options = [
         token: token,
         address: config[:address],
-        mount: Application.get_env(:troupe_plane, :kms_mount, "secret")
+        mount: Tokens.kv_mount()
       ]
 
       case KMS.adapter().destroy_at(path, options) do

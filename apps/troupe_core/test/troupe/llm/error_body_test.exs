@@ -95,8 +95,8 @@ defmodule Troupe.LLM.ErrorBodyTest do
              "the provider rejected the credentials (Incorrect API key provided: sk-s...ef.)"
   end
 
-  # What the retries outlast and what fails inside a stream are said the same way (D74,
-  # Decision 805): the provider's words, trimmed, with the key masked.
+  # What the retries outlast and what fails inside a stream are said the same way:
+  # the provider's words, trimmed, with the key masked.
   describe "an error the retries outlast" do
     test "Anthropic's 529 says Overloaded, not only its status", context do
       body = %{

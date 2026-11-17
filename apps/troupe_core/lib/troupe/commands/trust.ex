@@ -18,6 +18,7 @@ defmodule Troupe.Commands.Trust do
   """
 
   alias Troupe.MCP.Trust, as: MCPTrust
+  alias Troupe.Protocol.Digest
 
   @file_name "command-trust.json"
 
@@ -28,7 +29,7 @@ defmodule Troupe.Commands.Trust do
   @doc "What is remembered of a command: a hash of the prompt its file sends."
   @spec fingerprint(%{body: String.t()}) :: String.t()
   def fingerprint(%{body: body}),
-    do: "sha256:" <> Base.encode16(:crypto.hash(:sha256, body), case: :lower)
+    do: Digest.tagged(body)
 
   @doc "Whether this command, as its file reads now, was allowed in this workspace."
   @spec approved?(Path.t() | nil, Path.t(), %{name: String.t(), body: String.t()}) :: boolean()
@@ -59,10 +60,10 @@ defmodule Troupe.Commands.Trust do
   defp save(state_dir, map) do
     file = path(state_dir)
 
-    with :ok <- File.mkdir_p(Path.dirname(file)),
-         :ok <- File.write(file, Jason.encode!(map, pretty: true) <> "\n") do
-      :ok
-    else
+    case Troupe.Paths.write_atomic(file, Jason.encode!(map, pretty: true) <> "\n") do
+      :ok ->
+        :ok
+
       {:error, reason} ->
         {:error, "could not write #{Troupe.Paths.display(file)}: #{:file.format_error(reason)}"}
     end

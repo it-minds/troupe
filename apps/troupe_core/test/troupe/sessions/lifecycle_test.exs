@@ -1,6 +1,6 @@
 defmodule Troupe.Sessions.LifecycleTest do
   @moduledoc """
-  A session's life after D117 (Decision 855): where its files are, how it stops, and what
+  A session's life: where its files are, how it stops, and what
   a command that arrives while it stops is told.
 
   - A session's files are under its own state directory, the one its config names, and

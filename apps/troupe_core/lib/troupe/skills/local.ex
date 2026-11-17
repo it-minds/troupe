@@ -122,14 +122,14 @@ defmodule Troupe.Skills.Local do
   @typedoc "Where a layer keeps its skills, and the `skills.json` beside it that links others."
   @type paths :: %{dir: Path.t(), links: Path.t()}
 
-  @doc "The layer's directory, and the `skills.json` beside it that links others."
+  # The layer's directory, and the `skills.json` beside it that links others.
   @spec layer_paths(layer(), Path.t() | nil, keyword()) :: {:ok, paths()} | {:error, String.t()}
-  def layer_paths(:user, _workspace, opts) do
+  defp layer_paths(:user, _workspace, opts) do
     dir = user_dir(opts)
     {:ok, %{dir: dir, links: Path.join(Path.dirname(dir), "skills.json")}}
   end
 
-  def layer_paths(:workspace, workspace, _opts) when is_binary(workspace) do
+  defp layer_paths(:workspace, workspace, _opts) when is_binary(workspace) do
     {:ok,
      %{
        dir: workspace_dir(workspace),
@@ -137,9 +137,9 @@ defmodule Troupe.Skills.Local do
      }}
   end
 
-  def layer_paths(:workspace, nil, _opts), do: {:error, "the workspace scope needs a workspace"}
+  defp layer_paths(:workspace, nil, _opts), do: {:error, "the workspace scope needs a workspace"}
 
-  def layer_paths(other, _workspace, _opts),
+  defp layer_paths(other, _workspace, _opts),
     do: {:error, "scope must be user or workspace, not #{inspect(other)}"}
 
   # -- reading -----------------------------------------------------------------------

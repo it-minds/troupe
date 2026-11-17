@@ -82,17 +82,6 @@ defmodule Troupe.Remote.Journal do
     end
   end
 
-  @doc "The cursor for a session with no journal process running, straight from disk."
-  @spec cursor_on_disk(String.t(), String.t()) :: non_neg_integer()
-  def cursor_on_disk(plane_url, session_id) do
-    plane_url
-    |> dir(session_id)
-    |> Path.join("events.jsonl")
-    |> read_file(session_id)
-    |> Enum.map(&(&1.seq || 0))
-    |> Enum.max(fn -> 0 end)
-  end
-
   @doc "Where a session's journal lives."
   @spec dir(String.t(), String.t()) :: String.t()
   def dir(plane_url, session_id),

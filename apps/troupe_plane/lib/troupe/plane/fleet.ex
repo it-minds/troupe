@@ -19,6 +19,10 @@ defmodule Troupe.Plane.Fleet do
   # item's number, and heartbeats are every five.
   @lease_timeout_ms 15_000
 
+  # Placement skips a pod above this fraction of its disk: the worker's own high mark,
+  # past which it puts its quietest sessions to sleep.
+  @high_watermark 0.80
+
   @doc "How long a pod may go quiet before it is presumed lost."
   @spec lease_timeout_ms() :: pos_integer()
   def lease_timeout_ms, do: Application.get_env(:troupe_plane, :lease_timeout_ms, @lease_timeout_ms)
@@ -154,7 +158,7 @@ defmodule Troupe.Plane.Fleet do
   """
   @spec placeable(String.t(), keyword()) :: [Worker.t()]
   def placeable(profile, opts \\ []) do
-    high_watermark = Keyword.get(opts, :high_watermark, high_watermark())
+    high_watermark = Keyword.get(opts, :high_watermark, @high_watermark)
     cutoff = DateTime.add(DateTime.utc_now(), -lease_timeout_ms(), :millisecond)
 
     Repo.all(
@@ -401,12 +405,4 @@ defmodule Troupe.Plane.Fleet do
 
     :ok
   end
-
-  @doc "Placement skips a pod above this fraction of its disk."
-  @spec high_watermark() :: float()
-  def high_watermark, do: Application.get_env(:troupe_plane, :disk_high_watermark, 0.80)
-
-  @doc "Dormant caches are evicted above this fraction, down to below it."
-  @spec low_watermark() :: float()
-  def low_watermark, do: Application.get_env(:troupe_plane, :disk_low_watermark, 0.70)
 end

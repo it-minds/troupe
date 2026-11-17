@@ -499,7 +499,7 @@ defmodule Troupe.Gateway.PrivateTest do
       assert FakePlane.row(ctx.plane.state, session_id)["device"] == "the other one"
     end
 
-    # D61: what `session.claim` does with one. This copy holds the event the row's
+    # What `session.claim` does with one. This copy holds the event the row's
     # `last_seq` names, so what is sealed here follows on from it, past the other's epoch.
     test "a session another device took is sealed here once claimed, from where the plane has it",
          ctx do
@@ -883,7 +883,7 @@ defmodule Troupe.Gateway.PrivateTest do
                Client.call(client, "identity.sign_out", %{"command_id" => Client.command_id()})
     end
 
-    # D61: a client lists what `session.list` says, and it said nothing of a session being
+    # A client lists what `session.list` says, and it said nothing of a session being
     # private, so the desktop app listed one as local.
     test "session.list says a private session is private, and how its sealing stands", ctx do
       {:ok, client} = Troupe.Protocol.Daemon.connect(endpoint: ctx.endpoint, spawn: false)
@@ -901,7 +901,7 @@ defmodule Troupe.Gateway.PrivateTest do
                Client.call(client, "session.get", %{"session_id" => private})
     end
 
-    # D61 and Decision 764: one another device sealed last is left to it until it is claimed
+    # One another device sealed last is left to it until it is claimed
     # here, which a machine whose name changed needs as well.
     test "a private session another device sealed last is listed so, and claiming it takes it here",
          ctx do
@@ -942,7 +942,7 @@ defmodule Troupe.Gateway.PrivateTest do
                Client.call(client, "session.claim", %{claim | "command_id" => Client.command_id(), "session_id" => local})
     end
 
-    # D59: the state Decision 756 added, as a client lists it.
+    # The state Decision 756 added, as a client lists it.
     test "a private session waiting to be erased is listed so, and is not claimed", ctx do
       {:ok, client} = Troupe.Protocol.Daemon.connect(endpoint: ctx.endpoint, spawn: false)
       on_exit(fn -> if Process.alive?(client), do: Client.close(client) end)
