@@ -16,9 +16,6 @@ symbols:
 gist: "troupe setup = Troupe.UI.Setup over setup.get/answer, its own app before any session; writes held to the summary; Esc writes nothing; no TTY says which"
 ---
 
-Issue #76, root Decision 817 (what it writes) after root Decisions 705 and 762, and TUI
-Decision 123 (plain `troupe` asks the daemon first). The terminal client asked a first run's
-questions line by line; the full-screen flow was the slice those decisions left.
 
 - **Its own screen, before any session.** `Troupe.UI.Setup` is an `ExRatatui.App` of its
   own, run under `Troupe.UI.Windows` as the terminal UI is, and the runner waits for how
@@ -54,11 +51,3 @@ questions line by line; the full-screen flow was the slice those decisions left.
   config`'s questions line by line (said); with standard input or output not a terminal
   `troupe setup` says which, prints the ways on, and exits 1. `troupe config` keeps its
   own questions (TUI Decision 123).
-- **Proof:** `cli_test.exs` ("troupe setup is a command line", refused on the chunk's tip
-  with `unknown arguments: setup`); `setup_screen_test.exs` (the whole path with the
-  sends in order and none that writes before the summary, back on both sides, Esc,
-  a refused key, a refusal after the summary, a plane, a half-done flow, what is on the
-  machine first, an entry already at login); `setup_screen_daemon_test.exs` against the
-  embedded daemon; `config_setup_test.exs` for the entries and the fallbacks; `mix check`;
-  and the installed TUI driven headlessly against the installed daemon with scratch
-  homes.

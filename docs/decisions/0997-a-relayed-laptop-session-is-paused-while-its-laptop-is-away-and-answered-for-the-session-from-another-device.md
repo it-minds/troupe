@@ -19,18 +19,11 @@ symbols:
 gist: "Laptop gone (daemon said stopped, socket closed, or 3 missed pings): views kept, offer_paused {reason}, sends refused unavailable, remote.list paused; back: offer_resumed then relay.closed for the client to reattach. approval_requested carries cwd. allow_session honoured over the relay (amends 945), gated on capabilities.relayed_allow_session"
 ---
 
-#932: what #904 (for #899) left on the plane and the daemon for a laptop's session steered
-from another device. This amends Decision 945 on one point, the answers a relayed approval
-offers, and Decision 921's sentence that a remote person cannot loosen the laptop's rules
-in the same way; the rest of both stands.
+This amends Decision 945 on one point, the answers a relayed approval offers, and Decision
+921's sentence that a remote person cannot loosen the laptop's rules in the same way; the
+rest of both stands.
 
 ## A laptop that is away is paused, not lost
-
-Before, the steerer heard of a laptop gone only from their own connection: the plane
-closed the view with `relay.closed` when the laptop's socket ended, the console's attachment
-tried six times in about twenty seconds, and then said *Lost the laptop*. A laptop that went
-to sleep kept its socket open as far as the plane could tell (the socket's timeout is a day),
-so the view looked hung until something timed out.
 
 - **The plane keeps a heartbeat.** It pings the laptop's connection every fifteen seconds
   (`relay_heartbeat_ms`) and closes one that has answered nothing for three, as `offline`.
@@ -51,12 +44,6 @@ so the view looked hung until something timed out.
   laptop is back"}`, and the client's attachment opens it again and subscribes from its own
   cursor, which loses nothing. An offer withdrawn while away (the laptop came back offering
   less) ends the view with `withdrawn`.
-- **The console says it.** The status line reads *The laptop is asleep or offline; waiting
-  for it*, or *Troupe stopped on the laptop; waiting for it to start again*, from the event,
-  then *The laptop is back*, which stays beside the usual words until the session next says
-  anything. *Asleep or offline* rather than *asleep*, because the plane cannot tell the two
-  apart. The attachment's own words stay for the page's own connection. The list says
-  *Troupe stopped there since …* for a `stopped` laptop.
 
 **Not chosen: replaying the view on the plane.** The plane could remember a view's
 `initialize` and subscriptions and replay them to the laptop when it is back, keeping the
@@ -85,33 +72,6 @@ nothing is left behind; a call one of the laptop's own rules asks about (`ask`, 
 that always asks) is asked again whatever was allowed, as at the laptop. `allow_always`,
 which writes a rule into the laptop's configuration, stays the laptop's person's.
 
-- `Troupe.Protocol.Relay` lets `allow_session` through at both ends.
 - The daemon says `capabilities.relayed_allow_session: true` on a relayed connection, and a
   client offers the session-wide answer only where it is named: a daemon from before refuses
   it, and the clients answer once there, with the sentence saying why, as before.
-- The console offers it in the desktop app's words (`callScopedLabel`, and *Allow, and let
-  it publish unasked for this session* for a publication that names whom it is for); the
-  desktop app draws its own scoped button again for such a laptop; the terminal answers a
-  laptop's approval once only where the laptop names `relayed` without
-  `relayed_allow_session`.
-
-## Proof
-
-- `apps/troupe_plane/test/troupe/plane/remote_test.exs`: a laptop gone without a word pauses
-  the view as `offline`, lists `paused`, and back sends `offer_resumed` and `relay.closed`
-  *the laptop is back*; a daemon that says it is stopping pauses as `stopped`, a prompt
-  meanwhile is refused with the sentence, and a laptop back offering nothing ends the view
-  `withdrawn`; a laptop that stops answering pings is paused `offline`.
-- `apps/troupe_gateway/test/troupe/gateway/remote_test.exs`: a relayed connection's
-  `initialize` names `relayed_allow_session`, its `approval_requested` carries the
-  workspace as `cwd`, and `allow_session` from a control share is honoured (the second call
-  of the tool runs unasked); a daemon that stops sends `relay.pause` and closes no view at
-  the plane.
-- `apps/troupe_protocol/test/troupe/protocol/relay_test.exs`: the three answers pass at
-  `control`, none at `observe`.
-- `clients/gui/apps/console/test/remote.test.tsx`: the folder and the session-wide answer,
-  a daemon from before answered once with the sentence, the status words, and a laptop
-  paused and back walked against the fake relay.
-- `clients/gui/apps/desktop/test/remote-sessions.test.tsx` and
-  `clients/tui/test/troupe/relayed_answers_test.exs`: the session-wide answer where the
-  laptop names it, once where it does not.

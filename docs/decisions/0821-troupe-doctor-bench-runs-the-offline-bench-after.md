@@ -14,11 +14,6 @@ symbols:
 gist: "doctor --bench runs the offline bench's own scenarios here against the scripted model, judged as troupe bench judges them; never a provider"
 ---
 
-Issue #390's last item, `troupe doctor --bench`, as the offline half: whether this install
-gets a session through the harness end to end, said in a few lines, with no provider, key
-or network. The live bench (Decisions 773 and 775) is unchanged, and running it in the
-nightly is still open.
-
 - **The offline bench's scenarios, not a second set.** `Troupe.Doctor.bench/1` runs
   `Troupe.Bench.run/1`, the five scenarios `troupe bench` and CI run (Decision 772): a turn
   of thirty tool calls, a tool result over the limit cut and read back with
@@ -76,13 +71,3 @@ nightly is still open.
   harness's, and the daemon's command line is a change of its own. None of the five
   scenarios calls the `shell` tool, so a `PATH` without a shell passes the bench; a shell
   step belongs in the offline suite, where CI holds it too, not in the doctor alone.
-- **Proof:** `Troupe.DoctorTest` ("the bench"): a line a scenario and one for the whole,
-  the scratch directories untouched; a measure over a lowered budget and one nobody takes,
-  each a `FAIL` naming it, and the bench's `failed`; `json/2` with and without the bench.
-  The TUI's `doctor_test.exs`: `troupe doctor --bench` parses, which failed on the chunk's
-  tip with `unknown option: --bench`; the checks and then the five lines and the whole,
-  exit 0, the person's config and state directories as they were and no bench directory
-  left; a lowered budget a `FAIL` line and exit 1; `--json` as one object. And the
-  installed `troupe doctor --bench`, on the pull request: with nothing set up (the
-  `provider` line fails, the bench passes), with the fake provider, and with a broken
-  `rg` first on the `PATH`, where `cut_output` fails and says what did not hold.

@@ -15,11 +15,6 @@ symbols:
 gist: "artifacts_keep_versions_days / artifacts_keep_unopened_days (unit days_or_off, 0 = off, org-wide only); hourly singleton sweep; newest + pinned never go; audit artifact.delete / artifact.version.delete by system:retention, by: retention; goes_at on rows; opened_at set by artifact.open and the host's entry page"
 ---
 
-Issue #981, a slice #62 left: "retention" was in its list of administrator's controls and
-nothing shipped for it. An artifact and every version were kept until an owner deleted it or
-an administrator took it down, which is the right default and the wrong only answer for an
-organisation that has to say how long it keeps what its agents publish.
-
 ## The two settings
 
 Under *Policy and settings*, beside the other artifact settings, in the `artifacts` group:
@@ -75,9 +70,7 @@ deleted (the bucket keeps versions, Decision 786), and the artifact's `total_byt
 the team's quota counts, drops by what went.
 
 What the object store refuses is left as it was, the row and the objects, and tried again
-by the next pass. The pass says it once, at `warning`, naming the artifact, when it first
-fails, and not again while it keeps failing, so a store refusing one artifact for a week is
-one line and not 168. What went is said at `info`.
+by the next pass.
 
 ## The audit
 
@@ -93,10 +86,4 @@ nothing more: the first pass's removals are audited as every other one is.
 `artifact.list`, `artifact.get` and `admin.artifacts.list` rows carry `goes_at`, when the
 unopened period removes it, or `null`; `artifact.get`'s versions each carry `goes_at`, `null`
 for the newest, the pinned one and every one while that period is off, and the answer carries
-`retention: {versions_days, unopened_days}` for the page's sentences. The words are one
-module in `@troupe/client` (`retention.ts`), so the desktop app and the console say the same:
-a card's line "Goes 3 Dec unless opened", beside its other pieces, and on the page "It goes on
-3 Dec, every version with it, unless somebody opens it", with the period and that opening it
-starts it again, and beside each version that goes "goes 22 Jan". The administrators' table
-says it in the Published column. The terminal's gallery row and its versions list say the same
-words, since its row shows a date already. With both off no field is set and nothing appears.
+`retention: {versions_days, unopened_days}` for the page's sentences.

@@ -74,19 +74,16 @@ which dials in plaintext, and an upgrade to `enabled` and `requireTls: true`. Th
 closes the pod's connection at its first byte, once a minute in the log with the count;
 the pod stops heartbeating and takes no session; the profile reports `UpgradePending`,
 "waits to be drained", and stays so. The upgrade (Decision 726) waits for the plane to
-drain a pod behind, and the plane drains only a pod that can reach it, so the pod and every
-session on it were cut off for good. The live plane avoided it by running `requireTls:
-false` through the upgrade from 0.18, whose operator made plaintext pods, and turning it
-on once the old pod had gone.
+drain a pod behind, and the plane drains only a pod that can reach it, so the pod and
+every session on it were cut off for good.
 
 The operator now replaces such a pod without a drain: one behind, whose worker container
 has no `TROUPE_PLANE_CA_PATH` (a pod is told where the CA is exactly when it dials with
 TLS), where the plane takes TLS only (the chart passes `requireTls` to the operator) and
-the current revision dials with TLS (so the replacement can enrol). Still one at a time and
-the highest ordinal first, as every replacement is. The deleted pod's own stop drains it
-(`Troupe.Worker.Drain.on_stop/1`): its sessions are put to sleep inside the grace period,
-as for any pod something other than the plane stops. With the fixed operator on the same
-cluster the pod was replaced within a pass and its successor enrolled over TLS.
+the current revision dials with TLS (so the replacement can enrol). Still one at a time
+and the highest ordinal first, as every replacement is. The deleted pod's own stop drains
+it (`Troupe.Worker.Drain.on_stop/1`): its sessions are put to sleep inside the grace
+period, as for any pod something other than the plane stops.
 
 Turning `requireTls` from `false` to `true` is then the upgrade and nothing else, which
 `values.yaml` says; `false` stays for a workload of one's own that dials without TLS. This
@@ -136,18 +133,3 @@ The OpenBao administrator's lines on `docs/admin/openbao.md`, which the plane ch
 prints. Labelling the ingress controller's namespace `troupe.dev/ingress=true` and the
 Secrets each worker namespace needs stay where they were: neither is named by #765's slot,
 and each is said where it is needed.
-
-## Proof
-
-- `Troupe.Operator.ResourcesTest` (the labels at each setting), `ReconcilerTest` (a
-  namespace made without them is labelled; a plaintext pod under `requireTls` is replaced
-  undrained, and is waited for while the plane takes plaintext, while it dials with TLS, or
-  while the current revision has no CA either).
-- `Troupe.E2E.PodSecurityTest`: the worker namespace's three labels, the worker pod as its
-  StatefulSet makes it admitted at that level and refused one below, no `FailedCreate` for
-  Pod Security, and `troupe-system` labelled. The cluster job's dry run of every pod the
-  chart makes at the level it labels its namespace with, both ways.
-- `Troupe.KMS.PolicyTest` (the page is current; every grant and path is on it; the policy
-  texts unchanged) and `Troupe.Plane.KMSCheckTest`, against the development OpenBao with
-  tokens holding some grants and not others.
-- `Troupe.Plane.UnlinkedGroupsTest`, and the console's overview and teams tests.

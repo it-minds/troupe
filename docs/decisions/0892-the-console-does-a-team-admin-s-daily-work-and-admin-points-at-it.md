@@ -68,18 +68,6 @@ them again restores it.
   shown is the record; where it cannot be read, the note says the change was made and the
   record could not be read here.
 
-## Overview, Sessions and Audit
-
-The console now opens on the Overview: *Needs attention* (pods broken, never reported or
-draining; a profile short of pods; a team at or near its ceiling; unattended runs nobody
-has looked at, from `admin.sessions.list`'s `needs_review`), each linking to where it is
-fixed, which for an area not drawn yet is the previous console's page; then fleet per
-profile and spend per team, from `admin.overview`. Sessions is the plane's metadata, never
-content, filtered by state and profile at the plane and searched and paged over its answer
-(the plane's newest 200). Audit is `admin.audit.list` narrowed at the plane and read a
-hundred rows at a time; the chain's check is a platform admin's, as the plane holds it.
-All of it reads `admin.*` and nothing else.
-
 ## Deep links survive the sign-in
 
 The provider's redirect URI is registered without a fragment, so a deep link opened signed
@@ -101,15 +89,3 @@ this one (the GitHub App's page, on Integrations) is owed here on the same area 
 A field's label names it and its hint describes it (`aria-describedby`); no placeholder
 names a field. `test/labels.test.tsx` opens every form the console draws and fails on a
 field whose name is its placeholder, empty, or has its hint run into it.
-
-## Proof
-
-- On the chunk's tip: the console could not revoke a profile (no control: "Grant a
-  profile" never appeared) nor show Sessions (an area not drawn), and a deep link came back
-  from the provider to Teams; those tests failed there. The plane's index pointed its
-  console door at `/admin` and the Overview named no console; `web_test.exs` and
-  `panel_test.exs`'s new tests failed there.
-- `apps/console/test`: 70 tests in 11 files against the fake plane, whose administrative half follows
-  `Troupe.Plane.Admin` for every method the console calls, its refusals and its audit.
-- In a browser against the fake plane, as a platform admin and as a team admin, dark and
-  light, at a narrow width with the map folded.

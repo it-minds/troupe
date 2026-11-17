@@ -18,12 +18,9 @@ gist: "native.yml signs only with sign: release (release.yml), in the release en
 
 #656 asks for the desktop app and the `troupe` and `troupe-daemon` binaries to be signed and
 notarised on macOS and code-signed on Windows. The certificates are not procured yet, and
-the maintainer decided on 2026-10-24 (on #765) that everything but them is built and tested
-now, with signing off by default, so that the day the `release` environment holds the
-secrets nothing else changes. Writing the procurement guide had found four things in the
-way (#656's comment): the secrets did not reach the native builds, tauri-action wants the
-App Store Connect key as a file, the Windows signing tool was renamed, and Smart App
-Control checks every executable rather than only the one downloaded.
+the maintainer decided on 2026-10-24 (on #765) that everything but them is built and
+tested now, with signing off by default, so that the day the `release` environment holds
+the secrets nothing else changes.
 
 ## In addition to the release key, never instead
 
@@ -114,8 +111,4 @@ BEAM under a Developer ID with `beam.entitlements` alone.
 `install.sh` prints its Gatekeeper note only for a program that is quarantined and has no
 Developer ID signature, and `install.ps1` its SmartScreen note only when a program it
 installed has no valid signature, so they are right before and after the first signed
-release without an edit. The docs say which releases are signed in one place,
-`docs/admin/security.md` §6 ("none yet"), and `docs/developer/signing-day.md` is the runbook
-for the day: the secrets, the one-time setup, how to check the first signed release
-on a fresh Mac and a fresh Windows machine with Smart App Control on, which paragraphs to
-drop afterwards, and what to do when notarisation is rejected.
+release without an edit.

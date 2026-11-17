@@ -14,18 +14,6 @@ paths:
 gist: artifact.put with base and no files carries every file (visibility moves in the app via the daemon); pods upload past 2.5 MB by handle; path parts <= 255 bytes
 ---
 
-**Why.** D137 and the chunk's first wave left three things a person met. The desktop app's
-*Change who can see it* opened the console, because moving an artifact's visibility had no
-call the daemon forwarded (Decision 954 says so), and the only call that moved it,
-`artifact.publish` or `artifact.put` with `id`, needed the files sent again: a put with no
-files was refused. With Decision 953's `private` and `team:<name>`, which visibility an
-artifact has is the first thing its owner may want to change, and the console's Mine is to
-stay as it is (the maintainer, on #765, 2026-10-26). A pod's agent sent an artifact inline
-over its control link, so a version past what one message carries (8 MiB) could not be
-published from a pod at all, while a daemon's went by an upload handle. And a path part
-past the object store's 255 bytes was refused by the store halfway through writing a
-version.
-
 **The decision.**
 
 - **A put over a version may send no files.** `artifact.put {id, base, visibility?, title?,
@@ -50,14 +38,3 @@ version.
   plane's object-store endpoint publishes only what fits inline.
 - **A path part is at most 255 bytes**, the object store's own limit, refused with the
   publish's other path rules before anything is written.
-
-**Proof.** `artifact_teams_test.exs`: an owner's put with `base` and no files is version 2
-with version 1's files, moved; without `base` it is `invalid_params`, over a replaced base
-`conflict`, and nobody else moves it. `apps/troupe_gateway/test/troupe/gateway/artifacts_test.exs`:
-`artifact.put` forwarded with only its arguments, and a publish to a team the person is not
-in keeps the plane's `forbidden` and its `teams`. `apps/troupe_worker/test/troupe/worker/artifacts_test.exs`:
-a 10 MiB file from a pod, refused on the tip (the link could not carry it), published by a
-handle and read back from the store. `artifacts_test.exs` and `artifact_versions_test.exs`:
-a 256-byte part is `invalid_params` and no object is written. The desktop's
-`artifacts-gallery.test.tsx`: the move sends `artifact.put` with no files and opens no
-console page, and a conflict is said in the plane's words.

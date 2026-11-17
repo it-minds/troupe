@@ -15,8 +15,6 @@ paths:
 gist: "On a plane, a turn the harness stopped is a failed turn: the row says why, the run is failed and its target is told, and a pod whose session…"
 ---
 
-Issue #320, defect D47, following 687, 727 and the daemon's `failed`
-(745).
 - **The worker reports `failed_reason`.** `turn_ended`'s `reason`, `tool_failures`
   (the failure guard's `stop`) or `agent_failed` (a root that crashed as often as it
   may be restarted), goes into `session.status` and the dormancy report beside
@@ -48,11 +46,3 @@ Issue #320, defect D47, following 687, 727 and the daemon's `failed`
   report the debounce held, since that is the one that announces. The cost is folded
   from the log left on the pod, because the projection that knew it went down with
   the tree and the dormancy report said `0`.
-- The desktop app's team rows don't read `failed_reason` yet.
-- **Proof:** the worker's `stopped_turn_test.exs` (a tool that fails ten times with
-  nobody to ask; a root that keeps crashing, asleep within seconds with its cost; the
-  same session woken, saying so until a turn starts) and `approval_status_test.exs`
-  (the fold over a recorded log), and the plane's `triggers_test.exs` (a pod's report
-  makes the run failed, on the row and in the post, with no place under the cap; a
-  crashed session asleep is failed and broken, and told once). Each failed before
-  this change.

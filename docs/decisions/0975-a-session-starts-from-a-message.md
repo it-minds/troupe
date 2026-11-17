@@ -69,8 +69,7 @@ button is off and the line is the plane's own sentence once a refusal has said i
 
 **Who can open it follows from where it runs.** Only you for this computer or a private
 session; everyone on the profile's teams (`profiles.list`'s `teams`, by name) on the
-platform, and the create asks for `visibility: "team"` so the sentence is true. The old
-screen said "Everyone on [object Object]" and made the session private.
+platform, and the create asks for `visibility: "team"` so the sentence is true.
 
 **"On this computer" turns on by itself.** While this computer's daemon does not answer,
 the option is off with "APP NOT RUNNING" and the line says why; it turns on when the
@@ -84,16 +83,4 @@ beside the session's log; `session.title.set` renames a session in either.
 
 **The agent is on the row.** The plane records the agent a session was created as and the
 one its pod reports it was switched to, and answers `agent` and `created_at` on its rows,
-so "start like last time" copies where, folder, profile and agent from a listing. A
-session that waited for a place used to start as the profile's default whatever was
-asked; it now starts as the agent it was asked for.
-
-## Proof
-
-`packages/client/test/new-session.test.ts` and the TUI's `new_session_screen_test.exs`
-hold the rules to the same examples; `apps/desktop/test/new-session.test.tsx` drives the
-desktop screen against the fake plane and daemon (auto-pick both ways, tokens and a chip
-clash, full → Queue it → pending → placed, the ceiling, the daemon not ready then ready,
-the local sentence, the title, Ctrl+Enter, start like last time, a failed start).
-`scaling_test.exs` proves the agent survives a wait and the listing's ceiling and teams;
-`session_title_test.exs` the daemon's title.
+so "start like last time" copies where, folder, profile and agent from a listing.

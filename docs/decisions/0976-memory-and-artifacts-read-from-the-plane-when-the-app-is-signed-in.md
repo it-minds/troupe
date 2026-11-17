@@ -100,17 +100,3 @@ rest of 954 (Local only, the child window, entries) holds.
 - **Verify `me.memory`'s signature in the app.** The daemon verifies it because it keeps
   the copy its sessions read; the app only shows the answer it was given over its own
   signed-in TLS connection, as the console does.
-
-## Proof
-
-`clients/gui/apps/desktop/test/own-things-from-the-plane.test.tsx`: signed in to a fake
-plane with no daemon, and with a connected daemon signed in to no plane, Memory shows the
-plane's entries in effect and Artifacts its artifact, and neither says anything about a
-daemon; the connected daemon is asked `me.memory.status` and nothing of the person's own.
-Under Local only the plane is asked nothing. Offline with a daemon, memory goes through
-the daemon; offline with a shell that found none, both say the daemon is not running.
-On the tip (`d37507cf`) the first two failed with "This computer's daemon is not
-connected" and "this computer's daemon is not signed in to a Troupe plane", and the
-last with the same false sentence. The Memory and gallery tests from 954 and 957 run
-against a fake plane whose memory and artifacts the fake daemon keeps
-(`packages/client/test/support/kept.ts`), unchanged otherwise.

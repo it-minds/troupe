@@ -11,8 +11,6 @@ paths:
 gist: Whether troupe has a terminal is asked of Burrito's launcher on Linux and macOS, and on Windows Ctrl-C ends the commands that only print
 ---
 
-Issue #231's follow-ups
-(Decision 128 left them; root Decision 719 has the daemon's side).
 - **The launcher's standard output is the one the person sees.** On Linux and macOS
   Burrito's launcher gives the VM a pipe for standard output and copies it to its
   own (`erlang_launcher.zig`, so that `troupe … | head` going away ends the VM too).
@@ -46,13 +44,3 @@ Issue #231's follow-ups
   `+Bi` ignores it and leaves the VM behind the launcher that died of it, and `+Bd`
   is not read on Windows at all. A second Ctrl-Break ends the VM. Ending it on the
   first takes a console control handler inside the VM, a NIF of our own.
-- **Unix Ctrl-C, checked.** At `troupe login` under a pty the launcher dies of SIGINT
-  and the VM with it, and nothing of troupe is left three seconds later; nothing
-  changes there.
-- **Proof:** `test/troupe/terminal_test.exs` (the launcher is asked only behind the
-  pipe; a file, a pipe and `/dev/null` are refused and a terminal is not; another
-  process's standard output read from `/proc`, and with `lsof` and `ps` as on
-  macOS), `test/troupe/interrupt_test.exs`, `test/troupe/cli_daemon_test.exs` ("the
-  daemon goes when the process that ran it goes", which the old spawn fails), the
-  Linux binary under a pty, and the Windows binary in console windows, before and
-  after, on the pull request.

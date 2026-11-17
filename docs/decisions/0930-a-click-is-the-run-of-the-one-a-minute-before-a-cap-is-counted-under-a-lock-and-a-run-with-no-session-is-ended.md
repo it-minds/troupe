@@ -17,10 +17,8 @@ gist: "A click is the run of the same person's click <60 s before; caps are coun
 
 # A click is the run of the click a minute before, a cap is counted under a lock, and a run with no session is ended
 
-Decision 927 drew a webhook's blind retry on a minute from the firing it repeats, under
-the trigger's row lock, and left three things it found for their own change. This is
-that change. It replaces the minute of a run by hand in Decision 914 and of "fix this" in
-Decision 917; the rest of those two stands.
+It replaces the minute of a run by hand in Decision 914 and of "fix this" in Decision 917;
+the rest of those two stands.
 
 ## Context
 
@@ -28,14 +26,12 @@ Decision 917; the rest of those two stands.
   `manual:<trigger>:<subject>:<minute>` and the console's "fix this" on
   `fix:<trigger>:<issue>:<subject>:<minute>`. A click at :59 and a second one a moment
   later, or a retry of a call whose answer was lost, were two runs, the second skipped
-  under the cap the first held. The test of the run by hand waited for the start of a
-  minute to pass.
-- **Counted apart.** `start/3` counted live runs and wrote `skipped` outside any lock.
-  Two firings with keys of their own that raced on one trigger with a concurrency of 1
-  each wrote its run, then each counted the other's (still `created`, no session) as live,
-  and both were skipped: nothing ran. The chunk tip's test of three such firings started
-  none. A run on a repository counts against its profile's and its team's caps across
-  triggers too, which no one trigger's row covers.
+  under the cap the first held.
+- **Counted apart.** `start/3` counted live runs and wrote `skipped` outside any lock. Two
+  firings with keys of their own that raced on one trigger with a concurrency of 1 each
+  wrote its run, then each counted the other's (still `created`, no session) as live, and
+  both were skipped: nothing ran. A run on a repository counts against its profile's and
+  its team's caps across triggers too, which no one trigger's row covers.
 - **A failed create's retry** went to `create/3` without counting, so a run that failed
   while another took its place made a second session past a concurrency of 1.
 - **A run left with no session**, by a request that crashed or a replica that went down
@@ -87,18 +83,3 @@ Decision 917; the rest of those two stands.
   repositories are few; one lock held for two counts costs nothing measurable.
 - **End a sessionless run by `fired_at`.** A failed run retried now is `created` again
   with its old `fired_at`; `updated_at` is when it was last decided.
-
-## Proof
-
-`apps/troupe_plane/test/troupe/plane/trigger_sources_test.exs` ("the console's run is
-the run of the person's click less than a minute before") and
-`apps/troupe_plane/test/troupe/plane/github_issues_test.exs` ("a second click on the issue
-less than a minute after the first is its run, across a minute's turn") move the first
-run to the last tenth of a second of the minute before, under the old minute key, and
-click again: on the chunk tip each made a second run. `trigger_ingress_test.exs`, "the
-cap": three firings with keys of their own racing on a concurrency of 1, four times (on
-the tip, all three skipped), and a failed run's retry beside the run that took its place
-(on the tip, a second session). "a run left with no session is ended by the plane, said
-why and audited": a run with no session for eleven minutes is ended and audited, one a
-moment old is left, and the ended run's retry makes its session (on the tip,
-`end_unmade/0` did not exist and the stuck run skipped every firing after it).

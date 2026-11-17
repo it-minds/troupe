@@ -29,8 +29,6 @@ sign in** left the app on "Finishing…" for good. The daemon had taken the fini
 `setup.get` said `needed: false`, the flow back at `where`), and the app never heard. The
 screen left the first run only from the `.then` of that one `setup.answer`; a reply that
 never came, a socket that went in its place, or a reconnect moved nothing, and nothing
-else in the app asked. The fake daemon reproduces it: a `finish` it does whose answer it
-holds back leaves the tip on "Finishing…".
 
 ## Decision
 
@@ -68,11 +66,6 @@ holds back leaves the tip on "Finishing…".
 
 ## Consequences
 
-- A stuck finish is reproduced in `test/first-run-finish.test.tsx` with the fake daemon's
-  `loseReply` (`hold`, `drop`) and `dropClients()`; the same file sweeps sign-in against
-  planes answering as 0.18, 0.19 and 0.20 do (their policy recommends themselves): the app
-  signs in, shows the team's sessions, asks the shell about the recommended version and is
-  told there is nothing to move to, since the shell never moves back on its own.
 - A key check slower than 20 seconds says it is late, and still lands when the provider
   answers.
 - The daemon is unchanged: `setup.get` and `setup.answer` already said everything needed.

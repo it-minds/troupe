@@ -9,10 +9,6 @@ paths:
 gist: The desktop app shows a session's goal and its loop in the session's head, marks what happened while nobody was reading, and says it with the…
 ---
 
-Issues #59 (the GUI's part) and #119 (its "tell the person" box).
-The harness had `/goal`, `/loop` and `unseen`, and the terminal client showed the
-first two; the desktop app dropped `goal_*` and `loop_*` on the floor, printed a
-loop's own input as the person's words, and read no `unseen`.
 - **What the events say, in the head.** The fold keeps the goal from `goal_set`
   until `goal_cleared` and the latest loop from `loop_started` to `loop_stopped`,
   so the head follows any client's change as it happens. The goal sits under the
@@ -43,11 +39,3 @@ loop's own input as the person's words, and read no `unseen`.
   Counts are remembered per session and a request by its call id, which a waking
   session asks again under. Permission is asked once, on the person's first
   gesture, a refusal is kept, and a preference beside the appearance turns it off.
-- **Not in this slice.** A plane's rows carry no `unseen`, so a team session tells
-  only while it is open; clicking a notification does not open its session, which
-  the plugin cannot report on a desktop; and the launcher's rows carry no marker.
-  (Both are 714.)
-- **Proof:** the desktop app's `goal-loop`, `away` and `notify` tests against the
-  fake daemon, which now keeps the loop in its log and `unseen` beside it; the
-  client's fold and row tests; the probe and the renamed installed build on the pull
-  request.

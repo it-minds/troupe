@@ -17,9 +17,6 @@ symbols:
 gist: "Offer's lasts (across_restarts | until_restart) and restored in the listing, said alike by TUI and desktop, command said once; relayed approvals offer allow once and deny; only the versioned app archive ships"
 ---
 
-#58's last two items, after slice 2 (Decision 928) and the console and presence (Decision
-942), and two loose ends of the 0.26.0 release (D135).
-
 ## An offer and a restart
 
 Decision 928 made the offer outlive its client: the daemon keeps its own sign-in in the
@@ -45,11 +42,6 @@ told apart, and said:
   since …*), then *back after a restart* and *until this machine restarts* where they hold:
   `/steer` says *(online, back after a restart)*, the desktop's pill *Offered · Online ·
   back after a restart*.
-- **The plane's half was already there.** A restarted daemon dials the relay as soon as its
-  steering process starts and sends `relay.sync` with its whole record; the plane's
-  `relay.offer` and `relay.sync` insert or update each row, so offering again is idempotent
-  and nothing new was needed. The session is listed online again within seconds of the
-  daemon starting.
 
 **Not chosen: the daemon writing the login entry itself at the first offer.** It would
 make every offer survive a reboot, but a login entry is the person's choice (Decision 762
@@ -82,8 +74,6 @@ allowed it, would undo that sentence, so the clients stop offering it instead:
   allow button now reads *Allow once*, as the console's has since Decision 921.
 - **The console's** steering view offers *Allow once* and *Deny*, unchanged.
 
-## The release's loose ends
-
 - **One app archive.** The macOS build leaves an unversioned `Troupe.app.tar.gz` of its own
   in `bundle/macos/`, which `Keep the installers` uploaded with every `*.app.tar.gz`, so
   releases carried it beside `Troupe_<version>_universal.app.tar.gz`, named in the manifest,
@@ -91,38 +81,3 @@ allowed it, would undo that sentence, so the clients stop offering it instead:
   removes any other archive first, and the upload names the versioned archive alone. The
   updater is unchanged: `latest.json` (`scripts/release-desktop-update.exs`) and the desktop
   app (`release.rs`) name `Troupe_<version>_universal.app.tar.gz` only.
-- **The signature count.** `code-signing.md` §3 said a release signs about 85 Windows files.
-  `sign-windows.ps1` leaves a file that already carries a valid signature as it is, and the
-  Erlang runtime's own executables and libraries in both payloads are signed by Ericsson AB,
-  so what a release signs is what the build makes itself. Measured on the installed 0.26.0
-  build: `troupe-daemon` holds 25 PE files of which 22 carry a valid signature (left: the
-  zstd NIF, `inotifywait.exe`, the reaper), and the terminal's payload 36 of which 32 (the
-  same three and the renderer's NIF), with `troupe.exe` itself the fifth; then the desktop
-  app's executable and its installers. The cost paragraph follows from the count.
-
-## Proof
-
-- `apps/troupe_gateway/test/troupe/gateway/remote_test.exs` ("after a restart"): an offer on
-  a daemon with no login entry says `until_restart` in its answer and its listing; with the
-  entry, `across_restarts`, and a steering process started again with no client syncs the
-  offer to the relay on the kept sign-in, with no new grant, and lists it online and
-  `restored`. Both failed on the chunk's tip.
-- `apps/troupe_core/test/troupe/start_at_login_test.exs`: `enabled?/1` beside `status/1`.
-- `clients/tui/test/troupe/steer_command_test.exs`: the sentences, the command said once,
-  *back after a restart*; and on a session whose daemon says `relayed`, the approval drawn
-  *y allow once / n deny*, `a` refused in words with nothing sent, and `y` answering it.
-- `clients/gui/apps/desktop/test/remote-sessions.test.tsx`: *Offered · Online · until this
-  machine restarts* and the sentence as the offer is made, *back after a restart* from the
-  listing after; a relayed approval's *Allow once* and no session-wide button.
-- `apps/troupe_core/test/troupe/release/desktop_update_test.exs`: the pack step run on a
-  bundle holding the build's own archive, the upload's globs taking the versioned archive
-  and the disk image only, and a manifest over them naming no unversioned archive; it failed
-  on the tip's workflow.
-- The installed build, with scratch homes (APPDATA among them, so the login entry went
-  into a scratch Startup folder) and a test credential-store service, against a stand-in
-  plane: the offer answered `until_restart`; after `troupe-daemon login on`,
-  `across_restarts`; the daemon killed and started by running the entry, it dialled on
-  its kept grant, synced the offer within about two seconds of the entry running, with no
-  new grant and no client, and listed it online and `restored`. A relayed
-  `allow_session` was refused with the laptop's sentence and a relayed `allow` ran the
-  tool; the laptop's `initialize` said `capabilities.relayed`.

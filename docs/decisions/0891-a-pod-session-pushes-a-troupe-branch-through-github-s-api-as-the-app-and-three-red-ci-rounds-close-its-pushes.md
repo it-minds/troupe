@@ -21,13 +21,11 @@ symbols:
 gist: "Worker tools push troupe/* via GitHub's API as the App, draft PR, no force or merge; token is the profile's grants; 3 red CI rounds close pushes"
 ---
 
-Issue #147, slice 2, within #653's rules and the maintainer's decision of 2026-10-13: a run
-pushes to `troupe/*` branches as the App's bot and opens a draft pull request; it reads CI
-and pushes fixes; after three red CI rounds on its own pull request it stops, comments what
-it tried and what still fails, and leaves the draft for a person; the run's budget applies
-first; it never merges. Slice 1 (Decision 885) gave a session a repository and a read-only
-clone. On the chunk tip a session that asked for `git_push` was told "There is no tool
-named git_push."
+Issue #147, slice 2, within #653's rules and the maintainer's decision of 2026-10-13: a
+run pushes to `troupe/*` branches as the App's bot and opens a draft pull request; it
+reads CI and pushes fixes; after three red CI rounds on its own pull request it stops,
+comments what it tried and what still fails, and leaves the draft for a person; the run's
+budget applies first; it never merges.
 
 - **Four worker-owned tools, for a session created with a repository and no other.**
   `git_push`, `pr_open`, `pr_comment` and `pr_checks` are the worker's
@@ -37,8 +35,7 @@ named git_push."
   nor let call them, and the answer never changes during a session. Each asks like `shell`
   unless a profile says otherwise; a profile made for unattended fixing marks them `auto`,
   which is how #147 said an unattended run gets its tools (the `approvals` term stays
-  `wait` or `deny`). Agent validation knows the four names, so an agent written for the
-  work validates on a laptop or the plane where they do not run.
+  `wait` or `deny`).
 - **They run in the worker's VM with the fix loop's token, which the agent never holds.**
   `git.credential` takes `access: "write"`, and the plane mints that token with exactly
   what the session's worker profile grants in `spec.github.permissions`: some of
@@ -109,46 +106,3 @@ named git_push."
   for a push to `main`, a merge or the token gets refusals, no tool and no token. What
   failing checks reported is shown fenced, marked as the repository's CI output and never
   instructions; it is written by code anyone could change in a pull request.
-- **The run records what it produced.** `sessions.github` (a migration): `base`, `branch`,
-  `commit`, `tree`, `pushes`, `pushed_at`, `pull_request: {number, url}`, `rounds:
-  [{commit, state, failing, at}]` and `stopped: {at, reason}`. The pod reports each step
-  over the control channel (`github.record`), for a session it holds; the plane checks it
-  (a `troupe/*` branch, the session's one; a pull request URL that is this repository's on
-  the App's host; a round on the last push) under the row's lock, keeps it and audits it
-  (`github.push`, `github.pull_request`, `github.round`, `github.stopped`). Metadata only.
-  `session.get`, `sessions.list`, `admin.sessions.list` and `admin.runs.list` carry it as
-  `github`; the console's Sessions screen and the plane's Sessions and Review pages show the
-  pull request as a link (or the branch and commit before there is one, and that a run
-  stopped); the session's own
-  transcript, in every client, shows each tool's answer with the branch, commit and pull
-  request.
-- **Out of this decision.** The webhook and label trigger, and a trigger naming a
-  repository (slice 3); autonomy policy per team or repository, such as a draft only, or
-  merging (slice 4); a tool to read the issue or the pull request's comments, and a review
-  comment sending the session back; the notify payload's content field; revoking tokens at
-  dormancy; which teams may name which repositories; the console's Runs screen, which is not
-  built yet (`admin.runs.list` carries the record for it).
-- **Proof.** `github_fix_loop_test.exs` in the worker, with a real plane on the link, the
-  sandbox on, the fake GitHub serving the Git data API, pull requests, comments and
-  scripted CI against each token's permissions, and a ruleset letting the App write only
-  `troupe/*`: a session pushes its branch as one commit of the App's bot (verified, on the
-  clone's commit, its own trailer, the agent's local commit and forged trailer gone), opens
-  a draft into `main`, reads green CI, and no token is in a log line at debug, an event, a
-  tool result, the plane's rows or audit, a process's state, the commit, the pull request
-  or a comment, nor anywhere the agent's shell looked; the CI loop's three red rounds, the
-  fourth push refused, the bot's stop comment and the agent's, still an open draft, three
-  commits, the next write token unable to push; a push refused while CI runs, allowed when
-  it is green, and refused over a person's commit or to another branch; a hostile issue
-  body and hostile CI output whose model obeys them gets refusals for `main`, `refs/heads/
-  main` and `troupe/../main`, no token in its shell, no tool to merge, fenced CI output and
-  its literal comment, with `main` unmoved and nothing merged or forced; and the tools only
-  for a session with a repository. `github_run_test.exs` in the plane: a profile's grants by
-  GitHub's names and every other refused by name; the write token's permissions exactly
-  the grants, the clone's read-only; refused for a profile that grants no writing or does
-  not declare the API's host, before GitHub is asked; `contents: read` after three red
-  rounds; the record's steps, refusals and audit; `session.get` and a run carrying it; and
-  `github.record` and `git.credential access: write` over the control channel only for a
-  session the pod holds. `panel_test.exs` and the console's `sessions.test.tsx`: the Sessions
-  and Review pages link the pull request, show the branch before one, and say a run stopped. On the installed daemon,
-  `agents.validate` of an agent naming the four tools: refused on 0.17.0 ("git_push is not
-  a tool"), taken after.

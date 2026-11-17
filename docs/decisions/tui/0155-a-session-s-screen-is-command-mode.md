@@ -31,10 +31,7 @@ Issue #502, parts A and 3, with the choices the coordinator booked for the chunk
 maintainer had none). Supersedes 101's "a plain line is what you say to it"; its other
 half stands: a session has one agent, the window `root`, and `troupe run` and a pod
 session still put their work there. Amends 154 only in where the start's questions are
-drawn. On the chunk's tip a line typed with no window activated went to the session's own
-agent (`Client.send_input(sid, "root", …)`), a new session showed a `root` window that read
-`running` before anything ran, with a token count of its own, and a slash command typed in
-a window's box was sent to its agent as words (D107).
+drawn.
 
 - **Root is a mode, not a window.** The session's own window is still folded (its goal,
   its loop, the start's questions, the notes the session writes, what `!` ran), but
@@ -99,24 +96,3 @@ a window's box was sent to its agent as words (D107).
   --headless`, `-p` and the runner's `target: "root"` talk to the session's own agent
   through `Client.send_input/3`, not through the screen; a non-headless `troupe run` opens
   command mode with its agent listed, one digit away.
-
-Proof: `test/troupe/command_mode_test.exs`. A new session opens in command mode, with no
-window, its own idle, and nothing running on screen; a plain line starts `build-1` in the
-checkout with the line as its prompt, the notice first, and no input to root, and its row
-shows its agent, last line and cost; the start's question (a `CLAUDE.md` in a repository)
-is asked and a plain line waits for it; Ctrl-N with a line typed shows `quick`'s
-instruction as `agents.get` serves it, `w` starts `quick-1` in a worktree, and its
-worktree's row says `↑0 ↓0`, `+2 −0`, dirty and `quick-1 · alive`; Ctrl-N with nothing
-typed leaves the choice waiting for the task; `/goal` typed in a branch's window sets the
-goal and `/usr/bin is missing` reaches its agent; a pod session's agent is its row and a
-plain line goes to it; `/review the parser`, its file naming `agent: plan`, opens `plan-1`
-in the checkout whose input is the expanded prompt, and `/standup`, naming none, opens
-`build-1`, with nothing said to the session's own agent (`project_command_test.exs` asks
-814's question in each branch's window). `commands_test.exs` in core: a file's `agent` is
-in its row, and one that names none has no `agent`. `tui_theme_test.exs`: `done ●` loses
-its `●` once read, in the row and the observer. On the chunk's tip a reproduction showed the fresh screen's `root ·
-running` and the line typed reaching `root` as input. Tests that typed to root on the
-command line now say it to the session's own agent (`say!/2`, as a headless run does) or
-type into a branch's window; the theme's corner tests draw the tray, and one checks the
-row's mark. `mix check` in `clients/tui`, and the installed TUI driven headlessly against
-the installed daemon (the pull request has it).

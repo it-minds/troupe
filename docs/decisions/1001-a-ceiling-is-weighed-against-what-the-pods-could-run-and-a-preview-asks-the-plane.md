@@ -19,10 +19,6 @@ symbols:
 gist: "max_sessions vs the pods' most (hosts or policy maxReplicas x per pod, not replicas now), saved with a sentence; clients.put dry_run only where discovery lists it; refusal limit in the setting's unit; audit rows and profiles.list in units and gone; SCIM ServiceProviderConfig"
 ---
 
-Issue #957 gathers what chunk 47's pull requests (#937, #939, #940, #941) left, and #870.
-Most of it applies decisions already taken (992's names, 991's units, 994's gone pods);
-four points needed choosing.
-
 ## What a ceiling is weighed against
 
 The chunk 46 audit asked what happens when a profile's `max_sessions` is above what its

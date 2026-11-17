@@ -11,15 +11,12 @@ paths:
 gist: "Windows: past one entry, parts <target>/0..n-1 and <target> = troupe-parts:<n>; a value that fits (and isn't the marker) is one entry; delete takes every part"
 ---
 
-D5. Windows' Credential Manager holds at most 2560 bytes in one generic credential
+Windows' Credential Manager holds at most 2560 bytes in one generic credential
 (`CRED_MAX_CREDENTIAL_BLOB_SIZE`). The desktop app keeps the identity provider's refresh
 token through the keyring crate, which writes a password as UTF-16 and refuses one past
 1280 units before writing anything; the daemon keeps its sign-in for steering (Decision
 928) through `CredWriteW` from PowerShell, as UTF-8, and Windows refused one past 2560
-bytes ("The stub received bad data"). Authentik's refresh tokens are 128 characters;
-Entra's are opaque and have been reported past 1280 in tenants with many claims. And the
-desktop wrote the token before exchanging it, without catching, so a store that refused
-it failed a sign-in the provider had already answered.
+bytes ("The stub received bad data").
 
 - **The layout.** A value that fits one entry, and does not itself begin with
   `troupe-parts:`, is one entry under its target, exactly as every earlier release wrote
@@ -48,14 +45,3 @@ it failed a sign-in the provider had already answered.
   it holds, and `notKept` says in a sentence, which `console.warn` says too, that the
   next launch will ask for a sign-in again. Shown in the desktop app's own window, it is
   owed: nothing reads `notKept` there yet.
-- **Proof.** The desktop crate's tests: a 4096-character value is four parts and an
-  index in a store that refuses past 1280 units, reads back whole, and is deleted with
-  every part; a shorter value after it takes the parts away; an entry written as before
-  reads as it was; a value that looks like an index reads as itself; a part never splits
-  a character; a missing part is an error. On Windows, the same 4096 characters through
-  Credential Manager itself, under a service of the test's own, which it removes. The
-  protocol's `KeyringTest`: on Windows, a value of 4098 bytes through `Troupe.Keyring.OS`
-  is two parts of which the first is 2560 bytes, reads back whole, a short value after it
-  reads as itself, and a delete leaves no part; the tip's backend refused it with "The
-  stub received bad data". `restore.test.ts`: a store that refuses the token leaves the
-  sign-in signed in, its session working, and `notKept` saying why.

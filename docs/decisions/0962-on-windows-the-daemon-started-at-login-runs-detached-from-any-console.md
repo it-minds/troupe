@@ -22,11 +22,9 @@ symbols:
 gist: "The Windows login entry runs `troupe-daemon run --detached` (erl -detached via detached.vm.args, switched in env.bat), no console, no script host; eval never detaches"
 ---
 
-A person who turned on starting at login on Windows got a console window on every login:
-762 chose a console minimised to the taskbar, and the report was that the daemon "starts a
-cmd console on start up and not as a true background service". This replaces 762's Windows
-console part only; the rest of 762 stands (one module, each platform's own per-user entry,
-only files, `TROUPE_DAEMON_IDLE_MINUTES=0`, the setup step).
+This replaces 762's Windows console part only; the rest of 762 stands (one module, each
+platform's own per-user entry, only files, `TROUPE_DAEMON_IDLE_MINUTES=0`, the setup
+step).
 
 - **What 762 was guarding against, and what it gave up.** 762 said a start with no window
   needs a script host (VBScript) or a hidden PowerShell, which is what malware looks like,
@@ -83,14 +81,3 @@ only files, `TROUPE_DAEMON_IDLE_MINUTES=0`, the setup step).
   thing that runs after an update on every platform, which is why it is there and not in
   an update step: `Troupe.Update`, `install.sh` and `install.ps1` have no hook after a
   new daemon is in place, and the installer leaves an entry it finds alone.
-- **Proof:** `start_at_login_test.exs` (the Windows entry's exact text: `run --detached`,
-  no bare `run` that would keep a console, a path beyond ASCII still read as UTF-8; an
-  entry in the old shape rewritten in place, a current one left with its time, a foreign
-  file and an entry with no `troupe-daemon` to name left with the reason),
-  `release_test.exs` (the wrapper's `run --detached`, refused with anything else, `eval`
-  never detached, every VM reading the null device; `detached.vm.args` derived from
-  `vm.args`), the daemon's `cli_test.exs` and the TUI's setup screen tests. Not run on
-  Windows in this change: a person should check that Task Manager's Startup list shows
-  `troupe-daemon.cmd`, that no window appears after login, that `troupe-daemon status`
-  finds the daemon, and that `%LOCALAPPDATA%\troupe\daemon.log` has its "listening at"
-  line.

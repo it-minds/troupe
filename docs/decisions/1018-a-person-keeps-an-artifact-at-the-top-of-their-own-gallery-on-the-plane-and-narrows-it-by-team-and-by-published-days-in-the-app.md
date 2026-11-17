@@ -16,11 +16,6 @@ symbols:
 gist: "artifact.keep {id, on}: the person's own row on the plane (user, artifact, when), kept on each list/get row, never cut by the 500, not audited; desktop groups kept above the days; team chips inside Your teams only with 2+; published since/until is the app's, reset with it"
 ---
 
-Issue #978, the slice of #62's gallery that Decision 1007 left: "filters (kind, team, author,
-date), thumbnails and pinning". Kind, author (the search) and audience were there. Left were
-keeping an artifact at the top of a person's own gallery, a filter by team for somebody in
-several, and a date range beyond the three groups.
-
 ## The word
 
 **Keep at the top**, **Kept at the top** and **Let go from the top**. "Pin" is taken: an
@@ -53,9 +48,6 @@ newest first.
 own view state, as reading their gallery is (Decision 954), and the audit is for what changes
 an artifact or who may open it.
 
-The daemon forwards it as it does the gallery's other methods (`Troupe.Gateway.Artifacts`,
-`control`, only `id` and `on` sent on), and refuses it under Local only, as every `artifact.*`.
-
 ## The desktop app's gallery
 
 The kept ones form a group above *Today*, *This week* and *Earlier*, titled **Kept at the
@@ -76,31 +68,3 @@ again, as the kind already did; nothing of them is stored. The plane's `artifact
 take a range: it answers the newest 500, which is every artifact a person sees today, and a
 range the client applies is one less argument for the daemon to forward. When lists pass a page
 the plane should take it, with the search.
-
-**The empty state** says what narrowed it in its one sentence: "Nothing matches “…”" or
-"Nothing here", then "among pages", "for design", "published between 1 and 9 November 2026",
-whichever apply, and suggests widening only what is narrowed.
-
-## Left
-
-The console's gallery (its *Teams* tab names each card's team) gains no team chips: it has
-no search, kind or date either, and a person's own gallery is the desktop app's and the
-terminal's (Decision 954). The terminal's `/artifacts` shows no kept group: the plane's order
-is unchanged for it, and it does not show `kept`. Thumbnails stay #977.
-
-## Proof
-
-- `apps/troupe_plane/test/troupe/plane/artifact_keeps_test.exs`: kept and let go round-trip
-  through `artifact.list` and `artifact.get`, the list still newest first; another person's
-  list does not say it and nothing is audited; the artifact's deletion takes the row; one the
-  person may no longer open is not listed and comes back kept; refused for one they may not
-  open, an `on` that is not a boolean, and no id. Failed on the development branch's tip
-  (`d6beea37`): `method_not_found`.
-- `apps/troupe_gateway/test/troupe/gateway/artifacts_test.exs` (forwarded with only `id` and
-  `on`, `unavailable` signed out) and `local_only_test.exs` (refused under Local only).
-- `clients/gui/packages/client/test/artifact-keep.test.ts`: the fake plane keeps it per
-  person, a second sign-in reads it back, another person's does not; `PlaneOwn` and
-  `DaemonClient` ask it.
-- `clients/gui/apps/desktop/test/artifacts-gallery.test.tsx`: kept into a group above the
-  days and let go, held by the daemon standing in for the plane; team chips with two teams
-  and none with one; the range narrowing the groups and the empty state naming it.

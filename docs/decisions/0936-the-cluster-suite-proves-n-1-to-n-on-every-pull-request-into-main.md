@@ -16,12 +16,10 @@ paths:
 gist: Beside the fresh install, cluster.yml installs the previous release from the registry, seeds it through the protocol, upgrades with the CRDs and helm upgrade alone and checks every seeded thing; N-1 to N only
 ---
 
-Issue #765, the path to 1.0, whose second gate is a live plane thirty days on one release
-with no hand step the chart, the operator or a checked precondition does not own. The
-cluster suite (Decision 889) installed the chart fresh and ran the e2e; nothing anywhere
-installed the release before and upgraded it, so a migration that needs a hand step, a CRD
-change that breaks an old object, or a row the new code misreads was found by the first
-deployment to upgrade.
+The cluster suite (Decision 889) installed the chart fresh and ran the e2e; nothing
+anywhere installed the release before and upgraded it, so a migration that needs a hand
+step, a CRD change that breaks an old object, or a row the new code misreads was found by
+the first deployment to upgrade.
 
 - **What runs.** `cluster.yml` has a second job, `upgrade`, beside `kind`, on a runner and
   a kind cluster of its own; one after the other would be about an hour. It runs
@@ -57,11 +55,7 @@ deployment to upgrade.
   profile is Ready with its pods replaced on the new release by themselves; the dormant
   session wakes there with its old log read back and answers a turn; the memory reaches a
   new session; the trigger fires on its old key.
-- **A failure says why.** A hook that fails, a CRD refused, a rollout that does not finish
-  or a seeded thing lost fails the job, and `.e2e/upgrade/logs/` is its artifact: the
-  migration Job's log (a failed hook is kept), the plane's, the operator's, the workers',
-  the release's history, the profiles, pods and events. The seed file with its trigger key
-  is not in the artifact.
+
 - **When.** On Decision 889's paths, plus `scripts/kind-upgrade-check`, the plane's
   migrations and `VERSION`, which are added to the one `cluster` filter in `ci.yml` and
   `dev-check.yml`, so a migration also runs the fresh suite; in the nightly; and on every

@@ -19,19 +19,9 @@ gist: "GUI tests await sees(); async ExUnit sets only TROUPE_TEST_ vars; one pla
 
 ## Context
 
-Rerunning a red job had become routine. A census of the `ci`, `nightly` and `release`
-runs from 2026-09-25 to 2026-10-16, the coordinator's notes and `defects.md` (D8,
-D125-D129) found about thirty tests that failed and then passed with no change. Most had
-been fixed one at a time; the same few shapes kept coming back:
-
 - **A GUI assertion made at once on what a later render draws.** `await waitFor(…)` on one
   thing, then `expect(says(…)).toBe(true)` on another: true on a fast machine, false on a
-  busy one (`teams.test.tsx` twice, `onboarding.test.tsx`, `palette-agents-watch`,
-  `start-onboarding`, `daemon-restart`, `servers-panel`, the console's `policy`). Three were app
-  bugs the same timing exposed: an update restarted before this computer's daemon had said
-  what was at work, a theme picked before the daemon's settings came was never written to
-  it, and a Ctrl-K pressed as a session's screen appeared was lost to a listener a passive
-  effect had not yet attached.
+  busy one.
 - **Shared homes.** A test that sets the process environment changes it for every test
   running beside it (`DoctorCLITest`'s shared homes, D8's "order or shared state").
 - **One plane test database for every checkout.** Two worktrees' plane suites, or a plane
@@ -97,9 +87,6 @@ finding goes to `docs/developer/defects.md` with what was tried.
 
 ## Consequences
 
-- A GUI test reads `await sees("…")` where it read `expect(says("…")).toBe(true)`; 335
-  were converted. A failing `sees` takes its ten seconds to say so, where the bare form
-  failed at once.
 - A new checkout's first plane run creates a database; old `troupe_plane_test_*`
   databases of removed worktrees stay in the dev Postgres until `scripts/dev-down --purge`
   removes its volume.

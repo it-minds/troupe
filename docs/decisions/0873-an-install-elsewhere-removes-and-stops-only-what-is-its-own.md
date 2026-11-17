@@ -12,20 +12,6 @@ paths:
 gist: Elsewhere (bin dir not the default), uninstall leaves the desktop app, Burrito payload and its TUIs, others' login entry, menu entry and PATH line
 ---
 
-#506. `install.ps1 -Uninstall` and `-CleanInstall`, and `install.sh`'s `--uninstall` and
-`--clean-install`, acted on more than the install they were pointed at. With
-`TROUPE_BIN_DIR` and `TROUPE_LIB_DIR` set to another place (a second install, or a check of
-the installer), they still ran the desktop app's own uninstaller, found through its `HKCU`
-entry whichever install it came from; cleared the TUI's unpacked payload under `%APPDATA%`
-and `%LOCALAPPDATA%` (`~/.local/share` or `~/Library/Application Support` for `install.sh`),
-which the default install's `troupe` runs from too; stopped every TUI running from that
-payload; and on macOS removed `~/Applications/Troupe.app`. Looking at what else such an
-uninstall reaches turned up three more of the same kind: `troupe-daemon login off`, which
-removes the person's one login entry whichever daemon it starts (Decision 818 runs it
-first); `install.sh`'s PATH line, which it took out of every shell profile whichever
-directory it named; and on Linux the menu entry and icon, and the licence copies in
-`~/.local/share/doc/troupe`.
-
 - **Which install is the default.** The one whose programs are in the default place:
   `%LOCALAPPDATA%\Programs\troupe`, or `~/.local/bin`. It is decided by the directory of
   the programs and not the daemon's, because what is shared follows the programs: the
@@ -62,16 +48,3 @@ directory it named; and on Linux the menu entry and icon, and the licence copies
   PowerShell 5.1's `Get-Process` gives no parent). An install elsewhere stops the
   `troupe.exe` it is about to remove; what that one started from the payload may run on
   until its window is closed, and the payload it runs from stays anyway.
-
-Proof: `scripts/check-installers.ps1` and `scripts/check-installers` gained stand-ins for
-what is shared (a desktop app entry whose uninstaller is written down, not run, and which
-removes the entry as the real one does; a payload in both places; a TUI process running
-from it, a desktop app process and the install's own `troupe`, whose stops are written
-down; another install's login entry, menu entry and PATH line; for `install.sh` on macOS, a
-`uname` that answers Darwin). On the chunk's tip an uninstall elsewhere ran the desktop
-app's uninstaller, cleared the payload, stopped the TUI running from it and the desktop app
-and removed the other install's login entry (9 failures under Windows PowerShell 5.1), and
-under `sh` it also took the other install's menu entry and PATH line and, on macOS, the
-desktop app (12 failures). With this change every check passes under Windows PowerShell
-5.1, PowerShell 7, `sh` and `bash`, the default install's included. Not run: a real macOS,
-and either script against a real desktop app or payload, which no check may touch.

@@ -19,13 +19,6 @@ symbols:
 gist: "A memory save reaches running sessions next turn (pod push, laptop 5-min signed poll) as memory_changed; child reads its chain's; deleted profile's goes"
 ---
 
-#55 slice 2. Decision 922 delivered the organisation's, a team's and a worker profile's
-memory documents to every session in their scope, read once as the session started, and
-named what it left: a running session not hearing of a save, `troupe config pull` not
-fetching memory, a child profile not reading its parent's, a deleted profile's memory
-staying with its name, no instructions view in the desktop app, no `config.changed` for a
-refreshed copy, and `memory.json` kept after sign-out. This records how each is closed.
-
 ## A save reaches a running session at its next turn
 
 **One holder per session.** `Troupe.Session.PlaneMemory` is a small process in the session's
@@ -114,21 +107,6 @@ the versions under the name was what made a new profile inherit an old one's wor
 them under some other key would be a second store nobody reads. A team's needs nothing: its
 documents are keyed by the team's id, which a team made again does not share.
 
-## The desktop app's instructions view
-
-A session's backstage has an **Instructions** pane: every layer its next prompt is read
-from, in order (the organisation's memory, a team's, each profile's of its chain, the
-person's own `AGENTS.md`, the repository's files and its brief), each with where it came
-from and its version: a memory document's version and the plane's URL with when this
-machine fetched it, or the activation on a pod; a file's path and the start of its hash. A
-file found and not read stays listed, muted, saying why. Shown, never edited. It is the
-session's `context.get` (`SessionView.context()`, laid out by `instructionLayers`), which a
-pod answers over the session's own connection, and it reads again when a `memory_changed`
-arrives and when this computer's settings change. `context.get` now lists the documents the
-session's next turn reads (on a pod, the activation's, which no file on the pod holds; it
-listed none there before) and says where they came from (`memory_from`). The transcript
-shows `memory_changed` as the harness's sentence, in the desktop app and the TUI.
-
 ## `memory.json` is dropped on sign-out
 
 `identity.sign_out` for the plane the copy came from, and `identity.unlink`, delete
@@ -139,56 +117,3 @@ person signed out is no longer one. **The key pinned for the plane stays**: it i
 plane, not the organisation's content, and the next sign-in is checked against it.
 `organisation.json` is left as it is: it holds defaults and limits, not words for agents,
 and dropping it is a different question.
-
-## Not in this slice
-
-A shared facts store, librarian-written briefs and user-level memory on the plane (the
-slot's out of scope). A profile whose `extends` changes reaches its running sessions' memory
-at their next activation, not their next turn: only a save announces. `PROTOCOL.md` still does
-not document the plane-to-pod pushes (`session.activate`, `session.memory`) as a section of
-their own.
-
-## Proof
-
-- `apps/troupe_core/test/troupe/plane_memory_refresh_test.exs`: a session started with the
-  organisation's version 1 given version 2 and a team's: nothing until its next turn, then
-  the new text in the prompt and the old gone, one `memory_changed` with the versions from
-  and to and the sentence, `explain_session` naming version 2 and the team's; the same
-  versions again saying nothing; an empty list taking them away, said; a session not
-  running refused.
-- `apps/troupe_worker/test/troupe/worker/plane_memory_test.exs`: `session.memory` to a
-  session up on the pod read at its next turn, the change logged, `explain_session`
-  following; refused at a stale epoch and for a session not up there.
-- `apps/troupe_gateway/test/troupe/gateway/plane_memory_test.exs`: a save on a signing fake
-  plane reaching a session running on the daemon through the poll, `config.changed` with
-  scope `memory`, the next turn reading it, `context.get` naming version 3; `config.memory`
-  keeping an answer, saying what changed, announcing it, the session's next turn reading it,
-  the same answer again changing nothing; sign-out of another plane keeping the copy, of the
-  copy's plane dropping it, keeping the pinned key and taking the documents from the
-  session's next turn; `context.get` naming a session's given documents, not the copy.
-- `apps/troupe_plane/test/troupe/plane/memory_test.exs`: a three-profile chain read
-  organisation, base, standard, dev, `admin.memory.get` of the child listing the two it
-  inherits with their versions and who saved them; a deleted profile made again under its
-  name with no document and no versions, and the audit's two saves still there without the
-  text.
-- `apps/troupe_plane/test/troupe/plane/bundles_test.exs`: a save telling the pod holding a
-  running session `session.memory` with its epoch and what it now reads; another team's save
-  telling it nothing; a parent profile's save reaching a child profile's session, the
-  parent's document before the child's.
-- `clients/tui/test/troupe/model_config_test.exs`: `config pull`'s memory handed to
-  `config.memory` as the plane signed it, and what is kept said; a refusal said, exit 1.
-  `remote_translate_test.exs`: `memory_changed` drawn as the harness's sentence.
-- `clients/gui/packages/client/test/instructions.test.ts`: the layers in order with their
-  source and version, a file not read listed and why, a pod's memory named as the
-  activation's. `transcript.test.ts`: `memory_changed` as a system line.
-- `clients/gui/apps/desktop/test/instructions-view.test.tsx`: a local session's pane listing
-  organisation, team, the person's own and the repository's files with their sources and
-  versions, nothing editable, and reading again when `memory_changed` arrives; a team
-  session's pane listing what its pod reads, the activation's memory first.
-- `clients/gui/apps/console/test/memory.test.tsx`: a profile's page showing what it inherits
-  from the profile it extends and where it is changed; the preview's new sentences.
-
-All of these failed on the chunk's tip (`db62353`): there was no holder, no
-`session.memory`, no poll, no `config.memory`, no chain in `for_session/2`, no deletion of a
-profile's documents, no `inherited`, no instructions pane, and `context.get` on a session
-given its documents listed the machine's copy.

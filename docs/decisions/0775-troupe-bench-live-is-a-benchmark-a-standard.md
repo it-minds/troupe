@@ -13,12 +13,6 @@ paths:
 gist: "`troupe bench --live` is a benchmark: a `standard` suite of ten tasks beside the four-task `smoke`, each run's tool calls in its record, a score…"
 ---
 
-Issue #390's second
-tier, and issues #405 and #406, found in the first live bench against `qwen3-235b`
-(Decision 773's four tasks, three runs each). That bench said whether the setup
-worked; it could not say whether the harness is good at work, nor where a dear run's
-money went: one `fix_test` run cost five times another, and nothing in the report
-said why.
 - **Two suites.** `smoke` is Decision 773's four and stays the default, so the
   cheapest answer to "does it work here" costs what it did and its history compares
   with the runs before this. `standard` adds six tasks that look more like work, each
@@ -51,8 +45,7 @@ said why.
   it succeeded, the bytes of its result as the model was given it (a result the log
   keeps as a blob is resolved and measured), and `cut`, whether the result says part
   of it was left out. Never its input or its output, as the history has never held
-  what a run was sent. `largest_tool_result_bytes` beside it. The run that cost five
-  times another would have said: one `shell` call, 60 kB, cut.
+  what a run was sent. `largest_tool_result_bytes` beside it.
 - **`--keep DIR` (#406).** Each run's workspace and state directory, its session log
   among them, are left under `DIR/<when the bench started>/<scenario>-<n>` instead of
   removed, so a person can read what a run did. A directory of the bench's own, so a
@@ -71,15 +64,3 @@ said why.
 - **`suite` stays the report's name.** Schema 1's `suite` is `"troupe bench"`; the
   set that ran is `live_suite` (`smoke`, `standard`, or `only` for scenarios named).
   Fields are added, none renamed (772).
-- **Proof:** `Troupe.BenchLiveTest`: the suites, a scenario by name, an unknown suite
-  or scenario refused before anything is asked of the provider; the `standard` suite
-  against the stand-in, every outcome and check holding, the log searched rather than
-  read whole, `answer_only` in one call with no tool, the summary and its interval;
-  the six new tasks failing when the stand-in touches nothing; a run whose last
-  allowed call ends the turn succeeding, which failed on the chunk's tip with "the
-  run's budget stopped it (max_turns)", and one cut off with a call pending not; a
-  read cut at the limit in `tool_calls` as a blob measured whole, and `--keep`
-  leaving the workspace and the session log; the interval's values; `--compare`'s
-  `all` rows. The TUI's `bench_cli_test.exs` (TUI Decision 142). And the installed
-  `troupe bench --live --suite standard --repeat 2 --keep --json` against the
-  stand-in, on the pull request.

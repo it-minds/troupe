@@ -25,9 +25,7 @@ gist: "One user-level memory per person (by id, nobody else reads it), read afte
 
 #55's rest, as the maintainer decided it on #765 on 2026-10-25: agents may write to the
 **user level only**; the organisation's, a team's and a profile's memory stay read-only to
-agents. Decisions 922 and 929 put the organisation's three levels on the plane and named the
-person's own as left. This records how it is kept, who reads and writes it, and how an agent
-adds to it.
+agents.
 
 ## The document
 
@@ -58,17 +56,10 @@ an agent may add to it with `remember` and `level: "me"` and change nothing in i
 they edit it. Not chosen: inside *Your organisation's memory*, whose preamble tells an agent
 it may change none of it.
 
-In the instruction listing (`context.get`, `instructions_loaded`) its scope is **`person`** and
-its path `memory:user`: `user` was already the person's own `AGENTS.md` there, and a client
-from before this reading `person` as an unknown file is better than one reading the plane's
-document as a file on this machine. The change line says *Your memory changed* when it alone
-changed.
-
-It reaches every session the person runs: on their machines in the signed `me.memory` copy,
-on pods with every activation and every `session.memory`, whose document lists now carry the
-owner's own whichever level was saved. A save of it tells the pods of the person's running
-sessions; the daemon that saved it asks `me.memory` again at once, so the sessions on that
-machine read it at their next turn, and other machines at their next poll.
+In the instruction listing (`context.get`, `instructions_loaded`) its scope is
+**`person`** and its path `memory:user`: `user` was already the person's own `AGENTS.md`
+there, and a client from before this reading `person` as an unknown file is better than
+one reading the plane's document as a file on this machine.
 
 ## Who writes it
 
@@ -102,48 +93,3 @@ connection's own rule), and memory is not that: the documents already go down to
 every activation (Decision 922), and the entry that comes back is one an agent was asked to
 keep for its person, theirs from then on, as the text of a `me.memory.put` is. Nothing else
 of the session's goes with it.
-
-## Not in this slice
-
-Provenance and history per document beyond the audit row (who or which session wrote each
-line, soft delete); a change to a profile's `extends` reaching its sessions at their next
-turn; agents proposing changes to a team's memory for review. The daemon has no Local only of
-its own: an agent's entry is refused only where the daemon holds no plane token.
-
-## Proof
-
-- `apps/troupe_plane/test/troupe/plane/user_memory_test.exs`: a person's saves versioned,
-  conflict-checked, the same text making none, audited on `user/<subject>` without the text; a
-  preview writing nothing and refusing past the limit; entries under the day's heading below
-  what is there, folded; a full document refusing an entry and naming `troupe memory --edit`;
-  a principal refused; no administrator listing, reading or changing it and another person's
-  machine and session reading none; a pod's session reading it after the organisation's
-  levels, a cleared one none; a re-key and a SCIM fold keeping it, removal deleting it;
-  `me.memory` signed, with `user`.
-- `apps/troupe_plane/test/troupe/plane/control_test.exs`: `session.memory.put` adding to the
-  session owner's, the audit naming the session; every other scope `forbidden`, another pod's
-  session `not_found`, a stale epoch `conflict`, nothing written.
-- `apps/troupe_plane/test/troupe/plane/bundles_test.exs`: the activation carrying the owner's
-  own last and nobody else's; an entry telling the pod of her running session and not his; an
-  organisation's save keeping her own in what her session is told.
-- `apps/troupe_worker/test/troupe/worker/user_memory_test.exs`: an entry from a pod's session
-  over a real control link landing in its owner's document, another session refused.
-- `apps/troupe_core/test/troupe/tools/remember_me_test.exs`: an entry through the installed
-  host, one entry and nothing in the repository; signed out offering the repository; anchors
-  refused, no level for the organisation's; a session's call logged with what it wrote.
-- `apps/troupe_core/test/troupe/instructions_prompt_test.exs` and `plane_memory_test.exs`: the
-  person's section after the organisation's and before their own `AGENTS.md`, listed as
-  `person` with its version; `config --explain` naming it; the change line.
-- `apps/troupe_gateway/test/troupe/gateway/plane_memory_test.exs`: `me.memory` and
-  `me.memory.put` through the daemon, a running session reading the save at its next turn, a
-  stale version said; `remember` with `level: "me"` in one session landing on the plane and a
-  second session reading it at its next turn with `memory_changed`; signed out, a sentence.
-- `clients/tui/test/troupe/memory_cli_test.exs`: the command line, show, edit, nothing
-  changed, a conflict, clear, signed out.
-- `clients/gui/apps/console/test/mine.test.tsx`: Mine previewing and saving a person's own
-  over the version edited, a conflict said, the organisation's still read-only, no `admin.*`.
-  `apps/desktop/test/instructions-view.test.tsx`: the pane listing it as its own layer, edited
-  in place, a conflict said; signed out, why. `packages/client/test/instructions.test.ts`.
-
-All of these failed on the chunk's tip (`08f1e008`): there was no `user` scope, no
-`me.memory.put`, no `session.memory.put`, no `level` on `remember`, and no person's section.

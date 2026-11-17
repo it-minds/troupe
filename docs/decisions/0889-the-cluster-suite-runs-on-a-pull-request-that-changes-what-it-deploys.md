@@ -12,14 +12,6 @@ paths:
 gist: A PR touching charts/, docker/, dev/kind/, the kind scripts or the operator runs cluster.yml; CRDs reach the API server first; the suite proves isolation
 ---
 
-Issue #679, and #670 for what the suite then proves. Decision 676 put the cluster suite in
-the nightly and the release only, "where it is owed". The 0.16.0 release run then failed
-ten minutes into its cluster job: the API server refused a TroupePolicy CRD rule (a
-`x-kubernetes-validations` rule over several lines with no `message`), fixed by #678.
-Nothing before the release had applied that CRD to an API server. The chart job's
-kubeconform checks a CRD's shape against a schema, and only an API server compiles its
-CEL; `ci.yml` ran the cluster suite only when `inputs.cluster` was set, which no pull
-request does; `dev-check.yml` had no cluster at all; and the fixer had no kind cluster.
 This replaces 676's sentence about the cluster suite and nothing else of it.
 
 - **When.** A pull request that changes what the cluster runs: `charts/**` (the CRDs and
@@ -42,9 +34,7 @@ This replaces 676's sentence about the cluster suite and nothing else of it.
 - **The CRDs first.** Right after `scripts/kind-up`, before the images are built (nine of
   the job's twenty-five minutes), the CRDs are applied and the admission policy and the
   kind values' TroupePolicy go through a server-side dry run, so the chart still owns them
-  when it installs. A refused rule fails in about a minute. Reproduced against a kind API
-  server (v1.34): the CRD before #678 is refused, "message must be specified if rule
-  contains line breaks", and the tip's is accepted.
+  when it installs. A refused rule fails in about a minute.
 - **What the suite proves of a worker's isolation (#670).** A worker reaches no other
   namespace's pod and no pod but the ingress's reaches it; it cannot reach 169.254.169.254
   even where another policy admits it, against a stand-in the job puts on the runner (an

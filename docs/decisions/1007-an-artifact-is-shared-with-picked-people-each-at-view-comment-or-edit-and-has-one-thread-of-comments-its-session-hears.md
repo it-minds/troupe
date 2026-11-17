@@ -19,12 +19,6 @@ symbols:
 gist: "artifact.share {person, role} grants by name (no link), roles view < comment < edit, strongest of link/grant/visibility wins; artifact.comments/comment, one thread, writers owner/edit/comment; pod session hears artifact_commented, never input"
 ---
 
-Issue #62's last slice. Decisions 948, 950, 953 and 964 shipped the store, versions at one
-address, links that honour sign-in, team and private visibilities and team ownership;
-Decision 950 left "teams and picked people; comments", and named a link as what covered a
-picked person meanwhile. A link has to be sent and opened before it gives anything, and the
-issue's picker "searches people", and asks for "roles per share: view, comment, edit".
-
 ## Picked people
 
 `artifact.share {id, person, role}` shares the artifact with that one person by name, at
@@ -47,7 +41,8 @@ who share a team with the caller. The daemon forwards it, so the desktop app's g
 the same people whether it reads the plane itself or through this computer's daemon, and
 Local only refuses it as every `artifact.*`. The plane grants to any active person of the
 plane by subject (an organisation's artifact already reaches all of them); the clients offer
-whom the picker finds.
+whom the picker finds. The console lists and removes who an artifact is shared with by name
+and does not pick: a person's own things are picked in their own app (Decision 954).
 
 **Not chosen:** the put that sends no files (Decision 955) carrying a `people` list, as the
 brief for this slice suggested. A put is a version, which an edit link's holder may make
@@ -76,56 +71,4 @@ artifact's id and title, the comment) in the session's log at the plane's epoch,
 as a share's or a memory save's news is. Whoever steers the session reads it beside the work,
 and may ask the agent to act on it. It is never input: a comment is somebody else's words,
 and a reader with `comment` must not be able to steer an agent they could not steer
-otherwise. The owners and editors find comments on the gallery's cards (the count) and the
-artifact's view in the desktop app and the console, where the thread is shown beside its
-details.
-
-## Clients
-
-The desktop app's aside has **Shared with** under *Who can see it* for an owner (the people,
-each at a role, **Remove**, and **Share with** with the search and *They may* view, comment or
-edit) and **Comments** for everybody, with a box where the plane says the caller may write.
-`audienceOf` reads `scope: shared` before `private`, so a private artifact shared with
-somebody is under *Shared with you* for them, not *Only you*; that was wrong for a link's
-holder before this too. The gallery gains a choice of kind beside the audience chips. The
-console's artifact page shows the thread and, for an owner, who it is shared with by name and
-**Remove**; its links offer **Comment**. The terminal's *Shared with you* row says "you may
-comment" or "you may edit", and its empty tab says a share by name lands there.
-
-## Left
-
-Thumbnails, #977 (a page drawn to an image needs a browser on the plane, which the plane does
-not run and the artifacts host's isolation would have to extend to); pinning an artifact in a
-person's gallery and filters by team and date, #978 (the owner's version pin exists); a
-comment's deletion or editing, #979; a laptop session hearing a comment, #980 (the plane has
-no way to tell a daemon's session today); and a retention period, #981, the one admin control
-#62 names that has none. The console lists and removes who an artifact is shared with by name
-and does not pick: a person's own things are picked in their own app (Decision 954).
-
-## Proof
-
-- `apps/troupe_plane/test/troupe/plane/artifact_people_test.exs`: a person picked at view finds
-  it under Shared with you, opens it on both hosts, and may not put, comment, share or delete;
-  nobody else sees it; at comment writes in the thread and may not put; at edit puts and
-  comments and does nothing an owner does; listed for the owner only, named again at another
-  role, removed, each audited; refused for nobody, for the owner, for a role that is not one,
-  and to a non-owner; the stronger of a link's and a grant's role, both ended by one removal;
-  the thread read by an organisation's reader who may not write until given a role, oldest
-  first with names, counted on the rows; empty and long refused; not there for whoever may not
-  open it; audited without its text; gone with the artifact; and the session it came from, on
-  a pod, told `artifact.commented` with the artifact, the author and the text.
-- `apps/troupe_worker/test/troupe/worker/artifact_comments_test.exs`: the pod writes
-  `artifact_commented` in a running session's log and starts no turn; nothing for a session
-  not up there or at another epoch; a shapeless one refused.
-- `apps/troupe_gateway/test/troupe/gateway/artifacts_test.exs` (the share with a person, the
-  thread and `people.search` forwarded with only their arguments) and `local_only_test.exs`
-  (refused under Local only).
-- The desktop app's `artifacts-gallery.test.tsx` (a picked person at a role, listed and
-  removed; the thread with names and a box for a role that comments, none for a reader; the
-  kind filter), the console's `artifact-comments.test.tsx`, and the terminal's
-  `artifacts_screen_test.exs` (a row shared by name under Shared with you, saying the role)
-  and `remote_translate_test.exs` and the client's `transcript.test.ts` (`artifact_commented`
-  as one line with who, which and what).
-
-All of the plane's failed on the chunk's tip (`767aa773`): there was no `person` on
-`artifact.share`, no `comment` role and no thread.
+otherwise.

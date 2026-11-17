@@ -26,13 +26,9 @@ gist: "Turns name memory versions (instructions_loaded memory); pod asks session
 ---
 
 #55, as the maintainer decided it on #765 on 2026-10-25 ("memory, proven read"): sessions
-record the memory versions each turn ran under; the console shows who is behind; a stale pod
-session re-reads before its next turn; rollback and side-by-side in the editor. Enforcement
-otherwise unchanged. Decisions 922, 929 and 943 put the documents on the plane, got a save to
-running sessions at their next turn and gave each person their own; what none of them could
-say is whether a given session had in fact read a given version, and a `session.memory` push
-lost between two turns (a pod reconnecting, a notification dropped) left the next turn on
-the version before with nothing to show it. This records how that is closed.
+record the memory versions each turn ran under; the console shows who is behind; a stale
+pod session re-reads before its next turn; rollback and side-by-side in the editor.
+Enforcement otherwise unchanged.
 
 ## What a turn ran under
 
@@ -113,22 +109,12 @@ who may change the document. `admin.sessions.list` marks each running pod sessio
 current` or `behind` (`Memory.standing/1`, the in-force documents computed once per team,
 profile and owner in the listing); the Sessions page shows `memory: behind`.
 
-## The editor
-
-**Rollback** (`admin.memory.rollback {scope, name, to, version}`) is a put of version `to`'s
-text as the next version, over `version` as every save is, so the history keeps every version
-and a rollback is itself undone the same way. Audited as `memory.put`, with `rolled_back_to`
-and `note: "rolled back to v3"` beside the version, size and hash. A method of its own, not a
-`rollback` argument on the put, so the put's `text` stays required. In the console an open
-version has *Restore version n*, previewed through `admin.memory.preview` as a save is, with
-the readers' line, then *Roll back*, then the audit's record.
-
-**Side by side**: `admin.memory.get` takes `against`, another version to compare the one
-shown with (the version before it where absent), and answers `against` and `against_text`. The
-diff stays the plane's line diff (`List.myers_difference/2`); the console lays it out as two
-columns, the older on the left, a line gone marked on the left and one come on the right, a
-run of each paired across and a line with no partner blank. An open version has *Beside
-version n*, the version in force.
+**Rollback** (`admin.memory.rollback {scope, name, to, version}`) is a put of version
+`to`'s text as the next version, over `version` as every save is, so the history keeps
+every version and a rollback is itself undone the same way. Audited as `memory.put`, with
+`rolled_back_to` and `note: "rolled back to v3"` beside the version, size and hash. A
+method of its own, not a `rollback` argument on the put, so the put's `text` stays
+required.
 
 ## `troupe memory --status`
 
@@ -140,51 +126,3 @@ out, or with the plane unreachable, it still says what the copy holds and why th
 not asked. `troupe memory --status` prints it and exits 0 whenever it could ask the daemon.
 Under `troupe memory` rather than `troupe doctor`: it asks the plane, which `doctor`'s
 offline checks do not.
-
-## Not in this slice
-
-Provenance per line (who or which session wrote each line, E44's); rules inside memory; an
-agent writing above the person's level. A pod's session whose plane is unreachable for
-longer than a turn still runs on what it holds, said only in the pod's debug log. A
-laptop's report is per session, so a machine with many sessions sends up to 64 stamps lists
-every five minutes; a machine summary would be smaller, and per session is what the console
-must list.
-
-## Proof
-
-- `apps/troupe_plane/test/troupe/plane/memory_read_test.exs`: a pod's session reporting
-  version 1 current and kept; version 2 saved and its push lost, the next report answered
-  with version 2 and version 2 kept; a session another pod holds `not_found`, a stale epoch
-  `conflict`, nothing kept; `admin.memory.get`'s readers with a pod's and a laptop's session,
-  both behind after a save and the preview saying so, the session list marking the pod's
-  `behind` then `current` after its next turn; a team's document listing its members'
-  machines and not another team's; a nudge sending `session.memory` to a pod and saying a
-  machine's hears at its next poll, an unknown session `not_found`; a rollback to version 3 as
-  version 5 with the audit's `rolled_back_to` and note, `conflict` over a replaced version and
-  `not_found` for a version there is not; two versions compared with `against`.
-- `apps/troupe_core/test/troupe/plane_memory_turn_test.exs`: a turn asking with what it holds,
-  `instructions_loaded` naming version 1's stamp and the read kept; the check answering
-  version 2 with nothing given (the push lost), the next turn's prompt reading version 2,
-  `memory_changed` from 1 to 2, `instructions_loaded` and the read naming version 2; a check
-  that cannot answer leaving the turn on what it holds.
-- `apps/troupe_worker/test/troupe/worker/memory_read_test.exs`: over a real control link to a
-  real plane, a pod's session activated with version 1, version 2 saved and never announced,
-  and the next turn reading version 2, with `memory_changed` and the plane keeping version 2.
-- `apps/troupe_gateway/test/troupe/gateway/plane_memory_test.exs`: the daemon's poll carrying
-  the session's stamps and none of the text; `me.memory.status` naming the copy's versions,
-  the plane's and the session's as current, then the plane's new version and the session
-  behind.
-- `clients/tui/test/troupe/memory_cli_test.exs`: `troupe memory --status` parsed, refused with
-  `--edit`, printing the copy, the plane's newer version and a session behind; signed out,
-  why it was not checked.
-- `clients/gui/apps/console/test/memory.test.tsx`: Company memory listing one running session
-  behind with its version and the laptop's, a nudge said and sent, the preview counting the
-  readers; a version beside the one in force in two columns with the added line marked and a
-  blank; a rollback previewed, saved as version 3 with version 1's text and the audit's note.
-  `sessions.test.tsx`: `memory: behind` on the session behind and not on the current one.
-
-The plane suite's file failed on the chunk's tip (`f1684a4b`), all seven: there was no
-`session.memory.read`, no `memory_reads`, no `readers`, no rollback, no nudge, no `against`.
-The core, worker, gateway, TUI and console tests above fail there for the same reasons:
-no check hook, no `memory` in `instructions_loaded`, no `sessions` on the poll, no
-`me.memory.status`, no `--status`, no readers or rollback in the console.

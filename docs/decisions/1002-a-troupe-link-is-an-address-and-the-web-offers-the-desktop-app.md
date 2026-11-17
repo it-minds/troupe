@@ -17,9 +17,6 @@ symbols:
 gist: "troupe://open|session/<id>|artifact/<id> with ?plane=<https url> only; any other parameter, a fragment, userinfo or a non-https plane refuses the whole link in one line; a plane not signed in to opens the sign-in filled in with 'This link is for <host>. Sign in there?' and nothing is sent until Sign in; the shell only checks scheme and length. /.well-known/troupe gains plane.downloads (recommended desktop version + three installers) and plane.console; the console and docs banner opens or installs, dismissed per recommended version"
 ---
 
-#959 gives the desktop app a URL scheme and every web surface a way into it. Three things
-were open, and each is settled here.
-
 - **What a link may carry.** Exactly three forms, each a place the app already shows:
   `troupe://open?plane=<url>`, `troupe://session/<id>?plane=<url>`,
   `troupe://artifact/<id>?plane=<url>`; `open` may leave the plane out (the docs site has

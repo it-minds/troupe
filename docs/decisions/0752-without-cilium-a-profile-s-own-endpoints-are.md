@@ -12,10 +12,9 @@ paths:
 gist: "Without Cilium, a profile's own endpoints are admitted as the installation's are: a name on another port as the public rule's addresses on that…"
 ---
 
-Issue #268, its second part, as decided
-there; 749 did not choose this. 749 refused an LLM gateway on 8443, or an MCP server
-on the office network, where the profile was set up, so an installation without
-Cilium that ran its gateway in-house could not use it.
+749 refused an LLM gateway on 8443, or an MCP server on the office network, where the
+profile was set up, so an installation without Cilium that ran its gateway in-house could
+not use it.
 - **What is admitted.** The worker NetworkPolicy gives each of a profile's endpoints
   the public rule does not reach a rule of its own, as 724 does OpenBao and the object
   store: the LLM endpoint, each MCP server (its own, and its channel's bundle's
@@ -44,12 +43,3 @@ Cilium that ran its gateway in-house could not use it.
   NetworkPolicy, the refusal and the condition cannot disagree about an endpoint.
 - The git hosts and an MCP identity's token endpoint are still not judged, as #268
   does not name them. With Cilium nothing changes.
-- **Proof:** the protocol's `reach_test.exs` (admissions and refusals: ports, both
-  families, the ranges' edges, the v6 spelling, entries with and without a port, the
-  platform's), the operator's `resources_test.exs` (a name on 8443, private and public
-  addresses in both families, entries, loopback and link-local admitted by nothing, a
-  port the platform shares, the Cilium path) and `reconciler_test.exs` (the condition
-  reachable for the gateway and the server, beside their rules; named for loopback and
-  link-local), and the plane's `reach_test.exs` (saved, refused, a channel's server,
-  the bundle, the editor, the Workers page). The operator's NetworkPolicy and
-  condition cases and the plane's saves failed on the chunk tip.

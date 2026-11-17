@@ -75,11 +75,3 @@ not ask.
   addition, and one that should be the person's or the organisation's setting rather than
   the model's guess, so nothing here forecloses it; until then the person chooses each
   time, which is the safe default for something other people read.
-- **Proof.** `Troupe.Tools.PublishArtifactTest`: a call with no visibility must ask and
-  its request carries `publication`; one with a visibility is a plain ask; the allow with
-  an answer publishes for the chosen audience and owner, says so, and the decision names
-  them with `edited`; an allow naming nobody is refused and the request waits on;
-  `allow_session` on it is an allow; a wrong shape and a delegation's keys are refused
-  naming the publication; a publication's keys on another tool's request are refused
-  naming the tool; a denial with a word back. The gateway's and the worker's artifacts
-  tests pass `owner` through to the plane.

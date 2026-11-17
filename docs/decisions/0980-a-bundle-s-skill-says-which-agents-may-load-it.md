@@ -65,18 +65,4 @@ offers what the skill opened to it.
 **Seen before a session finds it.** `admin.profile.agents` gives each agent `loads`, the
 bundle's skills it may load before a grant narrows them, and the answer `skills`, every
 skill the bundle in effect carries. The row's `skills` stays its own frontmatter's, which
-the builder edits; `loads` is beside it rather than in its place. The console's profile
-page says "loads ..." or "loads none of its bundle's skills" on each agent where the bundle
-has skills, and a bundle version's page shows each skill's `agents`. The bundle editor
-holds skills as JSON, so the key is written and kept there as any other key of a skill.
-
-## Proof
-
-`apps/troupe_core/test/troupe/skills_test.exs` ("a skill the bundle opens to agents": an
-agent with no `skills:` loads a skill whose `agents` names it, with the tool and the prompt
-line; `all`; one not named cannot; a grant still narrows; the hold keeps it).
-`apps/troupe_protocol/test/troupe/protocol/bundle_test.exs` (parse, refuse a bad shape,
-refuse an unknown name in a draft but not on a re-read, `loads?/3`, a materialised
-bundle's skills carry `agents`). `apps/troupe_plane/test/troupe/plane/admin_test.exs`
-("each agent of a profile says which of its bundle's skills it loads", and the refusal at
-`admin.bundle.validate` and `publish`). Each failed before the change.
+the builder edits; `loads` is beside it rather than in its place.

@@ -10,12 +10,6 @@ paths:
 gist: Every screen of the GUI is drawn in Afterglow, the launcher and the full-screen "new session" with them
 ---
 
-Issue #52, part 2 of 2, on the tokens
-702 laid down. The session view (transcript, tool calls, the agent's and the
-harness's questions, approvals), the inbox, review, This computer with its models
-and servers panels, appearance and the command palette are restyled to the comp;
-the two screens the comp has that neither part listed are built. Nothing behaves
-differently: the same protocol calls, the same words on the buttons.
 - **The launcher is behind the lockup, not the first screen.** The comp opens on
   it; the app still opens on the one list, because the list is the whole idea
   (Sessions.tsx says so) and the app's tests and habits are built on it. The lockup
@@ -44,11 +38,3 @@ differently: the same protocol calls, the same words on the buttons.
   machine's cyan, not the comp's pink: pink marks a person's decision and nothing
   else, which 702 held to and this holds to. The `ag-scan` keyframe is defined in
   the comp and used by nothing in it.
-- **Room left.** The session head's subject column stacks the breadcrumb and the
-  title and is where the next wave's goal line, loop controls and "while you were
-  away" marker go.
-- **Proof:** `pnpm tokens:check`, `icons:check`, the GUI's typecheck, its test
-  suites (the app's grew from 13 to 18: `statusOf`, the trust question, the
-  launcher), the desktop build, and every screen against `pnpm fake` and the
-  client's fake daemon in a browser, light and dark, at 1280px and 380px, on the
-  pull request.

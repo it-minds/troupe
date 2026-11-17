@@ -55,9 +55,6 @@ the settings page now shows two of the `ui` keys.
   it does not know is drawn as Afterglow and said once, in the status line, per value. A
   session on a plane has no settings door (`Client.settings/1` answers it with an error),
   so it draws in Afterglow for now. Light or dark stays the terminal's (807).
-- **The settings page** shows `theme` as a menu of the four, its cursor on the one in
-  use and no "type one instead", since a theme is one of them or none; and `blink` as a
-  toggle. Both apply immediately.
 - **The mark, per #228's table: fill is what the agent did alone, hollow is what waits on
   you.** In the top right corner of every window's border, a right-aligned title three
   cells wide that the left title is fitted around (`View.mark/2`). ◐ ◓ ◑ ◒ in `:working`
@@ -74,22 +71,3 @@ the settings page now shows two of the `ui` keys.
   drawn differently by many terminals, so the TUI draws the mark and the border lit and
   unlit off its clock, which works in any of them; `ui.blink: false` holds them lit.
   Terminals do not report reduced motion, so the setting is the switch.
-- **Not in this slice:** painting the canvas (126's opt-in), still not built; glyph
-  fallbacks for a font without the Geometric Shapes (#228's ⏺ → ● → *), since nothing
-  measures the font; "follow my terminal", a fifth theme of only the sixteen
-  (`TROUPE_COLORS=16` draws that today); the mark in the status line, and the observer's
-  blinking "▶ you".
-- **Proof:** `test/troupe/tui_theme_test.exs` — every theme at truecolor, 256, 16 and no
-  colour, light and dark (the reserved colour on what waits on you and nowhere below the
-  window's tile, the accent and the diff in the theme's own, ◑ in the corner), the
-  palette against all four tokens files, no other role on the reserved colour at
-  truecolor or 256, the corner turning ◐ ◓ ◑ ◒ with the activity line, ◑ blinking and
-  steady with blinking off, ⏺ in one cell, ○ read, ✗ failed, and with no colour the
-  glyph and the word still there; `settings_test.exs`; `shared_settings_test.exs` (a
-  theme the desktop app sets drawn by the running TUI, one picked on its page reaching
-  the desktop app, an unknown one said once). The reproductions — Footlight drawn in
-  Afterglow's pink, a working window with no ◐, the running TUI not following the
-  desktop app's `ui.theme` — failed on the chunk's tip. `mix check`; and the installed
-  TUI in Windows Terminal on scratch homes with the fake provider, in Footlight and in
-  Limelight, its window working (◐ turning in the corner and the activity line) and then
-  waiting on a question (◑ in the theme's reserved colour, blinking with the border).

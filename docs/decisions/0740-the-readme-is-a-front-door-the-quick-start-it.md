@@ -9,22 +9,13 @@ paths:
 gist: The README is a front door, the quick start it points to is run by CI, and the product is shown with example data
 ---
 
-Issue #188. A stranger landing here met the
-umbrella's layout, five images, a deploy command and the release process before
-anything said what Troupe is for, with no picture of it, no page that set it beside
-the agent CLIs a reader already runs, and six of its own words in the first paragraph
-with nowhere to look them up.
 
 *The README* is one screen: what Troupe is in two sentences, one Mermaid diagram of the
 machine and the cluster, what it is not, the install from the release installers for
-Linux, macOS and Windows, where to go next, and the licence with the name's terms. The
-rest moved to where it was already said: the images and the deploy to
-`docs/admin/installing.md`, which now also lists the plane's front-page paths;
-releasing to `docs/developer/ci.md` and `docs/developer/deployment.md`; building from source
-to `docs/developer/`; writing a client to PROTOCOL.md. Five badges, each something a
-reader can act on: CI on `main`, the quick start's own run, the latest release, the
-protocol's version and the licence. The protocol badge is static, so the quick start's
-job fails when it stops naming PROTOCOL.md's version.
+Linux, macOS and Windows, where to go next, and the licence with the name's terms. Five
+badges, each something a reader can act on: CI on `main`, the quick start's own run, the
+latest release, the protocol's version and the licence. The protocol badge is static, so
+the quick start's job fails when it stops naming PROTOCOL.md's version.
 
 *The quick start* (`docs/quick-start.md`) is install, a key, a first session, what it
 cost, a cap, and what a plane adds, in that order, because the budget is the part a
@@ -55,13 +46,5 @@ what it asks, and when you do not need it, each claim linked to the page or code
 behind it. *The glossary* (`docs/glossary.md`) defines each word once, and a page links
 to it the first time it uses one.
 
-*Pictures*, under `docs/assets/`, made with a headless Chromium from made-up data only:
-no real person, host or key. The desktop app is its web build against `pnpm fake`,
-signed in as that deployment's Alice. The console is its teams page from the plane's
-own endpoint, rendered in its test environment against the development PostgreSQL
-from made-up teams, people and spend, as the page is before its script runs. The TUI is
-`View.render/2` drawn into a headless `CellSession` from made-up events, as its suite
-draws it, then cell by cell into HTML. A recording of a live terminal session needs a
-recorder this project does not use yet; the capture stands in for one. Proof: the
-quick start's job on both platforms, `scripts/doc-links.exs` and
-`scripts/check-neutral.exs`.
+*Pictures*, under `docs/assets/`, made with a headless Chromium from made-up data only: no
+real person, host or key.

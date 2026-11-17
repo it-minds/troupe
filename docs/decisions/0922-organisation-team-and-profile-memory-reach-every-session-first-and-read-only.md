@@ -18,12 +18,10 @@ symbols:
 gist: "Org, team, profile memory on the plane, versioned, audited, 8192 bytes each; sessions read them first, org then team then profile, as instructions; no tool writes them"
 ---
 
-#55 slice 1. Until now the only memory was a repository's (`.troupe/memory.md`, Decisions
-649 and 838), which no other repository, person or team sees. The maintainer decided the
-slice on 2026-10-18: layered memory files, the organisation's, a team's and a profile's,
-on the plane and edited in the console, each reaching every session in its scope as an
-instruction layer, like a project brief, with the person's own memory on top, read-only
-to agents. Decision 860 had left exactly these levels to #55. This records how.
+The maintainer decided the slice on 2026-10-18: layered memory files, the organisation's,
+a team's and a profile's, on the plane and edited in the console, each reaching every
+session in its scope as an instruction layer, like a project brief, with the person's own
+memory on top, read-only to agents.
 
 ## The documents
 
@@ -71,11 +69,7 @@ organisation's and the teams' the caller administers, each with the version in f
 saved it and when, its text, *Change*, every version opening onto what it changed, and,
 for a team admin, the organisation's read-only with who changes it. A profile's is on the
 profile's own page, through the same editor, also on a gitops plane: a profile's memory is
-the plane's, not its manifest's. A change is a textarea with its size against the limit,
-then the preview (the shared `Preview`, with a line-by-line `TextDiff` in place of the
-fields' diff), then *Save*, then the audit's record, as every edit in the console is. The
-diff is the plane's (`List.myers_difference/2` on lines), so what the preview shows is what
-the plane compared.
+the plane's, not its manifest's.
 
 ## How a session gets them
 
@@ -123,13 +117,6 @@ instructions from the organisation that apply as written, which disagreement the
 wins, that no tool of the agent's writes them, and that asked to change one the agent says
 it cannot and points at the console (Company memory, or the profile's page).
 
-**Named everywhere a layer is.** `troupe config --explain` (and `--session`, and the pod's
-answer) lists each after the files, `memory   the team design's memory, version 5
-(https://plane.example.test, fetched ..., kept in ...)`, a pod's as `(the plane, with the
-session's activation)`, and `--json` has `memory`, each with `scope`, `name`, `version`,
-`hash`, `source` and `fetched_at`. The TUI's `/context` names each by its label and
-version, first.
-
 ## Read-only to agents, and treated as instructions
 
 No tool writes them. On a pod they exist only in the session's configuration; on a laptop
@@ -139,61 +126,3 @@ outside), and `remember` writes only the repository's facts. The section's pream
 an agent asked to change one reads. They are the organisation's word, in the instruction
 section, not fenced as data: that is what an administrator writing them means, and they
 come only from the plane, signed on a laptop, over the control channel to a pod.
-
-## Not in this slice
-
-A shared facts store, librarian-written team briefs and user-level memory on the plane
-(out of scope by the slot); `troupe config pull` fetching memory beside the organisation's
-document (it refreshes at the next link); the desktop app showing the layers (it has no
-instructions view today); a child profile reading its parent's memory; a profile deleted
-and made again under its name finding the old memory (the rows stay with the name);
-announcing a refreshed copy to clients as `config.changed` is announced for the document.
-
-## Proof
-
-- `apps/troupe_plane/test/troupe/plane/memory_test.exs`: versions numbered and kept with
-  who saved them, the text normalised, a version's line diff against the one before, the
-  audit rows with the version from and to; the same text making no version and no row; a
-  save over a replaced version refused naming the one in force; past the limit refused at
-  the preview and the put with nothing written; the preview's diff, size and effect writing
-  nothing; a team admin changing their team's, reading the organisation's, `not_found` on
-  another team's, forbidden on the organisation's and a profile's, their audit listing
-  their team's row; a platform admin editing all three, an unknown profile and scope
-  refused; nobody who administers nothing reading any; a pod's session's documents in
-  order and another team's left out; a cleared document reaching none; `me.memory` signed
-  as `memory`, verified against the plane's served key and refused as `client_defaults`,
-  holding the organisation's and the person's team's and not the design team's or the
-  profile's; a person in no team getting the organisation's alone.
-- `apps/troupe_plane/test/troupe/plane/bundles_test.exs`: the activation push carrying the
-  organisation's, the team's and the profile's memory, none of another team's, after an
-  empty list before any was saved. `admin_parity_test` and `console_coverage_test` hold the
-  four methods to the table, the MCP tools and Company memory.
-- `apps/troupe_core/test/troupe/plane_memory_test.exs`: a signed copy read into the
-  configuration, the organisation's first; the copy edited on disk refused with the
-  sentence and nothing of it read, and refused unsigned with the key pinned; an expired copy
-  holding with its warning; the copy outside the workspace's writable reach; a pod reading
-  the activation's documents and never the machine's copy; a document past the limit kept
-  to it and marked; the instructions' order, outside the budget, the section's read-only
-  words and the provenance's `version`; `config --explain` text and JSON naming each.
-- `apps/troupe_core/test/troupe/instructions_prompt_test.exs`: a real session's prompt
-  with the organisation's and a team's memory, then the person's own `AGENTS.md`, then the
-  repository's, and the `instructions_loaded` event listing them in that order.
-- `apps/troupe_gateway/test/troupe/gateway/plane_memory_test.exs`: a link to a signing fake
-  plane keeping `me.memory` with its signature, and a session started after it listing the
-  two documents first in `context.get`; a plane with no `me.memory` leaving the copy.
-- `apps/troupe_worker/test/troupe/worker/plane_memory_test.exs`: `session.activate` with
-  `memory` putting the organisation's, the team's and the profile's before the repository's
-  `AGENTS.md` in the turn's system prompt, and `explain_session` naming each with its
-  version; an activation with none giving none.
-- `clients/tui/test/troupe/context_command_test.exs`: `/context` naming the organisation's
-  and a team's memory first, each with its version.
-- `clients/gui/apps/console/test/memory.test.tsx`: the organisation's with its version,
-  a change previewed line by line, saved on confirm, the audit's note and the plane's row;
-  a version opening onto its change; a conflict said and nothing saved; a team admin
-  changing their team's and only reading the organisation's, another team's not listed; the
-  limit held before anything is asked; a profile's edited on its page. `shell.test.tsx`
-  now has no area left undrawn.
-
-All of these failed on the chunk's tip (`4ce0c7b`), but for the shell's, which asserted the area undrawn: there was
-no memory table, no admin method, no `me.memory`, no `memory` in the activation, and no
-memory scope in the instructions.

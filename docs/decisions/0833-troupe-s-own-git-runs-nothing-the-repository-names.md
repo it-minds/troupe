@@ -40,7 +40,7 @@ that will not start is still an error, never a raise (Decision 733).
 **What is neutralised, and why each.**
 
 - `core.fsmonitor=false`. The fsmonitor hook runs in any command that reads the index:
-  `status`, `diff`, `ls-files` (the brief's file count). This was the reproduction.
+  `status`, `diff`, `ls-files` (the brief's file count).
 - `core.hooksPath` set to a path inside the reaper helper, which is a file, so no
   directory can be there and no hook runs. `status` can write the index and so run
   `post-index-change`; a ref update runs `reference-transaction`; the gateway's worktree
@@ -103,8 +103,8 @@ only when
   followed;
 - the common directory is the `.git` of the checkout: git's top level, or the main
   checkout that a worktree's `.git` names and that names the worktree back
-  (`Troupe.Config.Trust.root/1`, the check trust, `Troupe.Worktree.main/1` and
-  Decision 831 make);
+  (`Troupe.Config.Trust.root/1`, the check trust, `Troupe.Worktree.main/1` and Decision
+  831 make);
 - the git directory is that `.git` itself or, for such a worktree, one of the checkout's
   `.git/worktrees/`.
 
@@ -138,15 +138,3 @@ onboard`. The shell can still write there, which is why the runner does not rely
   inside under its own config.
 - The cost: one or two more git processes for each call (where the repository is, and
   its config for a command that touches the working tree).
-
-**Proof.** `Troupe.GitTest`: a repository whose `core.fsmonitor` names a marker-writing
-script runs it through none of `git_read`'s `status` and `diff`, the brief's HEAD and file
-count, and `Troupe.Worktree.committed/2`; a clean filter (one named `a=b'c` among them), a
-process filter, the `post-index-change` and `reference-transaction` hooks, a textconv and
-an external diff run through none of `git_read`'s ops; three forged `.git`s naming another
-checkout's repository are not read by `git_read` and stamp no HEAD on the brief, while a
-real worktree and a subdirectory of a checkout are read; `write_file` and `edit_file`
-refuse `.git/config`, `.GIT/config`, a nested `.git` and a link to `.git`.
-`Troupe.Gateway.WorktreesTest`: a worktree is made, its work committed and merged in a
-repository with eight hooks, an fsmonitor, a filter and a merge driver set, and none of
-them runs; the merge driver's file is a conflict. All of these failed on the chunk's tip.

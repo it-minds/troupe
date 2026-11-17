@@ -15,18 +15,9 @@ symbols:
 gist: "Provider types live in ProviderType alone; the four new ones use the OpenAI adapter, differences in Compatible; Gemini via its OpenAI endpoint"
 ---
 
-Issue #658, slice 1: what #122's proposal section 6 left of the providers. A documented
-table of provider types, `ollama`, `openrouter`, `azure_openai` and `gemini` beside
-`anthropic` and `openai`, and a `type:` that names none of them an error rather than a
-silent `openai`.
-
-**What the tip did.** A file naming `type: gemini` was already refused, by Decision 686's
-strict reading: `providers.g.type must be one of openai, anthropic, not "gemini"`, with a
-hint that called OpenRouter `openai`. So the reproduction the slot was handed ("`type:
-gemini` loads silently as `openai`") did not hold for a file. The silent `openai` left was
-the one-time copy of opencode's providers, which wrote every SDK package but Anthropic's
-as `type: openai`: `@ai-sdk/google` became an OpenAI provider with no base URL. The tests
-for this slice start from what the tip refused: a gemini provider that loads as one.
+A documented table of provider types, `ollama`, `openrouter`, `azure_openai` and `gemini`
+beside `anthropic` and `openai`, and a `type:` that names none of them an error rather
+than a silent `openai`.
 
 **One table.** The list of types was written out in seven places: the schema's two enums,
 the organisation's enforceable `provider`, `Troupe.LLM.Provider.known/0` and `adapter/1`,
@@ -107,9 +98,7 @@ windows, output caps and prices (strings of dollars per token, cache rates inclu
 which the catalogue now reads, so `troupe models` prices its models.
 
 **The catalogue.** A provider is asked for its list when its type has one and it has a
-key, or takes none. A refused provider is asked nothing: before, one refused because the
-variable its `base_url` reads was unset was asked at its vendor's default URL with its
-key.
+key, or takes none.
 
 **A name that is no type.** The loader's refusal names the file, the line, the key and
 every type. For a name people mean another type by (`litellm`, `vllm`, `lmstudio` and
@@ -123,26 +112,4 @@ are a type's (`@ai-sdk/google`, `@ai-sdk/azure`, `@openrouter/ai-sdk-provider`,
 **Out of scope.** Bedrock and Vertex: each signs its requests with its cloud's own
 credentials (SigV4, a Google service account) rather than taking a key, which is an auth
 subsystem rather than a row; a gateway in front of either is the type of the API the
-gateway speaks. The onboarding flows in both clients, which offer `anthropic`, `openai`
-and a gateway, and the desktop app's Models panel, which shows a type it has no name for
-as it is, are not changed.
-
-**Proof:** `Troupe.LLM.ProviderTypesTest`: the table against the schema's enums, the
-organisation's list, the adapters and the documentation; each new type loading, the
-session-wide provider and the environment included; a name that is no type refused with
-the file, line, key and types; an Azure provider without a URL refused and asked nothing;
-migrate's rewrites, and its refusal for a name it cannot rewrite; each type's URL, key
-header, cap, effort and identity headers against `Troupe.Test.FakeTransport`; a vendor
-variable going only to its own endpoint; what a provider attached to a call going back to
-its type alone, and through the log; and, end to end against each type's stand-in
-(`fake_providers.exs`), Ollama with no key, OpenRouter's headers, Azure's deployment and
-`api-version`, Gemini's signature handed back and the turn refused without it in Gemini's
-own words, and the catalogue listing Ollama keyless, pricing OpenRouter, naming Gemini's
-models as a request does and asking Azure nothing. `Troupe.Config.OrgTest`: an enforced
-`ollama` and its URL held as `openai`'s are, a named provider of another type or URL
-refused, and an organisation's default `openrouter` provider. `Troupe.ConfigProvidersTest`:
-the opencode copy's types.
-
-**Not tested:** any real provider. The stand-ins are written from each provider's
-documentation; whether Azure's `2024-10-21` takes `stream_options`, and whether Gemini's
-compatible endpoint reports cached tokens, is said by the documentation and not measured.
+gateway speaks.

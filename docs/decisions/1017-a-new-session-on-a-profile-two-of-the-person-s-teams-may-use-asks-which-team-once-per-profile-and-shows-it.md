@@ -20,10 +20,7 @@ symbols:
 gist: "Two of your teams on a profile: the new-session screen asks which team once (before sending from profiles.list's teams, or on the plane's choose-a-team refusal), remembers it per profile in the client, shows it as a chip; troupe run --team; plane logs the refusal"
 ---
 
-A second `team.grant` of a profile is an ordinary admin action, and it stopped every new
-session on that profile for anybody in both teams: the plane answered `invalid_params`,
-`reason: "choose a team"`, `teams: [...]`, and both clients printed "Could not start:
-Choose a team" with no list and no way to pick (troupe #992). The plane's refusal is right
+The plane's refusal is right
 and stays: the team decides whose budget pays and whose volume the session mounts, and
 guessing would pick one of those for somebody.
 
@@ -43,12 +40,7 @@ changed. Neither client shows "Could not start" for it.
 **The question is the team chip's picker.** Where it is a choice, and only then, the
 sentence ends "· everyone on [team] can open it", the
 team a chip like the others, in place of "everyone on core and design can open it", which
-was not true of any one session. With no team chosen yet the chip reads "which team?" in
-the queued amber, and the line under the sentence asks: "core and design can both use
-dev. Choose the team it is for: its budget pays, and everyone on it can open it." Start
-(Enter in the terminal) opens the chip's picker first, "WHICH TEAM IT IS FOR", each option
-saying whose budget pays and who can open it, and the pick starts. Esc closes it and leaves
-the form as it was, nothing started. With one candidate team nothing new appears and the
+was not true of any one session. With one candidate team nothing new appears and the
 create names no team, as before: the plane takes the only one. In the terminal the team is
 a fourth chip, after the agent, reached with Tab and →; this is the TUI's sentence of
 Decision 975 and TUI Decision 172 with one chip more, so it takes no TUI decision of its
@@ -72,16 +64,4 @@ the candidates.
 help and the command reference). A run without one on such a profile stops, non-zero, with
 one line: "troupe: could not start: core and design can both use dev; say which team it is
 for with --team, as in --team core". A script is never given the team the screen
-remembers: what a script runs as is written in the script. The desktop app has no
-scripted start or deep link that creates a session, so it has no such line.
-
-**The plane logs it.** The refusal is one `info` line, who, on which profile, and how many
-of their teams may use it, so an operator asked why a person could not start a session
-finds it. The refusal's shape is unchanged; `PROTOCOL.md` says it under `profiles.list`'s
-`teams`, where the plane's `session.create` parameters are described.
-
-The daemon does not stand between a client and the plane's `session.create`: both clients
-call the plane for a platform session, the terminal through its own plane connection, the
-desktop app through its sign-in, so there is no forwarding that could drop the refusal's
-`data`. The terminal's plane client now passes the names through whole
-(`{:choose_team, teams}`) instead of flattening the refusal into text.
+remembers: what a script runs as is written in the script.

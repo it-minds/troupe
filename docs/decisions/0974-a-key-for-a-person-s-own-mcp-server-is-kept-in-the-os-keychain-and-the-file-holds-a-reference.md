@@ -54,7 +54,3 @@ form a person pastes a key into must have somewhere safe to put it.
   offer bringing it in with `skills.add`. It reads and writes nothing else. Finding other
   tools' files of servers is not part of this: a server is still brought in from a file
   named.
-- **Both clients do all of it.** The desktop app asks for a missing secret in the server's
-  row and takes secrets in its drawer; the TUI's `/mcp` page asks with `p` or `/mcp secret`,
-  drawing what is typed as dots, since a command line is drawn as typed. Both show the
-  tools' titles and marks and the folders of skills to bring in.

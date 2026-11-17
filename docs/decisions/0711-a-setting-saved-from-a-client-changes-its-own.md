@@ -42,15 +42,3 @@ file into a machine-written one.
   setting it did not touch as it is, with its load warning, for `troupe config
   migrate --write`, the one rewrite, which is asked for and shows its diff first.
   An edited file gets no `version` line it did not have: a missing one reads as 1.
-- **Not done:** `troupe config migrate --write` still renders the file, since a
-  migration moves keys between blocks; and a string with a space or a letter
-  outside ASCII is quoted, though YAML would take some of them bare.
-- **Proof:** `Troupe.Config.YamlTest` (one key written is one line changed, nested,
-  added under its parent and with a missing parent, quoting, a key with only a
-  comment, a map in braces, line endings and a byte order mark, a key of the same
-  name elsewhere, removal with the lines beneath, `{}` and new maps and lists);
-  `Troupe.Config.WriteKeyTest`, `Troupe.Config.ModelSettingsTest` and the terminal
-  UI's `Troupe.SettingsTest`, each keeping a comment and changing one line;
-  `Troupe.Agent.BudgetQuestionTest`'s workspace answer; `Troupe.Config.ExplainTest`
-  for a new file and an edited one; and `config.set` over the installed daemon's
-  socket on a commented file, the diff that one line.

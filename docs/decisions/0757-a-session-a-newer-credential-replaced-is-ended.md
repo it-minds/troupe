@@ -11,15 +11,6 @@ paths:
 gist: A session a newer credential replaced is ended when the new one is kept, a server a bundle drops has its sessions ended, and a `400` to a request…
 ---
 
-Issue #358, defect D51, and two of the things 746 left
-out of its slice. 746 kept a server's MCP session under its URL and a hash of the
-call's headers and ended it only when its holder stopped. A pod calling a server as
-its profile (747) gets a new token about once an hour, and each opened a new session
-and left the one before open at the server until the pod stopped; a daemon's
-refreshed sign-in (741) did the same for as long as the local session ran. A bundle
-that dropped a server left its sessions open. And a server that answers a session it
-has forgotten with `400` rather than the specification's `404` failed every call
-after it restarted, until the pod did.
 - **What a session is kept for.** The key does not change: two credentials are two
   sessions, and a person's and a profile's are never one. Beside it each session
   records the server it was opened for, by URL and name, and its credential mode
@@ -49,12 +40,3 @@ after it restarted, until the pod did.
   look the session up before it and answer an unknown one with `400`, `DELETE`
   included; the Python SDK's session manager answered `400` through at least 1.23.0
   and answers `404` on its main branch now.
-- **Proof:** `Troupe.MCPHandshakeTest`, against `test/support/fake_mcp.exs`, which
-  now takes `forgotten: 400` and `bad_calls: true`: a credential that replaced another
-  ends the session the other opened and leaves a person's be; a session the server
-  answers `400` for is opened again once and the call goes through; a `400` a new
-  session does not cure is the call's error after one retry, with one session left.
-  `Troupe.Worker.MCPTest`: a profile's renewed token, through `:profile_tokens`, ends
-  the session the token before it opened, and a bundle that drops a server ends the
-  session discovery opened for it, lets go of a person's and keeps the other
-  server's. All five failed on the tip of `development-2026-10-03`.

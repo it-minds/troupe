@@ -48,10 +48,6 @@ and wider; below that, and for everything else 139 says, it stands.
   provider's cache reads, there at nothing too, `↓` what came back, and the money is
   `money/1`'s, `no price` and `, n calls unpriced` included. The side box's old
   `⟳ … from cache` line went with `token_lines/1`.
-- **Width.** The side box is 30 to 60 columns (Decision 48). Two figures share a line where
-  the room (inside the borders, less the two-column indent) holds both, and each takes its
-  own where it does not, so at 30 columns `↑ 1.2M sent · 310.0k cached` is two lines
-  rather than one wrapped mid-figure.
 - **The transcript.** The fold still writes `{:system, turn_line(turn)}` under the turn:
   the narrow screen reads it there, and so does every test written for 139. The view
   leaves it out of the window's own agent's transcript wherever the side box is drawn, the
@@ -67,11 +63,3 @@ and wider; below that, and for everything else 139 says, it stands.
   words to find it, but every test of the line reads the fold's `{:system, …}` entry, and
   the issue keeps them as they are. `This turn` following the agent viewed with ←→ would
   move a subagent's line too; the issue keeps the group the window's.
-- **Proof:** `test/troupe/side_box_cost_test.exs`: the two groups after a turn and no line
-  on screen at 120 columns; the line and no side box at 99; the line back at 90 and gone
-  again at 120, drawn by one process; `said when it ends` while the next turn runs, and its
-  figures once it ends; `(none)` before any; `no price` and an unpriced call; the warning
-  under `Session`; the figures one to a line at 30 columns and side by side at 60; every
-  line within its room from 26 to 56 columns; the window's lines left out and a subagent's
-  kept. Eight of the first nine failed on the chunk's tip, the narrow one passing there as
-  it should. `turn_cost_test.exs` and `cli_test.exs` pass unchanged.

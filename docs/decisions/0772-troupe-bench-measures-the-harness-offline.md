@@ -13,10 +13,9 @@ paths:
 gist: "`troupe bench` measures the harness offline against budgets kept in one file, and CI fails past one"
 ---
 
-Issue #390, its first tier; the live tier and `troupe doctor --bench`
-stay open. The harness's cost curve (#389) was found by a person reading a bill:
-nothing in the repository said how many model calls a turn makes or what each one
-sends, so nothing could notice when that got worse.
+The harness's cost curve (#389) was found by a person reading a bill: nothing in the
+repository said how many model calls a turn makes or what each one sends, so nothing could
+notice when that got worse.
 - **Shape, not answers.** Five scenarios (`Troupe.Bench.Scenarios`): one turn of thirty
   tool calls (calls per turn, the system prompt and tool definitions, the largest
   prompt, growth per round trip, input tokens over the turn, events logged), a tool
@@ -60,9 +59,3 @@ sends, so nothing could notice when that got worse.
   request the model is handed. When #389's first slice records each call's prompt
   breakdown and each turn's sum in the log, a live run reads the same `calls[]` from
   there.
-- **Proof:** `Troupe.BenchTest` (the suite passes on this build's numbers; a budget
-  lowered under a measure fails the run and the table names it; a budget for a
-  measure nobody takes fails; two runs write the same JSON; the report's fields are
-  schema 1's; both kinds of outcome), the TUI's `bench_cli_test.exs`, failing on the
-  chunk's tip with `unknown arguments: bench`, and the installed `troupe bench`, on
-  the pull request.

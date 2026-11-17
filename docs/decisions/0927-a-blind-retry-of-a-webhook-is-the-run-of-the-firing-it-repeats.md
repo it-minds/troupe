@@ -18,12 +18,8 @@ gist: "A keyless webhook retry is the run of a firing <60 s before it (trigger r
 `POST /trigger/<id>` without an `Idempotency-Key` was keyed on the trigger, the revision
 and the clock's minute (`Triggers.window_key/1`). A POST at :59 and its retry a second
 later were two keys, so two runs: the second was `skipped` under the concurrency cap the
-first held and answered `202` with no session. The release CI of 0.23.0 failed so in the
-cluster suite ("does not double-fire when an executor retries blindly"): the first
-session was made at 09:38:59 and the retry came after the minute turned. The plane's own
-test of the same thing had been made to wait out the end of a minute instead
-(`same_minute!`). Decision 914 moved a run by hand from the second to the minute for the
-same reason; the minute only made the boundary rarer.
+first held and answered `202` with no session. Decision 914 moved a run by hand from the
+second to the minute for the same reason; the minute only made the boundary rarer.
 
 A second hole sat beside it. Two firings that agree on a run, by the unique key or by the
 window, race: the one that loses the insert reads the winner's run between its row and
@@ -62,16 +58,3 @@ its session, and `replay/3` answered such a run with no session too.
 - **Answer the overtaking repeat with `409` at once.** An executor that retried because
   the first was slow would be told to retry again, for a session a few milliseconds
   away.
-
-## Proof
-
-`apps/troupe_plane/test/troupe/plane/trigger_ingress_test.exs`, "the run it makes": a
-retry after the first run is moved to the last tenth of a second of the minute before
-(the cluster suite's failure), three blind retries racing, two racing at either side of
-a minute's turn with the clock given, and a repeat that overtakes a run still making its
-session, then one whose session never comes. On the code before this, the retry across
-the turn, the racing retries and the overtaking repeat each got a `202` that carried no
-session. `same_minute!` is gone from the old test.
-
-A run by hand (`admin.trigger.run`) and a GitHub fix by hand still key on the minute
-(Decision 914, Decision 917) and keep the boundary; they are left for their own change.

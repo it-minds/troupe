@@ -11,18 +11,6 @@ paths:
 gist: The prompt's task list stays as the turn's input or last compaction left it; rendered per call, every rewrite writes the cached conversation again.
 ---
 
-Issue #389, its last item (D65). Decision 770 put the task list behind the system
-prompt's cache mark, as the request's `system_tail`, and said what that left: the
-conversation's marks come after the whole system prompt, so each `todo_write` changed
-what stood in front of them, and the call after it wrote the conversation to the cache
-again. On the chunk's tip, a thirty-call turn with ten rewrites against the stand-in that
-caches only what is marked, as Anthropic does: the ten calls after a rewrite read 3,618
-tokens, the tools and the system prompt, of prompts up to 14,073; the turn read 206,201
-tokens from the cache and wrote 65,341, which at Sonnet 5's prices is 2.65 times cheaper
-than no cache. The same turn on the OpenAI-compatible wire, where the list joins the
-system message (770) and so is the first thing in the prompt, read only the tools after
-each rewrite.
-
 - **The list as the turn began.** The agent keeps the list its prompt shows apart from
   the list itself (`State.prompt_todos`): `todos` as they stood when the turn's input was
   taken, or when a compaction last rewrote the conversation, and the same on every call
@@ -56,23 +44,3 @@ each rewrite.
 - **Counted where it was.** `system_tail` is still the list, so `Spend.prompt_bytes/2`
   counts it in `system` (769) as before. The offline bench's `measure/2` counts
   `request.system` only (D65); no scenario writes a list, and no budget moves.
-- **Not measured:** what a real provider bills for the same turn. Nothing in this chunk
-  calls one; #389's measured factor on a provider that caches is still owed.
-- **Proof:** `Troupe.Agent.PromptCacheTest`. The thirty-call turn with ten rewrites: every
-  call after the first reads all of the call before (on the tip, the ten after a rewrite
-  read 3,618 tokens); the turn reads 254,177 tokens and writes 14,378, 6.19 times cheaper
-  than no cache at the same prices, where it was 2.65. On every call the last list the
-  model reads is the current one, the newest `todo_write`'s result, and the system prompt
-  is the same on all thirty. A second input's calls show the list the first turn left,
-  before and after the turn rewrites it; its first call reads the tools and the system
-  prompt, and each after it all of the one before. The OpenAI-compatible wire, thirty
-  calls: each reads the whole of the call before (on the tip, the ten after a rewrite
-  read 3,418 tokens, the tools). With the scripted model: a compaction in the middle of a
-  turn shows the list as it is now, where the calls before it showed none, which is what
-  the turn began with; and an agent killed in the middle of a turn shows the list the
-  turn began with after the restart. All six fail on the tip. And the installed daemon
-  release, with scratch homes, driven over the protocol against a stand-in like the
-  test's with `provider: anthropic`: one input, thirty calls, ten rewrites, every call
-  after the first reading all of the one before and the last list in each request the
-  current one; the build installed before it read 3,501 tokens on each of the ten calls
-  after a rewrite.
