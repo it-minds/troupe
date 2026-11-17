@@ -380,12 +380,12 @@ export class RemoteSource implements FleetSource {
     const token = await this.token();
     const [offered, invited] = await Promise.all([
       this.plane
-        .rpc<{ sessions: Record<string, unknown>[] }>(token, "remote.list", {})
+        .remoteSessions(token)
         .then(({ sessions }) => (sessions ?? []).map((s) => rowFromRemote(s, this.id)))
         // A plane from before #58 relays nothing, which is no sessions rather than a fault.
         .catch(none),
       this.plane
-        .rpc<{ invites: unknown }>(token, "invites.list", {})
+        .listInvites(token)
         .then(({ invites }) => invitationsFrom(invites).map((i) => rowFromInvite(i, this.id)))
         // Nor does a plane from before #765 invite anybody.
         .catch(none),

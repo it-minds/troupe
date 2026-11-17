@@ -4,8 +4,11 @@
 // token; the live session is then spoken to the worker directly (see connection.ts).
 
 import { TroupeRpcError } from "./connection.js";
+import type { OwnMemory, OwnMemoryPreview, OwnMemorySaved } from "./instructions.js";
 import type { Invitation, Invitee, InviteRole, Person } from "./invites.js";
+import type { PlaneDocument } from "./own.js";
 import type { ProfileView } from "./profile.js";
+import type { RemoteListRow } from "./remote.js";
 import type { JsonRpcError, JsonRpcResponse } from "./types.js";
 
 export interface Discovery {
@@ -59,6 +62,9 @@ export interface Attachment {
   /** `null` when the plane could not mint one; treat as a failure. */
   token: string | null;
   expires_at?: number;
+  /** `pending` while a full profile waits for a place: no endpoint yet, and `retry_after_ms` says when to `token.mint` again. */
+  state?: string;
+  retry_after_ms?: number;
   [k: string]: unknown;
 }
 
@@ -86,6 +92,16 @@ export interface Me {
   /** Signed in with the plane's break-glass token rather than through the identity provider. */
   breakglass?: boolean;
   [k: string]: unknown;
+}
+
+/** One of the person's own clients as the plane last saw it (`me.clients`), and how its version stands against the plane's policy. */
+export interface OwnClient {
+  component: string;
+  version: string;
+  platform?: string | null;
+  seen_at?: string | null;
+  standing: string;
+  recommended?: string | null;
 }
 
 /** What `POST /auth/breakglass` answers: a plane token for the break-glass subject, and when it ends. */
@@ -415,10 +431,6 @@ export class PlaneClient {
     return this.rpc(planeToken, "sessions.list", filter);
   }
 
-  getSession(planeToken: string, sessionId: string): Promise<SessionRow> {
-    return this.rpc<SessionRow>(planeToken, "session.get", { session_id: sessionId });
-  }
-
   listProfiles(planeToken: string): Promise<{ profiles: ProfileOffering[] }> {
     return this.rpc(planeToken, "profiles.list", {});
   }
@@ -431,23 +443,9 @@ export class PlaneClient {
     return this.rpc<ProfileView>(planeToken, "profile.get", { name });
   }
 
-  listTeams(planeToken: string): Promise<{ teams: Team[] }> {
-    return this.rpc(planeToken, "teams.list", {});
-  }
-
   /** Mark a session looked at. An acknowledgement; it changes nothing the agent does. */
   reviewSession(planeToken: string, sessionId: string): Promise<SessionRow> {
     return this.rpc<SessionRow>(planeToken, "session.review", { session_id: sessionId });
-  }
-
-  /** Let another subject in. Owner or team admin only. */
-  grantSession(
-    planeToken: string,
-    sessionId: string,
-    subject: string,
-    role: "collaborator" | "viewer",
-  ): Promise<{ session_id: string; subject: string; role: string; pushed: boolean }> {
-    return this.rpc(planeToken, "session.grant", { session_id: sessionId, subject, role });
   }
 
   /**
@@ -479,6 +477,31 @@ export class PlaneClient {
     return this.rpc(planeToken, "people.search", sessionId ? { query, session_id: sessionId } : { query });
   }
 
+  /** The laptop sessions the plane relays to this person: their own from their other computers, and those shared with them. */
+  remoteSessions(planeToken: string): Promise<{ sessions: RemoteListRow[] }> {
+    return this.rpc(planeToken, "remote.list", {});
+  }
+
+  /** The versions of this person's own clients the plane last saw, each with how it stands against the plane's policy. */
+  clientsSeen(planeToken: string): Promise<{ clients: OwnClient[] }> {
+    return this.rpc(planeToken, "me.clients", {});
+  }
+
+  /** The person's own memory as `user`, and the levels above it as `documents`, as the plane answers `me.memory`. */
+  ownMemory(planeToken: string): Promise<{ documents?: PlaneDocument[]; user?: OwnMemory }> {
+    return this.rpc(planeToken, "me.memory", {});
+  }
+
+  /** What saving `text` as the person's own memory would change, saving nothing. */
+  previewOwnMemory(planeToken: string, text: string): Promise<OwnMemoryPreview> {
+    return this.rpc<OwnMemoryPreview>(planeToken, "me.memory.preview", { text });
+  }
+
+  /** Save `text` as the person's own memory over `version`; a version since saved is refused. */
+  putOwnMemory(planeToken: string, text: string, version: number): Promise<OwnMemorySaved> {
+    return this.rpc<OwnMemorySaved>(planeToken, "me.memory.put", { text, version });
+  }
+
   pinSession(planeToken: string, sessionId: string, pinned: boolean): Promise<unknown> {
     return this.rpc(planeToken, pinned ? "session.pin" : "session.unpin", { session_id: sessionId });
   }
@@ -495,9 +518,5 @@ export class PlaneClient {
   /** Put an archived session back in the session list. Its owner's alone, as archiving it is. */
   unarchiveSession(planeToken: string, sessionId: string): Promise<SessionRow> {
     return this.rpc<SessionRow>(planeToken, "session.unarchive", { session_id: sessionId });
-  }
-
-  eraseSession(planeToken: string, sessionId: string): Promise<unknown> {
-    return this.rpc(planeToken, "session.erase", { session_id: sessionId });
   }
 }

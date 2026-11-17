@@ -125,7 +125,7 @@ export function AgentSwitch({
       : kind === "team"
       ? auth && planeProfile
         ? async (name) => {
-            const created = await auth.rpc<{ session_id: string }>("session.create", { profile: planeProfile, agent: name });
+            const created = await auth.withToken((plane, token) => plane.createSession(token, { profile: planeProfile, agent: name }));
             setOpen(false);
             onStarted?.(created.session_id, "team");
           }
