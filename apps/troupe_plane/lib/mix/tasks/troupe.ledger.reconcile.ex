@@ -8,15 +8,15 @@ defmodule Mix.Tasks.Troupe.Ledger.Reconcile do
       mix troupe.ledger.reconcile --days 7
       mix troupe.ledger.reconcile --database-url postgres://…@localhost:5433/troupe_plane
 
-  The nightly job, and the second half of a restore drill: a restored database has lost
-  whatever was recorded after the backup, and this is what says by how much.
+  A check an operator runs, and the second half of a restore drill: a restored database
+  has lost whatever was recorded after the backup, and this is what says by how much.
 
   Reports; never repairs. A job that silently rewrote the ledger to match the gateway
   would destroy the evidence that they disagreed, and which of them is right is a
   question about the incident rather than about the numbers.
 
-  Exits non-zero when the drift is over the configured threshold, so it can be a cron
-  job whose failure means something.
+  Exits non-zero when the drift is over the threshold, a million micros, so it can be a
+  cron job whose failure means something.
   """
 
   use Mix.Task

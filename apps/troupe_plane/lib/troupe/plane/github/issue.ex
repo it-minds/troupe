@@ -392,9 +392,9 @@ defmodule Troupe.Plane.GitHub.Issue do
     )
   end
 
-  @doc "The event a template is rendered against: the run's, with every piece of free text out."
+  # The event a template is rendered against: the run's, with every piece of free text out.
   @spec template_event(map()) :: map()
-  def template_event(event) do
+  defp template_event(event) do
     event
     |> update_in(["issue"], &Map.drop(&1 || %{}, ["title", "body"]))
     |> then(fn e ->

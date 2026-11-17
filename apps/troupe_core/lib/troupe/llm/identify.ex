@@ -147,9 +147,9 @@ defmodule Troupe.LLM.Identify do
     end
   end
 
-  @doc "Whether the plane attributes the session: a worker set its owner or team."
+  # Whether the plane attributes the session: a worker set its owner or team.
   @spec attributed?(map()) :: boolean()
-  def attributed?(attribution),
+  defp attributed?(attribution),
     do: string(attribution[:owner]) != nil or string(attribution[:team]) != nil
 
   @doc """

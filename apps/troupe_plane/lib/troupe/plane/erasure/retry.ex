@@ -40,10 +40,7 @@ defmodule Troupe.Plane.Erasure.Retry do
   def init(opts) do
     Process.set_label("troupe erasure retry")
 
-    interval =
-      Keyword.get_lazy(opts, :interval_ms, fn ->
-        Application.get_env(:troupe_plane, :erasure_retry_ms, @interval_ms)
-      end)
+    interval = Keyword.get(opts, :interval_ms, @interval_ms)
 
     send(self(), :pass)
     {:ok, %{interval_ms: interval, failed: 0}}

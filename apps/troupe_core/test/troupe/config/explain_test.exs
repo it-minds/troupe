@@ -195,7 +195,7 @@ defmodule Troupe.Config.ExplainTest do
     test "a new file: the new spellings only, version 1, and a header that names the schema", ctx do
       path = Path.join(ctx.base, "written.yaml")
 
-      :ok = Config.write_file(path, %{"model" => "m", "small_model" => "c", "auth_token" => "t", "x-mine" => 1})
+      :ok = Migrate.write(path, %{"model" => "m", "small_model" => "c", "auth_token" => "t", "x-mine" => 1})
       text = File.read!(path)
 
       assert text =~ ~r/\A# yaml-language-server: \$schema=https:\/\/troupe\.dev\/schema\/config\/v1\.json\n/
@@ -212,7 +212,7 @@ defmodule Troupe.Config.ExplainTest do
       File.write!(path, "# a note\nold: 1\nsmall_model: kept   # the file's own\n")
 
       :ok =
-        Config.write_file(path, %{"model" => "m", "small_model" => "kept", "auth_token" => "t", "x-mine" => 1})
+        Migrate.write(path, %{"model" => "m", "small_model" => "kept", "auth_token" => "t", "x-mine" => 1})
 
       # The file's own old spelling is left for `troupe config migrate`; the writer's are not.
       assert File.read!(path) ==
@@ -223,7 +223,7 @@ defmodule Troupe.Config.ExplainTest do
 
     test "refuses a map that spells one setting two ways", ctx do
       path = Path.join(ctx.base, "both.yaml")
-      assert {:error, message} = Config.write_file(path, %{"model" => "a", "models" => %{"default" => "b"}})
+      assert {:error, message} = Migrate.write(path, %{"model" => "a", "models" => %{"default" => "b"}})
       assert message =~ "model and models.default both set models.default"
       refute File.exists?(path)
     end

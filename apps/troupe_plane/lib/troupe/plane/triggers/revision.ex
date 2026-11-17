@@ -65,10 +65,6 @@ defmodule Troupe.Plane.Triggers.Revision do
   @document ~w(profile agent principal_id prompt_template terms visibility review notify
                concurrency source)a
 
-  @doc "The field names the hash covers."
-  @spec document_fields() :: [atom()]
-  def document_fields, do: @document
-
   @doc """
   The document of a trigger or a revision, as the hash sees it.
 

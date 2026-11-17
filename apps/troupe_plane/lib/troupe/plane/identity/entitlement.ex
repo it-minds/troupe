@@ -50,10 +50,6 @@ defmodule Troupe.Plane.Identity.Entitlement do
   @spec kinds() :: [String.t()]
   def kinds, do: @kinds
 
-  @doc "The two ways a row can read."
-  @spec modes() :: [String.t()]
-  def modes, do: @modes
-
   @spec changeset(t() | Ecto.Changeset.t(), map()) :: Ecto.Changeset.t()
   def changeset(entitlement, attrs) do
     entitlement

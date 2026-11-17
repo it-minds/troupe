@@ -87,10 +87,6 @@ defmodule Troupe.Memory do
   @spec empty() :: t()
   def empty, do: %__MODULE__{}
 
-  @doc "The view's section titles, in the order it shows them."
-  @spec canonical_titles() :: [String.t()]
-  def canonical_titles, do: Enum.map(@titles, &elem(&1, 1))
-
   @doc "The kinds a fact may be, in the order the contract names them."
   @spec kinds() :: [String.t()]
   def kinds, do: @kinds
@@ -231,9 +227,9 @@ defmodule Troupe.Memory do
 
   def unit(fact), do: fact["claim"]
 
-  @doc "The kind a section title stands for, or `nil`."
+  # The kind a section title stands for, or `nil`.
   @spec kind_of_title(String.t()) :: String.t() | nil
-  def kind_of_title(title) do
+  defp kind_of_title(title) do
     want = title |> String.trim() |> String.downcase()
 
     Enum.find_value(@titles, fn {kind, t} ->
@@ -289,17 +285,15 @@ defmodule Troupe.Memory do
     end
   end
 
-  @doc """
-  Whether a fact may no longer be true: an anchor's file changed (`moved`) or is gone
-  (`missing`), or, with no anchors, it was last checked longer ago than `:max_age_days`.
-  """
+  # Whether a fact may no longer be true: an anchor's file changed (`moved`) or is gone
+  # (`missing`), or, with no anchors, it was last checked longer ago than `:max_age_days`.
   @spec doubtful?(fact(), keyword()) :: boolean()
-  def doubtful?(%{"status" => status}, _opts) when status in ["moved", "missing"], do: true
+  defp doubtful?(%{"status" => status}, _opts) when status in ["moved", "missing"], do: true
 
-  def doubtful?(%{"status" => "unanchored"} = fact, opts),
+  defp doubtful?(%{"status" => "unanchored"} = fact, opts),
     do: aged?(fact["verified_at"], Keyword.get(opts, :max_age_days, @max_age_days))
 
-  def doubtful?(_fact, _opts), do: false
+  defp doubtful?(_fact, _opts), do: false
 
   ## Staleness
 

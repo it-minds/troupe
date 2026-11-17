@@ -1601,16 +1601,14 @@ defmodule Troupe.Plane.GitHub do
 
   defp object?(name), do: is_binary(name) and Regex.match?(@object, name)
 
-  @doc """
-  Whether `branch` is one a session may push: under `troupe/`, and a name git takes as a
-  branch, with nothing that could be read as an option or climb out of `refs/heads/`.
-  """
+  # Whether `branch` is one a session may push: under `troupe/`, and a name git takes as a
+  # branch, with nothing that could be read as an option or climb out of `refs/heads/`.
   @spec troupe_branch?(term()) :: boolean()
-  def troupe_branch?("troupe/" <> rest = branch) when rest != "" do
+  defp troupe_branch?("troupe/" <> rest = branch) when rest != "" do
     match?({:ok, _}, ref(branch)) and not String.contains?(branch, "@{")
   end
 
-  def troupe_branch?(_branch), do: false
+  defp troupe_branch?(_branch), do: false
 
   defp audit({step, data}, session, actor) do
     {:ok, _} =

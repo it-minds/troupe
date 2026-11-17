@@ -164,9 +164,9 @@ defmodule Troupe.Onboard.Start do
     |> binary_part(0, 16)
   end
 
-  @doc "An item as the protocol carries it."
+  # An item as the protocol carries it.
   @spec item_json(Onboard.item()) :: map()
-  def item_json(item) do
+  defp item_json(item) do
     %{
       "id" => id(item),
       "target" => to_string(item.proposal.target),

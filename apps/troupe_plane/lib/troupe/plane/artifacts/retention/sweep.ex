@@ -37,10 +37,7 @@ defmodule Troupe.Plane.Artifacts.Retention.Sweep do
   def init(opts) do
     Process.set_label("troupe artifact retention")
 
-    interval =
-      Keyword.get_lazy(opts, :interval_ms, fn ->
-        Application.get_env(:troupe_plane, :artifact_retention_ms, @interval_ms)
-      end)
+    interval = Keyword.get(opts, :interval_ms, @interval_ms)
 
     send(self(), :pass)
     {:ok, %{interval_ms: interval, failed: MapSet.new()}}

@@ -150,7 +150,7 @@ defmodule Troupe.Plane.Connections do
   defp config, do: Application.get_env(:troupe_plane, :transit, [])
   defp address, do: config()[:address]
   defp token, do: config()[:token] || ""
-  defp mount, do: Application.get_env(:troupe_plane, :kms_mount, "secret")
+  defp mount, do: Tokens.kv_mount()
 
   defp auth_path do
     Application.get_env(:troupe_plane, :person_auth_path, "jwt")

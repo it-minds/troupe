@@ -151,10 +151,6 @@ defmodule Troupe.Protocol.ProviderTypes do
   @spec keyless?(String.t() | atom() | nil) :: boolean()
   def keyless?(name), do: match?(%{key: :none}, fetch(name))
 
-  @doc "Whether a type has no address of its own, so a provider of it without one is refused."
-  @spec needs_url?(String.t() | atom() | nil) :: boolean()
-  def needs_url?(name), do: match?(%{url: :required}, fetch(name))
-
   # The two ways beside the types that an OpenAI-compatible server is reached at an
   # address of the person's: a gateway is the type of the API it speaks.
   @gateways [

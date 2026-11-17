@@ -163,12 +163,6 @@ defmodule Troupe.Protocol.Token do
     end
   end
 
-  @doc "How long a token has left, in seconds. Negative once it has expired."
-  @spec remaining(claims(), integer()) :: integer()
-  def remaining(claims, now \\ System.system_time(:second))
-  def remaining(%{"exp" => exp}, now) when is_integer(exp), do: exp - now
-  def remaining(_claims, _now), do: 0
-
   @doc """
   The RFC 7638 thumbprint of a JWK, used as its `kid`.
 

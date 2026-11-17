@@ -415,17 +415,14 @@ defmodule Troupe.Config do
   def as_run_by(text, "troupe"), do: text
   def as_run_by(text, command), do: String.replace(text, "`troupe config", "`#{command} config")
 
-  @doc "Write a config file the way every writer does: `Troupe.Config.Migrate.write/2`."
-  defdelegate write_file(path, map), to: Migrate, as: :write
-
   @doc "Remove the old spellings of one setting: `Troupe.Config.Migrate.drop_spellings/2`."
   defdelegate drop_spellings(map, path), to: Migrate
 
   @doc """
   Set one top-level key in a config file and answer the path written: the key's old
   spellings dropped, and the file as it was kept beside it as `.previous`, all through
-  `write_file/2`, the writer every settings screen uses. A file that is not YAML is left
-  alone and the reason answered; a missing one is made.
+  `Troupe.Config.Migrate.write/2`, the writer every settings screen uses. A file that is
+  not YAML is left alone and the reason answered; a missing one is made.
 
   The file is edited, not rewritten: the key's own line changes, or is added after the
   last key, and every other line, comments included, stays as it was.
@@ -446,10 +443,6 @@ defmodule Troupe.Config do
       {:error, issue} -> {:error, Issue.format(issue)}
     end
   end
-
-  @doc "Whether a project's file may set the key at `path` only in a trusted workspace."
-  @spec gated?([String.t()]) :: boolean()
-  def gated?(path), do: match?(%{scope: :trusted}, Schema.at(path))
 
   @doc """
   Whether a workspace is on the user file's `trusted_workspaces`, so its own files may
@@ -885,9 +878,9 @@ defmodule Troupe.Config do
     end
   end
 
-  @doc "What a named provider declares about one addressable model, or `nil`."
+  # What a named provider declares about one addressable model, or `nil`.
   @spec model_spec(t(), String.t()) :: model() | nil
-  def model_spec(%__MODULE__{} = config, id) when is_binary(id) do
+  defp model_spec(%__MODULE__{} = config, id) when is_binary(id) do
     case split_model(config, id) do
       {%{models: models}, bare} -> Map.get(models, bare)
       {nil, _bare} -> nil
@@ -1504,12 +1497,10 @@ defmodule Troupe.Config do
   def interpolate(list) when is_list(list), do: Enum.map(list, &interpolate/1)
   def interpolate(other), do: other
 
-  @doc """
-  One provider's `models:` block as model specs. Public because
-  `Troupe.Config.OpenCode` maps opencode's own shape onto the same specs.
-  """
+  # One provider's `models:` block as model specs. Public because
+  # `Troupe.Config.OpenCode` maps opencode's own shape onto the same specs.
   @spec parse_models(term()) :: %{optional(String.t()) => model()}
-  def parse_models(map) when is_map(map) do
+  defp parse_models(map) when is_map(map) do
     Map.new(map, fn {name, m} ->
       m = if is_map(m), do: m, else: %{}
       name = to_string(name)
@@ -1525,7 +1516,7 @@ defmodule Troupe.Config do
     end)
   end
 
-  def parse_models(_other), do: %{}
+  defp parse_models(_other), do: %{}
 
   # Only where the file says it (Decision 871), so every other entry is what it was.
   defp put_flag(map, key, value) when is_boolean(value), do: Map.put(map, key, value)

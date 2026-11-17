@@ -111,9 +111,8 @@ defmodule Troupe.LLM.Providers.OpenAI do
   defp refused(_request, _body, detail, _reply_to, _ref, :second),
     do: {:error, {:http_status, 400, detail}}
 
-  @doc false
   @spec output_cap_retry(map(), term()) :: map() | nil
-  def output_cap_retry(body, detail) when is_binary(detail) do
+  defp output_cap_retry(body, detail) when is_binary(detail) do
     cond do
       String.contains?(detail, "max_completion_tokens") and Map.has_key?(body, :max_tokens) ->
         body |> Map.delete(:max_tokens) |> Map.put(:max_completion_tokens, body.max_tokens)
@@ -128,7 +127,7 @@ defmodule Troupe.LLM.Providers.OpenAI do
     end
   end
 
-  def output_cap_retry(_body, _detail), do: nil
+  defp output_cap_retry(_body, _detail), do: nil
 
   # A test supplies its own transport here rather than a socket, so the request goes
   # through Req's real pipeline while the bytes are scripted.

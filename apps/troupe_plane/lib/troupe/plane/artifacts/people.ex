@@ -132,20 +132,6 @@ defmodule Troupe.Plane.Artifacts.People do
     |> Enum.sort_by(&String.downcase(&1["display_name"] || &1["subject"]))
   end
 
-  @doc "The subjects `artifact` is shared with at `role` or above, for whom its news is."
-  @spec subjects_at_least(Artifact.t(), String.t()) :: [String.t()]
-  def subjects_at_least(%Artifact{id: id}, role) do
-    wanted = Enum.drop_while(@roles, &(&1 != role))
-
-    from(p in Person,
-      join: u in User,
-      on: u.id == p.user_id,
-      where: p.artifact_id == ^id and p.role in ^wanted,
-      select: u.subject
-    )
-    |> Repo.all()
-  end
-
   defp json(%User{} = user, role, by, at),
     do: %{
       "subject" => user.subject,

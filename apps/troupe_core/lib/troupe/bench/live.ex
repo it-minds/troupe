@@ -278,12 +278,10 @@ defmodule Troupe.Bench.Live do
     end
   end
 
-  @doc """
-  Issue #465's two settings a plan's runs have (Decisions 815 and 863): `thinking_binding`
-  and `system_prompt`, as the person's configuration or the environment set them.
-  """
+  # Issue #465's two settings a plan's runs have (Decisions 815 and 863): `thinking_binding`
+  # and `system_prompt`, as the person's configuration or the environment set them.
   @spec experiment(Plan.t()) :: map()
-  def experiment(%Plan{settings: settings}) do
+  defp experiment(%Plan{settings: settings}) do
     %{
       "thinking_binding" => Keyword.get(settings, :thinking_binding, "default"),
       "system_prompt" => Keyword.get(settings, :system_prompt, "stable")
