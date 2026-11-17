@@ -1,6 +1,6 @@
 # The config.yaml a session reads
 
-Part F of the [configuration reference](configuration.md): what an administrator needs
+Beside the [configuration reference](configuration.md), what an administrator needs
 from the `config.yaml` files every session reads, and the defaults and limits an
 organisation gives the machines of the people in it, from a plane or from a managed file.
 

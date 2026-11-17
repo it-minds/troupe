@@ -4,7 +4,7 @@ What a session does on GitHub once [the GitHub App](github.md) is set up: the fi
 tools and the rules the pod keeps whatever the agent asks, and the triggers that turn an
 issue into a run, from a delivery, a sweep or "fix this", and send a review back to the
 session. How far a run may go, per profile and per team, is
-[the App's §9](github.md#9-how-far-a-run-may-go).
+[the App's §7](github.md#7-how-far-a-run-may-go).
 
 ## The fix loop
 
@@ -230,7 +230,7 @@ tried as often as it may be:
   finished and its pull request is no longer open. It is counted since a person last asked
   for a run on that issue, with its label, its command or "fix this"; a person's own runs
   are not held to the cap. The cap is the lower of the profile's `maxAttempts` and the
-  team's `max_attempts`, and **one** where neither says ([§9](github.md#9-how-far-a-run-may-go)).
+  team's `max_attempts`, and **one** where neither says ([§7](github.md#7-how-far-a-run-may-go)).
 
 Each run is the trigger's, under its `concurrency`, the profile's and the team's caps of
 runs on a repository at once, and the budget, as any run is, with the issue fenced as data

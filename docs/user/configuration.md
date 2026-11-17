@@ -199,10 +199,10 @@ models:
 ## Provider types
 
 The session-wide `provider`, and a named provider's `type`, is one of the types below. A
-name that is none of them refuses the file, naming the file, the key and these. A Troupe
-before 0.5 read any such name as `openai`; `troupe config migrate` rewrites one that is
-another's name (`litellm`, `vllm` and `lmstudio` are `openai`, `google` is `gemini`,
-`azure` is `azure_openai`) and says what to write for any other. A gateway that speaks one
+name that is none of them refuses the file, naming the file, the key and these.
+`troupe config migrate` rewrites one that is another's name (`litellm`, `vllm` and
+`lmstudio` are `openai`, `google` is `gemini`, `azure` is `azure_openai`) and says what to
+write for any other. A gateway that speaks one
 of these APIs, such as LiteLLM, is that type with its `base_url`.
 
 <!-- provider-types:begin -->

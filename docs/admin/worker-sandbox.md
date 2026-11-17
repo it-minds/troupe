@@ -4,13 +4,13 @@ Every command a session runs on a worker pod runs in bubblewrap, which builds it
 from an unprivileged user namespace, and three things on the nodes decide whether it can
 start there: the worker container's seccomp profile, its AppArmor profile, and a user
 namespace of the pod's own. This page is step 2 of [installing](installing.md#2-crds-then-the-chart)
-in full: what each needs, how to check a cluster before installing, and what bubblewrap's
-refusals mean.
+in full: what each needs and what it allows, how to check a cluster before installing, and
+what bubblewrap's refusals mean. A pod that cannot start bubblewrap refuses the command
+with a sentence; it never runs one unconfined (Decision 832).
 
 ## The workers' seccomp profile
 
-Every command a session runs on a pod runs in bubblewrap, which builds its sandbox from an
-unprivileged user namespace. A container runtime's default seccomp profile refuses one, so
+A container runtime's default seccomp profile refuses an unprivileged user namespace, so
 a worker under it refuses every command ("bubblewrap could not start one here (bwrap: No
 permissions to create new namespace ...)"). `worker.seccomp` chooses the worker
 container's profile, and the default needs nothing from you:
@@ -26,9 +26,7 @@ worker:
 ```
 
 - **`Localhost`**, the default, is the profile the chart ships: the runtime's default plus
-  the calls bubblewrap makes its namespaces with
-  ([a worker's isolation and egress](security-worker.md) says what it allows and
-  why). The kubelet reads it from the node, so it must be on every node that runs workers.
+  the calls bubblewrap makes its namespaces with (what it allows and why, below). The kubelet reads it from the node, so it must be on every node that runs workers.
   The `seccomp` container of the chart's DaemonSet `troupe-worker-profiles`, one per node,
   copies it there from a ConfigMap and waits, ready while the file is in place. It mounts
   that one host directory (`/var/lib/kubelet/seccomp/troupe`) and runs as root with every
@@ -47,6 +45,26 @@ worker:
 - **`Unconfined`** is no filter at all, for a development cluster (`dev/kind/values.yaml`).
   The `baseline` and `restricted` Pod Security levels refuse it.
 
+**What the chart's profile allows** (Decision 890). It is containerd's default profile for a
+container with no capabilities, with three changes:
+
+- `clone` and `unshare` may make a user, mount, PID, IPC or UTS namespace, the ones the
+  sandbox is made of;
+- `mount`, `umount2` and `pivot_root` are allowed, which a process with no capabilities
+  can use only inside a user namespace it made, where bubblewrap builds the sandbox's
+  root;
+- nothing else. A network, cgroup or time namespace is still refused, so a command never
+  owns a network namespace and the netfilter it would bring (`CAP_NET_ADMIN` there is
+  where many kernel exploits through user namespaces start), and `setns`, `bpf`,
+  `keyctl`, `perf_event_open`, io_uring and the new mount API stay refused as in the
+  default.
+
+What this adds is the kernel's user-namespace code, reachable from a command a session
+runs. That is the price of a sandbox built without privileges, and less than the
+alternatives: `CAP_SYS_ADMIN` would allow all of this and mounting in the pod's own
+namespace besides, and `Unconfined` removes the filter. Only the worker container has this
+profile; the pod keeps the runtime's default.
+
 ## The workers' AppArmor profile
 
 Where a node enforces AppArmor, as Ubuntu's do, two things of AppArmor's stop bubblewrap:
@@ -64,8 +82,8 @@ Where a node enforces AppArmor, as Ubuntu's do, two things of AppArmor's stop bu
 `worker.appArmor` gives the worker container a profile of its own that answers both
 without touching the node's sysctl: the runtime's default with bubblewrap's mounts and
 `pivot_root` allowed, under which a worker is confined when it makes the namespace, so the
-restriction does not apply ([a worker's isolation and egress](security-worker.md)
-says what it allows and denies). The default needs nothing from you:
+restriction does not apply (what it allows and denies, below). The default needs nothing
+from you:
 
 ```yaml
 worker:
@@ -95,6 +113,30 @@ worker:
   restriction for every process on the node, and a managed node pool often cannot set it.
   The chart never sets it, and the worker container is never `Unconfined`.
 
+**What the chart's profile allows and denies** (Decision 898). It is containerd's default
+profile with these changes:
+
+- `mount` and `pivot_root` are allowed, where the default denies every mount. As with
+  seccomp, a process with no capabilities can mount only inside a user and mount
+  namespace it made itself, so these reach the sandbox's mounts, never the pod's;
+- a worker is confined by it, so the kernel's restriction on unprivileged user
+  namespaces, which applies to unconfined processes, does not move it into a profile with
+  no capabilities. The profile is written for the AppArmor 3.0 policy ABI, which the
+  parser that loads it speaks and which does not mediate user namespaces, so a worker may
+  make one. The node's sysctl is left as it is, so every other process keeps the
+  restriction;
+- denied beyond the default: mounting sysfs, cgroup and cgroup2, mqueue, fuse, overlay,
+  bpf, ramfs and binder filesystems even inside the sandbox; the capabilities that mean
+  something only in the node's own namespace (`mac_admin`, `mac_override`, `sys_module`,
+  `sys_rawio`, `sys_boot`, `sys_time`, `syslog`, `audit_control`); and raw IP and packet
+  sockets (netlink's stay, which listing the network interfaces needs). The default's
+  denials stay: no writes to the kernel's files in `/proc` or to sysfs outside cgroups,
+  nothing of `/proc/kcore`, `/proc/sysrq-trigger`, firmware or `/sys/kernel/security`.
+
+The loader is the one new privilege the sandbox takes: a container per node, root in the
+node's user namespace with `MAC_ADMIN` alone, unconfined by AppArmor (the default profile
+would refuse it `/sys/kernel/security`, the only part of the host it mounts).
+
 ## The workers' user namespaces
 
 Bubblewrap also mounts a fresh `/proc` for the sandbox, and the kernel refuses that in a
@@ -103,7 +145,10 @@ and others mounted over, `/proc/sys` read-only): "bwrap: Can't mount proc on /ne
 Operation not permitted". Kubernetes unmasks `/proc` only for a pod in a user namespace of
 its own, so with `worker.userNamespaces: true`, the default, every worker pod gets
 `hostUsers: false` and its worker container `procMount: Unmasked`, always together. Every
-user in the container, root included, is then an unprivileged user on the node.
+user in the container, root included, is then an unprivileged user on the node, mapped to
+a range no other pod has: a process that escaped the container would be nobody there.
+Because the operator writes the two together or neither, what the masks hid
+(`/proc/kcore`, `/proc/sys`, ...) is visible only to a root with no privilege over the node.
 
 What the cluster needs for it:
 
