@@ -1148,6 +1148,25 @@ defmodule Troupe.Plane.AdminTest do
       assert Fleet.get_profile("quiet-dev").spec["memoryProposals"] == false
     end
 
+    # #1080: the most output one model call on the profile's pods asks for, a number of
+    # tokens the pods can read and nothing else.
+    test "llm.maxTokens is kept when it is a whole number above 0 and refused otherwise", context do
+      llm = %{"endpoint" => "https://llm.example.test/v1"}
+      profile = %{"name" => "long-dev", "image" => "ghcr.io/troupe/worker:1"}
+      with_cap = &Map.put(profile, "spec", %{"llm" => Map.put(llm, "maxTokens", &1)})
+
+      assert {:ok, _} = Admin.profile_put(context.root, with_cap.(32_000))
+      assert Fleet.get_profile("long-dev").spec["llm"]["maxTokens"] == 32_000
+
+      for value <- [0, -1, "16000", 1.5] do
+        assert {:error, error} = Admin.profile_put(context.root, with_cap.(value))
+        assert error.message == "invalid_params"
+        assert error.data.reason =~ "llm.maxTokens must be a whole number of tokens above 0, not"
+      end
+
+      assert Fleet.get_profile("long-dev").spec["llm"]["maxTokens"] == 32_000
+    end
+
     # The resource declares it, optional and with no default of its own, so a profile kept
     # in a repository carries it to the plane and no existing resource changes on upgrade.
     test "the WorkerProfile resource declares memoryProposals as an optional boolean" do

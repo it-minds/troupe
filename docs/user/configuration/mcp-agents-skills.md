@@ -66,6 +66,9 @@ line. Say nothing about style the code around it does not already follow.
 Finish with the findings, the most serious first, or with "nothing to fix".
 ```
 
+A `max_tokens:` in the front matter lowers how much output one of its model calls asks
+for below your own `max_tokens` (on a pod, the profile's); it never raises it.
+
 A parent agent hands it work with `delegate`, by name. The desktop app's **Agents** and
 `agents.put` check a new one as it is saved: a tool that does not exist, or a model your
 provider does not serve, is refused with the reason.

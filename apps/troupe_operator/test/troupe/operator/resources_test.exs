@@ -1857,6 +1857,20 @@ defmodule Troupe.Operator.ResourcesTest do
 
       for name <- names, do: refute(Map.has_key?(env, name), name)
     end
+
+    # #1080: the profile's output cap is the pods' `max_tokens`; absent, they ask for the
+    # harness's default and are given no variable for it.
+    test "a profile's llm.maxTokens is the pods' TROUPE_MAX_TOKENS", %{
+      policy: policy,
+      settings: settings
+    } do
+      llm = %{"endpoint" => "https://llm-gw.example.test/v1", "model" => "glm-5.2"}
+
+      assert llm_env([llm: Map.put(llm, "maxTokens", 32_000)], policy, settings)["TROUPE_MAX_TOKENS"] ==
+               "32000"
+
+      refute Map.has_key?(llm_env([llm: llm], policy, settings), "TROUPE_MAX_TOKENS")
+    end
   end
 
   # The pod's model variables, by name: a value, or where a secret one comes from.

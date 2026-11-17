@@ -281,6 +281,8 @@ defmodule Troupe.WorkerProfile do
     :llm_provider,
     :llm_model,
     :llm_small_model,
+    # The most output one model call asks for, a pod's `max_tokens`; `nil` is the default.
+    :llm_max_tokens,
     :llm_secret_name,
     :llm_secret_key,
     # Each pod's own disk. `nil` for either means the operator's default: 20Gi, on the
@@ -327,6 +329,7 @@ defmodule Troupe.WorkerProfile do
       llm_provider: get_in(spec, ["llm", "provider"]) || "openai",
       llm_model: get_in(spec, ["llm", "model"]),
       llm_small_model: get_in(spec, ["llm", "smallModel"]),
+      llm_max_tokens: get_in(spec, ["llm", "maxTokens"]),
       llm_prices: get_in(spec, ["llm", "prices"]) || %{},
       llm_secret_name: get_in(spec, ["llm", "secretRef", "name"]),
       llm_secret_key: get_in(spec, ["llm", "secretRef", "key"]) || "api-key",

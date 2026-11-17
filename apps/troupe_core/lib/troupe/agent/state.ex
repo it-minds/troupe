@@ -183,6 +183,9 @@ defmodule Troupe.Agent.State do
     # left out for `read_output`, the turn's own included. Not replayed — a restart
     # forgets them and grants the retry again, which errs towards finishing.
     truncation_retried: false,
+    # The output cap the call in flight asked for, which a note about a reply it cut names
+    # so the next attempt fits. Not folded: ephemeral.
+    output_cap: nil,
     overflow_retried: false,
     overflow_left_out: false,
     # Why the compaction in flight was started, and what the summariser's prompt was made
@@ -294,6 +297,7 @@ defmodule Troupe.Agent.State do
           context_model: String.t() | nil,
           turn: Spend.t(),
           truncation_retried: boolean(),
+          output_cap: pos_integer() | nil,
           overflow_retried: boolean(),
           overflow_left_out: boolean(),
           compact_reason: String.t() | nil,

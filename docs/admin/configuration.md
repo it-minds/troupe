@@ -122,6 +122,7 @@ Worker pods are created by the operator, so the chart sets none of these.
 | `TROUPE_OBJECT_*` | as the plane | the object store; credentials from `TROUPE_OBJECT_SECRET_NAME` | yes |
 | `TROUPE_STATE_HOME` | | `/var/lib/troupe`, the pod's data volume | yes |
 | `TROUPE_SMALL_MODEL` | unset | the cheap model | from `llm.smallModel` |
+| `TROUPE_MAX_TOKENS` | `8192` | `max_tokens`: the most output tokens one model call asks for | from `llm.maxTokens` |
 | `TROUPE_ALLOWED_ORIGINS` | none | browser origins the WebSocket upgrade admits besides the desktop app's own (`tauri://localhost`, `http://tauri.localhost`); none admits no page, `*` every one. A client that is not a browser sends no origin and is not asked | from `TROUPE_WORKER_ALLOWED_ORIGINS` |
 | `TROUPE_BASE_URL` | unset | **the LLM endpoint** — not the plane's meaning of the name | from `llm.endpoint` |
 | `TROUPE_PROVIDER`, `TROUPE_MODEL`, `TROUPE_API_KEY` | core defaults | provider, model, and the key from `llm.secretRef` (not optional: a missing Secret is `CreateContainerConfigError`). Given only with `llm.endpoint`, which is why a profile that sets them without one is refused | from `llm` |

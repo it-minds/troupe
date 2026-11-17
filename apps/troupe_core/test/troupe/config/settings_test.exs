@@ -14,7 +14,8 @@ defmodule Troupe.Config.SettingsTest do
   alias Troupe.Config.Settings
 
   @vars ~w(TROUPE_CONFIG_HOME TROUPE_OPENCODE_CONFIG TROUPE_OPENCODE_AUTH TROUPE_API_KEY TROUPE_AUTH_TOKEN
-           TROUPE_PROVIDER TROUPE_MODEL TROUPE_SMALL_MODEL TROUPE_EXPENSIVE_MODEL SETTINGS_TEST_KEY)
+           TROUPE_PROVIDER TROUPE_MODEL TROUPE_SMALL_MODEL TROUPE_EXPENSIVE_MODEL TROUPE_MAX_TOKENS
+           SETTINGS_TEST_KEY)
 
   setup do
     base = Path.join(System.tmp_dir!(), "troupe-settings-#{System.unique_integer([:positive])}")
@@ -230,5 +231,21 @@ defmodule Troupe.Config.SettingsTest do
     assert Settings.changed(before, now) == ["models.default", "ui.theme"]
     assert Settings.changed(now, now) == []
     assert Settings.changed(%{"ui" => %{}}, %{}) == ["ui"]
+  end
+
+  # #1080: a profile's `llm.maxTokens` reaches its pods as `TROUPE_MAX_TOKENS`, which a
+  # session there reads as its `max_tokens`, as a pod reads its configuration.
+  describe "TROUPE_MAX_TOKENS" do
+    test "is a pod session's max_tokens, and the default without it", ctx do
+      assert {:ok, %Config{max_tokens: 8192}, _} = Config.resolve(ctx.ws, [], trust: :never)
+
+      System.put_env("TROUPE_MAX_TOKENS", "16000")
+      assert {:ok, %Config{max_tokens: 16_000}, _} = Config.resolve(ctx.ws, [], trust: :never)
+      assert key(Settings.describe(ctx.ws), "max_tokens")["value"] == 16_000
+
+      System.put_env("TROUPE_MAX_TOKENS", "lots")
+      assert {:error, error} = Config.resolve(ctx.ws, [], trust: :never)
+      assert Exception.message(error) =~ "TROUPE_MAX_TOKENS sets max_tokens, which must be"
+    end
   end
 end

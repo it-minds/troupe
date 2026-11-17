@@ -25,10 +25,10 @@ flat `WorkerProfile`.
 | `egress.fqdns`, `egress.gitHosts` | the parent's, and its own **added**; each still checked against the policy |
 | `mcpServers` | the parent's, and its own **added** by name. One with a parent's name replaces the parent's only with `"override": true`; otherwise the parent's is kept and the clash is reported |
 | agents, skills, MCP servers and ACP agents in the bundle its pods load | the parent's channel's, and its own channel's **added** by name (Bundles, below) |
-| `max_sessions` | the **lower** of the two: a child can narrow a ceiling, never raise it |
+| `max_sessions`, `llm.maxTokens` | the **lower** of the two: a child can narrow a ceiling, never raise it; the preview and the effective view say so where a child's `llm.maxTokens` is higher |
 | `budget_micros` | the **lower** of the two; one set above the parent's is **refused** with a sentence |
 | `personalTools`, `repositoryOverridesBundle`, `memoryProposals` | a parent's `forbid` or `false` **holds** whatever the child says, and the preview and the effective view say so where the child says otherwise; otherwise the child's, or the parent's |
-| `image`, `size_class`, `provisioner`, the `llm` fields, `storage.storageClassName`, `configBundleChannel`, `github`, `orgMount` and any other field | the child's where it sets one, the parent's where it does not (for `github`'s caps and denied paths, see [github.md §7](github.md#7-how-far-a-run-may-go)) |
+| `image`, `size_class`, `provisioner`, the other `llm` fields, `storage.storageClassName`, `configBundleChannel`, `github`, `orgMount` and any other field | the child's where it sets one, the parent's where it does not (for `github`'s caps and denied paths, see [github.md §7](github.md#7-how-far-a-run-may-go)) |
 | `llm.secretRef`, `mcpIdentities`, grants, `warm_workers` | **never inherited**: a key and an identity are each profile's own, in its own namespace, and a grant of the standard does not make a team a user of its extensions |
 
 An empty field is one the child does not set, so a child cannot take away what its parent

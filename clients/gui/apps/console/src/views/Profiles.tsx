@@ -304,6 +304,7 @@ const READ_HERE = [
   "llm.provider",
   "llm.model",
   "llm.smallModel",
+  "llm.maxTokens",
   "llm.secretRef",
   "llm.prices",
   "egress.fqdns",
@@ -430,6 +431,7 @@ function ProfileReading({ detail, granted }: { detail: ProfileDetail; granted: s
           ["Provider", show(at(spec, "llm.provider"))],
           ["Model", show(at(spec, "llm.model"))],
           ["Small model", show(at(spec, "llm.smallModel"))],
+          ["Output per model call", typeof at(spec, "llm.maxTokens") === "number" ? `at most ${count(at(spec, "llm.maxTokens") as number, "token")}` : "Troupe's default, 8192 tokens"],
           ["Credential", at(spec, "llm.secretRef") ? <span className="mono">{`${show(at(spec, "llm.secretRef.name"))} · ${show(at(spec, "llm.secretRef.key") ?? "api-key")}`}</span> : "—"],
           ["Prices, per million tokens", Object.keys(prices).length ? Object.entries(prices).map(([m, v]) => `${m}: ${show(v?.input)} in, ${show(v?.output)} out`).join("; ") : "none: the gateway's"],
         ]}
@@ -844,6 +846,7 @@ const FORM_PATHS = [
   ["llm", "provider"],
   ["llm", "model"],
   ["llm", "smallModel"],
+  ["llm", "maxTokens"],
   ["llm", "secretRef"],
   ["egress", "fqdns"],
   ["egress", "gitHosts"],
@@ -917,7 +920,7 @@ function dollars(micros: unknown): string {
 }
 
 /** The `llm` fields a profile may set only beside `llm.endpoint`, as the plane names them. */
-const LLM_FIELDS = ["provider", "model", "smallModel", "secretRef", "prices"];
+const LLM_FIELDS = ["provider", "model", "smallModel", "secretRef", "prices", "maxTokens"];
 
 /**
  * The plane's rule, said at the field before anything is sent: every `llm` field but the
@@ -945,6 +948,8 @@ interface Form {
   provider: string;
   model: string;
   smallModel: string;
+  /** The most output tokens one model call asks for, as typed; empty is the default, or the parent's. */
+  maxTokens: string;
   secretName: string;
   secretKey: string;
   fqdns: string;
@@ -987,6 +992,7 @@ function formOf(detail: ProfileDetail | null): Form {
     provider: text(at(spec, "llm.provider")),
     model: text(at(spec, "llm.model")),
     smallModel: text(at(spec, "llm.smallModel")),
+    maxTokens: text(at(spec, "llm.maxTokens")),
     secretName: text(at(spec, "llm.secretRef.name")),
     secretKey: text(at(spec, "llm.secretRef.key")),
     fqdns: lines(at(spec, "egress.fqdns")),
@@ -1016,6 +1022,7 @@ export function draftOf(form: Form, servers: Plain[], kept: Plain, rules: RuleLi
       provider: form.provider.trim(),
       model: form.model.trim(),
       smallModel: form.smallModel.trim(),
+      maxTokens: whole(form.maxTokens),
       secretRef: compact({ name: form.secretName.trim(), key: form.secretKey.trim() }),
     }),
     egress: compact({ fqdns: split(form.fqdns), gitHosts: split(form.gitHosts) }),
@@ -1282,6 +1289,12 @@ export function ProfileEditor({
       </Field>
       <Field label="Small model" hint="Used only to summarise a long conversation.">
         {(p) => <input {...p} value={form.smallModel} onChange={(e) => set({ smallModel: e.target.value })} autoComplete="off" spellCheck={false} />}
+      </Field>
+      <Field
+        label="Output per model call, in tokens"
+        hint={`The most one model call of a session asks for, held to the model's own limit; an agent may ask for less. ${parent ? `Empty is ${parent}'s; a number above ${parent}'s has ${parent}'s in effect.` : "Empty is Troupe's default, 8192."}`}
+      >
+        {(p) => <input {...p} value={form.maxTokens} placeholder={theirs ?? undefined} onChange={(e) => set({ maxTokens: e.target.value })} inputMode="numeric" />}
       </Field>
       <Field
         label="Credential: secret name"

@@ -195,6 +195,28 @@ defmodule Troupe.Plane.ExtendsTest do
       assert {:ok, %{extended_by: ["data-team"]}} = Admin.profile_get(context.actor, "standard")
     end
 
+    # #1080: a parent's output cap holds below it. A child may ask its calls for less; a
+    # higher number of its own is kept as written, does nothing, and is said.
+    test "a child's llm.maxTokens may lower its parent's and not raise it", context do
+      {:ok, _} = Admin.profile_put(context.actor, put_in(standard(), ["spec", "llm", "maxTokens"], 16_000))
+
+      lower = put_in(data_team(), ["spec", "llm", "maxTokens"], 4_000)
+      {:ok, _} = Admin.profile_put(context.actor, lower)
+      assert Fleet.get_profile("data-team").spec["llm"]["maxTokens"] == 4_000
+
+      higher = put_in(data_team(), ["spec", "llm", "maxTokens"], 64_000)
+      said = "data-team sets llm.maxTokens to 64000, and standard's 16000 holds: a profile cannot raise a limit of the profile it extends"
+
+      assert {:ok, %{problems: problems}} = Admin.preview(context.actor, higher)
+      assert said in problems
+
+      {:ok, _} = Admin.profile_put(context.actor, higher)
+      assert Fleet.get_profile("data-team").spec["llm"]["maxTokens"] == 16_000
+      assert {:ok, got} = Admin.profile_get(context.actor, "data-team", true)
+      assert got.spec["llm"]["maxTokens"] == 64_000
+      assert said in got.effective.problems
+    end
+
     test "a server the child has from its parent that it has no identity for is reported",
          context do
       parent = put_in(standard(), ["spec", "configBundleChannel"], "standard-channel")
