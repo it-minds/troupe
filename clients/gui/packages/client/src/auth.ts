@@ -19,6 +19,7 @@ import { PlaneClient, PlaneHttpError } from "./plane.js";
 import type { BreakGlassAnswer, DeviceAuthorization, Discovery, IdpTokens, PlaneCredential } from "./plane.js";
 import { beginRedirect, completeRedirect, hasRedirectAnswer, scrubRedirect } from "./pkce.js";
 import type { BeginRedirectOptions } from "./pkce.js";
+import { errorText } from "./words.js";
 
 /** Where the refresh token lives. The default keeps it in memory and nowhere else. */
 export interface TokenStore {
@@ -158,6 +159,14 @@ export class PlaneUnreachableError extends Error {
     }
     return `${check} If the address is right, the plane may be down: ask your administrator.`;
   }
+}
+
+/**
+ * Whether a failed sign-in is the provider not knowing the address it is sent back to: a
+ * registration problem no retry fixes, which both apps explain instead of only printing.
+ */
+export function unregisteredRedirect(message: string): boolean {
+  return /redirect_uri|AADSTS50011|invalid_client|unauthorized_client/i.test(message);
 }
 
 function originOf(url: string): string | null {
@@ -589,7 +598,7 @@ export class AuthSession {
       await this.store.write(this.key, refresh);
       this.unkept = null;
     } catch (e) {
-      this.unkept = `This sign-in could not be kept in the credential store, so the next launch will ask you to sign in again: ${e instanceof Error ? e.message : String(e)}`;
+      this.unkept = `This sign-in could not be kept in the credential store, so the next launch will ask you to sign in again: ${errorText(e)}`;
       console.warn(`troupe: ${this.unkept}`);
     }
   }

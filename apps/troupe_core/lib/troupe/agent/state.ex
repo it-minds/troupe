@@ -46,7 +46,19 @@ defmodule Troupe.Agent.State do
   alias Troupe.{Budget, Config, Workspace}
   alias Troupe.LLM.Message
 
-  @enforce_keys [:session_id, :agent_path, :workspace, :config, :definitions, :definition]
+  # `budget` and `turn` are given where the state is made, not defaulted here: a struct as
+  # a default is built while this module compiles, which would recompile it with every
+  # change to `Troupe.Budget` or `Troupe.Agent.Spend` and to everything those reach.
+  @enforce_keys [
+    :session_id,
+    :agent_path,
+    :workspace,
+    :config,
+    :definitions,
+    :definition,
+    :budget,
+    :turn
+  ]
   # credo:disable-for-next-line Credo.Check.Warning.StructFieldAmount
   defstruct [
     :session_id,
@@ -78,7 +90,11 @@ defmodule Troupe.Agent.State do
     # the prompt's skill lines; written into `agent_started` so a transcript says which
     # definition ran.
     :bundle,
-    budget: %Budget{},
+    :budget,
+    # What the turn this agent is on has cost so far: its own calls, folded, and what its
+    # subagents reported, which a restart forgets as the budget does. Written on the event
+    # that ends the turn, and started again after it.
+    :turn,
     conversation: [],
     todos: [],
     # The task list the system prompt shows (Decision 792): `todos` as it stood when the
@@ -159,10 +175,6 @@ defmodule Troupe.Agent.State do
     # The model the last `context_status` was about: a turn on another one (or the first
     # turn of this process) says its window before it calls. Not folded: ephemeral.
     context_model: nil,
-    # What the turn this agent is on has cost so far (Decision 769): its own calls, folded,
-    # and what its subagents reported, which a restart forgets as the budget does. Written
-    # on the event that ends the turn, and started again after it.
-    turn: %Spend{},
     # Dimensions already warned about (Decision 655): one `budget_warning` each.
     headroom_warned: MapSet.new(),
     # At-most-once guards for the recoveries a turn makes on its own: one more request

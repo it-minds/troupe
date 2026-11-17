@@ -17,7 +17,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import type { JSX, ReactNode } from "react";
-import { draftOf, draftProblems, joinCommand, pairsFromText, pairsToText, revocationText, serverChanges, serverTrial, splitCommand } from "@troupe/client";
+import { draftOf, draftProblems, errorText, joinCommand, pairsFromText, pairsToText, revocationText, serverChanges, serverTrial, splitCommand } from "@troupe/client";
 import type { DaemonClient, DraftOAuth, FoundSkills, LocalServer, LocalSkill, ServerDraft, SkippedSkill, SourceScope, ToolAbout } from "@troupe/client";
 import { useAdminQuery } from "../hooks";
 import { shell } from "../shell";
@@ -172,7 +172,7 @@ function Connect({ client, initialProject }: { client: DaemonClient; initialProj
       const { server: result } = await client.checkServer({ ...scoped, name: server.name });
       setLive((l) => ({ ...l, [server.name]: result }));
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errorText(e));
     } finally {
       setChecking((c) => {
         const next = new Set(c);
@@ -192,7 +192,7 @@ function Connect({ client, initialProject }: { client: DaemonClient; initialProj
       if (said) setToast(said);
       reread();
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errorText(e));
     }
   };
 
@@ -753,7 +753,7 @@ function ImportDrawer({ client, project, onClose, onDone }: { client: DaemonClie
       const needs = r.warnings?.length ? " Some need a secret: their rows say which." : "";
       onDone(head + skipped + needs, r.added);
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errorText(e));
       setBusy(false);
     }
   };
@@ -863,7 +863,7 @@ function ManualDrawer({
       const { server: result } = await client.checkServer({ name: full.name, server: serverTrial(full).server, ...(ws ? { workspace: ws } : {}) });
       setTried(result);
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errorText(e));
     } finally {
       setBusy(null);
     }
@@ -884,7 +884,7 @@ function ManualDrawer({
       const state = checked.state === "ready" ? `Ready, ${n} ${n === 1 ? "tool" : "tools"}.` : checked.state === "sign_in" ? "Sign in to use it: its row has the button." : (checked.error ?? "Saved.");
       onDone(full.name, `${editing ? "Saved" : "Added"} ${full.name}.${keptSaid} ${state}`, checked);
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errorText(e));
       setBusy(null);
     }
   };
@@ -1081,7 +1081,7 @@ function SkillsTab({
       const r = await client.importSkills({ from: f.from, link, scope: f.scope, ...(f.scope === "workspace" && project ? { workspace: project } : {}) });
       onDone(link ? `Using ${r.added.length} skills from ${f.dir}.` : `Copied ${r.added.length} skills into your Troupe settings.`);
     } catch (e) {
-      onError(e instanceof Error ? e.message : String(e));
+      onError(errorText(e));
     } finally {
       setBusy(null);
     }
@@ -1101,7 +1101,7 @@ function SkillsTab({
       const r = await client.removeSkill({ scope: layer, ...(layer === "workspace" && project ? { workspace: project } : {}), name: skill.name });
       onDone(`Removed ${r.removed.join(", ")} from ${r.path}.`);
     } catch (e) {
-      onError(e instanceof Error ? e.message : String(e));
+      onError(errorText(e));
     }
   };
 

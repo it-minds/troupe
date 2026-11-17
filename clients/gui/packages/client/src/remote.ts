@@ -11,6 +11,7 @@ import { TroupeConnection, TroupeRpcError } from "./connection.js";
 import { invitationsFrom } from "./invites.js";
 import type { Invitation } from "./invites.js";
 import type { Attachment } from "./plane.js";
+import { errorText } from "./words.js";
 
 type Rpc = <T = unknown>(method: string, params?: unknown) => Promise<T>;
 
@@ -36,7 +37,7 @@ export function remoteRefusal(e: unknown): string {
     if (e.code === -32010) return "The laptop is offline";
     if (e.code === -32005) return "It is no longer offered to you";
   }
-  return e instanceof Error ? e.message : String(e);
+  return errorText(e);
 }
 
 /** When, as a person reads it: today's time, or the day and time. */

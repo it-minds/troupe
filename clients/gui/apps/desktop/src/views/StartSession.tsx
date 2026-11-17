@@ -25,12 +25,14 @@ import type { JSX, KeyboardEvent as ReactKeyboardEvent, ReactNode } from "react"
 import {
   LOCAL_DOWN_SENTENCE,
   TroupeRpcError,
+  ago,
   andList,
   autoPickProfile,
   ceilingSentence,
   chosenTeam,
   cleanMessage,
   defaultProfileAgent,
+  errorText,
   firstLine,
   fullHouseSentence,
   pickLine,
@@ -47,7 +49,6 @@ import type { AgentRow, Attachment, AuthSession, DaemonClient, FleetRow, NewSess
 import { useProfiles } from "../hooks";
 import { prefs } from "../shell";
 import { useChooseFolder } from "./ChooseFolder";
-import { relative } from "./bits";
 import { Mask } from "./brand";
 
 type DaemonStatus = "unsupported" | "searching" | "absent" | "connected" | "error";
@@ -797,7 +798,7 @@ function recentSessions(rows: FleetRow[], me: string | null): Recent[] {
         folder,
         profile: local ? null : r.profile,
         agent: local ? r.profile : typeof raw.agent === "string" ? raw.agent : null,
-        when: Number.isNaN(at) ? "" : relative(at),
+        when: Number.isNaN(at) ? "" : ago(at),
       };
     });
 }
@@ -905,13 +906,10 @@ async function castHere(
   }
 }
 
-/** A refusal in one line: the plane's or the daemon's own sentence where it gave one. */
+/** A refusal in one line, starting as a sentence does: the plane's or the daemon's own where it gave one. */
 function refusal(e: unknown): string {
-  if (e instanceof TroupeRpcError) {
-    const reason = e.data?.["reason"];
-    if (typeof reason === "string" && reason) return reason.charAt(0).toUpperCase() + reason.slice(1);
-  }
-  return e instanceof Error ? e.message : String(e);
+  const said = errorText(e);
+  return said.charAt(0).toUpperCase() + said.slice(1);
 }
 
 /**
@@ -1042,7 +1040,7 @@ function useWorkspaceAgents(daemon: DaemonClient | null, workspace: string): { r
       void daemon
         .listAgents(workspace)
         .then((r) => live && setRows(r.agents))
-        .catch((e: unknown) => live && setError(e instanceof Error ? e.message : String(e)));
+        .catch((e: unknown) => live && setError(errorText(e)));
     }, 250);
     return () => {
       live = false;

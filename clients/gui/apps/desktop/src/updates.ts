@@ -28,7 +28,7 @@
 // window does, so it is not waited for.
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { askPlane, onThisComputer, suggestion, TroupeRpcError } from "@troupe/client";
+import { askPlane, errorText, onThisComputer, suggestion, TroupeRpcError } from "@troupe/client";
 import type { AuthSession, DaemonClient, FleetRow, PinnedPlaneKey, PlaneVersionWord } from "@troupe/client";
 import { shell } from "./shell";
 import type { UpdateOffer, UpdatePlane, UpdateTarget } from "./shell";
@@ -77,10 +77,6 @@ export interface Updates {
   /** Put the question away until the next check. */
   later: () => void;
   dismissed: boolean;
-}
-
-function message(e: unknown): string {
-  return e instanceof Error ? e.message : String(e);
 }
 
 /** A session on this computer with a turn at work, which a restart waits for. */
@@ -174,7 +170,7 @@ export function useUpdates(auth: AuthSession | null, daemon: DaemonClient | null
     setKeyError(null);
     daemon.acceptPlaneKey({ fingerprint: held.offered.fingerprint, plane_url: held.plane_url }).then(
       () => setRound((n) => n + 1),
-      (e: unknown) => setKeyError(message(e)),
+      (e: unknown) => setKeyError(errorText(e)),
     );
   }, [daemon, held]);
 
@@ -198,7 +194,7 @@ export function useUpdates(auth: AuthSession | null, daemon: DaemonClient | null
       }
       return null;
     } catch (e) {
-      setPhase({ kind: "refused", sentence: message(e) });
+      setPhase({ kind: "refused", sentence: errorText(e) });
       throw e;
     }
   }, [updater, params]);
@@ -238,7 +234,7 @@ export function useUpdates(auth: AuthSession | null, daemon: DaemonClient | null
         await updater.download((received, total) => setPhase({ kind: "downloading", offer, received, total }));
         setPhase({ kind: "ready", offer });
       } catch (e) {
-        setPhase({ kind: "refused", sentence: message(e) });
+        setPhase({ kind: "refused", sentence: errorText(e) });
       }
     })();
   }, [updater, check]);
@@ -283,7 +279,7 @@ export function useUpdates(auth: AuthSession | null, daemon: DaemonClient | null
       try {
         await updater.install(daemonStopped);
       } catch (e) {
-        setPhase({ kind: "refused", sentence: message(e) });
+        setPhase({ kind: "refused", sentence: errorText(e) });
       }
     })();
   }, [updater]);

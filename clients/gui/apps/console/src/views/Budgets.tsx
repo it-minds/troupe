@@ -18,8 +18,9 @@ import type { JSX } from "react";
 import type { AdminTeam, Ceiling } from "@troupe/client";
 import { useConsole, useLoad } from "../console";
 import { href } from "../route";
-import { AuditNote, Empty, Field, Loaded, Preview, Region, bytes, money, useChange } from "./bits";
+import { AuditNote, Empty, Field, Loaded, Preview, Region, useChange } from "./bits";
 import { Spend } from "./Teams";
+import { bytes, moneyWords } from "@troupe/client";
 
 export function Budgets(): JSX.Element {
   const { admin, role } = useConsole();
@@ -81,7 +82,7 @@ function TeamCeilings({ teams }: { teams: AdminTeam[] }): JSX.Element {
                   <td>
                     <Spend team={t} />
                   </td>
-                  <td className="num">{money(t.reserved_micros)}</td>
+                  <td className="num">{moneyWords(t.reserved_micros)}</td>
                   <td>{t.budget_micros ? per(t.budget_period) : "no ceiling"}</td>
                   {storage && <td>{artifactStorage(t)}</td>}
                 </tr>
@@ -175,7 +176,7 @@ function Explain({ teams }: { teams: AdminTeam[] }): JSX.Element {
               <div className="ceilings" role="status" aria-label="The ceilings">
                 {binds ? (
                   <p>
-                    {capital(SCOPES[binds.scope] ?? binds.scope)} is what refuses first: {money(binds.remaining_micros as number)} left.
+                    {capital(SCOPES[binds.scope] ?? binds.scope)} is what refuses first: {moneyWords(binds.remaining_micros as number)} left.
                   </p>
                 ) : (
                   <p>No rung here has a ceiling at all: nothing refuses on spend.</p>
@@ -199,10 +200,10 @@ function Explain({ teams }: { teams: AdminTeam[] }): JSX.Element {
                             {SCOPES[c.scope] ?? c.scope}
                             {c === binds ? " · binds first" : ""}
                           </td>
-                          <td className="num">{money(c.spent_micros)}</td>
-                          <td className="num">{money(c.reserved_micros)}</td>
-                          <td className="num">{c.budget_micros ? money(c.budget_micros) : <span className="muted">none</span>}</td>
-                          <td className="num">{typeof c.remaining_micros === "number" ? money(c.remaining_micros) : <span className="muted">no ceiling</span>}</td>
+                          <td className="num">{moneyWords(c.spent_micros)}</td>
+                          <td className="num">{moneyWords(c.reserved_micros)}</td>
+                          <td className="num">{c.budget_micros ? moneyWords(c.budget_micros) : <span className="muted">none</span>}</td>
+                          <td className="num">{typeof c.remaining_micros === "number" ? moneyWords(c.remaining_micros) : <span className="muted">no ceiling</span>}</td>
                           <td>{c.budget_micros ? per(c.budget_period) : "—"}</td>
                         </tr>
                       ))}
@@ -270,7 +271,7 @@ function OwnCap({ teams, onApplied }: { teams: AdminTeam[]; onApplied: () => voi
                 {everybody.map((x) => (
                   <option key={x.subject} value={x.subject}>
                     {x.name === x.subject ? x.subject : `${x.name} (${x.subject})`}
-                    {x.budget ? ` · ${money(x.budget)} a month` : ""}
+                    {x.budget ? ` · ${moneyWords(x.budget)} a month` : ""}
                   </option>
                 ))}
               </select>
@@ -295,14 +296,14 @@ function OwnCap({ teams, onApplied }: { teams: AdminTeam[]; onApplied: () => voi
           lines={[{ field: "budget_micros", from: person.budget, to: asked || null }]}
           effects={
             asked
-              ? [`${person.name} may spend ${money(asked)} a month across every team; a session that would go past it is refused, whatever the team has left.`]
+              ? [`${person.name} may spend ${moneyWords(asked)} a month across every team; a session that would go past it is refused, whatever the team has left.`]
               : [`${person.name} has no cap of their own; their teams' ceilings and the platform's still apply.`]
           }
           verb="Apply"
           onCancel={() => setPreviewing(false)}
           cancel="Back to editing"
           onConfirm={async () => {
-            await apply("person.budget", person.subject, () => admin.personBudget(person.subject, asked || null), `${person.name}'s cap is ${asked ? money(asked) : "taken away"}.`, (a) => (a as { changes?: Record<string, unknown> }).changes);
+            await apply("person.budget", person.subject, () => admin.personBudget(person.subject, asked || null), `${person.name}'s cap is ${asked ? moneyWords(asked) : "taken away"}.`, (a) => (a as { changes?: Record<string, unknown> }).changes);
             setPreviewing(false);
             setForm(null);
           }}

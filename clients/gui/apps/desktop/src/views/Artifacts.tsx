@@ -20,12 +20,12 @@
 
 import { useCallback, useEffect, useState } from "react";
 import type { JSX } from "react";
-import { appLink, audienceName, audienceOf, teamOwned, visibilityWords } from "@troupe/client";
+import { ago, appLink, audienceName, audienceOf, bytes, errorText, teamOwned, visibilityWords } from "@troupe/client";
 import type { Artifact, ArtifactAudience, ArtifactDetail, ArtifactList, ArtifactShareRole, ArtifactThread, DaemonClient, OwnPlane, Person } from "@troupe/client";
 import { goesLine, goesSentence, versionGoes, versionsSentence } from "@troupe/client";
 import { copyText } from "../clipboard";
 import { shell } from "../shell";
-import { Loading, relative, unreachedWords } from "./bits";
+import { Loading, unreachedWords } from "./bits";
 import { Publish, VisibilityOptions } from "./Publish";
 
 type Filter = "all" | ArtifactAudience;
@@ -59,19 +59,6 @@ function markSeen(id: string, version: number): void {
   } catch {
     // A device that keeps nothing shows every artifact as new to it; nothing else changes.
   }
-}
-
-function sentence(e: unknown): string {
-  const data = (e as { data?: { reason?: unknown } } | null)?.data;
-  if (data && typeof data.reason === "string") return data.reason;
-  return e instanceof Error ? e.message : String(e);
-}
-
-export function size(bytes: number | undefined): string {
-  if (bytes === undefined || !Number.isFinite(bytes)) return "";
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1).replace(/\.0$/, "")} KB`;
-  return `${(bytes / 1024 / 1024).toFixed(1).replace(/\.0$/, "")} MB`;
 }
 
 /** Today, This week or Earlier, by when its newest version was published. */
@@ -240,7 +227,7 @@ export function Artifacts({
       (l) => {
         if (live) setList(l);
       },
-      (e: unknown) => live && setError(sentence(e)),
+      (e: unknown) => live && setError(errorText(e)),
     );
     return () => {
       live = false;
@@ -367,7 +354,7 @@ export function Artifacts({
                       <span className={a.thumbnail_url ? "placeholder has-picture" : "placeholder"} aria-hidden={a.thumbnail_url ? undefined : "true"}>
                         {a.thumbnail_url && <Picture src={a.thumbnail_url} alt={a.title} />}
                         <span className="what" aria-hidden="true">
-                          {a.kind} · {size(a.bytes)}
+                          {a.kind} · {bytes(a.bytes)}
                         </span>
                         {fresh && (
                           <span className="fresh" aria-hidden="true">
@@ -379,7 +366,7 @@ export function Artifacts({
                         <span className="title">{a.title}</span>
                         {fresh && <span className="visually-hidden">New to you.</span>}
                         <span className="byline">
-                          {whose(a)} · {relative(Date.parse(a.published_at))}
+                          {whose(a)} · {ago(Date.parse(a.published_at))}
                         </span>
                         <span className="tags">
                           <span className={`audience-pill is-${audience}`}>
@@ -494,7 +481,7 @@ function Aside({
     let live = true;
     via.artifact(artifact.id).then(
       (d) => live && setDetail(d),
-      (e: unknown) => live && setError(sentence(e)),
+      (e: unknown) => live && setError(errorText(e)),
     );
     return () => {
       live = false;
@@ -511,7 +498,7 @@ function Aside({
       setAsked((n) => n + 1);
       onChanged();
     } catch (e) {
-      setError(sentence(e));
+      setError(errorText(e));
     } finally {
       setBusy(false);
     }
@@ -521,7 +508,7 @@ function Aside({
     setError(null);
     show(via, artifact, version).then(
       () => onOpened(version ?? detail?.current ?? artifact.current ?? artifact.version),
-      (e: unknown) => setError(sentence(e)),
+      (e: unknown) => setError(errorText(e)),
     );
   };
 
@@ -536,14 +523,14 @@ function Aside({
       setCopied(true);
       if (owner) setAsked((n) => n + 1);
     } catch (e) {
-      setError(`Not copied: ${sentence(e)}`);
+      setError(`Not copied: ${errorText(e)}`);
     }
   };
 
   // Its address in the person's browser, which signs them in; a shell that refuses says why here.
   const browse = (): void => {
     setError(null);
-    openExternal(artifact.url).catch((e: unknown) => setError(`Not opened: ${sentence(e)}`));
+    openExternal(artifact.url).catch((e: unknown) => setError(`Not opened: ${errorText(e)}`));
   };
 
   const words = audienceWords(artifact, audience);
@@ -556,7 +543,7 @@ function Aside({
     <aside className="repertoire-aside" aria-label="Artifact details">
       <div>
         <div className="micro what">
-          {KIND[artifact.kind] ?? artifact.kind.toUpperCase()} · VERSION {artifact.version} · {size(artifact.bytes)}
+          {KIND[artifact.kind] ?? artifact.kind.toUpperCase()} · VERSION {artifact.version} · {bytes(artifact.bytes)}
         </div>
         <h2>{artifact.title}</h2>
         {summary && <p className="muted">{summary}</p>}
@@ -702,7 +689,7 @@ function Aside({
               <span className="n">v{v.n}</span>
               <span className="note-text">{v.note ?? (v.n === 1 ? "First publish" : "")}</span>
               <span className="micro" title={v.published_at}>
-                {relative(Date.parse(v.published_at))}
+                {ago(Date.parse(v.published_at))}
               </span>
               {v.goes_at && <span className="micro goes">{versionGoes(v)}</span>}
               <span className="version-actions">
@@ -823,7 +810,7 @@ function SharedWith({ via, artifact, detail, onChanged }: { via: OwnPlane; artif
       setChosen(null);
       onChanged();
     } catch (e) {
-      setError(sentence(e));
+      setError(errorText(e));
     } finally {
       setBusy(false);
     }
@@ -935,7 +922,7 @@ function Thread({ via, artifact }: { via: OwnPlane; artifact: Artifact }): JSX.E
         if (!live) return;
         // A plane from before comments has no thread to show, which is no fault.
         if ((e as { code?: unknown } | null)?.code === -32601) setAbsent(true);
-        else setError(sentence(e));
+        else setError(errorText(e));
       },
     );
     return () => {
@@ -953,7 +940,7 @@ function Thread({ via, artifact }: { via: OwnPlane; artifact: Artifact }): JSX.E
       setDraft("");
       setAsked((n) => n + 1);
     } catch (e) {
-      setError(`Not posted: ${sentence(e)}`);
+      setError(`Not posted: ${errorText(e)}`);
     } finally {
       setBusy(false);
     }
@@ -970,7 +957,7 @@ function Thread({ via, artifact }: { via: OwnPlane; artifact: Artifact }): JSX.E
       setConfirming(null);
       setAsked((n) => n + 1);
     } catch (e) {
-      setError(`Not deleted: ${sentence(e)}`);
+      setError(`Not deleted: ${errorText(e)}`);
     } finally {
       setBusy(false);
     }
@@ -984,7 +971,7 @@ function Thread({ via, artifact }: { via: OwnPlane; artifact: Artifact }): JSX.E
       setEditing(null);
       setAsked((n) => n + 1);
     } catch (e) {
-      setError(`Not saved: ${sentence(e)}`);
+      setError(`Not saved: ${errorText(e)}`);
     } finally {
       setBusy(false);
     }
@@ -1002,11 +989,11 @@ function Thread({ via, artifact }: { via: OwnPlane; artifact: Artifact }): JSX.E
             <li key={c.id}>
               <p className="micro">
                 <span className="author">{c.author.display_name || c.author.subject}</span> ·{" "}
-                <span title={c.created_at}>{relative(Date.parse(c.created_at))}</span>
+                <span title={c.created_at}>{ago(Date.parse(c.created_at))}</span>
                 {c.edited_at && (
                   <>
                     {" "}
-                    · <span title={c.edited_at}>edited {relative(Date.parse(c.edited_at))}</span>
+                    · <span title={c.edited_at}>edited {ago(Date.parse(c.edited_at))}</span>
                   </>
                 )}
               </p>

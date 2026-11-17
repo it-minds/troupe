@@ -11,7 +11,7 @@
 
 import { useEffect, useState } from "react";
 import type { JSX } from "react";
-import { visibilityWords } from "@troupe/client";
+import { errorText, visibilityWords } from "@troupe/client";
 import type { Artifact, ArtifactKind, ArtifactList, ArtifactThumbnail, ArtifactUpload, DaemonClient } from "@troupe/client";
 import { shell } from "../shell";
 
@@ -46,12 +46,6 @@ export function replyTitle(text: string): string {
   const first = text.split("\n").find((l) => l.trim() !== "") ?? "";
   const plain = first.replace(/^#+\s*/, "").replace(/[*_`]/g, "").trim();
   return plain.length > 80 ? `${plain.slice(0, 79)}…` : plain;
-}
-
-function sentence(e: unknown): string {
-  const data = (e as { data?: { reason?: unknown } } | null)?.data;
-  if (data && typeof data.reason === "string") return data.reason;
-  return e instanceof Error ? e.message : String(e);
 }
 
 /**
@@ -112,7 +106,7 @@ export function Publish({
     let live = true;
     daemon.artifacts({ mine: true }).then(
       (l) => live && setList(l),
-      (e: unknown) => live && setListError(sentence(e)),
+      (e: unknown) => live && setListError(errorText(e)),
     );
     return () => {
       live = false;
@@ -144,7 +138,7 @@ export function Publish({
       });
       setDone(published);
     } catch (e) {
-      setError(sentence(e));
+      setError(errorText(e));
     } finally {
       setBusy(false);
     }
@@ -205,7 +199,7 @@ export function Publish({
             </label>
             {files.length > 0 && <p className="hint">{kind === "html" ? "A page" : kind === "markdown" ? "A Markdown document" : "A file"}: {paths.join(", ")}</p>}
             <label>
-              A picture of it for its card, if you have one (PNG, JPEG or WebP, at most 256 KB)
+              A picture of it for its card, if you have one (PNG, JPEG or WebP, at most 256 KiB)
               <input type="file" accept="image/png,image/jpeg,image/webp" onChange={(e) => setPicture(e.target.files?.[0] ?? null)} />
             </label>
             {mode === "new" && (

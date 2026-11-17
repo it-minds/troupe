@@ -14,8 +14,9 @@ import type { JSX } from "react";
 import type { SessionGitHub, TriggerRun } from "@troupe/client";
 import { show, useConsole, useLoad } from "../console";
 import { href } from "../route";
-import { AuditNote, Empty, Field, Fields, Loaded, Preview, Region, Status, count, money, useChange, when } from "./bits";
+import { AuditNote, Empty, Field, Fields, Loaded, Preview, Region, Status, count, useChange, when } from "./bits";
 import type { StatusKind } from "./bits";
+import { moneyWords } from "@troupe/client";
 
 const STATE: Record<string, { kind: StatusKind; glyph: string; word: string }> = {
   created: { kind: "waiting", glyph: "◌", word: "starting" },
@@ -133,7 +134,7 @@ export function Runs(): JSX.Element {
                       <td>
                         <PullRequest github={r.github ?? null} />
                       </td>
-                      <td className="num">{money(r.cost_micros)}</td>
+                      <td className="num">{moneyWords(r.cost_micros)}</td>
                       <td>{r.reviewed_by ? `by ${r.reviewed_by}` : unread(r) ? <strong>not yet</strong> : <span className="muted">—</span>}</td>
                     </tr>
                   ))}
@@ -232,7 +233,7 @@ export function RunPage({ id }: { id: string }): JSX.Element {
                   ["Repository", <span className="mono">{show(r.repository)}</span>],
                   ["Issue", r.issue ? <span><Issue run={r} /> {r.issue.title ?? ""}</span> : "—"],
                   ["Session", r.session_id ? <a href={href({ page: "sessions", path: [r.session_id] })}>{r.session_id}</a> : "none: it did not start one"],
-                  ["Spent", money(r.cost_micros)],
+                  ["Spent", moneyWords(r.cost_micros)],
                   ["Read", r.reviewed_by ? `by ${r.reviewed_by}, ${when(r.reviewed_at)}` : unread(r) ? "not yet" : "—"],
                 ]}
               />

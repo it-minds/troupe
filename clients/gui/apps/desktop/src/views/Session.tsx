@@ -21,7 +21,9 @@ import {
   UPLOAD_ARTIFACT,
   archiveRefusal,
   markRefusal,
+  bytes,
   configKey,
+  errorText,
   isBusy,
   isRoot,
   mayArchive,
@@ -34,7 +36,6 @@ import {
   presentMembers,
   severalSteer,
   rootState,
-  scratchSize,
   scratchVersion,
   settleLoop,
   stoppedSentence,
@@ -292,7 +293,7 @@ export function Session({
         const where = await saveFile(path.split("/").pop() || path, file.content);
         return where ? `saved to ${where}` : "not saved";
       } catch (e) {
-        return `not saved: ${e instanceof Error ? e.message : String(e)}`;
+        return `not saved: ${errorText(e)}`;
       }
     },
     [sessionView],
@@ -1589,7 +1590,7 @@ function ScratchCard({ entry, onOpen }: { entry: Extract<Entry, { kind: "scratch
       </p>
     );
   }
-  const facts = [entry.name, entry.size === undefined ? undefined : scratchSize(entry.size), scratchVersion(entry.version)].filter(Boolean);
+  const facts = [entry.name, entry.size === undefined ? undefined : bytes(entry.size), scratchVersion(entry.version)].filter(Boolean);
   return (
     <button type="button" className="scratch-card" disabled={!entry.name} onClick={() => onOpen(entry.name)} title="Open it in the scratchpad">
       <span className="title">{entry.title || entry.name || "A document"}</span>
@@ -1644,7 +1645,7 @@ function Scratchpad({
       {doc ? (
         <div className="doc" role="tabpanel">
           <h3>{doc.title}</h3>
-          <p className="note">{[doc.name, scratchSize(doc.size), scratchVersion(doc.version)].join(" · ")}</p>
+          <p className="note">{[doc.name, bytes(doc.size), scratchVersion(doc.version)].join(" · ")}</p>
           {read.error ? (
             <p className="note error">{read.error}</p>
           ) : read.content === null ? (
@@ -1679,7 +1680,7 @@ function useScratchText(view: SessionView | null, doc: ScratchDocument | undefin
     view
       .scratchRead({ path })
       .then((file) => live && setRead({ name, content: file.content, error: null }))
-      .catch((e: unknown) => live && setRead({ name, content: null, error: e instanceof Error ? e.message : String(e) }));
+      .catch((e: unknown) => live && setRead({ name, content: null, error: errorText(e) }));
     return () => {
       live = false;
     };
@@ -1891,7 +1892,7 @@ function ReplyFoot({
   const act = (what: () => Promise<unknown>, done: string): void => {
     what().then(
       () => setSaid(done),
-      (e: unknown) => setSaid(e instanceof Error ? e.message : String(e)),
+      (e: unknown) => setSaid(errorText(e)),
     );
   };
   return (
@@ -1952,11 +1953,6 @@ interface Attachment {
 
 let attached = 0;
 
-/** A size as the chip says it. */
-function sizeWords(bytes: number): string {
-  return bytes >= 1_000_000 ? `${(bytes / 1_000_000).toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1000))} KB`;
-}
-
 /** A token count as the ring says it: `24.1k`. */
 function tokens(n: number): string {
   return n >= 1000 ? `${(n / 1000).toFixed(1).replace(/\.0$/, "")}k` : String(n);
@@ -1968,14 +1964,14 @@ function tokens(n: number): string {
  */
 async function readAttachment(file: File, max: number | undefined): Promise<Attachment> {
   // What a message carries around the file, kept clear of the server's limit.
-  if (max !== undefined && file.size > max - 4096) throw new Error(`${file.name} is larger than this session takes in one message (${sizeWords(max)})`);
+  if (max !== undefined && file.size > max - 4096) throw new Error(`${file.name} is larger than this session takes in one message (${bytes(max)})`);
   let content: string;
   try {
     content = new TextDecoder("utf-8", { fatal: true }).decode(await file.arrayBuffer());
   } catch {
     throw new Error(`${file.name} is not UTF-8 text; an upload carries text only`);
   }
-  return { id: `a${++attached}`, kind: "file", name: baseName(file.name), content, about: sizeWords(file.size) };
+  return { id: `a${++attached}`, kind: "file", name: baseName(file.name), content, about: bytes(file.size) };
 }
 
 function baseName(path: string): string {
@@ -2036,7 +2032,7 @@ function ArtifactPicker({
     let live = true;
     source.artifacts({}).then(
       (l) => live && setList(l.artifacts),
-      (e: unknown) => live && setError(reasonOf(e)),
+      (e: unknown) => live && setError(errorText(e)),
     );
     return () => {
       live = false;
@@ -2064,7 +2060,7 @@ function ArtifactPicker({
       );
       onPick(files);
     } catch (e) {
-      setError(reasonOf(e));
+      setError(errorText(e));
     } finally {
       setBusy(null);
     }
@@ -2100,12 +2096,6 @@ function ArtifactPicker({
       </div>
     </Dialog>
   );
-}
-
-function reasonOf(e: unknown): string {
-  const data = (e as { data?: { reason?: unknown } } | null)?.data;
-  if (data && typeof data.reason === "string") return data.reason;
-  return e instanceof Error ? e.message : String(e);
 }
 
 /**
@@ -2185,7 +2175,7 @@ function Composer({
       setError(null);
       const read = await Promise.allSettled([...list].map((f) => readAttachment(f, view.view?.maxMessageBytes)));
       const ok = read.flatMap((r) => (r.status === "fulfilled" ? [r.value] : []));
-      const refused = read.flatMap((r) => (r.status === "rejected" ? [reasonOf(r.reason)] : []));
+      const refused = read.flatMap((r) => (r.status === "rejected" ? [errorText(r.reason)] : []));
       if (ok.length > 0) setFiles((had) => [...had, ...ok]);
       if (refused.length > 0) setError(refused.join("; "));
     },
@@ -2269,7 +2259,7 @@ function Composer({
       await view.send(message);
       onSent();
     } catch (e) {
-      setError(reasonOf(e));
+      setError(errorText(e));
       setDraft((d) => d || words);
     } finally {
       setSending(false);
@@ -2427,7 +2417,7 @@ function Composer({
           {agent}
           <ContextRing fill={context} />
           {busy && (
-            <button type="button" className="send stop" onClick={() => void view.cancel().catch((e: unknown) => setError(reasonOf(e)))} title="Stop what the troupe is doing">
+            <button type="button" className="send stop" onClick={() => void view.cancel().catch((e: unknown) => setError(errorText(e)))} title="Stop what the troupe is doing">
               <span className="visually-hidden">Stop</span>
               <span aria-hidden="true">■</span>
             </button>

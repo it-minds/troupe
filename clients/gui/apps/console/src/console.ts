@@ -2,7 +2,7 @@
 // everything a screen needs besides its own calls, worked out once after the sign-in.
 
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
-import { AdminApi, TroupeRpcError, downloadsOf, requiredRole } from "@troupe/client";
+import { AdminApi, TroupeRpcError, downloadsOf, durationWords, errorText, requiredRole } from "@troupe/client";
 import type { AppDownloads, AuthSession, Discovery, Me, ProfileView } from "@troupe/client";
 import type { Role } from "./nav";
 
@@ -195,7 +195,7 @@ export function describeError(e: unknown): string {
     if (e.code === UNAUTHENTICATED) return "Your sign-in has ended. Sign in again.";
     return e.message;
   }
-  return e instanceof Error ? e.message : String(e);
+  return errorText(e);
 }
 
 /**
@@ -207,14 +207,7 @@ export function limitWords(limit: unknown, unit: string): string {
   const n = Number(limit);
   if (!Number.isFinite(n)) return `The platform allows at most ${show(limit)}.`;
   const seconds = unit === "minutes" ? n * 60 : unit === "seconds" ? n : null;
-  if (seconds !== null) {
-    const total = Math.round(seconds);
-    const words = [Math.floor(total / 3600), Math.floor((total % 3600) / 60), total % 60]
-      .map((v, i) => (v ? `${v} ${["h", "min", "s"][i]}` : ""))
-      .filter(Boolean)
-      .join(" ");
-    return `The platform allows at most ${words || "0 s"}.`;
-  }
+  if (seconds !== null) return `The platform allows at most ${durationWords(Math.round(seconds) * 1000)}.`;
   if (unit === "days") return `The platform allows at most ${n === 1 ? "1 day" : `${n} days`}.`;
   return `The platform allows at most ${n} ${unit}.`;
 }

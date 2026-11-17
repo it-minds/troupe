@@ -25,6 +25,7 @@
 import { TroupeRpcError } from "./connection.js";
 import type { DaemonClient } from "./daemon.js";
 import { LIBRARIAN_PROMPT, librarianBarred, refreshStep } from "./memory.js";
+import { errorText } from "./words.js";
 
 export { LIBRARIAN_PROMPT };
 
@@ -382,7 +383,7 @@ export class StartQuestions {
         this.set({ librarian: created.session_id });
         this.say(step.status === "absent" ? LIBRARIAN_WRITING : LIBRARIAN_REWRITING);
       } catch (e) {
-        this.say(`No librarian for the project brief: the daemon did not start it: ${e instanceof Error ? e.message : String(e)}.`);
+        this.say(`No librarian for the project brief: the daemon did not start it: ${errorText(e)}.`);
       }
     } else if (step.say) {
       this.say(`No librarian for the project brief: ${step.why}.`);
@@ -404,7 +405,7 @@ export class StartQuestions {
     try {
       await run();
     } catch (e) {
-      this.set({ error: e instanceof Error ? e.message : String(e) });
+      this.set({ error: errorText(e) });
     } finally {
       this.set({ busy: false });
     }

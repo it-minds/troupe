@@ -31,7 +31,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { JSX } from "react";
 import type { AgentLayer, AgentRow, CommandEntry } from "@troupe/client";
-import { ErrorCodes, TroupeRpcError } from "@troupe/client";
+import { ErrorCodes, TroupeRpcError, errorText } from "@troupe/client";
 import { copyText } from "../clipboard";
 import type { SessionHandle } from "../hooks";
 import { switchable } from "./AgentSwitch";
@@ -466,7 +466,7 @@ export function CommandPalette({
     }
     v.commands()
       .then((r) => live && setCommands(r.commands.map(inThisApp).filter((c) => c.availability !== "tui")))
-      .catch((e: unknown) => live && setError(e instanceof Error ? e.message : String(e)));
+      .catch((e: unknown) => live && setError(errorText(e)));
     input.current?.focus();
     return () => {
       live = false;
@@ -537,7 +537,7 @@ export function CommandPalette({
         if (args !== "") await view.send(args);
         onClose();
       } catch (e) {
-        setNotice(e instanceof Error ? e.message : String(e));
+        setNotice(errorText(e));
       }
       return;
     }
@@ -555,7 +555,7 @@ export function CommandPalette({
       else if (result === "") setQuery("");
       else setNotice(result);
     } catch (e) {
-      setNotice(e instanceof Error ? e.message : String(e));
+      setNotice(errorText(e));
     }
   };
 

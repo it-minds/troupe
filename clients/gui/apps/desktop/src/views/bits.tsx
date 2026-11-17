@@ -9,7 +9,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { JSX, ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { firstLine, hasUnseen, moneyWords, syncWords, unseenSummary } from "@troupe/client";
+import { ago, firstLine, hasUnseen, moneyWords, sessionStateWords, syncWords, unseenSummary } from "@troupe/client";
 import type { FleetRow, LineKind, SessionKind, SyncState } from "@troupe/client";
 import { Eye } from "./brand";
 
@@ -20,16 +20,17 @@ import { Eye } from "./brand";
  */
 export type Status = "running" | "waiting" | "queued" | "idle" | "allowed" | "denied" | "dormant" | "readonly" | "error" | "offline" | "private";
 
+// A session's own states are the library's words, which the console says too.
 const WORDS: Record<Status, string> = {
-  running: "Working",
-  waiting: "Waiting for you",
+  running: sessionStateWords("working"),
+  waiting: sessionStateWords("waiting"),
   queued: "Queued",
-  idle: "Idle",
+  idle: sessionStateWords("idle"),
   allowed: "Allowed",
   denied: "Denied",
-  dormant: "Asleep",
-  readonly: "Read only",
-  error: "Failed",
+  dormant: sessionStateWords("dormant"),
+  readonly: sessionStateWords("read_only"),
+  error: sessionStateWords("failed"),
   offline: "Offline",
   private: "Private",
 };
@@ -69,7 +70,7 @@ export function RowStatus({ row }: { row: FleetRow }): JSX.Element | null {
   if (row.state === "erasure_pending") return null;
   const status = statusOf(row);
   const detail = row.doneReason ?? row.status ?? row.state;
-  return <Pill status={status} title={failedTitle(row) ?? `${row.state}${row.status ? ` · ${row.status}` : ""}`}>{status === "idle" ? word(detail) : undefined}</Pill>;
+  return <Pill status={status} title={failedTitle(row) ?? `${row.state}${row.status ? ` · ${row.status}` : ""}`}>{status === "idle" ? sessionStateWords(detail) : undefined}</Pill>;
 }
 
 /** Each way the harness ends a turn as a failure, in words (Decisions 727 and 750). */
@@ -83,10 +84,6 @@ export function failedTitle(row: Pick<FleetRow, "failed">): string | undefined {
   if (!row.failed) return undefined;
   const why = FAILED[row.failed.reason] ?? `The turn failed (${row.failed.reason.replace(/_/g, " ")})`;
   return `${why}${row.failed.detail ? `: ${row.failed.detail}` : ""}`;
-}
-
-function word(s: string): string {
-  return s.charAt(0).toUpperCase() + s.slice(1).replace(/_/g, " ");
 }
 
 /**
@@ -184,22 +181,9 @@ export function When({ iso }: { iso: string | null }): JSX.Element {
   if (!iso) return <span className="when">never</span>;
   return (
     <time className="when" dateTime={iso} title={new Date(iso).toLocaleString()}>
-      {relative(Date.parse(iso))}
+      {ago(Date.parse(iso))}
     </time>
   );
-}
-
-/** A moment as a distance from now, in the coarsest unit that still says something. */
-export function relative(at: number): string {
-  // A time the server did not give, or gave in a shape `Date.parse` does not read, is not a number of days.
-  if (!Number.isFinite(at)) return "—";
-  const seconds = Math.round((Date.now() - at) / 1000);
-  if (seconds < 60) return "just now";
-  const minutes = Math.round(seconds / 60);
-  if (minutes < 60) return `${minutes} min ago`;
-  const hours = Math.round(minutes / 60);
-  if (hours < 24) return `${hours} h ago`;
-  return `${Math.round(hours / 24)} d ago`;
 }
 
 /**

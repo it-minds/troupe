@@ -152,7 +152,7 @@ describe("the gallery", () => {
     expect(img.alt).toBe("Weekly figures");
     expect(card("Weekly figures").firstElementChild!.firstElementChild).toBe(img);
     // The kind and size stay on it, and nothing else of the artifact is in the app.
-    expect(card("Weekly figures").textContent).toContain("html · 1.2 KB");
+    expect(card("Weekly figures").textContent).toContain("html · 1.2 KiB");
     expect(gallery().querySelector("iframe")).toBeNull();
     expect(externalResources().filter((u) => u.includes("artifacts.example.test"))).toEqual([picture]);
 

@@ -221,4 +221,13 @@ describe("signing in to a plane", () => {
     await waitFor(() => nav("Sessions")?.getAttribute("aria-current") === "page", "the list, as at a start");
     expect(launcher()).toBeNull();
   });
+
+  it("says a plane that did not answer as an alert, as the console does, with a retry", async () => {
+    localStorage.setItem("troupe.pref.planeUrl", "http://127.0.0.1:1");
+    unmount = render(<App />).unmount;
+    (await waitFor(() => button("Sign in"), "the sign-in button")).click();
+    const alert = await waitFor(() => document.querySelector<HTMLElement>(".banner.error[role=alert]"), "the error, as an alert");
+    await sees("The plane at http://127.0.0.1:1 did not answer.");
+    await waitFor(() => button("Try again", alert), "the retry in the alert");
+  });
 });

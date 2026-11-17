@@ -12,6 +12,7 @@
 
 import { TroupeRpcError } from "./connection.js";
 import { ErrorCodes } from "./types.js";
+import { errorText } from "./words.js";
 
 /** A provider type's name, as the daemon's `provider_types` lists them (troupe #658). */
 export type ModelProvider = string;
@@ -443,5 +444,5 @@ export function modelConfigError(e: unknown): string {
       return `The daemon refused: this needs the ${typeof scope === "string" ? scope : "admin"} scope, which this connection does not have.`;
     }
   }
-  return e instanceof Error ? e.message : String(e);
+  return errorText(e);
 }

@@ -6,6 +6,7 @@
 
 import { useState } from "react";
 import type { JSX } from "react";
+import { errorText } from "@troupe/client";
 import type { TodoItem } from "@troupe/client";
 
 export type TodoEdit = (action: "add" | "cancel" | "complete", params: { id?: string; content?: string }) => Promise<void>;
@@ -31,7 +32,7 @@ export function Tasks({
       await onEdit(action, params);
       return true;
     } catch (e) {
-      setError(`It was not changed. ${e instanceof Error ? e.message : String(e)}.`);
+      setError(`It was not changed. ${errorText(e)}.`);
       return false;
     } finally {
       setBusy(false);
