@@ -10,7 +10,7 @@ defmodule Troupe.Remote.Worker do
       reconnect, a `resync_required` and a move to another pod all produce the
       same transcript as an unbroken connection;
     * nothing pushes back on the stream — durable events are published the
-      moment they arrive, `llm.delta` is coalesced into one event per frame
+      moment they arrive, `llm_delta` is coalesced into one event per frame
       interval with a byte cap, and a TUI that cannot keep up costs this
       process nothing;
     * an activating action on a session that is not active opens it through the
@@ -406,7 +406,7 @@ defmodule Troupe.Remote.Worker do
     state = ensure_window(state)
 
     # The line goes on screen now, tagged with the command id the server will
-    # echo back; `input.accepted` is what clears the tag, and the window draws
+    # echo back; `input_accepted` is what clears the tag, and the window draws
     # none of the durable copies of the line, which carry the same id.
     notify(state, state.agent, :input, %{
       content: text,
@@ -1042,10 +1042,10 @@ defmodule Troupe.Remote.Worker do
        when is_binary(plane) and current in [:active, :dormant] do
     if (Translate.seq(event) || 0) > state.cursor do
       case type do
-        type when type in ["session_dormant", "session.dormant"] ->
+        "session_dormant" ->
           %{state | session_state: :dormant}
 
-        type when type in ~w(session_activated session.activated session_resumed session.resumed) ->
+        type when type in ["session_activated", "session_resumed"] ->
           %{state | session_state: :active}
 
         _other ->
@@ -1349,7 +1349,7 @@ defmodule Troupe.Remote.Worker do
     %{state | notes: []}
   end
 
-  defp ephemeral(state, %{"type" => type} = params) when type in ["llm.delta", "llm_delta"] do
+  defp ephemeral(state, %{"type" => "llm_delta"} = params) do
     agent = Translate.agent_of(params) || state.agent || "session"
     data = params["data"] || %{}
 

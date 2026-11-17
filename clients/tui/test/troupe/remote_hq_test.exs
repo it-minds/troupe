@@ -25,7 +25,7 @@ defmodule Troupe.RemoteHQTest do
         profile: "code",
         state: "active",
         status: "running",
-        events: [%{"type" => "message.completed", "data" => %{"text" => "working on it"}}]
+        events: [%{"type" => "llm_response", "data" => FakeRemote.said("working on it")}]
       ),
       FakeRemote.session(
         id: "s-beta",
@@ -249,7 +249,7 @@ defmodule Troupe.RemoteHQTest do
       eventually(fn -> Client.fleet_status(origin).up? == false end)
 
       # the attached session is untouched by the plane going away
-      FakeRemote.emit(remote, "s-alpha", "message.completed", %{"text" => "still here"})
+      FakeRemote.emit(remote, "s-alpha", "llm_response", FakeRemote.said("still here"))
       eventually(fn -> screen_text(pid, screen) =~ "still here" end)
       assert Client.capability(sid).up?
 

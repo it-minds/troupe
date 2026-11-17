@@ -22,8 +22,8 @@ defmodule Troupe.RemoteSessionTest do
           id: "s-live",
           profile: "code",
           events: [
-            %{"type" => "input.queued", "data" => %{"text" => "build it"}, "actor" => "alice"},
-            %{"type" => "message.completed", "data" => %{"text" => "on it"}}
+            %{"type" => "input_queued", "data" => %{"text" => "build it"}, "actor" => "alice"},
+            %{"type" => "llm_response", "data" => FakeRemote.said("on it")}
           ]
         ],
         fields
@@ -32,7 +32,7 @@ defmodule Troupe.RemoteSessionTest do
   end
 
   describe "attach, input and the reply" do
-    test "the transcript replays, input renders optimistically and reconciles on input.accepted" do
+    test "the transcript replays, input renders optimistically and reconciles on input_accepted" do
       {remote, url} = start_remote!(sessions: [fixture()])
       origin = connect!(remote, url)
 
@@ -65,7 +65,7 @@ defmodule Troupe.RemoteSessionTest do
       assert command_id != nil
 
       # the reply arrives as an ordinary durable event
-      FakeRemote.emit(remote, "s-live", "message.completed", %{"text" => "done"})
+      FakeRemote.emit(remote, "s-live", "llm_response", FakeRemote.said("done"))
       eventually(fn -> rendered_text(sid) =~ "done" end)
     end
 
@@ -95,14 +95,14 @@ defmodule Troupe.RemoteSessionTest do
       eventually(fn -> length(Client.events(sid)) >= 3 end)
 
       for n <- 1..5,
-          do: FakeRemote.emit(remote, "s-live", "message.completed", %{"text" => "before #{n}"})
+          do: FakeRemote.emit(remote, "s-live", "llm_response", FakeRemote.said("before #{n}"))
 
       eventually(fn -> rendered_text(sid) =~ "before 5" end)
 
       FakeRemote.kill_workers(remote)
 
       for n <- 1..5,
-          do: FakeRemote.emit(remote, "s-live", "message.completed", %{"text" => "after #{n}"})
+          do: FakeRemote.emit(remote, "s-live", "llm_response", FakeRemote.said("after #{n}"))
 
       eventually(fn -> rendered_text(sid) =~ "after 5" end, 15_000)
 
@@ -122,8 +122,7 @@ defmodule Troupe.RemoteSessionTest do
       await_up(sid)
 
       for n <- 1..3,
-          do:
-            FakeRemote.emit(remote, "s-live", "message.completed", %{"text" => "after crash #{n}"})
+          do: FakeRemote.emit(remote, "s-live", "llm_response", FakeRemote.said("after crash #{n}"))
 
       eventually(fn -> rendered_text(sid) =~ "after crash 3" end, 15_000)
       assert seqs(sid) == server_seqs(remote, "s-live")
@@ -138,7 +137,7 @@ defmodule Troupe.RemoteSessionTest do
       FakeRemote.resync(remote, "s-live")
 
       for n <- 1..3,
-          do: FakeRemote.emit(remote, "s-live", "message.completed", %{"text" => "post #{n}"})
+          do: FakeRemote.emit(remote, "s-live", "llm_response", FakeRemote.said("post #{n}"))
 
       eventually(fn -> rendered_text(sid) =~ "post 3" end, 15_000)
       assert seqs(sid) == server_seqs(remote, "s-live")

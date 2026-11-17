@@ -21,7 +21,7 @@ defmodule Troupe.RemoteTransportTest do
       id: "s-http",
       profile: "code",
       title: "over POST",
-      events: [%{"type" => "message.completed", "data" => %{"text" => "hello over http"}}]
+      events: [%{"type" => "llm_response", "data" => FakeRemote.said("hello over http")}]
     )
   end
 

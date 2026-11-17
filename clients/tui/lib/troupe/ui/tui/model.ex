@@ -526,7 +526,7 @@ defmodule Troupe.UI.TUI.Model do
         |> sent(path, d, ts)
 
       # A remote session renders your own input before the server has seen it;
-      # `input.accepted` carrying the same command id is what confirms it.
+      # `input_accepted` carrying the same command id is what confirms it.
       :input_accepted ->
         %{w | unconfirmed: Map.delete(w.unconfirmed, d[:command_id])}
 
@@ -1716,10 +1716,6 @@ defmodule Troupe.UI.TUI.Model do
   # often the screen is drawn. The same glyph sits in the corner of a working window.
   @spinner ~w(◐ ◓ ◑ ◒)
   @turn_ms 250
-
-  @doc "The glyphs the mark turns through while an agent works."
-  @spec spinner_glyphs() :: [String.t()]
-  def spinner_glyphs, do: @spinner
 
   @doc "The turning mark at `now`, in milliseconds: a quarter turn every #{@turn_ms} ms."
   @spec spinner(integer()) :: String.t()

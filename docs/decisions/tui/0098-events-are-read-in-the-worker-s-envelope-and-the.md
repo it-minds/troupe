@@ -2,7 +2,7 @@
 number: 98
 title: Events are read in the worker's envelope and the worker's vocabulary
 date: 2026-09-19
-status: accepted
+status: superseded
 paths:
   - clients/tui/lib/troupe/remote/translate.ex
   - clients/tui/lib/troupe/remote/worker.ex
