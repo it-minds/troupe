@@ -732,6 +732,19 @@ export function archiveRefusal(e: unknown, archiving = true): string {
 }
 
 /**
+ * Why renaming a session, or keeping it at the top or letting it go, was refused: the
+ * owner's refusal in words, a name too long as the server says it, anything else as the
+ * error says it. Who may is `mayArchive`'s rule: the owner, of a session that has a list.
+ */
+export function markRefusal(e: unknown, what: "rename" | "keep" | "let go"): string {
+  if (e instanceof TroupeRpcError && e.code === ErrorCodes.forbidden) {
+    return `Only its owner can ${what === "rename" ? "rename this session" : what === "keep" ? "keep this session at the top" : "let this session go from the top"}`;
+  }
+  if (e instanceof TroupeRpcError && typeof e.data?.["reason"] === "string") return e.data["reason"];
+  return e instanceof Error ? e.message : String(e);
+}
+
+/**
  * The daemon's row over the plane's, but for one thing the plane knows first: a session
  * somebody erased is waiting to be erased whatever the daemon says, since the daemon hears
  * it only when it is next linked (troupe Decision 756).

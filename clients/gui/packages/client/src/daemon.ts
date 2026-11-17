@@ -810,6 +810,11 @@ export class DaemonClient implements OwnPlane {
     return this.command("session.title.set", { session_id: sessionId, title });
   }
 
+  /** Keep a session at the top of the session list (`session.pin`), or let it go; the mark outlives the session's sleep. */
+  pinSession(sessionId: string, pinned: boolean): Promise<{ session_id: string; pinned: boolean }> {
+    return this.command(pinned ? "session.pin" : "session.unpin", { session_id: sessionId });
+  }
+
   recentWorkspaces(): Promise<{ workspaces: RecentWorkspace[] }> {
     return this.call("workspace.recent");
   }

@@ -126,6 +126,8 @@ shell forbids this too ([Decision 813](../decisions/0813-a-person-s-own-command-
 | `/uninvite PERSON` | Take an invitation into this session back. Ends every way the invitation let them in: their open views close. A private session is sealed from then on under a new key they are never given; what they read before stays read, since an invitation cannot be taken back for what it already showed. For example `/uninvite bea@example.com`. |  |
 | `/archive` | Archive this session: hide it from the session list, for everyone who sees it. Its owner's to do. The session goes to sleep and leaves the session list, yours and your team's, and is kept whole: its conversation, its workspace and its files. Anybody who could open it still can, from the archived sessions; working in it again does not bring it back. /unarchive does. For example `/archive`. |  |
 | `/unarchive` | Unarchive this session: put it back in the session list. Its owner's to do. The session is back in the session list for everyone who sees it, where it was before it was archived. For example `/unarchive`. |  |
+| `/rename <name>` | Rename this session: the name the session list shows. Its owner's to do. The name is the session's, for everyone who sees it, and at most 200 bytes. For example `/rename Fix the parser`. |  |
+| `/keep [off]`, `/pin` | Keep this session at the top of the session list. Its owner's to do. Kept, it is listed first, for everyone who sees it, and the platform does not clear it away when it is old. /keep off lets it go from the top. For example `/keep`. |  |
 
 ### Navigate
 

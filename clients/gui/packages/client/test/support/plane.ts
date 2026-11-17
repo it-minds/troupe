@@ -1848,6 +1848,19 @@ export class FakePlane {
         return { result: this.sessionJson(row, subject) };
       }
 
+      // Its owner's, as archiving is: trimmed, at most 200 bytes, an empty one taking it off.
+      case "session.title.set": {
+        const row = this.rows.get(String(params["session_id"] ?? ""));
+        if (!row) return { error: { code: -32005, message: "not_found" } };
+        if (row.owner !== subject) return { error: { code: -32004, message: "forbidden", data: { required_role: "owner" } } };
+        const title = String(params["title"] ?? "").trim();
+        if (new TextEncoder().encode(title).length > 200) {
+          return { error: { code: -32602, message: "invalid_params", data: { field: "title", reason: "a title is at most 200 bytes" } } };
+        }
+        row.title = title || null;
+        return { result: this.sessionJson(row, subject) };
+      }
+
       // Its owner's alone; archiving a running session puts it to sleep, and only
       // `session.unarchive` brings it back to the list.
       case "session.archive":

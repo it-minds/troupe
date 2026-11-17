@@ -164,6 +164,12 @@ notes.scratch.show(
   { name: "plan.md", title: "Migration plan", content: "# Migration plan\n\n1. copy the ledger table\n2. check the counts in `rows.csv`\n3. drop the old index\n" },
   "call-plan-2",
 );
+// A task list the person can change from the backstage's Tasks pane (troupe #1032).
+daemon.todos(notes.id, [
+  { id: "t1", content: "copy the ledger table", status: "completed" },
+  { id: "t2", content: "check the counts in rows.csv", status: "in_progress" },
+  { id: "t3", content: "drop the old index", status: "pending" },
+]);
 // An approval of a plain tool, which "Always allow" answers with a rule of the person's
 // (troupe #920): the Rules panel under This computer lists it afterwards.
 daemon.askTool(notes.id, "write_file", { path: "plan.md" });
