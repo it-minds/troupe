@@ -62,6 +62,7 @@ defmodule Troupe.Remote.Worker do
   # ones sent again after a pod said it does not hold the session.
   @activating ~w(input.send commands.run approval.respond question.answer todo.edit
                  profile.switch session.goal.set session.goal.clear session.loop.start
+                 session.compact
                  fs.upload shell.run)
   # What a person is asked, by call id, and what answers it: a branch's are answered from
   # its parent's screen (`remember_call/2`).
@@ -155,6 +156,13 @@ defmodule Troupe.Remote.Worker do
   @doc "Sets the session's goal, or clears it with `nil`. Activating, like a profile switch."
   @spec set_goal(String.t(), String.t() | nil) :: :ok | {:error, term()}
   def set_goal(session_id, text), do: call(session_id, {:goal, text})
+
+  @doc """
+  Compacts the session's conversation now, between turns (`session.compact`). Activating,
+  like the goal; `compacted` with `reason: "manual"` is the effect.
+  """
+  @spec compact(String.t()) :: :ok | {:error, term()}
+  def compact(session_id), do: call(session_id, :compact)
 
   @doc "The session's latest loop as the server reads it from the log; wakes nothing."
   @spec loop(String.t()) :: {:ok, term()} | {:error, term()}
@@ -504,6 +512,9 @@ defmodule Troupe.Remote.Worker do
 
   def handle_call({:goal, text}, from, state),
     do: activating(state, from, "session.goal.set", %{text: text, command_id: RPC.command_id()})
+
+  def handle_call(:compact, from, state),
+    do: activating(state, from, "session.compact", %{command_id: RPC.command_id()})
 
   # A loop sends the session input, so starting one activates it; stopping one does not.
   def handle_call({:loop, n}, from, state) do

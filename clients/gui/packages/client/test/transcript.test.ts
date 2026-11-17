@@ -728,11 +728,12 @@ describe("questions, and what the daemon says about limits (troupe-remote Decisi
       durable("truncated", { reason: "max_tokens", calls: 2 }),
       durable("compacted", { summary: "s", reason: "context_overflow" }),
       durable("budget_warning", { dimension: "turns", used: 32, limit: 40, fraction: 0.8, detail: "turns 32/40 (80%)" }),
+      durable("compacted", { summary: "s", reason: "manual", command_id: "c-1" }),
     ]);
 
     assert.deepEqual(
       state.entries.map((e) => e.kind),
-      ["system", "system", "system", "system", "system", "system"],
+      ["system", "system", "system", "system", "system", "system", "system"],
     );
     const texts = state.entries.map((e) => (e as Extract<Entry, { kind: "system" }>).text);
     assert.equal(texts[0], "the harness said: Your previous reply was cut off");
@@ -741,6 +742,7 @@ describe("questions, and what the daemon says about limits (troupe-remote Decisi
     assert.match(texts[3]!, /2 tool call\(s\) answered with an error/);
     assert.match(texts[4]!, /no longer fit/);
     assert.equal(texts[5], "nearly out: turns 32/40 (80%)");
+    assert.equal(texts[6], "conversation compacted, as asked with /compact");
   });
 
   it("names the person and the tools when somebody's own tools are offered to the session (troupe #668)", () => {

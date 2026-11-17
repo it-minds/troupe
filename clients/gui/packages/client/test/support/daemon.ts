@@ -535,6 +535,8 @@ export class FakeDaemon {
   token: string;
   /** The command table `commands.list` answers; a test may add a row of its own. */
   commands: typeof COMMANDS = [...COMMANDS];
+  /** What `session.compact` is refused with, as the daemon's `conflict` reason; `null` compacts. */
+  compactRefusal: string | null = null;
   readonly sessions = new Map<string, Session>();
   readonly calls: Array<{ method: string; params: Record<string, unknown> }> = [];
   /** Who the daemon says its user is. `null` until somebody links an identity. */
@@ -1651,6 +1653,20 @@ evoked where nothing is set and there was a sign-in. */
         if (!session) return reply(ws, id, null, { code: -32005, message: "not_found" });
         session.goal = null;
         session.log.append("goal_cleared", { command_id: params["command_id"] }, { kind: "user", subject: this.principal.subject });
+        return reply(ws, id, { accepted: true });
+      }
+
+      // Compacting now, as the root agent does it between turns: refused while a turn runs or
+      // when a test says so, else `compacted` with `reason: manual` and the command's id.
+      case "session.compact": {
+        if (!session) return reply(ws, id, null, { code: -32005, message: "not_found" });
+        const refusal = this.compactRefusal ?? (session.status !== "idle" ? "the agent is in the middle of a turn: compact once it has finished, or cancel it first" : null);
+        if (refusal) return reply(ws, id, null, { code: -32006, message: "conflict", data: { reason: refusal } });
+        session.log.append(
+          "compacted",
+          { summary: "the earlier work, summarised", reason: "manual", conversation: [], command_id: params["command_id"] },
+          { kind: "user", subject: this.principal.subject },
+        );
         return reply(ws, id, { accepted: true });
       }
 

@@ -140,7 +140,11 @@ defmodule Troupe.Protocol.Schema do
         # What a turn's first call took and offers to the turn's end: `digest`, and `tools`
         # and `skills` when they differ from the last written whole; folded on replay so an
         # agent restarted in the middle of the turn offers what it began with (Decision 876).
-        "turn_hold" => optional(:object)
+        "turn_hold" => optional(:object),
+        # A request sent again with every large tool result left out, after the provider
+        # refused it as too long even compacted: how many messages are behind from then on.
+        # Folded on replay.
+        "behind" => optional(:integer)
       },
       "llm_response" => %{
         "message" => required(:object),
@@ -308,9 +312,11 @@ defmodule Troupe.Protocol.Schema do
       },
       "compacted" => %{
         "summary" => required(:string),
-        # `threshold`, or `context_overflow` when the provider refused the prompt and
-        # compacting is how the turn was sent again (Decision 659).
+        # `threshold`; `context_overflow` when the provider refused the prompt and
+        # compacting is how the turn was sent again; `manual` when a person asked with
+        # `session.compact`, whose `command_id` it carries.
         "reason" => optional(:string),
+        "command_id" => optional(:string),
         "conversation" => optional(:array),
         # The summariser's own call, in the words `llm_request` and `llm_response` use for
         # one (Decision 769). Absent from a log written before it.
@@ -890,6 +896,12 @@ defmodule Troupe.Protocol.Schema do
         "session_id" => required(:string)
       },
       "session.loop.get" => %{"session_id" => required(:string)},
+      # Compact the conversation now, between turns: activating, like the goal. Refused
+      # `conflict` while a turn runs or while there is too little to compact.
+      "session.compact" => %{
+        "command_id" => required(:string),
+        "session_id" => required(:string)
+      },
       # A delegation's answer (Decision 850) may carry `agent`, a subagent the request offered
       # to send it to instead; `brief`, the parts the person edited, held to the brief's
       # shape; and `reason`, a word back with `deny`. A publication's carries `visibility`,

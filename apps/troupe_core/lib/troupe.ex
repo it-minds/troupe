@@ -427,6 +427,21 @@ defmodule Troupe do
     with_root(session_id, &Agent.set_goal(&1, text, actor, opts))
   end
 
+  @doc """
+  Compact the session's conversation now, between turns (`/compact`): the root agent asks
+  its summariser and writes `compacted` with `reason: "manual"` under `actor`, carrying
+  `:command_id` from `opts`. Refused while a turn runs (`:busy`), and while there is
+  nothing old enough to summarise (`:too_little`).
+  """
+  @spec compact(String.t(), Troupe.Protocol.Event.Actor.t() | nil, keyword()) ::
+          :ok | {:error, :no_session | :busy | :too_little}
+  def compact(session_id, actor \\ nil, opts \\ []) do
+    with_root(
+      session_id,
+      &Agent.compact(&1, actor: actor, command_id: Keyword.get(opts, :command_id))
+    )
+  end
+
   @doc "Clear the session's goal; the root agent writes `goal_cleared` if it had one."
   @spec clear_goal(String.t(), Troupe.Protocol.Event.Actor.t() | nil, keyword()) ::
           :ok | {:error, :no_session}

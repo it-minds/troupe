@@ -73,6 +73,16 @@ defmodule Troupe.Tools.ReadOutput do
       "Call #{call(id, 1)} to see it again.]"
   end
 
+  @doc """
+  The line a result the model has not read yet is sent as, when the prompt with it whole
+  was too long for the model's context window even after a compaction.
+  """
+  @spec unread_stub(String.t(), non_neg_integer(), String.t()) :: String.t()
+  def unread_stub(tool, size, id) do
+    "[output of #{tool} (#{size} bytes) left out: the prompt was too long for the model's " <>
+      "context window with it whole. Call #{call(id, 1)} to read it a page at a time.]"
+  end
+
   defp call(id, offset),
     do: ~s|read_output(id: "#{id}", offset: #{offset}, limit: #{@default_limit})|
 

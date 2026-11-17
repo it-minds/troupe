@@ -770,7 +770,7 @@ defmodule Troupe.FakeRemote do
   @addressed ~w(approval.respond blob.get fs.list fs.read fs.upload input.send presence.set
                 profile.switch session.archive session.erase session.get session.pin
                 session.unpin todo.edit tools.register tools.unregister turn.cancel
-                shell.run shell.cancel)
+                shell.run shell.cancel session.compact)
 
   # What `Troupe.Gateway.Dispatch` refuses a command without, beyond `session_id`, for the
   # commands this client sends. Accepting any spelling is how `profile.switch`,
@@ -1339,7 +1339,13 @@ defmodule Troupe.FakeRemote do
   end
 
   defp dispatch(state, _kind, method, _params, _pid)
-       when method in ["turn.cancel", "approval.respond", "todo.edit", "profile.switch"],
+       when method in [
+              "turn.cancel",
+              "approval.respond",
+              "todo.edit",
+              "profile.switch",
+              "session.compact"
+            ],
        do: {{:ok, %{"accepted" => true}}, state}
 
   # Laptops' sessions offered for steering (root #58), as `offer/3` set them.

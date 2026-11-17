@@ -38,7 +38,8 @@ defmodule Troupe.LLM.Fake do
             cost_micros: :derived,
             cache_read: 0,
             strict_pairs: false,
-            strict_tools: false
+            strict_tools: false,
+            window_bytes: nil
 
   # -- client -----------------------------------------------------------------
 
@@ -74,6 +75,9 @@ defmodule Troupe.LLM.Fake do
     * `:strict_tools` — refuse, as Anthropic's Messages API does, a request whose
       messages hold a tool call or result when it defines no tools (default `false`).
       OpenAI's takes such a request. A refused request takes no step from the script
+    * `:window_bytes` — refuse, with the `400` a provider answers a prompt too long for its
+      context window with, a request whose messages' text is longer than this many bytes
+      (default `nil`, no window). A refused request takes no step from the script
     * `:name` — registered name (tests usually pass one)
   """
   @spec start_link(keyword()) :: GenServer.on_start()
@@ -209,7 +213,8 @@ defmodule Troupe.LLM.Fake do
        cost_micros: Keyword.get(opts, :cost_micros, :derived),
        cache_read: Keyword.get(opts, :cache_read, 0),
        strict_pairs: Keyword.get(opts, :strict_pairs, false),
-       strict_tools: Keyword.get(opts, :strict_tools, false)
+       strict_tools: Keyword.get(opts, :strict_tools, false),
+       window_bytes: Keyword.get(opts, :window_bytes)
      }}
   end
 
@@ -218,7 +223,8 @@ defmodule Troupe.LLM.Fake do
     state = %{state | requests: [request | state.requests]}
 
     case (state.strict_pairs && unpaired(request.messages)) ||
-           (state.strict_tools && undefined_tools(request)) do
+           (state.strict_tools && undefined_tools(request)) ||
+           (state.window_bytes && too_long(request, state.window_bytes)) do
       reason when is_binary(reason) ->
         {:reply, {:error, {:http_status, 400, reason}}, state}
 
@@ -256,6 +262,28 @@ defmodule Troupe.LLM.Fake do
           [] -> {state.default, state}
         end
     end
+  end
+
+  # The words of a context overflow as an OpenAI-compatible gateway says them, counting the
+  # text and the tool blocks of the messages, which is what a large tool result makes long.
+  defp too_long(request, window) do
+    size = request.messages |> Enum.map(&message_bytes/1) |> Enum.sum()
+
+    if size > window,
+      do:
+        "This model's maximum context length is #{window} tokens. However, you requested " <>
+          "#{size} tokens. Please reduce the length of the messages."
+  end
+
+  defp message_bytes(%Message{content: blocks}) do
+    blocks
+    |> Enum.map(fn
+      %Text{text: text} -> byte_size(text)
+      %ToolResult{content: content} when is_binary(content) -> byte_size(content)
+      %ToolUse{input: input} -> input |> inspect() |> byte_size()
+      _other -> 0
+    end)
+    |> Enum.sum()
   end
 
   # What Anthropic's and OpenAI's APIs check of tool blocks before anything else: every

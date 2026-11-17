@@ -1273,7 +1273,7 @@ defmodule Troupe.UI.TUI.Server do
   # 698); this is only which of them the TUI implements, and the suite holds the two
   # equal, so a command added to the table without a clause here fails a test rather
   # than being dispatched as an agent.
-  @builtins ~w(new cancel dismiss merge discard goal loop steer invite uninvite sessions back hq observer files
+  @builtins ~w(new cancel dismiss merge discard compact goal loop steer invite uninvite sessions back hq observer files
                scratch upload save publish artifacts profiles profile copy memory context watch settings
                models mcp
                skills help
@@ -1677,6 +1677,16 @@ defmodule Troupe.UI.TUI.Server do
   end
 
   defp builtin("goal", args, state, _target), do: goal_command(state.session_id, String.trim(args))
+
+  # The conversation compacted now, to make room before a heavy turn. The transcript says
+  # so when the session's `compacted` arrives; this answers on the notice line.
+  defp builtin("compact", _args, state, _target) do
+    case Client.compact(state.session_id) do
+      :ok -> {:notice, "compacting the conversation"}
+      {:error, reason} -> {:error, to_message(reason)}
+    end
+  end
+
   defp builtin("loop", args, state, _target), do: loop_command(state.session_id, String.trim(args))
 
   defp builtin("upload", args, state, _target),

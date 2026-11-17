@@ -14,7 +14,10 @@ defmodule Troupe.Tools.Output do
 
   `stub_behind/3` is the same idea once a result has been read (Decision 771): a large
   result a compaction left behind is sent from then on as one line naming the
-  `read_output` call that returns it, rather than again in full on every call.
+  `read_output` call that returns it, rather than again in full on every call. A prompt
+  the provider refused as too long, even compacted, moves the boundary to the end of the
+  conversation, so the results the model has not read yet go that way too, their stub
+  saying why.
   """
 
   alias Troupe.Agent.Definition
@@ -124,34 +127,60 @@ defmodule Troupe.Tools.Output do
   def stub_behind(conversation, through, ctx) do
     {behind, since} = Enum.split(conversation, through)
 
+    # The results after the model's last reply among them it has not read: their stub says
+    # they were left out unread.
+    read = behind |> Enum.reverse() |> Enum.find_index(&(&1.role == :assistant))
+    read_through = if read, do: length(behind) - read, else: 0
+
     # A result's tool is named by the message just before it, the calls it answers: an id
     # is only unique within its response where a gateway numbers them `call_0`, `call_1`.
     {stubbed, _names} =
-      Enum.map_reduce(behind, %{}, fn message, names ->
-        {stub_results(message, names, ctx), tool_names(message)}
+      behind
+      |> Enum.with_index()
+      |> Enum.map_reduce(%{}, fn {message, at}, names ->
+        {stub_results(message, names, at >= read_through, ctx), tool_names(message)}
       end)
 
     stubbed ++ since
   end
 
+  @doc """
+  Whether `stub_behind/3` would send any of these messages differently: one holds a tool
+  result over the blob inline limit.
+  """
+  @spec stubs_any?([Message.t()]) :: boolean()
+  def stubs_any?(messages) do
+    Enum.any?(messages, fn
+      %Message{role: :user, content: blocks} -> Enum.any?(blocks, &large_result?/1)
+      _message -> false
+    end)
+  end
+
+  defp large_result?(%ToolResult{content: content}) when is_binary(content),
+    do: byte_size(content) > Blobs.inline_limit()
+
+  defp large_result?(_block), do: false
+
   defp tool_names(message), do: Map.new(Message.tool_uses(message), &{&1.id, &1.name})
 
-  defp stub_results(%Message{role: :user, content: blocks} = message, names, ctx),
-    do: %{message | content: Enum.map(blocks, &stub_result(&1, names, ctx))}
+  defp stub_results(%Message{role: :user, content: blocks} = message, names, unread?, ctx),
+    do: %{message | content: Enum.map(blocks, &stub_result(&1, names, unread?, ctx))}
 
-  defp stub_results(message, _names, _ctx), do: message
+  defp stub_results(message, _names, _unread?, _ctx), do: message
 
-  defp stub_result(%ToolResult{content: content} = result, names, ctx) when is_binary(content) do
-    with true <- byte_size(content) > Blobs.inline_limit(),
+  defp stub_result(%ToolResult{content: content} = result, names, unread?, ctx)
+       when is_binary(content) do
+    with true <- large_result?(result),
          {:ok, id} <- keep(ctx, content) do
       tool = Map.get(names, result.tool_use_id, "an earlier tool call")
-      %{result | content: ReadOutput.stub(tool, byte_size(content), id)}
+      stub = if unread?, do: &ReadOutput.unread_stub/3, else: &ReadOutput.stub/3
+      %{result | content: stub.(tool, byte_size(content), id)}
     else
       _small_or_unkept -> result
     end
   end
 
-  defp stub_result(block, _names, _ctx), do: block
+  defp stub_result(block, _names, _unread?, _ctx), do: block
 
   defp count_lines(text), do: text |> String.split("\n") |> length()
 end

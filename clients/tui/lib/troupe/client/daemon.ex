@@ -315,6 +315,9 @@ defmodule Troupe.Client.Daemon do
   @impl true
   def stop_loop(sid), do: describe(Worker.stop_loop(sid))
 
+  @impl true
+  def compact(sid), do: describe(Worker.compact(sid))
+
   # `/cancel` and `x x` on a branch (TUI Decision 57): its turn is cancelled, and once it is
   # at rest the worktree Troupe made for it is discarded and the window closed, so nothing
   # is writing the tree as it goes. That waits on the daemon, which refuses the discard

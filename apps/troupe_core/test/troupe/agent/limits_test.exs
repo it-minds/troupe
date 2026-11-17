@@ -130,7 +130,7 @@ defmodule Troupe.Agent.LimitsTest do
       await_state(sid, [:idle], 10_000)
       assert [%{data: %{"reason" => reason}}] = events_of_type(sid, :llm_error)
       assert reason =~ "no longer fits the model's context window"
-      assert reason =~ "compacted once"
+      assert reason =~ "even after compacting; fetch less per call"
       assert length(events_of_type(sid, :compacted)) == 1
     end
 

@@ -28,7 +28,9 @@ defmodule Troupe.PlainLineTest do
   end
 
   # Every name and alias the harness's table gives a built-in, on its own and with words
-  # after it, so a command added to the table is covered here without a word changed.
+  # after it, so a command added to the table is covered here without a word changed. It
+  # grows with the table, past the default minute.
+  @tag timeout: 180_000
   test "no built-in's name or alias at the start of a plain line keeps it from the agent" do
     {sid, _, _} = start_session!(script: [])
     {pid, _session} = start_tui(sid)
