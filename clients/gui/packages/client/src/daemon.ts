@@ -14,7 +14,7 @@
 import { TroupeConnection, TroupeRpcError } from "./connection.js";
 import { SessionView } from "./session.js";
 import type { CallOptions, ConnectOptions, ConnectionHooks } from "./connection.js";
-import type { Artifact, ArtifactComment, ArtifactDetail, ArtifactFilter, ArtifactKind, ArtifactList, ArtifactNewLink, ArtifactOwner, ArtifactPersonShare, ArtifactShareRole, ArtifactText, ArtifactThread, ArtifactThumbnail, ArtifactTicket, ArtifactTransferTo, ArtifactUpload } from "./artifacts.js";
+import type { Artifact, ArtifactBlocked, ArtifactComment, ArtifactDetail, ArtifactFilter, ArtifactKind, ArtifactList, ArtifactNewLink, ArtifactOwner, ArtifactPersonShare, ArtifactShareRole, ArtifactText, ArtifactThread, ArtifactThumbnail, ArtifactTicket, ArtifactTransferTo, ArtifactUpload } from "./artifacts.js";
 import type { AgentBroken, AgentCheck, AgentDefinition, AgentDeleted, AgentRow, AgentScope, AgentSkippedFile, AgentsChanged, AgentWritten } from "./agents.js";
 import type { ConfigScope, ConfigSetParams, ModelConfig, ModelDiscovery, ModelsParams } from "./config.js";
 import { remoteOffer, syncState } from "./fleet.js";
@@ -1228,10 +1228,11 @@ export class DaemonClient implements OwnPlane {
    * one, or with `id` the next version of one of theirs. `owner` says whose a new one is:
    * left out, one for a team is that team's and any other the person's. The daemon sends a
    * version too large for one call by an upload handle. Refused with a sentence where it is
-   * signed in to no plane.
+   * signed in to no plane. The answer names what the artifacts host will block in the
+   * version (`blocked`); it is published all the same.
    */
-  publishArtifact(params: { title: string; kind: ArtifactKind; visibility: string; files: ArtifactUpload[]; owner?: ArtifactOwner; id?: string; note?: string; session_id?: string; thumbnail?: ArtifactThumbnail }): Promise<Artifact & { plane_url?: string }> {
-    return this.command<Artifact & { plane_url?: string }>("artifact.publish", params);
+  publishArtifact(params: { title: string; kind: ArtifactKind; visibility: string; files: ArtifactUpload[]; owner?: ArtifactOwner; id?: string; note?: string; session_id?: string; thumbnail?: ArtifactThumbnail }): Promise<Artifact & { plane_url?: string; blocked?: ArtifactBlocked[] }> {
+    return this.command<Artifact & { plane_url?: string; blocked?: ArtifactBlocked[] }>("artifact.publish", params);
   }
 
   /** The person's own artifacts on the plane, and where the console's gallery is. */

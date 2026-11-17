@@ -17,31 +17,51 @@ defmodule Troupe.Plane.Web.Artifacts.CSP do
 
   Beside it `nosniff`, so nothing here is run as a script it is not, and no referrer, so a
   link out of an artifact tells nobody where it was.
+
+  What a page may load is also read at publish (`sources/1`), so a page that loads what this
+  policy blocks is named to its publisher from these same lists, never from a second copy.
   """
 
   @behaviour Plug
 
   import Plug.Conn
 
+  # What a page may load and from where, as the header says it.
+  @loads [
+    {"default-src", ["'self'"]},
+    {"script-src", ["'self'"]},
+    {"style-src", ["'self'", "'unsafe-inline'"]},
+    {"img-src", ["'self'", "data:"]},
+    {"font-src", ["'self'", "data:"]},
+    {"media-src", ["'self'"]},
+    {"connect-src", ["'self'"]},
+    {"object-src", ["'none'"]},
+    {"base-uri", ["'none'"]},
+    {"form-action", ["'none'"]}
+  ]
+
   @doc "The policy, as the header carries it, framed by `plane` (an origin) or by nothing."
   @spec policy(String.t() | nil) :: String.t()
   def policy(plane) do
-    [
-      {"default-src", ["'self'"]},
-      {"script-src", ["'self'"]},
-      {"style-src", ["'self'", "'unsafe-inline'"]},
-      {"img-src", ["'self'", "data:"]},
-      {"font-src", ["'self'", "data:"]},
-      {"media-src", ["'self'"]},
-      {"connect-src", ["'self'"]},
-      {"object-src", ["'none'"]},
-      {"base-uri", ["'none'"]},
-      {"form-action", ["'none'"]},
-      {"frame-ancestors", [plane || "'none'"]},
-      {"sandbox",
-       ["allow-scripts", "allow-popups", "allow-popups-to-escape-sandbox", "allow-downloads"]}
-    ]
+    (@loads ++
+       [
+         {"frame-ancestors", [plane || "'none'"]},
+         {"sandbox",
+          ["allow-scripts", "allow-popups", "allow-popups-to-escape-sandbox", "allow-downloads"]}
+       ])
     |> Enum.map_join("; ", fn {directive, sources} -> Enum.join([directive | sources], " ") end)
+  end
+
+  @doc """
+  The sources `directive` allows, as a browser reads the header: a fetch directive the
+  policy does not name (`frame-src`, `manifest-src`) falls back to `default-src`.
+  """
+  @spec sources(String.t()) :: [String.t()]
+  def sources(directive) do
+    case List.keyfind(@loads, directive, 0) do
+      {^directive, sources} -> sources
+      nil -> sources("default-src")
+    end
   end
 
   @doc "The plane's own origin, which alone may frame an artifact, or `nil`."

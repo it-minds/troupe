@@ -11,8 +11,8 @@
 
 import { useEffect, useState } from "react";
 import type { JSX } from "react";
-import { errorText, visibilityWords } from "@troupe/client";
-import type { Artifact, ArtifactKind, ArtifactList, ArtifactThumbnail, ArtifactUpload, DaemonClient } from "@troupe/client";
+import { blockedKindWords, blockedWords, errorText, visibilityWords } from "@troupe/client";
+import type { Artifact, ArtifactBlocked, ArtifactKind, ArtifactList, ArtifactThumbnail, ArtifactUpload, DaemonClient } from "@troupe/client";
 import { shell } from "../shell";
 
 /** The person's real browser where there is a shell; a webview does nothing useful with a new window. */
@@ -100,7 +100,7 @@ export function Publish({
   const [picture, setPicture] = useState<File | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [done, setDone] = useState<Artifact | null>(null);
+  const [done, setDone] = useState<(Artifact & { blocked?: ArtifactBlocked[] }) | null>(null);
 
   useEffect(() => {
     let live = true;
@@ -156,6 +156,19 @@ export function Publish({
               {done.title} is published as {done.id}, version {done.version}, for {visibilityWords(done.visibility)}
               {done.owner_team ? `, owned by the ${done.owner_team} team` : ""}.
             </p>
+            {/* What the artifacts host will block in it, as the plane read the files. */}
+            {done.blocked && done.blocked.length > 0 && (
+              <div className="note blocked" role="note">
+                <p>{blockedWords(done.blocked.length)}</p>
+                <ul>
+                  {done.blocked.map((b, i) => (
+                    <li key={i}>
+                      <code>{b.file}</code> {b.reference} ({blockedKindWords(b.kind)})
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
             <div className="actions">
               {gallery && (
                 <button type="button" onClick={() => void openExternal(`${gallery}/${done.id}`)}>
@@ -170,6 +183,7 @@ export function Publish({
         ) : (
           <>
             <p className="copy">Files from this computer, published on your Troupe plane as you, served from a host of their own that can reach nothing of yours.</p>
+            <p className="hint">An artifact may load only its own files: no stylesheet, script, font or image from another site, and no inline script.</p>
             {listError && <p className="banner error">{listError}</p>}
             <fieldset>
               <legend>What to publish</legend>

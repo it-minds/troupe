@@ -38,6 +38,9 @@ defmodule Troupe.Plane.Artifacts.Artifact do
     field(:total_bytes, :integer, default: 0)
     # The picture of the version in force, as that version keeps it, or nil for none.
     field(:thumbnail, :map)
+    # How many references the artifacts host blocks in the version in force, as its files
+    # were read at publish.
+    field(:blocked, :integer, default: 0)
     # When somebody last opened it, at most once an hour; nil for never since the column
     # came. What the unopened retention period counts from, with `updated_at`.
     field(:opened_at, :utc_datetime_usec)

@@ -1068,8 +1068,10 @@ ul.plain li {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
-/* A running session whose last turn read an older version than the one in force. */
+/* A running session whose last turn read an older version than the one in force, and an
+   artifact version that references what the artifacts host blocks. */
 .readers tr.behind td,
+.note.blocked,
 .memory-mark {
   color: var(--waiting-fg);
 }

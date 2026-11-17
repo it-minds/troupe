@@ -483,6 +483,9 @@ label code {
   color: var(--text-muted);
   font: var(--t-code-small);
 }
+.note.blocked {
+  color: var(--waiting-fg);
+}
 .note.error {
   color: var(--error-fg);
 }

@@ -20,8 +20,8 @@
 
 import { useCallback, useEffect, useState } from "react";
 import type { JSX } from "react";
-import { ago, appLink, audienceName, audienceOf, bytes, errorText, teamOwned, visibilityWords } from "@troupe/client";
-import type { Artifact, ArtifactAudience, ArtifactDetail, ArtifactList, ArtifactShareRole, ArtifactThread, DaemonClient, OwnPlane, Person } from "@troupe/client";
+import { ago, appLink, audienceName, audienceOf, blockedKindWords, blockedWords, bytes, errorText, teamOwned, visibilityWords } from "@troupe/client";
+import type { Artifact, ArtifactAudience, ArtifactDetail, ArtifactList, ArtifactShareRole, ArtifactThread, ArtifactVersion, DaemonClient, OwnPlane, Person } from "@troupe/client";
 import { goesLine, goesSentence, versionGoes, versionsSentence } from "@troupe/client";
 import { copyText } from "../clipboard";
 import { shell } from "../shell";
@@ -436,6 +436,38 @@ export function Artifacts({
   );
 }
 
+/**
+ * What the artifacts host blocks in the version its address serves, as the plane read its
+ * files at publish: one line, and the references themselves on request.
+ */
+function Blocked({ artifact, versions }: { artifact: Artifact; versions: ArtifactVersion[] }): JSX.Element | null {
+  const line = blockedWords(artifact.blocked_count);
+  if (!line) return null;
+  const serving = versions.find((v) => v.n === (artifact.current ?? artifact.version)) ?? versions[0];
+  const found = serving?.blocked ?? [];
+  return (
+    <div className="note blocked" role="note">
+      <p>{line}</p>
+      {found.length > 0 && (
+        <details>
+          <summary>What is blocked</summary>
+          <ul>
+            {found.map((b, i) => (
+              <li key={i}>
+                <code>
+                  {b.file}
+                  {b.line ? `:${b.line}` : ""}
+                </code>{" "}
+                {b.reference} ({blockedKindWords(b.kind)})
+              </li>
+            ))}
+          </ul>
+        </details>
+      )}
+    </div>
+  );
+}
+
 /** The artifact chosen: what it is, Open and Copy link, who can see it, where it came from, its versions, and its owner's controls. */
 function Aside({
   via,
@@ -578,6 +610,7 @@ function Aside({
       {error && <p className="note error">{error}</p>}
       {said && <p className="note" role="status">{said}</p>}
       {(detail ?? artifact).goes_at && <p className="muted goes">{goesSentence(detail ?? artifact)}</p>}
+      <Blocked artifact={detail ?? artifact} versions={versions} />
 
       <section>
         <h3 className="screen">Who can see it</h3>

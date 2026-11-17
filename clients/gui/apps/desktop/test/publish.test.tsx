@@ -115,6 +115,20 @@ describe("Publish…", () => {
     expect(button("Open it in the gallery", d)).not.toBeNull(); // at once: drawn with the answer just seen
   });
 
+  it("says an artifact loads only its own files, and what the artifacts host will block of a page just published", async () => {
+    daemon.artifacts = [];
+    const d = await openPublish();
+    await sees("An artifact may load only its own files: no stylesheet, script, font or image from another site, and no inline script.");
+    const page = '<link rel="stylesheet" href="https://cdn.example.test/lib.css">\n<button onclick="go()">Go</button>';
+    pick(d.querySelector<HTMLInputElement>('input[type="file"]')!, [new File([page], "index.html", { type: "text/html" })]);
+    type([...d.querySelectorAll<HTMLInputElement>("label input")].find((i) => i.closest("label")?.textContent?.startsWith("Title"))!, "Weekly");
+    (await waitFor(() => (button("Publish", d)?.disabled === false ? button("Publish", d) : null), "the Publish button")).click();
+    await sees("is published as art-fake1, version 1");
+    await sees("This version references 2 things the artifacts host blocks, so it may look or work broken. An artifact may load only its own files.");
+    const listed = [...d.querySelectorAll(".note.blocked li")].map((li) => li.textContent);
+    expect(listed).toEqual(["index.html https://cdn.example.test/lib.css (a stylesheet from another site)", 'index.html onclick="go()" (an inline event handler)']);
+  });
+
   it("publishes a new version of one of the person's own, with what changed", async () => {
     daemon.artifacts = [{ id: "art-ada-notes", title: "Notes", kind: "markdown", visibility: "organisation", version: 2, mine: true }];
     const d = await openPublish();
