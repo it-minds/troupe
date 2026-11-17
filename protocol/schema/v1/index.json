@@ -82,6 +82,7 @@
     "commands/scratch.list.json",
     "commands/session.archive.json",
     "commands/session.claim.json",
+    "commands/session.compact.json",
     "commands/session.create.json",
     "commands/session.erase.json",
     "commands/session.fork.json",

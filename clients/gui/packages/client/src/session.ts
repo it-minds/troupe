@@ -424,6 +424,15 @@ export class SessionView {
     await this.conn.call("session.goal.clear", { command_id: this.conn.nextCommandId(), session_id: this.sessionId });
   }
 
+  /**
+   * `session.compact`: compact the conversation now, between turns. Activating; the effect
+   * is `compacted` with `reason: "manual"`. Refused `conflict`, its `reason` a sentence,
+   * while a turn runs or while there is too little to compact.
+   */
+  async compact(): Promise<void> {
+    await this.conn.call("session.compact", { command_id: this.conn.nextCommandId(), session_id: this.sessionId });
+  }
+
   /** `session.loop.start`: up to `maxIterations` turns towards the goal, or the session's own cap. */
   startLoop(maxIterations?: number): Promise<LoopStarted> {
     const params: Record<string, unknown> = { command_id: this.conn.nextCommandId(), session_id: this.sessionId };

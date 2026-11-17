@@ -107,6 +107,8 @@ defmodule Troupe.Worker.AuthTest do
     "session.loop.get",
     "session.loop.start",
     "session.loop.stop",
+    # Compacting now, between turns (`/compact`, both clients').
+    "session.compact",
     "fs.list",
     "fs.read",
     "fs.upload",

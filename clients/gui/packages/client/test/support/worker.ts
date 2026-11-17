@@ -504,6 +504,20 @@ export class FakeWorker {
         return;
       }
 
+      // As a pod's root agent compacts between turns: refused while a turn runs.
+      case "session.compact": {
+        if (!session) return reply(ws, id, null, { code: -32005, message: "not_found" });
+        if (session.status !== "idle") {
+          return reply(ws, id, null, { code: -32006, message: "conflict", data: { reason: "the agent is in the middle of a turn: compact once it has finished, or cancel it first" } });
+        }
+        session.log.append(
+          "compacted",
+          { summary: "the earlier work, summarised", reason: "manual", conversation: [], command_id: params["command_id"] },
+          { kind: "user", subject: client.token.sub },
+        );
+        return reply(ws, id, { accepted: true });
+      }
+
       case "turn.cancel": {
         if (!session) return reply(ws, id, null, { code: -32005, message: "not_found" });
         session.log.append("cancelled", {}, { kind: "user", subject: client.token.sub });

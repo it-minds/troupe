@@ -610,7 +610,7 @@ defmodule Troupe.Remote.Translate do
       # The summariser's call is the session's to pay for as a reply's is (root Decision
       # 769), so what it used reaches the window's count.
       "compacted" ->
-        {[emit.(:remote_note, %{text: "context compacted"})] ++ summarised(emit, data), memory}
+        {[emit.(:remote_note, %{text: compacted_note(data)})] ++ summarised(emit, data), memory}
 
       # The limit, where the `agent_done` before it did not name it, goes to the input line.
       "budget_exhausted" ->
@@ -1107,6 +1107,10 @@ defmodule Troupe.Remote.Translate do
   end
 
   defp spent(state, _data), do: state
+
+  # One a person asked for with `/compact` says so; the harness's own say nothing more.
+  defp compacted_note(%{"reason" => "manual"}), do: "context compacted, as /compact asked"
+  defp compacted_note(_data), do: "context compacted"
 
   defp summarised(emit, %{"usage" => %{} = used}), do: [emit.(:call_usage, %{usage: usage(used)})]
   defp summarised(_emit, _data), do: []

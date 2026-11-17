@@ -134,6 +134,7 @@ defmodule Troupe.Client do
   @callback loop(session_id()) :: {:ok, map() | nil} | {:error, term()}
   @callback start_loop(session_id(), pos_integer() | nil) :: :ok | {:error, term()}
   @callback stop_loop(session_id()) :: :ok | {:error, term()}
+  @callback compact(session_id()) :: :ok | {:error, term()}
   @callback cancel_branch(session_id(), String.t()) :: :ok | {:error, term()}
   @callback dismiss(session_id(), String.t()) :: :ok | {:error, term()}
   @callback merge(session_id(), String.t()) :: {:ok, String.t()} | {:error, term()}
@@ -368,6 +369,13 @@ defmodule Troupe.Client do
 
   @spec stop_loop(session_id()) :: :ok | {:error, term()}
   def stop_loop(sid), do: impl(sid).stop_loop(sid)
+
+  @doc """
+  Compacts the session's conversation now, between turns (`/compact`). Refused, with the
+  session's sentence, while a turn runs or while there is too little to compact.
+  """
+  @spec compact(session_id()) :: :ok | {:error, term()}
+  def compact(sid), do: impl(sid).compact(sid)
 
   @spec cancel_branch(session_id(), String.t()) :: :ok | {:error, term()}
   def cancel_branch(sid, path), do: impl(sid).cancel_branch(sid, path)

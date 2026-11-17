@@ -31,6 +31,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { JSX } from "react";
 import type { AgentLayer, AgentRow, CommandEntry } from "@troupe/client";
+import { ErrorCodes, TroupeRpcError } from "@troupe/client";
 import { copyText } from "../clipboard";
 import type { SessionHandle } from "../hooks";
 import { switchable } from "./AgentSwitch";
@@ -90,6 +91,21 @@ const RUNNERS: Record<string, (ctx: RunContext, args: string) => Promise<string 
   cancel: async ({ view }) => {
     await view.cancel();
     return undefined;
+  },
+  // Compact now, between turns; a refusal (a turn running, too little to compact) is the
+  // daemon's own sentence.
+  compact: async ({ view }) => {
+    const v = view.view;
+    if (!v) return "not attached";
+    try {
+      await v.compact();
+      return "compacting the conversation";
+    } catch (e) {
+      if (e instanceof TroupeRpcError && e.code === ErrorCodes.conflict && typeof e.data?.["reason"] === "string") {
+        return `not compacted: ${e.data["reason"]}`;
+      }
+      throw e;
+    }
   },
   goal: async ({ view }, args) => {
     const v = view.view;

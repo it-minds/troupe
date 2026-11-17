@@ -360,6 +360,13 @@ defmodule Troupe.Commands do
             "included, and closes the window.",
         example: "/discard 2"
       ),
+      entry("compact", "session", "Compact the conversation now, to make room",
+        detail:
+          "Summarises the older part of the session's conversation now, between turns, and " <>
+            "keeps the last few messages as they are, as the session does on its own when " <>
+            "the context window fills. Use it before a turn that will read a lot. Refused " <>
+            "while a turn runs, and while there is too little to compact."
+      ),
       entry("goal", "session", "Set, show or clear the session's goal",
         usage: "/goal [text | clear]",
         args: [arg("text", false, "text")],

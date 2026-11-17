@@ -146,6 +146,9 @@ defmodule Troupe.Gateway.Dispatch do
     "session.loop.start" => :control,
     "session.loop.stop" => :control,
     "session.loop.get" => :observe,
+    # Compacting now rewrites what the agent goes on with, as a turn may on its own, and
+    # costs a model call: what input takes.
+    "session.compact" => :control,
     "approval.respond" => :control,
     "question.answer" => :control,
     "todo.edit" => :control,
@@ -329,7 +332,7 @@ defmodule Troupe.Gateway.Dispatch do
   # it runs (`Troupe.Gateway.LocalOnly`). A session is put under it, or taken out, by the
   # client that last gave it work: before the work, so a turn it starts is already under it,
   # and after a create, whose session there was no id for before.
-  @work ~w(input.send commands.run session.goal.set session.loop.start)
+  @work ~w(input.send commands.run session.goal.set session.loop.start session.compact)
   @invites ~w(session.invite session.uninvite session.invites session.read_sealed)
   @forwarded_artifacts ~w(artifact.get artifact.open artifact.read artifact.share artifact.unshare artifact.comments artifact.comment artifact.comment.delete artifact.comment.edit people.search artifact.rollback artifact.pin artifact.put artifact.transfer)
 
@@ -1034,6 +1037,37 @@ defmodule Troupe.Gateway.Dispatch do
       case Troupe.goal(session_id) do
         nil -> {:ok, %{"goal" => nil, "set_by" => nil, "set_at" => nil}}
         goal -> {:ok, %{"goal" => goal.text, "set_by" => goal.set_by, "set_at" => goal.set_at}}
+      end
+    end
+  end
+
+  # Compact the conversation now (`/compact`). Activating, like the goal: the root agent
+  # is what compacts. The answer is the acknowledgement; `compacted` with `reason: manual`,
+  # carrying this `command_id`, is the effect. Refused while a turn runs, and while there
+  # is too little to compact, with what to do instead.
+  defp handle("session.compact", params, context) do
+    with {:ok, session_id} <- fetch(params, "session_id"),
+         :ok <- activate(session_id, context) do
+      case Troupe.compact(session_id, actor(context), command_opts(params)) do
+        :ok ->
+          {:ok, %{"accepted" => true}}
+
+        {:error, :busy} ->
+          {:error,
+           Error.new(:conflict, %{
+             reason: "the agent is in the middle of a turn: compact once it has finished, or cancel it first"
+           })}
+
+        {:error, :too_little} ->
+          {:error,
+           Error.new(:conflict, %{
+             reason:
+               "there is too little to compact yet: a compaction keeps the last few messages " <>
+                 "as they are, and there is nothing before them to summarise"
+           })}
+
+        {:error, :no_session} ->
+          {:error, Error.new(:unavailable, %{reason: "the session is not running"})}
       end
     end
   end

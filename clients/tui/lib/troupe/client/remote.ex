@@ -179,6 +179,9 @@ defmodule Troupe.Client.Remote do
   def stop_loop(sid), do: describe(Worker.stop_loop(sid))
 
   @impl true
+  def compact(sid), do: describe(Worker.compact(sid))
+
+  @impl true
   def cancel_branch(sid, _path), do: describe(Worker.cancel(sid))
 
   # A pod session has one window, its own, which stays: letting go of it under the screen

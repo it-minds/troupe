@@ -988,9 +988,8 @@ function systemText(d: DurableEvent): string {
     case "profile_switched":
       return switchedText(d);
     case "compacted":
-      return d.data["reason"] === "context_overflow"
-        ? "conversation compacted, because the prompt no longer fit the model"
-        : "conversation compacted";
+      if (d.data["reason"] === "context_overflow") return "conversation compacted, because the prompt no longer fit the model";
+      return d.data["reason"] === "manual" ? "conversation compacted, as asked with /compact" : "conversation compacted";
     case "budget_warning":
       return `nearly out: ${str(d.data["detail"], str(d.data["dimension"], "a limit"))}`;
     case "agent_done":
