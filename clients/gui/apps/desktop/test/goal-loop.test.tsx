@@ -10,16 +10,14 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { JSX } from "react";
 import { createRoot } from "react-dom/client";
 import { WebSocket as NodeWebSocket } from "ws";
-import { App } from "../src/App";
 import { GoalLine } from "../src/views/Goal";
 import { FakeDaemon } from "../../../packages/client/test/support/daemon.js";
-import { button, render, says, sees, seesButton, sleep, startOnTheList, type, waitFor } from "./support";
+import { button, says, sees, seesButton, sessionOpener, sleep, startOnTheList, type, waitFor } from "./support";
 
 Element.prototype.scrollIntoView = function scrollIntoView() {};
 globalThis.WebSocket = NodeWebSocket as unknown as typeof WebSocket;
 
 let daemon: FakeDaemon;
-let unmount: (() => void) | null = null;
 
 // The goal is one line under the session's head while there is one, with the loop beside it.
 const head = (): HTMLElement => document.querySelector<HTMLElement>(".goal-bar") ?? document.querySelector<HTMLElement>(".session-head")!;
@@ -46,8 +44,7 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
-  unmount?.();
-  unmount = null;
+  close();
   location.hash = "";
   await daemon.stop();
 });
@@ -58,13 +55,7 @@ afterEach(async () => {
  * over in one go, before the screen has started listening — a browser delivers each
  * message as a task of its own, so the replay is not lost there.
  */
-async function open(workspace: string): Promise<void> {
-  unmount = render(<App />).unmount;
-  const row = await waitFor(() => [...document.querySelectorAll<HTMLButtonElement>("button.row")].find((b) => b.textContent?.includes(workspace)), "the session in the list");
-  row.click();
-  await waitFor(() => document.querySelector('textarea[aria-label="Message"]'), "the session");
-  await waitFor(() => daemon.calls.some((c) => c.method === "session.loop.get"), "the screen attached");
-}
+const { open, close } = sessionOpener(() => daemon);
 
 describe("the goal under the session's head", () => {
   it("is set with /goal and cleared from its line or /goal clear, clipped with the whole of it on hover and a click, and follows the events", async () => {

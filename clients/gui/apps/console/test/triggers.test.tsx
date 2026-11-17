@@ -4,12 +4,10 @@
 // gitops lock.
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { App } from "../src/App";
-import { PEOPLE, button, field, freshBrowser, link, render, says, sees, seesButton, signedInAs, startFake, type, visit, waitFor } from "./support";
+import { PEOPLE, button, field, freshBrowser, link, opener, says, sees, seesButton, startFake, type, visit, waitFor } from "./support";
 import type { FakeDeployment } from "./support";
 
 let fake: FakeDeployment;
-let unmount: (() => void) | null = null;
 
 beforeEach(async () => {
   freshBrowser();
@@ -17,8 +15,7 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
-  unmount?.();
-  unmount = null;
+  close();
   await fake.stop();
 });
 
@@ -27,11 +24,7 @@ const row = (name: string): HTMLTableRowElement | null =>
   [...document.querySelectorAll<HTMLTableRowElement>("table.triggers tbody tr")].find((r) => (r.cells[0]?.textContent ?? "") === name) ?? null;
 const trigger = (team: string, name: string) => fake.admin.triggerRows.find((t) => t.team === team && t.name === name);
 
-async function open(hash: string, who: { subject: string; name: string } = PEOPLE.alice): Promise<void> {
-  await signedInAs(fake, who);
-  visit(hash);
-  unmount = render(<App />).unmount;
-}
+const { open, close } = opener(() => fake);
 
 describe("a team's triggers", () => {
   it("lists them per team, and a platform admin picks the team", async () => {

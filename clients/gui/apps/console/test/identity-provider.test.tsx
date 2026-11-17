@@ -4,12 +4,10 @@
 // `admin.provider.*` and `admin.scim.*`, with the plane's two roles.
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { App } from "../src/App";
-import { PEOPLE, button, field, freshBrowser, render, says, sees, signedInAs, startFake, type, visit, waitFor } from "./support";
+import { PEOPLE, button, field, freshBrowser, opener, says, sees, startFake, type, waitFor } from "./support";
 import type { FakeDeployment } from "./support";
 
 let fake: FakeDeployment;
-let unmount: (() => void) | null = null;
 
 beforeEach(async () => {
   freshBrowser();
@@ -17,16 +15,11 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
-  unmount?.();
-  unmount = null;
+  close();
   await fake.stop();
 });
 
-async function open(who: { subject: string; name: string } = PEOPLE.alice): Promise<void> {
-  await signedInAs(fake, who);
-  visit("#/signin");
-  unmount = render(<App />).unmount;
-}
+const { open, close } = opener(() => fake);
 
 const sso = (): HTMLElement => document.querySelector<HTMLElement>('[aria-label="Single sign-on"]')!;
 const scim = (): HTMLElement => document.querySelector<HTMLElement>('[aria-label="SCIM connector"]')!;
@@ -34,7 +27,7 @@ const go = (verb: string) => [...document.querySelectorAll<HTMLButtonElement>(".
 
 describe("the identity provider", () => {
   it("says what the registration needs, every value with where it came from, and a secret as set", async () => {
-    await open();
+    await open("#/signin");
     await waitFor(() => says("Single sign-on") && says("https://troupe.example.com/console"), "the provider");
     await sees("https://idp.example.com", sso());
     await sees("set · never shown", sso());
@@ -42,7 +35,7 @@ describe("the identity provider", () => {
   });
 
   it("checks the values in the form, refuses a save the provider does not stand behind, and saves it anyway when told", async () => {
-    await open();
+    await open("#/signin");
     (await waitFor(() => button("Change sign-in"), "the provider")).click();
     type(await waitFor(() => field("issuer"), "the form"), "https://other.example.com");
     button("Check these values")!.click();
@@ -69,7 +62,7 @@ describe("the identity provider", () => {
   });
 
   it("sends a typed secret and never one that was not typed", async () => {
-    await open();
+    await open("#/signin");
     (await waitFor(() => button("Change sign-in"), "the provider")).click();
     type(await waitFor(() => field("client_secret"), "the form"), "a-new-secret");
     button("Preview")!.click();
@@ -82,14 +75,14 @@ describe("the identity provider", () => {
   });
 
   it("is read by a team admin, who is not shown sign-in in the map", async () => {
-    await open(PEOPLE.bob);
+    await open("#/signin", PEOPLE.bob);
     await waitFor(() => document.querySelector("h1")?.textContent === "Overview", "the overview instead");
   });
 });
 
 describe("the SCIM connector", () => {
   it("rotates its token, shown once, switches whether groups become teams, and forgets the token once the base URL is typed", async () => {
-    await open();
+    await open("#/signin");
     await waitFor(() => scim() && says("connected", scim()), "the connector");
     button("Rotate the token")!.click();
     await waitFor(() => says("The token set now stops working at once"), "the preview");

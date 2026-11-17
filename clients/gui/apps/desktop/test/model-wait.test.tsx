@@ -38,6 +38,7 @@ afterEach(async () => {
   await daemon.stop();
 });
 
+// Its own open, not support's: the list's one row, open once the view says it is here.
 async function open(): Promise<void> {
   unmount = render(<App />).unmount;
   const row = await waitFor(() => document.querySelector<HTMLButtonElement>("button.row"), "the session in the list");

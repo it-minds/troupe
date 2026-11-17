@@ -6,7 +6,7 @@
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { App } from "../src/App";
-import { PEOPLE, freshBrowser, render, sees, seesButton, signedInAs, startFake, type, visit, waitFor } from "./support";
+import { PEOPLE, freshBrowser, opener, render, sees, seesButton, startFake, type, visit, waitFor } from "./support";
 import type { FakeDeployment } from "./support";
 import { exampleAdmin } from "../../../packages/client/test/support/admin.js";
 import { artifact } from "../../../packages/client/test/support/plane.js";
@@ -16,11 +16,7 @@ const carol = { subject: PEOPLE.carol.subject, display_name: "Carol" };
 let fake: FakeDeployment;
 let unmount: (() => void) | null = null;
 
-async function open(hash: string, who: { subject: string; name: string }): Promise<void> {
-  await signedInAs(fake, who);
-  visit(hash);
-  unmount = render(<App openTab={() => undefined} navigate={() => undefined} />).unmount;
-}
+const { open, close } = opener(() => fake, { openTab: () => undefined, navigate: () => undefined });
 
 const thread = () => document.querySelector<HTMLElement>('section[aria-label="Comments"]');
 const people = () => document.querySelector<HTMLElement>('section[aria-label="Shared with"]');
@@ -37,6 +33,7 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  close();
   unmount?.();
   unmount = null;
   await fake.stop();

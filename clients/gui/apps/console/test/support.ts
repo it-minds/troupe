@@ -1,14 +1,13 @@
-// What the console's tests need that a browser would have: a page to render into, a way
-// to click and type, a fake plane with its administrative half, and a record of every
-// call the page makes to it.
-//
-// No testing library, as in the desktop app's tests: find the control by what it says,
-// press it, and wait until the screen says something. The desktop app's helpers are not
-// imported; the two apps share no code but the protocol client.
+// What the console's tests need that the desktop app's do not: a fake plane with its
+// administrative half, a record of every call the page makes to it, and the console's own
+// ways about its screens. The page helpers both apps' tests drive their page with (render,
+// wait, find a button, type) are `@troupe/test-support`'s, re-exported here; the apps
+// themselves share no code but the protocol client.
 
-import { createRoot } from "react-dom/client";
-import type { ReactElement } from "react";
+import { createElement } from "react";
 import { AuthSession } from "@troupe/client";
+import { render, waitFor } from "@troupe/test-support";
+import { App } from "../src/App";
 import { FakeAdmin, exampleAdmin } from "../../../packages/client/test/support/admin.js";
 import { FakeIdp } from "../../../packages/client/test/support/idp.js";
 import { FakePlane } from "../../../packages/client/test/support/plane.js";
@@ -20,6 +19,11 @@ import { tabTokenStore } from "../src/plane";
 // Mine holds a watch on the plane (`/v1/relay/watch`) wherever it is drawn, and the test
 // environment's own WebSocket cannot open one against the fake: Node's can.
 globalThis.WebSocket = NodeWebSocket as unknown as typeof WebSocket;
+
+export * from "@troupe/test-support";
+
+type AppProps = NonNullable<Parameters<typeof App>[0]>;
+type Person = { subject: string; name: string };
 
 export const PEOPLE = {
   alice: { subject: "alice@example.com", name: "Alice" },
@@ -95,83 +99,9 @@ export function recordCalls(): { calls: Call[]; restore: () => void } {
   return { calls, restore: () => void (globalThis.fetch = original) };
 }
 
-export function render(element: ReactElement): { unmount: () => void } {
-  const container = document.createElement("div");
-  document.body.appendChild(container);
-  const root = createRoot(container);
-  root.render(element);
-  return {
-    unmount: () => {
-      root.unmount();
-      container.remove();
-    },
-  };
-}
-
-export function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-/**
- * Poll until `find` answers something, the way a person waits for a screen. A `find` that
- * throws has not found it yet: a row it reaches into can be gone for a render while the
- * screen redraws it. At the deadline the last thing it threw is said.
- */
-export async function waitFor<T>(find: () => T | null | undefined | false, what: string, timeoutMs = 10_000): Promise<T> {
-  const deadline = Date.now() + timeoutMs;
-  for (;;) {
-    let found: T | null | undefined | false = null;
-    let threw: unknown = null;
-    try {
-      found = find();
-    } catch (e) {
-      threw = e;
-    }
-    if (found) return found;
-    if (Date.now() > deadline) {
-      const why = threw ? ` (it last threw: ${threw instanceof Error ? threw.message : String(threw)})` : "";
-      throw new Error(`timed out waiting for ${what}${why}. The page says:\n${document.body.textContent ?? ""}`);
-    }
-    await sleep(20);
-  }
-}
-
-/** Whether the page says this anywhere. */
-export function says(text: string, within: ParentNode = document.body): boolean {
-  return (within.textContent ?? "").includes(text);
-}
-
-/**
- * Wait until the page says this. The assertion for anything that shows after an async
- * step: a line drawn by another render than the one a `waitFor` saw is not there yet in
- * the same tick, on a busy machine. `expect(says(…)).toBe(true)` is refused by
- * `waits.test.ts` unless its line says why it is meant at once (`// at once: <why>`).
- */
-export async function sees(text: string, within: ParentNode | (() => ParentNode | null | undefined) = document.body): Promise<void> {
-  // A function is asked again on every look: the row it finds can be drawn anew meanwhile.
-  await waitFor(() => {
-    const at = typeof within === "function" ? within() : within;
-    return Boolean(at) && says(text, at!);
-  }, `the page to say "${text}"`);
-}
-
 /** Wait for the link whose words begin with `label`, as `sees` waits for words. */
 export function seesLink(label: string, within: ParentNode = document): Promise<HTMLAnchorElement> {
   return waitFor(() => link(label, within), `the link "${label}"`);
-}
-
-/** The button whose words begin with `label`. */
-export function button(label: string, within: ParentNode = document): HTMLButtonElement | null {
-  return [...within.querySelectorAll("button")].find((b) => (b.textContent ?? "").trim().startsWith(label)) ?? null;
-}
-
-/**
- * Wait for the button whose words begin with `label`, as `sees` waits for words, and answer
- * it. `expect(button(…)).not.toBeNull()` and a read of a button found at once
- * (`button(…)!.disabled`) are refused by `waits.test.tsx` unless marked `// at once: <why>`.
- */
-export function seesButton(label: string, within: ParentNode = document): Promise<HTMLButtonElement> {
-  return waitFor(() => button(label, within), `the button "${label}"`);
 }
 
 /** Wait for the field a label names, as `seesButton` waits for a button, and answer it. */
@@ -193,16 +123,29 @@ export function field(label: string, within: ParentNode = document): HTMLInputEl
   return found.querySelector<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>("input, select, textarea");
 }
 
-/** Type into a field, or choose in a select, the way React hears it. */
-export function type(el: HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement, value: string): void {
-  const proto = el instanceof HTMLSelectElement ? HTMLSelectElement.prototype : el instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
-  Object.getOwnPropertyDescriptor(proto, "value")!.set!.call(el, value);
-  el.dispatchEvent(new Event(el instanceof HTMLSelectElement ? "change" : "input", { bubbles: true }));
-}
-
 /** Go to a place in the console, as a link or a typed address would. */
 export function visit(hash: string): void {
   location.hash = hash;
+}
+
+/**
+ * Open the console as a person does: signed in to the suite's deployment as `who` (Alice
+ * unless said), at `hash`, the app drawn with `props`. `close` takes the page down again,
+ * for the suite's `afterEach`.
+ */
+export function opener(deployment: () => FakeDeployment, props: AppProps = {}): { open(hash: string, who?: Person): Promise<void>; close(): void } {
+  let unmount: (() => void) | null = null;
+  return {
+    async open(hash, who = PEOPLE.alice) {
+      await signedInAs(deployment(), who);
+      visit(hash);
+      unmount = render(createElement<AppProps>(App, props)).unmount;
+    },
+    close() {
+      unmount?.();
+      unmount = null;
+    },
+  };
 }
 
 /** Clear what one test leaves in the browser for the next. */

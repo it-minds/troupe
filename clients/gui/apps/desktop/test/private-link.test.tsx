@@ -12,7 +12,7 @@ import { App } from "../src/App";
 import { FakeDaemon } from "../../../packages/client/test/support/daemon.js";
 import { startHarness } from "../../../packages/client/test/support/harness.js";
 import type { Harness } from "../../../packages/client/test/support/harness.js";
-import { button, hereIn, nav, render, says, sees, seesButton, sleep, startOnTheList, waitFor } from "./support";
+import { button, enabled, hereIn, nav, render, says, sees, seesButton, sleep, startOnTheList, waitFor } from "./support";
 
 Element.prototype.scrollIntoView = function scrollIntoView() {};
 globalThis.WebSocket = NodeWebSocket as unknown as typeof WebSocket;
@@ -185,10 +185,9 @@ describe("this computer linked by the sign-in, and a private session started", (
     // Offered on the same connection: the daemon said no private sessions when the app
     // connected, before anybody had linked it.
     const keep = await waitFor(
-      () => [...start.querySelectorAll<HTMLLabelElement>("label")].find((l) => l.textContent?.includes("Keep it private"))?.querySelector("input"),
-      "the private checkbox",
+      () => enabled([...start.querySelectorAll<HTMLLabelElement>("label")].find((l) => l.textContent?.includes("Keep it private"))?.querySelector("input")),
+      "the private checkbox, enabled",
     );
-    expect(keep.disabled).toBe(false);
     keep.click();
     button("Start", start)!.click();
 

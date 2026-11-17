@@ -2,7 +2,7 @@
 // both. Every stage-1 test starts one of these and talks to it with nothing but
 // `@troupe/client`, the same way the GUI does.
 
-import { AuthSession, memoryTokenStore, SessionAttachment } from "../../src/index.js";
+import { AuthSession, memoryTokenStore, planeOpener, SessionAttachment } from "../../src/index.js";
 import type { TokenStore } from "../../src/index.js";
 import { FakeIdp } from "./idp.js";
 import { FakePlane, type PlaneOptions } from "./plane.js";
@@ -62,8 +62,7 @@ export async function startHarness(
     attach(auth, sessionId, extra = {}) {
       return SessionAttachment.open({
         sessionId,
-        open: (mode) => auth.rpc("session.open", { session_id: sessionId, mode }),
-        mint: () => auth.rpc("token.mint", { session_id: sessionId }),
+        ...planeOpener(auth, sessionId),
         mode: "activate",
         backoffMs: [10, 20, 40, 80],
         ...extra,

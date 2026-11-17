@@ -1,12 +1,15 @@
-// What the app's tests need that a browser would have: a page to render into, a way to
-// click and type, and a record of every request the page makes.
-//
-// No testing library. The app is driven the way a person drives it — find the button
-// by what it says, press it, wait until the screen says something — and that is a page
-// of code rather than a dependency.
 
-import { createRoot } from "react-dom/client";
-import type { ReactElement } from "react";
+// What the app's tests need that a browser would have and the console's do not: a record
+// of every request the page makes, and the app's own ways about its screens. The page
+// helpers both apps' tests drive their page with (render, wait, find a button, type) are
+// `@troupe/test-support`'s, re-exported here.
+
+import { createElement } from "react";
+import { button, enabled, render, seesButton, type, waitFor } from "@troupe/test-support";
+import { App } from "../src/App";
+import type { FakeDaemon } from "../../../packages/client/test/support/daemon.js";
+
+export * from "@troupe/test-support";
 
 export interface Sent {
   via: "fetch" | "websocket" | "xhr" | "beacon" | "eventsource";
@@ -110,76 +113,6 @@ export function externalResources(): string[] {
     .filter((url) => /^(https?:)?\/\//i.test(url));
 }
 
-export function render(element: ReactElement): { unmount: () => void } {
-  const container = document.createElement("div");
-  document.body.appendChild(container);
-  const root = createRoot(container);
-  root.render(element);
-  return {
-    unmount: () => {
-      root.unmount();
-      container.remove();
-    },
-  };
-}
-
-export function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-/**
- * Poll until `find` answers something, the way a person waits for a screen. A `find` that
- * throws has not found it yet: an element it reaches into can be gone for a render while
- * the screen redraws it. At the deadline the last thing it threw is said.
- */
-export async function waitFor<T>(find: () => T | null | undefined | false, what: string, timeoutMs = 10_000): Promise<T> {
-  const deadline = Date.now() + timeoutMs;
-  for (;;) {
-    let found: T | null | undefined | false = null;
-    let threw: unknown = null;
-    try {
-      found = find();
-    } catch (e) {
-      threw = e;
-    }
-    if (found) return found;
-    if (Date.now() > deadline) {
-      const why = threw ? ` (it last threw: ${threw instanceof Error ? threw.message : String(threw)})` : "";
-      throw new Error(`timed out waiting for ${what}${why}. The page says:\n${document.body.textContent ?? ""}`);
-    }
-    await sleep(20);
-  }
-}
-
-/** Whether the page says this anywhere. */
-export function says(text: string): boolean {
-  return (document.body.textContent ?? "").includes(text);
-}
-
-/**
- * Wait until the page says this. The assertion for anything that shows after an async
- * step: a line drawn by another render than the one a `waitFor` saw is not there yet in
- * the same tick, on a busy machine. `expect(says(…)).toBe(true)` is refused by
- * `waits.test.ts` unless its line says why it is meant at once (`// at once: <why>`).
- */
-export async function sees(text: string): Promise<void> {
-  await waitFor(() => says(text), `the page to say "${text}"`);
-}
-
-/** The button whose words begin with `label`, inside `within` if given. */
-export function button(label: string, within: ParentNode = document): HTMLButtonElement | null {
-  return [...within.querySelectorAll("button")].find((b) => (b.textContent ?? "").trim().startsWith(label)) ?? null;
-}
-
-/**
- * Wait for the button whose words begin with `label`, as `sees` waits for words, and answer
- * it. `expect(button(…)).not.toBeNull()` and a read of a button found at once
- * (`button(…)!.disabled`) are refused by `waits.test.tsx` unless marked `// at once: <why>`.
- */
-export function seesButton(label: string, within: ParentNode = document): Promise<HTMLButtonElement> {
-  return waitFor(() => button(label, within), `the button "${label}"`);
-}
-
 /**
  * The session's backstage, shown as a person shows it (it starts hidden): Show backstage
  * under the head's ⋯, once the session is drawn.
@@ -205,7 +138,6 @@ export function nav(label: string): HTMLButtonElement | null {
   return button(label, document.querySelector(".rail nav") ?? document);
 }
 
-/** Type into a field the way React hears it: through the native setter, then an input event. */
 /**
  * On the new-session screen, put the session on this computer, in `workspace`, as a person
  * does: the sentence's where chip, "On this computer" once it is on, the folder typed.
@@ -214,25 +146,35 @@ export async function hereIn(start: HTMLElement, workspace: string): Promise<voi
   const chip = await waitFor(() => start.querySelector<HTMLButtonElement>('button.ns-chip[aria-label^="Where it runs"]'), "the where chip");
   if (!chip.textContent?.includes("on this computer")) {
     chip.click();
-    const here = await waitFor(() => {
-      const b = button("On this computer", start);
-      return b && !b.disabled && b;
-    }, "On this computer, on");
-    here.click();
+    (await waitFor(() => enabled(button("On this computer", start)), "On this computer, on")).click();
   }
   type(await waitFor(() => start.querySelector<HTMLInputElement>('input[aria-label="Which directory"]'), "the folder"), workspace);
 }
 
 /** The new-session screen's start button, once it may be pressed. */
 export function startButton(start: HTMLElement): Promise<HTMLButtonElement> {
-  return waitFor(() => {
-    const b = start.querySelector<HTMLButtonElement>("button.ns-start");
-    return b && !b.disabled && b;
-  }, "the start button, on");
+  return waitFor(() => enabled(start.querySelector<HTMLButtonElement>("button.ns-start")), "the start button, on");
 }
 
-export function type(field: HTMLInputElement | HTMLTextAreaElement, value: string): void {
-  const proto = field instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
-  Object.getOwnPropertyDescriptor(proto, "value")!.set!.call(field, value);
-  field.dispatchEvent(new Event("input", { bubbles: true }));
+/**
+ * Open a session on this computer as a person does: the app drawn, the session's row in
+ * the list pressed, and the screen attached (it has read the session's loop). `open`
+ * answers the composer; `close` takes the page down again, for the suite's `afterEach`.
+ */
+export function sessionOpener(daemon: () => FakeDaemon): { open(workspace: string): Promise<HTMLTextAreaElement>; close(): void } {
+  let unmount: (() => void) | null = null;
+  return {
+    async open(workspace) {
+      unmount = render(createElement(App)).unmount;
+      const row = await waitFor(() => [...document.querySelectorAll<HTMLButtonElement>("button.row")].find((b) => b.textContent?.includes(workspace)), "the session in the list");
+      row.click();
+      const composer = await waitFor(() => document.querySelector<HTMLTextAreaElement>('textarea[aria-label="Message"]'), "the session");
+      await waitFor(() => daemon().calls.some((c) => c.method === "session.loop.get"), "the screen attached");
+      return composer;
+    },
+    close() {
+      unmount?.();
+      unmount = null;
+    },
+  };
 }

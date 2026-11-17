@@ -12,9 +12,8 @@ import { readFileSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { WebSocket as NodeWebSocket } from "ws";
 import { LINES, pickLine } from "@troupe/client";
-import { App } from "../src/App";
 import { FakeDaemon } from "../../../packages/client/test/support/daemon.js";
-import { externalResources, render, startOnTheList, type, waitFor } from "./support";
+import { externalResources, sessionOpener, startOnTheList, type, waitFor } from "./support";
 
 /** A session the fake daemon keeps. */
 type Session = ReturnType<FakeDaemon["seed"]>;
@@ -23,7 +22,6 @@ Element.prototype.scrollIntoView = function scrollIntoView() {};
 globalThis.WebSocket = NodeWebSocket as unknown as typeof WebSocket;
 
 let daemon: FakeDaemon;
-let unmount: (() => void) | null = null;
 
 beforeEach(async () => {
   localStorage.clear();
@@ -35,8 +33,7 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
-  unmount?.();
-  unmount = null;
+  close();
   location.hash = "";
   await daemon.stop();
 });
@@ -44,15 +41,7 @@ afterEach(async () => {
 const WORKSPACE = "/home/ada/parser";
 
 /** Open a seeded session from the list, the way a person does. */
-async function open(session: Session): Promise<void> {
-  unmount = render(<App />).unmount;
-  const row = await waitFor(
-    () => [...document.querySelectorAll<HTMLButtonElement>("button.row")].find((b) => b.textContent?.includes(session.workspace)),
-    "the session in the list",
-  );
-  row.click();
-  await waitFor(() => daemon.calls.some((c) => c.method === "session.loop.get"), "the screen attached");
-}
+const { open, close } = sessionOpener(() => daemon);
 
 const ANSWER = [
   "## Fixed",
@@ -126,7 +115,7 @@ function palette(command: string): Promise<void> {
 describe("a turn, quiet by default", () => {
   it("shows its answer framed and its working as one strip above it, the failed call open", async () => {
     const session = daemon.seed(WORKSPACE);
-    await open(session);
+    await open(session.workspace);
     turn(session);
     await settled();
 
@@ -152,7 +141,7 @@ describe("a turn, quiet by default", () => {
 
   it("renders the answer's Markdown with a parser: a table, nested lists and a fenced block as a frame of its own", async () => {
     const session = daemon.seed(WORKSPACE);
-    await open(session);
+    await open(session.workspace);
     turn(session);
     await settled();
 
@@ -186,7 +175,7 @@ describe("the levels", () => {
     daemon.projects[WORKSPACE] = { "transcript.detail": "tools" };
     const session = daemon.seed(WORKSPACE);
     turn(session, { narration: "Looking at the files first." });
-    await open(session);
+    await open(session.workspace);
     await settled();
 
     // Tools: the strip open above every call's frame, open; reasoning its header alone; the
@@ -241,7 +230,7 @@ describe("the levels", () => {
     }
     turn(session, { ids: "u" });
     session.log.append("session_dormant", {});
-    await open(session);
+    await open(session.workspace);
     await waitFor(() => stream().querySelectorAll(".note.turn-cost").length === 2, "both turns");
 
     const notes = (): string[] =>
@@ -272,7 +261,7 @@ describe("the levels", () => {
       summary: 'add.py adds now\n\nchanged: 1 file, +2 -0; the full diff: read_branch(session_id: "s-branch", diff: true)\n  add.py +2 -0 (written whole)',
       report: { ...parts, changed: { files: [{ path: "add.py", added: 2, removed: 0, whole: true }], added: 2, removed: 0, commands: 0, session_id: "s-branch", agent: ["root"] } },
     });
-    await open(session);
+    await open(session.workspace);
 
     const finish = await waitFor(() => toolFrames().find((f) => f.querySelector("summary")?.textContent?.includes("finish")), "the finish frame");
     const changed = await waitFor(
@@ -285,7 +274,7 @@ describe("the levels", () => {
 
   it("opens a turn with a click on its strip, live reasoning and all, and shuts it with another", async () => {
     const session = daemon.seed(WORKSPACE);
-    await open(session);
+    await open(session.workspace);
     turn(session);
     await settled();
 
@@ -307,7 +296,7 @@ describe("the levels", () => {
 
   it("says how long a call and the working took, from the events' times", async () => {
     const session = daemon.seed(WORKSPACE);
-    await open(session);
+    await open(session.workspace);
     let t = Date.parse("2026-10-12T10:00:00.000Z");
     session.log.now = () => new Date(t);
     session.log.append("user_input", { source: "user", text: "test it" }, { kind: "user", subject: "ada" });
@@ -333,7 +322,7 @@ describe("the levels", () => {
 describe("never collapsed", () => {
   it("opens everything after a budget stop, at every level, and keeps an approval and a question whole", async () => {
     const session = daemon.seed(WORKSPACE);
-    await open(session);
+    await open(session.workspace);
     turn(session);
     await settled();
     session.log.append("budget_exhausted", { limit: "turns" });
@@ -360,7 +349,7 @@ describe("long frames", () => {
 
   it("cut past 24 lines to their first 20, open in place, and are whole at everything; a scratchpad document stays its card", async () => {
     const session = daemon.seed(WORKSPACE);
-    await open(session);
+    await open(session.workspace);
     session.log.append("user_input", { source: "user", text: "list it" }, { kind: "user", subject: "ada" });
     call(session, "l", "list_files", { path: "lib" }, true, lines(30, "lib/file"));
     session.scratch.show(session.log, { name: "plan.md", title: "The plan", content: "# Plan\n\n- one\n" }, "sc");
@@ -395,7 +384,7 @@ describe("long frames", () => {
 describe("the answer's Markdown", () => {
   it("disallows raw HTML: it is shown as text, never as markup, and loads nothing", async () => {
     const session = daemon.seed(WORKSPACE);
-    await open(session);
+    await open(session.workspace);
     session.log.append("user_input", { source: "user", text: "html?" }, { kind: "user", subject: "ada" });
     reply(
       session,
@@ -426,7 +415,7 @@ describe("the answer's Markdown", () => {
 
   it("shows the prose's source on its toggle, and its rendering again", async () => {
     const session = daemon.seed(WORKSPACE);
-    await open(session);
+    await open(session.workspace);
     turn(session);
     await settled();
 
@@ -442,7 +431,7 @@ describe("the answer's Markdown", () => {
 
   it("frames a diff and data fences by kind, a table when they parse and the source when not", async () => {
     const session = daemon.seed(WORKSPACE);
-    await open(session);
+    await open(session.workspace);
     session.log.append("user_input", { source: "user", text: "show me" }, { kind: "user", subject: "ada" });
     reply(
       session,
@@ -501,7 +490,7 @@ describe("the curtain line", () => {
 
   it("says what runs after a few words from its set, never the same twice in a turn, and none when it waits on you", async () => {
     const session = daemon.seed(WORKSPACE);
-    await open(session);
+    await open(session.workspace);
     session.log.append("user_input", { source: "user", text: "go" }, { kind: "user", subject: "ada" });
     expect(curtain()).toBeNull();
 
@@ -543,7 +532,7 @@ describe("the curtain line", () => {
 
   it("says the facts alone past the end of a list, and nothing at rest after a model error, whose note says it", async () => {
     const session = daemon.seed(WORKSPACE);
-    await open(session);
+    await open(session.workspace);
     session.log.append("user_input", { source: "user", text: "go" }, { kind: "user", subject: "ada" });
     // One more thinking than the list has lines: the facts alone.
     for (let n = 0; n < LINES.thinking.length; n++) {

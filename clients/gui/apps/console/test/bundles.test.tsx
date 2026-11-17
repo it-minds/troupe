@@ -3,12 +3,10 @@
 // `.preview`, `.publish` and `.retire`, and the agent builder's `admin.agent.check` (#594).
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { App } from "../src/App";
-import { PEOPLE, button, field, freshBrowser, link, render, says, sees, seesButton, signedInAs, startFake, type, visit, waitFor } from "./support";
+import { PEOPLE, button, field, freshBrowser, link, opener, says, sees, seesButton, startFake, type, visit, waitFor } from "./support";
 import type { FakeDeployment } from "./support";
 
 let fake: FakeDeployment;
-let unmount: (() => void) | null = null;
 
 beforeEach(async () => {
   freshBrowser();
@@ -16,8 +14,7 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
-  unmount?.();
-  unmount = null;
+  close();
   await fake.stop();
 });
 
@@ -25,11 +22,7 @@ const heading = (): string => document.querySelector("h1")?.textContent ?? "";
 const rowOf = (table: string, first: string): HTMLTableRowElement | null =>
   [...document.querySelectorAll<HTMLTableRowElement>(`table.${table} tbody tr`)].find((r) => (r.cells[0]?.textContent ?? "") === first) ?? null;
 
-async function open(hash: string, who: { subject: string; name: string } = PEOPLE.alice): Promise<void> {
-  await signedInAs(fake, who);
-  visit(hash);
-  unmount = render(<App />).unmount;
-}
+const { open, close } = opener(() => fake);
 
 const docsWriter = { name: "docs-writer", definition: "---\nmode: subagent\ndescription: Writes the docs a change needs.\n---\nYou write docs." };
 const checklist = { name: "review-checklist", description: "How we review.", files: { "SKILL.md": "---\nname: review-checklist\n---\nRead the diff twice." } };

@@ -12,6 +12,8 @@ import { bareAssertions, bareIn } from "../../../packages/client/test/support/wa
 const bare = (call: string, matcher: string) => `expect(${call}("Ready")).${matcher};`;
 // A read of a control found at once: what follows its call, as `!.disabled).toBe(true);`.
 const read = (call: string, rest: string) => `expect(${call}("Save")${rest}`;
+// A control said to be enabled: `expect(<it>.disabled).toBe(false);`, built so this file has none.
+const enabledRead = (it: string) => `expect(${it}.disabled).toBe(${String(false)});`;
 
 describe("the suite's assertions on the page's words", () => {
   it("wait for them in every test file", () => {
@@ -35,5 +37,12 @@ describe("the suite's assertions on the page's words", () => {
     expect(bareIn(`// at once: drawn by the first render\n${read("button", "!.disabled).toBe(true);")}`)).toEqual([]);
     expect(bareIn(bare("button", "toBeNull()"))).toEqual([]);
     expect(bareIn(`expect((await seesButton("Save")).disabled).toBe(true);`)).toEqual([]);
+  });
+
+  it("refuses a control said to be enabled that was waited for only to be there", () => {
+    expect(bareIn(enabledRead(`(await seesButton("Save"))`))).toHaveLength(1);
+    expect(bareIn(`const save = await waitFor(() => item("Save"), "Save");\n${enabledRead("save")}`)).toEqual([`2: ${enabledRead("save")}`]);
+    expect(bareIn(`// at once: drawn enabled\n${enabledRead("save")}`)).toEqual([]);
+    expect(bareIn(`(await seesEnabled("Save")).click();`)).toEqual([]);
   });
 });
