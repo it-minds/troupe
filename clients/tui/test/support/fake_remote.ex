@@ -1001,6 +1001,41 @@ defmodule Troupe.FakeRemote do
     end
   end
 
+  # The plane's name for a session and its place at the top: the owner's alone, as the
+  # plane's archive is; an empty name takes it off.
+  defp dispatch(state, :plane, method, %{"session_id" => id} = params, _pid)
+       when method in ["session.title.set", "session.pin", "session.unpin"] do
+    me = state.principal["sub"]
+
+    case Map.fetch(state.sessions, id) do
+      {:ok, %{owner: ^me} = session} ->
+        session =
+          case method do
+            "session.title.set" ->
+              %{
+                session
+                | title:
+                    if(String.trim(params["title"] || "") == "",
+                      do: nil,
+                      else: String.trim(params["title"])
+                    )
+              }
+
+            pin ->
+              Map.put(session, :pinned, pin == "session.pin")
+          end
+
+        state = put_in(state.sessions[id], session)
+        {{:ok, Map.put(live_summary(session), "pinned", Map.get(session, :pinned, false))}, state}
+
+      {:ok, _theirs} ->
+        {{:error, -32_004, "forbidden", %{"required_role" => "owner"}}, state}
+
+      :error ->
+        {{:error, -32_005, "no such session"}, state}
+    end
+  end
+
   defp dispatch(state, _kind, "session.open", params, _pid) do
     id = params["session_id"]
 

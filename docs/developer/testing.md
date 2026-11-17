@@ -132,7 +132,7 @@ Decision 915 is the long form.
   line it types, put through every shell the machine has, the Settings view's rows, its
   Models group and the manifest), and `pnpm test:vscode`, its suite inside a real VS Code
   against a fake `troupe`, with its own user data and extensions directories
-  ([vscode.md](../user/vscode.md#how-it-is-built-and-tested)).
+  ([its README](../../clients/vscode/README.md#testing-it)).
 - `scripts/verify-local.ps1` checks an install made by `scripts/install-local.ps1` on this
   Windows machine.
 - `scripts/check-installers` (`install.sh` under `sh` and `bash`, or the shells named) and

@@ -35,7 +35,7 @@ defmodule Troupe.Client.Daemon do
 
   @behaviour Troupe.Client
 
-  alias Troupe.Client.Archive
+  alias Troupe.Client.{Archive, Marks}
   alias Troupe.Client.Daemon.{Link, Start}
   alias Troupe.Client.Events
   alias Troupe.Config
@@ -976,6 +976,33 @@ defmodule Troupe.Client.Daemon do
     case Link.call_with_data(Archive.method(archived?), params) do
       {:ok, _answer} -> {:ok, Archive.said(archived?)}
       {:error, %{code: "forbidden", data: data}} -> {:error, Archive.forbidden(data, archived?)}
+      {:error, %{message: said}} when is_binary(said) -> {:error, said}
+      {:error, reason} -> {:error, refusal(reason)}
+    end
+  end
+
+  # A name and a place at the top are the owner's as archiving is, and kept beside the log.
+  @impl true
+  def rename(sid, title) do
+    params = %{session_id: sid, title: title, command_id: Troupe.Remote.RPC.command_id()}
+
+    case Link.call_with_data("session.title.set", params) do
+      {:ok, %{"title" => named}} -> {:ok, Marks.renamed(named)}
+      {:ok, _answer} -> {:ok, Marks.renamed(nil)}
+      {:error, %{code: "forbidden", data: data}} -> {:error, Marks.forbidden(data, :rename)}
+      {:error, %{data: %{"reason" => said}}} when is_binary(said) -> {:error, said}
+      {:error, %{message: said}} when is_binary(said) -> {:error, said}
+      {:error, reason} -> {:error, refusal(reason)}
+    end
+  end
+
+  @impl true
+  def keep(sid, kept?) do
+    params = %{session_id: sid, command_id: Troupe.Remote.RPC.command_id()}
+
+    case Link.call_with_data(Marks.keep_method(kept?), params) do
+      {:ok, _answer} -> {:ok, Marks.kept(kept?)}
+      {:error, %{code: "forbidden", data: data}} -> {:error, Marks.forbidden(data, :keep)}
       {:error, %{message: said}} when is_binary(said) -> {:error, said}
       {:error, reason} -> {:error, refusal(reason)}
     end

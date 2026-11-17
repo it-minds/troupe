@@ -502,8 +502,14 @@ export class PlaneClient {
     return this.rpc<OwnMemorySaved>(planeToken, "me.memory.put", { text, version });
   }
 
-  pinSession(planeToken: string, sessionId: string, pinned: boolean): Promise<unknown> {
-    return this.rpc(planeToken, pinned ? "session.pin" : "session.unpin", { session_id: sessionId });
+  /** Keep a session at the top of the session list, and out of the plane's retention, or let it go. Its owner's alone. */
+  pinSession(planeToken: string, sessionId: string, pinned: boolean): Promise<SessionRow> {
+    return this.rpc<SessionRow>(planeToken, pinned ? "session.pin" : "session.unpin", { session_id: sessionId });
+  }
+
+  /** Name a session, or take its name off with an empty title; the answer is its row. Its owner's alone. */
+  setSessionTitle(planeToken: string, sessionId: string, title: string): Promise<SessionRow> {
+    return this.rpc<SessionRow>(planeToken, "session.title.set", { session_id: sessionId, title });
   }
 
   /**

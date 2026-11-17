@@ -14,7 +14,7 @@ import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "rea
 import type { JSX } from "react";
 import { PlaneOwn, awaitingYou, onThisComputer, planeAddress } from "@troupe/client";
 import type { AuthSession, FleetRow, OwnPlane, SessionKind } from "@troupe/client";
-import { useAdmin, useArchived, useDaemon, useFleet } from "./hooks";
+import { useAdmin, useArchived, useDaemon, useFleet, useMarks } from "./hooks";
 import { useUpdates } from "./updates";
 import { UpdateBanner } from "./views/Update";
 import { Agents } from "./views/Agents";
@@ -250,6 +250,7 @@ export function App(): JSX.Element {
   const mode: AppMode = localOnly || offline || refused ? "local" : "plane";
   const { snapshot, store, refresh } = useFleet(planeAuth, daemon.client);
   const archived = useArchived(store, planeAuth, daemon.client);
+  const marks = useMarks(store, planeAuth, daemon.client);
   // Not known while the daemon is still being found, or has not answered its first list.
   const daemonUnheard = daemon.status === "searching" || (daemon.client !== null && !snapshot.sources["daemon"]);
   rowsNow.current = daemonUnheard ? null : snapshot.rows;
@@ -749,6 +750,7 @@ export function App(): JSX.Element {
               onStart={() => setWhere({ screen: "new" })}
               onClaim={claim}
               archived={archived}
+              marks={marks}
             />
           )}
 
@@ -849,6 +851,7 @@ export function App(): JSX.Element {
                 created={where.kind}
                 startedIn={where.workspace}
                 onBack={() => setWhere({ screen: "sessions" })}
+                marks={marks}
                 onArchive={async (on) => {
                   if (!row) return;
                   await archived.set(row, on);

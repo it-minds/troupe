@@ -1,12 +1,12 @@
 # Architecture: the plane, the pods and what a session carries
 
-Sections 6 to 10 of [ARCHITECTURE.md](../../ARCHITECTURE.md), which is the design of the
-harness and its reasons: how a session runs remotely (the plane, a worker pod, the
-operator and the admin surface), what a profile carries and the work nobody starts, what a
-session cost, provenance and entitlements, and what belongs to a person. They keep the
-numbers they have there, so `ARCHITECTURE.md §6.2` is [§6.2](#62-a-worker-pod) here.
+How a session runs remotely (the plane, a worker pod, the operator and the admin surface),
+what a profile carries and the work nobody starts, what a session cost, provenance and
+entitlements, and what belongs to a person. The parts and where they live are
+[the map](../../ARCHITECTURE.md); the harness a pod runs is
+[the harness and its clients](architecture.md).
 
-## 6. Remote
+## 1. Remote
 
 A client reaches the plane over HTTPS and a session's pod over a WebSocket of its own,
 pods reach the plane over the control channel, and the plane is in the path of neither a
@@ -63,7 +63,7 @@ sequenceDiagram
   C->>W: auth.refresh (same socket)
 ```
 
-### 6.1 The plane
+### 1.1 The plane
 
 The plane decides *what* may happen and *where*; it never sees what happens, and is never
 in the data path of a live session. **Identity**: it is a plain OIDC relying party;
@@ -127,7 +127,7 @@ is checked again on every command against the ACL mirror the plane pushes, so a 
 collaborator is refused on their next command, and a narrowed one runs it with the
 narrower role's scopes.
 
-### 6.2 A worker pod
+### 1.2 A worker pod
 
 **One process per active session, none per dormant one.** Everything a dormant session is
 lives in object storage, and activation is the only way back, which makes relocation and
@@ -154,7 +154,7 @@ enrols. A private session has no pod: its objects go when the owner's daemon nex
 and says it has stopped (Decisions 756 and 811). A key the key manager refused leaves the session
 `erasure_pending`, and the plane tries it again every five minutes (Decision 811).
 
-### 6.3 The operator
+### 1.3 The operator
 
 | Resource | Scope | Written by | Says |
 |---|---|---|---|
@@ -187,7 +187,7 @@ at a loopback or link-local address is admitted by no rule, and is refused where
 up and reported on the profile. Which mode a profile has is its `EgressByHostname`
 condition, and the plane claims egress by hostname only where that condition says so.
 
-### 6.4 The admin surface
+### 1.4 The admin surface
 
 Every administrative action goes through `Troupe.Plane.Admin`; the console, the `admin.*`
 JSON-RPC methods and the MCP server at `/mcp` are renderings of it. The console is a client
@@ -220,7 +220,7 @@ be saved until a check passes for the value in the field. **Audit** is a row per
 with the actor and a diff keyed by path (`spec.llm.model`), computed by the same function
 the editor previews with.
 
-## 7. What a profile carries, and work nobody starts
+## 2. What a profile carries, and work nobody starts
 
 **Bundles** (agent definitions, skills and MCP servers) are one versioned, hashed,
 immutable document per version, validated at publish by the plane and again by the worker
@@ -249,7 +249,7 @@ fires that trigger and nothing else, or by an executor that calls `trigger.fire`
 structured decision, artifacts are `published` events and blobs served with the caller's
 own token. It holds no database and no credential of its own ([docs/a2a.md](../a2a.md)).
 
-## 8. What a session cost
+## 3. What a session cost
 
 **Cost is a fold over the log, not a second thing to write down.** Every `llm_response`
 carries the model and, behind a gateway, its request id and cost, read from response
@@ -270,7 +270,7 @@ pod still made the calls it reports. The ledger's uniqueness on request id turns
 overlap into duplicates rather than charges. There is no rollup pipeline: the raw table,
 an index and a one-minute cache answer every question at this volume.
 
-## 9. Provenance and entitlements
+## 4. Provenance and entitlements
 
 A trigger run names a **revision**: the trigger document frozen and addressed by the hash
 of its canonical form, `source` inside the hash and `enabled` outside it. Editing a
@@ -282,7 +282,7 @@ person's teams, the session gets its one team's set, and the pod filters agents 
 whole search order is merged, skills after the definition's own list, and each session's
 MCP tool list; the pod still discovers once.
 
-## 10. What belongs to a person
+## 5. What belongs to a person
 
 Key paths take an owner: `troupe/teams/<team>/sessions/<id>` for a pod, scoped to its
 granted teams, and `troupe/people/<name>/…` for a person, which no pod rule mentions. The
@@ -315,3 +315,40 @@ sealing each private session it has no sealer for, from the row's `last_seq` at 
 it held, or from the first event for one the plane has never heard of (Decision 764).
 Signing out at the client takes the token back (`identity.sign_out`), and the daemon stops
 every sealer until the next link carries them on (Decision 766).
+
+## 6. Supervision trees
+
+**Worker** (`Troupe.Worker.Supervisor`, empty unless `TROUPE_WORKER_AUTOSTART`):
+`KMS.OpenBao.Login` first (the worker's own OpenBao identity), `Sessions` (a
+`Session.Manager` per active session), `Auth`, `MCP.Sessions`, `Connections`,
+`ClientCredentials`, `MCP`,
+`Bundles` (before the link: enrolment claims the bundle hash), `Usage`, `Disk.Watch`,
+`Plane.Link` (only with
+`TROUPE_PLANE_CONTROL`), and `Harness` — the gateway's `Commands`, `Connections`, a raw
+NDJSON `Listener` on 4100 and `Gateway.Web` (Bandit on 4000: `/health/live`,
+`/health/ready`, `/v1/socket`).
+
+**Plane** (`Troupe.Plane.Supervisor`, empty unless `TROUPE_PLANE_AUTOSTART`): `Repo`,
+`Settings` (5 s cache), PubSub, `Singleton` (a `DynamicSupervisor` for the `:global`
+actors: one `Placement` per profile, one `TeamBudget` per team, one `PersonBudget` per
+person, one `PlatformBudget`, and the fleet scaler, GitOps and erasure-retry singletons),
+`Fleet.Sweeper`, the keepers of the trigger scheduler, the fleet scaler, GitOps
+(`Gitops.Keeper`) and the erasure retry (`Erasure.Retry.Keeper`), `Erasure.Tasks`, `Fleet.ReleaseImage` (rewrites
+`release` profiles after an upgrade), the control channel's registry, connections and `:gen_tcp`
+listener on 4001 (plaintext or TLS, told apart by the first byte), `Ledger.Cache`, `Tokens.Credential` (the OpenBao login), the Phoenix
+endpoint on 4000, and libcluster when `RELEASE_DISTRIBUTION=name`. The `:global` actors
+are why the chart refuses more than one replica without distribution.
+
+**Operator** (`rest_for_one`, under `TROUPE_OPERATOR_AUTOSTART`): `Reconcilers` (one per
+resource), `Watch` (Bonny: watch, resync, `Lease` leadership), `Descendants`. **A2A**:
+a plane-token cache, the stream registry, and Bandit when autostarted.
+
+## 7. Things a reader will trip over
+
+- The operator and the worker both compose a pod's hostname `<ordinal>-<profile>.<domain>`;
+  the two cannot share a function across the boundary, and both say so.
+- `apps/troupe_protocol/test/troupe/policy_test.exs` imports `Troupe.Operator.Fixtures`
+  without declaring the dependency ([testing.md §1](testing.md#1-running)).
+- `troupe_plane` reads what it needs of the design (the front page's theme, which
+  `mix troupe.theme` writes to `priv/static/theme.css`) from `priv/`, not from
+  `clients/gui/docs/design/themes/` directly: the image build does not see `docs/`.

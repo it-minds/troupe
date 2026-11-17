@@ -5,8 +5,8 @@ as one Burrito binary per platform, that runs every session in `troupe_core`
 behind `troupe_gateway` — a daemon it embeds when none is running on the
 machine, or a plane's worker pod — and talks to over `PROTOCOL.md`. The harness
 itself (`troupe_core`, `troupe_gateway`, `troupe_protocol`) is a path dependency on
-`../../apps/` — the umbrella this project sits in, at the same commit. Read the root
-`ARCHITECTURE.md` (the harness, and §6 of `docs/developer/architecture.md` for this
+`../../apps/` — the umbrella this project sits in, at the same commit. Read
+`docs/developer/architecture.md` (the harness, and its §7 for this
 client) and this client's decisions in `docs/decisions/tui/` (every deviation, numbered,
 a file each; `mix troupe.decisions --for <path>` lists the ones that govern a file, and a
 new deviation is a new file) before changing behaviour.

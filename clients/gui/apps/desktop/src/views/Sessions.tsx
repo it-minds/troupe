@@ -13,15 +13,16 @@
 // one more filter away: chosen, the list is the archived ones, from every source, and the
 // other filters narrow those.
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { JSX } from "react";
-import { archiveRefusal, claimable, claimRefusal, filterRows, mayArchive } from "@troupe/client";
+import { archiveRefusal, claimable, claimRefusal, filterRows, markRefusal, mayArchive } from "@troupe/client";
 import type { FleetRow, SessionKind } from "@troupe/client";
-import type { Archived } from "../hooks";
+import type { Archived, Marks } from "../hooks";
 import { useNarrow } from "../narrow";
 import { NavSheet } from "../sheet";
 import { Cost, RowStatus, statusOf, Sync, Unread, When, Where } from "./bits";
 import { inviteLine, presenceWords } from "./Remote";
+import { RenameField } from "./Rename";
 
 export function Sessions({
   rows,
@@ -31,6 +32,7 @@ export function Sessions({
   onStart,
   onClaim,
   archived,
+  marks,
 }: {
   rows: FleetRow[];
   loading: boolean;
@@ -42,6 +44,8 @@ export function Sessions({
   onClaim?: ((id: string) => Promise<void>) | undefined;
   /** The archived sessions, asked for when the filter chooses them; absent where nothing archives. */
   archived?: Archived | undefined;
+  /** Rename a session and keep it at the top, from its row's ⋯: its owner's alone. */
+  marks?: Marks | undefined;
 }): JSX.Element {
   const [claimError, setClaimError] = useState<string | null>(null);
   const claim = onClaim
@@ -75,6 +79,29 @@ export function Sessions({
           } catch (e) {
             setUnarchiveError(archiveRefusal(e, false));
           }
+        }
+      : undefined;
+  // A name or a place at the top changed from a row's ⋯: what a refusal said, until the next try.
+  const [markError, setMarkError] = useState<string | null>(null);
+  const mark =
+    marks && !showArchived
+      ? {
+          rename: async (row: FleetRow, title: string): Promise<void> => {
+            setMarkError(null);
+            try {
+              await marks.rename(row, title);
+            } catch (e) {
+              setMarkError(`It was not renamed. ${markRefusal(e, "rename")}.`);
+            }
+          },
+          keep: async (row: FleetRow, on: boolean): Promise<void> => {
+            setMarkError(null);
+            try {
+              await marks.keep(row, on);
+            } catch (e) {
+              setMarkError(`It was not ${on ? "kept at the top" : "let go from the top"}. ${markRefusal(e, on ? "keep" : "let go")}.`);
+            }
+          },
         }
       : undefined;
   const listed = showArchived && archived ? archived.rows.filter((r) => r.archived) : rows;
@@ -223,6 +250,12 @@ export function Sessions({
         </div>
       )}
 
+      {markError && (
+        <div className="banner error" role="alert">
+          <p>{markError}</p>
+        </div>
+      )}
+
       <div className="listing">
         {showArchived && listed.length === 0 && !listing ? (
           <div className="empty">
@@ -250,13 +283,13 @@ export function Sessions({
             {waiting.length > 0 && (
               <section className="group waiting">
                 <h3>Waiting for you</h3>
-                <Rows rows={waiting} onOpen={onOpen} onClaim={claim} onUnarchive={unarchive} />
+                <Rows rows={waiting} onOpen={onOpen} onClaim={claim} onUnarchive={unarchive} mark={mark} />
               </section>
             )}
             {rest.length > 0 && (
               <section className="group">
                 {waiting.length > 0 && <h3>Everything else</h3>}
-                <Rows rows={rest} onOpen={onOpen} onClaim={claim} onUnarchive={unarchive} />
+                <Rows rows={rest} onOpen={onOpen} onClaim={claim} onUnarchive={unarchive} mark={mark} />
               </section>
             )}
           </>
@@ -276,21 +309,36 @@ function Rows({
   onOpen,
   onClaim,
   onUnarchive,
+  mark,
 }: {
   rows: FleetRow[];
   onOpen: (id: string) => void;
   onClaim?: ((id: string) => Promise<void>) | undefined;
   /** Put an archived session back in the list: offered on the rows the person owns. */
   onUnarchive?: ((row: FleetRow) => Promise<void>) | undefined;
+  /** Rename it or keep it at the top, from the row's ⋯: offered on the rows the person owns. Never rejects. */
+  mark?: { rename: (row: FleetRow, title: string) => Promise<void>; keep: (row: FleetRow, on: boolean) => Promise<void> } | undefined;
 }): JSX.Element {
+  // The row whose name is a field, one at a time.
+  const [renaming, setRenaming] = useState<string | null>(null);
   return (
     <ul className="rows">
       {rows.map((r) => {
         const status = statusOf(r);
         const claim = onClaim && claimable(r);
         const unarchive = onUnarchive && r.archived && mayArchive(r);
+        const marked = mark && !r.archived && mayArchive(r) ? mark : undefined;
+        if (marked && renaming === r.id) {
+          return (
+            <li key={r.id} className="markable">
+              <div className={`row is-${status} renaming`}>
+                <RenameField title={r.title ?? ""} onRename={(title) => marked.rename(r, title)} onDone={() => setRenaming(null)} />
+              </div>
+            </li>
+          );
+        }
         return (
-          <li key={r.id} className={claim ? "claimable" : unarchive ? "unarchivable" : undefined}>
+          <li key={r.id} className={claim ? "claimable" : unarchive ? "unarchivable" : marked ? "markable" : undefined}>
             <button className={`row is-${status}`} onClick={() => onOpen(r.id)}>
               <span className="subject">
                 <span className="title">{r.title ?? r.id}</span>
@@ -300,6 +348,11 @@ function Rows({
                 </span>
               </span>
               <span className="meta">
+                {r.pinned && (
+                  <span className="micro kept" title="Kept at the top of the session list, for everyone who sees it">
+                    Kept
+                  </span>
+                )}
                 <Unread row={r} />
                 <Where kind={r.kind} />
                 {r.kind === "remote" && r.remote && r.remote.state !== "online" && (
@@ -313,6 +366,7 @@ function Rows({
             </button>
             {claim && <Claim row={r} onClaim={onClaim} />}
             {unarchive && <Unarchive row={r} onUnarchive={onUnarchive} />}
+            {marked && <RowMenu row={r} onRename={() => setRenaming(r.id)} onKeep={(on) => void marked.keep(r, on)} />}
           </li>
         );
       })}
@@ -358,5 +412,51 @@ function Unarchive({ row, onUnarchive }: { row: FleetRow; onUnarchive: (row: Fle
     >
       {busy ? "Unarchiving" : "Unarchive"}
     </button>
+  );
+}
+
+/**
+ * A row's ⋯, beside it as Claim is: rename it, and keep it at the top of the list or let it
+ * go. Both are the session's for everyone who sees it, and its owner's to change.
+ */
+function RowMenu({ row, onRename, onKeep }: { row: FleetRow; onRename: () => void; onKeep: (on: boolean) => void }): JSX.Element {
+  const [open, setOpen] = useState(false);
+  const box = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const outside = (e: MouseEvent): void => {
+      if (!box.current?.contains(e.target as Node)) setOpen(false);
+    };
+    const escape = (e: KeyboardEvent): void => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("mousedown", outside);
+    document.addEventListener("keydown", escape);
+    return () => {
+      document.removeEventListener("mousedown", outside);
+      document.removeEventListener("keydown", escape);
+    };
+  }, [open]);
+  const then = (act: () => void) => () => {
+    setOpen(false);
+    act();
+  };
+  const name = row.title ?? row.id;
+  return (
+    <div className="row-menu" ref={box}>
+      <button type="button" className="ib" aria-label={`More actions for ${name}`} aria-haspopup="true" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
+        ⋯
+      </button>
+      <div className="menu-pop" hidden={!open} aria-label={`Actions for ${name}`}>
+        <button type="button" className="item" onClick={then(onRename)}>
+          <span className="t">Rename</span>
+          <span className="d">The name the session list shows, for everyone who sees it</span>
+        </button>
+        <button type="button" className="item" onClick={then(() => onKeep(!row.pinned))}>
+          <span className="t">{row.pinned ? "Let go from the top" : "Keep at the top"}</span>
+          <span className="d">{row.pinned ? "Back among the rest, by when it was last active" : "Listed first, for everyone who sees it"}</span>
+        </button>
+      </div>
+    </div>
   );
 }

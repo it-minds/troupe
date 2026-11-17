@@ -341,6 +341,47 @@ defmodule Troupe.Client.Remote do
     end
   end
 
+  # A pod session's name and its place at the top are the plane's, as archiving it is.
+  @impl true
+  def rename(sid, title) do
+    at_plane(sid, "session.title.set", %{session_id: sid, title: title}, :rename, fn row ->
+      Troupe.Client.Marks.renamed(if is_map(row), do: row["title"])
+    end)
+  end
+
+  @impl true
+  def keep(sid, kept?) do
+    at_plane(sid, Troupe.Client.Marks.keep_method(kept?), %{session_id: sid}, :keep, fn _row ->
+      Troupe.Client.Marks.kept(kept?)
+    end)
+  end
+
+  defp at_plane(sid, method, params, what, said) do
+    case attachment(sid) do
+      %{plane_url: plane} when is_binary(plane) ->
+        case call(plane, method, params) do
+          {:ok, row} ->
+            {:ok, said.(row)}
+
+          {:error, %{message: "forbidden"} = error} ->
+            {:error, Troupe.Client.Marks.forbidden(error[:data], what)}
+
+          {:error, %{data: %{"reason" => reason}}} when is_binary(reason) ->
+            {:error, reason}
+
+          {:error, reason} ->
+            {:error, mark_refusal(plane_refusal(reason), what)}
+        end
+
+      _ ->
+        {:error, message(:not_attached)}
+    end
+  end
+
+  defp mark_refusal(:unsupported, :rename), do: "this plane does not rename sessions yet"
+  defp mark_refusal(:unsupported, :keep), do: "this plane does not keep sessions at the top yet"
+  defp mark_refusal(reason, _what), do: archive_refusal(reason)
+
   defp archive_refusal(:unsupported), do: "this plane does not archive sessions yet"
   defp archive_refusal(:not_found), do: "the plane has no such session"
   defp archive_refusal(reason), do: message(reason)

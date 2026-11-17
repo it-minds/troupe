@@ -61,7 +61,7 @@ A session lives in the [daemon](glossary.md#daemon) on your machine, or on a
 from. Close the terminal and the agent carries on; open the session again from the
 desktop app or a script and you see what it did. On a pod, a session nobody uses sleeps in
 object storage and wakes when it is next opened
-([the harness](../ARCHITECTURE.md#2-the-harness), [a worker pod](developer/architecture-remote.md#62-a-worker-pod)).
+([the harness](developer/architecture.md#1-the-harness), [a worker pod](developer/architecture-remote.md#12-a-worker-pod)).
 
 </div>
 
@@ -79,7 +79,7 @@ The terminal client and the desktop app speak only [the protocol](../PROTOCOL.md
 is complete on its own, with JSON Schema for every message: a program of yours gets
 everything they get. On a plane, the console, the `admin.*` methods and the MCP server are
 three renderings of one module, and a test holds them level, so nothing the console does is
-out of a script's or an agent's reach ([the admin surface](developer/architecture-remote.md#64-the-admin-surface)).
+out of a script's or an agent's reach ([the admin surface](developer/architecture-remote.md#14-the-admin-surface)).
 
 </div>
 
@@ -171,8 +171,8 @@ You run agents, on your own machine or on your team's plane.
 
 1. [user/](user/README.md) — what a session is, the first run in five steps, the ways in,
    and a line for each page that explains one thing.
-2. [The terminal client](../clients/tui/README.md) — installing `troupe`, a model
-   provider, using it, and sessions on a plane; [in VS Code](user/vscode.md), opened in
+2. [The terminal client](user/terminal-client.md) — installing `troupe`, using it
+   headless, and sessions on a plane; [in VS Code](user/vscode.md), opened in
    a terminal tab at the workspace folder.
 3. [Command reference](user/cli-reference.md) (generated) — every command line `troupe`
    takes, and every command you type inside a session.
@@ -180,7 +180,7 @@ You run agents, on your own machine or on your team's plane.
    set it; [models](user/models.md), [agents and commands](user/agents.md),
    [MCP servers and skills](user/mcp.md), [instruction files](user/instructions.md) and
    [memory](user/memory.md) each have a page.
-5. [The daemon](../apps/troupe_daemon/README.md) — `troupe-daemon`, what runs your
+5. [The daemon](user/daemon.md) — `troupe-daemon`, what runs your
    sessions, and how long it stays up.
 6. [The desktop app](../clients/gui/docs/install.md) — installing the builds while they
    are unsigned.
@@ -194,7 +194,7 @@ bundles and triggers on top.
    `helm install`.
 2. [Installing](admin/installing.md) — from a cluster with nothing on it to a first team
    in the console. The shape of what you are installing is
-   [ARCHITECTURE.md §6](../ARCHITECTURE.md#6-remote).
+   [the plane and the pods](developer/architecture-remote.md#1-remote).
 3. [Roles and permissions](admin/roles-and-permissions.md) and
    [integrations](admin/integrations.md) — identity, what each surface accepts, and what
    the identity provider, OpenBao, PostgreSQL and object storage must provide;
@@ -215,7 +215,7 @@ You contribute to Troupe itself.
    contribution.
 2. [A tour](developer/tour.md) — where things live, running the suite, adding a tool,
    and how the event log works.
-3. [ARCHITECTURE.md](../ARCHITECTURE.md) — the design, and why the log is the session.
+3. [ARCHITECTURE.md](../ARCHITECTURE.md) — the map of the design, and why the log is the session.
 4. [developer/](developer/README.md) — setup, testing, conventions, the build, CI and
    releases, and the code's own map.
 5. [decisions/](decisions/README.md) — the judgment calls that still hold, a file each,
