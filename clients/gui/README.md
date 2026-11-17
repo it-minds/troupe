@@ -17,27 +17,10 @@ Four packages in one pnpm workspace:
 
 ## The path a client takes
 
-```mermaid
-sequenceDiagram
-  participant G as GUI
-  participant IdP as Identity provider
-  participant P as Plane
-  participant W as Worker
-  G->>P: GET /.well-known/troupe (discovery, no auth)
-  G->>IdP: POST device_authorization_endpoint
-  G->>IdP: POST token_endpoint (poll)
-  IdP-->>G: id_token, refresh_token
-  G->>P: POST /auth/exchange {id_token}
-  P-->>G: plane token (≤ 15 min)
-  G->>P: POST /rpc session.create
-  P-->>G: endpoint, token (aud = the pod), session_id
-  G->>W: WebSocket to the pod's /v1/socket
-  Note over G,W: initialize → subscribe → input.send → events
-```
-
-The plane is never in the data path of a live session. Only the last hop is a socket;
-everything before it is ordinary HTTP. `PlaneClient` covers every step up to the socket,
-and `TroupeConnection` + `SessionView` the socket.
+The steps from sign-in to a live session are drawn on
+[the plane page](../../docs/developer/architecture-remote.md#1-remote). Only the last hop
+is a socket; everything before it is ordinary HTTP. `PlaneClient` covers every step up to
+the socket, and `TroupeConnection` + `SessionView` the socket.
 
 Things the client library knows that the protocol document does not say loudly:
 
@@ -50,11 +33,9 @@ Things the client library knows that the protocol document does not say loudly:
   durable marker. Ephemerals may be dropped under load, so `SessionView.prompt` also
   polls `session.get` once the model has answered with `end_turn`.
 * Command ids are made unique across clients with a random prefix, not just per connection.
-* `auth.expiring` arrives two minutes before the pod token expires; renew with `token.mint`
-  on the plane and `auth.refresh` on the same socket — never by reconnecting.
-* A session can move to another pod, and its old pod then answers `not_found` with
-  `data.kind` of `session`. Ask the plane's `session.open` where it is, on every reconnection
-  and after that answer (`SessionAttachment` does both).
+
+How it renews a pod token and follows a session to another pod is in
+[the harness and its clients](../../docs/developer/architecture.md#8-the-gui-clientsgui).
 
 ## Run it
 
@@ -190,20 +171,11 @@ is `text`, `tools`, `reasoning`, `stop` (`max_tokens` / `refusal`) or `error`.
 
 ### Against a real deployment
 
-Three allowlists, not one:
-
-* the plane's `TROUPE_CORS_ORIGINS` must contain the GUI's origin — `http://localhost:5173`
-  in development, or the origin it is served from;
-* the chart's `operator.workerAllowedOrigins` must contain it too, for a team session's
-  socket to a worker pod: a pod admits no page whose origin is not listed. The GUI the
-  chart serves and the desktop app are admitted without it;
-* **the identity provider must allow that origin too.** The device grant is spoken to the
-  provider directly, so a deployment that adds the GUI to the plane and stops there signs
-  in as far as discovery and then fails. In Dex this is the public client's
-  `redirectURIs`/allowed origins; in Authentik the application's allowed origins.
-
-A browser cannot tell a page *why* a cross-origin request failed, so the GUI names both
-possibilities and the origin to add rather than guess.
+The origins a GUI served from anywhere but the plane's own host needs added, at the plane,
+the workers and the identity provider, are on
+[integrations](../../docs/admin/integrations.md#9-the-gui). A browser cannot tell a page *why*
+a cross-origin request failed, so the GUI names those possibilities and the origin to add
+rather than guess.
 
 ## Testing
 
@@ -292,15 +264,6 @@ keeps the local daemon's token in `localStorage`, so this is what keeps any othe
 off its origin; the plane sends its own policy on everything else on the host. Whatever
 serves the bundle anywhere else should send the same header.
 
-### Check the digest, not the tag
-
-A tag already in the registry plus `imagePullPolicy: IfNotPresent` means the node keeps
-the image it has, and since the Deployment's spec did not change, no pod is restarted:
-`helm upgrade` reports success and the old code carries on serving. It happened on a real
-cluster. Read every pod's running digest after an upgrade
-([routine-tasks.md](../../docs/admin/routine-tasks.md#upgrade)); CI never publishes a
-floating tag.
-
 ## Design
 
 [`docs/design/DESIGN.md`](docs/design/DESIGN.md) is the system and its rules,
@@ -316,34 +279,10 @@ bug ([DESIGN.md §12](docs/design/DESIGN.md#12-what-a-developer-must-not-do)).
 names differ) and committed; do not edit them. So is everything in
 `apps/desktop/src-tauri/icons/` (the app's icon on every platform, the installer's images
 and the disk image's background), by `pnpm icons`, from `mark.ts` and Signal's dark
-values; `scripts/icons.ts` says which and why.
-
-## The throughput test
-
-A worker with no plane, no object store and the scripted `fake` model measures a
-*client*: the path from a frame to the session actor and back, without a model's latency.
-It runs as one Docker container, dialled with tokens the bench mints itself
-(`packages/bench/src/devToken.ts`); [docs/bench.md](docs/bench.md) has the key pair, the
-`docker run`, the run and its variables.
-
-Each client opens its own socket and its own session (five clients on one session would
-measure the model's serialisation, not the transport) and sends its prompts one at a
-time. Every prompt is timed from just before `input.send` to the ack, `input_accepted`,
-the first `llm_delta`, the durable `llm_response` and the end of the turn. Results are
-printed and written as JSON under `packages/bench/bench-results/`.
-
-Measured on 2026-09-12, Docker Desktop on a Windows laptop, worker image built from
-commit `2f85e39` of the platform's former repository, fake model:
-
-| clients × prompts | connect+init p50 | input_accepted p50 / p95 | llm_response p50 / p95 | turn end p50 / p95 | turns/s |
-| --- | --- | --- | --- | --- | --- |
-| 5 × 20 | 13 ms | 0.6 / 1.3 ms | 1.1 / 3.7 ms | 1.3 / 9.1 ms | ~900 |
-| 20 × 10 | 44 ms | 0.9 / 2.1 ms | 3.7 / 5.6 ms | 4.1 / 7.2 ms | ~1000 |
-
-All 300 turns completed; the fake model answers instantly, so these numbers are the
-harness and the transport, not a model. `BENCH_MODE=plane` runs the same test through a
-plane; that path has not been measured, since it needs Postgres, OpenBao and an identity
-provider behind it.
+values; `scripts/icons.ts` says which and why. Those four theme files are the
+repository's only copy of the design tokens: the plane's front page and the TUI are
+generated from them too (Decision 716). Afterglow is the default and the design
+(Decision 702).
 
 ## Layout of the client package
 
@@ -394,4 +333,4 @@ apps/desktop/src
 ```
 
 What the code settles (the fold, the cursor, sign-in, storage, the two modes, the fleet)
-is in [docs/developer/architecture.md §7](../../docs/developer/architecture.md#7-the-gui-clientsgui).
+is in [the harness and its clients §8](../../docs/developer/architecture.md#8-the-gui-clientsgui).

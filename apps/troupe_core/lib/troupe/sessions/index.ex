@@ -18,7 +18,7 @@ defmodule Troupe.Sessions.Index do
   is reading it (`Troupe.Events.attached?/1`): a session stopped under the person looking
   at it is a state change nobody asked for, and the clocks start when they leave. The
   whole ladder, from a running turn to the daemon's exit, with every clock's setting:
-  [troupe-daemon](../../../../troupe_daemon/README.md#how-long-it-stays-up).
+  [the daemon](../../../../../docs/user/daemon.md#how-long-it-stays-up).
 
   None of it waits on a session (Decision 848). The sweep asks the sessions how they are
   from a task and decides here, from the answers, which to stop; a stop runs in a task of

@@ -35,7 +35,7 @@ Credo's line-ending check and `dash` both break on CRLF.
 
 ## 2. Boundaries
 
-The rules are in [architecture.md §2](architecture.md#2-boundaries). When a client needs a
+The rules are in [ARCHITECTURE.md §3](../../ARCHITECTURE.md#3-boundaries). When a client needs a
 server module, the protocol is missing a method: add it to `PROTOCOL.md` and the apps in
 the same pull request as the client change that needs it.
 

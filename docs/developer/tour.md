@@ -11,7 +11,7 @@ One Elixir umbrella under `apps/`, the terminal and desktop clients under `clien
 `charts/troupe`, and the documentation. The clients and the plane reach a session only
 through the protocol, and `mix troupe.boundaries` (the umbrella) and `mix troupe.xref` (the
 terminal client) fail the build on any other call
-([architecture.md §2](architecture.md#2-boundaries)), so the place a change goes is
+([ARCHITECTURE.md §3](../../ARCHITECTURE.md#3-boundaries)), so the place a change goes is
 usually the only place it can go.
 
 | To change | Look in |
@@ -31,8 +31,8 @@ usually the only place it can go.
 | the chart | `charts/troupe`, its CRDs in `charts/troupe/crds/` |
 
 [repo-structure.md](repo-structure.md) has the whole tree and the generated files, and
-[architecture.md](architecture.md) the apps, their supervision trees and where each kind
-of state is kept.
+[ARCHITECTURE.md](../../ARCHITECTURE.md) the apps and where each kind of state is kept, and
+[architecture.md](architecture.md) and [architecture-remote.md](architecture-remote.md) their supervision trees.
 
 ## 2. Running the suite
 
@@ -78,7 +78,7 @@ A tool is a module implementing `Troupe.Tool`, in `apps/troupe_core/lib/troupe/t
 3. **What a tool must do itself.** Resolve every path with `Troupe.Workspace.resolve/3`,
    so a write never leaves the workspace. Bound the result where it is made — the head
    and tail of output, a window of a file — with a marker naming the exact call that
-   returns the rest ([ARCHITECTURE.md §2.3](../../ARCHITECTURE.md#23-tools)). Start any OS
+   returns the rest ([architecture.md §1.3](architecture.md#13-tools)). Start any OS
    process with `Troupe.Reaper.open/3`, so it dies with the VM.
 4. **Register it** at the end of `@builtins` in `apps/troupe_core/lib/troupe/tools.ex`.
    The order is the order the model sees, and a fixed order is what keeps the provider's
@@ -131,18 +131,18 @@ sequenceDiagram
   are never written.
 - **Replay.** A crashed agent folds its own events back into its state; a dormant session
   has no processes at all, and the next activating command starts its tree and the fold
-  brings it back ([ARCHITECTURE.md §2.2](../../ARCHITECTURE.md#22-the-agent)).
+  brings it back ([architecture.md §1.2](architecture.md#12-the-agent)).
 - **Old logs.** `Troupe.Log.Upcast` brings an old event up a step at a time, and
   `fold_test.exs` replays every recorded version in `test/fixtures/logs/` against the hash
   of its fold, so a fold that quietly changed meaning fails CI. A moving hash is a bug to
-  find, never a fixture to re-record ([ARCHITECTURE.md §11](../../ARCHITECTURE.md#11-reading-old-logs)).
+  find, never a fixture to re-record ([architecture.md §5](architecture.md#5-reading-old-logs)).
 
 Adding an event is a recipe in [conventions.md §6](conventions.md#6-recipes); the events,
-the hash chain and what a client may rely on are in [ARCHITECTURE.md §3](../../ARCHITECTURE.md#3-the-wire)
+the hash chain and what a client may rely on are in [architecture.md §2](architecture.md#2-the-wire)
 and [PROTOCOL.md](../../PROTOCOL.md).
 
 ## Where next
 
 [conventions.md](conventions.md) for the gate, commit style and the other recipes (a
 command, an admin method, a setting, a GUI view); [fixing-issues.md](fixing-issues.md)
-for how issues are worked through; and [ARCHITECTURE.md](../../ARCHITECTURE.md) for why it is all this way.
+for how issues are worked through; and [architecture.md](architecture.md) for why it is all this way.

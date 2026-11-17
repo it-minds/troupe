@@ -201,7 +201,7 @@ the scripted model's requests, and their budgets are the script's.
 | `task_list` | three turns on `plan`: write a three-item list, one with a number worked out without a tool, then read a file and mark items done, twice | | all three turns were taken; the list ends with its three items completed; the last reply names `b.txt` and 440 |
 
 Six more run only when named, each for a measurement of what changes in front of a prompt
-([ARCHITECTURE.md §2.3](../../ARCHITECTURE.md#23-tools)): `long_turn` (one turn of thirteen calls, Decision 867), `loop_turn` (a `/loop`
+([architecture.md §1.3](architecture.md#13-tools)): `long_turn` (one turn of thirteen calls, Decision 867), `loop_turn` (a `/loop`
 turn and then a person's, Decision 871), and `scratchpad`, `scratchpad_without`,
 `scratchpad_session` and `scratchpad_session_without` (a migration plan, and a session of
 eight turns, with the scratchpad and without it, Decisions 870 and 895; see "The

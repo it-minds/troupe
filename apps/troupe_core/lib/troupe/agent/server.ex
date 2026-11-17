@@ -27,7 +27,7 @@ defmodule Troupe.Agent.Server do
   on the last start its Node allows writes why before it goes (`turn_ended` with
   `agent_failed`, Decision 727), and crashes all the same.
 
-  See `ARCHITECTURE.md` for the transition table and the failure matrix.
+  See `docs/developer/architecture.md` for the transition table and the failure matrix.
   """
 
   @behaviour :gen_statem
@@ -709,7 +709,7 @@ defmodule Troupe.Agent.Server do
   # that waits.
   #
   # `resume_on_restart: true` opts back into the old behaviour: incomplete tool calls
-  # are re-run (at-least-once, documented in ARCHITECTURE.md) and a turn the model owes
+  # are re-run (at-least-once, documented in docs/developer/architecture.md) and a turn the model owes
   # is taken.
   #
   # A turn that was cancelled is owed nothing, whichever kind of start this is: the
