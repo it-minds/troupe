@@ -8,7 +8,7 @@ defmodule Troupe.BudgetTest do
 
   alias Troupe.Budget
 
-  # Every limit spent at once, on a clock that started an hour ago.
+  # Every limit spent at once, after an hour's work.
   defp spent do
     %Budget{
       max_turns: 2,
@@ -18,8 +18,57 @@ defmodule Troupe.BudgetTest do
       max_output_tokens: 10,
       output_tokens: 10,
       wall_clock_ms: 1_000,
-      started_at: System.monotonic_time(:millisecond) - 3_600_000
+      worked_ms: 3_600_000
     }
+  end
+
+  # A clock that began working `ms` ago, as `Budget.work/1` would have set it then.
+  defp working_for(budget, ms), do: %{budget | working_since: System.monotonic_time(:millisecond) - ms}
+
+  # Issue #985: the wall clock is working time, not time since the agent began.
+  describe "the wall clock" do
+    test "an agent idle longer than its wall clock is not exhausted" do
+      # Its process began an hour ago and it worked a minute of that: the rest was rest.
+      budget = %Budget{wall_clock_ms: 30 * 60_000, worked_ms: 60_000}
+
+      assert Budget.check(budget) == :ok
+      assert Budget.elapsed(budget) == 60_000
+      assert Budget.used(budget, :wall_clock) == 60_000
+    end
+
+    test "one that worked past it is" do
+      budget = %Budget{wall_clock_ms: 1_000} |> working_for(1_500)
+
+      assert {:exhausted, :wall_clock} = Budget.check(budget)
+      assert Budget.used(budget, :wall_clock) >= 1_500
+    end
+
+    test "counts the stretches of work and none of the time between them" do
+      budget = %Budget{wall_clock_ms: 1_000} |> Budget.work()
+      Process.sleep(30)
+      budget = Budget.pause(budget)
+      worked = budget.worked_ms
+      assert worked >= 30
+      refute Budget.working?(budget)
+
+      # Resting: the clock stands still, however long it rests.
+      Process.sleep(60)
+      assert Budget.elapsed(budget) == worked
+
+      # Back at work, the next stretch adds to the first.
+      budget = budget |> Budget.work() |> working_for(1_000 - worked)
+      assert Budget.working?(budget)
+      assert Budget.elapsed(budget) >= 1_000
+      assert {:exhausted, :wall_clock} = Budget.check(budget)
+    end
+
+    test "starting a running clock and stopping a stopped one change nothing" do
+      running = %Budget{} |> working_for(500)
+      assert Budget.work(running) == running
+
+      stopped = %Budget{worked_ms: 42}
+      assert Budget.pause(stopped) == stopped
+    end
   end
 
   @limits [:max_turns, :max_input_tokens, :max_output_tokens, :wall_clock]
@@ -62,7 +111,7 @@ defmodule Troupe.BudgetTest do
 
     test "still takes tokens and time as a share of what the parent has left" do
       parent =
-        Budget.start(%Budget{
+        Budget.work(%Budget{
           max_input_tokens: 1_000,
           input_tokens: 500,
           max_output_tokens: 100,

@@ -79,6 +79,9 @@ collapses nothing. A frame longer than 24 lines shows its first 20 and `… 42 m
 and opening its turn shows the rest in place; a scratchpad document stays a card that
 `/scratch` opens.
 
+An agent's finish is a `done:` note, its report's parts under it. Its `changed:` line is Troupe's count
+of what the agent's file tools wrote: the files and the lines each added and removed, and what its shell commands changed as not counted. The desktop app shows the same count as the finish frame's `changed`.
+
 Replies are rendered as in the desktop app, with these of the terminal's own: nested lists
 are indented, each level its own marker (`•` `◦` `▪`); `inline code` and **bold** keep their
 emphasis without their markers; code has full syntax highlighting; a `csv`, `tsv` or
@@ -298,6 +301,12 @@ plane's error, a profile you may not use. `--private` is this computer's: a plat
 session from this screen is the team's. `@profile`, `#agent`, `/local` and `/platform` typed in the box set the chips and are
 taken out before the agent reads it; in this box `@name` naming a profile is not a file
 path, and `/local` is not a command. CALLED is the first line until you edit it.
+
+Where more than one of your teams may use the profile, the sentence ends `everyone on [which team?]
+can open it` and the team is a fourth chip: Enter asks which team the session is for first (its
+budget pays, and everyone on it can open it), the pick starts it, and Esc goes back to the form
+without starting. The team is kept for that profile on this machine and shown on the chip next time,
+where you can change it. `troupe run --team NAME` says it for a script; without it a run on such a profile stops and names the teams.
 
 Enter starts it; Ctrl-J is a new line, as on the command line (Shift or Alt with Enter
 too, where the terminal tells them from Enter; Windows Terminal does not). A typed digit

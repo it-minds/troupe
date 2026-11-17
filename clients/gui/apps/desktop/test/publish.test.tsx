@@ -144,6 +144,24 @@ describe("Publish…", () => {
     expect(daemon.publishedArtifacts[0]).toMatchObject({ title: "Mine", visibility: "private" });
   });
 
+  it("sends a picture for its card when one is picked, and none when not", async () => {
+    daemon.artifacts = [];
+    const d = await openPublish();
+    const inputs = (): HTMLInputElement[] => [...d.querySelectorAll<HTMLInputElement>('input[type="file"]')];
+    await waitFor(() => inputs().length === 2, "the files and the picture");
+    const picture = inputs().find((i) => i.closest("label")?.textContent?.startsWith("A picture of it for its card"))!;
+    expect(picture.accept).toBe("image/png,image/jpeg,image/webp");
+    pick(inputs()[0]!, [new File(["<h1>Weekly</h1>"], "index.html", { type: "text/html" })]);
+    pick(picture, [new File([new Uint8Array([0x89, 0x50, 0x4e, 0x47])], "shot.png", { type: "image/png" })]);
+    type([...d.querySelectorAll<HTMLInputElement>("label input")].find((i) => i.closest("label")?.textContent?.startsWith("Title"))!, "Weekly");
+    (await waitFor(() => (button("Publish", d)?.disabled === false ? button("Publish", d) : null), "the Publish button")).click();
+    await sees("is published as");
+    const sent = daemon.publishedArtifacts[0]!;
+    expect(sent["thumbnail"]).toEqual({ content_type: "image/png", bytes: btoa("\x89PNG") });
+    // The picture is not one of the page's files.
+    expect((sent["files"] as Array<{ path: string }>).map((f) => f.path)).toEqual(["index.html"]);
+  });
+
   it("says the daemon's sentence where the plane answers it has no sign-in", async () => {
     daemon.artifacts = null;
     await openPublish();

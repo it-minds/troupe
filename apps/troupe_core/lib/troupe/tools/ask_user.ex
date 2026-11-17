@@ -13,6 +13,7 @@ defmodule Troupe.Tools.AskUser do
 
   @behaviour Troupe.Tool
 
+  alias Troupe.Agent.Server
   alias Troupe.Session.Questions
   alias Troupe.Tool
 
@@ -65,19 +66,26 @@ defmodule Troupe.Tools.AskUser do
     with {:ok, _question} <- Tool.fetch_string(args, "question") do
       question = normalize(args)
 
-      case Questions.ask(ctx.session_id, %{
-             call_id: ctx.call_id,
-             agent_path: ctx.agent_path,
-             question: question.question,
-             options: question.options,
-             multiple: question.multiple
-           }) do
-        {:ok, ""} -> {:ok, "(the user answered with nothing)"}
-        {:ok, text} -> {:ok, text}
-        {:error, :unattended} -> {:error, "nobody is attached to this session to answer; decide yourself or finish"}
-      end
+      asked = %{
+        call_id: ctx.call_id,
+        agent_path: ctx.agent_path,
+        question: question.question,
+        options: question.options,
+        multiple: question.multiple
+      }
+
+      # The time the question waits on the person is not the agent's working time.
+      ctx.agent_pid
+      |> Server.waiting_on_person(ctx.call_id, fn -> Questions.ask(ctx.session_id, asked) end)
+      |> answered()
     end
   end
+
+  defp answered({:ok, ""}), do: {:ok, "(the user answered with nothing)"}
+  defp answered({:ok, text}), do: {:ok, text}
+
+  defp answered({:error, :unattended}),
+    do: {:error, "nobody is attached to this session to answer; decide yourself or finish"}
 
   @doc "The largest number of options a question may offer, one per digit key."
   @spec max_options() :: pos_integer()

@@ -374,9 +374,25 @@ defmodule Troupe.CLI.Runner do
       {:ok, sid} ->
         tui(sid, mouse_opts(args))
 
+      {:error, {:choose_team, teams}} ->
+        fail("troupe: could not start: " <> choose_team(params[:profile], teams))
+
       {:error, reason} ->
         fail("troupe: could not start: " <> reason(reason))
     end
+  end
+
+  @doc """
+  The line a run gets where more than one of the person's teams may use the profile and it
+  named none: the teams, and the flag that picks one.
+  """
+  @spec choose_team(String.t() | nil, [String.t()]) :: String.t()
+  def choose_team(profile, teams) do
+    on = profile || "the profile"
+    both = if length(teams) == 2, do: "both", else: "all"
+
+    "#{Troupe.UI.NewSession.and_list(teams)} can #{both} use #{on}; " <>
+      "say which team it is for with --team, as in --team #{hd(teams)}"
   end
 
   @doc """

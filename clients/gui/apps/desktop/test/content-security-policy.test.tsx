@@ -65,11 +65,27 @@ describe("the app's Content-Security-Policy", () => {
     expect(p["frame-src"]).toEqual(["https:"]);
   });
 
-  it("takes styles, fonts and images from the bundle", () => {
+  it("takes styles and fonts from the bundle, and images from it and, over TLS, a card's picture from the artifacts host", () => {
     const p = policy();
     expect(p["style-src"]).toEqual(["'self'"]);
     expect(p["font-src"]).toEqual(["'self'"]);
-    expect(p["img-src"]).toEqual(["'self'"]);
+    expect(p["img-src"]).toEqual(["'self'", "https:"]);
+    expect(p["img-src"]!.some((s) => admits(s, "https://artifacts.example.test/t/token"))).toBe(true);
+    expect(p["img-src"]!.some((s) => admits(s, "http://artifacts.example.test/t/token"))).toBe(false);
+  });
+
+  it("lets the desktop shell draw a card's picture from the artifacts host, and run nothing more", () => {
+    const conf = JSON.parse(read("../src-tauri/tauri.conf.json")) as { app: { security: { csp: string } } };
+    const shell = Object.fromEntries(
+      conf.app.security.csp
+        .split(";")
+        .map((d) => d.trim().split(/\s+/))
+        .filter((d) => d[0])
+        .map(([name, ...sources]) => [name!, sources]),
+    ) as Record<string, string[]>;
+    expect(shell["img-src"]).toEqual(["'self'", "data:", "blob:", "https:", "http://127.0.0.1:*"]);
+    expect(shell["script-src"]).toEqual(["'self'"]);
+    expect(shell["frame-src"]).toBeUndefined();
   });
 
   it("connects to the plane, to this machine's daemon, and elsewhere only over TLS", () => {

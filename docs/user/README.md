@@ -151,7 +151,8 @@ all out from what it enforces (`profile.get`), so the page is what your session 
 it says how it runs, "Runs on the platform with dev as build · everyone on core can open
 it", each word a picker; the profile is the last used with room, else the first with room,
 and a line says which. `@dev`, `#plan`, `/local` in the message set those and are removed
-before the agent reads it; a full profile says *Queue it* and starts when a place frees.
+before the agent reads it; a full profile says *Queue it* and starts when a place frees. If
+two of your teams may use the profile you pick the team once (its budget pays); it is kept.
 
 ## Words you will meet
 
@@ -248,8 +249,8 @@ Publishing an [artifact](artifacts.md) asks too, and the approval is where you s
 is for: the agent proposes an audience only when you named one, and otherwise you choose
 it there, whatever your permission rules or `--auto-approve` say.
 
-**Budget.** Limits on turns, tokens and time, plus your team's money budget on the plane.
-When one is reached the agent says which and asks, or stops; it never silently continues.
+**Budget.** Limits on turns, tokens and working time, plus your team's money budget on the plane.
+When one is reached the agent says which and asks, or stops where the session's terms set a turn or time limit, as a trigger's may; it never silently continues.
 The question says what the session has used and spent, and you answer with how much more
 and for how long: pick a size for this run, this session or this workspace (which writes
 it to the repository's `.troupe/config.yaml`, so the next session there starts with it),

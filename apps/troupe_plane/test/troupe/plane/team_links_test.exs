@@ -146,12 +146,25 @@ defmodule Troupe.Plane.TeamLinksTest do
       # volume is mounted, so guessing would be picking one of those for somebody — and
       # this is the shape that makes it happen, since one group in the provider is now
       # two teams here.
-      assert {:error, error} =
-               Harness.call(
-                 "session.create",
-                 %{"profile" => "dev", "prompt" => "hello"},
-                 %{user: ada, platform_admin?: false}
-               )
+      log =
+        ExUnit.CaptureLog.capture_log([level: :info], fn ->
+          send(
+            self(),
+            {:refused,
+             Harness.call(
+               "session.create",
+               %{"profile" => "dev", "prompt" => "hello"},
+               %{user: ada, platform_admin?: false}
+             )}
+          )
+        end)
+
+      assert_received {:refused, {:error, error}}
+
+      # An operator asked why a person could not start a session finds a line for it: who,
+      # on which profile, and how many teams could have paid.
+      assert log =~ "session.create by #{ada.subject} on dev asked which team"
+      assert log =~ "2 of theirs may use it"
 
       assert error.message == "invalid_params"
       assert error.data.reason == "choose a team"

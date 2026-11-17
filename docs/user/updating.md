@@ -67,7 +67,11 @@ again, it swaps forward.
 
 The latest release replaces only what is older than it; `--version` replaces either way. It
 updates what the installers installed, where they installed it (`TROUPE_BIN_DIR` and
-`TROUPE_LIB_DIR` move it, as they move the installers'). A machine with the daemon and no
+`TROUPE_LIB_DIR` move it, as they move the installers'). An install elsewhere, whose
+`troupe` is not in `%LOCALAPPDATA%\Programs\troupe` or `~/.local/bin`, updates only what is
+in its two directories: the desktop app is the default install's unless it is in them, and
+`--check` lists it as that: `troupe update` run from the default place updates it. A
+machine with the daemon and no
 `troupe` is updated by the desktop app, when it has one (below), and otherwise by running
 its installer again.
 

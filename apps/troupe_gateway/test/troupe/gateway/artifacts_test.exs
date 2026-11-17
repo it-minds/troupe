@@ -189,6 +189,44 @@ defmodule Troupe.Gateway.ArtifactsTest do
              )
   end
 
+  test "a picture for the card goes with the version, inline beside the files or the upload handle",
+       ctx do
+    assert {:ok, %{"linked" => true}} = link(ctx)
+    picture = %{"content_type" => "image/png", "bytes" => Base.encode64(<<0x89, "PNG", 0x0D, 0x0A, 0x1A, 0x0A>>)}
+
+    on_exit(fn ->
+      Troupe.ObjectStore.delete_prefix(Troupe.ObjectStore.from_env(), "artifact-uploads/")
+    end)
+
+    assert {:ok, _artifact} = publish(ctx, %{"thumbnail" => picture})
+
+    {"artifact.publish", sent} =
+      Enum.find(FakePlane.calls(ctx.plane.state), &match?({"artifact.publish", _}, &1))
+
+    assert sent["thumbnail"] == picture
+    assert [%{"path" => "index.html"}] = sent["files"]
+
+    big = :binary.copy("x", 3 * 1024 * 1024)
+
+    assert {:ok, _artifact} =
+             publish(ctx, %{
+               "thumbnail" => picture,
+               "files" => [
+                 %{"path" => "index.html", "bytes" => Base.encode64("<h1>Big</h1>")},
+                 %{"path" => "data.bin", "bytes" => Base.encode64(big)}
+               ]
+             })
+
+    calls = FakePlane.calls(ctx.plane.state)
+    {"artifact.upload.begin", begun} = Enum.find(calls, &match?({"artifact.upload.begin", _}, &1))
+    # The handle is for the page's files alone; the picture is not one of them.
+    assert Enum.map(begun["files"], & &1["path"]) |> Enum.sort() == ["data.bin", "index.html"]
+
+    {"artifact.publish", sent} = calls |> Enum.filter(&match?({"artifact.publish", _}, &1)) |> List.last()
+    assert "up-fake" <> _ = sent["upload"]
+    assert sent["thumbnail"] == picture
+  end
+
   test "the person's own artifacts are listed through the daemon, with the gallery", ctx do
     assert {:error, %{message: "unavailable"}} =
              Client.call(ctx.client, "artifact.list", %{"mine" => true})
@@ -289,7 +327,7 @@ defmodule Troupe.Gateway.ArtifactsTest do
     assert reason =~ "owner"
   end
 
-  test "a share with a person, the thread and the picker's search go to the plane with only their arguments",
+  test "a share with a person, the thread, a comment's deletion and edit and the picker's search go to the plane with only their arguments",
        ctx do
     forwarded = [
       {"artifact.share",
@@ -302,7 +340,10 @@ defmodule Troupe.Gateway.ArtifactsTest do
       {"artifact.comments", %{"id" => "art-fakefakefakefake"}},
       {"artifact.comment",
        %{"command_id" => Client.command_id(), "id" => "art-fakefakefakefake", "body" => "Looks good."}},
-      {"people.search", %{"query" => "cy"}}
+      {"people.search", %{"query" => "cy"}},
+      {"artifact.comment.delete", %{"command_id" => Client.command_id(), "id" => "art-fakefakefakefake", "comment" => "c-1"}},
+      {"artifact.comment.edit",
+       %{"command_id" => Client.command_id(), "id" => "art-fakefakefakefake", "comment" => "c-2", "body" => "Looks better."}}
     ]
 
     for {method, params} <- forwarded do
@@ -323,12 +364,37 @@ defmodule Troupe.Gateway.ArtifactsTest do
     assert {:ok, %{"people" => [%{"subject" => "cy@example.test"}]}} =
              Client.call(ctx.client, "people.search", %{"query" => "cy"})
 
+    assert {:ok, %{"comment" => "c-1", "deleted" => true}} =
+             Client.call(ctx.client, "artifact.comment.delete", Enum.at(forwarded, 4) |> elem(1))
+
+    assert {:ok, %{"comment" => %{"body" => "Looks better.", "edited_at" => _}}} =
+             Client.call(ctx.client, "artifact.comment.edit", Enum.at(forwarded, 5) |> elem(1))
+
     calls = FakePlane.calls(ctx.plane.state)
 
     for {method, params} <- forwarded do
       {^method, sent} = Enum.find(calls, &match?({^method, _}, &1))
       assert sent == Map.delete(params, "command_id"), method
     end
+  end
+
+  # The person's own gallery: an artifact kept at the top, or let go, on the plane, so every
+  # device and app of theirs shows it so.
+  test "keeping one at the top goes to the plane with only its id and on", ctx do
+    keep = %{"command_id" => Client.command_id(), "id" => "art-fakefakefakefake", "on" => true}
+
+    assert {:error, %{message: "unavailable"}} = Client.call(ctx.client, "artifact.keep", keep)
+    refute Enum.any?(FakePlane.calls(ctx.plane.state), &match?({"artifact.keep", _}, &1))
+
+    assert {:ok, %{"linked" => true}} = link(ctx)
+
+    assert {:ok, %{"id" => "art-fakefakefakefake", "kept" => true, "plane_url" => _}} =
+             Client.call(ctx.client, "artifact.keep", keep)
+
+    assert {"artifact.keep", %{"id" => "art-fakefakefakefake", "on" => true} = sent} =
+             Enum.find(FakePlane.calls(ctx.plane.state), &match?({"artifact.keep", _}, &1))
+
+    refute Map.has_key?(sent, "command_id")
   end
 
   test "a session's agent publishes through the daemon, naming the session and itself", ctx do

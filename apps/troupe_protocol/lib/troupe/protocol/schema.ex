@@ -1231,7 +1231,8 @@ defmodule Troupe.Protocol.Schema do
       # the daemon's sign-in: `files` each `{path, bytes}` (base64) and an optional
       # `content_type`; `id` republishes one of theirs; `session_id` names where it came from.
       # No `visibility` is `private`, the owner's alone, for a new one, and as it was for a
-      # republish.
+      # republish. `thumbnail`, `{content_type, bytes}`, is a picture of the version for its
+      # gallery card: PNG, JPEG or WebP, at most 256 KiB.
       "artifact.publish" => %{
         "command_id" => required(:string),
         "title" => required(:string),
@@ -1241,7 +1242,8 @@ defmodule Troupe.Protocol.Schema do
         "files" => required(:array),
         "id" => optional(:string),
         "note" => optional(:string),
-        "session_id" => optional(:string)
+        "session_id" => optional(:string),
+        "thumbnail" => optional(:object)
       },
       # The person's own artifacts on the plane (#62), for a client's "Publish a new version
       # of…": `mine`, `shared`, `teams` or `visibility` narrows it, as the plane's
@@ -1281,6 +1283,19 @@ defmodule Troupe.Protocol.Schema do
         "id" => required(:string),
         "body" => required(:string)
       },
+      # A comment taken back by its author, an owner or whoever may take the artifact down;
+      # and its author's edit, marked edited.
+      "artifact.comment.delete" => %{
+        "command_id" => required(:string),
+        "id" => required(:string),
+        "comment" => required(:string)
+      },
+      "artifact.comment.edit" => %{
+        "command_id" => required(:string),
+        "id" => required(:string),
+        "comment" => required(:string),
+        "body" => required(:string)
+      },
       # The share picker's search: people whose name, email or subject starts with `query`,
       # among those the plane lets the person find, as its `people.search`.
       "people.search" => %{"query" => required(:string), "limit" => optional(:integer)},
@@ -1306,6 +1321,13 @@ defmodule Troupe.Protocol.Schema do
         "command_id" => required(:string),
         "id" => required(:string),
         "to" => required(:string)
+      },
+      # One kept at the top of the person's own gallery (`on: true`), or let go (`false`):
+      # the person's view of their gallery, kept on the plane.
+      "artifact.keep" => %{
+        "command_id" => required(:string),
+        "id" => required(:string),
+        "on" => required(:boolean)
       },
       # Who may open it moved by its owner, or its title: a version over `base` carrying
       # every file of it, no files sent.

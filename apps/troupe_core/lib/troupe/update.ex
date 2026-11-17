@@ -74,6 +74,13 @@ defmodule Troupe.Update do
   running the old build until it is restarted, and is told so. `--rollback` puts back the
   AppImage or the app bundle kept as `.previous`; the Windows setup and the extension keep
   no previous and are said to.
+
+  **An install elsewhere.** One whose `troupe` is not in the default place
+  (`%LOCALAPPDATA%\\Programs\\troupe`, `~/.local/bin`), a second install or a check of the
+  installers, owns what is in its two directories, as its uninstall does: the desktop app
+  is its own only where it is in them (an AppImage beside its programs, a Windows setup
+  whose program is there). Any other is the default install's, listed as that and left
+  alone, and `troupe update` from the default place updates it.
   """
 
   alias Troupe.Protocol.{Client, ClientUpdate, Daemon}
@@ -101,7 +108,8 @@ defmodule Troupe.Update do
   `:releases` (the releases `--latest` looks at, newest first: `{:ok, [{version | nil,
   base}]}`), `:release_url`, `:repo`, `:keys`, `:target`, `:tui`, `:lib`, `:desktop` (where the
   desktop app is: `%{kind: :appimage | :mac_app | :windows_setup, path: ...}`), `:vscode`
-  (VS Code's command line, or nil), `:windows?`, `:out` (a line printed), `:fetch`,
+  (VS Code's command line, or nil), `:default_bin` (where the default install's programs
+  are), `:windows?`, `:out` (a line printed), `:fetch`,
   `:run` (a program run to completion: `{:ok, output, status}`), `:daemon` (what quiets
   the daemon) and `:sleep`.
   """
@@ -160,8 +168,10 @@ defmodule Troupe.Update do
       releases: Keyword.get(opts, :releases, &releases/1),
       run: Keyword.get(opts, :run, &run_program/1),
       daemon: Keyword.get(opts, :daemon, &quiet_daemon/1),
-      sleep: Keyword.get(opts, :sleep, &Process.sleep/1)
+      sleep: Keyword.get(opts, :sleep, &Process.sleep/1),
+      default_bin: Keyword.get_lazy(opts, :default_bin, fn -> default_bin_dir(windows?) end)
     }
+    |> owned()
   end
 
   defp env(name) do
@@ -182,12 +192,82 @@ defmodule Troupe.Update do
     end
   end
 
-  defp bin_dir(windows?) do
+  defp bin_dir(windows?), do: env("TROUPE_BIN_DIR") || default_bin_dir(windows?)
+
+  # Where the default install's programs are, whatever `TROUPE_BIN_DIR` says.
+  defp default_bin_dir(true), do: Path.join(System.get_env("LOCALAPPDATA", ""), "Programs/troupe")
+  defp default_bin_dir(false), do: Path.join(System.user_home!(), ".local/bin")
+
+  # An install whose programs are not in the default place owns what is in its two
+  # directories and what names them, as its uninstall does; the desktop app every install
+  # on the machine finds is the default install's, which updates it. Which install this is
+  # follows the programs' directory, not the daemon's: the default `troupe` is the one the
+  # desktop app and the login entry go with. `shared_desktop` is the desktop app left to
+  # the default install, said and never touched.
+  defp owned(%{desktop: nil} = s), do: Map.put(s, :shared_desktop, nil)
+
+  defp owned(s) do
+    own = [Path.dirname(s.tui), s.lib]
+
     cond do
-      dir = env("TROUPE_BIN_DIR") -> dir
-      windows? -> Path.join(System.get_env("LOCALAPPDATA", ""), "Programs/troupe")
-      true -> Path.join(System.user_home!(), ".local/bin")
+      same_path?(Path.dirname(s.tui), s.default_bin, s.windows?) ->
+        Map.put(s, :shared_desktop, nil)
+
+      own_desktop?(s.desktop, own, s) ->
+        %{s | desktop: own_entry(s.desktop, s.windows?)} |> Map.put(:shared_desktop, nil)
+
+      true ->
+        %{s | desktop: nil} |> Map.put(:shared_desktop, s.desktop)
     end
+  end
+
+  # The Windows setup's entry is this install's when the program it names is in one of its
+  # directories; the AppImage and the app bundle when they are.
+  defp own_desktop?(%{kind: :windows_setup}, own, s) do
+    case s.run.(["reg", "query", @uninstall_key, "/v", "DisplayIcon"]) do
+      {:ok, output, 0} ->
+        case Regex.run(~r/DisplayIcon\s+REG_(?:EXPAND_)?SZ\s+(.+)$/m, output) do
+          [_, icon] -> icon |> String.trim() |> String.replace(~r/,\s*-?\d+$/, "") |> String.trim("\"") |> under?(own, true)
+          _ -> false
+        end
+
+      _ ->
+        false
+    end
+  end
+
+  defp own_desktop?(%{path: path}, own, s) when is_binary(path), do: under?(path, own, s.windows?)
+  defp own_desktop?(_desktop, _own, _s), do: false
+
+  # The menu entry is every install's on the machine unless it starts this AppImage: one
+  # that does not is left to the version it says.
+  defp own_entry(%{kind: :appimage, path: path, entry: entry} = desktop, windows?)
+       when is_binary(entry) do
+    names_it? =
+      case File.read(entry) do
+        {:ok, text} ->
+          Regex.scan(~r/^Exec=\s*"?([^"\s]+)/m, text)
+          |> Enum.any?(fn [_, exec] -> same_path?(exec, path, windows?) end)
+
+        _ ->
+          false
+      end
+
+    if names_it?, do: desktop, else: Map.delete(desktop, :entry)
+  end
+
+  defp own_entry(desktop, _windows?), do: desktop
+
+  defp under?(path, dirs, windows?) do
+    path = tidy_path(path, windows?)
+    Enum.any?(dirs, &String.starts_with?(path, tidy_path(&1, windows?) <> "/"))
+  end
+
+  defp same_path?(a, b, windows?), do: tidy_path(a, windows?) == tidy_path(b, windows?)
+
+  defp tidy_path(path, windows?) do
+    path = path |> String.replace("\\", "/") |> String.trim_trailing("/")
+    if windows?, do: String.downcase(path), else: path
   end
 
   defp lib_dir(windows?) do
@@ -406,13 +486,26 @@ defmodule Troupe.Update do
 
   # What is installed, one line each: the version or "not installed", and where.
   defp installed_lines(inst, s) do
+    desktop =
+      case shared_desktop(s) do
+        nil -> "  the desktop app  #{inst.desktop || "not installed"}  #{desktop_where(s)}"
+        version -> "  the desktop app  #{version}  " <> shared_line(s)
+      end
+
     [
       "  troupe         #{inst.tui || "not installed"}  #{s.tui}",
       "  troupe-daemon  #{inst.daemon || "not installed"}  #{s.lib}",
-      "  the desktop app  #{inst.desktop || "not installed"}  #{desktop_where(s)}",
+      desktop,
       "  the VS Code extension  #{inst.vscode || "not installed"}  #{s.vscode || "no code command line"}"
     ]
   end
+
+  # The version of the desktop app this install leaves to the default one, where there is one.
+  defp shared_desktop(%{shared_desktop: %{} = desktop} = s), do: desktop_version(desktop, s)
+  defp shared_desktop(_s), do: nil
+
+  defp shared_line(s),
+    do: "the default install's, not this one's: troupe update run from #{s.default_bin} updates it"
 
   # -- the release ----------------------------------------------------------------
 
@@ -960,6 +1053,9 @@ defmodule Troupe.Update do
       )
 
       announce(rel, s)
+
+      if version = shared_desktop(s),
+        do: s.out.("  the desktop app #{version} is left as it is: " <> shared_line(s))
 
       if plan.steps == [] do
         s.out.("Nothing to update: what is installed is #{rel.version} or newer.")

@@ -14,7 +14,7 @@
 import { TroupeConnection, TroupeRpcError } from "./connection.js";
 import { SessionView } from "./session.js";
 import type { CallOptions, ConnectOptions, ConnectionHooks } from "./connection.js";
-import type { Artifact, ArtifactComment, ArtifactDetail, ArtifactFilter, ArtifactKind, ArtifactList, ArtifactNewLink, ArtifactOwner, ArtifactPersonShare, ArtifactShareRole, ArtifactText, ArtifactThread, ArtifactTicket, ArtifactTransferTo, ArtifactUpload } from "./artifacts.js";
+import type { Artifact, ArtifactComment, ArtifactDetail, ArtifactFilter, ArtifactKind, ArtifactList, ArtifactNewLink, ArtifactOwner, ArtifactPersonShare, ArtifactShareRole, ArtifactText, ArtifactThread, ArtifactThumbnail, ArtifactTicket, ArtifactTransferTo, ArtifactUpload } from "./artifacts.js";
 import type { AgentBroken, AgentCheck, AgentDefinition, AgentDeleted, AgentRow, AgentScope, AgentSkippedFile, AgentsChanged, AgentWritten } from "./agents.js";
 import type { ConfigScope, ConfigSetParams, ModelConfig, ModelDiscovery, ModelsParams } from "./config.js";
 import { remoteOffer, syncState } from "./fleet.js";
@@ -1217,7 +1217,7 @@ export class DaemonClient implements OwnPlane {
    * version too large for one call by an upload handle. Refused with a sentence where it is
    * signed in to no plane.
    */
-  publishArtifact(params: { title: string; kind: ArtifactKind; visibility: string; files: ArtifactUpload[]; owner?: ArtifactOwner; id?: string; note?: string; session_id?: string }): Promise<Artifact & { plane_url?: string }> {
+  publishArtifact(params: { title: string; kind: ArtifactKind; visibility: string; files: ArtifactUpload[]; owner?: ArtifactOwner; id?: string; note?: string; session_id?: string; thumbnail?: ArtifactThumbnail }): Promise<Artifact & { plane_url?: string }> {
     return this.command<Artifact & { plane_url?: string }>("artifact.publish", params);
   }
 
@@ -1278,6 +1278,11 @@ export class DaemonClient implements OwnPlane {
     return this.command<ArtifactDetail>("artifact.transfer", { id, to });
   }
 
+  /** Keep it at the top of the person's own gallery, or let it go: the plane's `artifact.keep`, forwarded as `artifact.pin` is. */
+  keepArtifact(id: string, on: boolean): Promise<ArtifactDetail> {
+    return this.command<ArtifactDetail>("artifact.keep", { id, on });
+  }
+
   /** Share it with one person by name at `role`, no link made: the plane's `artifact.share` with `person`. The owner's. */
   sharePersonArtifact(id: string, person: string, role: ArtifactShareRole): Promise<{ id: string; person: ArtifactPersonShare }> {
     return this.command<{ id: string; person: ArtifactPersonShare }>("artifact.share", { id, person, role });
@@ -1291,6 +1296,16 @@ export class DaemonClient implements OwnPlane {
   /** A comment in its thread: the plane's `artifact.comment`, as the person. */
   commentArtifact(id: string, body: string): Promise<{ id: string; comment: ArtifactComment }> {
     return this.command<{ id: string; comment: ArtifactComment }>("artifact.comment", { id, body });
+  }
+
+  /** A comment deleted from its thread: the plane's `artifact.comment.delete`, as the person. */
+  deleteArtifactComment(id: string, comment: string): Promise<{ id: string; comment: string; deleted: boolean }> {
+    return this.command<{ id: string; comment: string; deleted: boolean }>("artifact.comment.delete", { id, comment });
+  }
+
+  /** A comment's text replaced by its author: the plane's `artifact.comment.edit`, as the person. */
+  editArtifactComment(id: string, comment: string, body: string): Promise<{ id: string; comment: ArtifactComment }> {
+    return this.command<{ id: string; comment: ArtifactComment }>("artifact.comment.edit", { id, comment, body });
   }
 
   /** The share picker's search, the plane's `people.search` as the person. */

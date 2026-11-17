@@ -12,7 +12,7 @@ import { openInNewTab } from "../src/console";
 import { PEOPLE, button, freshBrowser, link, recordCalls, render, says, sees, seesButton, seesField, seesLink, signedInAs, startFake, type, visit, waitFor } from "./support";
 import type { FakeDeployment } from "./support";
 import { exampleAdmin } from "../../../packages/client/test/support/admin.js";
-import { artifact } from "../../../packages/client/test/support/plane.js";
+import { TINY_PNG, artifact } from "../../../packages/client/test/support/plane.js";
 import type { FakeArtifact, PlaneOptions } from "../../../packages/client/test/support/plane.js";
 
 const MIB = 1024 * 1024;
@@ -127,6 +127,34 @@ describe("artifacts", () => {
     expect(methods.filter((m) => m.startsWith("admin.") && m !== "admin.teams.list")).toEqual([]);
   });
 
+  it("starts a card with the picture its publisher sent, titled, and keeps the title and kind where none was", async () => {
+    const pictured = fake.plane.artifacts.get("art-carol-weekly")!;
+    pictured.versions[1]!.thumbnail = TINY_PNG;
+    await open("#/artifacts/organisation", PEOPLE.carol);
+    await sees("Carol's weekly", cards);
+    const card = (title: string): HTMLElement => [...cards()!.querySelectorAll<HTMLElement>(".artifact-card")].find((c) => c.textContent?.includes(title))!;
+
+    const img = card("Carol's weekly").querySelector<HTMLImageElement>(".thumb img")!;
+    expect(img.getAttribute("src")).toBe(`${fake.plane.baseUrl}/t/art-carol-weekly/2`);
+    expect(img.alt).toBe("Carol's weekly");
+    expect(card("Carol's weekly").querySelector(".thumb")!.firstElementChild).toBe(img);
+    expect(card("Carol's weekly").textContent).toContain("HTML page");
+    // Still nothing of the page itself.
+    expect(document.querySelector("iframe, object, embed")).toBeNull();
+    expect(document.body.innerHTML).not.toContain("Week forty-three in full");
+
+    // One without a picture is its title and its kind, as before.
+    expect(card("<b>Bold claims</b>").querySelector("img")).toBeNull();
+
+    // A picture that does not load leaves the title and the kind.
+    await waitFor(() => {
+      const shown = card("Carol's weekly").querySelector("img");
+      shown?.dispatchEvent(new Event("error"));
+      return shown === null;
+    }, "no picture");
+    expect(card("Carol's weekly").textContent).toContain("HTML page");
+  });
+
   it("says how to publish one where a tab has none, and that an administrator switched them off where one did", async () => {
     await open("#/artifacts", PEOPLE.bob);
     await sees("You have published nothing yet");
@@ -191,6 +219,41 @@ describe("artifacts", () => {
     const methods = recorded.calls.filter((c) => c.url.startsWith(fake.plane.baseUrl)).map((c) => c.method).filter((m): m is string => m !== null);
     expect(methods).toEqual(expect.arrayContaining(["artifact.get", "artifact.open"]));
     expect(methods.filter((m) => m.startsWith("admin.") && m !== "admin.teams.list")).toEqual([]);
+  });
+
+  it("says on each card and on its page when one goes, only where an administrator set a retention period", async () => {
+    // Both periods off: no card and no page says anything of going.
+    await open("#/artifacts/organisation", PEOPLE.carol);
+    await sees("Carol's weekly", cards);
+    expect(cards()!.textContent).not.toContain("Goes ");
+    visit("#/artifacts/art-carol-weekly");
+    await sees("Version 1", () => document.querySelector<HTMLElement>('section[aria-label="Versions"]'));
+    expect(document.body.textContent).not.toMatch(/goes on|goes \d|Versions older than/i);
+    unmount!();
+    unmount = null;
+    await fake.stop();
+
+    await start({ retention: { versions_days: 90, unopened_days: 60 } });
+    await open("#/artifacts/organisation", PEOPLE.carol);
+    // Sixty days from its newest version, 25 October: 24 December.
+    await sees("Goes 24 Dec", cards);
+    await sees("unless opened", cards);
+
+    visit("#/artifacts/art-carol-weekly");
+    const versions = () => document.querySelector<HTMLElement>('section[aria-label="Versions"]');
+    await sees("Version 1", versions);
+    await sees("It goes on 24 Dec");
+    await sees("every version with it, unless somebody opens it. Artifacts nobody opens for 60 days are removed, and opening it starts the 60 days again.");
+    await sees("Versions older than the newest are removed 90 days after they were published; the newest, and a pinned one, are kept.", versions);
+    // Version 1, published 24 October, goes ninety days later; the newest does not go.
+    const li = (n: number) => versions()!.querySelector<HTMLElement>(`li[aria-label="Version ${n}"]`)!;
+    await sees("goes 22 Jan", () => li(1));
+    expect(li(2).textContent).not.toContain("goes ");
+
+    // Opening it starts the count again: its date moves out to sixty days from today.
+    (await seesButton("Open")).click();
+    await waitFor(() => fake.plane.opened.length === 1, "opened");
+    expect(fake.plane.artifacts.get("art-carol-weekly")!.opened_at).toBeTruthy();
   });
 
   it("opens a link in a new tab that has no hold on the console", () => {
@@ -278,6 +341,10 @@ describe("artifacts' storage", () => {
     await sees("artifacts_enabled", group);
     await sees("artifacts_publish_organisation", group);
     await sees("artifacts_public_links", group);
+    // How long they are kept: off unless an administrator sets a number of days.
+    await sees("artifacts_keep_versions_days", group);
+    await sees("artifacts_keep_unopened_days", group);
+    await sees("Old versions of an artifact kept", group);
   });
 
   it("keeps the Artifacts area beside Mine for an administrator too", async () => {

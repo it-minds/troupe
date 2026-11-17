@@ -1,0 +1,141 @@
+---
+number: 1020
+title: A gallery card shows the picture its publisher sent with the version, a PNG, JPEG or WebP of at most 256 KiB kept beside the version's files and served by the artifacts host at a signed address for the person whose row gave it; nothing on the plane or a worker renders a page into one in this slice
+date: 2026-11-16
+status: accepted
+issue: 977
+paths:
+  - apps/troupe_plane/lib/troupe/plane/artifacts.ex
+  - apps/troupe_plane/lib/troupe/plane/artifacts/version.ex
+  - apps/troupe_plane/lib/troupe/plane/artifacts/artifact.ex
+  - apps/troupe_plane/lib/troupe/plane/web/artifacts.ex
+  - apps/troupe_plane/priv/repo/migrations/20261116001020_artifact_thumbnails.exs
+  - apps/troupe_plane/test/troupe/plane/artifact_thumbnails_test.exs
+  - apps/troupe_core/lib/troupe/tools/publish_artifact.ex
+  - apps/troupe_gateway/lib/troupe/gateway/artifacts.ex
+  - apps/troupe_worker/lib/troupe/worker/artifacts.ex
+  - apps/troupe_protocol/lib/troupe/protocol/schema.ex
+  - clients/gui/packages/client/src/artifacts.ts
+  - clients/gui/apps/desktop/src/views/Artifacts.tsx
+  - clients/gui/apps/desktop/src/views/Publish.tsx
+  - clients/gui/apps/desktop/src-tauri/tauri.conf.json
+  - clients/gui/apps/console/src/views/Artifacts.tsx
+  - clients/gui/docker/headers.conf
+  - PROTOCOL.md
+  - docs/user/artifacts.md
+symbols:
+  - Troupe.Plane.Artifacts.thumbnail/1
+gist: "Thumbnail = the publisher's own image per version (png/jpeg/webp, 256 KiB, not decoded); served at /t/<signed> for that person, visibility read per request; no renderer"
+---
+
+Issue #977, left from #62 ("its Gallery section asks for thumbnails"). A card in the desktop
+app's and the console's gallery was the title, the kind and the size, and never the page,
+which is a stranger's code to either app (Decision 948). A picture of the page needs
+something to draw it, and the only place an artifact's scripts may run is the artifacts
+host's sandboxed origin. The issue asked who renders, when, and where the picture is kept and
+served.
+
+## Who draws it: the publisher
+
+The publisher sends it with the version. `artifact.publish` (and `artifact.put`, and the
+pod's `session.artifact.publish`) take an optional `thumbnail: {content_type, bytes}` beside
+`files`, base64 as the files are. A separate key, not a reserved path among `files`: a
+reserved path would be one of the page's own files, in its hash, its file list, the editor's
+choice of files and the entry a page opens, and served at `/a/<id>/` to the page itself. A
+key of its own also fits `artifact.upload.begin` with nothing new: at most 256 KiB, about
+350 KB as base64, it always rides inline in the publish call, beside `files` or beside an
+`upload` handle, under the plane's 4 MiB door with the daemon's 2.5 MB inline budget for
+files and under the control link's 8 MiB.
+
+**Limits.** `image/png`, `image/jpeg` or `image/webp`, at most 256 KiB, its first bytes that
+kind's signature; anything else is `invalid_params` with a sentence saying which. The plane
+reads those few bytes and nothing more: no image library is on the plane, nothing decodes or
+resizes the picture, and a client draws it fitted to the card (`object-fit: cover`). It is
+stored at `artifacts/<id>/thumbnails/<n>` in the object store, beside the version's files and
+never among them (no path is a number followed by `thumbnails`, since a file's key is
+`artifacts/<id>/<n>/<path>`), and an artifact's deletion takes it with every other byte. It
+counts against the team's `artifact_quota_bytes` as a file does.
+
+**Not chosen: a renderer.** A headless browser on the plane would be a new dependency, and
+it would run a stranger's page outside the artifacts host's policy and network isolation: a
+new attack surface on the one service that holds every person's sign-in. A job on a worker
+would run it where agents run, which Decision 948 keeps an artifact out of. A later slice may
+add one, run as the artifacts host's own client under that host's policy, filling the same
+`thumbnail` a publisher fills now. In this slice the `publish_artifact` tool takes a
+workspace path (`thumbnail`) and its description says to send one only where the agent
+already has a screenshot of the page; it is never required.
+
+## Which version's
+
+Each version's own, so a card never shows a picture of a page that is not the one it opens:
+
+- a version that sends any file and no picture has none, whatever the one before had;
+- a version that sends no file (Decision 955's put that retitles or moves who may open it) is
+  the page its base was, and keeps the base's picture, carried rather than copied
+  (`stored_in`, as a carried file is);
+- a rollback carries the picture of the version it brings back;
+- the row's picture is the version its address serves: the pinned one, else the newest,
+  moved by `artifact.pin` as `bytes` is.
+
+**A Markdown document or a file** shows what it showed: the kind and the title (the desktop's
+striped placeholder with the kind and size; the console's title and kind). A publisher may
+send a picture for one, and then it is shown as a page's is.
+
+## Where it is served
+
+On the artifacts host, under its policy (`Web.Artifacts.CSP`, with `nosniff`): `GET
+/t/<token>`, the image with the type it was sent with, `cache-control: private`. A row of
+`artifact.list` and `artifact.get` carries `thumbnail_url`, that address, or `null`.
+
+A gallery's `<img>` cannot carry the artifacts host's cookie: the console and the desktop app
+are other origins that never opened the artifact, and the cookie only comes from a ticket
+(Decision 948). So the address is its own key: `Plug.Crypto` signed with the plane's secret
+under a salt of its own, naming the person the row was made for, the artifact and the
+version, dated to the start of the hour and good for two hours, so a gallery listed twice in
+an hour asks for the same address and a browser keeps the picture. At every request the host
+reads that person again, as active, and whether they may still see the artifact now
+(`visible/3`); a forged or old address, a leaver, a moved or deleted artifact, and a version
+without a picture are the host's 404. Decision 948 turned down a capability in the path for a
+page, whose links copy it into every address the page loads; a picture loads nothing, and
+its address stops at the next request once its person may no longer see the artifact. No
+image bytes are in a list's answer.
+
+**The apps' policies.** The GUI image's `img-src` gains `https:`, as `connect-src` and
+`frame-src` already name it for hosts a deployment chooses at run time; the desktop shell's
+gains `https:` and `http://127.0.0.1:*` (a local plane's artifacts host). An image runs
+nothing. This narrows Decision 954's "no picture of the artifacts host in the app" to this
+one picture, an image from that host at an address the plane signed; the app still fetches
+none of an artifact's files and draws no frame. A picture that does not load (its address
+past its hours, the artifact gone) leaves the card as it was without one.
+
+## Left
+
+The terminal's `/publish` takes no picture: its arguments are positional (a path, an
+audience, an owner), and a picture needs a flag the parser does not have. The terminal's
+gallery draws no image. The administrators' table (**Published artifacts**) stays a table of
+titles, owners and sizes. A renderer, as above.
+
+## Proof
+
+- `apps/troupe_plane/test/troupe/plane/artifact_thumbnails_test.exs`: a publish with a
+  picture keeps it beside the files, not among them, and puts its address on the list's and
+  `get`'s rows; one without, and the next version sent without, has none; a put sending no
+  file keeps its base's, a rollback the brought-back version's, carried not copied; a pin
+  shows the pinned version's; past 256 KiB, a GIF, a script sent as a PNG, a path and bad
+  base64 are refused in words and keep nothing; the bytes count against the quota; the host
+  serves it to a member whose row gave the address, with its type and the policy, no cookie;
+  a made-up or altered address, a member once the owner made it private, and a deleted
+  artifact get nothing.
+- `apps/troupe_core/test/troupe/tools/publish_artifact_test.exs` (the tool sends a workspace
+  picture, none when not given, refuses a GIF, one past 256 KiB and one outside the
+  workspace); `apps/troupe_gateway/test/troupe/gateway/artifacts_test.exs` (the daemon sends
+  it inline beside the files and beside an upload handle); `apps/troupe_worker/test/troupe/
+  worker/artifacts_test.exs` (over a real control link into the store).
+- `clients/gui/packages/client/test/artifact-thumbnail.test.ts`, the desktop's
+  `artifacts-gallery.test.tsx` (the image first on its card, the title as `alt`, the
+  placeholder without one and after a failed load), `publish.test.tsx` (**Publish…** sends
+  the picked picture) and `content-security-policy.test.tsx`, and the console's
+  `artifacts.test.tsx`.
+
+All of the plane's, the tool's, the daemon's and the clients' failed on the chunk's tip
+(`d6beea37`): there was no `thumbnail` and no `thumbnail_url`.

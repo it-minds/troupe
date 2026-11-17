@@ -49,6 +49,7 @@ gitops mode a manifest names its image, and a release reaches the workers with a
 | `orgMount` | mount the policy's org volume at `/mnt/org`, always read-only |
 | `repositoryOverridesBundle` | `true` lets a working copy's agents and skills replace the bundle's, and Troupe's built-in agents, of the same name ([a profile's options](profile-options.md#a-repositorys-agents-and-skills-on-a-pod)) |
 | `personalTools` | `allow` (the default) or `forbid`: whether a person may offer a session on these pods the tools of MCP servers they signed in to on their own machine ([a profile's options](profile-options.md#a-persons-own-tools-on-a-pod)) |
+| `memoryProposals` | `false` refuses every proposal its sessions make to a team's or the organisation's memory; absent, the platform setting decides ([a profile's options](profile-options.md#proposals-to-shared-memory-from-a-pod)) |
 | `permissions` | per-tool `deny`, `ask` and `allow` rules every session on these pods obeys ([a profile's options](profile-options.md#per-tool-rules-on-a-profile)) |
 | `agents` | which agents exist on these pods, built-ins included: `allow` and `deny` lists of names, a grant narrowing only what they leave ([a profile's options](profile-options.md#which-agents-a-profile-has)) |
 | `github.*` | what a session's token may do on GitHub beyond cloning (`permissions`, [github.md §5](github.md#5-let-a-profile-reach-github)) and how far the fix loop goes (`allowPublic`, `denyPaths`, `maxPushes`, `maxRuns`, `maxAttempts`, [github.md §9](github.md#9-how-far-a-run-may-go)) |

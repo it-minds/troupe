@@ -69,6 +69,8 @@ interface Session {
   questions: Set<string>;
   /** Why the laptop this session stands in for is away, while it is (troupe #932). */
   paused?: string;
+  /** How the root ended, once a `spend:` turn ran its budget out: input is dropped after it. */
+  done?: string;
 }
 
 interface Client {
@@ -810,6 +812,12 @@ export class FakeWorker {
    */
   private async turn(session: Session, text: string, commandId: string, token: Pick<PodToken, "sub" | "name">): Promise<void> {
     const actor = actorOf(token);
+    // A root whose budget ran out takes nothing more: the harness writes that it did not,
+    // and drops the input (troupe #987).
+    if (session.done && session.done !== "finished") {
+      session.log.append("input_after_done", { source: "user" }, actor);
+      return;
+    }
     session.log.append("input_accepted", { command_id: commandId, author: token.sub }, actor);
     session.log.append("user_input", { source: "user", text }, actor);
     this.setStatus(session, "thinking");
@@ -819,6 +827,7 @@ export class FakeWorker {
     if (text.startsWith("ask:")) return this.askQuestion(session, text.slice("ask:".length).trim());
     if (text.startsWith("big:")) return this.bigResult(session, text.slice("big:".length).trim());
     if (text.startsWith("show:")) return this.showNotes(session, text.slice("show:".length).trim());
+    if (text.startsWith("spend:")) return this.spendBudget(session);
     const quiet = text.startsWith("quiet:");
 
     const answer = quiet ? `(silently) ${text.slice("quiet:".length)}` : `You said: ${text}`;
@@ -853,6 +862,20 @@ export class FakeWorker {
     // The folder it acts in, as a daemon and a pod say it (troupe #932): the workspace's.
     session.log.append("approval_requested", { call_id: callId, tool: "shell", args, agent_path: ["root"], cwd: session.workspace });
     this.setStatus(session, "waiting");
+  }
+
+  /**
+   * A turn that runs the session's 30-minute working limit out, as a pod writes it: the
+   * warning at 80%, then the root's `agent_done` and `budget_exhausted` naming the limit.
+   * The session takes no more input after it.
+   */
+  private spendBudget(session: Session): void {
+    this.respond(session, "Still working through the placement loop.");
+    session.log.append("budget_warning", { dimension: "wall", used: 1_440_000, limit: 1_800_000, fraction: 0.8, detail: "working time 24m/30m (80%)" });
+    session.log.append("agent_done", { reason: "budget_exhausted", limit: "wall_clock", turn: { calls: 1, input_tokens: 10, output_tokens: 40, cache_read: 0, cache_write: 0, cost_micros: 100, unpriced: 0 } });
+    session.log.append("budget_exhausted", { limit: "wall_clock" });
+    session.done = "budget_exhausted";
+    this.setStatus(session, "done");
   }
 
   /** The agent's `ask_user`: `ask: Which branch? | main | develop` asks with those options. */

@@ -1469,6 +1469,17 @@ pre.manifest {
   background: var(--bg-hover);
 }
 
+/* The picture its publisher sent, at the card's start: an image from the artifacts host,
+   never the page. */
+.artifact-card .thumb-picture {
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  object-fit: cover;
+  border: var(--bw-hairline) solid var(--border-hairline);
+  background: var(--bg-raised);
+}
+
 .artifact-card .thumb-title {
   font: var(--t-subheading);
   overflow-wrap: anywhere;

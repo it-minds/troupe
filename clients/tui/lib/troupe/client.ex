@@ -891,6 +891,21 @@ defmodule Troupe.Client do
   @spec profile_rows(origin()) :: {:ok, [map()]} | {:error, term()}
   def profile_rows(origin), do: Remote.profile_rows(origin)
 
+  @doc """
+  The team this machine remembers each profile's sessions on a plane being for, by profile:
+  where more than one of the person's teams may use one, `/new` asks once (`Troupe.Client.TeamChoice`).
+  """
+  @spec remembered_teams(origin() | nil) :: %{String.t() => String.t()}
+  def remembered_teams({:remote, plane}), do: Troupe.Client.TeamChoice.for_plane(plane)
+  def remembered_teams(_origin), do: %{}
+
+  @doc "Remember the team a profile's sessions on a plane are for, as `/new`'s answer."
+  @spec remember_team(origin() | nil, String.t(), String.t()) :: :ok
+  def remember_team({:remote, plane}, profile, team),
+    do: Troupe.Client.TeamChoice.remember(plane, profile, team)
+
+  def remember_team(_origin, _profile, _team), do: :ok
+
   @doc "The plane's `sessions.list` rows as it answers them: each one's agent, for `/new`'s screen."
   @spec plane_session_rows(origin()) :: {:ok, [map()]} | {:error, term()}
   def plane_session_rows(origin), do: Remote.session_rows(origin)

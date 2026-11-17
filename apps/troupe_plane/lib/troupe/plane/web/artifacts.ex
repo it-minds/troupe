@@ -10,6 +10,7 @@ defmodule Troupe.Plane.Web.Artifacts do
       GET /s/<token>                  a link: its role for the viewer signed in here, then the artifact
       GET /s/<token>/[<path>]         a public link's artifact, where public links are on
       GET /p/<nonce>/[<path>]         an edit's preview, which the console frames
+      GET /t/<token>                  a version's picture for a gallery card (`thumbnail_url`)
       GET /_/document.css             the stylesheet a Markdown artifact's page uses
       GET /healthz                    liveness
 
@@ -36,6 +37,12 @@ defmodule Troupe.Plane.Web.Artifacts do
   administrator allows them, opens without a sign-in, and then under its own address, so
   nothing it serves carries a cookie. An edit's preview (`/p/<nonce>/`) is served under the
   same policy and checked against who may put, at every request.
+
+  **A card's picture** (`/t/<token>`) is the one thing here a gallery draws: an image its
+  publisher sent, served with its own type, under the same policy, never a page. A gallery's
+  `<img>` carries no cookie of this host's, so the signed address is its key; it names the
+  person it was made for, lasts two hours at most, and whether they may still see the
+  artifact is read at every request.
   """
 
   use Plug.Router
@@ -129,6 +136,20 @@ defmodule Troupe.Plane.Web.Artifacts do
         {:ok, found} -> answer(conn, found)
         :error -> not_found(conn)
       end
+    end
+  end
+
+  # A card's picture, at the address a row of `artifact.list` gave its person.
+  get "/t/:token" do
+    case Artifacts.enabled?() && Artifacts.thumbnail(token) do
+      {:ok, %{content_type: type, body: body}} ->
+        conn
+        |> put_resp_header("content-type", type)
+        |> put_resp_header("cache-control", "private, max-age=3600")
+        |> send_resp(200, body)
+
+      _none ->
+        not_found(conn)
     end
   end
 

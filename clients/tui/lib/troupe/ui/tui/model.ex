@@ -196,6 +196,7 @@ defmodule Troupe.UI.TUI.Model do
           unconfirmed: %{optional(String.t()) => String.t()},
           drawn_inputs: %{optional(String.t()) => String.t()},
           warnings: %{optional(atom()) => map()},
+          stopped: String.t() | nil,
           curtain: %{optional(atom()) => pos_integer()},
           host: String.t() | nil,
           wait: wait()
@@ -325,6 +326,9 @@ defmodule Troupe.UI.TUI.Model do
           # The lines drawn for inputs the agent has not yet taken, by command id.
           drawn_inputs: %{},
           warnings: %{},
+          # Why the window's own agent takes no more input, once it ended so (a spent
+          # budget, a refusal); nil while input reaches it.
+          stopped: nil,
           curtain: %{},
           host: m.host,
           wait: @no_wait
@@ -420,11 +424,14 @@ defmodule Troupe.UI.TUI.Model do
   defp window_state(%{started: false}), do: :idle
   defp window_state(_w), do: :running
 
-  # What says a window's agent has been given something to do (TUI Decision 155): its
-  # own work, never a note about it. A session's own window opens with the session and
+  # What says a window's agent has been given something to do: its own work, never a
+  # note about it. A session's own window opens with the session and
   # hears that it was created, that its agent started and what its start asks, and is
-  # idle through all of it; it used to read `running` from its first frame.
-  @work ~w(input assistant_message llm_delta tool_started approval_requested question_asked
+  # idle through all of it; it used to read `running` from its first frame. A question is
+  # no work either: the harness asks one at a start, before any turn (whether to start a
+  # workspace's MCP server), and once it is answered with nothing sent the agent is idle.
+  # One asked in a turn comes after the turn's own input or model request, which say it.
+  @work ~w(input assistant_message llm_delta tool_started approval_requested
            budget_ask_started cancelled llm_error call_usage)a
 
   defp begun(%{started: true} = w, _e), do: w
@@ -461,7 +468,12 @@ defmodule Troupe.UI.TUI.Model do
   # A turn that starts puts the last one's figures away: the side box says nothing of a
   # turn while it runs (TUI Decision 160), as the line under it never did.
   defp working(w),
-    do: %{w | outcome: nil, message: nil, ended_at: nil, started: true, last_turn: nil}
+    do:
+      Map.put(
+        %{w | outcome: nil, message: nil, ended_at: nil, started: true, last_turn: nil},
+        :stopped,
+        nil
+      )
 
   # Why a rest is a failure, in words, or nil when it is none: the line the headless
   # printer draws between a run that finished and one that ended short, save that a cancel
@@ -871,6 +883,11 @@ defmodule Troupe.UI.TUI.Model do
       :budget_warning ->
         %{w | warnings: Map.put(w.warnings, d.dimension, d)}
         |> push(path, {:system, "⚠ " <> (d[:detail] || to_string(d.dimension)) <> " used"})
+
+      # The window's own agent ended so that the harness drops what is sent to it: the
+      # input line says so in its place, until the agent works again.
+      :stopped when path == w.path ->
+        Map.put(w, :stopped, d[:why])
 
       _ ->
         w
@@ -1433,11 +1450,12 @@ defmodule Troupe.UI.TUI.Model do
 
   @doc """
   The windows on screen, in the order they opened: the branches, numbered by the digit
-  that opens each. The session's own window, `"root"`, is command mode's (TUI Decision
-  155), not a branch beside them: it is folded like any other, for its goal, its loop, the
+  that opens each. The session's own window, `"root"`, is command mode's, not a branch
+  beside them: it is folded like any other, for its goal, its loop, the
   start's questions and the session's own lines, and listed only once its agent has been
   given work of its own (a `troupe run` task, a loop, a watch trigger, a pod session's
-  input, or a session from before command mode).
+  input, or a session from before command mode), or while the harness asks a question
+  there, as it may at the start before any turn.
   """
   @spec windows(t()) :: [window()]
   def windows(%__MODULE__{} = m) do
@@ -1446,7 +1464,11 @@ defmodule Troupe.UI.TUI.Model do
     |> Enum.filter(&listed?/1)
   end
 
-  defp listed?(%{path: "root"} = w), do: Map.get(w, :started, true)
+  # Listed while the harness asks a question there too, so its row says it needs you and
+  # its digit opens it; the client's own start questions are drawn without a row.
+  defp listed?(%{path: "root"} = w),
+    do: Map.get(w, :started, true) or Enum.any?(Map.get(w, :pending, []), &(&1.kind != :local))
+
   defp listed?(_w), do: true
 
   @doc "The session's own window, `\"root\"`, listed or not; `nil` before its first event."
@@ -1541,6 +1563,22 @@ defmodule Troupe.UI.TUI.Model do
       %{loop: %{id: ^id}} = w -> %{w | loop: nil}
       w -> w
     end)
+  end
+
+  @doc """
+  What the input line says in its place while the window's agent takes no more input —
+  "This session has stopped: its 30-minute working limit is spent. Start a new session to
+  continue." — or `nil` while input reaches it.
+  """
+  @spec stopped(t(), String.t()) :: String.t() | nil
+  def stopped(%__MODULE__{windows: windows}, path) do
+    case Map.get(windows, path) do
+      %{stopped: why} when is_binary(why) ->
+        "This session has stopped: #{why}. Start a new session to continue."
+
+      _ ->
+        nil
+    end
   end
 
   @doc """
@@ -1924,7 +1962,7 @@ defmodule Troupe.UI.TUI.Model do
   defp dimension_label(:turns), do: "turns"
   defp dimension_label(:input), do: "input tokens"
   defp dimension_label(:output), do: "output tokens"
-  defp dimension_label(:wall), do: "wall clock"
+  defp dimension_label(:wall), do: "working time"
   defp dimension_label(:context), do: "context window"
   defp dimension_label(other), do: to_string(other)
 

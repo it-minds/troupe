@@ -10,7 +10,7 @@
 import { FakeDaemon, exampleFacts, exampleOnboarding } from "../packages/client/test/support/daemon.js";
 import { FakeIdp } from "../packages/client/test/support/idp.js";
 import { keptBy } from "../packages/client/test/support/kept.js";
-import { FakePlane, GATEWAY_DEFAULTS } from "../packages/client/test/support/plane.js";
+import { FakePlane, GATEWAY_DEFAULTS, SAMPLE_PICTURE } from "../packages/client/test/support/plane.js";
 import { FakeWorker } from "../packages/client/test/support/worker.js";
 
 const origins = process.env["ORIGINS"]?.split(",") ?? ["http://localhost:5173", "http://127.0.0.1:5173"];
@@ -29,6 +29,10 @@ const plane = await FakePlane.start({
   corsOrigins: origins,
   podTokenLifetime: 900,
   clientDefaults: process.env["NO_CLIENT_DEFAULTS"] ? { configured: false } : GATEWAY_DEFAULTS,
+  // TEAMS=core,design puts everybody in both, so a new session asks which team it is for;
+  // LISTS_ONE_TEAM=1 has the listing name only the first, so the plane's refusal asks instead.
+  ...(process.env["TEAMS"] ? { teams: process.env["TEAMS"].split(",") } : {}),
+  ...(process.env["LISTS_ONE_TEAM"] ? { listsOneTeam: true } : {}),
   // The person's memory and artifacts are the ones the daemon below keeps, so the app shows
   // the same signed in, when it asks the plane, and offline, when it asks the daemon.
   keeper: (method, params) => keptBy(daemon)(method, params),
@@ -106,9 +110,23 @@ daemon.artifacts = [
     ],
   }),
   artifact({ id: "art-ledger", title: "Ledger migration plan", visibility: "profile:dev", published_at: day(2) }),
+  // A second of the person's teams under Your teams, so it offers a chip per team (#978).
+  artifact({ id: "art-oncall", title: "On-call handover", kind: "markdown", visibility: "team:core", published_at: day(5) }),
   artifact({ id: "art-interviews", title: "Field interview guide", kind: "file", visibility: "profile:ux", shared: true, role: "view", published_at: day(4) }),
   artifact({ id: "art-mine", title: "Placement loop benchmarks", mine: true, role: "owner", owner: { subject: "alice@example.com", display_name: "Alice" }, version: 2, current: 2, published_at: day(12), may_delete: true }),
 ];
+// A picture its publisher sent for one card (troupe #977), served by the fake plane as the
+// artifacts host would serve it; the others keep the placeholder.
+plane.pictures.set("art-ledger", SAMPLE_PICTURE);
+daemon.artifacts![1]!["thumbnail_url"] = `${plane.baseUrl}/t/art-ledger/1`;
+// RETENTION=1 is a plane whose administrator set both artifact retention periods (#981):
+// 90 days for old versions, 60 for one nobody opens. Unset, both are off and nothing new is shown.
+if (process.env["RETENTION"]) {
+  const later = (n: number): string => new Date(Date.now() + n * 24 * 3600 * 1000).toISOString();
+  const retention = { versions_days: 90, unopened_days: 60 };
+  for (const a of daemon.artifacts) Object.assign(a, { retention, goes_at: later(a["id"] === "art-mine" ? 48 : 60) });
+  Object.assign(daemon.artifacts[0]!, { version_goes_at: { "1": later(75), "2": later(88) } });
+}
 // Who the share picker finds, and a thread on one artifact (troupe #62).
 const findable = [
   { subject: "bob@example.com", display_name: "Bob Example", email: "bob@example.com" },
@@ -278,10 +296,11 @@ console.log(`
 
 Sign in to the plane URL above. A browser is sent to the provider and straight back as
 Alice; a device code approves itself.
-Prompts understand four prefixes: "approve: <cmd>" asks for an approval,
+Prompts understand five prefixes: "approve: <cmd>" asks for an approval,
 "big: <label>" returns a tool result too large to inline, "show: <title>" puts
-notes.md in the session's scratchpad (again for its next version), and "quiet: …"
-answers without streaming.
+notes.md in the session's scratchpad (again for its next version), "spend:" runs
+the session's 30-minute working limit out (it takes no more input after), and
+"quiet: …" answers without streaming.
 
 This computer's daemon is a fake too: open the app at
   ${origins[0]}/#daemon=${daemon.port}:${daemon.token}

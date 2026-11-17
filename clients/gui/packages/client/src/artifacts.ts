@@ -90,6 +90,12 @@ export interface Artifact {
   pinned?: number | null;
   bytes: number;
   url: string;
+  /**
+   * The picture its publisher sent of the version its address serves, on the artifacts host,
+   * for this caller alone and for an hour or two: a card draws it, never the page. Null or
+   * absent where none was sent, or from a plane from before thumbnails.
+   */
+  thumbnail_url?: string | null;
   created_at: string;
   published_at: string;
   /** Whether this caller may delete it: its owner, or a platform admin taking it down. */
@@ -105,6 +111,23 @@ export interface Artifact {
   public_links?: boolean;
   /** Whether a public link opens it now. */
   public?: boolean;
+  /**
+   * When it is removed because nobody opened it (`artifacts_keep_unopened_days`); opening it
+   * moves the date out. Null, or absent from an older plane, while no such period is set.
+   */
+  goes_at?: string | null;
+  /**
+   * Whether the caller keeps it at the top of their own gallery: the person's view, kept on
+   * the plane so every device and app of theirs shows it so, and nobody else's. Absent from
+   * a plane from before it.
+   */
+  kept?: boolean;
+}
+
+/** An administrator's retention periods, in days; null for one that is off. */
+export interface ArtifactRetention {
+  versions_days: number | null;
+  unopened_days: number | null;
 }
 
 export interface ArtifactFile {
@@ -124,6 +147,8 @@ export interface ArtifactVersion {
   /** What its publisher said of it; a rollback's says which version it brought back. */
   note?: string | null;
   rolled_back_to?: number | null;
+  /** When it is removed for its age (`artifacts_keep_versions_days`); null for the newest, the pinned one, and every one while that is off. */
+  goes_at?: string | null;
   url: string;
 }
 
@@ -164,6 +189,12 @@ export interface ArtifactComment {
   author: ArtifactPerson;
   body: string;
   created_at: string;
+  /** When its author last edited it; null or absent for one never edited. */
+  edited_at?: string | null;
+  /** Whether the caller may edit it: its author, while they may write in the thread. Absent from a plane from before it. */
+  may_edit?: boolean;
+  /** Whether the caller may delete it: its author, an owner, or whoever may take the artifact down. Absent from a plane from before it. */
+  may_delete?: boolean;
 }
 
 /** What `artifact.comments` answers: the thread, oldest first, and whether the caller may write in it. */
@@ -182,6 +213,8 @@ export interface ArtifactDetail extends Artifact {
   people?: ArtifactPersonShare[];
   /** For its owner: whether an administrator allows public links, so one may be made. */
   public_links_allowed?: boolean;
+  /** How long it and its old versions are kept; absent from a plane from before retention. */
+  retention?: ArtifactRetention;
 }
 
 /** What `artifact.list` answers. */
@@ -271,6 +304,14 @@ export interface ArtifactPublish {
   id?: string;
   note?: string;
   session_id?: string;
+  /** A picture of this version for its gallery card: PNG, JPEG or WebP, at most 256 KiB. */
+  thumbnail?: ArtifactThumbnail;
+}
+
+/** A card's picture as a publish sends it, its bytes in base64. */
+export interface ArtifactThumbnail {
+  content_type: "image/png" | "image/jpeg" | "image/webp";
+  bytes: string;
 }
 
 /** One text file of a version, for an editor. */
@@ -385,6 +426,16 @@ export class ArtifactApi {
     return this.rpc<{ id: string; comment: ArtifactComment }>("artifact.comment", { id, body });
   }
 
+  /** Delete a comment from its thread: its author, an owner, or whoever may take the artifact down. */
+  deleteComment(id: string, comment: string): Promise<{ id: string; comment: string; deleted: boolean }> {
+    return this.rpc<{ id: string; comment: string; deleted: boolean }>("artifact.comment.delete", { id, comment });
+  }
+
+  /** A comment's text replaced by its author, marked edited. */
+  editComment(id: string, comment: string, body: string): Promise<{ id: string; comment: ArtifactComment }> {
+    return this.rpc<{ id: string; comment: ArtifactComment }>("artifact.comment.edit", { id, comment, body });
+  }
+
   /** Revoke a link by its id, or one person from every link by their subject. */
   unshare(id: string, which: { share: string } | { person: string }): Promise<{ revoked: boolean }> {
     return this.rpc<{ revoked: boolean }>("artifact.unshare", { id, ...which });
@@ -412,5 +463,10 @@ export class ArtifactApi {
    */
   transfer(id: string, to: ArtifactTransferTo): Promise<ArtifactDetail> {
     return this.rpc<ArtifactDetail>("artifact.transfer", { id, to });
+  }
+
+  /** Keep it at the top of the caller's own gallery (`true`), or let it go (`false`): anybody who may open it, for themselves. */
+  keep(id: string, on: boolean): Promise<ArtifactDetail> {
+    return this.rpc<ArtifactDetail>("artifact.keep", { id, on });
   }
 }

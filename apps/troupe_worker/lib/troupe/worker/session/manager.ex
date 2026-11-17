@@ -873,13 +873,16 @@ defmodule Troupe.Worker.Session.Manager do
 
   # A session with an agent still thinking or running a tool is not idle no matter how
   # long it has been since anyone typed: going dormant mid-turn would seal a turn that
-  # never finished and lose whatever the tool was doing.
+  # never finished and lose whatever the tool was doing. One `waiting` on the budget's or
+  # the failure guard's question is not working: nothing runs until a person answers, the
+  # question is in the log, and the agent that wakes asks it again under the same id, so
+  # it sleeps on the usual schedule as an idle one does.
   defp busy?(session_id) do
     session_id
     |> Troupe.agent_tree()
     |> Enum.any?(fn path ->
       case Troupe.snapshot(session_id, path) do
-        %{state: agent_state} -> agent_state not in [:idle, :done]
+        %{state: agent_state} -> agent_state not in [:idle, :waiting, :done]
         _ -> false
       end
     end)

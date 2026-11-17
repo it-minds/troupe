@@ -5140,6 +5140,20 @@ pre.instruction {
   margin-left: auto;
   color: var(--text-muted);
 }
+/* Which of the person's teams, inside Your teams, where there is more than one to choose. */
+.audiences.teams-row {
+  padding-top: var(--space-2);
+}
+/* Published since … until …, beside the kind. */
+.audiences .published-range {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+.audiences .published-range input {
+  min-height: var(--touch-target);
+}
 
 .repertoire-body {
   display: flex;
@@ -5171,7 +5185,8 @@ pre.instruction {
   grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
   gap: var(--space-4);
 }
-/* A card is the title and the kind, never the page: its picture is a striped placeholder. */
+/* A card is the title and the kind, never the page: its picture is the one its publisher
+   sent, else a striped placeholder. */
 .repertoire .card {
   display: flex;
   flex-direction: column;
@@ -5212,6 +5227,19 @@ pre.instruction {
   font: var(--t-micro);
   background: var(--running-solid);
   color: var(--text-inverse);
+}
+/* The picture its publisher sent, where one was: an image from the artifacts host, never the
+   page. Over the stripes, so one that does not load leaves the placeholder as it was. */
+.repertoire .placeholder .picture {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.repertoire .placeholder.has-picture .what {
+  padding: 2px 7px;
+  background: var(--bg-panel);
 }
 .repertoire .card .body {
   display: flex;
@@ -5444,6 +5472,16 @@ pre.instruction {
 }
 .repertoire-aside .comment-form button {
   align-self: flex-end;
+}
+/* A comment's own Edit and Delete, and Save beside Cancel while it is edited. */
+.repertoire-aside .comments .comment-actions {
+  margin: var(--space-1) 0 0;
+}
+.repertoire-aside .comment-edit-actions {
+  display: flex;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: var(--space-2);
 }
 .audiences .kind-filter select {
   min-height: var(--touch-target);

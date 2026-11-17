@@ -284,14 +284,14 @@ a key by, in the desktop app and the TUI alike.
 
 | Key | Type | Default | Set by | Shown as | What it does |
 |---|---|---|---|---|---|
-| `max_turns` | integer ≥ 1 | `40` | any; an organisation may enforce | max turns | Model calls an agent may make before its budget stops it. |
+| `max_turns` | integer ≥ 1 | `40` | any; an organisation may enforce | max turns | Model calls an agent may make before its budget is spent: then it asks to go on, or stops (`budget_asks`). |
 | `max_input_tokens` | integer ≥ 1 | `2000000` | any |  | Input tokens an agent may spend. |
 | `max_output_tokens` | integer ≥ 1 | `400000` | any |  | Output tokens an agent may spend. |
-| `wall_clock_ms` | integer ≥ 1 | `1800000` | any; an organisation may enforce |  | How long an agent may run. |
+| `wall_clock_ms` | integer ≥ 1 | `1800000` | any; an organisation may enforce |  | How long an agent may work, in working time: each turn from its start to its end, summed. Resting between turns and waiting on an approval or a question do not count. |
 | `max_depth` | integer ≥ 0 | `3` | any; an organisation may enforce | delegation depth | How deep agents may delegate; 1 means the root alone may. |
 | `budget_warn_at` | number, 0 to 1 | `0.8` | any |  | The share of any limit at which the agent is warned. |
 | `full_send` | boolean | `false` | any | full send | No budget warnings: an agent nearing a limit says nothing until the limit stops it. `troupe --full-send` sets it for one run. |
-| `budget_asks` | boolean | `true` | any |  | A spent budget asks the person attached, rather than stopping. |
+| `budget_asks` | boolean | `true` | any |  | A spent budget asks the person attached, rather than stopping. A pod session asks too, unless its terms set a turn or time limit: then that limit is a contract and it stops. |
 
 ### Approvals
 

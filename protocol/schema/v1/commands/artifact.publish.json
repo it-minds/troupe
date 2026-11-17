@@ -24,6 +24,9 @@
     "session_id": {
       "type": "string"
     },
+    "thumbnail": {
+      "type": "object"
+    },
     "title": {
       "type": "string"
     },

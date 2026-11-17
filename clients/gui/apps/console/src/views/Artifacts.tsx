@@ -6,7 +6,8 @@
 // newest first. Which tab a row is under is the plane's to say (`scope`), not this
 // console's to work out.
 //
-// An artifact is never drawn here. Its card is its title and its kind, and its page says
+// An artifact is never drawn here. Its card is its title and its kind, with the picture its
+// publisher sent where there is one (an image from the artifacts host), and its page says
 // what it is and where it came from; opening it asks the plane for a one-time link at the
 // moment it is opened, and the artifacts host shows it in a tab of its own that has no hold
 // on this one. A published page's HTML or Markdown is a stranger's code to this console.
@@ -29,6 +30,7 @@ import type { JSX } from "react";
 import { ArtifactApi, TroupeRpcError, appLink, ownerWords, teamOwned, visibilityWords as audienceWords } from "@troupe/client";
 import { OpenInApp } from "./AppBanner";
 import type { Artifact, ArtifactDetail, ArtifactFilter, ArtifactList, ArtifactPerson } from "@troupe/client";
+import { goesLine, goesSentence, versionGoes, versionsSentence } from "@troupe/client";
 import { describeError, useConsole, useLoad } from "../console";
 import { go, href } from "../route";
 import type { Route } from "../route";
@@ -171,12 +173,20 @@ function Gallery({ tab, list }: { tab: ArtifactTab; list: ArtifactList }): JSX.E
   );
 }
 
-/** A card: the title and the kind where a thumbnail would be, and what it is beneath. Never its content. */
+/**
+ * A card: the picture its publisher sent where there is one, the title and the kind, and what
+ * it is beneath. Never its content: the picture is an image the artifacts host serves.
+ */
 function Card({ artifact: a }: { artifact: Artifact }): JSX.Element {
   const { plane } = useConsole();
+  const [pictured, setPictured] = useState(true);
+  useEffect(() => setPictured(true), [a.thumbnail_url]);
   return (
     <li className="artifact-card">
       <a className="thumb" href={href({ page: "artifacts", path: [a.id] })}>
+        {a.thumbnail_url && pictured && (
+          <img className="thumb-picture" src={a.thumbnail_url} alt={a.title} loading="lazy" referrerPolicy="no-referrer" onError={() => setPictured(false)} />
+        )}
         <span className="thumb-title">{a.title}</span>
         <span className="thumb-kind">{kindWords(a.kind)}</span>
       </a>
@@ -191,6 +201,7 @@ function Card({ artifact: a }: { artifact: Artifact }): JSX.Element {
           {[a.public ? "public link" : null, a.pinned ? `pinned to version ${a.pinned}` : null, a.role === "edit" ? "you may edit it" : null].filter(Boolean).join(" · ")}
         </p>
       )}
+      {a.goes_at && <p className="card-meta">{goesLine(a)}</p>}
       <p className="card-meta">
         <OpenInApp link={appLink({ kind: "artifact", id: a.id, plane: plane.url })} />
       </p>
@@ -309,6 +320,7 @@ function Detail({ artifact: a, reload }: { artifact: ArtifactDetail; reload: () 
           ["First published", when(a.created_at)],
         ]}
       />
+      {a.goes_at && <p className="muted">{goesSentence(a)}</p>}
       <Region>Where it came from</Region>
       <Origin artifact={a} />
       <div className="actions">
@@ -407,6 +419,7 @@ function Detail({ artifact: a, reload }: { artifact: ArtifactDetail; reload: () 
       )}
       <section aria-label="Versions">
         <Region>Versions</Region>
+        {versionsSentence(a) && <p className="muted">{versionsSentence(a)}</p>}
         <ol className="artifact-versions">
           {versions.map((v) => (
             <li key={v.n} aria-label={`Version ${v.n}`}>
@@ -415,6 +428,7 @@ function Detail({ artifact: a, reload }: { artifact: ArtifactDetail; reload: () 
                 <span className="muted">
                   {" "}
                   · published by {personWords(v.published_by)} · {when(v.published_at)} · {bytes(v.bytes)}
+                  {v.goes_at && ` · ${versionGoes(v)}`}
                 </span>
                 <span className="version-actions">
                   <button type="button" disabled={opening !== null} onClick={() => open(v.n)}>

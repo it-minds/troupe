@@ -52,7 +52,7 @@ defmodule Troupe.Worker.Artifacts do
   def publish(params, ctx) do
     params =
       params
-      |> Map.take(~w(title kind visibility owner files id note))
+      |> Map.take(~w(title kind visibility owner files id note thumbnail))
       |> Troupe.Gateway.Artifacts.own_only_new()
       |> Map.put("session_id", ctx.session_id)
       |> put_agent(ctx)

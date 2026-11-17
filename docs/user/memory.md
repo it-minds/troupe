@@ -138,7 +138,8 @@ its last turn: the place to start when a session seems not to follow what was sa
 
 ## What an agent may write
 
-An agent may add to your own memory and to the repository's, and to nothing else:
+An agent may add to your own memory and to the repository's, and propose to your team's or
+the organisation's:
 
 - **`remember`** writes a fact about the repository by default, as it always has.
 - **`remember` with `level: "me"`** adds one entry to your own memory: a sentence or two,
@@ -147,8 +148,14 @@ An agent may add to your own memory and to the repository's, and to nothing else
   or removes a word you wrote; only you do. Sections under a date, from agents before topics,
   stay as they were. The session's transcript shows the call and what it
   wrote. Ask an agent to remember something about how you work, and it may use it.
-- **The organisation's, a team's and a profile's memory are read-only to every agent.**
-  `remember` has no level for them, and the plane refuses a write to any of them from a pod.
+- **`remember` with `level: "team"` or `level: "organisation"`** proposes one entry, which is
+  in nobody's memory until an administrator who may change that level accepts it; the
+  session is told either way. The platform setting *Agents may propose memory* switches
+  proposals off everywhere, and a worker profile's `memoryProposals: false` for the sessions
+  on its pods; either way the proposal is refused with a sentence naming which, and the agent
+  can keep the fact in the repository or in your own memory instead.
+- **The organisation's, a team's and a profile's memory are otherwise read-only to every
+  agent**, and a profile's has no level an agent may propose to.
 
 When your own memory is full, `remember` says so and names `troupe memory --edit`: make room
 there and ask again. With no plane signed in on this machine, `remember` to your own memory
