@@ -7,4 +7,13 @@ they are `TUI Decision N`. They are written
 and checked as the repository's are ([decisions/](../README.md)), and
 `mix troupe.decisions --for clients/tui/<path>` lists them with the repository's.
 
+One is short, as the repository's are: what was decided, what was not chosen and why, and
+what breaks if it is undone, in at most 40 lines that are not blank; no list of tests, no
+history of the issue, no restatement of the code. Its `paths` are where it would be undone,
+at most eight globs of code, never a test. The line below stays above every
+number the log has used and moves past each new one, so a number stays taken after its
+file is deleted:
+
+<!-- next: 176 -->
+
 <!-- decisions:index -->
