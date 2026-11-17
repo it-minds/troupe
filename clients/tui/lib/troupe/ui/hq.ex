@@ -37,7 +37,8 @@ defmodule Troupe.UI.HQ do
           status: map(),
           error: String.t() | nil,
           invitations: [map()],
-          shared: non_neg_integer()
+          shared: non_neg_integer(),
+          archived: boolean()
         }
 
   @doc "Opens HQ against a plane (or nothing, for a local-only machine)."
@@ -54,7 +55,8 @@ defmodule Troupe.UI.HQ do
       status: status(origin),
       error: nil,
       invitations: [],
-      shared: 0
+      shared: 0,
+      archived: false
     }
     |> load_teams()
     |> reload()
@@ -119,6 +121,18 @@ defmodule Troupe.UI.HQ do
   def key(hq, %{code: "r"}), do: {:ok, reload(hq)}
   def key(hq, %{code: "n"}), do: {:new_session, hq, selected_profile(hq)}
 
+  # `a` turns the sessions column to the archived ones and back: they are left out of it
+  # otherwise, for everyone who can see them.
+  def key(hq, %{code: "a"}) do
+    # The other list's rows are not kept for a plane that does not answer.
+    hq =
+      hq
+      |> Map.put(:archived, not archived?(hq))
+      |> Map.merge(%{sessions: [], cursors: Map.put(hq.cursors, :sessions, 0)})
+
+    {:ok, load_sessions(hq, selected_team(hq))}
+  end
+
   def key(hq, %{code: "enter"}) do
     case hq.column do
       :inbox -> open_inbox(hq)
@@ -169,8 +183,15 @@ defmodule Troupe.UI.HQ do
 
   @doc "The line under the page that says what the keys do."
   @spec footer(t()) :: String.t()
-  def footer(_hq),
-    do: " HQ — ↑↓ move · ←/→/Tab column · Enter opens · n new session · r refresh · Esc back "
+  def footer(hq) do
+    archived = if archived?(hq), do: "a the rest", else: "a archived"
+
+    " HQ — ↑↓ move · ←/→/Tab column · Enter opens · n new session · #{archived} · " <>
+      "r refresh · Esc back "
+  end
+
+  # A page made before archiving was listed has no `archived`.
+  defp archived?(hq), do: Map.get(hq, :archived, false)
 
   # The lockup over the page — the mask, the word, where this HQ looks and what waits on
   # you — when the page is tall enough to give it the rows; on a short terminal the
@@ -314,17 +335,24 @@ defmodule Troupe.UI.HQ do
     items = Enum.map(hq.sessions, &session_line(&1, state))
 
     %List{
-      items: if(items == [], do: ["(no sessions)"], else: items),
+      items: if(items == [], do: [empty_sessions(hq)], else: items),
       selected: if(hq.sessions == [], do: nil, else: cursor(hq, :sessions)),
       highlight_symbol: "▸ ",
       highlight_style: highlight(hq, :sessions),
       block: %Block{
-        title: " sessions — remote and local ",
+        title:
+          if(archived?(hq),
+            do: " archived sessions — remote and local ",
+            else: " sessions — remote and local "
+          ),
         borders: [:all],
         border_style: border(hq, :sessions)
       }
     }
   end
+
+  defp empty_sessions(hq),
+    do: if(archived?(hq), do: "(no archived sessions)", else: "(no sessions)")
 
   # Where a session lives is the first thing on its row, not a footnote: a list
   # that mixes the two has to say which is which at a glance.
@@ -433,14 +461,16 @@ defmodule Troupe.UI.HQ do
   # Remote sessions first, then this machine's own: one list, each row saying
   # where it lives, so a local session is never hidden behind a plane outage.
   defp load_sessions(hq, team) do
+    archived = if archived?(hq), do: %{archived: true}, else: %{}
+
     remote =
-      case hq.origin && Client.sessions(hq.origin, %{team: team}) do
+      case hq.origin && Client.sessions(hq.origin, Map.put(archived, :team, team)) do
         {:ok, sessions} -> sessions
         _ -> keep_remote(hq)
       end
 
     local =
-      case Client.sessions({:local, hq.workspace}, %{}) do
+      case Client.sessions({:local, hq.workspace}, archived) do
         {:ok, sessions} -> sessions
         _ -> []
       end

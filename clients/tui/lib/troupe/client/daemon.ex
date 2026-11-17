@@ -35,6 +35,7 @@ defmodule Troupe.Client.Daemon do
 
   @behaviour Troupe.Client
 
+  alias Troupe.Client.Archive
   alias Troupe.Client.Daemon.{Link, Start}
   alias Troupe.Client.Events
   alias Troupe.Config
@@ -963,6 +964,20 @@ defmodule Troupe.Client.Daemon do
   defp refusal(%{data: %{"reason" => reason}}) when is_binary(reason), do: reason
   defp refusal(reason), do: message(reason)
 
+  # Only the session's owner archives it; on this computer a collaborator who steers a
+  # session is refused as one who does not hold it.
+  @impl true
+  def archive(sid, archived?) do
+    params = %{session_id: sid, command_id: Troupe.Remote.RPC.command_id()}
+
+    case Link.call_with_data(Archive.method(archived?), params) do
+      {:ok, _answer} -> {:ok, Archive.said(archived?)}
+      {:error, %{code: "forbidden", data: data}} -> {:error, Archive.forbidden(data, archived?)}
+      {:error, %{message: said}} when is_binary(said) -> {:error, said}
+      {:error, reason} -> {:error, refusal(reason)}
+    end
+  end
+
   @impl true
   def fs_list(sid, path) do
     case Worker.fs_list(sid, path) do
@@ -1150,12 +1165,13 @@ defmodule Troupe.Client.Daemon do
   def profiles(_origin, _team), do: {:ok, []}
 
   @impl true
-  def sessions({:local, workspace} = origin, _filter) do
+  def sessions({:local, workspace} = origin, filter) do
     # Every session the daemon has, and this workspace's picked out here: a branch is a
     # session of its own with `parent` set (decision 7.3 b), and one in a worktree of its
     # own is listed under that worktree, not under the workspace its parent is in. Each
-    # row carries the branches made from it.
-    case Link.call("session.list", %{filter: %{}}) do
+    # row carries the branches made from it. The daemon leaves archived sessions out
+    # unless asked for them, and then lists only them.
+    case Link.call("session.list", %{filter: list_filter(filter)}) do
       {:ok, %{"sessions" => sessions}} ->
         branches = Enum.group_by(sessions, & &1["parent"], &branch_entry/1)
 
@@ -1176,6 +1192,10 @@ defmodule Troupe.Client.Daemon do
   end
 
   def sessions(_origin, _filter), do: {:ok, []}
+
+  defp list_filter(filter) do
+    if filter[:archived] || filter["archived"], do: %{archived: true}, else: %{}
+  end
 
   @impl true
   def get_session({:local, workspace}, sid) do
@@ -1805,7 +1825,9 @@ defmodule Troupe.Client.Daemon do
       # A daemon from before 0.8.4 says no kind, and every session it had was local.
       kind: row["kind"] || "local",
       sync: row["sync"],
-      device: row["device"]
+      device: row["device"],
+      # A daemon from before archiving says nothing, and archived nothing.
+      archived: row["archived"] == true
     }
   end
 

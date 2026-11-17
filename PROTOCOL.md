@@ -775,11 +775,14 @@ that cannot yet — no token, or no plane answering — makes the session anyway
 #### `session.list`
 ```json
 {"filter": {"state": ["active", "dormant"], "workspace": "/home/me/project",
-            "parent": "s-3a"}}
+            "parent": "s-3a", "archived": true}}
 ```
 → `{"sessions": [{"id", "workspace", "branch", "parent", "profile", "state", "status",
 "failed", "pending_approvals", "pending_questions", "unseen", "tokens", "cost", "created_at",
-"last_active_at", "pinned", "title", "kind", "sync", "device", "remote"}]}`
+"last_active_at", "pinned", "archived", "title", "kind", "sync", "device", "remote"}]}`
+
+The list is the sessions not archived; `"archived": true` lists the archived ones instead
+(Decision 1023). `fleet.get` lists the sessions not archived, as the list does.
 
 `filter.parent` selects the branches of one session.
 
@@ -846,7 +849,9 @@ at rest: the session is `dormant` afterwards, as one that went to sleep is.
 
 #### `session.get` → one session object plus `head_seq`.
 
-#### `session.archive` → `{"session_id", "state": "dormant"}`; stops the session's agents and makes it dormant. On a daemon the log stays where it is; on a plane the pod keeps no copy of a dormant session.
+#### `session.archive` → `{"session_id", "state": "dormant", "archived": true}`; stops the session's agents, makes it dormant, and takes it out of the session list (`archived`) until `session.unarchive`, kept whole: its log, its workspace and its state. It still opens; working in it again does not bring it back into the list. On a daemon the log stays where it is and the mark is a file beside it, `archived`, as a pin is; on a plane the pod keeps no copy of a dormant session. A session it has no log of is `not_found` (Decision 1023).
+
+#### `session.unarchive` → `{"session_id", "archived": false}`; puts an archived session back in the session list, as it stands.
 
 #### `session.pin` / `session.unpin` → `{"session_id", "pinned"}`; a pinned session is exempt from the plane's retention. A daemon has no retention: it marks the session pinned in its listing, running or dormant, and keeps the mark in a file beside the session's log, so it outlives the session's going dormant and the daemon's stopping. A session it has no log of is `not_found`.
 
@@ -2831,7 +2836,7 @@ is asked again, under the same id, and an answer that arrived in the meantime �
 | --- | --- |
 | `observe` | `initialize`, `client.mode`, `subscribe`, `unsubscribe`, `session.list`, `session.get`, `session.invites`, `session.read_sealed`, `session.goal.get`, `session.loop.get`, `blob.get`, `fleet.get`, `fs.list`, `fs.read`, `scratch.list`, `agents.list`, `agents.get`, `agents.validate`, `commands.list`, `workflows.list`, `context.get`, `mcp.status`, `mcp.list`, `skills.list`, `skills.discover`, `workspace.recent`, `workspace.search`, `worktree.list`, `watch.get`, `presence.set`, `identity.get`, `config.get`, `setup.get`, `me.memory.status`, `artifact.list`, `artifact.get`, `artifact.open`, `artifact.read`, `profile.get` |
 | `control` | everything in `observe`, plus `input.send`, `commands.run`, `turn.cancel`, `profile.switch`, `session.goal.set`, `session.goal.clear`, `session.loop.start`, `session.loop.stop`, `approval.respond`, `question.answer`, `todo.edit`, `fs.upload`, `tools.register`, `tools.unregister`, `memory.get`, `memory.decline`, `onboard.decline`, `me.memory`, `me.memory.put`, `me.memory.history`, `me.memory.rollback`, `memory.in_effect`, `admin.memory.get`, `admin.memory.preview`, `admin.memory.put`, `artifact.publish`, `artifact.share`, `artifact.unshare`, `artifact.comment`, `artifact.comment.delete`, `artifact.comment.edit`, `artifact.rollback`, `artifact.pin`, `artifact.keep`; and `shell.run` and `shell.cancel`, which also need the session's owner or `admin` (Decision 813) |
-| `admin` | everything in `control`, plus `session.create`, `session.archive`, `session.pin`, `session.unpin`, `session.title.set`, `session.erase`, `session.claim`, `session.invite`, `session.uninvite`, `session.fork`, `worktree.remove`, `worktree.merge`, `worktree.discard`, `memory.forget`, `onboard.plan`, `onboard.apply`, `watch.set`, `identity.link`, `identity.unlink`, `identity.sign_out`, `identity.accept_plane_key`, `config.models`, `config.set`, `config.import`, `config.organisation`, `config.memory`, `setup.answer`, `mcp.add`, `mcp.remove`, `mcp.check`, `mcp.secret`, `mcp.sign_in`, `mcp.sign_out`, `mcp.tools`, `mcp.call`, `skills.add`, `skills.remove`, `agents.put`, `agents.delete`, `daemon.stop`, `remote.offer`, `remote.withdraw` |
+| `admin` | everything in `control`, plus `session.create`, `session.archive`, `session.unarchive`, `session.pin`, `session.unpin`, `session.title.set`, `session.erase`, `session.claim`, `session.invite`, `session.uninvite`, `session.fork`, `worktree.remove`, `worktree.merge`, `worktree.discard`, `memory.forget`, `onboard.plan`, `onboard.apply`, `watch.set`, `identity.link`, `identity.unlink`, `identity.sign_out`, `identity.accept_plane_key`, `config.models`, `config.set`, `config.import`, `config.organisation`, `config.memory`, `setup.answer`, `mcp.add`, `mcp.remove`, `mcp.check`, `mcp.secret`, `mcp.sign_in`, `mcp.sign_out`, `mcp.tools`, `mcp.call`, `skills.add`, `skills.remove`, `agents.put`, `agents.delete`, `daemon.stop`, `remote.offer`, `remote.withdraw` |
 
 Locally, the socket's permissions authenticate the user and the connection gets all
 three, and so does the loopback TCP token; a daemon mints no narrower token.
@@ -2906,9 +2911,9 @@ keeps the whole table.
 
 **Archiving, pinning, erasing and forking a pod session are the plane's.** The plane holds
 the session's row, its key, its placement and its retention, so a worker refuses
-`session.archive`, `session.pin`, `session.unpin`, `session.title.set`, `session.erase` and
-`session.fork` to a token for one session with `forbidden`, `data.method` naming it and
-`data.reason` of `done through the plane`. A client archives, pins, unpins, renames and
+`session.archive`, `session.unarchive`, `session.pin`, `session.unpin`, `session.title.set`,
+`session.erase` and `session.fork` to a token for one session with `forbidden`, `data.method` naming it and
+`data.reason` of `done through the plane`. A client archives, unarchives, pins, unpins, renames and
 erases a pod session with the plane's methods of the same names, each `{session_id}`
 (`session.title.set` with `title`, trimmed, at most 200 bytes, `invalid_params` with field
 `title` past it, an empty one taking it off; the answer is the session's row) and each
@@ -2916,8 +2921,12 @@ for the session's owner, and forks one with the plane's `session.fork` (Decision
 seals it, uploads its workspace, deletes its own copy and reports it dormant, giving back
 its slot and its budget slice; the answer is the session's row, `dormant`, and the next
 activating command brings it back on whichever pod has room. A session that is not
-running is answered as it stands, one still `pending` is refused with `conflict`, and one
-whose pod does not answer stays as it was, with `unavailable`. The plane's erasure destroys
+running is archived as it stands, one still `pending` is refused with `conflict`, and one
+whose pod does not answer stays as it was, with `unavailable`. The archived row says
+`archived: true` and is out of the plane's `sessions.list` for everyone who sees it, which
+lists the archived ones with `archived: true`; `session.unarchive` puts it back. Both are
+audited, and an administrator's `admin.sessions.list` lists archived sessions with the rest,
+with `archived` and `archived_by`. The plane's erasure destroys
 the session's key itself, as it does a private session's (below), and reaches the pod over
 the same control channel, which stops the session there and deletes the pod's copy and
 the objects (Decision 811). The answer has the private session's shape: `erased: true`

@@ -98,6 +98,7 @@
     "commands/session.pin.json",
     "commands/session.read_sealed.json",
     "commands/session.title.set.json",
+    "commands/session.unarchive.json",
     "commands/session.uninvite.json",
     "commands/session.unpin.json",
     "commands/setup.answer.json",

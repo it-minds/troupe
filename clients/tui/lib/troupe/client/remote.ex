@@ -316,6 +316,32 @@ defmodule Troupe.Client.Remote do
     end
   end
 
+  # A pod session is archived at the plane, which holds its row; a worker refuses it. Only
+  # the owner may, and the plane says so in `data.required_role`.
+  @impl true
+  def archive(sid, archived?) do
+    case attachment(sid) do
+      %{plane_url: plane} when is_binary(plane) ->
+        case call(plane, Troupe.Client.Archive.method(archived?), %{session_id: sid}) do
+          {:ok, _row} ->
+            {:ok, Troupe.Client.Archive.said(archived?)}
+
+          {:error, %{message: "forbidden"} = error} ->
+            {:error, Troupe.Client.Archive.forbidden(error[:data], archived?)}
+
+          {:error, reason} ->
+            {:error, archive_refusal(plane_refusal(reason))}
+        end
+
+      _ ->
+        {:error, message(:not_attached)}
+    end
+  end
+
+  defp archive_refusal(:unsupported), do: "this plane does not archive sessions yet"
+  defp archive_refusal(:not_found), do: "the plane has no such session"
+  defp archive_refusal(reason), do: message(reason)
+
   # The plane's sentence where it gave one: who may not be invited, and why.
   defp refusal(%{data: %{"reason" => reason}}) when is_binary(reason), do: reason
   defp refusal(%{"data" => %{"reason" => reason}}) when is_binary(reason), do: reason
@@ -481,11 +507,17 @@ defmodule Troupe.Client.Remote do
   @impl true
   def sessions({:remote, plane} = origin, filter) do
     params =
-      params(%{team: filter[:team] || filter["team"], state: filter[:state] || filter["state"]})
+      params(%{
+        team: filter[:team] || filter["team"],
+        state: filter[:state] || filter["state"],
+        archived: if(filter[:archived] || filter["archived"], do: true)
+      })
 
     case call(plane, "sessions.list", params) do
       {:ok, list} ->
-        {:ok, Enum.map(unwrap(list, "sessions"), &summary(&1, origin)) ++ offered(plane, origin)}
+        rows = Enum.map(unwrap(list, "sessions"), &summary(&1, origin))
+        # A laptop's session offered for steering is the laptop's to archive, never listed so.
+        {:ok, if(params[:archived], do: rows, else: rows ++ offered(plane, origin))}
 
       {:error, :plane_down} ->
         {:ok, attached(origin)}
@@ -1072,7 +1104,8 @@ defmodule Troupe.Client.Remote do
       # A plane cannot say how this machine's copy of a private session stands, only that
       # it is waiting to be erased (root Decision 756).
       sync: if(session["state"] == "erasure_pending", do: "erasure_pending"),
-      device: session["device"]
+      device: session["device"],
+      archived: session["archived"] == true
     }
   end
 

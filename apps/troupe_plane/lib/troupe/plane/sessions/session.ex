@@ -80,6 +80,11 @@ defmodule Troupe.Plane.Sessions.Session do
     field(:pinned, :boolean, default: false)
     field(:pinned_by, :string)
     field(:pinned_at, :utc_datetime_usec)
+    # Out of the session list for everyone who sees it, by its owner; kept whole, and back
+    # in the list once unarchived. Independent of `state`: an archived session still opens.
+    field(:archived, :boolean, default: false)
+    field(:archived_by, :string)
+    field(:archived_at, :utc_datetime_usec)
 
     field(:last_active_at, :utc_datetime_usec)
     field(:last_seq, :integer, default: 0)
@@ -169,6 +174,9 @@ defmodule Troupe.Plane.Sessions.Session do
     :pinned,
     :pinned_by,
     :pinned_at,
+    :archived,
+    :archived_by,
+    :archived_at,
     :last_active_at,
     :last_seq,
     :head_hash,

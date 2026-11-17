@@ -451,12 +451,18 @@ defmodule Troupe.Plane.HarnessTest do
       session = session!("s-full", user, team, state: "dormant")
 
       assert {:error, error} =
-               Harness.call("session.open", %{"session_id" => session.id, "mode" => "activate"}, context(user))
+               Harness.call(
+                 "session.open",
+                 %{"session_id" => session.id, "mode" => "activate"},
+                 context(user)
+               )
 
       assert error.message == "capacity"
       assert error.data.capacity == 1
       assert error.data.max_sessions == 12
-      assert error.data.reason == "every pod is full: its pods run 1 session(s) at once, and dev allows 12 at once"
+
+      assert error.data.reason ==
+               "every pod is full: its pods run 1 session(s) at once, and dev allows 12 at once"
     end
 
     test "a pod that cannot put the tree back parks the session read-only, and the next open says so",
@@ -614,6 +620,63 @@ defmodule Troupe.Plane.HarnessTest do
     end
   end
 
+  describe "archiving out of the list" do
+    test "an archived session leaves everyone's list, is listed with archived: true, opens, and comes back unarchived" do
+      team = team_with_grant("engineering", "dev", name: "engineering")
+      owner = person("ada@example.test", ["engineering"])
+      teammate = person("grace@example.test", ["engineering"])
+      session = session!("s-archive", owner, team, visibility: "team", state: "dormant")
+
+      ids = fn user, params ->
+        {:ok, %{"sessions" => rows}} = Harness.call("sessions.list", params, context(user))
+        for row <- rows, do: {row["id"], row["archived"]}
+      end
+
+      assert {session.id, false} in ids.(teammate, %{})
+
+      assert {:ok, archived} =
+               Harness.call("session.archive", %{"session_id" => session.id}, context(owner))
+
+      assert archived["archived"]
+      assert archived["state"] == "dormant"
+      assert Sessions.get(session.id).archived_by == "ada@example.test"
+
+      # Out of the list for the owner and the team, there under archived: true.
+      for user <- [owner, teammate] do
+        refute Enum.any?(ids.(user, %{}), fn {id, _} -> id == session.id end)
+        assert {session.id, true} in ids.(user, %{"archived" => true})
+      end
+
+      # Only the owner brings it back, and that is audited too.
+      assert {:error, error} =
+               Harness.call("session.unarchive", %{"session_id" => session.id}, context(teammate))
+
+      assert error.message == "forbidden"
+
+      assert {:ok, back} =
+               Harness.call("session.unarchive", %{"session_id" => session.id}, context(owner))
+
+      refute back["archived"]
+      assert {session.id, false} in ids.(teammate, %{})
+
+      assert ["session.unarchive", "session.archive"] ==
+               Enum.map(Audit.list(kind: "session", subject_id: session.id), & &1.action)
+    end
+
+    test "a teammate may not archive it" do
+      team = team_with_grant("engineering", "dev", name: "engineering")
+      owner = person("ada@example.test", ["engineering"])
+      teammate = person("grace@example.test", ["engineering"])
+      session = session!("s-archive-no", owner, team, visibility: "team", state: "dormant")
+
+      assert {:error, error} =
+               Harness.call("session.archive", %{"session_id" => session.id}, context(teammate))
+
+      assert error.message == "forbidden"
+      refute Sessions.get(session.id).archived
+    end
+  end
+
   describe "session.archive" do
     # The fake pod answers the push and reports nothing, which is also what a pod whose
     # tree had already stopped does; the plane gives the row back itself. A real pod's own
@@ -668,7 +731,7 @@ defmodule Troupe.Plane.HarnessTest do
       assert Audit.list(kind: "session", subject_id: session.id) == []
     end
 
-    test "a session asleep already is answered as it is; one not on a pod yet is refused",
+    test "a session asleep already is archived where it is; one not on a pod yet is refused",
          context do
       team = team_with_grant("engineering", "dev", name: "engineering")
       owner = person("ada@example.test", ["engineering"])
@@ -676,7 +739,7 @@ defmodule Troupe.Plane.HarnessTest do
 
       asleep = session!("s-asleep", owner, team, state: "dormant")
 
-      assert {:ok, %{"state" => "dormant"}} =
+      assert {:ok, %{"state" => "dormant", "archived" => true}} =
                Harness.call("session.archive", %{"session_id" => asleep.id}, context(owner))
 
       waiting = session!("s-waiting", owner, team, state: "pending")
@@ -687,9 +750,16 @@ defmodule Troupe.Plane.HarnessTest do
       assert error.message == "conflict"
       assert error.data.reason == "this session has not started on the platform yet"
       assert Sessions.get(waiting.id).state == "pending"
+      refute Sessions.get(waiting.id).archived
 
+      # No pod was told anything; taking the sleeping one out of the list is audited, with
+      # no pod named, and the refused one is not.
       refute_receive {:pushed, "session.dormant", _}, 200
-      assert Audit.list(kind: "session", subject_id: asleep.id) == []
+
+      assert [%{action: "session.archive", detail: detail}] =
+               Audit.list(kind: "session", subject_id: asleep.id)
+
+      assert detail == %{}
       assert Audit.list(kind: "session", subject_id: waiting.id) == []
     end
 

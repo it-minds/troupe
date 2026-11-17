@@ -849,17 +849,21 @@ main {
 .row.is-dormant {
   border-left-color: var(--dormant-fg);
 }
-/* A private session another device holds: Claim stands beside the row, at its edge, since
-   the row itself opens the session. */
-.rows li.claimable {
+/* A private session another device holds, and an archived one its owner may unarchive:
+   Claim or Unarchive stands beside the row, at its edge, since the row itself opens the
+   session. */
+.rows li.claimable,
+.rows li.unarchivable {
   display: flex;
   align-items: center;
 }
-.rows li.claimable .row {
+.rows li.claimable .row,
+.rows li.unarchivable .row {
   flex: 1 1 auto;
   min-width: 0;
 }
-.rows li.claimable .claim {
+.rows li.claimable .claim,
+.rows li.unarchivable .claim {
   flex: none;
   margin-right: var(--space-6);
 }

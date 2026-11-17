@@ -27,6 +27,8 @@ interface Row {
   failed_reason: string | null;
   epoch: number;
   pinned: boolean;
+  /** Hidden from the session list by its owner, for everyone; `sessions.list` lists it only when asked for archived ones. */
+  archived: boolean;
   reviewed_by: string | null;
   origin: { kind: string; trigger?: string } | null;
   created_at: number;
@@ -709,6 +711,7 @@ export class FakePlane {
       failed_reason: null,
       epoch: 1,
       pinned: false,
+      archived: false,
       reviewed_by: null,
       origin: { kind: "user" },
       created_at: Date.now() + this.counter,
@@ -1367,6 +1370,8 @@ export class FakePlane {
           .filter((r) => !params["status"] || r.status === params["status"])
           .filter((r) => !params["origin"] || r.origin?.kind === params["origin"])
           .filter((r) => !params["needs_review"] || (r.origin?.kind !== "user" && !r.reviewed_by))
+          // Archived ones only when asked for, and then nothing else.
+          .filter((r) => r.archived === (params["archived"] === true))
           .sort((a, b) => b.created_at - a.created_at);
         return { result: { sessions: rows.map((r) => this.sessionJson(r, subject)) } };
       }
@@ -1843,6 +1848,18 @@ export class FakePlane {
         return { result: this.sessionJson(row, subject) };
       }
 
+      // Its owner's alone; archiving a running session puts it to sleep, and only
+      // `session.unarchive` brings it back to the list.
+      case "session.archive":
+      case "session.unarchive": {
+        const row = this.rows.get(String(params["session_id"] ?? ""));
+        if (!row) return { error: { code: -32005, message: "not_found" } };
+        if (row.owner !== subject) return { error: { code: -32004, message: "forbidden", data: { required_role: "owner" } } };
+        row.archived = method === "session.archive";
+        if (row.archived && row.state === "active") row.state = "dormant";
+        return { result: this.sessionJson(row, subject) };
+      }
+
       default:
         return { error: { code: -32601, message: "method_not_found", data: { method } } };
     }
@@ -1884,6 +1901,7 @@ export class FakePlane {
       object_bytes: null,
       workspace_bytes: null,
       pinned: row.pinned,
+      archived: row.archived,
       // The index, reported by the worker over the control channel — not a replay.
       status: session?.status ?? row.status,
       done_reason: null,

@@ -791,6 +791,10 @@ defmodule Troupe.Protocol.Schema do
         "command_id" => required(:string),
         "session_id" => required(:string)
       },
+      "session.unarchive" => %{
+        "command_id" => required(:string),
+        "session_id" => required(:string)
+      },
       "question.answer" => %{
         "command_id" => required(:string),
         "session_id" => required(:string),

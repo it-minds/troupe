@@ -158,6 +158,7 @@ defmodule Troupe.Gateway.Dispatch do
     "tools.unregister" => :control,
     "session.create" => :admin,
     "session.archive" => :admin,
+    "session.unarchive" => :admin,
     "session.pin" => :admin,
     "session.title.set" => :admin,
     "session.unpin" => :admin,
@@ -515,8 +516,9 @@ defmodule Troupe.Gateway.Dispatch do
 
   # -- reads ------------------------------------------------------------------
 
+  # The list is the sessions not archived unless the filter asks for `archived: true`.
   defp handle("session.list", params, _context) do
-    filter = Map.get(params, "filter", %{})
+    filter = (Map.get(params, "filter") || %{}) |> Map.update("archived", false, &(&1 == true))
     {:ok, %{"sessions" => Enum.map(Troupe.list_live_sessions(filter), &session_json/1)}}
   end
 
@@ -528,7 +530,8 @@ defmodule Troupe.Gateway.Dispatch do
   end
 
   defp handle("fleet.get", _params, _context) do
-    {:ok, %{"sessions" => Enum.map(Troupe.list_live_sessions(%{}), &session_json/1)}}
+    sessions = Troupe.list_live_sessions(%{"archived" => false})
+    {:ok, %{"sessions" => Enum.map(sessions, &session_json/1)}}
   end
 
   # -- files ------------------------------------------------------------------
@@ -1293,14 +1296,25 @@ defmodule Troupe.Gateway.Dispatch do
     end
   end
 
+  # Dormant, and out of the session list until `session.unarchive`, kept whole: the mark
+  # is a file beside the log, as a pin is. Marked first, so a session that has no log is
+  # refused before anything is stopped.
   defp handle("session.archive", params, _context) do
-    with {:ok, session_id} <- fetch(params, "session_id") do
+    with {:ok, session_id} <- fetch(params, "session_id"),
+         :ok <- archived(session_id, true) do
       Troupe.stop_session(session_id)
       # After the tree, so that `session_dormant` is in the log this seals, and a private
       # session is written down before the daemon says it is dormant. A local session has
       # no sealer and this is a no-op.
       Private.stop(session_id)
-      {:ok, %{"session_id" => session_id, "state" => "dormant"}}
+      {:ok, %{"session_id" => session_id, "state" => "dormant", "archived" => true}}
+    end
+  end
+
+  defp handle("session.unarchive", params, _context) do
+    with {:ok, session_id} <- fetch(params, "session_id"),
+         :ok <- archived(session_id, false) do
+      {:ok, %{"session_id" => session_id, "archived" => false}}
     end
   end
 
@@ -2474,6 +2488,14 @@ defmodule Troupe.Gateway.Dispatch do
     end
   end
 
+  defp archived(session_id, archived?) do
+    case Troupe.archive_session(session_id, archived?) do
+      :ok -> :ok
+      {:error, :not_found} -> {:error, Error.new(:not_found, %{session_id: session_id})}
+      {:error, reason} -> {:error, Error.new(:internal_error, %{reason: reason})}
+    end
+  end
+
   defp pin(params, pinned?) do
     with {:ok, session_id} <- fetch(params, "session_id") do
       case Troupe.pin_session(session_id, pinned?) do
@@ -2831,13 +2853,27 @@ defmodule Troupe.Gateway.Dispatch do
     daemon? = Process.whereis(Troupe.Gateway.Daemon) != nil
 
     case Troupe.Artifacts.files(ask) do
-      {:ok, %{"files" => files} = answer} when is_list(files) -> {:ok, answer}
-      {:ok, _other} -> {:error, Error.new(:internal_error, %{reason: "the plane answered no files"})}
-      {:error, %Error{} = error} -> {:error, error}
-      {:error, sentence} when is_binary(sentence) -> {:error, Error.new(:unavailable, %{reason: sentence})}
-      {:error, %{"message" => message} = refusal} -> {:error, plane_refusal(message, refusal)}
-      {:error, :signed_out} when not daemon? -> {:error, Error.new(:unavailable, %{reason: "nothing here fetches artifacts from a plane"})}
-      other -> forwarded("artifact.files", other)
+      {:ok, %{"files" => files} = answer} when is_list(files) ->
+        {:ok, answer}
+
+      {:ok, _other} ->
+        {:error, Error.new(:internal_error, %{reason: "the plane answered no files"})}
+
+      {:error, %Error{} = error} ->
+        {:error, error}
+
+      {:error, sentence} when is_binary(sentence) ->
+        {:error, Error.new(:unavailable, %{reason: sentence})}
+
+      {:error, %{"message" => message} = refusal} ->
+        {:error, plane_refusal(message, refusal)}
+
+      {:error, :signed_out} when not daemon? ->
+        {:error,
+         Error.new(:unavailable, %{reason: "nothing here fetches artifacts from a plane"})}
+
+      other ->
+        forwarded("artifact.files", other)
     end
   end
 
@@ -2845,8 +2881,11 @@ defmodule Troupe.Gateway.Dispatch do
   defp plane_refusal(message, refusal) do
     token =
       case Error.token(refusal["code"]) do
-        :unknown -> Enum.find(Map.keys(Error.codes()), :unavailable, &(Atom.to_string(&1) == message))
-        token -> token
+        :unknown ->
+          Enum.find(Map.keys(Error.codes()), :unavailable, &(Atom.to_string(&1) == message))
+
+        token ->
+          token
       end
 
     Error.new(token, refusal["data"] || %{reason: "the plane refused it (#{message})"})
@@ -2887,12 +2926,18 @@ defmodule Troupe.Gateway.Dispatch do
 
   defp decoded(%{"bytes" => bytes} = file) when is_binary(bytes) do
     case Base.decode64(bytes, ignore: :whitespace) do
-      {:ok, body} -> {:ok, body}
-      :error -> {:error, Error.new(:internal_error, %{reason: "#{file["path"]}'s bytes are not base64"})}
+      {:ok, body} ->
+        {:ok, body}
+
+      :error ->
+        {:error, Error.new(:internal_error, %{reason: "#{file["path"]}'s bytes are not base64"})}
     end
   end
 
-  defp decoded(file), do: {:error, Error.new(:internal_error, %{reason: "#{inspect(file["path"])} came with no bytes"})}
+  defp decoded(file),
+    do:
+      {:error,
+       Error.new(:internal_error, %{reason: "#{inspect(file["path"])} came with no bytes"})}
 
   defp join_into(folder, path) when is_binary(path) do
     if String.ends_with?(folder, "/"), do: folder <> path, else: folder <> "/" <> path
@@ -2933,7 +2978,8 @@ defmodule Troupe.Gateway.Dispatch do
         {:error,
          Error.new(:forbidden, %{
            required_scope: "admin",
-           reason: "a lasting rule is written into this computer's configuration, which is its person's"
+           reason:
+             "a lasting rule is written into this computer's configuration, which is its person's"
          })}
   end
 
@@ -2959,8 +3005,11 @@ defmodule Troupe.Gateway.Dispatch do
     file_scope = if scope == "workspace", do: "local", else: "user"
 
     case announcing(file_scope, workspace, fn -> Settings.allow_rule(tool, scope, workspace) end) do
-      {:ok, written} -> {:ok, written}
-      {:error, sentence} -> {:error, Error.new(:invalid_params, %{field: "scope", reason: sentence})}
+      {:ok, written} ->
+        {:ok, written}
+
+      {:error, sentence} ->
+        {:error, Error.new(:invalid_params, %{field: "scope", reason: sentence})}
     end
   end
 
@@ -3093,6 +3142,7 @@ defmodule Troupe.Gateway.Dispatch do
       "created_at" => Map.get(session, :created_at),
       "last_active_at" => Map.get(session, :last_active_at),
       "pinned" => Map.get(session, :pinned, false),
+      "archived" => Map.get(session, :archived, false),
       # What the person called it, or nil, and the client shows the workspace.
       "title" => Map.get(session, :title),
       # Offered to the plane for steering from another device: to whom, whether the plane
