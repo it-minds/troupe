@@ -5,13 +5,10 @@ date: 2026-09-20
 status: accepted
 paths:
   - apps/troupe_core/lib/troupe/agent/headroom.ex
-  - apps/troupe_core/lib/troupe/agent/server.ex
   - apps/troupe_core/lib/troupe/budget.ex
   - apps/troupe_core/lib/troupe/llm/message.ex
   - apps/troupe_core/lib/troupe/llm/providers/anthropic.ex
   - apps/troupe_core/lib/troupe/llm/providers/openai.ex
-  - apps/troupe_core/test/troupe/agent/usage_shape_test.exs
-  - apps/troupe_core/test/troupe/llm/usage_test.exs
 gist: Token usage is four disjoint figures — `input_tokens`, `cache_read`, `cache_write`, `output_tokens`
 ---
 

@@ -7,18 +7,8 @@ supersedes: [710, 764]
 paths:
   - clients/gui/apps/desktop/src-tauri/src/signin.rs
   - clients/gui/apps/desktop/src-tauri/src/secrets.rs
-  - clients/gui/apps/desktop/src-tauri/src/lib.rs
-  - clients/gui/apps/desktop/src/shell-tauri.ts
-  - clients/gui/apps/desktop/src/shell.ts
-  - clients/gui/apps/desktop/src/main.tsx
-  - clients/gui/apps/desktop/src/hooks.ts
-  - clients/gui/apps/desktop/src/views/SignIn.tsx
-  - clients/gui/apps/desktop/src/views/Local.tsx
-  - clients/gui/packages/client/src/auth.ts
   - clients/tui/lib/troupe/remote/credentials.ex
   - clients/tui/lib/troupe/remote/tokens.ex
-  - install.sh
-  - install.ps1
 symbols:
   - TokenStore.lock
   - adoptSignedInPlane

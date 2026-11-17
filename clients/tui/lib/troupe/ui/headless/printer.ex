@@ -475,7 +475,7 @@ defmodule Troupe.UI.Headless.Printer do
     do: say(state, p, "< #{d.content}")
 
   # The protocol says a tool started as its own event; the message that asked for it
-  # carries text only (Decision 98).
+  # carries text only.
   defp print(%{type: :tool_started, agent_path: p, data: d}, state),
     do: say(state, p, "→ #{d.name} #{Jason.encode!(d.input)}")
 

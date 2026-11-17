@@ -10,13 +10,8 @@ paths:
   - apps/troupe_protocol/lib/troupe/mcp/client.ex
   - apps/troupe_protocol/lib/troupe/mcp/server.ex
   - apps/troupe_protocol/lib/troupe/mcp/sessions.ex
-  - apps/troupe_protocol/test/troupe/mcp/address_test.exs
   - apps/troupe_core/lib/troupe/mcp/oauth.ex
   - apps/troupe_core/lib/troupe/session/mcp.ex
-  - apps/troupe_core/test/support/fake_oauth.exs
-  - apps/troupe_core/test/troupe/mcp_oauth_address_test.exs
-  - docs/user/configuration.md
-  - docs/user/mcp.md
 symbols:
   - Troupe.MCP.Address
   - Troupe.MCP.Address.target/1

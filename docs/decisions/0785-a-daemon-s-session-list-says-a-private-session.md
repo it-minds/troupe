@@ -4,22 +4,7 @@ title: A daemon's `session.list` says a private session is private and how its s
 date: 2026-10-05
 status: accepted
 paths:
-  - PROTOCOL.md
   - apps/troupe_gateway/lib/troupe/gateway/private.ex
-  - apps/troupe_protocol/lib/troupe/protocol/schema.ex
-  - apps/troupe_worker/test/troupe/worker/auth_test.exs
-  - clients/gui/apps/desktop/src/App.tsx
-  - clients/gui/apps/desktop/src/views/bits.tsx
-  - clients/gui/apps/desktop/test/private-sessions.test.tsx
-  - clients/gui/packages/client/src/daemon.ts
-  - clients/gui/packages/client/src/fleet.ts
-  - clients/gui/packages/client/test/support/daemon.ts
-  - clients/tui/lib/troupe/client.ex
-  - clients/tui/lib/troupe/client/daemon.ex
-  - clients/tui/lib/troupe/ui/tui/server.ex
-  - clients/tui/lib/troupe/ui/tui/view.ex
-  - clients/tui/test/support/fake_remote.ex
-  - clients/tui/test/troupe/private_sessions_test.exs
 gist: A daemon's `session.list` says a private session is private and how its sealing stands here, and `session.claim` takes one another device sealed…
 ---
 

@@ -6,11 +6,7 @@ status: accepted
 paths:
   - apps/troupe_protocol/lib/troupe/protocol/daemon.ex
   - apps/troupe_daemon/lib/troupe/daemon/cli.ex
-  - apps/troupe_daemon/README.md
   - apps/troupe_plane/lib/troupe/plane/web/router.ex
-  - apps/troupe_gateway/test/troupe/gateway/autospawn_test.exs
-  - apps/troupe_daemon/test/troupe/daemon/cli_test.exs
-  - apps/troupe_plane/test/troupe/plane/web_test.exs
 symbols:
   - Troupe.Protocol.Daemon.detach_line/2
   - Troupe.Daemon.CLI.open/2

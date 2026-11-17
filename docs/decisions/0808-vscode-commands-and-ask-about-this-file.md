@@ -9,7 +9,6 @@ paths:
   - clients/vscode/src/lines.ts
   - clients/vscode/src/shell.ts
   - clients/vscode/package.json
-  - clients/vscode/test/vscode/suite.ts
 symbols:
   - typed
   - mention

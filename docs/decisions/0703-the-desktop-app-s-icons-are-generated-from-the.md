@@ -6,8 +6,6 @@ status: accepted
 issue: 159
 paths:
   - clients/tui/lib/mix/tasks/troupe.palette.ex
-  - docs/developer/architecture.md
-  - docs/developer/build.md
 gist: The desktop app's icons are generated from the mask, in one fixed cut, and CI fails when the committed set is not what the design file says
 ---
 

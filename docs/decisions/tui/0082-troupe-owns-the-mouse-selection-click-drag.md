@@ -5,7 +5,6 @@ date: 2026-09-16
 status: accepted
 paths:
   - clients/tui/lib/troupe/ui/tui/server.ex
-  - clients/tui/test/troupe/tui_selection_test.exs
 gist: "Troupe owns the mouse selection: click-drag inside the activated pane highlights text, release copies it, and `Ctrl-Y` copies the selection when…"
 ---
 

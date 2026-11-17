@@ -6,36 +6,11 @@ status: accepted
 issue: 765
 paths:
   - apps/troupe_plane/lib/troupe/plane/drain.ex
-  - apps/troupe_plane/lib/troupe/plane/control/connection.ex
-  - apps/troupe_plane/lib/troupe/plane/reach.ex
-  - apps/troupe_plane/test/troupe/plane/drain_test.exs
-  - apps/troupe_plane/test/troupe/plane/reach_test.exs
-  - apps/troupe_plane/test/support/fake_pod.ex
   - apps/troupe_worker/lib/troupe/worker/drain.ex
-  - apps/troupe_worker/lib/troupe/worker/plane/commands.ex
-  - apps/troupe_worker/lib/troupe/worker/plane/link.ex
-  - apps/troupe_worker/test/troupe/worker/drain_test.exs
   - apps/troupe_operator/lib/troupe/operator/skip_observed.ex
-  - apps/troupe_operator/lib/troupe/operator/reconciler.ex
-  - apps/troupe_operator/lib/troupe/operator/watch.ex
-  - apps/troupe_operator/lib/troupe/operator/resources.ex
-  - apps/troupe_operator/test/troupe/operator/reconciler_test.exs
-  - apps/troupe_operator/test/troupe/operator/resources_test.exs
-  - apps/troupe_operator/test/support/fake_cluster.ex
-  - apps/troupe_operator/test/support/e2e/plane.ex
-  - apps/troupe_operator/test/e2e/upgrade_test.exs
-  - apps/troupe_operator/test/e2e/egress_test.exs
   - apps/troupe_protocol/lib/troupe/policy.ex
   - apps/troupe_protocol/lib/troupe/worker_profile.ex
   - apps/troupe_protocol/lib/troupe/worker_profile/reach.ex
-  - apps/troupe_protocol/test/troupe/policy_test.exs
-  - apps/troupe_protocol/test/troupe/worker_profile/reach_test.exs
-  - charts/troupe/crds/workerprofile.yaml
-  - charts/troupe/templates/admission-policy.yaml
-  - dev/kind/values.yaml
-  - docs/admin/monitoring.md
-  - docs/admin/profiles-and-policy.md
-  - docs/admin/configuration.md
 symbols:
   - Troupe.Plane.Drain.pod/2
   - Troupe.Plane.Drain.progress/2

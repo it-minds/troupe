@@ -6,11 +6,6 @@ status: accepted
 issue: 181
 paths:
   - PROTOCOL.md
-  - apps/troupe_core/test/troupe/agent/input_test.exs
-  - apps/troupe_core/test/troupe/log/fold_test.exs
-  - apps/troupe_core/test/troupe/session/log_schema_test.exs
-  - apps/troupe_core/test/troupe/session/loop_test.exs
-  - apps/troupe_core/test/troupe/watch/watch_session_test.exs
 gist: A `user_input` names the send it was taken from
 ---
 

@@ -7,14 +7,9 @@ issue: 123
 supersedes: [706]
 paths:
   - apps/troupe_core/lib/troupe/instructions.ex
-  - apps/troupe_core/lib/troupe/agent/server.ex
   - apps/troupe_core/lib/troupe/agent/state.ex
   - apps/troupe_gateway/lib/troupe/gateway/dispatch.ex
   - apps/troupe_core/lib/troupe/session/memory.ex
-  - apps/troupe_core/test/troupe/instructions_test.exs
-  - apps/troupe_core/test/troupe/instructions_prompt_test.exs
-  - apps/troupe_core/test/troupe/tools/remember_test.exs
-  - apps/troupe_gateway/test/troupe/gateway/context_test.exs
 symbols:
   - Troupe.Instructions.focus/1
   - Troupe.Instructions.load/3

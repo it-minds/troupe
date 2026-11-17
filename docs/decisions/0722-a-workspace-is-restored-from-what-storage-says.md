@@ -7,8 +7,6 @@ issue: 252
 paths:
   - apps/troupe_core/lib/troupe/session/files.ex
   - apps/troupe_gateway/lib/troupe/gateway/dispatch.ex
-  - apps/troupe_worker/test/troupe/worker/kms_unreachable_test.exs
-  - apps/troupe_worker/test/troupe/worker/workspace_listing_test.exs
 gist: A workspace is restored from what storage says it has, or the activation fails; a key manager the pod cannot reach is `kms_unreachable`
 ---
 

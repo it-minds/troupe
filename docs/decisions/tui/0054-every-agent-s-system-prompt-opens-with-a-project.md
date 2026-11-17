@@ -4,8 +4,6 @@ title: Every agent's system prompt opens with a project brief kept in `.troupe/m
 date: 2026-09-11
 status: accepted
 paths:
-  - AGENTS.md
-  - apps/troupe_core/lib/troupe/agent/server.ex
   - apps/troupe_core/lib/troupe/session/memory.ex
 gist: Every agent's system prompt opens with a project brief kept in `.troupe/memory.md`, and once there is one the workspace survey's listing budget…
 ---

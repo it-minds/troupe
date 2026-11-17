@@ -7,23 +7,10 @@ issue: 465
 paths:
   - apps/troupe_core/lib/troupe/llm/providers/anthropic.ex
   - apps/troupe_core/lib/troupe/llm/request.ex
-  - apps/troupe_core/lib/troupe/agent/server.ex
-  - apps/troupe_core/lib/troupe/agent/state.ex
-  - apps/troupe_core/lib/troupe/config.ex
   - apps/troupe_core/lib/troupe/config/schema.ex
-  - apps/troupe_core/lib/troupe/config/layers.ex
-  - apps/troupe_core/lib/troupe/bench.ex
   - apps/troupe_core/lib/troupe/bench/prefix.ex
-  - apps/troupe_core/lib/troupe/bench/live.ex
   - apps/troupe_core/lib/troupe/bench/live_scenarios.ex
-  - apps/troupe_core/lib/troupe/bench/scenario.ex
   - apps/troupe_core/lib/mix/tasks/troupe.prefix.ex
-  - apps/troupe_core/test/support/fake_openai.exs
-  - apps/troupe_core/test/troupe/agent/stable_prompt_test.exs
-  - apps/troupe_core/test/troupe/bench_live_test.exs
-  - apps/troupe_core/test/troupe/bench/prefix_test.exs
-  - apps/troupe_core/test/troupe/llm/thinking_test.exs
-  - apps/troupe_protocol/lib/troupe/protocol/schema.ex
 symbols:
   - Troupe.Bench.Prefix.count/1
 gist: "Both of issue 465's options stay off by default; a stable system prompt only ever appends to the conversation; llm_request and llm_response carry the counts"

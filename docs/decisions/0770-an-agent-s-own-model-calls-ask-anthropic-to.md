@@ -5,12 +5,9 @@ date: 2026-10-04
 status: accepted
 issue: 389
 paths:
-  - apps/troupe_core/lib/troupe/agent/server.ex
   - apps/troupe_core/lib/troupe/agent/spend.ex
   - apps/troupe_core/lib/troupe/llm/providers/anthropic.ex
   - apps/troupe_core/lib/troupe/llm/providers/openai.ex
-  - apps/troupe_core/test/support/prompt_cache_stand_in.ex
-  - apps/troupe_core/test/troupe/agent/prompt_cache_test.exs
 gist: "An agent's own model calls ask Anthropic to cache the prompt, with four marks: the last tool, the system prompt without its task list, and the last…"
 ---
 

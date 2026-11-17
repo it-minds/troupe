@@ -7,26 +7,8 @@ issue: 586
 paths:
   - apps/troupe_core/lib/troupe/mcp/oauth.ex
   - apps/troupe_core/lib/troupe/mcp/oauth/sign_in.ex
-  - apps/troupe_core/lib/troupe/mcp/oauth/store.ex
-  - apps/troupe_core/lib/troupe/mcp/oauth/tokens.ex
   - apps/troupe_core/lib/troupe/mcp/tool.ex
   - apps/troupe_core/lib/troupe/session/mcp.ex
-  - apps/troupe_core/test/support/fake_oauth.exs
-  - apps/troupe_core/test/troupe/mcp_oauth_test.exs
-  - apps/troupe_gateway/lib/troupe/gateway/local_sources.ex
-  - apps/troupe_gateway/test/troupe/gateway/mcp_call_test.exs
-  - apps/troupe_gateway/test/troupe/gateway/mcp_sign_in_test.exs
-  - apps/troupe_protocol/lib/troupe/mcp/client.ex
-  - apps/troupe_protocol/lib/troupe/protocol/schema.ex
-  - clients/tui/lib/troupe/cli/remote.ex
-  - clients/tui/lib/troupe/client.ex
-  - clients/tui/lib/troupe/client/daemon.ex
-  - clients/tui/lib/troupe/ui/tui/server.ex
-  - clients/tui/lib/troupe/ui/tui/view.ex
-  - clients/tui/test/troupe/mcp_page_test.exs
-  - docs/user/configuration.md
-  - docs/user/mcp.md
-  - PROTOCOL.md
 symbols:
   - Troupe.MCP.OAuth.authorized/2
   - Troupe.MCP.OAuth.sign_out/2

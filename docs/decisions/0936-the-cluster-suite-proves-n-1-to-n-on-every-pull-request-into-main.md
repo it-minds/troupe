@@ -13,10 +13,6 @@ paths:
   - scripts/e2e
   - scripts/dev-restore-rehearsal
   - scripts/dev-restore-rehearsal.exs
-  - apps/troupe_operator/test/upgrade/*.exs
-  - apps/troupe_operator/test/support/e2e/upgrade.ex
-  - docs/admin/upgrading.md
-  - docs/developer/ci.md
 gist: Beside the fresh install, cluster.yml installs the previous release from the registry, seeds it through the protocol, upgrades with the CRDs and helm upgrade alone and checks every seeded thing; N-1 to N only
 ---
 

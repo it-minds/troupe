@@ -7,16 +7,11 @@ issue: 124
 paths:
   - apps/troupe_core/lib/troupe/commands.ex
   - apps/troupe_core/lib/troupe/commands/local.ex
-  - apps/troupe_core/test/troupe/commands_test.exs
   - apps/troupe_gateway/lib/troupe/gateway/dispatch.ex
-  - apps/troupe_gateway/test/troupe/gateway/commands_list_test.exs
   - apps/troupe_protocol/lib/troupe/protocol/schema.ex
   - clients/gui/apps/desktop/src/views/CommandPalette.tsx
-  - clients/gui/apps/desktop/test/command-palette.test.tsx
-  - clients/gui/packages/client/test/support/daemon.ts
   - clients/tui/lib/troupe/client.ex
   - clients/tui/lib/troupe/ui/tui/server.ex
-  - clients/tui/test/troupe/command_palette_test.exs
 gist: "A command a person or a repository writes as a markdown file is a row of the command table, in a section of its own, and the harness runs it: the…"
 ---
 

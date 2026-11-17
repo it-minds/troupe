@@ -7,8 +7,6 @@ issue: 123
 paths:
   - apps/troupe_core/lib/troupe/instructions/check.ex
   - apps/troupe_core/lib/troupe/instructions/check/text.ex
-  - apps/troupe_core/test/troupe/instructions_check_test.exs
-  - clients/tui/test/troupe/instructions_check_cli_test.exs
   - clients/tui/lib/mix/tasks/troupe.xref.ex
 symbols:
   - Troupe.Instructions.Check.run/2

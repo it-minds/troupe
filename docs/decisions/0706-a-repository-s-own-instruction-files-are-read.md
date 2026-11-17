@@ -5,15 +5,10 @@ date: 2026-09-27
 status: accepted
 issue: 123
 paths:
-  - apps/troupe_core/lib/troupe/agent/server.ex
   - apps/troupe_core/lib/troupe/agent/state.ex
   - apps/troupe_core/lib/troupe/config.ex
   - apps/troupe_core/lib/troupe/instructions.ex
-  - apps/troupe_core/test/troupe/agent/loop_test.exs
-  - apps/troupe_core/test/troupe/instructions_prompt_test.exs
-  - apps/troupe_core/test/troupe/instructions_test.exs
   - apps/troupe_gateway/lib/troupe/gateway/dispatch.ex
-  - apps/troupe_gateway/test/troupe/gateway/context_test.exs
   - apps/troupe_protocol/lib/troupe/protocol/schema.ex
 gist: A repository's own instruction files are read into every prompt, from disk at every turn, in the order the other tools read them, and one table…
 ---

@@ -10,19 +10,6 @@ paths:
   - apps/troupe_core/lib/troupe/session/memory.ex
   - apps/troupe_core/lib/troupe/memory/facts.ex
   - apps/troupe_gateway/lib/troupe/gateway/worktrees.ex
-  - apps/troupe_gateway/lib/troupe/gateway/dispatch.ex
-  - apps/troupe_protocol/lib/troupe/protocol/schema.ex
-  - clients/tui/lib/troupe/client/daemon.ex
-  - clients/tui/lib/troupe/client/daemon/start.ex
-  - clients/tui/lib/troupe/ui/tui/view.ex
-  - clients/gui/packages/client/src/memory.ts
-  - clients/gui/packages/client/src/daemon.ts
-  - clients/gui/apps/desktop/src/views/Local.tsx
-  - PROTOCOL.md
-  - apps/troupe_gateway/test/troupe/gateway/enclosing_repository_test.exs
-  - apps/troupe_gateway/test/troupe/gateway/worktrees_test.exs
-  - apps/troupe_core/test/troupe/tools/remember_test.exs
-  - clients/tui/test/troupe/workspace_in_another_repository_test.exs
 symbols:
   - Troupe.Git.ignored?/1
   - Troupe.Session.Memory.locate/1

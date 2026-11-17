@@ -6,7 +6,6 @@ status: accepted
 paths:
   - apps/troupe_core/lib/troupe/config.ex
   - apps/troupe_core/lib/troupe/llm/catalog/store.ex
-  - clients/tui/test/troupe/models_cli_test.exs
 gist: "`troupe models` asks the providers first when the cached list is stale, and says what it fetched, from where and when"
 ---
 

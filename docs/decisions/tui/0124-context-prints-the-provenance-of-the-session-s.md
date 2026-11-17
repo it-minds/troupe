@@ -8,7 +8,6 @@ paths:
   - clients/tui/lib/troupe/client.ex
   - clients/tui/lib/troupe/client/daemon.ex
   - clients/tui/lib/troupe/client/instructions.ex
-  - clients/tui/test/troupe/context_command_test.exs
 gist: "`/context` prints the provenance of the session's prompt on the notice line, as the daemon's `context.get` answers it, and holds no reading of its own"
 ---
 

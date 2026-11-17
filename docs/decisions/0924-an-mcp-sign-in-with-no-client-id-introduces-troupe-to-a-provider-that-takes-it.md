@@ -7,22 +7,8 @@ issue: 585
 supersedes: [741, 861]
 paths:
   - apps/troupe_core/lib/troupe/mcp/oauth.ex
-  - apps/troupe_core/lib/troupe/mcp/oauth/sign_in.ex
   - apps/troupe_core/lib/troupe/mcp/oauth/store.ex
-  - apps/troupe_core/lib/troupe/mcp/oauth/tokens.ex
-  - apps/troupe_core/lib/troupe/config/schema.ex
-  - apps/troupe_core/test/support/fake_oauth.exs
-  - apps/troupe_core/test/troupe/mcp_oauth_test.exs
-  - docs/oauth/client.json
-  - docs/user/configuration.md
-  - docs/user/mcp.md
   - apps/troupe_core/lib/troupe/session/client_tools.ex
-  - apps/troupe_core/lib/troupe/tools.ex
-  - apps/troupe_core/lib/troupe/tool.ex
-  - apps/troupe_core/test/troupe/session/client_tools_test.exs
-  - clients/tui/lib/troupe/remote/translate.ex
-  - clients/gui/packages/client/src/transcript.ts
-  - PROTOCOL.md
 symbols:
   - Troupe.MCP.OAuth.client/3
   - Troupe.MCP.OAuth.client_metadata/1

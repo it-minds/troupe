@@ -4,7 +4,7 @@ title: An outbound notification target is absolute, off the loopback and on the 
 date: 2026-09-16
 status: accepted
 paths:
-  - apps/troupe_plane/test/troupe/plane/triggers_test.exs
+  - apps/troupe_plane/lib/troupe/plane/triggers/notify.ex
 gist: An outbound notification target is absolute, off the loopback and on the egress allowlist
 ---
 

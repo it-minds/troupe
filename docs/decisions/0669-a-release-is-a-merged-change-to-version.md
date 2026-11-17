@@ -6,8 +6,6 @@ status: accepted
 issue: 37
 paths:
   - .github/workflows/release.yml
-  - clients/gui/README.md
-  - docs/developer/deployment.md
   - scripts/release
 gist: A release is a merged change to `VERSION`
 ---

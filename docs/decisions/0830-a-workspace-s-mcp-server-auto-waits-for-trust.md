@@ -5,18 +5,10 @@ date: 2026-10-10
 status: accepted
 issue: 522
 paths:
-  - PROTOCOL.md
   - apps/troupe_core/lib/troupe/config/trust.ex
   - apps/troupe_core/lib/troupe/mcp/local.ex
   - apps/troupe_core/lib/troupe/session/mcp.ex
-  - apps/troupe_core/test/troupe/config/trust_test.exs
-  - apps/troupe_core/test/troupe/mcp/local_test.exs
-  - apps/troupe_core/test/troupe/mcp_layers_test.exs
-  - apps/troupe_core/test/troupe/mcp_local_test.exs
   - apps/troupe_gateway/lib/troupe/gateway/local_sources.ex
-  - apps/troupe_gateway/test/troupe/gateway/local_sources_test.exs
-  - docs/user/configuration.md
-  - docs/user/mcp.md
 symbols:
   - Troupe.MCP.Local.waits_for_trust?/1
   - Troupe.MCP.Local.held_reason/2

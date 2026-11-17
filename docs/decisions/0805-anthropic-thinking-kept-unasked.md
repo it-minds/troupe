@@ -9,10 +9,6 @@ paths:
   - apps/troupe_core/lib/troupe/llm/providers/openai.ex
   - apps/troupe_core/lib/troupe/llm/provider.ex
   - apps/troupe_core/lib/troupe/llm/catalog.ex
-  - apps/troupe_core/test/troupe/llm/thinking_test.exs
-  - apps/troupe_core/test/troupe/llm/error_body_test.exs
-  - apps/troupe_core/test/troupe/agent/thinking_kept_test.exs
-  - apps/troupe_core/test/support/error_stand_in.ex
 symbols:
   - Troupe.LLM.Catalog.thinks_unasked?/1
   - Troupe.LLM.Provider.with_retries/2

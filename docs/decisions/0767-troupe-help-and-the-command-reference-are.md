@@ -9,8 +9,6 @@ paths:
   - apps/troupe_core/lib/troupe/commands.ex
   - clients/tui/lib/mix/tasks/troupe.cli.reference.ex
   - clients/tui/lib/troupe/cli.ex
-  - clients/tui/test/troupe/cli_reference_test.exs
-  - docs/developer/build.md
 gist: "`troupe --help` and the command reference are written from two tables, the command lines beside `troupe`'s parser and the harness's slash commands…"
 ---
 

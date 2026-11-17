@@ -6,8 +6,6 @@ status: accepted
 paths:
   - apps/troupe_core/lib/troupe/config.ex
   - apps/troupe_core/lib/troupe/tools.ex
-  - apps/troupe_core/test/troupe/tools/remember_test.exs
-  - apps/troupe_gateway/test/troupe/gateway/memory_test.exs
   - clients/tui/lib/troupe/client/daemon.ex
 gist: The project brief is a file the daemon reads into every prompt, and `remember` is the one tool that writes unasked
 ---

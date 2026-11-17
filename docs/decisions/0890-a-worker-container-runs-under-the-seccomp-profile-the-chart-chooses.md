@@ -8,15 +8,7 @@ supersedes: [832]
 paths:
   - apps/troupe_operator/lib/troupe/operator/settings.ex
   - apps/troupe_operator/lib/troupe/operator/resources.ex
-  - apps/troupe_operator/test/troupe/operator/settings_test.exs
-  - config/runtime.exs
-  - charts/troupe/files/worker-seccomp.json
   - charts/troupe/templates/worker-profiles.yaml
-  - charts/troupe/templates/operator-deployment.yaml
-  - charts/troupe/templates/_helpers.tpl
-  - charts/troupe/values.yaml
-  - dev/kind/values.yaml
-  - scripts/kind-up
 symbols:
   - Troupe.Operator.Settings.worker_seccomp/1
 gist: "worker.seccomp Localhost (default + bwrap's namespaces, never net/cgroup/time); worker.userNamespaces: hostUsers false + procMount Unmasked, never apart"

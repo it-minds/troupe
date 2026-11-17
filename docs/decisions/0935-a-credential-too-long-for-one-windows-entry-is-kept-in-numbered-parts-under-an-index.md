@@ -7,9 +7,7 @@ issue: 765
 paths:
   - clients/gui/apps/desktop/src-tauri/src/secrets.rs
   - apps/troupe_protocol/lib/troupe/keyring/os.ex
-  - apps/troupe_protocol/test/troupe/keyring_test.exs
   - clients/gui/packages/client/src/auth.ts
-  - clients/gui/packages/client/test/restore.test.ts
 gist: "Windows: past one entry, parts <target>/0..n-1 and <target> = troupe-parts:<n>; a value that fits (and isn't the marker) is one entry; delete takes every part"
 ---
 

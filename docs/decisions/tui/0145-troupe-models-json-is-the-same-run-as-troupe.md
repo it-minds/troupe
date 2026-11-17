@@ -5,7 +5,6 @@ date: 2026-10-05
 status: accepted
 paths:
   - apps/troupe_core/lib/troupe/config.ex
-  - clients/tui/test/troupe/models_cli_test.exs
 gist: "`troupe models --json` is the same run as `troupe models`, printed as the harness's object"
 ---
 

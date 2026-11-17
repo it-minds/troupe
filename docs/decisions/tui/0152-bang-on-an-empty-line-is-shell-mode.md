@@ -9,8 +9,6 @@ paths:
   - clients/tui/lib/troupe/ui/tui/view.ex
   - clients/tui/lib/troupe/ui/tui/model.ex
   - clients/tui/lib/troupe/remote/translate.ex
-  - clients/tui/test/troupe/shell_mode_test.exs
-  - clients/tui/test/troupe/remote_shell_test.exs
 gist: "A line starting with ! runs via shell.run (!! = kept from agent), never input.send; Esc/Ctrl-C kill this screen's run; drawn as a ! block from user_shell"
 ---
 

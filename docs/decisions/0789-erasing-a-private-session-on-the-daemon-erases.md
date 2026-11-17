@@ -5,9 +5,7 @@ date: 2026-10-05
 status: accepted
 issue: 432
 paths:
-  - PROTOCOL.md
   - apps/troupe_gateway/lib/troupe/gateway/private.ex
-  - apps/troupe_gateway/test/support/fake_plane.ex
 gist: Erasing a private session on the daemon erases it at the plane first, as an erasure started there goes, and erases nothing where the plane cannot…
 ---
 

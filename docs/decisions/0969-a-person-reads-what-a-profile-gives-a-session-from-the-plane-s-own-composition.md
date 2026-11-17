@@ -7,8 +7,6 @@ paths:
   - apps/troupe_plane/lib/troupe/plane/harness.ex
   - apps/troupe_plane/lib/troupe/plane/profile_view.ex
   - apps/troupe_gateway/lib/troupe/gateway/dispatch.ex
-  - PROTOCOL.md
-  - docs/user/profiles.md
 symbols:
   - Troupe.Plane.ProfileView.get/3
   - Troupe.Plane.ProfileView.offering/2

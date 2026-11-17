@@ -5,29 +5,10 @@ date: 2026-10-02
 status: accepted
 issue: 341
 paths:
-  - ARCHITECTURE.md
-  - PROTOCOL.md
-  - apps/troupe_gateway/lib/troupe/gateway/private.ex
-  - apps/troupe_gateway/test/troupe/gateway/private_test.exs
   - apps/troupe_plane/lib/troupe/plane/connections.ex
-  - apps/troupe_plane/lib/troupe/plane/control/connection.ex
-  - apps/troupe_plane/lib/troupe/plane/erasure.ex
-  - apps/troupe_plane/lib/troupe/plane/harness.ex
-  - apps/troupe_plane/lib/troupe/plane/identity.ex
   - apps/troupe_plane/lib/troupe/plane/identity/user.ex
-  - apps/troupe_plane/lib/troupe/plane/tokens.ex
-  - apps/troupe_plane/priv/repo/migrations/20261002000755_person_kms_name.exs
-  - apps/troupe_plane/test/troupe/plane/control_test.exs
-  - apps/troupe_plane/test/troupe/plane/person_credentials_test.exs
-  - apps/troupe_plane/test/troupe/plane/private_erasure_test.exs
-  - apps/troupe_plane/test/troupe/plane/subject_claim_test.exs
   - apps/troupe_protocol/lib/troupe/kms.ex
   - apps/troupe_protocol/lib/troupe/kms/policy.ex
-  - apps/troupe_protocol/lib/troupe/protocol/bundle.ex
-  - apps/troupe_worker/lib/troupe/worker/connections.ex
-  - apps/troupe_worker/test/troupe/worker/person_credentials_test.exs
-  - docs/admin/configuration.md
-  - docs/developer/architecture.md
 gist: A person's name at the key manager is a column of its own, fixed when the plane first knows them and left alone by a re-key, and whatever reaches…
 ---
 

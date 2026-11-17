@@ -6,18 +6,13 @@ status: accepted
 issue: 886
 paths:
   - apps/troupe_protocol/lib/troupe/protocol/bundle.ex
-  - apps/troupe_protocol/test/troupe/protocol/bundle_test.exs
   - apps/troupe_core/lib/troupe/agent/definition.ex
   - apps/troupe_core/lib/troupe/agent/hold.ex
   - apps/troupe_core/lib/troupe/skills.ex
-  - apps/troupe_core/test/troupe/skills_test.exs
   - apps/troupe_plane/lib/troupe/plane/admin.ex
   - apps/troupe_plane/lib/troupe/plane/bundles.ex
-  - apps/troupe_plane/test/troupe/plane/admin_test.exs
   - clients/gui/apps/console/src/views/ProfileAgents.tsx
   - clients/gui/apps/console/src/views/Bundles.tsx
-  - docs/admin/bundles-and-triggers.md
-  - PROTOCOL.md
 symbols:
   - Troupe.Protocol.Bundle.loads?/3
   - Troupe.Protocol.Bundle.skill_agents/1

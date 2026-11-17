@@ -13,8 +13,6 @@ paths:
   - clients/tui/lib/troupe/ui/tui/server.ex
   - clients/tui/lib/troupe/ui/tui/theme.ex
   - clients/tui/lib/troupe/ui/tui/view.ex
-  - clients/tui/test/troupe/shared_settings_test.exs
-  - clients/tui/test/troupe/tui_theme_test.exs
 symbols:
   - Troupe.UI.TUI.Theme.choose/2
   - Troupe.UI.TUI.View.mark/2

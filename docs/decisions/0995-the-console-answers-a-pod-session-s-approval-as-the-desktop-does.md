@@ -7,7 +7,6 @@ issue: 928
 supersedes: [942]
 paths:
   - clients/gui/apps/console/src/views/Remote.tsx
-  - clients/gui/apps/console/test/invited.test.tsx
   - clients/gui/packages/client/src/calls.ts
 symbols:
   - RemoteSession

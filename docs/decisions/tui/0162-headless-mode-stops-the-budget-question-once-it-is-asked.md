@@ -5,7 +5,6 @@ date: 2026-10-12
 status: accepted
 paths:
   - clients/tui/lib/troupe/ui/headless/printer.ex
-  - clients/tui/test/troupe/cli_test.exs
 gist: Headless mode answers the budget question when it arrives with its options, never on `budget_ask_started` alone, which comes before the question exists
 ---
 

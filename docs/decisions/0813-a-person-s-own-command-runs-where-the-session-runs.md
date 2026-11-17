@@ -7,12 +7,10 @@ issue: 486
 paths:
   - apps/troupe_core/lib/troupe/session/shell.ex
   - apps/troupe_core/lib/troupe/tools/shell.ex
-  - apps/troupe_core/lib/troupe/agent/server.ex
   - apps/troupe_core/lib/troupe/log/fold.ex
   - apps/troupe_gateway/lib/troupe/gateway/dispatch.ex
   - apps/troupe_worker/lib/troupe/worker/auth.ex
   - apps/troupe_protocol/lib/troupe/protocol/schema.ex
-  - PROTOCOL.md
 symbols:
   - Troupe.Session.Shell.run/3
   - Troupe.Session.Shell.refusal/2

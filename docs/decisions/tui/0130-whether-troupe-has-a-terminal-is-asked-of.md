@@ -8,9 +8,6 @@ paths:
   - clients/tui/lib/troupe/cli/daemon.ex
   - clients/tui/lib/troupe/cli/interrupt.ex
   - clients/tui/lib/troupe/cli/terminal.ex
-  - clients/tui/test/troupe/cli_daemon_test.exs
-  - clients/tui/test/troupe/interrupt_test.exs
-  - clients/tui/test/troupe/terminal_test.exs
 gist: Whether troupe has a terminal is asked of Burrito's launcher on Linux and macOS, and on Windows Ctrl-C ends the commands that only print
 ---
 

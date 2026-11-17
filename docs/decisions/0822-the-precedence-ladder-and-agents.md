@@ -8,12 +8,6 @@ paths:
   - apps/troupe_core/lib/troupe/skills/local.ex
   - apps/troupe_core/lib/troupe/instructions.ex
   - apps/troupe_gateway/lib/troupe/gateway/local_sources.ex
-  - docs/user/configuration.md
-  - apps/troupe_core/test/troupe/ladder_test.exs
-  - apps/troupe_core/test/troupe/skills/local_test.exs
-  - apps/troupe_core/test/troupe/instructions_test.exs
-  - apps/troupe_gateway/test/troupe/gateway/context_test.exs
-  - apps/troupe_gateway/test/troupe/gateway/local_sources_test.exs
 symbols:
   - Troupe.Skills.Local.resolve/2
   - Troupe.Skills.Local.agents_home/1

@@ -11,7 +11,6 @@ paths:
   - apps/troupe_plane/lib/troupe/plane/fleet/worker.ex
   - apps/troupe_plane/priv/repo/migrations/20260929000034_worker_retiring.exs
   - apps/troupe_worker/lib/troupe/worker/drain.ex
-  - docs/admin/profiles-and-policy.md
 gist: A scale-down drains the pods it removes before it lowers the count, and finishes once it has started; a worker stopped by anything else drains itself
 ---
 

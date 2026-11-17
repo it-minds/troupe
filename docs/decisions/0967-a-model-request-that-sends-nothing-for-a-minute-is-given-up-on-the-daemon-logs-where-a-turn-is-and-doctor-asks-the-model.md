@@ -4,17 +4,11 @@ title: "A model request that sends nothing for a minute is given up on with a se
 date: 2026-10-29
 status: accepted
 paths:
-  - apps/troupe_core/lib/troupe/agent/server.ex
   - apps/troupe_core/lib/troupe/agent/state.ex
   - apps/troupe_core/lib/troupe/llm/request.ex
-  - apps/troupe_core/lib/troupe/llm/provider.ex
   - apps/troupe_core/lib/troupe/llm/providers/anthropic.ex
   - apps/troupe_core/lib/troupe/llm/providers/openai.ex
-  - apps/troupe_core/lib/troupe/llm/providers/fake.ex
-  - apps/troupe_core/lib/troupe/config/schema.ex
   - apps/troupe_core/lib/troupe/doctor.ex
-  - apps/troupe_core/test/troupe/agent/first_byte_test.exs
-  - apps/troupe_core/test/support/fake_gateway.exs
 symbols:
   - Troupe.LLM.Provider.first_byte/3
   - Troupe.LLM.Request.host/1

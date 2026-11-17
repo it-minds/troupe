@@ -6,7 +6,6 @@ status: accepted
 issue: 188
 paths:
   - .github/workflows/quick-start.yml
-  - docs/developer/ci.md
 gist: The README is a front door, the quick start it points to is run by CI, and the product is shown with example data
 ---
 

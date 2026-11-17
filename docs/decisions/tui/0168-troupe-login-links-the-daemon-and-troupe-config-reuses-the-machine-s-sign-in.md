@@ -7,9 +7,6 @@ paths:
   - clients/tui/lib/troupe/cli/remote.ex
   - clients/tui/lib/troupe/cli/config_setup.ex
   - clients/tui/lib/troupe/client/daemon/link.ex
-  - clients/tui/test/troupe/private_link_test.exs
-  - clients/tui/test/troupe/config_setup_test.exs
-  - clients/tui/test/support/remote_helpers.ex
 symbols:
   - Troupe.CLI.Remote.login/2
   - Troupe.Client.Daemon.Link.ours/3

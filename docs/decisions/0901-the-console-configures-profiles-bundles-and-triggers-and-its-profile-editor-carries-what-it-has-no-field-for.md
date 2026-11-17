@@ -11,13 +11,8 @@ paths:
   - clients/gui/apps/console/src/views/bits.tsx
   - clients/gui/apps/console/src/nav.ts
   - clients/gui/apps/console/src/route.ts
-  - clients/gui/apps/console/test/profiles.test.tsx
-  - clients/gui/apps/console/test/bundles.test.tsx
-  - clients/gui/apps/console/test/triggers.test.tsx
   - clients/gui/packages/client/src/admin.ts
-  - clients/gui/packages/client/test/support/admin.ts
   - clients/gui/scripts/fake-console.ts
-  - docs/admin/console.md
 gist: "Console profile editor sends only its paths over the loaded spec, never plane-written ones; team admins see what the plane answers; trigger put sends what moved"
 ---
 

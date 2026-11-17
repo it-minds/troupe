@@ -6,11 +6,7 @@ status: accepted
 issue: 123
 paths:
   - apps/troupe_core/lib/troupe/instructions.ex
-  - apps/troupe_core/test/troupe/instructions_test.exs
-  - apps/troupe_core/test/troupe/instructions_prompt_test.exs
-  - apps/troupe_gateway/test/troupe/gateway/context_test.exs
   - clients/tui/lib/troupe/client/instructions.ex
-  - clients/tui/test/troupe/context_command_test.exs
 symbols:
   - Troupe.Instructions.load/3
   - Troupe.Instructions.provenance/1

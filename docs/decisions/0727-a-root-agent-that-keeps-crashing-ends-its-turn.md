@@ -4,39 +4,8 @@ title: A root agent that keeps crashing ends its turn saying why, and its sessio
 date: 2026-09-29
 status: accepted
 paths:
-  - ARCHITECTURE.md
-  - PROTOCOL.md
-  - apps/troupe_a2a/lib/troupe/a2a/events.ex
-  - apps/troupe_a2a/test/troupe/a2a/stream_test.exs
   - apps/troupe_core/lib/troupe/agent/node.ex
-  - apps/troupe_core/lib/troupe/agent/server.ex
   - apps/troupe_core/lib/troupe/agent/state.ex
-  - apps/troupe_core/lib/troupe/session.ex
-  - apps/troupe_core/lib/troupe/session/log.ex
-  - apps/troupe_core/lib/troupe/sessions/index.ex
-  - apps/troupe_core/test/troupe/agent/crash_loop_test.exs
-  - apps/troupe_gateway/test/troupe/gateway/daemon_test.exs
-  - apps/troupe_plane/test/troupe/plane/triggers_test.exs
-  - apps/troupe_protocol/lib/troupe/protocol/schema.ex
-  - apps/troupe_worker/lib/troupe/worker/session/manager.ex
-  - apps/troupe_worker/test/troupe/worker/stopped_turn_test.exs
-  - clients/gui/apps/desktop/src/notify.ts
-  - clients/gui/apps/desktop/src/views/Session.tsx
-  - clients/gui/apps/desktop/src/views/bits.tsx
-  - clients/gui/apps/desktop/test/failed-turn.test.tsx
-  - clients/gui/packages/client/src/daemon.ts
-  - clients/gui/packages/client/src/fleet.ts
-  - clients/gui/packages/client/src/transcript.ts
-  - clients/gui/packages/client/test/fleet.test.ts
-  - clients/gui/packages/client/test/support/daemon.ts
-  - clients/gui/packages/client/test/transcript.test.ts
-  - clients/tui/lib/troupe/remote/translate.ex
-  - clients/tui/lib/troupe/ui/headless/printer.ex
-  - clients/tui/lib/troupe/ui/tui/model.ex
-  - clients/tui/test/troupe/cli_test.exs
-  - clients/tui/test/troupe/remote_translate_test.exs
-  - clients/tui/test/troupe/window_attention_test.exs
-  - docs/developer/architecture.md
 gist: A root agent that keeps crashing ends its turn saying why, and its session stops instead of starting it again
 ---
 

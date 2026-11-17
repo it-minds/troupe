@@ -10,11 +10,6 @@ paths:
   - clients/tui/lib/troupe/ui/tui/server.ex
   - clients/tui/lib/troupe/ui/tui/view.ex
   - apps/troupe_core/lib/troupe/commands.ex
-  - clients/tui/test/troupe/agent_picker_test.exs
-  - clients/tui/test/troupe/agents_manager_test.exs
-  - clients/tui/test/troupe/agents_mend_test.exs
-  - clients/tui/test/troupe/new_session_test.exs
-  - clients/tui/README.md
 symbols:
   - Troupe.UI.TUI.AgentChooser.key/3
   - Troupe.UI.TUI.AgentChooser.reload/4

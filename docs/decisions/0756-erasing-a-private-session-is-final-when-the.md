@@ -5,28 +5,10 @@ date: 2026-10-03
 status: accepted
 issue: 348
 paths:
-  - ARCHITECTURE.md
-  - PROTOCOL.md
-  - apps/troupe_gateway/lib/troupe/gateway/dispatch.ex
   - apps/troupe_gateway/lib/troupe/gateway/private.ex
-  - apps/troupe_gateway/test/support/fake_plane.ex
-  - apps/troupe_gateway/test/troupe/gateway/private_test.exs
-  - apps/troupe_plane/lib/troupe/plane/admin.ex
   - apps/troupe_plane/lib/troupe/plane/erasure.ex
-  - apps/troupe_plane/lib/troupe/plane/harness.ex
   - apps/troupe_plane/lib/troupe/plane/sessions.ex
-  - apps/troupe_plane/lib/troupe/plane/sessions/session.ex
-  - clients/gui/apps/console/src/views/Sessions.tsx
-  - apps/troupe_plane/test/troupe/plane/private_erasure_test.exs
   - apps/troupe_protocol/lib/troupe/object_store/signed.ex
-  - clients/gui/packages/client/src/fleet.ts
-  - clients/gui/packages/client/src/plane.ts
-  - clients/gui/packages/client/test/fleet.test.ts
-  - clients/tui/lib/troupe/client/remote.ex
-  - clients/tui/lib/troupe/remote/worker.ex
-  - clients/tui/lib/troupe/ui/hq.ex
-  - docs/admin/roles-and-permissions.md
-  - docs/admin/routine-tasks.md
 gist: Erasing a private session is final when the plane has destroyed its key, which it does itself and at once
 ---
 

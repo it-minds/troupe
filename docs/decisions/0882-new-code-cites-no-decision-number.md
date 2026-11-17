@@ -8,7 +8,6 @@ paths:
   - scripts/decision-citations.exs
   - .github/workflows/ci.yml
   - .github/workflows/dev-check.yml
-  - docs/developer/conventions.md
 gist: A change adds no `Decision N` to code (counted per file against the merge base); existing ones go when their file is touched; docs may cite
 ---
 

@@ -5,34 +5,9 @@ date: 2026-09-25
 status: accepted
 issue: 117
 paths:
-  - ARCHITECTURE.md
-  - PROTOCOL.md
-  - apps/troupe_a2a/lib/troupe/a2a/events.ex
-  - apps/troupe_a2a/test/troupe/a2a/stream_test.exs
   - apps/troupe_core/lib/troupe/agent/budget_question.ex
-  - apps/troupe_core/lib/troupe/agent/server.ex
   - apps/troupe_core/lib/troupe/agent/state.ex
   - apps/troupe_core/lib/troupe/budget.ex
-  - apps/troupe_core/lib/troupe/config.ex
-  - apps/troupe_core/lib/troupe/session/loop.ex
-  - apps/troupe_core/lib/troupe/sessions/index.ex
-  - apps/troupe_core/test/troupe/agent/budget_question_test.exs
-  - apps/troupe_core/test/troupe/agent/tool_failures_test.exs
-  - apps/troupe_core/test/troupe/budget_test.exs
-  - apps/troupe_core/test/troupe/session/loop_test.exs
-  - apps/troupe_core/test/troupe/session/sleep_test.exs
-  - apps/troupe_plane/lib/troupe/plane/triggers.ex
-  - apps/troupe_plane/test/troupe/plane/triggers_test.exs
-  - apps/troupe_protocol/lib/troupe/protocol/schema.ex
-  - apps/troupe_worker/lib/troupe/worker/session/manager.ex
-  - apps/troupe_worker/test/troupe/worker/approval_status_test.exs
-  - apps/troupe_worker/test/troupe/worker/stopped_turn_test.exs
-  - clients/gui/apps/desktop/src/views/Question.tsx
-  - clients/gui/packages/client/src/transcript.ts
-  - clients/tui/lib/troupe/remote/translate.ex
-  - clients/tui/test/troupe/cli_test.exs
-  - clients/tui/test/troupe/remote_translate_test.exs
-  - scripts/live-check
 gist: A tool that keeps failing stops the turn and asks, whatever the budget says; `always` lifts only the limit it was asked about
 ---
 

@@ -6,32 +6,12 @@ status: accepted
 issue: 594
 paths:
   - apps/troupe_protocol/lib/troupe/protocol/agent_check.ex
-  - apps/troupe_protocol/lib/troupe/protocol/schema.ex
   - apps/troupe_core/lib/troupe/agent/validate.ex
   - apps/troupe_core/lib/troupe/agent/local.ex
   - apps/troupe_core/lib/troupe/agent/definitions.ex
   - apps/troupe_gateway/lib/troupe/gateway/agents.ex
   - apps/troupe_worker/lib/troupe/worker/auth.ex
-  - apps/troupe_worker/lib/troupe/worker/plane/commands.ex
   - apps/troupe_plane/lib/troupe/plane/bundles.ex
-  - apps/troupe_plane/lib/troupe/plane/admin.ex
-  - apps/troupe_plane/lib/troupe/plane/admin/api.ex
-  - apps/troupe_plane/lib/troupe/plane/admin/console.ex
-  - clients/gui/packages/client/src/agents.ts
-  - clients/gui/packages/client/src/session.ts
-  - clients/gui/packages/client/src/admin.ts
-  - clients/gui/apps/desktop/src/views/AgentPicker.tsx
-  - clients/gui/apps/desktop/src/views/AgentSwitch.tsx
-  - clients/gui/apps/desktop/src/views/StartSession.tsx
-  - clients/gui/apps/desktop/src/shell.ts
-  - clients/gui/apps/desktop/src/shell-tauri.ts
-  - clients/gui/apps/desktop/src-tauri/src/agent_file.rs
-  - clients/gui/apps/desktop/src-tauri/capabilities/default.json
-  - clients/gui/apps/console/src/views/Bundles.tsx
-  - apps/troupe_gateway/test/troupe/gateway/agents_picker_test.exs
-  - clients/gui/apps/desktop/test/agent-picker.test.tsx
-  - clients/gui/apps/console/test/bundles.test.tsx
-  - PROTOCOL.md
 symbols:
   - Troupe.Protocol.AgentCheck.check/2
   - Troupe.Agent.Local.origin/1

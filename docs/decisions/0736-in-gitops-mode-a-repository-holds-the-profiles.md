@@ -5,30 +5,9 @@ date: 2026-09-29
 status: accepted
 issue: 186
 paths:
-  - ARCHITECTURE.md
-  - apps/troupe_plane/lib/troupe/plane/admin.ex
-  - apps/troupe_plane/lib/troupe/plane/application.ex
-  - apps/troupe_plane/lib/troupe/plane/bundles.ex
-  - apps/troupe_plane/lib/troupe/plane/cluster_policy.ex
-  - apps/troupe_plane/lib/troupe/plane/fleet.ex
-  - apps/troupe_plane/lib/troupe/plane/fleet/profile.ex
-  - apps/troupe_plane/lib/troupe/plane/fleet/release_image.ex
   - apps/troupe_plane/lib/troupe/plane/gitops.ex
   - apps/troupe_plane/lib/troupe/plane/gitops/profiles.ex
   - apps/troupe_plane/lib/troupe/plane/gitops/report.ex
-  - apps/troupe_plane/lib/troupe/plane/provision.ex
-  - apps/troupe_plane/lib/troupe/plane/settings.ex
-  - clients/gui/apps/console/src/views/Profiles.tsx
-  - clients/gui/apps/console/src/views/Pods.tsx
-  - apps/troupe_plane/priv/repo/migrations/20260929000035_gitops_sources.exs
-  - apps/troupe_plane/test/support/fake_cluster.ex
-  - apps/troupe_plane/test/troupe/plane/gitops_test.exs
-  - apps/troupe_plane/test/troupe/plane/provision_test.exs
-  - apps/troupe_plane/test/troupe/plane/release_image_test.exs
-  - apps/troupe_plane/test/troupe/plane/settings_test.exs
-  - charts/troupe/templates/plane-rbac.yaml
-  - docs/admin/profiles-and-policy.md
-  - docs/admin/gitops.md
 gist: In gitops mode a repository holds the profiles and the policy, and the plane reads them from the cluster and never writes git
 ---
 

@@ -6,8 +6,6 @@ status: accepted
 paths:
   - apps/troupe_plane/lib/troupe/plane/triggers.ex
   - apps/troupe_plane/lib/troupe/plane/web/router.ex
-  - apps/troupe_plane/test/troupe/plane/trigger_ingress_test.exs
-  - docs/admin/bundles-and-triggers.md
 symbols:
   - fire_in_window
 gist: "A keyless webhook retry is the run of a firing <60 s before it (trigger row lock), not the clock minute's; a repeat waits for a session still being made, then 409 naming the run"

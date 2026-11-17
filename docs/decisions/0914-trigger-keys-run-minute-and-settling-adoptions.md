@@ -12,13 +12,7 @@ paths:
   - apps/troupe_plane/lib/troupe/plane/identity.ex
   - apps/troupe_plane/lib/troupe/plane/login.ex
   - apps/troupe_plane/lib/troupe/plane/scim.ex
-  - apps/troupe_plane/test/troupe/plane/identity_gaps_test.exs
-  - apps/troupe_plane/test/troupe/plane/trigger_ingress_test.exs
-  - apps/troupe_plane/test/troupe/plane/trigger_sources_test.exs
   - clients/gui/apps/console/src/views/Identity.tsx
-  - clients/gui/apps/console/test/identity.test.tsx
-  - docs/admin/bundles-and-triggers.md
-  - docs/admin/routine-tasks.md
 symbols:
   - Troupe.Plane.Triggers.keyed?/1
   - Troupe.Plane.Admin.trigger_run/3

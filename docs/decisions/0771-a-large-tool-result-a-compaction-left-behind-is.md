@@ -5,13 +5,10 @@ date: 2026-10-04
 status: accepted
 issue: 389
 paths:
-  - ARCHITECTURE.md
   - apps/troupe_core/lib/troupe/agent/server.ex
   - apps/troupe_core/lib/troupe/agent/state.ex
   - apps/troupe_core/lib/troupe/tools/output.ex
   - apps/troupe_core/lib/troupe/tools/read_output.ex
-  - apps/troupe_core/test/troupe/agent/compaction_test.exs
-  - apps/troupe_core/test/troupe/tools/output_test.exs
 gist: A large tool result a compaction left behind is sent from then on as one line naming the `read_output` call that returns it, not again in full on…
 ---
 

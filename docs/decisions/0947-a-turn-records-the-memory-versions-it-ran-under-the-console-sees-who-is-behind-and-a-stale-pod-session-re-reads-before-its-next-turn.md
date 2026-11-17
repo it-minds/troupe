@@ -6,30 +6,11 @@ status: accepted
 issue: 55
 paths:
   - apps/troupe_protocol/lib/troupe/protocol/memory.ex
-  - apps/troupe_protocol/lib/troupe/protocol/schema.ex
   - apps/troupe_plane/lib/troupe/plane/memory.ex
   - apps/troupe_plane/lib/troupe/plane/memory/read.ex
-  - apps/troupe_plane/priv/repo/migrations/20261025000947_memory_reads.exs
-  - apps/troupe_plane/lib/troupe/plane/control/connection.ex
-  - apps/troupe_plane/lib/troupe/plane/harness.ex
-  - apps/troupe_plane/lib/troupe/plane/admin.ex
-  - apps/troupe_plane/lib/troupe/plane/admin/api.ex
-  - apps/troupe_plane/lib/troupe/plane/admin/console.ex
   - apps/troupe_core/lib/troupe/session/plane_memory.ex
-  - apps/troupe_core/lib/troupe/agent/server.ex
-  - apps/troupe_core/lib/troupe/instructions.ex
   - apps/troupe_gateway/lib/troupe/gateway/memory.ex
-  - apps/troupe_gateway/lib/troupe/gateway/dispatch.ex
   - apps/troupe_worker/lib/troupe/worker/memory_read.ex
-  - apps/troupe_worker/lib/troupe/worker/connections.ex
-  - clients/tui/lib/troupe/cli/memory.ex
-  - clients/tui/lib/troupe/cli.ex
-  - clients/gui/packages/client/src/admin.ts
-  - clients/gui/apps/console/src/views/Memory.tsx
-  - clients/gui/apps/console/src/views/Sessions.tsx
-  - PROTOCOL.md
-  - docs/user/memory.md
-  - docs/admin/console.md
 symbols:
   - Troupe.Protocol.Memory.stamp/1
   - Troupe.Plane.Memory.turn/2

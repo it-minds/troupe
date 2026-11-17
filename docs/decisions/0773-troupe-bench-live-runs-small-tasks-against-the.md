@@ -12,10 +12,7 @@ paths:
   - apps/troupe_core/lib/troupe/bench/scenario.ex
   - apps/troupe_core/lib/troupe/llm/provider.ex
   - apps/troupe_core/lib/troupe/reaper.ex
-  - apps/troupe_core/test/support/fake_openai.exs
-  - apps/troupe_core/test/troupe/bench_live_test.exs
   - clients/tui/lib/troupe/cli/bench.ex
-  - docs/developer/bench.md
 gist: "`troupe bench --live` runs small tasks against the person's own model, under a cap it says before it starts, and keeps a history `--compare` reads"
 ---
 

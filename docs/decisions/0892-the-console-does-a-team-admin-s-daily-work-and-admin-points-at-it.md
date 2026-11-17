@@ -5,17 +5,11 @@ date: 2026-10-13
 status: accepted
 issue: 56
 paths:
-  - clients/gui/apps/console/test/coverage.test.ts
   - clients/gui/apps/console/src/views/Team.tsx
   - clients/gui/apps/console/src/views/Teams.tsx
   - clients/gui/apps/console/src/views/Sessions.tsx
   - clients/gui/apps/console/src/views/Overview.tsx
   - clients/gui/apps/console/src/views/Audit.tsx
-  - clients/gui/apps/console/src/views/bits.tsx
-  - clients/gui/apps/console/src/plane.ts
-  - apps/troupe_plane/lib/troupe/plane/web/index.ex
-  - charts/troupe/templates/plane-deployment.yaml
-  - docs/admin/console.md
 gist: "Console door = TROUPE_CONSOLE_URL (/console), /admin stays; losing edits typed; write's audit row read back; every admin.* reached or in owed.ts"
 ---
 

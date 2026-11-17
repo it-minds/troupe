@@ -10,19 +10,7 @@ paths:
   - apps/troupe_core/lib/troupe/llm/providers/openai.ex
   - apps/troupe_core/lib/troupe/llm/provider.ex
   - apps/troupe_core/lib/troupe/llm/request.ex
-  - apps/troupe_core/lib/troupe/agent/server.ex
   - apps/troupe_core/lib/troupe/config/org.ex
-  - apps/troupe_protocol/lib/troupe/protocol/schema.ex
-  - protocol/schema/v1/events/config_note.json
-  - PROTOCOL.md
-  - clients/tui/lib/troupe/remote/translate.ex
-  - clients/gui/packages/client/src/transcript.ts
-  - apps/troupe_core/test/troupe/agent/thinking_ceiling_test.exs
-  - apps/troupe_core/test/troupe/llm/thinking_test.exs
-  - docs/user/configuration.md
-  - docs/user/models.md
-  - docs/admin/configuration.md
-  - docs/admin/client-config.md
 symbols:
   - Troupe.LLM.Request.output_cap/1
   - Troupe.LLM.Provider.thinking_held/2

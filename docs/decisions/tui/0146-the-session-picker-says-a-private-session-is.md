@@ -9,8 +9,6 @@ paths:
   - clients/tui/lib/troupe/remote/capability.ex
   - clients/tui/lib/troupe/remote/worker.ex
   - clients/tui/lib/troupe/ui/tui/view.ex
-  - clients/tui/test/support/fake_remote.ex
-  - clients/tui/test/troupe/private_sessions_test.exs
 gist: The session picker says a private session is private and how its sealing stands, and `c` claims one another device sealed last
 ---
 

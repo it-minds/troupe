@@ -6,30 +6,10 @@ status: accepted
 supersedes: [913, 914, 915]
 paths:
   - apps/troupe_core/lib/troupe/session.ex
-  - apps/troupe_core/lib/troupe/registry.ex
-  - apps/troupe_core/lib/troupe/config.ex
   - apps/troupe_core/lib/troupe/config/explain.ex
   - apps/troupe_core/lib/troupe/config/settings.ex
-  - apps/troupe_gateway/lib/troupe/gateway/dispatch.ex
-  - apps/troupe_protocol/lib/troupe/protocol/schema.ex
-  - apps/troupe_worker/lib/troupe/worker/auth.ex
-  - apps/troupe_worker/lib/troupe/worker/session/restore.ex
-  - apps/troupe_worker/test/troupe/worker/config_explain_test.exs
   - clients/tui/lib/troupe/cli/session_config.ex
-  - clients/tui/lib/troupe/client/remote.ex
-  - clients/tui/lib/troupe/settings.ex
-  - clients/tui/test/troupe/pod_settings_test.exs
-  - clients/gui/packages/client/src/config.ts
-  - clients/gui/apps/desktop/src/views/PodConfig.tsx
-  - clients/gui/packages/client/test/support/waits.ts
-  - clients/gui/apps/desktop/test/support.ts
-  - clients/gui/apps/console/test/support.ts
-  - apps/troupe_plane/lib/troupe/plane/triggers.ex
-  - apps/troupe_plane/priv/repo/migrations/20261018000918_dead_trigger_keys.exs
   - apps/troupe_plane/lib/troupe/plane/identity.ex
-  - apps/troupe_plane/lib/troupe/plane/scim.ex
-  - scripts/dev-down
-  - apps/troupe_operator/test/support/e2e/world.ex
 symbols:
   - Troupe.Session.resolved/1
   - Troupe.Config.Settings.describe_session/1

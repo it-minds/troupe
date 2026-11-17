@@ -7,9 +7,6 @@ paths:
   - apps/troupe_core/lib/troupe/registry.ex
   - apps/troupe_core/lib/troupe/tools.ex
   - apps/troupe_core/lib/troupe/tools/ask_user.ex
-  - apps/troupe_core/test/troupe/session/sleep_test.exs
-  - apps/troupe_core/test/troupe/sessions/unseen_test.exs
-  - apps/troupe_core/test/troupe/tools/ask_user_test.exs
   - apps/troupe_protocol/lib/troupe/protocol/schema.ex
   - clients/tui/lib/troupe/remote/translate.ex
 gist: A question is the other half of an approval, and it travels the same way

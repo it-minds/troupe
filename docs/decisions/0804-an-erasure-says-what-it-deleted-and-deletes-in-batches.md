@@ -4,22 +4,13 @@ title: An erasure reads every delete's answer and deletes a thousand versions to
 date: 2026-10-06
 status: accepted
 paths:
-  - PROTOCOL.md
   - apps/troupe_gateway/lib/troupe/gateway/private.ex
-  - apps/troupe_gateway/test/support/fake_plane.ex
   - apps/troupe_plane/lib/troupe/plane/application.ex
   - apps/troupe_plane/lib/troupe/plane/erasure.ex
   - apps/troupe_plane/lib/troupe/plane/harness.ex
-  - apps/troupe_plane/test/troupe/plane/private_erasure_test.exs
   - apps/troupe_protocol/lib/troupe/object_store.ex
-  - apps/troupe_protocol/test/support/object_store_case.ex
-  - apps/troupe_protocol/test/support/object_store_stand_in.ex
-  - apps/troupe_protocol/test/troupe/object_store_deletes_test.exs
-  - apps/troupe_protocol/test/troupe/object_store_test.exs
   - apps/troupe_worker/lib/troupe/worker/plane/commands.ex
   - apps/troupe_worker/lib/troupe/worker/plane/link.ex
-  - apps/troupe_worker/test/troupe/worker/erasure_test.exs
-  - docs/admin/routine-tasks.md
 symbols:
   - Troupe.ObjectStore.delete_prefix/3
   - Troupe.Plane.Erasure.device_applied/2

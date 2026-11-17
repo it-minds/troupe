@@ -5,17 +5,9 @@ date: 2026-10-12
 status: accepted
 issue: 474
 paths:
-  - docs/design/frames.md
-  - clients/tui/lib/troupe/ui/tui/model.ex
   - clients/tui/lib/troupe/ui/tui/view.ex
-  - clients/tui/lib/troupe/ui/tui/server.ex
   - clients/tui/lib/troupe/ui/tui/theme.ex
-  - clients/tui/lib/troupe/ui/tui/palette.ex
-  - clients/tui/lib/mix/tasks/troupe.palette.ex
-  - clients/tui/lib/troupe/settings.ex
-  - clients/tui/lib/troupe/remote/worker.ex
-  - apps/troupe_core/lib/troupe/config/schema.ex
-  - clients/tui/test/troupe/frames_test.exs
+  - clients/tui/lib/troupe/ui/tui/model.ex
 symbols:
   - Troupe.UI.TUI.Model.transcript_blocks/3
   - Troupe.UI.TUI.Model.curtain_line/4

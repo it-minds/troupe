@@ -5,7 +5,6 @@ date: 2026-09-20
 status: accepted
 paths:
   - apps/troupe_gateway/lib/troupe/gateway/worktrees.ex
-  - apps/troupe_gateway/test/troupe/gateway/branches_test.exs
 gist: A worktree ends in a merge or a discard, and a merge that cannot complete leaves no trace
 ---
 

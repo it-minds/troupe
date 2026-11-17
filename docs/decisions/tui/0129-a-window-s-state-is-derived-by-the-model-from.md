@@ -5,7 +5,7 @@ date: 2026-09-27
 status: accepted
 supersedes: [4]
 paths:
-  - clients/tui/test/troupe/window_attention_test.exs
+  - clients/tui/lib/troupe/ui/tui/model.ex
 gist: A window's state is derived by the model from what the daemon sends, since the daemon sends none
 ---
 

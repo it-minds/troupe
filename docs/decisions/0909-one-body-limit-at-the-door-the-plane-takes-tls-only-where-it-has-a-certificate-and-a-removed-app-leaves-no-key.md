@@ -7,21 +7,10 @@ supersedes: [904, 906]
 paths:
   - apps/troupe_plane/lib/troupe/plane/web/body_limit.ex
   - apps/troupe_plane/lib/troupe/plane/web/endpoint.ex
-  - apps/troupe_plane/lib/troupe/plane/web/router.ex
   - apps/troupe_plane/lib/troupe/plane/control/tls.ex
-  - apps/troupe_plane/lib/troupe/plane/control/listener.ex
-  - config/runtime.exs
-  - charts/troupe/templates/plane-deployment.yaml
   - apps/troupe_plane/lib/troupe/plane/github.ex
   - apps/troupe_plane/lib/troupe/plane/github/key.ex
-  - apps/troupe_plane/lib/troupe/plane/github/webhook_secret.ex
   - apps/troupe_protocol/lib/troupe/kms/policy.ex
-  - clients/gui/apps/desktop/src-tauri/src/daemon.rs
-  - apps/troupe_plane/test/troupe/plane/body_limit_test.exs
-  - apps/troupe_plane/test/troupe/plane/control_tls_test.exs
-  - apps/troupe_plane/test/troupe/plane/github_test.exs
-  - docs/admin/github.md
-  - docs/admin/configuration.md
 symbols:
   - Troupe.Plane.Web.BodyLimit
   - Troupe.Plane.Control.TLS.required?/0

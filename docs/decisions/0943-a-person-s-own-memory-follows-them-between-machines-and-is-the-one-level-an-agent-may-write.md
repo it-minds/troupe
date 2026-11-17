@@ -6,27 +6,13 @@ status: accepted
 issue: 55
 paths:
   - apps/troupe_protocol/lib/troupe/protocol/memory.ex
-  - apps/troupe_protocol/lib/troupe/protocol/schema.ex
   - apps/troupe_plane/lib/troupe/plane/memory.ex
-  - apps/troupe_plane/lib/troupe/plane/harness.ex
-  - apps/troupe_plane/lib/troupe/plane/admin.ex
-  - apps/troupe_plane/lib/troupe/plane/identity.ex
-  - apps/troupe_plane/lib/troupe/plane/control/connection.ex
   - apps/troupe_core/lib/troupe/user_memory.ex
   - apps/troupe_core/lib/troupe/tools/remember.ex
   - apps/troupe_core/lib/troupe/instructions.ex
-  - apps/troupe_core/lib/troupe/plane_memory.ex
   - apps/troupe_gateway/lib/troupe/gateway/memory.ex
-  - apps/troupe_gateway/lib/troupe/gateway/dispatch.ex
   - apps/troupe_worker/lib/troupe/worker/user_memory.ex
   - clients/tui/lib/troupe/cli/memory.ex
-  - clients/tui/lib/troupe/cli.ex
-  - clients/gui/packages/client/src/instructions.ts
-  - clients/gui/packages/client/src/daemon.ts
-  - clients/gui/apps/desktop/src/views/Instructions.tsx
-  - clients/gui/apps/console/src/views/Mine.tsx
-  - PROTOCOL.md
-  - docs/user/memory.md
 symbols:
   - Troupe.Plane.Memory.own/1
   - Troupe.Plane.Memory.save_own/4

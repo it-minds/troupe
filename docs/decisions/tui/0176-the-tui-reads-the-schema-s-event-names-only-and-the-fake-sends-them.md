@@ -8,7 +8,6 @@ supersedes: [98]
 paths:
   - clients/tui/lib/troupe/remote/translate.ex
   - clients/tui/lib/troupe/remote/worker.ex
-  - clients/tui/test/support/fake_remote.ex
 gist: "Events only under the schema's names (llm_response, tool_call_started, ...) in the worker's envelope; no dotted spellings; the fake sends the worker's"
 ---
 

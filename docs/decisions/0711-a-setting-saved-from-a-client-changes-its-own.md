@@ -8,12 +8,6 @@ paths:
   - apps/troupe_core/lib/troupe/config.ex
   - apps/troupe_core/lib/troupe/config/migrate.ex
   - apps/troupe_core/lib/troupe/config/yaml.ex
-  - apps/troupe_core/test/troupe/agent/budget_question_test.exs
-  - apps/troupe_core/test/troupe/config/explain_test.exs
-  - apps/troupe_core/test/troupe/config/model_settings_test.exs
-  - apps/troupe_core/test/troupe/config/write_key_test.exs
-  - apps/troupe_core/test/troupe/config/yaml_test.exs
-  - clients/tui/test/troupe/settings_test.exs
 gist: A setting saved from a client changes its own line of `config.yaml` and nothing else; the file is edited, not rewritten
 ---
 

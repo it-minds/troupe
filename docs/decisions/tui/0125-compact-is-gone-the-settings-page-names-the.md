@@ -1,17 +1,18 @@
 ---
 number: 125
-title: "`/compact` is gone, the settings page names the commands the table has, and headless mode answers the budget question as the question it is"
+title: The settings page names the commands the table has, and headless mode answers the budget question as the question it is
 date: 2026-09-27
 status: accepted
 issue: 124
 supersedes: [86]
 paths:
-  - clients/tui/lib/troupe/client.ex
-  - clients/tui/test/troupe/cli_test.exs
-  - clients/tui/test/troupe/command_palette_test.exs
-  - clients/tui/test/troupe/settings_test.exs
-gist: "`/compact` is gone, the settings page names the commands the table has, and headless mode answers the budget question as the question it is"
+  - clients/tui/lib/troupe/settings.ex
+  - clients/tui/lib/troupe/ui/headless/printer.ex
+gist: The settings help lists the command table's setup commands; headless answers the budget question with stop through question.answer and exits 1
 ---
+
+Corrected 2026-11-17: the `/compact` half below no longer holds; root Decision 1024 brought
+`/compact` back as `session.compact`.
 
 Paper cuts
 after 0.6.0 (defects D32), part of #124. `/compact` asked a session to shrink its

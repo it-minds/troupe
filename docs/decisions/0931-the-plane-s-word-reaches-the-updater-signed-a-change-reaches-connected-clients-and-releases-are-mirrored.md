@@ -7,29 +7,10 @@ issue: 657
 paths:
   - clients/gui/apps/desktop/src-tauri/src/plane_word.rs
   - clients/gui/apps/desktop/src-tauri/src/update.rs
-  - clients/gui/apps/desktop/src-tauri/src/daemon.rs
-  - clients/gui/apps/desktop/src/updates.ts
-  - clients/gui/apps/desktop/src/shell.ts
-  - clients/gui/packages/client/src/update.ts
-  - clients/gui/packages/client/src/planeSignature.ts
-  - clients/gui/apps/console/src/views/Integrations.tsx
-  - apps/troupe_protocol/lib/troupe/protocol/plane_signature.ex
-  - apps/troupe_protocol/lib/troupe/release/minisign.ex
-  - apps/troupe_protocol/lib/troupe/release/manifest.ex
-  - apps/troupe_plane/lib/troupe/plane/harness.ex
   - apps/troupe_plane/lib/troupe/plane/releases.ex
-  - apps/troupe_plane/lib/troupe/plane/admin.ex
-  - apps/troupe_plane/lib/troupe/plane/web/router.ex
   - apps/troupe_core/lib/troupe/plane_keys.ex
-  - apps/troupe_core/lib/troupe/session.ex
   - apps/troupe_core/lib/troupe/session/organisation.ex
-  - apps/troupe_core/lib/troupe/agent/server.ex
-  - apps/troupe_gateway/lib/troupe/gateway/plane.ex
   - apps/troupe_gateway/lib/troupe/gateway/policy.ex
-  - clients/tui/lib/troupe/remote/plane.ex
-  - PROTOCOL.md
-  - docs/user/updating.md
-  - docs/admin/routine-tasks.md
 symbols:
   - Troupe.Gateway.Policy
   - Troupe.Session.Organisation

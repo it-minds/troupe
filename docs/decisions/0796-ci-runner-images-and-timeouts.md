@@ -5,7 +5,6 @@ date: 2026-10-06
 status: accepted
 paths:
   - .github/workflows/
-  - apps/troupe_core/test/troupe/agent/acp_agent_test.exs
 gist: No ubuntu-latest (26.04 where trialled, 24.04 for the cluster suite); every job has timeout-minutes; the ACP test's fake agents take no -pa
 ---
 

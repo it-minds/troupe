@@ -8,18 +8,6 @@ paths:
   - apps/troupe_plane/lib/troupe/plane/gitops/trigger_copies.ex
   - apps/troupe_plane/lib/troupe/plane/gitops.ex
   - apps/troupe_plane/lib/troupe/plane/gitops/triggers.ex
-  - apps/troupe_plane/lib/troupe/plane/admin.ex
-  - apps/troupe_plane/lib/troupe/plane/admin/api.ex
-  - apps/troupe_plane/lib/troupe/plane/triggers.ex
-  - apps/troupe_plane/lib/troupe/plane/triggers/trigger.ex
-  - apps/troupe_plane/priv/repo/migrations/20261029000971_trigger_copies.exs
-  - apps/troupe_plane/test/troupe/plane/trigger_copies_test.exs
-  - charts/troupe/templates/plane-rbac.yaml
-  - clients/gui/apps/console/src/views/Triggers.tsx
-  - clients/gui/apps/console/test/trigger-copies.test.tsx
-  - clients/gui/packages/client/src/admin.ts
-  - docs/admin/gitops.md
-  - docs/admin/bundles-and-triggers.md
 symbols:
   - Troupe.Plane.Gitops.TriggerCopies
   - Troupe.Plane.Admin.triggers_repository/2

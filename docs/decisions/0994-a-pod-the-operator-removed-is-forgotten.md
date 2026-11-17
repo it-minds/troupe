@@ -8,11 +8,9 @@ paths:
   - apps/troupe_plane/lib/troupe/plane/fleet.ex
   - apps/troupe_plane/lib/troupe/plane/fleet/sweeper.ex
   - apps/troupe_plane/lib/troupe/plane/admin.ex
-  - apps/troupe_plane/test/troupe/plane/fleet_test.exs
   - clients/gui/apps/console/src/views/Pods.tsx
   - clients/gui/apps/console/src/views/Overview.tsx
   - clients/gui/packages/client/src/admin.ts
-  - PROTOCOL.md
 symbols:
   - Troupe.Plane.Fleet.listed?/2
   - Troupe.Plane.Fleet.gone?/2

@@ -7,8 +7,6 @@ issue: 37
 paths:
   - apps/troupe_protocol/lib/mix/tasks/compile.troupe_version.ex
   - clients/tui/mix.exs
-  - docs/developer/build.md
-  - docs/developer/repo-structure.md
   - docs/overrides/hooks.py
   - scripts/version.exs
 gist: One `VERSION` for everything this repository releases, and the TUI builds against the harness of its own commit

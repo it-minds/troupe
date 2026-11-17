@@ -9,8 +9,6 @@ paths:
   - clients/tui/lib/troupe/remote/translate.ex
   - clients/tui/lib/troupe/client/message.ex
   - clients/tui/lib/troupe/ui/tui/model.ex
-  - clients/tui/test/troupe/frames_test.exs
-  - clients/tui/test/troupe/remote_translate_test.exs
 symbols:
   - Troupe.Client.Message.reasoning/1
   - Troupe.Client.Message.reasoning_block/1

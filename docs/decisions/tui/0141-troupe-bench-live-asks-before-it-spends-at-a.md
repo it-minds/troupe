@@ -6,7 +6,6 @@ status: accepted
 paths:
   - clients/tui/lib/troupe/cli.ex
   - clients/tui/lib/troupe/cli/bench.ex
-  - docs/developer/bench.md
 gist: "`troupe bench --live` asks before it spends, at a terminal only, and `--json` and `--compare` take a value or none"
 ---
 

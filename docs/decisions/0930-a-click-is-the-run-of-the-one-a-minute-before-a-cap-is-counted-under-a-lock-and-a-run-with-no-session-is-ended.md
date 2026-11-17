@@ -9,12 +9,6 @@ paths:
   - apps/troupe_plane/lib/troupe/plane/triggers/scheduler.ex
   - apps/troupe_plane/lib/troupe/plane/admin.ex
   - apps/troupe_plane/lib/troupe/plane/github/issues.ex
-  - apps/troupe_plane/test/troupe/plane/trigger_ingress_test.exs
-  - apps/troupe_plane/test/troupe/plane/trigger_sources_test.exs
-  - apps/troupe_plane/test/troupe/plane/github_issues_test.exs
-  - docs/admin/bundles-and-triggers.md
-  - docs/admin/github.md
-  - docs/admin/github-runs.md
 symbols:
   - fire_by_hand
   - end_unmade

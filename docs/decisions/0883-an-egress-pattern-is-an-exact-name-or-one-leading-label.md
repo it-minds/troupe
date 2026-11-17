@@ -6,14 +6,9 @@ status: accepted
 issue: 662
 paths:
   - apps/troupe_protocol/lib/troupe/policy.ex
-  - apps/troupe_protocol/test/troupe/policy_test.exs
   - apps/troupe_operator/lib/troupe/operator/resources.ex
-  - apps/troupe_operator/test/troupe/operator/resources_test.exs
-  - apps/troupe_operator/test/troupe/operator/reconciler_test.exs
-  - apps/troupe_operator/test/support/fixtures.ex
   - charts/troupe/templates/admission-policy.yaml
   - charts/troupe/crds/troupepolicy.yaml
-  - docs/admin/profiles-and-policy.md
 symbols:
   - Troupe.Policy.pattern?/1
   - Troupe.Policy.matches?/2

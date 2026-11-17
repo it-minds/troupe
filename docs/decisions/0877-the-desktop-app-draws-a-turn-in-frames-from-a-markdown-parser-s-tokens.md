@@ -7,17 +7,6 @@ issue: 474
 paths:
   - clients/gui/apps/desktop/src/frames.ts
   - clients/gui/apps/desktop/src/views/Frames.tsx
-  - clients/gui/apps/desktop/src/views/Session.tsx
-  - clients/gui/apps/desktop/src/views/CommandPalette.tsx
-  - clients/gui/apps/desktop/src/hooks.ts
-  - clients/gui/apps/desktop/src/styles.css
-  - clients/gui/apps/desktop/src/tokens.css
-  - clients/gui/apps/desktop/package.json
-  - clients/gui/scripts/tokens.ts
-  - clients/gui/scripts/fake-deployment.ts
-  - clients/gui/packages/client/src/transcript.ts
-  - clients/gui/apps/desktop/test/frames.test.tsx
-  - docs/design/frames.md
 symbols:
   - layout
   - curtainLine

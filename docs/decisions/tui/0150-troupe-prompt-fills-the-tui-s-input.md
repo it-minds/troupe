@@ -8,7 +8,6 @@ paths:
   - clients/tui/lib/troupe/cli.ex
   - clients/tui/lib/troupe/cli/runner.ex
   - clients/tui/lib/troupe/ui/tui/server.ex
-  - clients/tui/test/troupe/cli_test.exs
 symbols:
   - Troupe.CLI.Runner.window_opts/1
 gist: "--prompt fills the command line at mount, cursor at its end, focus there; nothing is sent, and no other mode reads it"

@@ -6,38 +6,10 @@ status: accepted
 issue: 765
 paths:
   - apps/troupe_plane/lib/troupe/plane/invites.ex
-  - apps/troupe_plane/lib/troupe/plane/harness.ex
-  - apps/troupe_plane/lib/troupe/plane/erasure.ex
-  - apps/troupe_plane/lib/troupe/plane/remote/watch.ex
-  - apps/troupe_plane/lib/troupe/plane/sessions/session.ex
-  - apps/troupe_plane/priv/repo/migrations/20261025000949_session_invites.exs
-  - apps/troupe_plane/test/troupe/plane/invites_test.exs
   - apps/troupe_protocol/lib/troupe/kms.ex
-  - apps/troupe_protocol/lib/troupe/kms/open_bao.ex
-  - apps/troupe_protocol/lib/troupe/kms/policy.ex
-  - apps/troupe_protocol/lib/troupe/sessions/cipher.ex
-  - apps/troupe_protocol/lib/troupe/sessions/context.ex
   - apps/troupe_protocol/lib/troupe/sessions/sealer.ex
-  - apps/troupe_protocol/lib/troupe/protocol/schema.ex
-  - apps/troupe_worker/lib/troupe/worker/plane/commands.ex
   - apps/troupe_gateway/lib/troupe/gateway/invites.ex
   - apps/troupe_gateway/lib/troupe/gateway/private.ex
-  - apps/troupe_gateway/lib/troupe/gateway/dispatch.ex
-  - apps/troupe_gateway/test/troupe/gateway/invites_test.exs
-  - apps/troupe_core/lib/troupe/commands.ex
-  - clients/tui/lib/troupe/client/invites.ex
-  - clients/tui/lib/troupe/client/daemon.ex
-  - clients/tui/lib/troupe/client/remote.ex
-  - clients/tui/lib/troupe/ui/tui/server.ex
-  - clients/gui/packages/client/src/invites.ts
-  - clients/gui/packages/client/src/fleet.ts
-  - clients/gui/packages/client/src/remote.ts
-  - clients/gui/apps/desktop/src/views/Invites.tsx
-  - clients/gui/apps/console/src/views/Invited.tsx
-  - clients/gui/apps/console/src/views/Remote.tsx
-  - docs/user/sessions-shared.md
-  - docs/admin/roles-and-permissions.md
-  - PROTOCOL.md
 symbols:
   - Troupe.Plane.Invites
   - Troupe.Gateway.Invites

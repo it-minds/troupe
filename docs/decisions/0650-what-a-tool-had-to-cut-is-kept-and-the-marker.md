@@ -7,7 +7,6 @@ paths:
   - apps/troupe_core/lib/troupe/tools.ex
   - apps/troupe_core/lib/troupe/tools/output.ex
   - apps/troupe_core/lib/troupe/tools/read_output.ex
-  - apps/troupe_core/test/troupe/tools/read_output_test.exs
 gist: What a tool had to cut is kept, and the marker says how to read the rest
 ---
 

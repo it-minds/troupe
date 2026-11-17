@@ -6,23 +6,9 @@ status: accepted
 issue: 258
 paths:
   - apps/troupe_operator/lib/troupe/operator/reconciler.ex
-  - apps/troupe_operator/test/e2e/upgrade_test.exs
-  - apps/troupe_operator/test/support/e2e/plane.ex
   - apps/troupe_plane/lib/troupe/plane/enrolment.ex
-  - apps/troupe_plane/lib/troupe/plane/fleet.ex
-  - apps/troupe_plane/lib/troupe/plane/fleet/scaler.ex
   - apps/troupe_plane/lib/troupe/plane/fleet/upgrade.ex
   - apps/troupe_plane/lib/troupe/plane/fleet/worker.ex
-  - apps/troupe_plane/lib/troupe/plane/placement.ex
-  - apps/troupe_plane/lib/troupe/plane/provision.ex
-  - apps/troupe_plane/priv/repo/migrations/20260929000033_worker_upgrade_pending.exs
-  - apps/troupe_plane/test/troupe/plane/gitops_test.exs
-  - apps/troupe_plane/test/troupe/plane/placement_test.exs
-  - apps/troupe_plane/test/troupe/plane/upgrade_test.exs
-  - apps/troupe_protocol/lib/troupe/worker_profile.ex
-  - apps/troupe_protocol/test/troupe/worker_profile_upgrade_test.exs
-  - docs/admin/profiles-and-policy.md
-  - docs/admin/gitops.md
 gist: "A worker upgrade finishes by itself: the plane drains a pod behind once it holds no active session and records that on the profile, and the…"
 ---
 

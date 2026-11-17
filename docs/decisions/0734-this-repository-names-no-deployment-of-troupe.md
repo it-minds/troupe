@@ -6,7 +6,6 @@ status: accepted
 issue: 186
 paths:
   - .github/workflows/ci.yml
-  - docs/developer/deployment.md
   - scripts/check-neutral.exs
 gist: This repository names no deployment of Troupe, and a check in CI keeps it so
 ---

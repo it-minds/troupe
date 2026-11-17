@@ -5,23 +5,9 @@ date: 2026-09-26
 status: accepted
 issue: 183
 paths:
-  - PROTOCOL.md
   - apps/troupe_core/lib/troupe/agent/budget_question.ex
-  - apps/troupe_core/lib/troupe/agent/server.ex
   - apps/troupe_core/lib/troupe/agent/state.ex
   - apps/troupe_core/lib/troupe/budget.ex
-  - apps/troupe_core/lib/troupe/config.ex
-  - apps/troupe_core/test/troupe/agent/budget_answer_test.exs
-  - apps/troupe_core/test/troupe/agent/budget_question_test.exs
-  - apps/troupe_core/test/troupe/budget_test.exs
-  - apps/troupe_core/test/troupe/config/write_key_test.exs
-  - apps/troupe_protocol/lib/troupe/protocol/schema.ex
-  - apps/troupe_worker/lib/troupe/worker/session/restore.ex
-  - apps/troupe_worker/test/troupe/worker/unattended_session_test.exs
-  - clients/gui/apps/desktop/src/views/Question.tsx
-  - clients/gui/apps/desktop/test/question.test.tsx
-  - clients/gui/packages/client/src/transcript.ts
-  - clients/gui/packages/client/test/transcript.test.ts
 gist: "The budget question is answered with how much more and for how long: a typed amount raises the limit that asked, for this run, this session or this…"
 ---
 

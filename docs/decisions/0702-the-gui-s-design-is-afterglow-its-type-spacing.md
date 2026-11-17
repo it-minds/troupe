@@ -8,10 +8,6 @@ paths:
   - apps/troupe_plane/lib/mix/tasks/troupe.theme.ex
   - apps/troupe_plane/lib/troupe/plane/web/page.ex
   - clients/gui/apps/desktop/src/theme.ts
-  - clients/gui/docs/design/DESIGN.md
-  - clients/gui/docs/design/themes/THEMES.md
-  - docs/developer/architecture.md
-  - docs/third-party-licences.md
   - scripts/licences.exs
 gist: "The GUI's design is Afterglow: its type, spacing and square corners in every theme, its palette as the default, and the three earlier palettes kept…"
 ---

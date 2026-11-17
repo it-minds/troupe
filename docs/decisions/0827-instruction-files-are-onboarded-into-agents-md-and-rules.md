@@ -10,17 +10,7 @@ paths:
   - apps/troupe_core/lib/troupe/onboard/notice.ex
   - apps/troupe_core/lib/troupe/onboard/source.ex
   - apps/troupe_core/lib/troupe/tools/onboard_write.ex
-  - apps/troupe_core/lib/troupe/memory.ex
   - apps/troupe_core/lib/troupe/instructions/front_matter.ex
-  - apps/troupe_core/lib/troupe.ex
-  - apps/troupe_core/priv/agents/librarian.md
-  - apps/troupe_core/test/troupe/onboard/instructions_test.exs
-  - apps/troupe_core/test/troupe/onboard/notice_test.exs
-  - apps/troupe_core/test/troupe/onboard/librarian_test.exs
-  - apps/troupe_core/test/troupe/memory_test.exs
-  - clients/tui/lib/troupe/cli/onboard.ex
-  - clients/tui/lib/troupe/remote/translate.ex
-  - clients/tui/test/troupe/onboard_cli_test.exs
 symbols:
   - Troupe.Onboard.Instructions
   - Troupe.Onboard.Notice.due/2

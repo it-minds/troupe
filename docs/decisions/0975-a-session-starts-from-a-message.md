@@ -5,30 +5,11 @@ date: 2026-11-12
 status: accepted
 paths:
   - clients/gui/apps/desktop/src/views/StartSession.tsx
-  - clients/gui/apps/desktop/src/App.tsx
-  - clients/gui/apps/desktop/src/styles.css
-  - clients/gui/apps/desktop/test/new-session.test.tsx
   - clients/gui/packages/client/src/newSession.ts
-  - clients/gui/packages/client/test/new-session.test.ts
-  - clients/gui/packages/client/src/plane.ts
-  - clients/gui/packages/client/src/daemon.ts
-  - apps/troupe_plane/lib/troupe/plane/harness.ex
-  - apps/troupe_plane/lib/troupe/plane/profile_view.ex
-  - apps/troupe_plane/lib/troupe/plane/sessions.ex
-  - apps/troupe_plane/lib/troupe/plane/sessions/session.ex
-  - apps/troupe_plane/priv/repo/migrations/20261112000975_session_agent.exs
-  - apps/troupe_worker/lib/troupe/worker/session/manager.ex
-  - apps/troupe_worker/lib/troupe/worker/auth.ex
-  - apps/troupe_core/lib/troupe/sessions/title.ex
-  - apps/troupe_core/lib/troupe/sessions/index.ex
-  - apps/troupe_gateway/lib/troupe/gateway/dispatch.ex
-  - apps/troupe_protocol/lib/troupe/protocol/schema.ex
   - clients/tui/lib/troupe/ui/new_session.ex
   - clients/tui/lib/troupe/ui/tui/new_session_page.ex
   - clients/tui/lib/troupe/cli/run_target.ex
-  - PROTOCOL.md
-  - docs/user/sessions.md
-  - clients/gui/README.md
+  - apps/troupe_core/lib/troupe/sessions/title.ex
 symbols:
   - autoPickProfile
   - messageTokens

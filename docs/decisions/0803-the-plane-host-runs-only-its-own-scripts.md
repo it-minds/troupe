@@ -9,11 +9,9 @@ paths:
   - apps/troupe_plane/lib/troupe/plane/web/endpoint.ex
   - apps/troupe_plane/lib/troupe/plane/web/page.ex
   - apps/troupe_plane/priv/static/webfonts.js
-  - apps/troupe_plane/test/troupe/plane/content_security_policy_test.exs
   - clients/gui/docker/headers.conf
   - clients/gui/docker/nginx.conf
   - clients/gui/Dockerfile
-  - clients/gui/apps/desktop/test/content-security-policy.test.tsx
 symbols:
   - Troupe.Plane.Web.CSP
 gist: script-src 'self' everywhere on the plane's host, no inline handler; the plane's plug and the GUI's headers.conf set it, on every nginx location

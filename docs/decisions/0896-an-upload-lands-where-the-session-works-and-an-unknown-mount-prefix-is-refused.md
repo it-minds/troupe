@@ -11,7 +11,6 @@ paths:
   - apps/troupe_core/lib/troupe/commands.ex
   - apps/troupe_gateway/lib/troupe/gateway/dispatch.ex
   - clients/tui/lib/troupe/ui/tui/server.ex
-  - docs/user/cli-reference.md
 gist: "fs.upload writes to session:/, the checkout in a local session (documented, not moved); a word: prefix that is no mount is refused, not made a directory"
 ---
 

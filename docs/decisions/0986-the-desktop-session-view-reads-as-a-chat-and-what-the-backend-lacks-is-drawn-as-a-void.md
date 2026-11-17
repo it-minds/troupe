@@ -8,15 +8,7 @@ supersedes: [708, 877]
 paths:
   - clients/gui/apps/desktop/src/views/Session.tsx
   - clients/gui/apps/desktop/src/views/Approval.tsx
-  - clients/gui/apps/desktop/src/views/AgentSwitch.tsx
-  - clients/gui/apps/desktop/src/views/CommandPalette.tsx
-  - clients/gui/apps/desktop/src/views/Publish.tsx
-  - clients/gui/apps/desktop/src/styles.css
   - clients/gui/packages/client/src/transcript.ts
-  - clients/gui/packages/client/src/session.ts
-  - clients/gui/packages/client/src/daemon.ts
-  - clients/gui/docs/design/DESIGN.md
-  - clients/gui/docs/design/session-chat.dc.html
 symbols:
   - Composer
   - ContextRing

@@ -7,14 +7,10 @@ issue: 336
 paths:
   - apps/troupe_operator/lib/troupe/operator/resources.ex
   - apps/troupe_operator/lib/troupe/operator/settings.ex
-  - apps/troupe_operator/test/troupe/operator/resources_test.exs
   - apps/troupe_protocol/lib/troupe/kms/open_bao/login.ex
   - apps/troupe_protocol/lib/troupe/kms/policy.ex
   - apps/troupe_worker/lib/troupe/worker/application.ex
-  - apps/troupe_worker/test/support/fake_bao_login.ex
-  - apps/troupe_worker/test/troupe/worker/bao_login_test.exs
   - config/runtime.exs
-  - docs/admin/roles-and-permissions.md
 gist: A worker logs in to OpenBao under the role its pod is given and keeps the login until shortly before it runs out
 ---
 

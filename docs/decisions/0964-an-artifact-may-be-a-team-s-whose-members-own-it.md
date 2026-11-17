@@ -10,9 +10,6 @@ paths:
   - apps/troupe_plane/lib/troupe/plane/artifacts/artifact.ex
   - apps/troupe_plane/priv/repo/migrations/20261028000964_artifact_owner_team.exs
   - apps/troupe_plane/lib/troupe/plane/harness.ex
-  - apps/troupe_plane/test/troupe/plane/artifact_ownership_test.exs
-  - PROTOCOL.md
-  - docs/user/artifacts.md
 symbols:
   - Troupe.Plane.Artifacts.transfer/4
   - Troupe.Plane.Artifacts.role/2

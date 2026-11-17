@@ -4,12 +4,9 @@ title: A branch is a session with a `parent`, and nothing more
 date: 2026-09-20
 status: accepted
 paths:
-  - PROTOCOL.md
   - apps/troupe_core/lib/troupe/session.ex
   - apps/troupe_core/lib/troupe/tools.ex
   - apps/troupe_core/lib/troupe/tools/read_branch.ex
-  - apps/troupe_core/test/troupe/tools/read_branch_test.exs
-  - apps/troupe_gateway/test/troupe/gateway/branches_test.exs
 gist: A branch is a session with a `parent`, and nothing more
 ---
 

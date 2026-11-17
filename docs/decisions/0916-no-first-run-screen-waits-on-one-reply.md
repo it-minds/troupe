@@ -13,9 +13,6 @@ paths:
   - clients/gui/apps/desktop/src/views/SignIn.tsx
   - clients/gui/apps/desktop/src-tauri/capabilities/default.json
   - clients/gui/packages/client/src/setup.ts
-  - clients/gui/packages/client/test/setup-finished.test.ts
-  - clients/gui/packages/client/test/support/daemon.ts
-  - clients/gui/apps/desktop/test/first-run-finish.test.tsx
 symbols:
   - setupFinishedSince
   - finishedFlow

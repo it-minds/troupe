@@ -8,9 +8,7 @@ supersedes: [840]
 paths:
   - apps/troupe_gateway/lib/troupe/gateway/worktrees.ex
   - apps/troupe_gateway/lib/troupe/gateway/dispatch.ex
-  - apps/troupe_gateway/test/troupe/gateway/worktrees_test.exs
   - apps/troupe_core/lib/troupe/tools/read_branch.ex
-  - apps/troupe_core/test/troupe/tools/read_branch_test.exs
 symbols:
   - Troupe.Gateway.Worktrees.list/1
   - Troupe.Gateway.Worktrees.remove/2

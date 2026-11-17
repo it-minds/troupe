@@ -10,13 +10,7 @@ paths:
   - apps/troupe_core/lib/troupe/tool.ex
   - apps/troupe_core/lib/troupe/tools/todo.ex
   - apps/troupe_core/lib/troupe/llm/catalog.ex
-  - apps/troupe_core/lib/troupe/agent/server.ex
-  - apps/troupe_core/priv/agents/build.md
-  - apps/troupe_core/priv/agents/implementer.md
   - apps/troupe_core/lib/troupe/bench/live_scenarios.ex
-  - apps/troupe_core/test/support/fake_openai.exs
-  - apps/troupe_core/test/troupe/agent/bound_thinking_test.exs
-  - apps/troupe_core/test/troupe/agent/task_list_offer_test.exs
 symbols:
   - Troupe.LLM.Catalog.binds_thinking?/1
   - Troupe.Tool.Ctx

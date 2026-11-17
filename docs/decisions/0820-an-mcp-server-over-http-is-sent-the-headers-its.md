@@ -6,24 +6,14 @@ status: accepted
 issue: 60
 supersedes: [700]
 paths:
-  - PROTOCOL.md
   - apps/troupe_core/lib/troupe/config.ex
   - apps/troupe_core/lib/troupe/config/schema.ex
   - apps/troupe_core/lib/troupe/mcp/import.ex
   - apps/troupe_core/lib/troupe/mcp/local.ex
   - apps/troupe_core/lib/troupe/session/mcp.ex
-  - apps/troupe_core/test/support/fake_mcp.exs
-  - apps/troupe_core/test/troupe/config/layers_test.exs
-  - apps/troupe_core/test/troupe/mcp/import_test.exs
-  - apps/troupe_core/test/troupe/mcp/local_test.exs
-  - apps/troupe_core/test/troupe/mcp_handshake_test.exs
   - apps/troupe_gateway/lib/troupe/gateway/local_sources.ex
-  - apps/troupe_gateway/test/troupe/gateway/local_sources_test.exs
   - apps/troupe_protocol/lib/troupe/mcp/client.ex
   - apps/troupe_protocol/lib/troupe/mcp/server.ex
-  - apps/troupe_protocol/test/troupe/mcp/client_headers_test.exs
-  - docs/user/configuration.md
-  - docs/user/mcp.md
 symbols:
   - Troupe.MCP.Server.headers/1
   - Troupe.MCP.Server.header_problem/1

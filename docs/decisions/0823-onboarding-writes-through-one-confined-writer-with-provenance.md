@@ -8,16 +8,6 @@ paths:
   - apps/troupe_core/lib/troupe/onboard.ex
   - apps/troupe_core/lib/troupe/onboard/source.ex
   - apps/troupe_core/lib/troupe/tools/onboard_write.ex
-  - apps/troupe_core/lib/troupe/tools.ex
-  - apps/troupe_core/lib/troupe/tool.ex
-  - apps/troupe_core/lib/troupe/session/approvals.ex
-  - apps/troupe_core/lib/troupe/instructions/check.ex
-  - apps/troupe_core/priv/agents/librarian.md
-  - apps/troupe_core/test/troupe/onboard_test.exs
-  - apps/troupe_core/test/troupe/tools/onboard_write_test.exs
-  - clients/tui/lib/troupe/cli/onboard.ex
-  - clients/tui/lib/mix/tasks/troupe.xref.ex
-  - clients/tui/test/troupe/onboard_cli_test.exs
 symbols:
   - Troupe.Onboard.Source
   - Troupe.Onboard.plan/2

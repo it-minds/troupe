@@ -4,8 +4,9 @@ title: A headless run prints the harness's notes, and a turn a crashing agent en
 date: 2026-10-01
 status: accepted
 paths:
-  - clients/tui/test/troupe/remote_translate_test.exs
-  - clients/tui/test/troupe/window_attention_test.exs
+  - clients/tui/lib/troupe/remote/translate.ex
+  - clients/tui/lib/troupe/ui/headless/printer.ex
+  - clients/tui/lib/troupe/ui/tui/model.ex
 gist: A headless run prints the harness's notes, and a turn a crashing agent ended is a failure, in the window and in a headless run
 ---
 

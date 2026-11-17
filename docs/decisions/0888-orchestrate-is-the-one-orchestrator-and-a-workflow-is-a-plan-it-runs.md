@@ -6,18 +6,12 @@ status: accepted
 issue: 554
 supersedes: [850]
 paths:
-  - apps/troupe_core/priv/agents/orchestrate.md
   - apps/troupe_core/lib/troupe/workflow.ex
   - apps/troupe_core/lib/troupe/commands.ex
   - apps/troupe_gateway/lib/troupe/gateway/dispatch.ex
   - apps/troupe_core/lib/troupe/bench/live_scenarios.ex
-  - apps/troupe_core/test/troupe/workflow_test.exs
-  - apps/troupe_gateway/test/troupe/gateway/workflows_test.exs
-  - apps/troupe_core/test/troupe/bench_live_test.exs
   - clients/tui/lib/troupe/client/daemon.ex
   - clients/tui/lib/troupe/ui/tui/server.ex
-  - clients/tui/README.md
-  - PROTOCOL.md
 symbols:
   - Troupe.Workflow.agent/0
   - Troupe.Workflow.agent/1

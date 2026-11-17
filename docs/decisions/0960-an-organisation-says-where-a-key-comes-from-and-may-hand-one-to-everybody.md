@@ -6,21 +6,8 @@ status: accepted
 supersedes: [675]
 paths:
   - apps/troupe_plane/lib/troupe/plane/settings.ex
-  - apps/troupe_plane/lib/troupe/plane/harness.ex
-  - apps/troupe_plane/test/troupe/plane/client_defaults_test.exs
   - apps/troupe_core/lib/troupe/config/org.ex
   - apps/troupe_core/lib/troupe/config/model_settings.ex
-  - apps/troupe_core/test/troupe/config/org_test.exs
-  - clients/tui/lib/troupe/cli/config_setup.ex
-  - clients/tui/lib/troupe/cli.ex
-  - clients/tui/lib/troupe/cli/runner.ex
-  - clients/tui/test/troupe/config_setup_test.exs
-  - clients/gui/packages/client/src/config.ts
-  - clients/gui/packages/client/test/config.test.ts
-  - clients/gui/apps/desktop/src/views/Models.tsx
-  - clients/gui/apps/console/src/views/Organisation.tsx
-  - docs/admin/client-config.md
-  - PROTOCOL.md
 symbols:
   - Troupe.Config.Org.key_help/0
   - Troupe.CLI.ConfigSetup.key/2

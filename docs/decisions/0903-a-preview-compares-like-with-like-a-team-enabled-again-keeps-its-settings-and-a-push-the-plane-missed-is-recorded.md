@@ -6,19 +6,12 @@ status: accepted
 supersedes: [901]
 paths:
   - apps/troupe_plane/lib/troupe/plane/admin.ex
-  - apps/troupe_plane/lib/troupe/plane/admin/api.ex
   - apps/troupe_plane/lib/troupe/plane/provision.ex
   - apps/troupe_plane/lib/troupe/plane/login.ex
   - apps/troupe_plane/lib/troupe/plane/index.ex
   - apps/troupe_plane/lib/troupe/plane/identity.ex
-  - apps/troupe_plane/lib/troupe/plane/web/router.ex
   - apps/troupe_worker/lib/troupe/worker/github.ex
-  - apps/troupe_worker/lib/troupe/worker/github/tree.ex
-  - clients/gui/apps/console/src/views/Profiles.tsx
   - clients/gui/apps/desktop/src-tauri/src/daemon.rs
-  - clients/gui/packages/client/test/support/daemon.ts
-  - apps/troupe_core/lib/mix/tasks/troupe.config.schema.ex
-  - clients/gui/packages/client/test/support/provider-types.ts
 symbols:
   - Troupe.Plane.Admin.preview/2
   - Troupe.Plane.Admin.team_enable/4

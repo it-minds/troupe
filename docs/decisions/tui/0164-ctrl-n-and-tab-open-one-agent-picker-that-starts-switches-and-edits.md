@@ -10,10 +10,6 @@ paths:
   - clients/tui/lib/troupe/ui/tui/view.ex
   - clients/tui/lib/troupe/client/daemon.ex
   - clients/tui/lib/troupe/client/remote.ex
-  - clients/tui/test/troupe/agent_picker_test.exs
-  - clients/tui/test/troupe/command_mode_test.exs
-  - clients/tui/test/troupe/agents_palette_test.exs
-  - clients/tui/test/support/fake_remote.ex
 symbols:
   - Troupe.UI.TUI.AgentChooser
   - Troupe.UI.TUI.AgentChooser.key/3

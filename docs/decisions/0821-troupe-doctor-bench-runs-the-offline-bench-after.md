@@ -6,9 +6,7 @@ status: accepted
 issue: 390
 paths:
   - apps/troupe_core/lib/troupe/doctor.ex
-  - apps/troupe_core/test/troupe/doctor_test.exs
   - clients/tui/lib/troupe/cli/doctor.ex
-  - clients/tui/test/troupe/doctor_test.exs
 symbols:
   - Troupe.Doctor.bench/1
   - Troupe.Doctor.json/2

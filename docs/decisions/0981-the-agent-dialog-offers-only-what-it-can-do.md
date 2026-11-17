@@ -9,13 +9,8 @@ paths:
   - clients/gui/apps/desktop/src/views/AgentSwitch.tsx
   - clients/gui/apps/desktop/src/views/Agents.tsx
   - clients/gui/apps/desktop/src/styles.css
-  - clients/gui/apps/desktop/test/agent-picker.test.tsx
-  - clients/gui/apps/desktop/test/agents-manager.test.tsx
-  - clients/gui/packages/client/test/support/agents.ts
   - apps/troupe_core/lib/troupe/agent/local.ex
   - clients/tui/lib/troupe/client/remote.ex
-  - clients/tui/test/support/fake_remote.ex
-  - PROTOCOL.md
 symbols:
   - AgentPicker
   - AgentSwitch

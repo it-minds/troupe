@@ -7,31 +7,11 @@ issue: 992
 supersedes: []
 paths:
   - apps/troupe_plane/lib/troupe/plane/harness.ex
-  - apps/troupe_plane/test/troupe/plane/team_links_test.exs
   - clients/gui/packages/client/src/newSession.ts
-  - clients/gui/packages/client/src/index.ts
-  - clients/gui/packages/client/test/choose-a-team.test.ts
-  - clients/gui/packages/client/test/support/plane.ts
-  - clients/gui/scripts/fake-deployment.ts
   - clients/gui/apps/desktop/src/views/StartSession.tsx
-  - clients/gui/apps/desktop/test/new-session.test.tsx
+  - clients/tui/lib/troupe/client/team_choice.ex
   - clients/tui/lib/troupe/ui/new_session.ex
   - clients/tui/lib/troupe/ui/tui/new_session_page.ex
-  - clients/tui/lib/troupe/ui/tui/server.ex
-  - clients/tui/lib/troupe/client/team_choice.ex
-  - clients/tui/lib/troupe/client.ex
-  - clients/tui/test/troupe/profiles_screen_test.exs
-  - clients/tui/lib/troupe/client/remote.ex
-  - clients/tui/lib/troupe/cli.ex
-  - clients/tui/lib/troupe/cli/run_target.ex
-  - clients/tui/lib/troupe/cli/runner.ex
-  - clients/tui/test/troupe/new_session_team_test.exs
-  - clients/tui/test/support/fake_remote.ex
-  - PROTOCOL.md
-  - docs/user/sessions.md
-  - docs/user/terminal-screen.md
-  - docs/user/cli-reference.md
-  - docs/admin/routine-tasks.md
 symbols:
   - teamsToChoose
   - chosenTeam

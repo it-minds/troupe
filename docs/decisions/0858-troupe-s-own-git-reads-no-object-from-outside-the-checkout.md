@@ -7,7 +7,6 @@ issue: 538
 supersedes: [833]
 paths:
   - apps/troupe_core/lib/troupe/git.ex
-  - apps/troupe_core/test/troupe/git_test.exs
 symbols:
   - Troupe.Git.run/3
 gist: "Troupe.Git refuses a repository whose alternates (followed in turn) or links in .git/objects really lead outside the checkout"

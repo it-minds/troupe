@@ -9,9 +9,6 @@ paths:
   - .github/workflows/cluster.yml
   - .github/workflows/ci.yml
   - .github/workflows/dev-check.yml
-  - docs/developer/ci.md
-  - apps/troupe_operator/test/e2e/egress_test.exs
-  - apps/troupe_operator/test/e2e/isolation_test.exs
 gist: A PR touching charts/, docker/, dev/kind/, the kind scripts or the operator runs cluster.yml; CRDs reach the API server first; the suite proves isolation
 ---
 

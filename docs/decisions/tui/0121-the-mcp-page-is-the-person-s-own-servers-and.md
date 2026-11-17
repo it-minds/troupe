@@ -6,7 +6,6 @@ status: accepted
 issue: 60
 paths:
   - clients/tui/lib/troupe/client.ex
-  - clients/tui/test/troupe/mcp_page_test.exs
 gist: The `/mcp` page is the person's own servers and skills, from the daemon's layers, with the verbs to bring them in; it never holds a path of its own
 ---
 

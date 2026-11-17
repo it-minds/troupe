@@ -9,10 +9,6 @@ paths:
   - clients/tui/lib/troupe/cli/config_setup.ex
   - clients/tui/lib/troupe/cli/runner.ex
   - clients/tui/lib/troupe/cli.ex
-  - clients/tui/test/troupe/setup_screen_test.exs
-  - clients/tui/test/troupe/setup_screen_daemon_test.exs
-  - clients/tui/test/troupe/config_setup_test.exs
-  - clients/tui/test/test_helper.exs
 symbols:
   - Troupe.UI.Setup
   - Troupe.CLI.ConfigSetup.setup/2

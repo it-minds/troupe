@@ -5,27 +5,9 @@ date: 2026-10-04
 status: accepted
 issue: 389
 paths:
-  - PROTOCOL.md
-  - apps/troupe_core/lib/troupe/agent/server.ex
   - apps/troupe_core/lib/troupe/agent/spend.ex
-  - apps/troupe_core/lib/troupe/agent/state.ex
-  - apps/troupe_core/lib/troupe/bench/live.ex
   - apps/troupe_core/lib/troupe/log/fold.ex
   - apps/troupe_core/lib/troupe/session/usage.ex
-  - apps/troupe_core/lib/troupe/sessions/index.ex
-  - apps/troupe_core/test/troupe/agent/tool_failures_test.exs
-  - apps/troupe_core/test/troupe/agent/turn_cost_test.exs
-  - apps/troupe_core/test/troupe/agent/turn_ended_test.exs
-  - apps/troupe_core/test/troupe/bench_live_test.exs
-  - apps/troupe_core/test/troupe/session/usage_test.exs
-  - apps/troupe_protocol/lib/troupe/protocol/schema.ex
-  - clients/gui/apps/desktop/test/turn-cost.test.tsx
-  - clients/gui/packages/client/src/transcript.ts
-  - clients/gui/packages/client/test/turn-cost.test.ts
-  - clients/tui/lib/troupe/remote/translate.ex
-  - clients/tui/lib/troupe/ui/tui/model.ex
-  - clients/tui/test/troupe/turn_cost_test.exs
-  - docs/developer/bench.md
 gist: What a turn cost is written on the event that ends it, and what each model call's prompt was made of on its `llm_request`, in bytes
 ---
 

@@ -6,7 +6,6 @@ status: accepted
 issue: 524
 paths:
   - apps/troupe_core/lib/troupe/session/memory.ex
-  - apps/troupe_core/test/troupe/tools/remember_test.exs
 symbols:
   - Troupe.Session.Memory.path/1
 gist: "git's --git-common-dir alone never places the brief: the checkout must hold the workspace or name the worktree back (Config.Trust.root/1)"

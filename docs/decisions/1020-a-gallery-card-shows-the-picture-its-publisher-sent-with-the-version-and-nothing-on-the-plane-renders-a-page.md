@@ -5,24 +5,11 @@ date: 2026-11-16
 status: accepted
 issue: 977
 paths:
-  - apps/troupe_plane/lib/troupe/plane/artifacts.ex
-  - apps/troupe_plane/lib/troupe/plane/artifacts/version.ex
-  - apps/troupe_plane/lib/troupe/plane/artifacts/artifact.ex
   - apps/troupe_plane/lib/troupe/plane/web/artifacts.ex
-  - apps/troupe_plane/priv/repo/migrations/20261116001020_artifact_thumbnails.exs
-  - apps/troupe_plane/test/troupe/plane/artifact_thumbnails_test.exs
+  - apps/troupe_plane/lib/troupe/plane/artifacts/version.ex
+  - apps/troupe_plane/lib/troupe/plane/artifacts.ex
   - apps/troupe_core/lib/troupe/tools/publish_artifact.ex
-  - apps/troupe_gateway/lib/troupe/gateway/artifacts.ex
-  - apps/troupe_worker/lib/troupe/worker/artifacts.ex
-  - apps/troupe_protocol/lib/troupe/protocol/schema.ex
-  - clients/gui/packages/client/src/artifacts.ts
   - clients/gui/apps/desktop/src/views/Artifacts.tsx
-  - clients/gui/apps/desktop/src/views/Publish.tsx
-  - clients/gui/apps/desktop/src-tauri/tauri.conf.json
-  - clients/gui/apps/console/src/views/Artifacts.tsx
-  - clients/gui/docker/headers.conf
-  - PROTOCOL.md
-  - docs/user/artifacts.md
 symbols:
   - Troupe.Plane.Artifacts.thumbnail/1
 gist: "Thumbnail = the publisher's own image per version (png/jpeg/webp, 256 KiB, not decoded); served at /t/<signed> for that person, visibility read per request; no renderer"

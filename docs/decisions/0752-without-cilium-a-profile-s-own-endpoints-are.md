@@ -8,10 +8,7 @@ paths:
   - apps/troupe_operator/lib/troupe/operator/reconciler.ex
   - apps/troupe_operator/lib/troupe/operator/resources.ex
   - apps/troupe_plane/lib/troupe/plane/reach.ex
-  - apps/troupe_plane/test/troupe/plane/reach_test.exs
   - apps/troupe_protocol/lib/troupe/worker_profile/reach.ex
-  - apps/troupe_protocol/test/troupe/worker_profile/reach_test.exs
-  - docs/admin/profiles-and-policy.md
 gist: "Without Cilium, a profile's own endpoints are admitted as the installation's are: a name on another port as the public rule's addresses on that…"
 ---
 

@@ -8,8 +8,6 @@ paths:
   - apps/troupe_core/lib/troupe/onboard/agents_and_commands.ex
   - apps/troupe_core/lib/troupe/onboard/agents_and_commands/*.ex
   - apps/troupe_core/lib/troupe/agent/definition.ex
-  - apps/troupe_core/test/troupe/onboard/agents_and_commands_test.exs
-  - apps/troupe_core/test/troupe/agent/definition_test.exs
 symbols:
   - Troupe.Onboard.AgentsAndCommands.proposals/2
   - Troupe.Onboard.AgentsAndCommands.survey/2

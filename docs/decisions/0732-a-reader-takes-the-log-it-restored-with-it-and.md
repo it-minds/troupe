@@ -8,10 +8,7 @@ paths:
   - apps/troupe_core/lib/troupe/events.ex
   - apps/troupe_protocol/lib/troupe/sessions/fork.ex
   - apps/troupe_protocol/lib/troupe/sessions/storage.ex
-  - apps/troupe_protocol/test/troupe/sessions/storage_test.exs
   - apps/troupe_worker/lib/troupe/worker/session/restore.ex
-  - apps/troupe_worker/test/troupe/worker/object_store_unreachable_test.exs
-  - apps/troupe_worker/test/troupe/worker/reader_log_test.exs
 gist: A reader takes the log it restored with it, and stays while a client reads the session; a fork whose parent's workspace listing fails makes no child
 ---
 

@@ -8,12 +8,7 @@ supersedes: [660]
 paths:
   - apps/troupe_worker/lib/troupe/worker/session/restore.ex
   - apps/troupe_worker/lib/troupe/worker/session/manager.ex
-  - apps/troupe_worker/test/troupe/worker/unattended_session_test.exs
-  - apps/troupe_core/test/troupe/agent/budget_question_test.exs
   - apps/troupe_core/lib/troupe/config/schema.ex
-  - PROTOCOL.md
-  - docs/user/sessions.md
-  - docs/admin/bundles-and-triggers.md
 gist: budget_asks is false only when the terms set max_turns or wall_clock_ms, never because terms came; a waiting root sleeps like an idle one
 ---
 

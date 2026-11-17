@@ -13,8 +13,6 @@ paths:
   - clients/gui/apps/console/src/views/SignIn.tsx
   - clients/gui/apps/console/src/views/Shell.tsx
   - clients/gui/packages/client/src/auth.ts
-  - docs/admin/console.md
-  - docs/admin/roles-and-permissions.md
 symbols:
   - Troupe.Plane.Breakglass.verify/2
   - Troupe.Plane.Breakglass.actor/1

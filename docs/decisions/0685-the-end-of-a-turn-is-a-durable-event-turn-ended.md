@@ -6,9 +6,6 @@ status: accepted
 issue: 127
 paths:
   - PROTOCOL.md
-  - apps/troupe_core/test/troupe/agent/loop_test.exs
-  - apps/troupe_core/test/troupe/agent/turn_ended_test.exs
-  - apps/troupe_core/test/troupe/session/log_schema_test.exs
 gist: The end of a turn is a durable event, `turn_ended`, beside the ephemeral `agent_state`
 ---
 

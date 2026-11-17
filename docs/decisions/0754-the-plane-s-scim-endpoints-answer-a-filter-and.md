@@ -9,7 +9,6 @@ paths:
   - apps/troupe_plane/lib/troupe/plane/scim.ex
   - apps/troupe_plane/lib/troupe/plane/web/router.ex
   - apps/troupe_plane/priv/repo/migrations/20261002000754_scim_user_name.exs
-  - docs/admin/integrations.md
 gist: The plane's SCIM endpoints answer a filter and take PATCH the way Microsoft Entra ID sends them, keep a user's `userName` beside the subject, and…
 ---
 

@@ -12,9 +12,6 @@ paths:
   - apps/troupe_protocol/lib/troupe/protocol/bundle.ex
   - apps/troupe_gateway/lib/troupe/gateway/local_sources.ex
   - protocol/schema/v1/commands/skills.list.json
-  - PROTOCOL.md
-  - docs/user/configuration/mcp-agents-skills.md
-  - docs/admin/profiles-and-policy.md
 symbols:
   - Troupe.Skills.check/2
   - Troupe.Skills.runnable?/1

@@ -5,7 +5,6 @@ date: 2026-09-20
 status: accepted
 paths:
   - apps/troupe_core/lib/troupe/tools.ex
-  - apps/troupe_core/test/troupe/tools/read_tools_test.exs
 gist: Three read-only tools, in the core's shape
 ---
 

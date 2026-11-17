@@ -8,9 +8,6 @@ paths:
   - apps/troupe_core/lib/troupe/reaper.ex
   - apps/troupe_core/lib/troupe/tools/grep.ex
   - apps/troupe_core/lib/troupe/tools/shell.ex
-  - apps/troupe_core/test/support/fake_openai.exs
-  - apps/troupe_core/test/troupe/tools/file_tools_test.exs
-  - apps/troupe_core/test/troupe/tools/shell_test.exs
 gist: On Windows the shell is Git for Windows' bash, never WSL's launcher; no command Troupe starts has the release's own runtime on its `PATH`
 ---
 

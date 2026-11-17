@@ -6,24 +6,10 @@ status: accepted
 issue: 920
 supersedes: [986]
 paths:
-  - apps/troupe_gateway/lib/troupe/gateway/dispatch.ex
   - apps/troupe_gateway/lib/troupe/gateway/artifacts.ex
-  - apps/troupe_gateway/lib/troupe/gateway/connection.ex
   - apps/troupe_core/lib/troupe/artifacts.ex
   - apps/troupe_worker/lib/troupe/worker/artifacts.ex
   - apps/troupe_plane/lib/troupe/plane/artifacts.ex
-  - apps/troupe_plane/lib/troupe/plane/harness.ex
-  - apps/troupe_plane/lib/troupe/plane/control/connection.ex
-  - apps/troupe_protocol/lib/troupe/protocol/schema.ex
-  - apps/troupe_gateway/test/troupe/gateway/attach_artifact_test.exs
-  - apps/troupe_plane/test/troupe/plane/control_test.exs
-  - apps/troupe_plane/test/troupe/plane/artifact_versions_test.exs
-  - PROTOCOL.md
-  - clients/gui/apps/desktop/src/views/Session.tsx
-  - clients/gui/packages/client/src/session.ts
-  - clients/gui/packages/client/test/support/daemon.ts
-  - clients/gui/packages/client/test/support/worker.ts
-  - clients/gui/packages/client/test/support/plane.ts
 symbols:
   - Troupe.Artifacts.files/1
   - Troupe.Plane.Artifacts.files/4
