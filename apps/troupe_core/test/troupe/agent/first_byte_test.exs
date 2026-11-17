@@ -26,7 +26,7 @@ defmodule Troupe.Agent.FirstByteTest do
       ended = await_event(sid, :turn_ended, 5_000)
 
       assert error.data["reason"] ==
-               "the model at fake sent nothing for 300 ms: the address, the key or a proxy " <>
+               "the model at fake sent nothing for 0.3 s: the address, the key or a proxy " <>
                  "between here and there is the usual reason; `troupe doctor` tries a small request"
 
       # Stopped as a call that outlasts llm_timeout_ms is: ended, and counted as a call
@@ -111,7 +111,7 @@ defmodule Troupe.Agent.FirstByteTest do
       assert_received {:sid, sid}
       lines = log |> String.split("\n") |> Enum.filter(&String.contains?(&1, "troupe: #{sid} "))
 
-      assert Enum.any?(lines, &(&1 =~ ~r/root turn 1 failed after \d+ ms: the model at fake sent nothing for 200 ms/))
+      assert Enum.any?(lines, &(&1 =~ ~r/root turn 1 failed after \d+ ms: the model at fake sent nothing for 0.2 s/))
       refute Enum.any?(lines, &(&1 =~ "first byte after"))
     end
   end

@@ -45,6 +45,7 @@ defmodule Troupe.Gateway.Dispatch do
   alias Troupe.Mounts
   alias Troupe.Onboard.Start, as: Onboarding
   alias Troupe.PlaneKeys
+  alias Troupe.Protocol.Digest
   alias Troupe.Protocol.Error
   alias Troupe.Protocol.Event
   alias Troupe.Session.{ClientTools, Log}
@@ -562,7 +563,7 @@ defmodule Troupe.Gateway.Dispatch do
          "content" => contents,
          "size" => byte_size(contents),
          # The same hash `fs_changed` carries, so a client can check the two agree.
-         "hash" => "sha256:" <> (:sha256 |> :crypto.hash(contents) |> Base.encode16(case: :lower))
+         "hash" => Digest.tagged(contents)
        }}
     end
   end
@@ -609,7 +610,7 @@ defmodule Troupe.Gateway.Dispatch do
         %{
           "path" => Workspace.relative(workspace, resolved),
           "hash" =>
-            "sha256:" <> (:sha256 |> :crypto.hash(content) |> Base.encode16(case: :lower)),
+            Digest.tagged(content),
           "size" => byte_size(content)
         },
         actor(context)
@@ -2953,7 +2954,7 @@ defmodule Troupe.Gateway.Dispatch do
   defp written_json(workspace, resolved, body) do
     %{
       "path" => Workspace.relative(workspace, resolved),
-      "hash" => "sha256:" <> (:sha256 |> :crypto.hash(body) |> Base.encode16(case: :lower)),
+      "hash" => Digest.tagged(body),
       "size" => byte_size(body)
     }
   end

@@ -33,6 +33,7 @@ defmodule Troupe.Onboard.Start do
 
   alias Troupe.{Onboard, Paths}
   alias Troupe.Onboard.{Notice, Pod}
+  alias Troupe.Protocol.Digest
   alias Troupe.Session.Memory, as: Brief
 
   @all_targets [:workspace, :repo, :user]
@@ -150,7 +151,7 @@ defmodule Troupe.Onboard.Start do
       |> Enum.map(&"#{&1.source}\u0000#{&1.source_hash}")
       |> Enum.sort()
 
-    current = if item.current, do: sha256(item.current), else: "-"
+    current = if item.current, do: Digest.sha256(item.current), else: "-"
 
     [
       to_string(item.proposal.target),
@@ -160,7 +161,7 @@ defmodule Troupe.Onboard.Start do
       current | also
     ]
     |> Enum.join("\n")
-    |> sha256()
+    |> Digest.sha256()
     |> binary_part(0, 16)
   end
 
@@ -283,5 +284,4 @@ defmodule Troupe.Onboard.Start do
     end
   end
 
-  defp sha256(bytes), do: :sha256 |> :crypto.hash(bytes) |> Base.encode16(case: :lower)
 end

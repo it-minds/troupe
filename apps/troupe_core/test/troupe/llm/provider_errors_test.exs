@@ -45,11 +45,11 @@ defmodule Troupe.LLM.ProviderErrorsTest do
   # between here and there rather than the model, and says what to run next.
   test "a call nothing came from names the host, the wait and the next step" do
     assert Provider.describe_error({:first_byte, "api.anthropic.com", 60_000}) ==
-             "the model at api.anthropic.com sent nothing for 60 seconds: the address, the key or a proxy " <>
+             "the model at api.anthropic.com sent nothing for 1 min: the address, the key or a proxy " <>
                "between here and there is the usual reason; `troupe doctor` tries a small request"
 
-    assert Provider.describe_error({:first_byte, "llm-gw.example", 1_000}) =~ "sent nothing for 1 second:"
-    assert Provider.describe_error({:first_byte, "localhost", 1_500}) =~ "sent nothing for 1500 ms:"
+    assert Provider.describe_error({:first_byte, "llm-gw.example", 1_000}) =~ "sent nothing for 1 s:"
+    assert Provider.describe_error({:first_byte, "localhost", 1_500}) =~ "sent nothing for 1.5 s:"
   end
 
   test "describe_error says what happened in words a person can act on" do

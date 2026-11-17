@@ -42,6 +42,7 @@ defmodule Troupe.Memory.Facts do
   alias Troupe.Git
   alias Troupe.Memory
   alias Troupe.Memory.Facts.Store
+  alias Troupe.Protocol.Digest
   alias Troupe.Session.Memory, as: Brief
   alias Troupe.Workspace
 
@@ -339,7 +340,7 @@ defmodule Troupe.Memory.Facts do
          {:ok, file} <- confined(rel, top),
          {:ok, bytes} <- read_anchor(file, path),
          {:ok, name} <- tracked(where, rel) do
-      {:ok, %{"path" => name, "hash" => sha256(bytes)}}
+      {:ok, %{"path" => name, "hash" => Digest.sha256(bytes)}}
     end
   end
 
@@ -707,8 +708,6 @@ defmodule Troupe.Memory.Facts do
   defp new_id, do: "f_" <> Base.encode16(:crypto.strong_rand_bytes(6), case: :lower)
 
   defp now, do: DateTime.utc_now() |> DateTime.truncate(:second) |> DateTime.to_iso8601()
-
-  defp sha256(bytes), do: :sha256 |> :crypto.hash(bytes) |> Base.encode16(case: :lower)
 
   @doc false
   def max_anchor_bytes, do: @max_anchor_bytes

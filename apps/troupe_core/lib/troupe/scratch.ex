@@ -28,7 +28,7 @@ defmodule Troupe.Scratch do
   """
 
   alias Troupe.{Config, Mounts}
-  alias Troupe.Protocol.Event
+  alias Troupe.Protocol.{Digest, Event}
   alias Troupe.Session.Log
   alias Troupe.Sessions.Index
 
@@ -440,5 +440,5 @@ defmodule Troupe.Scratch do
   @doc "What `fs.read` answers as a document's `hash`, and `scratch_updated` carries."
   @spec hash(binary()) :: String.t()
   def hash(content),
-    do: "sha256:" <> (:sha256 |> :crypto.hash(content) |> Base.encode16(case: :lower))
+    do: Digest.tagged(content)
 end

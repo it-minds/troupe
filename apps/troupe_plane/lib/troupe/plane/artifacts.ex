@@ -59,6 +59,7 @@ defmodule Troupe.Plane.Artifacts do
   alias Troupe.Plane.Artifacts.Keeps
   alias Troupe.Plane.Identity.User
   alias Troupe.Plane.Sessions.Session
+  alias Troupe.Protocol.Digest
   alias Troupe.Protocol.Error
 
   @kinds ~w(html markdown file)
@@ -586,7 +587,7 @@ defmodule Troupe.Plane.Artifacts do
     do: {:error, invalid("an artifact needs files: [{path, content_type, bytes}]")}
 
   defp stored(path, body, type),
-    do: %{path: path, body: body, content_type: type, sha256: sha256(body), bytes: byte_size(body)}
+    do: %{path: path, body: body, content_type: type, sha256: Digest.sha256(body), bytes: byte_size(body)}
 
   # One file that came by an upload handle, held to what a file sent inline is held to.
   defp checked_file(path, body, type) do
@@ -919,7 +920,7 @@ defmodule Troupe.Plane.Artifacts do
          {:ok, body} <- thumbnail_body(encoded),
          :ok <- thumbnail_size(body),
          :ok <- thumbnail_kind(type, body) do
-      {:ok, %{body: body, content_type: type, sha256: sha256(body), bytes: byte_size(body)}}
+      {:ok, %{body: body, content_type: type, sha256: Digest.sha256(body), bytes: byte_size(body)}}
     end
   end
 
@@ -1290,10 +1291,8 @@ defmodule Troupe.Plane.Artifacts do
 
   defp version_hash(files) do
     lines = Enum.map_join(files, "", &"#{&1.path}\0#{&1.sha256}\n")
-    "sha256:" <> sha256(lines)
+    "sha256:" <> Digest.sha256(lines)
   end
-
-  defp sha256(body), do: :sha256 |> :crypto.hash(body) |> Base.encode16(case: :lower)
 
   defp new_id do
     "art-" <> (10 |> :crypto.strong_rand_bytes() |> Base.encode32(case: :lower, padding: false))

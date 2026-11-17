@@ -14,6 +14,7 @@ defmodule Troupe.UI.TUI.Model do
 
   alias Troupe.Client.Message
   alias Troupe.Event
+  alias Troupe.Protocol.Words
   alias Troupe.UI.{Lines, ModelError}
 
   @typedoc "A tool call in a transcript. `lines` is `result` split for rendering; `preview` is the approval preview (a diff for edits), when one was shown; `started_at` and `ended_at` are the times its events carried, for the duration its frame's header says (TUI Decision 161)."
@@ -2349,7 +2350,7 @@ defmodule Troupe.UI.TUI.Model do
     {:strip,
      [
        {:strip_glyph, if(level == :quiet, do: "▸ ", else: "▾ ")},
-       {:strip, "#{n} #{if n == 1, do: "step", else: "steps"}"}
+       {:strip, "#{Words.count(n, "step")}"}
      ] ++
        if(failed > 0, do: [{:strip_failed, " · #{failed} failed"}], else: []) ++
        [
@@ -2367,15 +2368,10 @@ defmodule Troupe.UI.TUI.Model do
   end
 
   # A duration under a second says nothing a person reads for.
-  defp took(ms) when is_integer(ms) and ms >= 1000, do: [{:strip, " · " <> seconds(ms)}]
-  defp took(_ms), do: []
+  defp took(ms) when is_integer(ms) and ms >= 1000,
+    do: [{:strip, " · " <> Words.duration(ms, :short)}]
 
-  @doc "A duration as a frame's header says it: `14s`, `4m 2s`."
-  @spec seconds(non_neg_integer()) :: String.t()
-  def seconds(ms) do
-    s = div(ms, 1000)
-    if s < 60, do: "#{s}s", else: "#{div(s, 60)}m #{rem(s, 60)}s"
-  end
+  defp took(_ms), do: []
 
   # The model's prose on the rendered surface, framed as it was folded (`frame/1`): every
   # line behind the frame's rail, a code, diff or data block inside it a frame of its own
@@ -2397,7 +2393,10 @@ defmodule Troupe.UI.TUI.Model do
        {:reasoning_marker, if(open?, do: "▾ ", else: "▸ ")},
        {:reasoning_title, "thinking"}
      ] ++
-       if(is_integer(ms) and ms >= 1000, do: [{:reasoning_title, " · " <> seconds(ms)}], else: [])}
+       if(is_integer(ms) and ms >= 1000,
+         do: [{:reasoning_title, " · " <> Words.duration(ms, :short)}],
+         else: []
+       )}
   end
 
   @doc """
@@ -2792,7 +2791,7 @@ defmodule Troupe.UI.TUI.Model do
   defp shell_body(lines, false) when length(lines) > @shell_rows do
     hidden = length(lines) - @shell_rows
 
-    [{:system, "  … #{hidden} earlier #{if hidden == 1, do: "line", else: "lines"}"}] ++
+    [{:system, "  … #{hidden} earlier #{Words.plural(hidden, "line")}"}] ++
       plain(Enum.take(lines, -@shell_rows))
   end
 
@@ -2804,7 +2803,7 @@ defmodule Troupe.UI.TUI.Model do
     took =
       case {Map.get(t, :started_at), Map.get(t, :ended_at)} do
         {from, to} when is_integer(from) and is_integer(to) and to - from >= 1000 ->
-          [{:tool_note, " · " <> seconds(to - from)}]
+          [{:tool_note, " · " <> Words.duration(to - from, :short)}]
 
         _ ->
           []
@@ -3054,7 +3053,7 @@ defmodule Troupe.UI.TUI.Model do
 
   defp data_table(label, head, rows, body, path) do
     n = length(rows)
-    note = " · #{n} #{if n == 1, do: "row", else: "rows"}" <> if(path, do: " · " <> path, else: "")
+    note = " · #{Words.count(n, "row")}" <> if(path, do: " · " <> path, else: "")
 
     case table_lines(head, List.duplicate(:left, length(head)), rows, :code) do
       nil -> code_block(body, label, path)

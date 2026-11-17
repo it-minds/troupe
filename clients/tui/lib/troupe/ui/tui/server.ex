@@ -12,7 +12,7 @@ defmodule Troupe.UI.TUI.Server do
 
   alias ExRatatui.Event.{Key, Mouse, Paste, Resize}
   alias Troupe.Client
-  alias Troupe.Protocol.Glob
+  alias Troupe.Protocol.{Glob, Words}
   alias Troupe.Settings
   alias Troupe.UI.HQ
 
@@ -2070,8 +2070,7 @@ defmodule Troupe.UI.TUI.Server do
   defp to_message(reason) when is_binary(reason), do: reason
 
   defp to_message({:choose_team, teams}),
-    do:
-      "#{Troupe.UI.NewSession.and_list(teams)} may each pay for it; /new asks which team it is for"
+    do: "#{Words.and_list(teams)} may each pay for it; /new asks which team it is for"
 
   defp to_message(reason), do: inspect(reason)
 
@@ -4978,7 +4977,7 @@ defmodule Troupe.UI.TUI.Server do
       text ->
         report(
           text,
-          "#{String.length(text)} #{plural(String.length(text), "char")} from the selection"
+          "#{Words.count(String.length(text), "char")} from the selection"
         )
     end
   end
@@ -4993,7 +4992,7 @@ defmodule Troupe.UI.TUI.Server do
 
       text ->
         lines = length(String.split(text, "\n"))
-        report(text, "#{lines} #{plural(lines, "line")}")
+        report(text, Words.count(lines, "line"))
     end
   end
 
@@ -5003,9 +5002,6 @@ defmodule Troupe.UI.TUI.Server do
       {:error, msg} -> msg
     end
   end
-
-  defp plural(1, word), do: word
-  defp plural(_n, word), do: word <> "s"
 
   defp apply_event(state, event) do
     model = Model.apply(state.model, event)

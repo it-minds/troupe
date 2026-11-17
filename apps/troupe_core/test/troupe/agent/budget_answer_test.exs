@@ -275,7 +275,7 @@ defmodule Troupe.Agent.BudgetAnswerTest do
       assert BudgetQuestion.amount(:max_output_tokens, 2_500_000) == "2.5M tokens"
       assert BudgetQuestion.amount(:max_output_tokens, 150) == "150 tokens"
       assert BudgetQuestion.amount(:wall_clock, 15 * 60_000) == "15 min"
-      assert BudgetQuestion.amount(:wall_clock, 90 * 60_000) == "1.5 h"
+      assert BudgetQuestion.amount(:wall_clock, 90 * 60_000) == "1 h 30 min"
       assert BudgetQuestion.amount(:wall_clock, 45_000) == "45 s"
       assert BudgetQuestion.money(0) == "$0.00"
       assert BudgetQuestion.money(5_000) == "under a cent"

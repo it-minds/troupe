@@ -41,6 +41,7 @@ defmodule Troupe.Onboard.Notice do
 
   alias Troupe.{Config, Memory, Onboard, Paths, Workspace}
   alias Troupe.Onboard.Pod
+  alias Troupe.Protocol.Words
   alias Troupe.Session.Memory, as: Brief
 
   # The state file `Troupe.Onboard` keeps declines in, under the same lock.
@@ -325,16 +326,12 @@ defmodule Troupe.Onboard.Notice do
   end
 
   defp listed(counts) do
-    words =
+    Words.and_list(
       for {kind, n} <- counts do
         {^kind, one, many} = List.keyfind(@kinds, kind, 0)
-        if n == 1, do: "1 #{one}", else: "#{n} #{many}"
+        Words.count(n, one, many)
       end
-
-    case Enum.split(words, -1) do
-      {[], [only]} -> only
-      {rest, [last]} -> Enum.join(rest, ", ") <> " and " <> last
-    end
+    )
   end
 
   ## State

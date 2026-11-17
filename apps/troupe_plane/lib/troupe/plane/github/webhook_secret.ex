@@ -64,7 +64,7 @@ defmodule Troupe.Plane.GitHub.WebhookSecret do
          {:ok, wrapping} <- Key.wrapping_key(opts),
          ciphertext = Key.wrap(secret, wrapping),
          {:ok, _} <- import_or_rotate(ciphertext, opts) do
-      latest_version(opts)
+      Tokens.latest_version(name(opts), opts)
     end
   end
 
@@ -143,14 +143,6 @@ defmodule Troupe.Plane.GitHub.WebhookSecret do
 
       error ->
         error
-    end
-  end
-
-  defp latest_version(opts) do
-    case Tokens.request(:get, "/v1/#{Tokens.mount(opts)}/keys/#{name(opts)}", nil, opts) do
-      {:ok, %{"data" => %{"latest_version" => version}}} -> {:ok, version}
-      {:ok, other} -> {:error, {:unexpected_response, other}}
-      error -> error
     end
   end
 end

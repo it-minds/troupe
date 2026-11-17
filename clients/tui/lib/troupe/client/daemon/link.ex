@@ -29,7 +29,7 @@ defmodule Troupe.Client.Daemon.Link do
 
   use GenServer
 
-  alias Troupe.Protocol.{Client, Endpoint}
+  alias Troupe.Protocol.{Client, Endpoint, Words}
   alias Troupe.Remote.{Credentials, Discovery, RPC, Tokens}
 
   require Logger
@@ -102,7 +102,7 @@ defmodule Troupe.Client.Daemon.Link do
   defp ask(message, timeout) do
     GenServer.call(@name, message, timeout)
   catch
-    :exit, {:timeout, _} -> {:error, "the daemon did not answer within #{div(timeout, 1_000)} s"}
+    :exit, {:timeout, _} -> {:error, "the daemon did not answer within #{Words.duration(timeout)}"}
     :exit, _gone -> {:error, "the daemon is not reachable"}
   end
 
@@ -266,7 +266,7 @@ defmodule Troupe.Client.Daemon.Link do
     end
   catch
     :exit, {:timeout, _} ->
-      {:error, "the daemon did not answer #{method} within #{div(@call_timeout, 1_000)} s"}
+      {:error, "the daemon did not answer #{method} within #{Words.duration(@call_timeout)}"}
 
     :exit, _closed ->
       {:error, :closed}

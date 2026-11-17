@@ -21,7 +21,7 @@ defmodule Troupe.Plane.Fleet.Profile do
 
   alias Troupe.Plane.Fleet.{Provisioner, SizeClass}
   alias Troupe.Plane.GitHub
-  alias Troupe.Protocol.{AgentRule, PermissionRule, ProviderTypes}
+  alias Troupe.Protocol.{AgentRule, PermissionRule, ProviderTypes, Words}
 
   @primary_key {:name, :string, autogenerate: false}
   @derive {Phoenix.Param, key: :name}
@@ -248,15 +248,12 @@ defmodule Troupe.Plane.Fleet.Profile do
 
       [
         spec:
-          "#{listed(set)} #{verb} set without llm.endpoint, and the pods are given the llm " <>
+          "#{Words.and_list(set)} #{verb} set without llm.endpoint, and the pods are given the llm " <>
             "settings only with an endpoint: without one they would run on Troupe's built-in " <>
             "model settings instead. Set llm.endpoint, or take #{pronoun} out"
       ]
     end
   end
-
-  defp listed([one]), do: one
-  defp listed(many), do: Enum.join(Enum.drop(many, -1), ", ") <> " and " <> List.last(many)
 
   @doc "The `llm` fields a profile may set only beside `llm.endpoint`, as the resource names them."
   @spec llm_fields() :: [String.t()]

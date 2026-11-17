@@ -44,7 +44,7 @@ defmodule Troupe.Agent.HeadroomTest do
              "input tokens 4.9M/6.0M (82%)"
 
     # The wall clock counts working time, and says so.
-    assert Headroom.describe(:wall, %{used: 125_000, limit: 1_800_000, fraction: 0.07}) == "working time 2m/30m (7%)"
+    assert Headroom.describe(:wall, %{used: 125_000, limit: 1_800_000, fraction: 0.07}) == "working time 2m 5s/30m (7%)"
     assert Headroom.describe(:turns, %{used: 3, limit: 40, fraction: 0.075}) == "turns 3/40 (8%)"
 
     # No figure in an exponent's notation, and one that rounds to a thousand thousands is 1.0M.
