@@ -320,7 +320,7 @@ defmodule Troupe.CommandModeTest do
           id: "s-cm",
           profile: "code",
           title: "on the plane",
-          events: [%{"type" => "message.completed", "data" => %{"text" => "first line"}}]
+          events: [%{"type" => "llm_response", "data" => FakeRemote.said("first line")}]
         )
 
       {remote, url} = start_remote!(sessions: [session])

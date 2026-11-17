@@ -38,7 +38,6 @@ defmodule Troupe.Gateway.MixProject do
       # The daemon calls a plane when a person has linked one. The same client the rest
       # of Troupe uses, rather than a second HTTP stack for four methods.
       {:req, "~> 0.7"},
-      {:telemetry, "~> 1.3"},
       # The remote transport. A worker pod is reached through an Ingress, so its clients
       # arrive over HTTP and stay over a WebSocket; the same JSON-RPC either way.
       {:bandit, "~> 1.12"},

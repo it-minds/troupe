@@ -2,7 +2,7 @@ defmodule Troupe.RemoteUITest do
   @moduledoc """
   The parts of the feature list that are about what is on screen: resume events
   in the transcript, a read-only session saying why input is off, and the files
-  panel backed by `fs.list`/`fs.read` and kept fresh by `fs.changed`.
+  panel backed by `fs.list`/`fs.read` and kept fresh by `fs_changed`.
   """
 
   use ExUnit.Case, async: false
@@ -23,7 +23,7 @@ defmodule Troupe.RemoteUITest do
           id: "s-ui",
           profile: "code",
           title: "the session on screen",
-          events: [%{"type" => "message.completed", "data" => %{"text" => "first line"}}]
+          events: [%{"type" => "llm_response", "data" => FakeRemote.said("first line")}]
         ],
         fields
       )
@@ -31,7 +31,7 @@ defmodule Troupe.RemoteUITest do
   end
 
   describe "resume events" do
-    test "session.resumed and config.upgraded appear in the transcript" do
+    test "session_resumed and config_upgraded appear in the transcript" do
       {remote, url} = start_remote!(sessions: [fixture()])
       origin = connect!(remote, url)
       sid = attach!(origin, "s-ui")
@@ -40,8 +40,8 @@ defmodule Troupe.RemoteUITest do
       eventually(fn -> user_state(pid).model.windows["code-1"] != nil end)
       press(pid, "1")
 
-      FakeRemote.emit(remote, "s-ui", "session.resumed", %{"worker" => "w7"})
-      FakeRemote.emit(remote, "s-ui", "config.upgraded", %{"version" => "2.1"})
+      FakeRemote.emit(remote, "s-ui", "session_resumed", %{"worker" => "w7"})
+      FakeRemote.emit(remote, "s-ui", "config_upgraded", %{"version" => "2.1"})
 
       # Two frames from the plane, each drawn when it comes: waited for together.
       eventually(fn ->
@@ -159,7 +159,7 @@ defmodule Troupe.RemoteUITest do
   end
 
   describe "the files panel" do
-    test "lists the worker's files, opens one, and reloads when fs.changed says so" do
+    test "lists the worker's files, opens one, and reloads when fs_changed says so" do
       {remote, url} = start_remote!(sessions: [fixture()])
       origin = connect!(remote, url)
       sid = attach!(origin, "s-ui")
@@ -179,10 +179,10 @@ defmodule Troupe.RemoteUITest do
       press(pid, "enter")
       assert screen_text(pid, screen) =~ "hello from the worker"
 
-      # …and an fs.changed reloads the listing without anyone asking
+      # …and an fs_changed reloads the listing without anyone asking
       press(pid, "esc")
       version = user_state(pid).files.version
-      FakeRemote.emit(remote, "s-ui", "fs.changed", %{"paths" => ["README.md"]})
+      FakeRemote.emit(remote, "s-ui", "fs_changed", %{"path" => "README.md"})
 
       eventually(fn -> user_state(pid).files.version != version end)
       assert user_state(pid).focus == :files

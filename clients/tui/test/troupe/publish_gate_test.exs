@@ -36,7 +36,7 @@ defmodule Troupe.PublishGateTest do
   # A session on the plane, this machine's daemon linked to it: `artifact.list` says the
   # person is in finance and ops, and granted the dev profile.
   defp gated do
-    asked = %{"type" => "message.completed", "data" => %{"text" => "publishing"}}
+    asked = %{"type" => "llm_response", "data" => FakeRemote.said("publishing")}
 
     {remote, url} =
       start_remote!(
