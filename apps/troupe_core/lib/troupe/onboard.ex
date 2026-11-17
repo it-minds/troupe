@@ -967,16 +967,9 @@ defmodule Troupe.Onboard do
   end
 
   defp replace(file, content) do
-    tmp = file <> ".onboard-#{System.unique_integer([:positive])}.tmp"
-
-    with :ok <- File.mkdir_p(Path.dirname(file)),
-         :ok <- File.write(tmp, content),
-         :ok <- File.rename(tmp, file) do
-      :ok
-    else
-      {:error, reason} ->
-        _ = File.rm(tmp)
-        {:error, "cannot write #{Paths.display(file)}: #{:file.format_error(reason)}"}
+    case Paths.write_atomic(file, content) do
+      :ok -> :ok
+      {:error, reason} -> {:error, "cannot write #{Paths.display(file)}: #{:file.format_error(reason)}"}
     end
   end
 

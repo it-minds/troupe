@@ -503,16 +503,9 @@ defmodule Troupe.Memory.Facts.Store do
   end
 
   defp write(path, text) do
-    tmp = path <> ".#{System.unique_integer([:positive])}.tmp"
-
-    with :ok <- File.mkdir_p(Path.dirname(path)),
-         :ok <- File.write(tmp, text),
-         :ok <- File.rename(tmp, path) do
-      :ok
-    else
-      {:error, reason} ->
-        _ = File.rm(tmp)
-        {:error, "cannot write #{path}: #{:file.format_error(reason)}"}
+    case Troupe.Paths.write_atomic(path, text) do
+      :ok -> :ok
+      {:error, reason} -> {:error, "cannot write #{path}: #{:file.format_error(reason)}"}
     end
   end
 

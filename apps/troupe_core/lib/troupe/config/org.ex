@@ -304,20 +304,14 @@ defmodule Troupe.Config.Org do
     end
   end
 
-  # Whole or not at all: beside it, then renamed over it. Readable by the owner alone,
-  # since an organisation that hands out a key puts it in the defaults.
+  # Readable by the owner alone, since an organisation that hands out a key puts it in the
+  # defaults.
   defp write(path, cached) do
-    temporary = path <> ".#{System.unique_integer([:positive])}.tmp"
+    case Troupe.Paths.write_atomic(path, Jason.encode!(cached, pretty: true) <> "\n", owner_only: true) do
+      :ok ->
+        :ok
 
-    with :ok <- File.mkdir_p(Path.dirname(path)),
-         :ok <- File.write(temporary, Jason.encode!(cached, pretty: true) <> "\n"),
-         :ok <- Troupe.OwnerOnly.restrict(temporary),
-         :ok <- File.rename(temporary, path) do
-      :ok
-    else
       {:error, reason} ->
-        File.rm(temporary)
-
         {:error,
          "#{Troupe.Paths.display(path)} could not be written: #{:file.format_error(reason)}"}
     end
