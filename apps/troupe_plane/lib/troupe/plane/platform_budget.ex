@@ -5,7 +5,8 @@ defmodule Troupe.Plane.PlatformBudget do
 
   One actor, one key, because both ceilings are over the same number — everything this
   plane has spent and promised, across every team. Two actors for two caps on one total
-  would be two answers to one question.
+  would be two answers to one question. Served by `Troupe.Plane.Budget.Rung`, as every
+  rung is.
 
   Spent this month: both caps count the calendar month in UTC and turn over at midnight
   UTC on the 1st, as a person's does. A deployment at its ceiling starts sessions again
@@ -25,39 +26,32 @@ defmodule Troupe.Plane.PlatformBudget do
   instruction.
   """
 
-  use GenServer
+  use Troupe.Plane.Budget.Rung
 
-  alias Troupe.Plane.{Ledger, Settings, Singleton}
+  alias Troupe.Plane.Budget.Rung
+  alias Troupe.Plane.{Ledger, Settings}
 
   # One of a kind: there is one platform.
   @key :platform
-
-  defstruct reservations: %{}, spent_micros: 0
-
-  @spec start_link(keyword()) :: GenServer.on_start()
-  def start_link(opts) do
-    GenServer.start_link(__MODULE__, opts, name: Keyword.fetch!(opts, :name))
-  end
 
   @doc """
   Whether this deployment can promise `amount_micros` more.
 
   Decides and holds; it does not write. One promise is one row, written by
-  `Troupe.Plane.Budget` once every rung has agreed — a row written by the first rung
-  would be counted by the rungs after it as though somebody else had made it.
+  `Troupe.Plane.Budget` once every rung has agreed.
   """
   @spec reserve(String.t(), non_neg_integer()) :: {:ok, map()} | {:error, {:over_budget, map()}}
   def reserve(session_id, amount_micros) do
-    Singleton.call(__MODULE__, @key, {:reserve, session_id, amount_micros})
+    Rung.reserve(__MODULE__, @key, session_id, amount_micros)
   end
 
   @doc "Give a promise back."
   @spec release(String.t()) :: :ok
-  def release(session_id), do: Singleton.call(__MODULE__, @key, {:release, session_id})
+  def release(session_id), do: Rung.release(__MODULE__, @key, session_id)
 
   @doc "Both ceilings, which one binds, and how much of it is gone."
   @spec inspect_state() :: map()
-  def inspect_state, do: Singleton.call(__MODULE__, @key, :inspect)
+  def inspect_state, do: Rung.inspect_state(__MODULE__, @key)
 
   @doc """
   Whether anybody has set a ceiling here at all.
@@ -87,68 +81,36 @@ defmodule Troupe.Plane.PlatformBudget do
     |> Enum.min_by(fn {_scope, cap} -> cap end, fn -> :unlimited end)
   end
 
-  @impl GenServer
-  def init(_opts) do
-    Process.set_label("troupe platform budget")
-    {:ok, %__MODULE__{}, {:continue, :load}}
-  end
+  @impl Rung
+  def label(_key), do: "troupe platform budget"
 
-  @impl GenServer
-  def handle_continue(:load, state), do: {:noreply, load(state)}
-
-  @impl GenServer
-  def handle_call({:reserve, session_id, amount}, _from, state) do
-    state = load(state)
-
-    cond do
-      Map.has_key?(state.reservations, session_id) ->
-        {:reply, {:ok, summary(state)}, state}
-
-      fits?(state, amount) ->
-        state = %{state | reservations: Map.put(state.reservations, session_id, amount)}
-        {:reply, {:ok, summary(state)}, state}
-
-      true ->
-        {:reply, {:error, {:over_budget, summary(state)}}, state}
-    end
-  end
-
-  def handle_call({:release, session_id}, _from, state) do
-    {:reply, :ok, %{state | reservations: Map.delete(state.reservations, session_id)}}
-  end
-
-  def handle_call(:inspect, _from, state) do
-    state = load(state)
-    {:reply, summary(state), state}
-  end
-
-  # -- state ------------------------------------------------------------------
-
-  # Re-read on every decision. This is asked once per session create, which is not a hot
-  # path, and a deployment-wide total that was right a minute ago is exactly the kind of
-  # number that lets a deployment quietly pass its own ceiling.
-  #
-  # Reservations the ledger knows about are merged *under* what this actor is holding, so
-  # a session granted a moment ago and not yet written is counted once rather than twice.
-  defp load(state) do
-    totals = Ledger.platform_totals()
-    known = Ledger.open_reservations()
+  # A deployment-wide total that was right a minute ago is exactly the kind of number that
+  # lets a deployment quietly pass its own ceiling, so the two caps are read with it.
+  @impl Rung
+  def load(_key) do
+    {bound_by, cap} =
+      case ceiling() do
+        :unlimited -> {nil, :unlimited}
+        {scope, cap} -> {scope, cap}
+      end
 
     %{
-      state
-      | spent_micros: totals.spent_micros,
-        reservations: Map.merge(known, state.reservations)
+      ceiling: cap,
+      bound_by: bound_by,
+      spent_micros: Ledger.platform_totals().spent_micros,
+      reservations: Ledger.open_reservations()
     }
   end
 
-  defp fits?(state, amount) do
-    case ceiling() do
-      :unlimited -> true
-      {_scope, cap} -> state.spent_micros + reserved(state) + amount <= cap
-    end
+  @impl Rung
+  def summary(_key, %{ceiling: cap, bound_by: bound_by}) do
+    %{
+      scope: :platform,
+      budget_period: "monthly",
+      bound_by: bound_by,
+      budget_micros: if(cap == :unlimited, do: 0, else: cap)
+    }
   end
-
-  defp reserved(state), do: state.reservations |> Map.values() |> Enum.sum()
 
   # What the deployment was given, and what a platform admin has said within it.
   defp ceiling do
@@ -158,26 +120,4 @@ defmodule Troupe.Plane.PlatformBudget do
   defp deployment_cap, do: Application.get_env(:troupe_plane, :deployment_budget_micros, 0)
 
   defp platform_cap, do: Settings.get("platform_budget_micros")
-
-  defp summary(state) do
-    base = %{
-      scope: :platform,
-      budget_period: "monthly",
-      spent_micros: state.spent_micros,
-      reserved_micros: reserved(state),
-      node: node()
-    }
-
-    case ceiling() do
-      :unlimited ->
-        Map.merge(base, %{bound_by: nil, budget_micros: 0, remaining_micros: :unlimited})
-
-      {scope, cap} ->
-        Map.merge(base, %{
-          bound_by: scope,
-          budget_micros: cap,
-          remaining_micros: max(cap - state.spent_micros - reserved(state), 0)
-        })
-    end
-  end
 end
