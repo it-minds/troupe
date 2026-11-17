@@ -17,6 +17,8 @@ defmodule Troupe.MCP.Secrets do
   refused with that reason rather than started without it.
   """
 
+  alias Troupe.Protocol.Digest
+
   @reference ~r/\{secret:([A-Za-z0-9][A-Za-z0-9_.\/-]*)\}/
 
   @typedoc "What a server's string needs from the store: nothing, or a reference it lacks."
@@ -46,7 +48,7 @@ defmodule Troupe.MCP.Secrets do
       end
 
     "ws-" <>
-      (:sha256 |> :crypto.hash(real) |> Base.encode16(case: :lower) |> binary_part(0, 16)) <> "/"
+      (Digest.sha256(real) |> binary_part(0, 16)) <> "/"
   end
 
   @doc "Whether a string names a value in the store."

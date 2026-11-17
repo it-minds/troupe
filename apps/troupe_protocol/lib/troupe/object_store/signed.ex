@@ -32,6 +32,8 @@ defmodule Troupe.ObjectStore.Signed do
   and the epoch and sequence numbers are in the segment key besides.
   """
 
+  alias Troupe.ObjectStore.Head
+
   @enforce_keys [:session_id, :presign, :list]
   defstruct [:session_id, :presign, :list]
 
@@ -94,21 +96,8 @@ defmodule Troupe.ObjectStore.Signed do
   """
   @spec head(t(), String.t()) :: {:ok, map()} | {:error, :not_found | term()}
   def head(%__MODULE__{} = signed, key) do
-    with {:ok, url} <- sign(signed, :head, key) do
-      case Req.head(url, decode_body: false, retry: false) do
-        {:ok, %{status: status} = response} when status in 200..299 ->
-          {:ok, %{key: key, bytes: content_length(response), metadata: metadata_of(response)}}
-
-        {:ok, %{status: 404}} ->
-          {:error, :not_found}
-
-        {:ok, response} ->
-          {:error, {:unexpected_status, response.status, response.body}}
-
-        {:error, reason} ->
-          {:error, reason}
-      end
-    end
+    with {:ok, url} <- sign(signed, :head, key),
+         do: Head.answer(key, Req.head(url, decode_body: false, retry: false))
   end
 
   @doc "Whether an object exists, without fetching it."
@@ -125,22 +114,5 @@ defmodule Troupe.ObjectStore.Signed do
       {:ok, _other} -> {:error, {:unsigned, key}}
       {:error, reason} -> {:error, reason}
     end
-  end
-
-  defp content_length(response) do
-    case Req.Response.get_header(response, "content-length") do
-      [value | _] -> String.to_integer(value)
-      _ -> 0
-    end
-  end
-
-  defp metadata_of(response) do
-    response.headers
-    |> Enum.flat_map(fn
-      {"x-amz-meta-" <> name, [value | _]} -> [{name, value}]
-      {"x-amz-meta-" <> name, value} when is_binary(value) -> [{name, value}]
-      _ -> []
-    end)
-    |> Map.new()
   end
 end

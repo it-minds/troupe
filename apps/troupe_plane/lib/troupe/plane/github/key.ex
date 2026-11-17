@@ -60,7 +60,7 @@ defmodule Troupe.Plane.GitHub.Key do
          {:ok, wrapping} <- wrapping_key(opts),
          ciphertext = wrap(:public_key.der_encode(:PrivateKeyInfo, key), wrapping),
          {:ok, _} <- import_or_rotate(ciphertext, type, opts),
-         {:ok, version} <- latest_version(opts) do
+         {:ok, version} <- Tokens.latest_version(name(opts), opts) do
       {:ok, %{type: type, fingerprint: fingerprint, version: version}}
     end
   end
@@ -272,14 +272,6 @@ defmodule Troupe.Plane.GitHub.Key do
 
       error ->
         error
-    end
-  end
-
-  defp latest_version(opts) do
-    case Tokens.request(:get, "/v1/#{Tokens.mount(opts)}/keys/#{name(opts)}", nil, opts) do
-      {:ok, %{"data" => %{"latest_version" => version}}} -> {:ok, version}
-      {:ok, other} -> {:error, {:unexpected_response, other}}
-      error -> error
     end
   end
 end

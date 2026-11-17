@@ -11,6 +11,7 @@ defmodule Troupe.Tools.Grep do
   @behaviour Troupe.Tool
 
   alias Troupe.{Config, Executable, Gitignore, Paths, Reaper, Tool, Workspace}
+  alias Troupe.Protocol.Words
   alias Troupe.Tools.Output
 
   @max_matches 200
@@ -228,7 +229,7 @@ defmodule Troupe.Tools.Grep do
   end
 
   defp count(%{lines: lines, total: total, files: files, more: more?}) do
-    matched = "#{plural(total, "matching line")} in #{plural(files, "file")}"
+    matched = "#{Words.count(total, "matching line")} in #{Words.count(files, "file")}"
 
     cond do
       more? -> matched <> ", and more in a file that reached #{@max_matches}:"
@@ -236,9 +237,6 @@ defmodule Troupe.Tools.Grep do
       true -> matched <> ":"
     end
   end
-
-  defp plural(1, noun), do: "1 #{noun}"
-  defp plural(n, noun), do: "#{n} #{noun}s"
 
   defp cap(%{config: nil}), do: %Config{}.tool_output_limit
   defp cap(%{config: config}), do: config.tool_output_limit

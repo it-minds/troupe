@@ -40,6 +40,7 @@ defmodule Troupe.UI.Setup do
   alias ExRatatui.Layout.Rect
   alias ExRatatui.Text.{Line, Span}
   alias ExRatatui.Widgets.{Block, Paragraph}
+  alias Troupe.Protocol.Words
   alias Troupe.UI.Lines
   alias Troupe.UI.TUI.{Input, Model, Theme}
 
@@ -475,7 +476,7 @@ defmodule Troupe.UI.Setup do
   defp late_words(state) do
     seconds = div(state.patience_ms + 999, 1000)
 
-    "The daemon has not answered in #{seconds} #{if seconds == 1, do: "second", else: "seconds"}. " <>
+    "The daemon has not answered in #{Words.count(seconds, "second")}. " <>
       "Its answer is still taken if it comes; Enter asks again, Esc leaves."
   end
 

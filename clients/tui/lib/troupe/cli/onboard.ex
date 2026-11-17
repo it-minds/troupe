@@ -27,6 +27,7 @@ defmodule Troupe.CLI.Onboard do
 
   alias Troupe.CLI.{Prompt, Terminal}
   alias Troupe.Paths
+  alias Troupe.Protocol.Words
 
   @doc """
   Run it and print what happened; returns the exit status.
@@ -69,7 +70,9 @@ defmodule Troupe.CLI.Onboard do
         status(plan, [])
 
       proposals ->
-        IO.puts("#{count(proposals, "file")} to onboard in #{Paths.display(plan.workspace)}.")
+        IO.puts(
+          "#{Words.count(length(proposals), "file")} to onboard in #{Paths.display(plan.workspace)}."
+        )
 
         {results, _mode} =
           Enum.map_reduce(proposals, if(args.yes, do: :yes, else: :ask), fn item, mode ->
@@ -235,13 +238,14 @@ defmodule Troupe.CLI.Onboard do
     unasked = Enum.count(results, &(&1 == :unasked))
     left = Enum.count(results, &(&1 == :left))
 
-    line = "#{count(written, "file")} written, #{declined} left out" <> passed_over(plan) <> "."
+    line =
+      "#{Words.count(written, "file")} written, #{declined} left out" <> passed_over(plan) <> "."
 
     line =
       if left > 0,
         do:
           line <>
-            "\n#{count(left, "new AGENTS.md", "new AGENTS.md files")} not created: creating " <>
+            "\n#{Words.count(left, "new AGENTS.md", "new AGENTS.md files")} not created: creating " <>
             "one is asked at a terminal, never answered by --yes.",
         else: line
 
@@ -367,11 +371,4 @@ defmodule Troupe.CLI.Onboard do
       true -> IO.gets(question)
     end
   end
-
-  defp count(n, noun) when is_list(n), do: count(length(n), noun)
-  defp count(1, noun), do: "1 #{noun}"
-  defp count(n, noun), do: "#{n} #{noun}s"
-
-  defp count(1, one, _many), do: "1 #{one}"
-  defp count(n, _one, many), do: "#{n} #{many}"
 end

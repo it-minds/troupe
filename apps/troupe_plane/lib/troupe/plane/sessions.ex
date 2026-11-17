@@ -15,6 +15,7 @@ defmodule Troupe.Plane.Sessions do
   alias Troupe.Plane.Repo
   alias Troupe.Plane.Sessions.{ACL, Anchor, Session, Share}
   alias Troupe.Plane.Settings.Ladder
+  alias Troupe.Protocol.Digest
 
   # A session somebody has erased, whether or not its key is gone yet. Nothing writes one
   # back into play: not a placement, not a pod's answer that it started it, not a wait. An
@@ -1297,7 +1298,7 @@ defmodule Troupe.Plane.Sessions do
   end
 
   defp secret_hash(salt, secret),
-    do: :sha256 |> :crypto.hash(salt <> secret) |> Base.encode16(case: :lower)
+    do: Digest.sha256(salt <> secret)
 
   defp secret_matches?(%Share{secret_hash: hash, secret_salt: salt}, secret) do
     presented = secret_hash(salt, secret)

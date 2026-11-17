@@ -29,20 +29,8 @@ defmodule Troupe.LLM.Providers.Anthropic do
   @api_version "2023-06-01"
 
   @impl Troupe.LLM.Provider
-  def stream(%Request{} = request, reply_to, ref) do
-    result =
-      Provider.with_retries(
-        fn -> attempt(request, reply_to, ref) end,
-        request.max_retries
-      )
-
-    case result do
-      {:ok, response} -> send(reply_to, {:llm_done, ref, response})
-      {:error, reason} -> send(reply_to, {:llm_error, ref, reason})
-    end
-
-    :ok
-  end
+  def stream(%Request{} = request, reply_to, ref),
+    do: Provider.reply(reply_to, ref, request.max_retries, fn -> attempt(request, reply_to, ref) end)
 
   defp attempt(request, reply_to, ref) do
     case api_key(request) do

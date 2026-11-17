@@ -33,6 +33,7 @@ defmodule Troupe.Agent.BudgetQuestion do
 
   alias Troupe.Agent.Headroom
   alias Troupe.Budget
+  alias Troupe.Protocol.Words
 
   @type scope :: :run | :session | :workspace
   @type decision :: :allow | :always | :deny | {:extend, scope(), pos_integer()}
@@ -449,21 +450,16 @@ defmodule Troupe.Agent.BudgetQuestion do
 
   @doc "An amount in a limit's unit, as a person reads it: `25 turns`, `50k tokens`, `15 min`."
   @spec amount(Budget.exhaustion(), non_neg_integer()) :: String.t()
-  def amount(:max_turns, 1), do: "1 turn"
-  def amount(:max_turns, n), do: "#{n} turns"
+  def amount(:max_turns, n), do: Words.count(n, "turn")
 
   def amount(tokens, n) when tokens in [:max_input_tokens, :max_output_tokens],
     do: "#{tokens(n)} tokens"
 
-  def amount(:wall_clock, ms), do: duration(ms)
+  def amount(:wall_clock, ms), do: Words.duration(ms)
 
   defp tokens(n) when n >= 1_000_000, do: round_unit(n / 1_000_000) <> "M"
   defp tokens(n) when n >= 1_000, do: round_unit(n / 1_000) <> "k"
   defp tokens(n), do: Integer.to_string(n)
-
-  defp duration(ms) when ms >= 60 * @minute, do: round_unit(ms / (60 * @minute)) <> " h"
-  defp duration(ms) when ms >= @minute, do: round_unit(ms / @minute) <> " min"
-  defp duration(ms), do: round_unit(ms / 1_000) <> " s"
 
   defp round_unit(value) do
     if value == trunc(value),

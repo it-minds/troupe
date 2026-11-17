@@ -269,12 +269,12 @@ defmodule Troupe.MCP.Stdio do
   defp after_tools_list(_other, state), do: fail(state, "tools/list answered without tools")
 
   defp reply_tool(from, %{"result" => %{"isError" => true} = result}, state) do
-    GenServer.reply(from, {:error, render(result)})
+    GenServer.reply(from, {:error, Tool.render(result)})
     state
   end
 
   defp reply_tool(from, %{"result" => result}, state) do
-    GenServer.reply(from, {:ok, render(result)})
+    GenServer.reply(from, {:ok, Tool.render(result)})
     state
   end
 
@@ -309,22 +309,6 @@ defmodule Troupe.MCP.Stdio do
     do: Map.get(config, :files, :all) == :all or remote in config.files
 
   defp stores_files?(_config, _remote), do: false
-
-  defp render(%{"content" => blocks}) when is_list(blocks) do
-    blocks
-    |> Enum.map_join("\n", fn
-      %{"type" => "text", "text" => text} -> text
-      %{"type" => type} -> "[#{type} content]"
-      other -> inspect(other)
-    end)
-    |> String.trim()
-    |> case do
-      "" -> "(no output)"
-      text -> text
-    end
-  end
-
-  defp render(result), do: Jason.encode!(result)
 
   defp describe(%{"message" => message}), do: message
   defp describe(error), do: inspect(error)

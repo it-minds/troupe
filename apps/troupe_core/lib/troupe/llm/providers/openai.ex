@@ -37,16 +37,8 @@ defmodule Troupe.LLM.Providers.OpenAI do
   alias Troupe.LLM.Providers.OpenAI.Collector
 
   @impl Troupe.LLM.Provider
-  def stream(%Request{} = request, reply_to, ref) do
-    result = Provider.with_retries(fn -> attempt(request, reply_to, ref) end, request.max_retries)
-
-    case result do
-      {:ok, response} -> send(reply_to, {:llm_done, ref, response})
-      {:error, reason} -> send(reply_to, {:llm_error, ref, reason})
-    end
-
-    :ok
-  end
+  def stream(%Request{} = request, reply_to, ref),
+    do: Provider.reply(reply_to, ref, request.max_retries, fn -> attempt(request, reply_to, ref) end)
 
   defp attempt(%Request{api_key: {:refused, _why} = refused}, _reply_to, _ref), do: {:error, refused}
   defp attempt(request, reply_to, ref), do: post(request, body(request), reply_to, ref, :first)

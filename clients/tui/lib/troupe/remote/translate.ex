@@ -15,6 +15,7 @@ defmodule Troupe.Remote.Translate do
 
   alias Troupe.Client.Message
   alias Troupe.Event
+  alias Troupe.Protocol.Words
 
   require Logger
 
@@ -900,7 +901,7 @@ defmodule Troupe.Remote.Translate do
     head =
       cond do
         files != [] ->
-          "#{count(length(files), "file")}, +#{changed["added"] || 0} -#{changed["removed"] || 0}"
+          "#{Words.count(length(files), "file")}, +#{changed["added"] || 0} -#{changed["removed"] || 0}"
 
         commands > 0 ->
           "no file through its file tools"
@@ -919,7 +920,7 @@ defmodule Troupe.Remote.Translate do
       shown ++
         if(length(files) > @listed, do: ["and #{length(files) - @listed} more"], else: []) ++
         if(commands > 0,
-          do: ["not counted: what its #{count(commands, "command")} changed"],
+          do: ["not counted: what its #{Words.count(commands, "command")} changed"],
           else: []
         ) ++
         if(is_binary(changed["said"]), do: ["it says: " <> changed["said"]], else: [])
@@ -928,9 +929,6 @@ defmodule Troupe.Remote.Translate do
   end
 
   defp changed_line(_changed), do: "not reported"
-
-  defp count(1, noun), do: "1 #{noun}"
-  defp count(n, noun), do: "#{n} #{noun}s"
 
   # How a window's agent ended that the harness wakes no more: every end but `finished`
   # (new input resumes it) and `llm_error` (a root rests on one, and the next message is a
@@ -1010,8 +1008,8 @@ defmodule Troupe.Remote.Translate do
   end
 
   @doc """
-  A spent budget limit in words, with its size where the session said it: "its 30-minute
-  working limit", "its 40-turn limit", "its 6M input-token limit"; "its budget" for a
+  A spent budget limit in words, with its size where the session said it: "its working
+  limit of 30 min", "its 40-turn limit", "its 6M input-token limit"; "its budget" for a
   limit this client does not know.
   """
   @spec limit_words(String.t() | nil, map()) :: String.t()
@@ -1020,7 +1018,7 @@ defmodule Troupe.Remote.Translate do
     n = dim && Map.get(limits, dim)
 
     case {dim, n} do
-      {"wall", n} when is_number(n) -> "its #{duration(n)} working limit"
+      {"wall", n} when is_number(n) -> "its working limit of #{Words.duration(n)}"
       {"wall", _} -> "its working-time limit"
       {"turns", n} when is_number(n) -> "its #{n}-turn limit"
       {"turns", _} -> "its turn limit"
@@ -1031,12 +1029,6 @@ defmodule Troupe.Remote.Translate do
       _ -> "its budget"
     end
   end
-
-  defp duration(ms) when ms >= 3_600_000 and rem(trunc(ms), 3_600_000) == 0,
-    do: "#{div(trunc(ms), 3_600_000)}-hour"
-
-  defp duration(ms) when ms >= 60_000, do: "#{round(ms / 60_000)}-minute"
-  defp duration(ms), do: "#{round(ms / 1000)}-second"
 
   defp token_count(n) when n >= 1_000_000, do: one_place(n / 1_000_000) <> "M"
   defp token_count(n) when n >= 1_000, do: one_place(n / 1_000) <> "k"
@@ -1434,14 +1426,8 @@ defmodule Troupe.Remote.Translate do
     kinds = Enum.map(files, &skipped_kind/1)
     many = Enum.frequencies(kinds)
 
-    case Enum.map(Enum.uniq(kinds), &count_of(&1, many[&1])) do
-      [one] -> one
-      some -> Enum.join(Enum.drop(some, -1), ", ") <> " and " <> List.last(some)
-    end
+    kinds |> Enum.uniq() |> Enum.map(&Words.count(many[&1], &1)) |> Words.and_list()
   end
-
-  defp count_of(kind, 1), do: "1 #{kind}"
-  defp count_of(kind, n), do: "#{n} #{kind}s"
 
   # How a person's command ended, and where it ran: a session on a plane says which
   # profile's pod, and is otherwise drawn as a local one is.

@@ -19,6 +19,7 @@ defmodule Mix.Tasks.Troupe.Xref do
       Troupe.Client.Message  content blocks, for the text of an assistant message
       Troupe.Codec     decoding events the client hands over
       Troupe.Protocol.Glob   escaping the workspace for `@file` completion
+      Troupe.Protocol.Words  durations, counts and lists in the words the server writes them
 
   The second rule is about the whole TUI and the harness under it. `troupe_core`,
   `troupe_gateway` and `troupe_protocol` are path dependencies on the umbrella beside this
@@ -28,6 +29,7 @@ defmodule Mix.Tasks.Troupe.Xref do
 
       Troupe.Protocol.Client, .Daemon, .Endpoint   finding, starting and talking to a daemon
       Troupe.Protocol.Glob                          escaping a path a glob starts from
+      Troupe.Protocol.Words                         durations, counts and lists, spelled as the server spells them
       Troupe.Protocol.Memory.Entries                a memory document's `## Topic` sections, read as the plane reads them
       Troupe.Config                                 the configuration the daemon reads too
       Troupe.Config.Schema                          the key table: each setting's label, type and help
@@ -67,7 +69,8 @@ defmodule Mix.Tasks.Troupe.Xref do
     Troupe.Event,
     Troupe.Client.Message,
     Troupe.Codec,
-    Troupe.Protocol.Glob
+    Troupe.Protocol.Glob,
+    Troupe.Protocol.Words
   ]
 
   @harness_apps [:troupe_core, :troupe_gateway, :troupe_protocol]
@@ -77,6 +80,7 @@ defmodule Mix.Tasks.Troupe.Xref do
     Troupe.Protocol.Daemon,
     Troupe.Protocol.Endpoint,
     Troupe.Protocol.Glob,
+    Troupe.Protocol.Words,
     Troupe.Protocol.Memory.Entries,
     Troupe.Config,
     Troupe.Config.Schema,

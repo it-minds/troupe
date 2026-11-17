@@ -24,6 +24,7 @@ defmodule Troupe.Session.Shell do
   alias Troupe.Agent.Server, as: Agent
   alias Troupe.Config.Permissions
   alias Troupe.{Events, Registry, Session}
+  alias Troupe.Protocol.Words
   alias Troupe.Session.Log
   alias Troupe.Tool.Ctx
   alias Troupe.Tools.{Output, Shell}
@@ -154,7 +155,7 @@ defmodule Troupe.Session.Shell do
 
   defp ending(data), do: "[it could not run: #{data["reason"] || "the shell is unavailable"}]"
 
-  defp seconds(ms) when is_integer(ms), do: "#{Float.round(ms / 1000, 1)} s"
+  defp seconds(ms) when is_integer(ms), do: Words.duration(ms)
   defp seconds(_ms), do: "its timeout"
 
   defp root(session_id) do

@@ -48,7 +48,7 @@ defmodule Troupe.Plane.GitHub.Issues do
   alias Troupe.Plane.GitHub.{Issue, Policy}
   alias Troupe.Plane.Identity.Team
   alias Troupe.Plane.Triggers.{Run, Trigger}
-  alias Troupe.Protocol.Error
+  alias Troupe.Protocol.{Error, Words}
 
   require Logger
 
@@ -173,7 +173,7 @@ defmodule Troupe.Plane.GitHub.Issues do
         "it has an open pull request, ##{number}, that a run on it opened"
 
       (tried = attempts(runs)) >= cap ->
-        "#{tried} #{if tried == 1, do: "run", else: "runs"} a sweep started on it ended " <>
+        "#{Words.count(tried, "run")} a sweep started on it ended " <>
           "without a fix, as many as it may (github.maxAttempts): a person asks again with " <>
           "its label, its command or the console's fix this"
 

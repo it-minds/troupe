@@ -24,6 +24,7 @@ defmodule Troupe.CLI.Bench do
   """
 
   alias Troupe.CLI.{Prompt, Terminal}
+  alias Troupe.Protocol.Words
 
   @doc """
   Run what the arguments ask for and print it; returns the exit status.
@@ -50,7 +51,7 @@ defmodule Troupe.CLI.Bench do
 
   defp offline(args) do
     {micros, report} = :timer.tc(&Troupe.Bench.run/0)
-    output(report, args, "The suite took #{seconds(micros)}.")
+    output(report, args, "The suite took #{Words.duration(div(micros, 1000))}.")
     if Troupe.Bench.passed?(report), do: 0, else: 1
   end
 
@@ -75,7 +76,7 @@ defmodule Troupe.CLI.Bench do
         if yes?(answer) do
           progress = &IO.puts(:stderr, &1)
           {micros, report} = :timer.tc(fn -> Troupe.Bench.live(plan, progress: progress) end)
-          output(report, args, "The live bench took #{seconds(micros)}.")
+          output(report, args, "The live bench took #{Words.duration(div(micros, 1000))}.")
           if args.compare, do: compare(args)
           if Troupe.Bench.passed?(report), do: 0, else: 1
         else
@@ -135,6 +136,4 @@ defmodule Troupe.CLI.Bench do
     IO.puts(:stderr, "troupe bench: " <> why)
     2
   end
-
-  defp seconds(micros), do: "#{Float.round(micros / 1_000_000, 1)} s"
 end

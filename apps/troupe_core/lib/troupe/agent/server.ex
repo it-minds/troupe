@@ -74,8 +74,10 @@ defmodule Troupe.Agent.Server do
     Usage
   }
 
+  alias Troupe.Protocol.Digest
   alias Troupe.Protocol.Event
   alias Troupe.Protocol.Principal
+  alias Troupe.Protocol.Words
   alias Troupe.Session.{Approvals, Blobs, Log, Memory, Organisation, Questions, Shell}
   alias Troupe.Session.MCP, as: SessionMCP
   alias Troupe.Sessions.Index
@@ -1934,7 +1936,7 @@ defmodule Troupe.Agent.Server do
   # and the digest of each section it carried) and folded back on replay (`put_context/2`),
   # so an agent restarted, or a session resumed, sends the prefix it sent before (Decision
   # 863).
-  @nothing_sent "sha256:" <> Base.encode16(:crypto.hash(:sha256, ""), case: :lower)
+  @nothing_sent Digest.tagged("")
 
   defp attach_turn_context(%State{} = state) do
     if stable?(state),
@@ -1976,7 +1978,7 @@ defmodule Troupe.Agent.Server do
   end
 
   defp section_digest(text),
-    do: "sha256:" <> Base.encode16(:crypto.hash(:sha256, text), case: :lower)
+    do: Digest.tagged(text)
 
   defp turn_sections(state) do
     [
@@ -3663,7 +3665,7 @@ defmodule Troupe.Agent.Server do
 
   defp answered_note(asked, agent, edited) do
     switched = if agent != asked, do: ["sent it to #{agent} rather than #{asked}"], else: []
-    parts = if edited != [], do: ["edited its #{Finish.and_list(edited)}"], else: []
+    parts = if edited != [], do: ["edited its #{Words.and_list(edited)}"], else: []
     "[The person #{Enum.join(switched ++ parts, " and ")} before it ran.]"
   end
 

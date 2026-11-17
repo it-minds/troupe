@@ -25,6 +25,7 @@ defmodule Troupe.Plane.Releases do
 
   alias Troupe.ObjectStore
   alias Troupe.Protocol.ClientUpdate
+  alias Troupe.Protocol.Digest
   alias Troupe.Release.{Manifest, Minisign}
 
   @source "https://github.com/it-minds/troupe/releases/download"
@@ -208,7 +209,7 @@ defmodule Troupe.Plane.Releases do
          "#{file} is #{byte_size(bytes)} bytes, and the signed manifest says #{size}: " <>
            "the copy stopped there, and the release is not mirrored"}
 
-      Base.encode16(:crypto.hash(:sha256, bytes), case: :lower) != sha256 ->
+      Digest.sha256(bytes) != sha256 ->
         {:error,
          "#{file} is not the file the signed manifest names (its sha256 differs): " <>
            "the copy stopped there, and the release is not mirrored"}

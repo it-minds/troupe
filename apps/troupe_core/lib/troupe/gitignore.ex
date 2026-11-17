@@ -10,6 +10,8 @@ defmodule Troupe.Gitignore do
   `.git/` is always ignored regardless of any file's contents.
   """
 
+  alias Troupe.Protocol.Glob
+
   @enforce_keys [:rules]
   defstruct [:rules]
 
@@ -164,40 +166,11 @@ defmodule Troupe.Gitignore do
   end
 
   defp compile(pattern, anchored?, dir_only?) do
-    body = translate(pattern)
+    body = Glob.regex(pattern, brackets: true)
     prefix = if anchored?, do: "\\A", else: "\\A(?:.*/)?"
     # A directory pattern also hides everything under it.
     suffix = if dir_only?, do: "(?:/.*)?\\z", else: "(?:/.*)?\\z"
 
     Regex.compile!(prefix <> body <> suffix)
-  end
-
-  defp translate(pattern) do
-    pattern
-    |> String.replace("**/", "\x00DOUBLESLASH\x00")
-    |> String.replace("**", "\x00DOUBLE\x00")
-    |> escape()
-    |> String.replace("\x00DOUBLESLASH\x00", "(?:.*/)?")
-    |> String.replace("\x00DOUBLE\x00", ".*")
-  end
-
-  defp escape(pattern) do
-    pattern
-    |> String.graphemes()
-    |> Enum.map_join(fn
-      "*" -> "[^/]*"
-      "?" -> "[^/]"
-      "." -> "\\."
-      "+" -> "\\+"
-      "(" -> "\\("
-      ")" -> "\\)"
-      "|" -> "\\|"
-      "^" -> "\\^"
-      "$" -> "\\$"
-      "{" -> "\\{"
-      "}" -> "\\}"
-      "\\" -> "\\\\"
-      c -> c
-    end)
   end
 end

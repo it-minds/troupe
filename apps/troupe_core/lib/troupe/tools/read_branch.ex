@@ -35,7 +35,7 @@ defmodule Troupe.Tools.ReadBranch do
   alias Troupe.Agent.{Background, BudgetQuestion, Spend, Writes}
   alias Troupe.LLM.Usage
   alias Troupe.Log.Fold
-  alias Troupe.Protocol.Event
+  alias Troupe.Protocol.{Event, Words}
   alias Troupe.Session.Log
   alias Troupe.Sessions.Index
 
@@ -309,7 +309,7 @@ defmodule Troupe.Tools.ReadBranch do
   defp cost(%Spend{calls: calls, usage: usage, cost_micros: micros, unpriced: unpriced}) do
     money = if micros > 0, do: ", " <> BudgetQuestion.money(micros), else: ""
 
-    "#{calls} model call#{if calls == 1, do: "", else: "s"}, #{Usage.total_input(usage)} tokens in, " <>
+    "#{Words.count(calls, "model call")}, #{Usage.total_input(usage)} tokens in, " <>
       "#{usage.output_tokens} out#{money}#{if unpriced > 0, do: ", #{unpriced} unpriced", else: ""}"
   end
 

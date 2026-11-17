@@ -57,6 +57,7 @@ defmodule Troupe.Config do
   alias Troupe.LLM.Catalog.Store
   alias Troupe.LLM.{Endpoint, ProviderType}
   alias Troupe.MCP.{OAuth, Server}
+  alias Troupe.Protocol.Words
 
   require Logger
 
@@ -1318,17 +1319,7 @@ defmodule Troupe.Config do
 
   defp ago(nil), do: "never"
 
-  defp ago(%DateTime{} = at) do
-    case DateTime.diff(DateTime.utc_now(), at) do
-      s when s < 60 -> "just now"
-      s when s < 3_600 -> plural(div(s, 60), "minute") <> " ago"
-      s when s < 86_400 -> plural(div(s, 3_600), "hour") <> " ago"
-      s -> plural(div(s, 86_400), "day") <> " ago"
-    end
-  end
-
-  defp plural(1, word), do: "1 " <> word
-  defp plural(n, word), do: "#{n} #{word}s"
+  defp ago(%DateTime{} = at), do: Words.ago(at)
 
   defp describe_choices(config, sources, answered) do
     case models(config) do

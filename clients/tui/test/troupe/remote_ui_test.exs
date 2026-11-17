@@ -74,7 +74,7 @@ defmodule Troupe.RemoteUITest do
   # so in its place and keeps a typed line rather than sending it to vanish, and the line
   # the harness writes for a dropped message reads as dropped, never as picked up.
   describe "a session that stopped" do
-    @stopped "This session has stopped: its 30-minute working limit is spent. Start a new session to continue."
+    @stopped "This session has stopped: its working limit of 30 min is spent. Start a new session to continue."
 
     test "the input line says why after a budget stop, and a message is not sent" do
       {remote, url} = start_remote!(sessions: [fixture()])

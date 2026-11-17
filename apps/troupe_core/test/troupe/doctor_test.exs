@@ -339,7 +339,7 @@ defmodule Troupe.DoctorTest do
       assert %{state: :fail, detail: detail} = Enum.find(checks, &(&1.name == "answer"))
 
       assert detail ==
-               "the model at 127.0.0.1 sent nothing for 300 ms: the address, the key or a proxy " <>
+               "the model at 127.0.0.1 sent nothing for 0.3 s: the address, the key or a proxy " <>
                  "between here and there is the usual reason; `troupe doctor` tries a small request"
 
       assert Doctor.exit_status(checks) == 1

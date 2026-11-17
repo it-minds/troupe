@@ -36,6 +36,7 @@ defmodule Troupe.Memory.Facts.Store do
 
   alias Troupe.Memory
   alias Troupe.Memory.Facts
+  alias Troupe.Protocol.Digest
   alias Troupe.Session.Memory, as: Brief
   alias Troupe.Workspace
 
@@ -121,7 +122,7 @@ defmodule Troupe.Memory.Facts.Store do
 
     case File.read(file) do
       {:ok, bytes} ->
-        hash = :sha256 |> :crypto.hash(bytes) |> Base.encode16(case: :lower)
+        hash = Digest.sha256(bytes)
         :ets.insert(tables.hashes, {file, size, mtime, at, hash})
         {:ok, hash, DateTime.from_unix!(mtime)}
 

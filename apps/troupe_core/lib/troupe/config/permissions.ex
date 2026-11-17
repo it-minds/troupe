@@ -26,7 +26,7 @@ defmodule Troupe.Config.Permissions do
   file may.
   """
 
-  alias Troupe.Protocol.PermissionRule
+  alias Troupe.Protocol.{Glob, PermissionRule}
 
   @type action :: :deny | :ask | :allow
 
@@ -328,7 +328,7 @@ defmodule Troupe.Config.Permissions do
   end
 
   defp matches?(%{tool: "mcp", pattern: pattern}, name, _root) when is_binary(name) do
-    regex = glob_regex(pattern, ".*")
+    regex = Glob.regex(pattern, slash: false)
     whole = if String.contains?(pattern, "."), do: regex, else: regex <> "\\..+"
     Regex.match?(~r/\A#{whole}\z/s, name)
   end
@@ -361,25 +361,12 @@ defmodule Troupe.Config.Permissions do
 
     if String.contains?(pattern, ["*", "?"]) do
       Regex.match?(
-        Regex.compile!("\\A" <> glob_regex(fold(pattern), "[^/]*") <> "\\z", "s"),
+        Regex.compile!("\\A" <> Glob.regex(fold(pattern)) <> "\\z", "s"),
         fold(path)
       )
     else
       fold(path) == fold(pattern) or String.starts_with?(fold(path), fold(pattern) <> "/")
     end
-  end
-
-  # `**/` any number of directories, `**` anything, `*` what `star` says, `?` one
-  # character; the rest as written.
-  defp glob_regex(pattern, star) do
-    Regex.scan(~r/\*\*\/|\*\*|\*|\?|[^*?]+/, pattern)
-    |> Enum.map_join(fn
-      ["**/"] -> "(?:.*/)?"
-      ["**"] -> ".*"
-      ["*"] -> star
-      ["?"] -> if star == ".*", do: ".", else: "[^/]"
-      [text] -> Regex.escape(text)
-    end)
   end
 
   # Windows' file names are one whatever their case, so a rule is too.

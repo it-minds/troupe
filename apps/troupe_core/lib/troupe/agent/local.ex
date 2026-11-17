@@ -25,6 +25,7 @@ defmodule Troupe.Agent.Local do
   alias Troupe.Onboard
   alias Troupe.Paths
   alias Troupe.Protocol.AgentDefinition
+  alias Troupe.Protocol.Digest
 
   @type scope :: :user | :project
 
@@ -119,7 +120,7 @@ defmodule Troupe.Agent.Local do
   """
   @spec hash(String.t() | nil) :: String.t() | nil
   def hash(nil), do: nil
-  def hash(text), do: "sha256:" <> (:sha256 |> :crypto.hash(text) |> Base.encode16(case: :lower))
+  def hash(text), do: Digest.tagged(text)
 
   @doc """
   The person's or the repository's file of `name` that was found and does not parse, the

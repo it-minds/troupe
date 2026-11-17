@@ -12,6 +12,8 @@ defmodule Troupe.WorkerProfile do
   which volumes to bind into the namespace.
   """
 
+  alias Troupe.Protocol.Digest
+
   defmodule Team do
     @moduledoc "One team's volume, as a profile sees it."
 
@@ -502,9 +504,9 @@ defmodule Troupe.WorkerProfile do
   @doc "The revision of a profile in effect: a hash of its spec, the same for the same spec."
   @spec revision_of(map()) :: String.t()
   def revision_of(spec) do
-    :sha256
-    |> :crypto.hash(:erlang.term_to_binary(spec, [:deterministic]))
-    |> Base.encode16(case: :lower)
+    spec
+    |> :erlang.term_to_binary([:deterministic])
+    |> Digest.sha256()
     |> binary_part(0, 16)
   end
 

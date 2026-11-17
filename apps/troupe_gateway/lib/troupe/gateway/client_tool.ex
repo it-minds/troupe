@@ -26,6 +26,7 @@ defmodule Troupe.Gateway.ClientTool do
   """
 
   alias Troupe.Gateway.Connection
+  alias Troupe.Protocol.Words
   alias Troupe.Session.ClientTools
   alias Troupe.Tool.Ctx
 
@@ -75,7 +76,7 @@ defmodule Troupe.Gateway.ClientTool do
   end
 
   defp gone(name, grace_ms) do
-    "The client hosting #{name} left mid-call and did not come back within #{seconds(grace_ms)}. " <>
+    "The client hosting #{name} left mid-call and did not come back within #{Words.duration(grace_ms)}. " <>
       gone_after()
   end
 
@@ -83,9 +84,6 @@ defmodule Troupe.Gateway.ClientTool do
     "The call may have run on their machine before they left, so check before doing it again. " <>
       "That tool is gone for this session; do the work another way."
   end
-
-  defp seconds(ms) when rem(ms, 1000) == 0, do: "#{div(ms, 1000)} s"
-  defp seconds(ms), do: "#{ms} ms"
 
   defp now, do: System.monotonic_time(:millisecond)
 

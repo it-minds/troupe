@@ -73,6 +73,7 @@ defmodule Troupe.Plane.Admin do
   alias Troupe.Protocol.Error
   alias Troupe.Protocol.Memory.Entries
   alias Troupe.Protocol.ProviderTypes
+  alias Troupe.Protocol.Words
 
   require Logger
 
@@ -1580,15 +1581,15 @@ defmodule Troupe.Plane.Admin do
   # leaving out what is nought, days counted, a permission by what it lets members do.
   defp limit_refusal(:idle_timeout_seconds, asked, ceiling),
     do:
-      "The platform allows at most #{duration_words(ceiling)} idle; #{duration_words(asked)} is more than that."
+      "The platform allows at most #{Words.duration(ceiling * 1000)} idle; #{Words.duration(asked * 1000)} is more than that."
 
   defp limit_refusal(:cache_eviction_days, asked, ceiling),
     do:
-      "The platform allows at most #{days_words(ceiling)} for a sleeping session's cache; #{days_words(asked)} is more than that."
+      "The platform allows at most #{Words.count(ceiling, "day")} for a sleeping session's cache; #{Words.count(asked, "day")} is more than that."
 
   defp limit_refusal(:erase_after_days, asked, ceiling),
     do:
-      "The platform allows at most #{days_words(ceiling)} before a session is erased; #{days_words(asked)} is more than that."
+      "The platform allows at most #{Words.count(ceiling, "day")} before a session is erased; #{Words.count(asked, "day")} is more than that."
 
   defp limit_refusal(:pins_allowed, _asked, _ceiling),
     do: "The platform does not let members pin a session; a team may not turn it on."
@@ -1598,17 +1599,6 @@ defmodule Troupe.Plane.Admin do
 
   defp limit_refusal(field, asked, ceiling),
     do: "The platform allows at most #{ceiling} for #{field}; #{asked} is more than that."
-
-  defp duration_words(0), do: "0 s"
-
-  defp duration_words(seconds) when is_integer(seconds) do
-    [{div(seconds, 3600), "h"}, {div(rem(seconds, 3600), 60), "min"}, {rem(seconds, 60), "s"}]
-    |> Enum.reject(fn {n, _unit} -> n == 0 end)
-    |> Enum.map_join(" ", fn {n, unit} -> "#{n} #{unit}" end)
-  end
-
-  defp days_words(1), do: "1 day"
-  defp days_words(days), do: "#{days} days"
 
   # A team admin may set everything else about their team and not this one: a flag a team
   # could give itself is not a decision anybody made about that team. Refused rather than

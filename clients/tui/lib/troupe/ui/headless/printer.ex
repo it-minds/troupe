@@ -54,6 +54,7 @@ defmodule Troupe.UI.Headless.Printer do
 
   alias Troupe.Client
   alias Troupe.Client.Message
+  alias Troupe.Protocol.Words
   alias Troupe.UI.{ModelError, ProfileView}
   alias Troupe.UI.TUI.Model
 
@@ -153,18 +154,23 @@ defmodule Troupe.UI.Headless.Printer do
   def handle_info({:troupe_event, event}, state), do: {:noreply, handle_event(event, state)}
 
   def handle_info({:connection_lost, ref}, %{lost: ref} = state) do
-    why = "lost the connection to the daemon, and it did not come back within #{seconds(state)}"
+    why =
+      "lost the connection to the daemon, and it did not come back within #{Words.duration(state.reconnect_ms)}"
+
     {:noreply, rest(state, {1, why})}
   end
 
   def handle_info({:queued_lost, ref}, %{held: {ref, outcome}, rested: false} = state) do
-    s = div(state.queued_ms, 1000)
-    say(state, state.target, "a line sent while the agent worked was not taken within #{s} s")
+    say(
+      state,
+      state.target,
+      "a line sent while the agent worked was not taken within #{Words.duration(state.queued_ms)}"
+    )
+
     {:noreply, rest(state, outcome)}
   end
 
   def handle_info({:stalled, ref, on}, %{stall: {ref, on}} = state) do
-    s = div(state.stall_ms, 1000)
     log = Model.daemon_log()
     next = "`troupe doctor` asks the model for a token, and the daemon's log is #{log}"
 
@@ -173,7 +179,7 @@ defmodule Troupe.UI.Headless.Printer do
         say(
           state,
           state.target,
-          "nothing has happened for #{s} s: the daemon took the prompt and has not sent " <>
+          "nothing has happened for #{Words.duration(state.stall_ms)}: the daemon took the prompt and has not sent " <>
             "the model request; #{next}"
         )
 
@@ -181,7 +187,7 @@ defmodule Troupe.UI.Headless.Printer do
         say(
           state,
           state.target,
-          "no answer from #{state.host} for #{s} s after the request; #{next}"
+          "no answer from #{state.host} for #{Words.duration(state.stall_ms)} after the request; #{next}"
         )
     end
     |> then(&{:noreply, %{&1 | stall: nil}})
@@ -210,11 +216,14 @@ defmodule Troupe.UI.Headless.Printer do
 
   # Said once an outage, when it starts, so that a script's log shows why it is quiet.
   defp lost(%{lost: nil} = state, path, false),
-    do: say(state, path, "lost the connection to the daemon; waiting #{seconds(state)} for it")
+    do:
+      say(
+        state,
+        path,
+        "lost the connection to the daemon; waiting #{Words.duration(state.reconnect_ms)} for it"
+      )
 
   defp lost(state, _path, _up?), do: state
-
-  defp seconds(state), do: "#{div(state.reconnect_ms, 1000)} s"
 
   defp handle_event(event, state) do
     case first_time(event, state) do
@@ -513,7 +522,7 @@ defmodule Troupe.UI.Headless.Printer do
 
     files =
       if is_integer(files),
-        do: "#{files} #{if files == 1, do: "file", else: "files"}",
+        do: "#{Words.count(files, "file")}",
         else: "files"
 
     proposal =

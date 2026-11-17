@@ -25,6 +25,8 @@ defmodule Troupe.PushPaths do
     would make them one file.
   """
 
+  alias Troupe.Protocol.Glob
+
   # What every profile denies, extended by its own `denyPaths`: files whose name alone says
   # they hold a credential.
   @defaults [
@@ -140,27 +142,5 @@ defmodule Troupe.PushPaths do
     end)
   end
 
-  defp regex(glob) do
-    body =
-      glob
-      |> tokens([])
-      |> Enum.map_join(fn
-        :globstar_dir -> "(?:[^/]+/)*"
-        :globstar -> ".*"
-        :star -> "[^/]*"
-        :any -> "[^/]"
-        literal -> Regex.escape(literal)
-      end)
-
-    Regex.compile!("\\A" <> body <> "\\z", "iu")
-  end
-
-  defp tokens("", acc), do: Enum.reverse(acc)
-  defp tokens("**/" <> rest, acc), do: tokens(rest, [:globstar_dir | acc])
-  defp tokens("**" <> rest, acc), do: tokens(rest, [:globstar | acc])
-  defp tokens("*" <> rest, acc), do: tokens(rest, [:star | acc])
-  defp tokens("?" <> rest, acc), do: tokens(rest, [:any | acc])
-
-  defp tokens(<<char::utf8, rest::binary>>, acc),
-    do: tokens(rest, [<<char::utf8>> | acc])
+  defp regex(glob), do: Regex.compile!("\\A" <> Glob.regex(glob) <> "\\z", "iu")
 end

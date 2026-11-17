@@ -20,6 +20,9 @@ defmodule Troupe.Protocol.Memory do
   narrower comes later and wins.
   """
 
+  alias Troupe.Protocol.Digest
+  alias Troupe.Protocol.Text
+
   @scopes ~w(organisation team profile user)
 
   # The levels an organisation writes, read-only to every agent; the person's own is not
@@ -77,7 +80,7 @@ defmodule Troupe.Protocol.Memory do
   @doc "The `sha256:` hash a document is named by."
   @spec hash(String.t()) :: String.t()
   def hash(text),
-    do: "sha256:" <> Base.encode16(:crypto.hash(:sha256, text), case: :lower)
+    do: Digest.tagged(text)
 
   @doc """
   A document as a session says it read it: its `scope`, `name`, `version` and `hash`, never
@@ -118,19 +121,7 @@ defmodule Troupe.Protocol.Memory do
   defp fit(text) when byte_size(text) <= @max_bytes, do: %{"text" => text, "trimmed" => 0}
 
   defp fit(text) do
-    kept = cut(text, @max_bytes)
+    kept = Text.cut(text, @max_bytes)
     %{"text" => kept, "trimmed" => byte_size(text) - byte_size(kept)}
-  end
-
-  # The longest prefix of whole characters within `bytes`.
-  defp cut(text, bytes) do
-    text
-    |> String.graphemes()
-    |> Enum.reduce_while({[], 0}, fn grapheme, {kept, size} ->
-      next = size + byte_size(grapheme)
-      if next <= bytes, do: {:cont, {[kept, grapheme], next}}, else: {:halt, {kept, size}}
-    end)
-    |> elem(0)
-    |> IO.iodata_to_binary()
   end
 end

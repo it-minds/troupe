@@ -66,7 +66,7 @@ defmodule Troupe.Onboard.Instructions do
   alias Troupe.{Git, Gitignore, Paths, Workspace}
   alias Troupe.Instructions.Check.Text
   alias Troupe.Instructions.FrontMatter
-  alias Troupe.Protocol.AgentDefinition
+  alias Troupe.Protocol.{AgentDefinition, Digest}
 
   # Other tools' names for a directory's `AGENTS.md`, in the order they are added.
   @aliases ["CLAUDE.md", "GEMINI.md"]
@@ -470,8 +470,8 @@ defmodule Troupe.Onboard.Instructions do
       path: spot.path,
       content: content,
       source: source,
-      source_hash: sha256(bytes),
-      also_from: for({s, b, _t, _n} <- rest, do: %{source: s, source_hash: sha256(b)}),
+      source_hash: Digest.sha256(bytes),
+      also_from: for({s, b, _t, _n} <- rest, do: %{source: s, source_hash: Digest.sha256(b)}),
       notes: notes
     }
   end
@@ -910,7 +910,7 @@ defmodule Troupe.Onboard.Instructions do
         path: "rules/#{name}.md",
         content: render_rule(meta) <> body <> "\n",
         source: path,
-        source_hash: sha256(bytes),
+        source_hash: Digest.sha256(bytes),
         also_from: [],
         notes: meta_notes ++ name_notes
       }
@@ -1328,5 +1328,4 @@ defmodule Troupe.Onboard.Instructions do
   defp lf(text), do: String.replace(text, "\r\n", "\n")
   defp crlf(text), do: String.replace(text, "\n", "\r\n")
 
-  defp sha256(bytes), do: :sha256 |> :crypto.hash(bytes) |> Base.encode16(case: :lower)
 end

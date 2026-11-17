@@ -15,6 +15,7 @@ defmodule Troupe.CLI.Runner do
 
   alias Troupe.{CLI, Client}
   alias Troupe.CLI.{Interrupt, LocalOnly, Terminal}
+  alias Troupe.Protocol.Words
   alias Troupe.UI.Headless.Printer
   alias Troupe.UI.TUI
 
@@ -391,7 +392,7 @@ defmodule Troupe.CLI.Runner do
     on = profile || "the profile"
     both = if length(teams) == 2, do: "both", else: "all"
 
-    "#{Troupe.UI.NewSession.and_list(teams)} can #{both} use #{on}; " <>
+    "#{Words.and_list(teams)} can #{both} use #{on}; " <>
       "say which team it is for with --team, as in --team #{hd(teams)}"
   end
 

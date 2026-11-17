@@ -77,6 +77,7 @@ defmodule Troupe.Instructions do
   alias Troupe.{Config, Memory, Paths, Workspace}
   alias Troupe.Instructions.FrontMatter
   alias Troupe.LLM.{Message, ToolUse}
+  alias Troupe.Protocol.{Digest, Glob}
   alias Troupe.Protocol.Memory.Entries
   alias Troupe.Session.Memory, as: Brief
 
@@ -607,7 +608,7 @@ defmodule Troupe.Instructions do
            path: path,
            directory: Path.dirname(path),
            size: byte_size(content),
-           hash: hash(content),
+           hash: Digest.tagged(content),
            reason: nil,
            skipped: [],
            imported_by: nil,
@@ -773,20 +774,8 @@ defmodule Troupe.Instructions do
     glob = if String.ends_with?(glob, "/"), do: glob <> "**", else: glob
     prefix = if String.contains?(glob, "/"), do: "\\A", else: "\\A(?:.*/)?"
     options = if match?({:win32, _}, :os.type()), do: "iu", else: "u"
-    Regex.compile(prefix <> translate(glob, 0) <> "\\z", options)
+    Regex.compile(prefix <> Glob.regex(glob, braces: true) <> "\\z", options)
   end
-
-  defp translate("", _depth), do: ""
-  defp translate("**/" <> rest, depth), do: "(?:.*/)?" <> translate(rest, depth)
-  defp translate("**" <> rest, depth), do: ".*" <> translate(rest, depth)
-  defp translate("*" <> rest, depth), do: "[^/]*" <> translate(rest, depth)
-  defp translate("?" <> rest, depth), do: "[^/]" <> translate(rest, depth)
-  defp translate("{" <> rest, depth), do: "(?:" <> translate(rest, depth + 1)
-  defp translate("}" <> rest, depth) when depth > 0, do: ")" <> translate(rest, depth - 1)
-  defp translate("," <> rest, depth) when depth > 0, do: "|" <> translate(rest, depth)
-
-  defp translate(<<char::utf8, rest::binary>>, depth),
-    do: Regex.escape(<<char::utf8>>) <> translate(rest, depth)
 
   # A rule's front matter and its body, read by the one reader onboarding reads Cursor's
   # and Copilot's rules with (`Troupe.Instructions.FrontMatter`, Decision 809's way).
@@ -1156,7 +1145,7 @@ defmodule Troupe.Instructions do
         size: byte_size(text),
         chars: String.length(text),
         budget: @harness_max_chars,
-        hash: hash(text),
+        hash: Digest.tagged(text),
         status: :whole,
         reason: nil,
         trimmed: 0,
@@ -1181,12 +1170,10 @@ defmodule Troupe.Instructions do
 
   defp stat(path) do
     case File.read(path) do
-      {:ok, content} -> {byte_size(content), hash(content)}
+      {:ok, content} -> {byte_size(content), Digest.tagged(content)}
       {:error, _reason} -> {nil, nil}
     end
   end
-
-  defp hash(content), do: "sha256:" <> Base.encode16(:crypto.hash(:sha256, content), case: :lower)
 
   # What the prompt was read from, as one string: the paths, what each held and how much
   # of it got in. Two turns with the same digest read the same files to the same effect.
@@ -1194,13 +1181,12 @@ defmodule Troupe.Instructions do
     files
     |> Enum.map_join("\n", fn f ->
       unfollowed = Enum.map(f.unfollowed, &"#{&1.import}:#{&1.reason}")
-      text = :crypto.hash(:sha256, f.text) |> Base.encode16(case: :lower)
+      text = Digest.sha256(f.text)
       fields = [f.path, f.hash || "", f.status, f.chars, f.trimmed, f.imported_by || "", text]
       fields = fields ++ List.wrap(Map.get(f, :version))
       Enum.join(fields ++ [f.applies || ""] ++ f.skipped ++ unfollowed, "\t")
     end)
-    |> then(&:crypto.hash(:sha256, &1))
-    |> Base.encode16(case: :lower)
+    |> Digest.sha256()
   end
 
   ## Rendering

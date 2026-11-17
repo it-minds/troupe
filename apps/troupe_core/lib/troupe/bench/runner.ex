@@ -24,7 +24,7 @@ defmodule Troupe.Bench.Runner do
   """
 
   alias Troupe.Bench.{Model, Scenario}
-  alias Troupe.Protocol.Event
+  alias Troupe.Protocol.{Event, Words}
 
   # Long enough for a slow machine, short enough that a hung scenario fails the bench
   # rather than the job's own timeout.
@@ -177,7 +177,7 @@ defmodule Troupe.Bench.Runner do
       {:troupe_event, ^sid, %Event{type: ^type, agent: ["root"], ephemeral?: false} = event} ->
         event
     after
-      timeout -> raise "no #{type} from the root agent within #{div(timeout, 1000)} s"
+      timeout -> raise "no #{type} from the root agent within #{Words.duration(timeout)}"
     end
   end
 
