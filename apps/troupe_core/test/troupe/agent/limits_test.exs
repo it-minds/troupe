@@ -8,6 +8,7 @@ defmodule Troupe.Agent.LimitsTest do
 
   use Troupe.SessionCase, async: true
 
+  alias Troupe.Agent.{Definition, Definitions}
   alias Troupe.LLM.Message
 
   @overflow {:error, {:http_status, 400, "prompt is too long: 250000 tokens > 200000 maximum"}}
@@ -29,6 +30,19 @@ defmodule Troupe.Agent.LimitsTest do
     done
   end
 
+  # Troupe's own agents, and primary ones of these names, each with its own `max_tokens`.
+  defp with_agents(caps) do
+    extra =
+      for {name, cap} <- caps do
+        {:ok, definition} =
+          Definition.parse(name, "---\nmode: primary\nmax_tokens: #{cap}\n---\n#{name}", :project)
+
+        definition
+      end
+
+    Definitions.from_list(Definitions.all(Definitions.load(System.tmp_dir!())) ++ extra)
+  end
+
   defp last_prompt_text(fake) do
     request = fake |> Fake.requests() |> List.last()
     request.messages |> List.last() |> Message.text()
@@ -45,10 +59,10 @@ defmodule Troupe.Agent.LimitsTest do
 
       assert [first, second] = events_of_type(sid, :truncated)
       assert first.data["reason"] == "max_tokens"
-      assert first.data["note"] =~ "output token cap"
+      assert first.data["note"] =~ "the output cap of 8,192 tokens"
       assert second.data["final"] == true
 
-      assert last_prompt_text(fake) =~ "cut off because it reached the output token cap"
+      assert last_prompt_text(fake) =~ "cut off because it reached the output cap of 8,192 tokens"
       assert [%{data: %{"source" => "harness"}}] = events_of_type(sid, :user_input) |> Enum.filter(&(&1.data["source"] == "harness"))
     end
 
@@ -71,6 +85,41 @@ defmodule Troupe.Agent.LimitsTest do
       assert [%{data: %{"ok" => false, "content" => content}} | _] = events_of_type(sid, :tool_call_completed)
       assert content =~ "cut off mid-argument"
       assert [%{data: %{"calls" => 1}}] = events_of_type(sid, :truncated)
+    end
+
+    # #1080: the note names the cap the call asked for, so the second attempt can fit it.
+    test "the notes name the cap the cut call asked for, in tokens", context do
+      cut_call = {:tools, [{"read_file", %{"__malformed_arguments__" => "{\"path\": \"f.t"}}]}
+      cut = {:stop, :max_tokens, {:text, ""}}
+      {sid, fake} = run(context, [{:stop, :max_tokens, cut_call}, cut, finish("ok")], max_tokens: 3000)
+
+      assert await_done(sid)["reason"] == "finished"
+
+      assert [%{data: %{"content" => content}} | _] = events_of_type(sid, :tool_call_completed)
+      assert content =~ "because the reply reached the output cap of 3,000 tokens, so its input"
+      assert last_prompt_text(fake) =~ "it reached the output cap of 3,000 tokens. Answer again"
+    end
+
+    # #1080: an agent's own `max_tokens` lowers the session's and never raises it.
+    test "an agent's own max_tokens lowers the session's and does not raise it", context do
+      definitions = with_agents(%{"brief" => 2_000, "report" => 50_000})
+
+      for {agent, asked} <- [{"brief", 2_000}, {"report", 16_000}] do
+        %{session: session, fake: fake} =
+          start_session(context,
+            steps: [finish("ok")],
+            agent: agent,
+            definitions: definitions,
+            config_overrides: [max_tokens: 16_000]
+          )
+
+        sid = session.id
+        :ok = Troupe.subscribe(sid)
+        Troupe.send_input(sid, "go")
+        await_done(sid)
+
+        assert [%{max_tokens: ^asked} | _] = Fake.requests(fake)
+      end
     end
 
     test "a refusal ends the agent as refused, not as a successful finish", context do

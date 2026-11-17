@@ -48,6 +48,11 @@ Enter picks one and writes it to the config file that owns the setting, Esc goes
 the last entry types a model by hand. The cheap model has the same menu on the settings
 page.
 
+One model call asks for at most `max_tokens` output tokens, 8192 unless you set more, and
+never more than the model's own output limit where the catalog gives one; an agent's own
+`max_tokens` in its definition lowers it for that agent. A session on a pod has its
+profile's `llm.maxTokens` instead ([profiles and policy](../admin/profiles-and-policy.md#1-what-an-administrator-sets)).
+
 ## What a call costs
 
 One thing you type is often many model calls, each sending the whole

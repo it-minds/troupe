@@ -71,6 +71,25 @@ defmodule Troupe.Agent.DefinitionTest do
              Validate.check("---\nmode: subagent\ndescription: d\ndelegation: ask\n---\nbody")
   end
 
+  # #1080: an agent may ask its model calls for less output than the session allows.
+  test "max_tokens is a whole number above 0, absent when not set, and reads back as written" do
+    assert {:ok, %Definition{max_tokens: nil}} = Definition.parse("x", "body", :project)
+
+    assert {:ok, %Definition{max_tokens: 4000} = capped} =
+             Definition.parse("x", "---\nmax_tokens: 4000\n---\nbody", :project)
+
+    assert Definition.render(capped) =~ "\nmax_tokens: 4000\n"
+    assert Definition.parse("x", Definition.render(capped), :project) == {:ok, capped}
+
+    assert %{ok: false, errors: [%{field: "max_tokens", message: message}]} =
+             Validate.check("---\nmode: subagent\ndescription: d\nmax_tokens: lots\n---\nbody")
+
+    assert message == "max_tokens must be a whole number above 0, not \"lots\""
+
+    assert %{ok: true} =
+             Validate.check("---\nmode: subagent\ndescription: d\nmax_tokens: 32000\n---\nbody")
+  end
+
   test "allowlist and permission resolution" do
     {:ok, restricted} = Definition.parse("r", "---\ntools:\n  - read_file\n---\nbody", :project)
 

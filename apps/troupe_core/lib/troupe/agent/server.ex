@@ -1560,7 +1560,7 @@ defmodule Troupe.Agent.Server do
             "message_count" => length(request.messages),
             "tools" => Enum.map(request.tools, & &1.name),
             "profile" => definition.name,
-            # What the prompt was made of, in bytes (Decision 769): which part is the large
+            # What the prompt was made of, in bytes: which part is the large
             # one is the question a long turn's bill raises.
             "prompt_bytes" => prompt_bytes(state, request)
           }
@@ -1573,7 +1573,13 @@ defmodule Troupe.Agent.Server do
         state =
           state
           |> send_request(request)
-          |> Map.merge(%{llm_summariser: false, llm_text: "", llm_tool_names: %{}, prefix: prefix})
+          |> Map.merge(%{
+            llm_summariser: false,
+            llm_text: "",
+            llm_tool_names: %{},
+            prefix: prefix,
+            output_cap: request.max_tokens
+          })
 
         info(state, "#{call_label(state)} asking #{request.model} at #{state.llm_host}")
         publish_state(state, :thinking)
@@ -1702,7 +1708,7 @@ defmodule Troupe.Agent.Server do
   end
 
   # The tools are offered knowing whether the model they go to binds its thinking to them:
-  # one that does is offered the same on every call (Decisions 867 and 871).
+  # one that does is offered the same on every call.
   defp build_request(state, definition) do
     ctx = base_ctx(state, "")
     tools = Tools.specs(definition, ctx)
@@ -1714,12 +1720,17 @@ defmodule Troupe.Agent.Server do
       system_tail: if(stable?(state), do: nil, else: todo_section(state.prompt_todos)),
       cache: true,
       tools: tools,
-      max_tokens: state.config.max_tokens,
+      max_tokens: own_cap(state.config.max_tokens, definition.max_tokens),
       attribution: attribution(state),
       extra: request_extra(state)
     }
     |> aim(state, definition.model)
   end
+
+  # An agent's own `max_tokens` lowers the session's (a profile's on a pod, the setting on a
+  # machine) and never raises it: what an administrator or a person allowed holds.
+  defp own_cap(session, nil), do: session
+  defp own_cap(session, agent), do: min(session, agent)
 
   # The conversation, but for a large tool result behind the boundary, the last
   # compaction's or a refused prompt's: that goes as a stub naming the `read_output` call
@@ -2445,12 +2456,22 @@ defmodule Troupe.Agent.Server do
     end
   end
 
-  @truncated_note "Your previous reply was cut off because it reached the output token cap. " <>
-                    "Answer again in smaller steps: make one tool call at a time, and keep text short."
+  # Both name the cap the call asked for, so the next attempt can be sized to fit it.
+  defp truncated_note(state),
+    do:
+      "Your previous reply was cut off because it reached #{cap_words(state)}. " <>
+        "Answer again in smaller steps: make one tool call at a time, and keep text short."
 
-  @truncated_call "This tool call was cut off mid-argument because the reply reached the output " <>
-                    "token cap, so its input could not be parsed and it was not run. Re-issue it on " <>
-                    "its own, with a shorter argument."
+  defp truncated_call(state),
+    do:
+      "This tool call was cut off mid-argument because the reply reached #{cap_words(state)}, " <>
+        "so its input could not be parsed and it was not run. Re-issue it on its own, with a " <>
+        "shorter argument."
+
+  defp cap_words(%State{output_cap: cap}) when is_integer(cap),
+    do: "the output cap of #{thousands(cap)} tokens"
+
+  defp cap_words(_state), do: "the output token cap"
 
   # A document too long for one reply is not shorter when it is asked again: it goes in
   # parts, the start shown and the rest added with `patch`, each part a reply of its own.
@@ -2480,8 +2501,9 @@ defmodule Troupe.Agent.Server do
         finish_short(state, :output_truncated, truncation_summary(text))
 
       [] ->
-        log(state, :truncated, %{"reason" => "max_tokens", "note" => @truncated_note})
-        nudge(state, @truncated_note)
+        note = truncated_note(state)
+        log(state, :truncated, %{"reason" => "max_tokens", "note" => note})
+        nudge(state, note)
 
       tool_uses ->
         log(state, :truncated, %{"reason" => "max_tokens", "calls" => length(tool_uses)})
@@ -2747,20 +2769,20 @@ defmodule Troupe.Agent.Server do
     |> Map.put("principal", Principal.to_json(principal))
   end
 
-  defp cut_call(name) do
+  defp cut_call(name, state) do
     if name in [Show.name(), Patch.name()],
-      do: @truncated_call <> @truncated_document,
-      else: @truncated_call
+      do: truncated_call(state) <> @truncated_document,
+      else: truncated_call(state)
   end
 
-  # Arguments the reply's output cap cut mid-JSON (Decision 659). Running a tool on a
+  # Arguments the reply's output cap cut mid-JSON. Running a tool on a
   # fragment is worse than saying so, and every `tool_use` still owes a `tool_result` or
   # the next request is refused outright — so the call is answered, not run.
   defp dispatch_tool(%ToolUse{input: %{"__malformed_arguments__" => _raw}} = tool_use, state) do
     call = %Call{id: tool_use.id, name: tool_use.name, args: %{}}
     state = %{state | pending: Map.put(state.pending, call.id, call)}
     log(state, :tool_call_started, %{"call_id" => call.id, "name" => call.name, "args" => %{}})
-    send(self(), {:tool_result, call.id, Result.error(call.id, call.name, cut_call(call.name))})
+    send(self(), {:tool_result, call.id, Result.error(call.id, call.name, cut_call(call.name, state))})
     state
   end
 

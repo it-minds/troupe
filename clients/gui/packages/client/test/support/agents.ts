@@ -68,7 +68,7 @@ export const FAKE_TOOLS = [
   "shell",
 ];
 
-const KEYS = ["description", "mode", "model", "tools", "permissions", "max_turns", "budget_share", "skills", "override", "delegation"];
+const KEYS = ["description", "mode", "model", "tools", "permissions", "max_turns", "max_tokens", "budget_share", "skills", "override", "delegation"];
 
 /** Troupe's own agents, as `priv/agents` has three of them. */
 export const BUILTIN_AGENTS: FakeAgent[] = [
@@ -203,7 +203,7 @@ export function checkAgent(source: string, opts: { name?: unknown; served: strin
   }
   for (const key of Object.keys(meta).sort()) {
     if (!KEYS.includes(key) && !key.startsWith("imported_")) {
-      errors.push({ field: key, message: `${key} is not a key an agent has: the keys are description, mode, model, tools, permissions, max_turns, budget_share, skills, override and delegation` });
+      errors.push({ field: key, message: `${key} is not a key an agent has: the keys are description, mode, model, tools, permissions, max_turns, max_tokens, budget_share, skills, override and delegation` });
     }
   }
   const mode = meta["mode"];
@@ -254,6 +254,10 @@ export function checkAgent(source: string, opts: { name?: unknown; served: strin
   const maxTurns = meta["max_turns"];
   if ("max_turns" in meta && !(Number.isInteger(maxTurns) && (maxTurns as number) > 0)) {
     errors.push({ field: "max_turns", message: `max_turns must be a whole number above 0, not ${JSON.stringify(maxTurns)}` });
+  }
+  const maxTokens = meta["max_tokens"];
+  if ("max_tokens" in meta && !(Number.isInteger(maxTokens) && (maxTokens as number) > 0)) {
+    errors.push({ field: "max_tokens", message: `max_tokens must be a whole number above 0, not ${JSON.stringify(maxTokens)}` });
   }
   const share = meta["budget_share"];
   if ("budget_share" in meta) {

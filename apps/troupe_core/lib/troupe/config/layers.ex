@@ -118,6 +118,8 @@ defmodule Troupe.Config.Layers do
     # JSON, the shape `models.prices` has in a file: how a profile hands its pods the
     # prices of the models it serves, since a pod has no file of its own.
     {"TROUPE_MODEL_PRICES", {:json, ["models", "prices"]}},
+    # A whole number: how a profile's `llm.maxTokens` reaches its pods.
+    {"TROUPE_MAX_TOKENS", {:integer, ["max_tokens"]}},
     {"TROUPE_FAKE_SCRIPT", ["fake_script"]},
     # Issue #465's settings, which is how a live bench is run with one changed without a
     # file of the person's being changed (Decisions 815 and 863).
@@ -964,6 +966,15 @@ defmodule Troupe.Config.Layers do
             ~s|such as {"<model>": {"input": 0.5, "output": 1.5}}; it is not JSON|
 
         %{acc | errors: acc.errors ++ [issue(:error, var, nil, Enum.join(key_path, "."), message)]}
+    end
+  end
+
+  # The environment holds text; one that is not a whole number is refused as a file's
+  # value of the wrong type is, naming the variable.
+  defp env_value(acc, var, {:integer, key_path}, value) do
+    case Integer.parse(String.trim(value)) do
+      {number, ""} -> env_value(acc, var, key_path, number)
+      _other -> env_value(acc, var, key_path, value)
     end
   end
 
