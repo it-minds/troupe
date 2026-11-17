@@ -140,7 +140,7 @@ What the screen shows once a session is open, and its keys and pages, are on
 [the terminal client's screen](../../docs/user/terminal-screen.md):
 
 - <a id="keys"></a>[Keys](../../docs/user/terminal-screen.md#keys): windows, answering, completing, reading, the task list, quitting, and selecting text with the mouse.
-- <a id="reading-a-transcript"></a>[Reading a transcript](../../docs/user/terminal-screen.md#reading-a-transcript): frames, how much of a turn is open, how replies are rendered, scrolling.
+- <a id="reading-a-transcript"></a>[Reading a transcript](../../docs/user/transcript.md#in-the-terminal): frames, how much of a turn is open, how replies are rendered, scrolling.
 - <a id="colours"></a>[Colours](../../docs/user/terminal-screen.md#colours): the themes, the reserved colour, the mark, and how many colours the terminal has.
 - <a id="tokens-and-cost"></a>[Tokens and cost](../../docs/user/terminal-screen.md#tokens-and-cost): what a tile and the side panel say a turn and the session used.
 - <a id="observer"></a>[Observer](../../docs/user/terminal-screen.md#observer): the overview across branches.
@@ -148,8 +148,8 @@ What the screen shows once a session is open, and its keys and pages, are on
 - <a id="settings-page"></a>[Settings page](../../docs/user/terminal-screen.md#settings-page): every setting, its value and the file it came from.
 - <a id="watch-mode"></a>[Watch mode](../../docs/user/terminal-screen.md#watch-mode): `AI!`, `AI?` and `AI` comments in saved files.
 - <a id="agents"></a>[Agents](../../docs/user/terminal-screen.md#agents): the agent picker, and editing, copying and making agents.
-- <a id="artifacts"></a>[Artifacts](../../docs/user/terminal-screen.md#artifacts): what is published for you, by who can see it, opened in the browser or read here.
-- <a id="memory"></a>[Memory](../../docs/user/terminal-screen.md#memory): what every new session of yours starts knowing, entry by entry, and your own to change.
+- <a id="artifacts"></a>[Artifacts](../../docs/user/artifacts.md#reading): what is published for you, by who can see it, opened in the browser or read here.
+- <a id="memory"></a>[Memory](../../docs/user/memory.md#your-own-memory): what every new session of yours starts knowing, entry by entry, and your own to change.
 
 ## Remote sessions
 
@@ -175,7 +175,7 @@ you are and which teams you are in; `troupe logout` forgets one plane, `troupe l
 hands it the plane token, starting the installed `troupe-daemon` where none is running.
 Signed in, `troupe` hands the token over again when it attaches, a minute before the token
 runs out and after the daemon restarted; the daemon keeps it in memory only and seals a
-[private session](../../docs/user/README.md#words-you-will-meet) with it (`troupe
+[private session](../../docs/user/sessions.md#private-session) with it (`troupe
 --private`, `troupe run --private`). A daemon somebody else linked is left as it is.
 
 `troupe --remote` opens HQ: the teams you are in, the profiles each can run with their

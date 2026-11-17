@@ -1,10 +1,13 @@
 # The terminal client's screen
 
 What [`troupe`](../../clients/tui/README.md), the terminal client, puts on the screen once a
-session is open, and the keys and pages it has: the keys, reading a transcript, colours,
-tokens and cost, the observer, the command palette, the settings page, watch mode, the
-agent picker, your artifacts, your memory and what a profile gives a session. Installing it, the command lines and sessions on a plane are on
-[its own page](../../clients/tui/README.md).
+session is open, and the keys and pages it has: the keys, colours, tokens and cost, the
+observer, the command palette, the settings page, watch mode, the agent picker and the
+new-session screen. Installing it, the command lines and sessions on a plane are on
+[its own page](../../clients/tui/README.md). How it draws a turn is on [reading a
+transcript](transcript.md#in-the-terminal); its pages for artifacts, memory and profiles
+are on [artifacts](artifacts.md#reading), [memory](memory.md#your-own-memory) and
+[profiles](profiles.md).
 
 ## Keys
 
@@ -54,88 +57,11 @@ terminals), or turn `mouse` off (`troupe --no-mouse`, or `/settings`); windows a
 `1`–`9`, and the pane still scrolls with PgUp/PgDn, ↑/↓ and End. With nothing selected,
 Ctrl-Y and `/copy` copy a whole transcript, which no drag across a scrolling pane can.
 
-## Reading a transcript
-
-A turn shows its answer, not its working ([reading a transcript](README.md#reading-a-transcript)
-says what is common to both clients). Everything rendered from something is a frame on a
-surface one step from the terminal's background, with a rail, `▎`, down its left; what you
-typed and the notes between turns are not on it. By default (`quiet`) a turn's reasoning,
-its calls and the prose between them are one line where they began, above the answer:
-
-```
-> fix the failing test
-▸ 7 steps · 1 failed · grep, read_file, edit_file · 14s
-✗ read_file nope · no such file: nope · 2s
-▎ ## Fixed
-▎ The parser keeps the last line now.
-```
-
-`e` opens the turn you are reading (the last one while the pane follows the tail, the one
-at the top of the view when you have scrolled) as `everything` draws it, and `e` again
-closes it. `/detail quiet`, `/detail tools` or `/detail everything` sets how much of every
-turn is open on this session's screen and draws the history again: `tools` opens each
-call's frame and keeps reasoning to its header (`▸ thinking · 12s`), `everything`
-collapses nothing. A frame longer than 24 lines shows its first 20 and `… 42 more lines`,
-and opening its turn shows the rest in place; a scratchpad document stays a card that
-`/scratch` opens.
-
-An agent's finish is a `done:` note, its report's parts under it. Its `changed:` line is Troupe's count
-of what the agent's file tools wrote: the files and the lines each added and removed, and what its shell commands changed as not counted. The desktop app shows the same count as the finish frame's `changed`.
-
-Replies are rendered as in the desktop app, with these of the terminal's own: nested lists
-are indented, each level its own marker (`•` `◦` `▪`); `inline code` and **bold** keep their
-emphasis without their markers; code has full syntax highlighting; a `csv`, `tsv` or
-`json` block that is not one is shown as written; a file an agent read is numbered source,
-its line numbers in their own column. Raw HTML, images, footnotes, and a
-table wider than 100 columns are left as written, under a line that says so. The same
-colours run through diffs and tool calls, by outcome.
-
-While a turn works, the line under it says what is running, how many and for how long,
-after a few words from the theatre: `◐ the actors are powdering their nose — thinking
-(00:12)`. The words never repeat within a turn, and are not there when a turn waits on
-you, in a window's tile, or in `troupe run --headless`, `troupe bench` or anything
-`--json` prints. The design, which the desktop app follows too, is
-[docs/design/frames.md](../design/frames.md).
-
-From the moment you send a line the facts say what is waited on. Until the daemon sends
-the model request: `◐ the house lights go down — preparing (00:04)`, and from ten seconds
-on, with no flourish, `◐ the daemon has not sent the model request yet (00:14)`. After
-the request: `thinking (00:12)` as ever, and from twenty seconds with nothing back, `◐ no
-answer from api.anthropic.com yet (00:35)`, the host your configuration's `base_url` or
-provider names, never the key. The time counts from the line you sent, then from the
-request. At forty-five seconds either way, a box under that line says what was sent and
-when, what has happened since, the last event this screen heard, and what to do:
-
-```
-nothing has happened for 00:46
-▎ your prompt went to the daemon at 14:02:11
-▎ the daemon acknowledged it; it has not sent the model request
-▎ the last event here was input, at 14:02:11
-▎ Esc cancels the turn · `troupe doctor` asks the model for a token · the daemon's log is ~/.local/state/troupe/daemon.log
-```
-
-After the request the second line reads `the request went to api.anthropic.com at
-14:02:12; nothing has come back`. The box goes with the first byte of an answer or the
-turn's end; a tile says the facts alone, and `troupe run --headless` prints one line at
-the same forty-five seconds, once for the prompt and once for the request, and no more.
-A request the model refused leaves the window saying so, `model error: <the provider's
-sentence>`, under the turn and in its tile, until the next line you send.
-
-The activated pane follows the tail until you scroll (PgUp/PgDn, Home/End, ↑/↓ while
-nothing is typed, or the wheel); the title says where you are (`↕ 120–150/400 · 12 new`),
-and End, scrolling to the bottom, sending input or answering follows again. Tool output
-keeps its indentation, tabs included; a tool's header says what came back and how long it
-took (`· 300 lines`, `· +3 -1`, `· exit 1 (12 lines) · 4s`), and its frame holds the
-output, with the diff for an edit you were asked to approve. Whatever a branch is waiting
-on is the last thing in the transcript, diff and all, so it reads at any width. `←`/`→`
-switch between the branch's agents so a subagent's transcript can be read; input still
-goes to the branch root. With a pane open the window strip shrinks to a tray; clicking the
-active tile jumps back to the latest output.
-
 ## When nothing happens after a prompt
 
 You typed a line, and nothing: no output, no error. The line under the turn says which of
-three things is going on, and the box that follows at forty-five seconds says what to do.
+three things is going on, and the box that follows at forty-five seconds
+([what it says](transcript.md#in-the-terminal)) says what to do.
 
 - **`the daemon has not sent the model request yet`.** The daemon took your line and is
   still preparing the turn, or is stuck before it: reading the workspace's instructions,
@@ -186,9 +112,8 @@ A tile reads `↑4.4k ↓3.1k`: tokens sent and received, the whole session's, `
 provider billed at close to full price. Input served from its prompt cache is reported
 apart, as `cached` in the side panel and the observer's detail, and budgets spend the
 billed part, so re-reading a cached prompt does not exhaust `max_input_tokens`. What one
-turn cost is said when it ends, its subagents' calls included and `no price` when nothing
-prices the model ([what a call costs](models.md#what-a-call-costs)). The
-side panel says it under `This turn`, with the session's totals under `Session` and, once
+turn cost ([what a call costs](models.md#what-a-call-costs)) the
+side panel says under `This turn`, with the session's totals under `Session` and, once
 a limit is near, how near:
 
 ```
@@ -320,81 +245,3 @@ says *Starting <title> on <profile>…*, Enter there starts nothing a second tim
 you close the screen the curtain line says when it started (`/sessions` lists it) or why
 it did not. `/new --remote PROFILE` and `/new --private` set the chips first; `/new --branch`
 forks at once. HQ's `n` opens the same screen on the platform.
-
-## Artifacts
-
-`/artifacts` lists what is published for you on the plane, through this computer's daemon
-and its sign-in ([artifacts](artifacts.md)), in the desktop app's words: **All**, **◉
-Everyone at** your organisation, **◎ Your teams** (a team's and a profile's), **◐ Shared
-with you** (through a link) and **○ Only you**, ←/→ or `1`–`5`. A row is its title,
-kind, version, whose it is (`team finance` for a team's, which every member of the team
-owns; `you`; or who published it) and when, and `new` on a version you have not opened on
-this machine. `/` filters; Enter opens it in your browser through the plane's one-time
-address, never in the terminal; `v` lists its versions to open one; `m` reads a Markdown
-one here, drawn as a reply is, in a frame, which past 500 lines is cut and offers the
-browser; `p` publishes a file of the workspace as `/publish` does, for you alone where
-you name nobody, and a team's where you name a team unless `me` follows (`/publish
-report.html team:core me`); `l` copies a view link to one of yours, through the terminal (OSC 52)
-where it takes it, else the clipboard, and shows it either way; `r` reads the list again;
-Esc goes back. Typed in a session's window, `/artifacts` is also the picker for its
-message: `a` attaches the one on the cursor, the window's box shows it until you send
-(Backspace in the empty box takes it off), and the session's server fetches its files from
-the plane as the message goes, which then says where each landed. Under Local only the page
-says the plane is not asked, and asks it nothing. HQ has a line for what is shared with you, and one per invitation into a session.
-`troupe artifacts list`, `open`, `show`, `publish` (`--owner me` keeps a team publication
-yours), `transfer` (hand one of yours to a team you are in with `--to team:<name>`, or take a
-team's back with `--to me` as its administrator; the listing says `transferable` where you
-may) and `link` are the same from the command line ([the command reference](cli-reference.md)).
-
-## Memory
-
-`/memory` is what every new session of yours starts knowing ([memory](memory.md)), entry by
-entry: each `## Topic` of a level's memory. **In effect** shows, for one of your teams (`t`
-picks another), the closest level's entry on each topic and what it replaces: yours over
-your team's, your team's over the organisation's. **◉ Everyone at** your organisation, **◎**
-each of your teams and **○ Only you** list each level's; one you cannot change here says
-`· read`, and says who can. Enter reads an entry whole. On a level you can change (Only
-you; a team's you administer; the organisation's if you are a platform admin), `a` adds
-one, its topic typed on the page and its words in your editor (`VISUAL`, then `EDITOR`) or,
-with neither set, in a box here (Ctrl-S saves); `e` edits one and `f` forgets one after a
-confirm line. A topic the level has already is refused, and one a lower level has is said
-to be replaced. The line under says where it saves to and, on a team's or the
-organisation's, how many running sessions it reaches. A save names the version it was made
-on: one saved elsewhere first is shown beside yours, and `l` reloads it. On Only you, `h`
-lists the versions (Space marks one, Enter shows two side by side, `r` saves an old
-one again), `b` who wrote each line, `s` where this machine's copy stands. A save, an
-agent's entry or one from another machine is on the page when it arrives. Under Local only
-every level is read from this machine's copy and nothing is changed. `/memory facts` is the
-repository brief's facts, as before.
-
-## What a profile gives a session
-
-`/profiles` lists the profiles on the plane you may start a session on, one line each:
-how many agents it offers, its MCP servers, the hosts it reaches and the sessions on it of
-those it has room for (`code  3 agents · severa, sursen · reaches github.com · 2 of 8
-sessions`). Enter on a row, or `/profile <name>`, opens what that profile gives a session of
-yours, in a frame drawn as the settings page's is, in six groups in reading order:
-
-- **Agents**: each offered, with its mode and description (`(built in)` for one of
-  Troupe's own); then **What the harness may run here**, the function agents Troupe
-  starts by itself for a job (`answer`, the librarian), each with its line; then **Not
-  here**, each with why: *the profile leaves it out*, or *your team's grant leaves it out*.
-- **Tools**: the rules, one a line, what they do to a tool and whose they are
-  (`deny  shell(git push)   the profile`); then each MCP server with its host, whose access
-  it runs with — *as you, once you connect it*, *as the profile*, or *as the profile's own
-  identity* — whether a call is asked first or automatic, and its tools; one not offered to
-  you is dimmed, with why. Then the skills.
-- **Model**: the model, the small model, the provider and its host, and whose key.
-- **Reach**: the hosts a session can reach.
-- **Limits**: the sessions running of those there is room for, to a pod, at most at once,
-  and the budgets of the profile, your team and you, in dollars.
-- **Who**: the team a session would run under, which of your teams may use it, and the
-  channel and bundle.
-
-What the plane does not say is shown as *not said*, never filled in. ↑↓, PgUp/PgDn,
-Home/End and the wheel scroll it; `q` or Esc goes back to the list, or closes the frame
-`/profile` opened. A profile you may not use is said to be one. It is asked of the plane
-you are signed in to (`troupe login`), with the terminal's own sign-in; under Local only
-nothing is asked. `troupe profiles` prints the list and `troupe profiles <name>` the page as
-plain lines, `--json` the plane's answer as it came ([the command reference](cli-reference.md));
-what a profile is, and who decides each part, is on [profiles](profiles.md).

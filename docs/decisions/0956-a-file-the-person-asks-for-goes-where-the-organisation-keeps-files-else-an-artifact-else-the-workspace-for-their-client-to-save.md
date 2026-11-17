@@ -41,7 +41,7 @@ paths:
   - clients/gui/apps/desktop/src-tauri/capabilities/default.json
   - clients/gui/apps/desktop/test/file-ready.test.tsx
   - PROTOCOL.md
-  - docs/user/README.md
+  - docs/user/artifacts.md
   - docs/user/mcp.md
   - docs/admin/profile-options.md
   - docs/admin/bundles-and-triggers.md

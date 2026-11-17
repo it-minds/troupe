@@ -1,12 +1,35 @@
 # Configuration
 
 Troupe reads its settings from a few YAML files and the environment, checks them against
-one key table, and merges them. This page says what the files are and how they merge,
-[which file wins](configuration-layers.md) and [seeing and changing
-settings](configuration-settings.md) the rest; its last section lists every key, generated
-from the table the loader checks against (`Troupe.Config.Schema`), so it cannot say
-something the loader does not do. Where each file is on disk is on [Where your files
-are](configuration/files.md), and complete files are in the [cookbook](configuration/cookbook.md).
+one key table, and merges them. This page says what the files are and how they merge; its
+last section lists every key, generated from the table the loader checks against
+(`Troupe.Config.Schema`), so it cannot say something the loader does not do. Where each
+file is on disk is on [Where your files are](configuration/files.md), and complete files
+are in the [cookbook](configuration/cookbook.md).
+
+[Which file wins](configuration-layers.md) is whose word a setting is: what [your
+organisation](configuration-layers.md#your-organisations-defaults-and-limits) suggests
+below your own file and enforces above everything; the keys that decide what a session may
+do unasked, where requests go, what runs and what may be read, which come from a
+workspace's own files only once you trust it with `troupe config trust` ([trusted
+workspaces](configuration-layers.md#trusted-workspaces)); [every file Troupe
+reads](configuration-layers.md#every-file-troupe-reads), in the order it is read; and the
+ladder of six, from Troupe's built-ins to the repository's `.troupe/`, on which the higher
+wins where two places say different things ([which one
+wins](configuration-layers.md#which-one-wins)).
+
+[Seeing and changing settings](configuration-settings.md) is a file once it is written. A
+file that is not YAML, has a value of the wrong type or spells one setting two ways is
+refused; an unknown key is ignored with a warning ([what is
+checked](configuration-settings.md#what-is-checked)). Each setting has one name; the old
+ones load with a warning until version 2, and `troupe config migrate` rewrites them ([old
+spellings](configuration-settings.md#old-spellings)). `troupe config --explain` shows every
+key, its value and the layer that set it, here or in a running session ([seeing what is in
+effect](configuration-settings.md#seeing-what-is-in-effect)). Both clients show and change
+the same keys through the daemon, so a change in one shows in the other ([settings in the
+desktop app and the terminal](configuration-settings.md#settings-in-the-desktop-app-and-the-terminal)),
+and an editor with a YAML language server reads the schema
+([editors](configuration-settings.md#editors)).
 
 ## The files
 
@@ -24,13 +47,15 @@ Each layer beats the ones above it: the defaults, the organisation's defaults, t
 file, the project file, the local file, the environment, the command line, and what the
 organisation enforces last. A file that is not there is not an error. `<config>`, the
 user file's directory, holds every other file of your own too (`mcp.json`, `agents/`,
-`skills/`, `commands/`, the terminal client's `credentials.json`).
-
-## Your organisation's defaults and limits
-
-What your organisation suggests sits below your own file, and what it enforces above
-everything; which keys it can enforce, and where its word comes from, are on
-[which file wins](configuration-layers.md#your-organisations-defaults-and-limits).
+`skills/`, `commands/`, the terminal client's `credentials.json`), and each has a page of
+its own: agents, your own slash commands (`commands/`) and a repository's
+`.troupe/workflows/`, with a delegation shown before it runs (`delegation.ask`), on
+[agents, commands and workflows](agents.md); MCP servers and skills (`mcp.json`, `skills/`,
+`.agents/skills`), how they are imported, the addresses the daemon may call and a server
+that wants you to sign in, given an `oauth` entry, on <a id="a-server-that-wants-you-to-sign-in"></a>[MCP servers and
+skills](mcp.md); instruction files (`AGENTS.md`, `.troupe/rules/`, the project brief) and
+`troupe onboard`, which brings other tools' files into them once, on [instruction files and
+onboarding](instructions.md).
 
 ## How the layers merge
 
@@ -63,12 +88,6 @@ models:
 In that workspace both providers are there, the default model is the gateway's and the
 cheap one is local.
 
-## What is checked
-
-A file that is not YAML, has a value of the wrong type or spells one setting two ways
-is refused; an unknown key is ignored with a warning:
-[what is checked](configuration-settings.md#what-is-checked).
-
 ## Secrets from the environment
 
 Any string may read a variable as `{env:VAR}`, which keeps a key out of the file:
@@ -93,35 +112,6 @@ your own file without echo. An organisation that hands one key to everybody puts
 its defaults, which `troupe config` reports as the organisation's; a key of your own, in
 your file or the environment, still wins over it.
 
-## Trusted workspaces
-
-The keys that decide what a session may do unasked, where requests go, what runs and
-what may be read come from a workspace's own files only once you trust it, with
-`troupe config trust`: [which keys, and how](configuration-layers.md#trusted-workspaces).
-
-## Agents, MCP servers and instructions
-
-Beside `config.yaml` are files with pages of their own:
-
-- **Agents, commands and workflows** (`agents/`, `commands/`, a repository's
-  `.troupe/workflows/`), and a delegation shown before it runs (`delegation.ask`):
-  [agents, commands and workflows](agents.md).
-- **MCP servers and skills** (`mcp.json`, `skills/`, and `.agents/skills`), how they are
-  imported, the addresses the daemon may call, and signing in: [MCP servers and skills](mcp.md).
-- **Instruction files** (`AGENTS.md`, `.troupe/rules/`, the project brief), and `troupe
-  onboard`, which brings other tools' files into them once:
-  [instruction files and onboarding](instructions.md).
-
-### Your own commands
-
-`<config>/commands/<name>.md` and `<workspace>/.troupe/commands/<name>.md` are slash
-commands, each sending the prompt its body holds ([your own commands](agents.md#your-own-commands)).
-
-### A server that wants you to sign in
-
-It is given an `oauth` entry and signed in to from either client
-([a server that wants you to sign in](mcp.md#a-server-that-wants-you-to-sign-in)).
-
 ## Per-tool permission rules
 
 `permissions:` answers a tool's question before it is asked: each rule names a tool, alone
@@ -141,37 +131,6 @@ permissions:
 
 `troupe config --explain permissions` lists them with their files, and the TUI's
 `/settings` and the desktop app's **This computer** page show them.
-
-## Every file Troupe reads
-
-Settings, MCP servers, skills, agents, commands, workflows, instruction files and the
-project brief, each in the order it is read: [the table](configuration-layers.md#every-file-troupe-reads).
-
-## Which one wins
-
-Where two places say different things, the higher on a ladder of six wins, from
-Troupe's built-ins to the repository's `.troupe/`:
-[the ladder](configuration-layers.md#which-one-wins).
-
-## Old spellings
-
-Each setting has one name; the old ones load with a warning until version 2, and
-`troupe config migrate` rewrites them: [the table](configuration-settings.md#old-spellings).
-
-## Seeing what is in effect
-
-`troupe config --explain` shows every key, its value and the layer that set it, here or
-in a running session: [the commands](configuration-settings.md#seeing-what-is-in-effect).
-
-## Settings in the desktop app and the terminal
-
-Both clients show and change the same keys through the daemon, so a change in one shows
-in the other: [what each shows, and where a change goes](configuration-settings.md#settings-in-the-desktop-app-and-the-terminal).
-
-## Editors
-
-The schema an editor with a YAML language server reads:
-[the comment to start a file with](configuration-settings.md#editors).
 
 ## Examples
 

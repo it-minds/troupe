@@ -24,7 +24,7 @@ paths:
   - clients/gui/packages/client/src/scratch.ts
   - clients/gui/packages/client/src/transcript.ts
   - clients/gui/apps/desktop/src/views/Session.tsx
-  - docs/user/README.md
+  - docs/user/transcript.md
   - PROTOCOL.md
 symbols:
   - Troupe.Scratch

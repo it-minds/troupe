@@ -17,7 +17,7 @@ in [docs/user/configuration.md](../user/configuration.md); the schema is
   what to write: one that is not YAML, a value of the wrong type, an enum value nobody
   knows, both spellings of one setting, or a file written for a newer Troupe.
 - **On a laptop**, a workspace's files set those keys only once the workspace is trusted
-  ([trusted workspaces](../user/configuration.md#trusted-workspaces)). The organisation's
+  ([trusted workspaces](../user/configuration-layers.md#trusted-workspaces)). The organisation's
   defaults sit below the user's file and what it enforces above everything (next section).
 - **A repository can check its own file** in CI: `troupe config validate
   .troupe/config.yaml` exits non-zero on any problem, an unknown key included.
@@ -107,7 +107,7 @@ a warning: the managed file is the one a person cannot change.
 **What a person sees**, and what a ceiling bounds (the question a session asks at an
 enforced `max_turns` or `wall_clock_ms`, and the room an enforced `max_tokens` leaves a
 model's thinking), are on the user's page:
-[your organisation's defaults and limits](../user/configuration.md#your-organisations-defaults-and-limits).
+[your organisation's defaults and limits](../user/configuration-layers.md#your-organisations-defaults-and-limits).
 
 **What it is not.** It is the organisation's word honoured by Troupe on the machine, not a
 control a person cannot get round on a machine they administer: the plane's copy is in

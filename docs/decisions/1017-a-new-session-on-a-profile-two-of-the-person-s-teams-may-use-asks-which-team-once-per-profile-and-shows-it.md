@@ -28,7 +28,7 @@ paths:
   - clients/tui/test/troupe/new_session_team_test.exs
   - clients/tui/test/support/fake_remote.ex
   - PROTOCOL.md
-  - docs/user/README.md
+  - docs/user/sessions.md
   - docs/user/terminal-screen.md
   - docs/user/cli-reference.md
   - docs/admin/routine-tasks.md

@@ -170,7 +170,7 @@ client author needs nothing but the protocol. The site at
 You run agents, on your own machine or on your team's plane.
 
 1. [user/](user/README.md) — what a session is, the first run in five steps, the ways in,
-   and the words you will meet.
+   and a line for each page that explains one thing.
 2. [The terminal client](../clients/tui/README.md) — installing `troupe`, a model
    provider, using it, and sessions on a plane; [in VS Code](user/vscode.md), opened in
    a terminal tab at the workspace folder.
