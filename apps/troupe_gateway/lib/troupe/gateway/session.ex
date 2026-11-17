@@ -41,7 +41,7 @@ defmodule Troupe.Gateway.Session do
   # what became of it, never enough to read its work.
   @lifecycle ~w(
     session_created agent_started agent_restarted agent_done session_dormant
-    session_activated session_resumed session_archived session_erased
+    session_activated session_resumed
     budget_exhausted cancelled approval_requested approval_decided approval_resolved
   )
 

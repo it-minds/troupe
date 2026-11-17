@@ -1567,12 +1567,6 @@ defmodule Troupe.Agent.Server do
           |> put_behind(state)
         )
 
-        :telemetry.execute(
-          [:troupe, :llm, :start],
-          %{system_time: System.system_time()},
-          %{session_id: state.session_id, agent_path: state.agent_path, model: request.model}
-        )
-
         state =
           state
           |> send_request(request)
@@ -2297,27 +2291,16 @@ defmodule Troupe.Agent.Server do
 
   defp announce_context(state), do: state
 
-  # A model call, wherever spend is added up: the listing, telemetry, the budget, which is
-  # charged what was billed (Decision 657), and the turn's spend (Decision 769). The
-  # summariser's call is counted here too, since it is billed like any other.
-  defp count_call(state, %Usage{} = usage, gateway, meta \\ %{}) do
+  # A model call, wherever spend is added up: the listing, the budget, which is charged
+  # what was billed, and the turn's spend. The summariser's call is counted here too,
+  # since it is billed like any other.
+  defp count_call(state, %Usage{} = usage, gateway) do
     cost = gateway && gateway["cost_micros"]
 
     # The same numbers the log just took, added to what a listing reports. The index has
     # carried `tokens` and `cost` from the start and only `pin_session/2` ever wrote to
     # it, so every session showed 0 tokens and $0.00 for as long as it ran.
     Index.observe(state.session_id, usage.input_tokens + usage.output_tokens, cost)
-
-    :telemetry.execute(
-      [:troupe, :llm, :stop],
-      %{
-        input_tokens: usage.input_tokens,
-        output_tokens: usage.output_tokens,
-        cache_read: usage.cache_read,
-        cache_write: usage.cache_write
-      },
-      Map.merge(%{session_id: state.session_id, agent_path: state.agent_path}, meta)
-    )
 
     %{
       state
@@ -2920,17 +2903,6 @@ defmodule Troupe.Agent.Server do
         "ok" => result.ok?,
         "content" => store_payload(state, result.content)
       })
-    )
-
-    :telemetry.execute(
-      [:troupe, :tool, :stop],
-      %{system_time: System.system_time()},
-      %{
-        session_id: state.session_id,
-        agent_path: state.agent_path,
-        tool: call.name,
-        ok?: result.ok?
-      }
     )
 
     updated = %{call | result: result, timer: nil, monitor: nil}
@@ -4158,7 +4130,7 @@ defmodule Troupe.Agent.Server do
 
     log(state, :compacted, data, actor)
 
-    state = count_call(state, response.usage, gateway, %{summariser: true})
+    state = count_call(state, response.usage, gateway)
 
     # The call that wrote the task list may be in the summary now, and the conversation
     # behind the system prompt is new anyway, so the prompt shows the list as it is, and
@@ -4312,9 +4284,8 @@ defmodule Troupe.Agent.Server do
     kill_llm(state)
     usage = reported_usage(ref, state.llm_usage)
     stopped = stopped_json(state, usage)
-    meta = if state.llm_summariser, do: %{stopped: true, summariser: true}, else: %{stopped: true}
 
-    state = count_call(clear_llm(state), usage || %Usage{}, stopped["gateway"], meta)
+    state = count_call(clear_llm(state), usage || %Usage{}, stopped["gateway"])
     {state, stopped}
   end
 
@@ -4657,12 +4628,6 @@ defmodule Troupe.Agent.Server do
   end
 
   defp publish_state(state, state_name) do
-    :telemetry.execute(
-      [:troupe, :agent, :transition],
-      %{system_time: System.system_time()},
-      %{session_id: state.session_id, agent_path: state.agent_path, state: state_name}
-    )
-
     publish(state, %{type: :agent_state, data: summary(state, state_name)})
   end
 

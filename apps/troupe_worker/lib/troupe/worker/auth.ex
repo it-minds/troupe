@@ -18,8 +18,8 @@ defmodule Troupe.Worker.Auth do
   **The ACL mirror** says what is true now. A collaborator whose access was revoked
   still holds a token that verifies perfectly, so the role in it is a claim about the
   past and cannot be the standing permission. Every command is checked against the
-  mirror, which the plane updates by push and which `acl_granted` and `acl_revoked`
-  events in the session log also feed. A revoked subject is refused; a narrowed one runs
+  mirror, which the plane alone feeds: each grant, invitation and invitation taken back
+  is pushed to the pod as `acl.changed`. A revoked subject is refused; a narrowed one runs
   the command with the scopes of the role the mirror holds, so an owner made a
   collaborator loses `admin` at their next command rather than at their next token. The
   mirror narrows and never widens: a token's scopes are the most a connection gets.
@@ -33,7 +33,7 @@ defmodule Troupe.Worker.Auth do
   require Logger
 
   # The answers that are about every session on the pod rather than one.
-  @listings ["session.list", "fleet.get"]
+  @listings ["session.list"]
 
   # What a token for one session may ask of a pod: every command that names a session as
   # `session_id`, which the guard then holds to the token's, but the plane's five below;
@@ -44,7 +44,7 @@ defmodule Troupe.Worker.Auth do
   # own configuration. `initialize` and `auth.refresh` are the connection's own and never
   # get here.
   @session_methods ~w(
-    subscribe unsubscribe session.list fleet.get
+    subscribe unsubscribe session.list
     session.get commands.list commands.run
     input.send turn.cancel profile.switch approval.respond question.answer todo.edit
     shell.run shell.cancel

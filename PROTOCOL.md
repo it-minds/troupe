@@ -288,8 +288,7 @@ token from its identity record (`name` beside `sub`); on a laptop, the linked pe
 the operating system's user where nobody is linked. `session_created` has `owner_name`
 beside `owner` where the writer knew it (a laptop's linked person; a pod is told no
 owner). The events whose `data` names a person carry `display_name` beside `subject`
-(`session_invited`, `session_uninvited`, `acl_granted`, `acl_revoked`, `session_tainted`,
-`presence`), and `by_name` beside `by`. In the plane's answers, a session row
+(`session_invited`, `session_uninvited`, `session_tainted`, `presence`), and `by_name` beside `by`. In the plane's answers, a session row
 (`sessions.list`, `session.get` and every method that answers a session, and
 `admin.sessions.list`) has `owner_name` beside `owner`, an audit row (`admin.audit.list`)
 `actor_name` beside `actor`, and an offer or an invitation `owner_name` and
@@ -374,14 +373,11 @@ Durable:
 | `fs_changed` | `path`, `hash`, `size` |
 | `file_ready` | `path`, `size`, `hash`, `title`, `local_path` — a file the agent made for the person: `write_file` with `deliverable: true` (Decision 956). `path` is in the session's workspace, as `fs.read` takes it, and `hash` the one that read answers; `local_path`, on a session that runs on the person's machine, is where it already is there. A client offers to save it: the desktop app's **Save…** on the line (the bytes through `fs.read`, then a save dialog), the TUI the path on a laptop and `/save <path> [to]` from a pod; a headless run prints it |
 | `scratch_updated` | `name`, `path`, `kind`, `title`, `size`, `hash`, `version`, `call_id` — a document the `show` tool wrote to the session's scratchpad, or replaced (Decision 870), or the `patch` tool revised in place: a plan, report, comparison, diagram or table the agent shows the person beside the chat instead of printing it there. `path` is where `fs.read` reads it (`scratch:/<name>`), `kind` how to show it (`markdown`, `mermaid`, `json`, `csv` or `text`), `hash` the same `sha256:…` `fs.read` answers, `version` the writes of that name in the session from 1, and `call_id` the `show` or `patch` call that wrote it, so a client puts a card where the call was rather than the call's `content`. `scratch.list` lists the documents |
-| `acl_granted` / `acl_revoked` | `subject`, `role`, `display_name` |
 | `artifact_commented` | `artifact: {id, title}`, `comment: {id, author: {subject, display_name}, body, created_at}` — somebody wrote a comment on an artifact this session published (Decision 1007), from the plane, on a pod at once and on a laptop at its daemon's next poll (Decision 1015): whoever steers the session reads it beside the work and may ask the agent to act on it. Somebody else's words, never input: no turn starts |
 | `session_invited` / `session_uninvited` | `subject`, `role` (invited only), `by`, `display_name`, `by_name` — a person invited into the session by name, to follow it (`observe`) or steer it (`control`), or the invitation taken back (Decision 949): written by the pod holding a pod session when the plane tells it, and by the daemon sealing a private one when its owner invites from there. A private session's daemon reads who it has invited from these, and puts a new key only in the slots of people they name |
 | `mounts_resolved` | `mounts` — the volumes a pod session's working tree was given, as the session started |
 | `published` | `source`, `destination`, `hash`, `bytes`, `direction` — a file the `publish` tool copied to or from a shared volume |
 | `config_upgraded` | `channel`, `from`, `to`, `hash`, `entitlements` — the configuration a session was pinned to was retired, and an activation moved it to the channel's current version |
-| `session_read_only` | `reason` — declared for a session parked read-only (see the states below) |
-| `session_archived` / `session_erased` | nothing; declared, and carried on a session's topic |
 | `share_created` | `id`, `role` (`observe` or `control`), `expires_at`, `audience` — a share of a team session, announced by the plane |
 | `share_revoked` | `id`, `reason` |
 | `tools_registered` | `tools`, `connection`, `consent` — a client offered tools of its own (§8) |
@@ -782,7 +778,7 @@ that cannot yet — no token, or no plane answering — makes the session anyway
 "last_active_at", "pinned", "archived", "title", "kind", "sync", "device", "remote"}]}`
 
 The list is the sessions not archived; `"archived": true` lists the archived ones instead
-(Decision 1023). `fleet.get` lists the sessions not archived, as the list does.
+(Decision 1023).
 
 `filter.parent` selects the branches of one session.
 
@@ -2706,7 +2702,9 @@ while its session is working.
 
 ### Fleet
 
-#### `fleet.get` → `{"sessions": [...]}`, the rows `session.list` gives with no filter. A `fleet` subscription replays nothing; it carries what happens from then on.
+A `fleet` subscription replays nothing; it carries what happens from then on, and
+`session.list` with no filter is the fleet as it stands.
+
 #### `watch.set` → `{"command_id", "workspace", "enabled": true, "session_id"}`. Watch mode is
 **exclusive per workspace**: enabling it with a `session_id` naming another session than the
 one that watches there returns `conflict`. `session_id`, optional, names the session that
@@ -2844,7 +2842,7 @@ is asked again, under the same id, and an answer that arrived in the meantime �
 
 | scope | grants |
 | --- | --- |
-| `observe` | `initialize`, `client.mode`, `subscribe`, `unsubscribe`, `session.list`, `session.get`, `session.invites`, `session.read_sealed`, `session.goal.get`, `session.loop.get`, `blob.get`, `fleet.get`, `fs.list`, `fs.read`, `scratch.list`, `agents.list`, `agents.get`, `agents.validate`, `commands.list`, `workflows.list`, `context.get`, `mcp.status`, `mcp.list`, `skills.list`, `skills.discover`, `workspace.recent`, `workspace.search`, `worktree.list`, `watch.get`, `presence.set`, `identity.get`, `config.get`, `setup.get`, `me.memory.status`, `artifact.list`, `artifact.get`, `artifact.open`, `artifact.read`, `profile.get` |
+| `observe` | `initialize`, `client.mode`, `subscribe`, `unsubscribe`, `session.list`, `session.get`, `session.invites`, `session.read_sealed`, `session.goal.get`, `session.loop.get`, `blob.get`, `fs.list`, `fs.read`, `scratch.list`, `agents.list`, `agents.get`, `agents.validate`, `commands.list`, `workflows.list`, `context.get`, `mcp.status`, `mcp.list`, `skills.list`, `skills.discover`, `workspace.recent`, `workspace.search`, `worktree.list`, `watch.get`, `presence.set`, `identity.get`, `config.get`, `setup.get`, `me.memory.status`, `artifact.list`, `artifact.get`, `artifact.open`, `artifact.read`, `profile.get` |
 | `control` | everything in `observe`, plus `input.send`, `commands.run`, `turn.cancel`, `profile.switch`, `session.goal.set`, `session.goal.clear`, `session.loop.start`, `session.loop.stop`, `session.compact`, `approval.respond`, `question.answer`, `todo.edit`, `fs.upload`, `tools.register`, `tools.unregister`, `memory.get`, `memory.decline`, `onboard.decline`, `me.memory`, `me.memory.put`, `me.memory.history`, `me.memory.rollback`, `memory.in_effect`, `admin.memory.get`, `admin.memory.preview`, `admin.memory.put`, `artifact.publish`, `artifact.share`, `artifact.unshare`, `artifact.comment`, `artifact.comment.delete`, `artifact.comment.edit`, `artifact.rollback`, `artifact.pin`, `artifact.keep`; and `shell.run` and `shell.cancel`, which also need the session's owner or `admin` (Decision 813) |
 | `admin` | everything in `control`, plus `session.create`, `session.archive`, `session.unarchive`, `session.pin`, `session.unpin`, `session.title.set`, `session.erase`, `session.claim`, `session.invite`, `session.uninvite`, `session.fork`, `worktree.remove`, `worktree.merge`, `worktree.discard`, `memory.forget`, `onboard.plan`, `onboard.apply`, `watch.set`, `identity.link`, `identity.unlink`, `identity.sign_out`, `identity.accept_plane_key`, `config.models`, `config.set`, `config.import`, `config.organisation`, `config.memory`, `setup.answer`, `mcp.add`, `mcp.remove`, `mcp.check`, `mcp.secret`, `mcp.sign_in`, `mcp.sign_out`, `mcp.tools`, `mcp.call`, `skills.add`, `skills.remove`, `agents.put`, `agents.delete`, `daemon.stop`, `remote.offer`, `remote.withdraw` |
 
@@ -2896,12 +2894,12 @@ The ACL narrows and never widens; a wider role arrives with the next token
 **A token is for its session and no other.** A pod holds several people's sessions, so a
 request that names another — as `session_id`, a branch's `parent`, or the id in a
 `session:` or `presence:` topic — is refused with `forbidden` and `data.field` saying
-which, and so is a subscription to `fleet`. `session.list` and `fleet.get` answer with the
+which, and so is a subscription to `fleet`. `session.list` answers with the
 token's own session and none of the others. A token with no `session_id` is held to the
 ACL of each session a request names.
 
 **It calls the methods about its session, and no others.** Those are `subscribe` and
-`unsubscribe` on its own topics, the two listings above, and every command whose params
+`unsubscribe` on its own topics, the listing above, and every command whose params
 require `session_id` (§6) but the five below: `session.get`, `input.send`, `turn.cancel`,
 `profile.switch`, `session.goal.*`, `session.loop.*`, `session.compact`, `approval.respond`,
 `question.answer`, `todo.edit`, `fs.list`, `fs.read`, `fs.upload`, `scratch.list`, `blob.get`,

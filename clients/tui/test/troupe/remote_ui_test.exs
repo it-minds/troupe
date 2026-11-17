@@ -31,7 +31,8 @@ defmodule Troupe.RemoteUITest do
   end
 
   describe "resume events" do
-    test "session_resumed and config_upgraded appear in the transcript" do
+    # The fields the schema gives each event, and nothing else.
+    test "session_resumed says when the session came back somewhere else" do
       {remote, url} = start_remote!(sessions: [fixture()])
       origin = connect!(remote, url)
       sid = attach!(origin, "s-ui")
@@ -40,14 +41,30 @@ defmodule Troupe.RemoteUITest do
       eventually(fn -> user_state(pid).model.windows["code-1"] != nil end)
       press(pid, "1")
 
-      FakeRemote.emit(remote, "s-ui", "session_resumed", %{"worker" => "w7"})
-      FakeRemote.emit(remote, "s-ui", "config_upgraded", %{"version" => "2.1"})
+      FakeRemote.emit(remote, "s-ui", "session_resumed", %{"dormant_ms" => 120_000, "moved" => true})
 
-      # Two frames from the plane, each drawn when it comes: waited for together.
-      eventually(fn ->
-        text = screen_text(pid, screen)
-        text =~ "session resumed on w7" and text =~ "config upgraded to 2.1"
-      end)
+      eventually(fn -> screen_text(pid, screen) =~ "session resumed on another device" end)
+
+      GenServer.stop(pid, :normal)
+    end
+
+    test "config_upgraded says the versions it moved between" do
+      {remote, url} = start_remote!(sessions: [fixture()])
+      origin = connect!(remote, url)
+      sid = attach!(origin, "s-ui")
+
+      {pid, screen} = start_tui(sid)
+      eventually(fn -> user_state(pid).model.windows["code-1"] != nil end)
+      press(pid, "1")
+
+      FakeRemote.emit(remote, "s-ui", "config_upgraded", %{
+        "channel" => "stable",
+        "from" => 3,
+        "to" => 4,
+        "hash" => "sha256:4"
+      })
+
+      eventually(fn -> screen_text(pid, screen) =~ "config upgraded from 3 to 4" end)
 
       GenServer.stop(pid, :normal)
     end

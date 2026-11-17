@@ -39,7 +39,7 @@ def main() -> int:
         }
 
         # 1. The fleet: every session this principal can see.
-        fleet = client.call("fleet.get")
+        fleet = client.call("session.list")
         report["fleet"] = [session["id"] for session in fleet["sessions"]]
         if args.session not in report["fleet"]:
             return fail(f"session {args.session} is not in the fleet: {report['fleet']}")

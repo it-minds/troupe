@@ -1213,7 +1213,7 @@ defmodule Troupe.Gateway.Remote do
   end
 
   defp narrow(session_id, method, %{"sessions" => sessions} = result)
-       when method in ["session.list", "fleet.get"] and is_list(sessions) do
+       when method == "session.list" and is_list(sessions) do
     %{result | "sessions" => Enum.filter(sessions, &(&1["id"] == session_id))}
   end
 
