@@ -19,7 +19,7 @@ export type {
   WorkerPod,
 } from "./plane.js";
 export { FUNCTIONS_HEADING, accessWords, askWords, budgetWords, capacityWords, keyWords, missingWords, moneyWords, profileSummary, ruleAccessWords, whoseWords } from "./profile.js";
-export type { ProfileView, ProfileViewAgent, ProfileViewFunction, ProfileViewLimits, ProfileViewMissing, ProfileViewModel, ProfileViewRule, ProfileViewServer, RuleAccess, ServerAccess } from "./profile.js";
+export type { ProfileView, ProfileViewAgent, ProfileViewFunction, ProfileViewLimits, ProfileViewMissing, ProfileViewModel, ProfileViewRule, ProfileViewServer, ProfileViewSkill, RuleAccess, ServerAccess } from "./profile.js";
 export {
   LOCAL_DOWN_SENTENCE,
   andList,

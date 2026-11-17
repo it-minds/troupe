@@ -183,6 +183,16 @@ defmodule Troupe.Plane.ProfileViewTest do
              ]
 
       assert view["skills"] == ["review-checklist"]
+
+      # What each one is, and its SKILL.md after the front matter, for the same skills.
+      assert view["skill_details"] == [
+               %{
+                 "name" => "review-checklist",
+                 "description" => "The review-checklist skill",
+                 "body" => "Do it.",
+                 "truncated" => false
+               }
+             ]
     end
 
     test "sees the model, and the hosts the pods may reach, deduplicated and sorted", ctx do
