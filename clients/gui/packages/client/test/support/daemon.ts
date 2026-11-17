@@ -75,6 +75,8 @@ interface Session {
   readers?: number;
   /** `private` for one sealed under the person's key (troupe Decision 785); local otherwise. */
   kind?: "local" | "private";
+  /** Hidden from `session.list` unless its filter asks for archived ones. */
+  archived?: boolean;
   /** How a private session's sealing stands here, as `session.list` says it. */
   sync?: "current" | "behind" | "paused" | "elsewhere" | "erasure_pending";
   /** The other device that holds a private one, where `sync` is `elsewhere`. */
@@ -1367,9 +1369,11 @@ evoked where nothing is set and there was a sign-in. */
       }
 
       case "session.list": {
-        const filter = (params["filter"] ?? {}) as { kind?: string; workspace?: string };
+        const filter = (params["filter"] ?? {}) as { kind?: string; workspace?: string; archived?: boolean };
         const sessions = [...this.sessions.values()]
           .filter((s) => !filter.workspace || s.workspace === filter.workspace)
+          // Archived ones only when asked for, and then nothing else.
+          .filter((s) => Boolean(s.archived) === (filter.archived === true))
           .map((s) => this.rowOf(s));
         return reply(ws, id, { sessions });
       }
@@ -1465,6 +1469,21 @@ evoked where nothing is set and there was a sign-in. */
       case "remote.withdraw": {
         if (session) session.remote = null;
         return reply(ws, id, { session_id: sessionId, remote: null });
+      }
+
+      // Hidden from the list and kept whole; a running one is put to sleep first, and only
+      // `session.unarchive` brings it back.
+      case "session.archive": {
+        if (!session) return reply(ws, id, null, { code: -32005, message: "not_found", data: { kind: "session", id: sessionId } });
+        session.archived = true;
+        session.state = "dormant";
+        return reply(ws, id, { session_id: sessionId, state: "dormant", archived: true });
+      }
+
+      case "session.unarchive": {
+        if (!session) return reply(ws, id, null, { code: -32005, message: "not_found", data: { kind: "session", id: sessionId } });
+        session.archived = false;
+        return reply(ws, id, { session_id: sessionId, archived: false });
       }
 
       // A private session another device holds, taken over here (troupe Decision 785).
@@ -3167,6 +3186,7 @@ evoked where nothing is set and there was a sign-in. */
       created_at: s.createdAt,
       last_active_at: s.lastActiveAt,
       pinned: false,
+      archived: Boolean(s.archived),
       title: s.title ?? null,
       kind: s.kind ?? "local",
       sync: s.kind === "private" ? (s.sync ?? "paused") : null,

@@ -212,9 +212,14 @@ defmodule Troupe.UI.TUI.Server do
   @typedoc """
   Session-picker state: the sessions found on disk for the directory the TUI was
   opened in, and where the cursor sits. Read once when the page opens (`r`
-  refreshes it), never while a frame is drawn.
+  refreshes it), never while a frame is drawn. `archived` is the list of the
+  archived ones instead (`/sessions archived`).
   """
-  @type sessions :: %{entries: [Troupe.Client.summary()], cursor: non_neg_integer()}
+  @type sessions :: %{
+          entries: [Troupe.Client.summary()],
+          cursor: non_neg_integer(),
+          archived: boolean()
+        }
 
   @typedoc """
   Files-panel state: the mount and directory being listed, what `fs.list`
@@ -1273,7 +1278,8 @@ defmodule Troupe.UI.TUI.Server do
   # 698); this is only which of them the TUI implements, and the suite holds the two
   # equal, so a command added to the table without a clause here fails a test rather
   # than being dispatched as an agent.
-  @builtins ~w(new cancel dismiss merge discard compact goal loop steer invite uninvite sessions back hq observer files
+  @builtins ~w(new cancel dismiss merge discard compact goal loop steer invite uninvite sessions archive
+               unarchive back hq observer files
                scratch upload save publish artifacts profiles profile copy memory context watch settings
                models mcp
                skills help
@@ -1361,6 +1367,7 @@ defmodule Troupe.UI.TUI.Server do
       :models -> open_models(state)
       :observer -> %{put_cmd(state, "") | focus: :observer, observer: %{cursor: 0}}
       {:sessions, ""} -> open_sessions(state)
+      {:sessions, "archived"} -> open_sessions(state, true)
       {:sessions, arg} -> resume_by_arg(state, arg)
       {:new, arg} -> new_session(state, arg)
       :back -> go_back(state)
@@ -1590,7 +1597,16 @@ defmodule Troupe.UI.TUI.Server do
   defp builtin("skills", args, state, _target),
     do: sources_command(state, "skills", String.trim(args))
 
-  defp builtin("sessions", args, _state, _target), do: {:sessions, args}
+  defp builtin("sessions", args, _state, _target), do: {:sessions, String.trim(args)}
+
+  # The session on screen, archived by its owner or brought back; it stays on screen either
+  # way, and the notice says where it is listed now.
+  defp builtin("archive", _args, state, _target),
+    do: notice_of(Client.archive(state.session_id, true))
+
+  defp builtin("unarchive", _args, state, _target),
+    do: notice_of(Client.archive(state.session_id, false))
+
   defp builtin("new", args, _state, _target), do: {:new, args}
   defp builtin("back", _args, _state, _target), do: :back
   defp builtin("hq", args, _state, _target), do: {:hq, args}
@@ -2205,7 +2221,18 @@ defmodule Troupe.UI.TUI.Server do
   # are, and the one `/back` returns to, which `/new` left. A branch is not one of them
   # while it is a window of its parent's, counted on its row; one whose window was
   # dismissed is, after them, named for the window it was (the row of `/dismiss`).
-  defp pickable_sessions(state) do
+  defp pickable_sessions(state, archived? \\ false)
+
+  # The archived ones are listed whatever they did, the one on screen among them only when
+  # it is archived: the list is of what was put away.
+  defp pickable_sessions(state, true) do
+    case Client.sessions({:local, here(state)}, %{archived: true}) do
+      {:ok, sessions} -> sessions
+      {:error, _reason} -> []
+    end
+  end
+
+  defp pickable_sessions(state, false) do
     case Client.sessions({:local, here(state)}) do
       {:ok, sessions} ->
         listed =
@@ -2239,12 +2266,25 @@ defmodule Troupe.UI.TUI.Server do
 
   defp worked?(entry), do: entry.branches != [] or (entry.tokens || 0) > 0
 
-  defp open_sessions(state) do
-    entries = pickable_sessions(state)
+  defp open_sessions(state, archived? \\ false) do
+    entries = pickable_sessions(state, archived?)
     cursor = Enum.find_index(entries, &(&1.id == state.session_id)) || 0
 
-    %{put_cmd(state, "") | focus: :sessions, sessions: %{entries: entries, cursor: cursor}}
+    %{
+      put_cmd(state, "")
+      | focus: :sessions,
+        sessions: %{entries: entries, cursor: cursor, archived: archived?}
+    }
   end
+
+  # The picker taken again in the list it shows, the cursor kept where it was.
+  defp reopen_sessions(%{sessions: s} = state) do
+    state = open_sessions(state, archived?(s))
+    entries = state.sessions.entries
+    %{state | sessions: %{state.sessions | cursor: min(s.cursor, max(length(entries) - 1, 0))}}
+  end
+
+  defp archived?(sessions), do: Map.get(sessions, :archived, false)
 
   defp sessions_key(%Key{code: "esc"}, state), do: %{state | focus: :command, sessions: nil}
 
@@ -2257,10 +2297,22 @@ defmodule Troupe.UI.TUI.Server do
   end
 
   # The list is a snapshot of the state dir; `r` takes another one without losing your place.
-  defp sessions_key(%Key{code: "r"}, %{sessions: s} = state) do
-    state = open_sessions(state)
-    entries = state.sessions.entries
-    %{state | sessions: %{state.sessions | cursor: min(s.cursor, max(length(entries) - 1, 0))}}
+  defp sessions_key(%Key{code: "r"}, state), do: reopen_sessions(state)
+
+  # `u` in the archived list brings the session back to the list, which only its owner may.
+  defp sessions_key(%Key{code: "u"}, %{sessions: s} = state) do
+    {entries, cursor} = View.sessions_view(state)
+
+    case archived?(s) && Enum.at(entries, cursor) do
+      %{id: id} ->
+        case Client.archive(id, false) do
+          {:ok, _said} -> state |> reopen_sessions() |> notice("#{id} is back in the session list")
+          {:error, reason} -> notice(state, "#{id}: #{reason}")
+        end
+
+      _ ->
+        state
+    end
   end
 
   defp sessions_key(%Key{code: "enter"}, state) do
@@ -2290,18 +2342,12 @@ defmodule Troupe.UI.TUI.Server do
 
   defp sessions_key(_key, state), do: state
 
-  defp claim(%{sessions: s} = state, entry) do
+  defp claim(state, entry) do
     case Client.claim_session(entry.origin, entry.id) do
       {:ok, _claimed} ->
-        state = open_sessions(state)
-        entries = state.sessions.entries
-
-        state = %{
-          state
-          | sessions: %{state.sessions | cursor: min(s.cursor, max(length(entries) - 1, 0))}
-        }
-
-        notice(state, "claimed #{entry.id}: this computer holds it now")
+        state
+        |> reopen_sessions()
+        |> notice("claimed #{entry.id}: this computer holds it now")
 
       {:error, reason} ->
         notice(state, "could not claim #{entry.id}: #{claim_reason(reason)}")
@@ -2315,10 +2361,15 @@ defmodule Troupe.UI.TUI.Server do
   defp resume_by_arg(state, arg) do
     entries = pickable_sessions(state)
 
+    # An archived session is not in the list, but opens by its id as any other does.
     found =
       case Integer.parse(arg) do
-        {n, ""} -> Enum.at(entries, n - 1)
-        _ -> Enum.find(entries, &String.starts_with?(&1.id, arg))
+        {n, ""} ->
+          Enum.at(entries, n - 1)
+
+        _ ->
+          Enum.find(entries, &String.starts_with?(&1.id, arg)) ||
+            Enum.find(pickable_sessions(state, true), &String.starts_with?(&1.id, arg))
       end
 
     case found do

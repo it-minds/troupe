@@ -30,6 +30,30 @@ const arg = (name: string, required: boolean, kind: string) => ({ name, required
 
 export const COMMANDS: CommandEntry[] = [
   {
+    name: "archive",
+    aliases: [],
+    section: "session",
+    summary: "Archive this session: hide it from the session list, for everyone who sees it",
+    usage: "/archive",
+    args: [],
+    availability: "always",
+    source: "builtin",
+    detail: "Kept whole, and asleep. Its owner brings it back with /unarchive; anybody who could open it still can.",
+    example: "/archive",
+  },
+  {
+    name: "unarchive",
+    aliases: [],
+    section: "session",
+    summary: "Unarchive this session: put it back in the session list",
+    usage: "/unarchive",
+    args: [],
+    availability: "always",
+    source: "builtin",
+    detail: "Only its owner can unarchive it.",
+    example: "/unarchive",
+  },
+  {
     name: "cancel",
     aliases: [],
     section: "session",

@@ -167,6 +167,7 @@ defmodule Troupe.Plane.Harness do
     "session.title.set" => :control,
     "session.erase" => :control,
     "session.archive" => :control,
+    "session.unarchive" => :control,
     "session.grant" => :control,
     # Inviting a person by name into a session, and taking it back (#765): a pod session's
     # grant made visible, a private session's key put in their own slot by its owner's machine.
@@ -796,6 +797,8 @@ defmodule Troupe.Plane.Harness do
       |> put_option(:source, params["source"])
       |> put_option(:needs_review, params["needs_review"])
       |> put_option(:limit, params["limit"])
+      # The list is the sessions not archived; `archived: true` is the archived ones.
+      |> put_option(:archived, params["archived"] == true)
 
     sessions = Sessions.visible_to(user, options)
     {:ok, %{"sessions" => sessions |> Enum.map(&session_row(&1, user)) |> Names.decorate(@owner_name)}}
@@ -1477,12 +1480,26 @@ defmodule Troupe.Plane.Harness do
   # gives back the slot and the slice. The log stays, and the next activating command
   # brings the session back wherever there is room.
   #
-  # The owner's, as pinning and erasing are: it stops a turn for everybody attached.
+  # It is also taken out of the session list for everyone who sees it (`archived`), until
+  # `session.unarchive` puts it back; nothing else does, activity included. It still opens
+  # for anybody who could open it.
+  #
+  # The owner's, as pinning and erasing are: it stops a turn for everybody attached, and it
+  # takes the session out of the team's list.
   defp handle("session.archive", params, %{user: user}) do
     with {:ok, session} <- visible(params["session_id"], user),
          :ok <- must_administer(user, session),
-         {:ok, archived} <- archive(session, user) do
+         {:ok, asleep, pod} <- sleep(session),
+         {:ok, archived} <- set_archived(asleep, true, user, pod) do
       {:ok, session_json(archived, user)}
+    end
+  end
+
+  defp handle("session.unarchive", params, %{user: user}) do
+    with {:ok, session} <- visible(params["session_id"], user),
+         :ok <- must_administer(user, session),
+         {:ok, back} <- set_archived(session, false, user, nil) do
+      {:ok, session_json(back, user)}
     end
   end
 
@@ -1508,23 +1525,37 @@ defmodule Troupe.Plane.Harness do
     end
   end
 
-  defp archive(%Session{state: "active", worker_id: worker_id} = session, user)
+  # One audit row each way; an archive that put a pod's session to sleep names the pod.
+  defp set_archived(session, archived?, user, pod) do
+    case Sessions.archive(session.id, archived?, user.subject) do
+      {:ok, updated} ->
+        action = if archived?, do: "session.archive", else: "session.unarchive"
+        detail = if pod, do: %{"pod" => pod}, else: %{}
+        {:ok, _audit} = Audit.record(user.subject, action, session.id, detail)
+        {:ok, updated}
+
+      {:error, :not_found} ->
+        {:error, Error.new(:not_found, %{kind: "session", id: session.id})}
+
+      {:error, reason} ->
+        {:error, Error.new(:internal_error, %{reason: inspect(reason)})}
+    end
+  end
+
+  defp sleep(%Session{state: "active", worker_id: worker_id} = session)
        when is_binary(worker_id) do
     with {:ok, worker} <- worker_of(session),
          {:ok, _slept} <- put_to_sleep(worker, session) do
-      {:ok, _audit} =
-        Audit.record(user.subject, "session.archive", session.id, %{"pod" => worker.pod_name})
-
-      {:ok, Sessions.get(session.id)}
+      {:ok, Sessions.get(session.id), worker.pod_name}
     end
   end
 
   # Nothing is running, and asking twice is what a retry does.
-  defp archive(%Session{state: state} = session, _user) when state in ["dormant", "read_only"],
-    do: {:ok, session}
+  defp sleep(%Session{state: state} = session) when state in ["dormant", "read_only"],
+    do: {:ok, session, nil}
 
   # Waiting for room, or between the epoch bump and its placement: there is no pod to tell.
-  defp archive(%Session{} = session, _user) do
+  defp sleep(%Session{} = session) do
     {:error,
      Error.new(:conflict, %{reason: "this session has not started on the platform yet", state: session.state})}
   end
@@ -3920,6 +3951,7 @@ defmodule Troupe.Plane.Harness do
       "object_bytes" => session.object_bytes,
       "workspace_bytes" => session.workspace_bytes,
       "pinned" => session.pinned,
+      "archived" => session.archived,
       # Lifecycle the worker reported, so a queue can be rendered from this listing
       # without replaying a log. Never what the session said.
       "status" => session.status,

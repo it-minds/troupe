@@ -21,7 +21,7 @@ defmodule Troupe do
   alias Troupe.Onboard.Notice
   alias Troupe.Protocol.Origin
   alias Troupe.Session.{Approvals, Blobs, Log, Questions, Watcher}
-  alias Troupe.Sessions.{Fork, Index, Pin, Title, Unseen}
+  alias Troupe.Sessions.{Archive, Fork, Index, Pin, Title, Unseen}
 
   require Logger
 
@@ -963,6 +963,17 @@ defmodule Troupe do
   def pin_session(session_id, pinned?) do
     with :ok <- Pin.put(session_id, pinned?, state_dirs()) do
       Index.update(session_id, %{pinned: pinned?})
+    end
+  end
+
+  @doc """
+  Archive a session, or bring it back, running or dormant (`Troupe.Sessions.Archive`): out
+  of the session list unless the list asks for the archived ones, and kept whole.
+  """
+  @spec archive_session(String.t(), boolean()) :: :ok | {:error, :not_found | String.t()}
+  def archive_session(session_id, archived?) do
+    with :ok <- Archive.put(session_id, archived?, state_dirs()) do
+      Index.update(session_id, %{archived: archived?})
     end
   end
 

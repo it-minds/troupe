@@ -699,17 +699,23 @@ defmodule Troupe.UI.TUI.View do
     detail = %Paragraph{
       text: session_detail(entry, state, max(detail_rect.width - 2, 20)),
       wrap: true,
-      block: %Block{title: detail_title(entry), borders: [:all]}
+      block: %Block{title: detail_title(entry, archived_list?(state)), borders: [:all]}
     }
 
     [{list, list_rect}, {detail, detail_rect}]
   end
 
-  defp detail_title(entry) do
+  defp detail_title(_entry, true), do: " detail — Enter opens · u unarchives it "
+
+  defp detail_title(entry, false) do
     if claimable?(entry),
       do: " detail — Enter resumes · c claims it here ",
       else: " detail — Enter resumes this session "
   end
+
+  # Whether the picker lists the archived sessions (`/sessions archived`) rather than the rest.
+  defp archived_list?(%{sessions: %{} = sessions}), do: Map.get(sessions, :archived, false)
+  defp archived_list?(_state), do: false
 
   @doc """
   Whether `c` takes the session over here: a private one another device sealed last, as
@@ -754,7 +760,10 @@ defmodule Troupe.UI.TUI.View do
   def sync_words(other, _device), do: {other, other}
 
   defp sessions_title(entries, state, width) do
-    count = "#{length(entries)} session(s)"
+    count =
+      if archived_list?(state),
+        do: "#{length(entries)} archived session(s)",
+        else: "#{length(entries)} session(s)"
 
     [
       " #{count} in #{state.workspace} ",
@@ -871,6 +880,12 @@ defmodule Troupe.UI.TUI.View do
       do: text,
       else: String.slice(text, 0, max(room - 1, 1)) <> "…"
   end
+
+  defp session_detail(nil, %{sessions: %{archived: true}}, _width),
+    do:
+      "No archived sessions in this directory.\n\n" <>
+        "/archive in a session puts it away here: hidden from the list, kept whole; " <>
+        "/sessions lists the rest."
 
   defp session_detail(nil, _state, _width),
     do:
@@ -1094,6 +1109,12 @@ defmodule Troupe.UI.TUI.View do
     do: " scratchpad — ↑↓ PgUp PgDn scroll · Esc back to the list "
 
   defp scratch_footer(_state), do: " scratchpad — ↑↓ move · Enter opens · Esc back "
+
+  defp sessions_footer(true),
+    do: " archived sessions — ↑↓ move · Enter opens · u unarchives · r refreshes · Esc back "
+
+  defp sessions_footer(false),
+    do: " sessions — ↑↓ move · Enter resumes · r refreshes · Esc back "
 
   defp human_size(size) when is_integer(size) and size >= 1_000_000,
     do: "#{Float.round(size / 1_000_000, 1)} MB"
@@ -3194,7 +3215,7 @@ defmodule Troupe.UI.TUI.View do
           {"", " agents — ↑↓ move · Enter opens the agent · Esc back "}
 
         :sessions ->
-          {"", " sessions — ↑↓ move · Enter resumes · r refreshes · Esc back "}
+          {"", sessions_footer(archived_list?(state))}
 
         :files ->
           {"", " files — ↑↓ move · Enter opens · ← up · r reloads · Esc back "}

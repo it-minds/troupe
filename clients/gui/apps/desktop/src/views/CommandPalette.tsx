@@ -71,6 +71,11 @@ export interface PaletteActions {
   switchAgent?: ((name: string) => Promise<void>) | undefined;
   /** The agent the session runs now. */
   currentAgent?: string | null | undefined;
+  /**
+   * `/archive` (`true`) and `/unarchive`: hide this session from the session list, for
+   * everyone who sees it, or put it back. A sentence back is a notice; undefined closes the palette.
+   */
+  archive?: ((on: boolean) => Promise<string | undefined>) | undefined;
 }
 
 interface RunContext extends PaletteActions {
@@ -160,6 +165,8 @@ const RUNNERS: Record<string, (ctx: RunContext, args: string) => Promise<string 
     return "copied the transcript";
   },
   help: () => "",
+  archive: ({ archive }) => (archive ? archive(true) : "this session cannot be archived from here"),
+  unarchive: ({ archive }) => (archive ? archive(false) : "this session cannot be unarchived from here"),
 };
 
 /** The built-ins this app asks its arguments of in a dialog of their own, rather than on the line. */

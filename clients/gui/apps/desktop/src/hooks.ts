@@ -32,6 +32,7 @@ import type {
   AuthSession,
   DaemonEndpoint,
   DaemonIdentity,
+  FleetRow,
   FleetSnapshot,
   GateAnswer,
   OfferAnswer,
@@ -105,6 +106,67 @@ export function useFleet(
   }, [store, intervalMs]);
 
   return { snapshot, store, refresh: useCallback(() => void store.refresh(), [store]) };
+}
+
+/** The archived sessions, as `useArchived` holds them. */
+export interface Archived {
+  rows: FleetRow[];
+  loading: boolean;
+  /** What went wrong asking a source, where one did; the others' rows are still here. */
+  error: string | null;
+  /** Ask every source for its archived sessions again. */
+  load: () => Promise<void>;
+  /**
+   * Archive a session (`on`) or unarchive it, where it runs: a session on this computer
+   * through its daemon, a team one through the plane. An archived one leaves the list at
+   * once; either way the list and the archived ones are asked again after.
+   */
+  set: (row: FleetRow, on: boolean) => Promise<void>;
+}
+
+/**
+ * The sessions their owners archived: asked when somebody looks, and again after one is
+ * archived or unarchived here, never on the poll, since nothing in them waits on anybody.
+ */
+export function useArchived(store: FleetStore, auth: AuthSession | null, daemon: DaemonClient | null): Archived {
+  const [rows, setRows] = useState<FleetRow[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const got = await store.archived();
+      setRows(got.rows);
+      setError(Object.values(got.sources).find((s) => s.error)?.error ?? null);
+    } finally {
+      setLoading(false);
+    }
+  }, [store]);
+  const set = useCallback(
+    async (row: FleetRow, on: boolean) => {
+      if (onThisComputer(row.kind)) {
+        if (!daemon) throw new Error("This computer's daemon is not running");
+        await (on ? daemon.archiveSession(row.id) : daemon.unarchiveSession(row.id));
+      } else if (row.kind === "team" && auth) {
+        const token = await auth.token();
+        await (on ? auth.plane.archiveSession(token, row.id) : auth.plane.unarchiveSession(token, row.id));
+      } else {
+        throw new Error("Only a session on the platform or on this computer can be archived");
+      }
+      if (on) {
+        // Among the archived ones before it leaves the list, so that a screen open on it
+        // still finds its row.
+        setRows((rs) => [{ ...row, archived: true }, ...rs.filter((r) => r.id !== row.id)]);
+        store.drop(row.id);
+      }
+      // The list first, so that a session unarchived here is in it before it leaves the
+      // archived ones: an open session is found in one or the other throughout.
+      await store.refreshAfterChange();
+      await load();
+    },
+    [store, auth, daemon, load],
+  );
+  return { rows, loading, error, load, set };
 }
 
 /** Who sessions on this computer are recorded as, and what to call them. */

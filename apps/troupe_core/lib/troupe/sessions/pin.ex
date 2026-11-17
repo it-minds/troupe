@@ -21,17 +21,30 @@ defmodule Troupe.Sessions.Pin do
   """
   @spec put(String.t(), boolean(), Path.t() | [Path.t() | nil] | nil) ::
           :ok | {:error, :not_found | String.t()}
-  def put(session_id, pinned?, state_dir \\ nil) do
-    case log(session_id, state_dir) do
-      nil -> {:error, :not_found}
-      path -> mark(Path.join(Path.dirname(path), @pinned), pinned?)
-    end
-  end
+  def put(session_id, pinned?, state_dir \\ nil),
+    do: put_mark(session_id, @pinned, pinned?, state_dir)
 
   @doc "Whether the session whose log is in `dir` is pinned, read raw as a listing reads."
   @spec pinned?(Path.t()) :: boolean()
-  def pinned?(dir),
-    do: match?({:ok, _info}, :file.read_file_info(Path.join(dir, @pinned), [:raw]))
+  def pinned?(dir), do: marked?(dir, @pinned)
+
+  @doc """
+  Set or clear the empty file `name` beside a session's log, running or dormant: how a pin
+  and an archive (`Troupe.Sessions.Archive`) are both kept. `:not_found` with no log.
+  """
+  @spec put_mark(String.t(), String.t(), boolean(), Path.t() | [Path.t() | nil] | nil) ::
+          :ok | {:error, :not_found | String.t()}
+  def put_mark(session_id, name, on?, state_dir) do
+    case log(session_id, state_dir) do
+      nil -> {:error, :not_found}
+      path -> mark(Path.join(Path.dirname(path), name), on?)
+    end
+  end
+
+  @doc "Whether the file `name` is beside the log in `dir`, read raw as a listing reads."
+  @spec marked?(Path.t(), String.t()) :: boolean()
+  def marked?(dir, name),
+    do: match?({:ok, _info}, :file.read_file_info(Path.join(dir, name), [:raw]))
 
   defp mark(path, true), do: said(File.write(path, ""), path)
 

@@ -36,9 +36,13 @@ defmodule Troupe.Client do
   `sync` as the daemon says it (root Decision 785): `"current"`, `"behind"`, `"paused"`,
   `"elsewhere"` (another device holds it, `device` names it, and `claim_session/2` takes
   it over) or `"erasure_pending"`; a plane's private row says only the last.
+
+  `archived` is whether its owner archived it: a listing leaves an archived session out
+  unless asked for archived ones (`sessions/2` with `archived: true`), which lists only them.
   """
   @type summary :: %{
           optional(:owner_name) => String.t() | nil,
+          optional(:archived) => boolean(),
           id: session_id(),
           title: String.t(),
           owner: String.t() | nil,
@@ -151,6 +155,7 @@ defmodule Troupe.Client do
   @callback remote_steering(session_id(), :status | :withdraw | {:offer, String.t()}) ::
               {:ok, String.t()} | {:error, term()}
   @callback invites(session_id(), invite_verb()) :: {:ok, String.t()} | {:error, term()}
+  @callback archive(session_id(), boolean()) :: {:ok, String.t()} | {:error, String.t()}
   @callback fs_list(session_id(), String.t()) :: {:ok, [map()]} | {:error, term()}
   @callback fs_read(session_id(), String.t()) :: {:ok, String.t()} | {:error, term()}
   @callback scratch_read(session_id(), String.t() | nil, String.t()) ::
@@ -548,6 +553,15 @@ defmodule Troupe.Client do
   """
   @spec invites(session_id(), invite_verb()) :: {:ok, String.t()} | {:error, term()}
   def invites(sid, verb), do: impl(sid).invites(sid, verb)
+
+  @doc """
+  Archive a session (`true`) or bring it back (`false`), which only its owner may do: an
+  archived one is hidden from the session list for everyone who can see it, kept whole, and
+  put to sleep if it runs; it can still be opened. A pod session is archived at the plane.
+  Answers the sentence to show, or the one saying why not.
+  """
+  @spec archive(session_id(), boolean()) :: {:ok, String.t()} | {:error, String.t()}
+  def archive(sid, archived?), do: impl(sid).archive(sid, archived?)
 
   @doc """
   What `/invite` names after the command: a person, and `observe` (the default) or

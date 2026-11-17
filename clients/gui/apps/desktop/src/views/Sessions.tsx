@@ -8,11 +8,16 @@
 // Where a session runs is a column rather than a tab, because it is a property of the
 // work and not a place to go: the question "what is waiting for me" is never "what is
 // waiting for me on the platform". The one list is the whole idea.
+//
+// The sessions their owners archived are out of it, for everyone who sees them, and are
+// one more filter away: chosen, the list is the archived ones, from every source, and the
+// other filters narrow those.
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type { JSX } from "react";
-import { claimable, claimRefusal, filterRows } from "@troupe/client";
+import { archiveRefusal, claimable, claimRefusal, filterRows, mayArchive } from "@troupe/client";
 import type { FleetRow, SessionKind } from "@troupe/client";
+import type { Archived } from "../hooks";
 import { useNarrow } from "../narrow";
 import { NavSheet } from "../sheet";
 import { Cost, RowStatus, statusOf, Sync, Unread, When, Where } from "./bits";
@@ -25,6 +30,7 @@ export function Sessions({
   onOpen,
   onStart,
   onClaim,
+  archived,
 }: {
   rows: FleetRow[];
   loading: boolean;
@@ -34,6 +40,8 @@ export function Sessions({
   onStart: () => void;
   /** Take a private session another device holds over on this computer; absent with no daemon to ask. */
   onClaim?: ((id: string) => Promise<void>) | undefined;
+  /** The archived sessions, asked for when the filter chooses them; absent where nothing archives. */
+  archived?: Archived | undefined;
 }): JSX.Element {
   const [claimError, setClaimError] = useState<string | null>(null);
   const claim = onClaim
@@ -51,29 +59,49 @@ export function Sessions({
   const [status, setStatus] = useState("");
   const [profile, setProfile] = useState("");
   const [kind, setKind] = useState<SessionKind | "">("");
+  // The archived ones in place of the list, asked for each time they are chosen.
+  const [showArchived, setShowArchived] = useState(false);
+  const load = archived?.load;
+  useEffect(() => {
+    if (showArchived && load) void load();
+  }, [showArchived, load]);
+  const [unarchiveError, setUnarchiveError] = useState<string | null>(null);
+  const unarchive =
+    archived && showArchived
+      ? async (row: FleetRow): Promise<void> => {
+          setUnarchiveError(null);
+          try {
+            await archived.set(row, false);
+          } catch (e) {
+            setUnarchiveError(archiveRefusal(e, false));
+          }
+        }
+      : undefined;
+  const listed = showArchived && archived ? archived.rows.filter((r) => r.archived) : rows;
+  const listing = showArchived && archived ? archived.loading : loading;
   const narrow = useNarrow();
   const [filtering, setFiltering] = useState(false);
   const closeFilters = useCallback(() => setFiltering(false), []);
 
   const shown = useMemo(
     () =>
-      filterRows(rows, {
+      filterRows(listed, {
         ...(state ? { state } : {}),
         ...(status ? { status } : {}),
         ...(profile ? { profile } : {}),
         ...(kind ? { kind } : {}),
         query,
       }),
-    [rows, state, status, profile, kind, query],
+    [listed, state, status, profile, kind, query],
   );
   const waiting = shown.filter((r) => statusOf(r) === "waiting");
   const rest = shown.filter((r) => statusOf(r) !== "waiting");
-  const profiles = [...new Set(rows.map((r) => r.profile).filter(Boolean))] as string[];
-  const states = [...new Set(rows.map((r) => r.state))];
-  const statuses = [...new Set(rows.map((r) => r.status).filter(Boolean))] as string[];
-  const kinds = [...new Set(rows.map((r) => r.kind))];
-  // How many of the four are set, for the phone's Filter button.
-  const set = [state, status, profile, kind].filter(Boolean).length;
+  const profiles = [...new Set(listed.map((r) => r.profile).filter(Boolean))] as string[];
+  const states = [...new Set(listed.map((r) => r.state))];
+  const statuses = [...new Set(listed.map((r) => r.status).filter(Boolean))] as string[];
+  const kinds = [...new Set(listed.map((r) => r.kind))];
+  // How many are set, for the phone's Filter button.
+  const set = [state, status, profile, kind, showArchived ? "archived" : ""].filter(Boolean).length;
 
   // The filters, inline on a wide window and in a sheet from the Filter button on a phone,
   // where four selects stacked would push the list the person came for below the fold.
@@ -114,9 +142,15 @@ export function Sessions({
           <option value="invited">Shared with you</option>
         </select>
       )}
+      {archived && (
+        <select value={showArchived ? "archived" : ""} onChange={(e) => setShowArchived(e.target.value === "archived")} aria-label="Archived">
+          <option value="">Not archived</option>
+          <option value="archived">Archived</option>
+        </select>
+      )}
     </>
   );
-  const count = <span className="count">{loading && rows.length === 0 ? "loading" : `${shown.length} of ${rows.length}`}</span>;
+  const count = <span className="count">{listing && listed.length === 0 ? "loading" : `${shown.length} of ${listed.length}`}</span>;
 
   return (
     <>
@@ -176,8 +210,26 @@ export function Sessions({
         </div>
       )}
 
+      {showArchived && archived?.error && (
+        <div className="banner error">
+          <p>Not every archived session could be listed, so some may be missing.</p>
+          <span className="micro">{archived.error}</span>
+        </div>
+      )}
+
+      {unarchiveError && (
+        <div className="banner error" role="alert">
+          <p>It was not unarchived. {unarchiveError}.</p>
+        </div>
+      )}
+
       <div className="listing">
-        {rows.length === 0 && !loading ? (
+        {showArchived && listed.length === 0 && !listing ? (
+          <div className="empty">
+            <h2>Nothing archived</h2>
+            <p>A session its owner archives is kept here, whole: anybody who could open it still can, and its owner can unarchive it.</p>
+          </div>
+        ) : rows.length === 0 && !loading && !showArchived ? (
           <div className="empty">
             <h2>No sessions yet</h2>
             <p>
@@ -191,20 +243,20 @@ export function Sessions({
         ) : shown.length === 0 ? (
           <div className="empty">
             <h2>Nothing matches</h2>
-            <p>No session matches those filters. Clear them to see all {rows.length}.</p>
+            <p>No session matches those filters. Clear them to see all {listed.length}.</p>
           </div>
         ) : (
           <>
             {waiting.length > 0 && (
               <section className="group waiting">
                 <h3>Waiting for you</h3>
-                <Rows rows={waiting} onOpen={onOpen} onClaim={claim} />
+                <Rows rows={waiting} onOpen={onOpen} onClaim={claim} onUnarchive={unarchive} />
               </section>
             )}
             {rest.length > 0 && (
               <section className="group">
                 {waiting.length > 0 && <h3>Everything else</h3>}
-                <Rows rows={rest} onOpen={onOpen} onClaim={claim} />
+                <Rows rows={rest} onOpen={onOpen} onClaim={claim} onUnarchive={unarchive} />
               </section>
             )}
           </>
@@ -219,14 +271,26 @@ export function Sessions({
  * says, in its order — the profile and the cost are what a session *is*, the pills are
  * where it runs and what it is doing, and the time sits at the edge to be scanned.
  */
-function Rows({ rows, onOpen, onClaim }: { rows: FleetRow[]; onOpen: (id: string) => void; onClaim?: ((id: string) => Promise<void>) | undefined }): JSX.Element {
+function Rows({
+  rows,
+  onOpen,
+  onClaim,
+  onUnarchive,
+}: {
+  rows: FleetRow[];
+  onOpen: (id: string) => void;
+  onClaim?: ((id: string) => Promise<void>) | undefined;
+  /** Put an archived session back in the list: offered on the rows the person owns. */
+  onUnarchive?: ((row: FleetRow) => Promise<void>) | undefined;
+}): JSX.Element {
   return (
     <ul className="rows">
       {rows.map((r) => {
         const status = statusOf(r);
         const claim = onClaim && claimable(r);
+        const unarchive = onUnarchive && r.archived && mayArchive(r);
         return (
-          <li key={r.id} className={claim ? "claimable" : undefined}>
+          <li key={r.id} className={claim ? "claimable" : unarchive ? "unarchivable" : undefined}>
             <button className={`row is-${status}`} onClick={() => onOpen(r.id)}>
               <span className="subject">
                 <span className="title">{r.title ?? r.id}</span>
@@ -248,6 +312,7 @@ function Rows({ rows, onOpen, onClaim }: { rows: FleetRow[]; onOpen: (id: string
               </span>
             </button>
             {claim && <Claim row={r} onClaim={onClaim} />}
+            {unarchive && <Unarchive row={r} onUnarchive={onUnarchive} />}
           </li>
         );
       })}
@@ -273,6 +338,25 @@ function Claim({ row, onClaim }: { row: FleetRow; onClaim: (id: string) => Promi
       }}
     >
       {busy ? "Claiming" : "Claim"}
+    </button>
+  );
+}
+
+/** Put an archived session back in the list, beside its row as Claim is: its owner's alone. */
+function Unarchive({ row, onUnarchive }: { row: FleetRow; onUnarchive: (row: FleetRow) => Promise<void> }): JSX.Element {
+  const [busy, setBusy] = useState(false);
+  return (
+    <button
+      className="claim"
+      disabled={busy}
+      aria-label={`Unarchive ${row.title ?? row.id}`}
+      title="Put it back in the session list, for everyone who sees it"
+      onClick={() => {
+        setBusy(true);
+        void onUnarchive(row).finally(() => setBusy(false));
+      }}
+    >
+      {busy ? "Unarchiving" : "Unarchive"}
     </button>
   );
 }

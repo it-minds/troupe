@@ -94,6 +94,8 @@ export interface DaemonSessionRow {
   created_at: string | null;
   last_active_at: string | null;
   pinned?: boolean;
+  /** Hidden from the session list and kept whole; listed only when `filter.archived` asks. Absent from a daemon before it. */
+  archived?: boolean;
   /** `local` or `private`; absent from a daemon before 0.8.4, which listed every session as local. */
   kind?: string;
   /** How a private session's sealing stands here (`SyncState`); null for a local one. */
@@ -730,8 +732,17 @@ export class DaemonClient implements OwnPlane {
     return this.command<SessionCreateResult>("session.create", { ...params }, opts);
   }
 
-  archiveSession(sessionId: string): Promise<unknown> {
+  /**
+   * Hide a session from the session list, keeping it whole; a running one is put to sleep
+   * first. Activity does not bring it back; only `unarchiveSession` does.
+   */
+  archiveSession(sessionId: string): Promise<{ session_id: string; state?: string; archived: boolean }> {
     return this.command("session.archive", { session_id: sessionId });
+  }
+
+  /** Put an archived session back in the session list. */
+  unarchiveSession(sessionId: string): Promise<{ session_id: string; archived: boolean }> {
+    return this.command("session.unarchive", { session_id: sessionId });
   }
 
   eraseSession(sessionId: string): Promise<unknown> {
@@ -1355,6 +1366,12 @@ export class DaemonSource implements FleetSource {
     const { sessions } = await this.daemon.listSessions();
     return sessions.map((s) => rowFromDaemon(s, this.id));
   }
+
+  /** The archived sessions; a daemon from before archiving ignores the filter, and its rows, none archived, are dropped. */
+  async listArchived(): Promise<FleetRow[]> {
+    const { sessions } = await this.daemon.listSessions({ archived: true });
+    return sessions.filter((s) => s.archived === true).map((s) => rowFromDaemon(s, this.id));
+  }
 }
 
 /** A memory document as a save or preview sends it: its whole text, or its entries for the plane to write as sections. */
@@ -1406,6 +1423,7 @@ export function rowFromDaemon(row: DaemonSessionRow, source = "daemon"): FleetRo
     costMicros: typeof row.cost === "number" ? Math.round(row.cost * 1_000_000) : null,
     lastActiveAt: row.last_active_at ?? null,
     pinned: Boolean(row.pinned),
+    archived: row.archived === true,
     // Everything on this machine is the user's own; there is no ACL to be a viewer on.
     yourRole: "owner",
     origin: null,

@@ -76,6 +76,7 @@ defmodule Troupe.Worker.AuthTest do
   # through this guard (`erasure_test.exs`). A fork is a new row (root Decision 812).
   @plane_level [
     "session.archive",
+    "session.unarchive",
     "session.pin",
     "session.unpin",
     "session.title.set",

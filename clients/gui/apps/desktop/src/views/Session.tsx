@@ -19,9 +19,11 @@ import {
   PlaneOwn,
   RELAYED_ALLOW_SESSION,
   UPLOAD_ARTIFACT,
+  archiveRefusal,
   configKey,
   isBusy,
   isRoot,
+  mayArchive,
   needsYou,
   onThisComputer,
   openApprovals,
@@ -104,6 +106,7 @@ export function Session({
   created,
   startedIn,
   onBack,
+  onArchive,
   onGo,
   onAgents,
   onStarted,
@@ -121,6 +124,8 @@ export function Session({
   /** The workspace a session on this computer was just started in, from the start screen: its start goes on to the librarian. */
   startedIn?: string | undefined;
   onBack: () => void;
+  /** Archive the session (`true`) or unarchive it, where it runs; it rejects with the server's refusal. */
+  onArchive?: ((on: boolean) => Promise<void>) | undefined;
   /** Leave for another screen, for the palette's Navigate and Setup commands. */
   onGo?: (screen: PaletteScreen) => void;
   /** Open the agents manager on this session's workspace, at one agent if named: a session on this computer's. */
@@ -187,6 +192,22 @@ export function Session({
   // a session that stopped mid-loop records the interruption only when it wakes.
   const loop = settleLoop(view.state.loop, useLoopAnswer(view.view));
   const [away, seenAway] = useAway(sessionId, row);
+  // Archiving it, from the ⋯ or the palette: what a refusal said, until the next try.
+  const [archiveError, setArchiveError] = useState<string | null>(null);
+  useEffect(() => setArchiveError(null), [sessionId]);
+  const archive = onArchive
+    ? async (on: boolean): Promise<string | null> => {
+        setArchiveError(null);
+        try {
+          await onArchive(on);
+          return null;
+        } catch (e) {
+          const why = archiveRefusal(e, on);
+          setArchiveError(`It was not ${on ? "archived" : "unarchived"}. ${why}.`);
+          return why;
+        }
+      }
+    : undefined;
   // Onboarding, then the brief, as the session's start found them due (Decision 835), and
   // the librarian for a session started here; what they came to is said in the transcript.
   const start = useStartQuestions(daemon, sessionId, view.state.onboarding, { local: here, canAnswer: !readOnly, startedIn });
@@ -289,6 +310,15 @@ export function Session({
         ...(listAgents ? { sessionAgents: listAgents } : {}),
         ...(readOnly ? {} : { switchAgent: async (name: string) => void (await view.switchProfile(name)) }),
         currentAgent: current,
+        ...(archive
+          ? {
+              archive: async (on: boolean) => {
+                if (row && Boolean(row.archived) === on) return on ? "this session is already archived" : "this session is not archived";
+                const why = await archive(on);
+                return why ?? (on ? undefined : "unarchived: it is back in the session list");
+              },
+            }
+          : {}),
       }}
     />
   ) : null;
@@ -321,6 +351,7 @@ export function Session({
                 : null
             }
             onAbout={here && onAgents && current ? () => onAgents(current) : undefined}
+            onArchive={archive && mayArchive(row) ? (on) => void archive(on) : undefined}
             remote={
               row && daemon && auth && (row.kind === "local" || row.kind === "private") ? (
                 <RemoteOfferControl daemon={daemon} row={row} presence={view.state.presence} />
@@ -339,6 +370,16 @@ export function Session({
         </div>
       )}
 
+      {row?.archived && (
+        <div className="banner dormant" role="status">
+          <p>This session is archived: it is kept whole, and not in the session list.{mayArchive(row) ? " Unarchive it from ⋯ to put it back." : ""}</p>
+        </div>
+      )}
+      {archiveError && (
+        <div className="banner error" role="alert">
+          <p>{archiveError}</p>
+        </div>
+      )}
       <Banners status={view.status} detail={view.detail} dormant={dormant} readOnly={readOnly} error={view.error} />
       <OfferLine offer={view.offer} />
       {/* Your own servers as this session on this computer has them. */}
@@ -756,6 +797,7 @@ function SessionMenu({
   onToggleBackstage,
   scratchpad,
   onAbout,
+  onArchive,
   remote,
 }: {
   sessionId: string;
@@ -766,6 +808,8 @@ function SessionMenu({
   scratchpad: { open: boolean; onToggle: () => void } | null;
   /** Open the agent in the agents manager: a session on this computer's. */
   onAbout?: (() => void) | undefined;
+  /** Archive it (`true`) or unarchive it: its owner's alone. */
+  onArchive?: ((on: boolean) => void) | undefined;
   /** Steering from another device: this computer's offer. */
   remote?: JSX.Element | null;
 }): JSX.Element {
@@ -814,6 +858,18 @@ function SessionMenu({
             <span className="d">Open it in the agents manager</span>
           </button>
         )}
+        {onArchive &&
+          (row?.archived ? (
+            <button type="button" className="item" onClick={then(() => onArchive(false))}>
+              <span className="t">Unarchive session</span>
+              <span className="d">Put it back in the session list</span>
+            </button>
+          ) : (
+            <button type="button" className="item" onClick={then(() => onArchive(true))}>
+              <span className="t">Archive session</span>
+              <span className="d">Hide it from the session list, for everyone who sees it</span>
+            </button>
+          ))}
         {remote && <div className="menu-remote">{remote}</div>}
         <dl className="menu-facts">
           <dt>Session</dt>
