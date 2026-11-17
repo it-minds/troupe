@@ -456,6 +456,29 @@ defmodule Troupe.Plane.Sessions do
   end
 
   @doc """
+  Archive a session, taking it out of the session list for everyone who sees it, or bring
+  it back. Recorded with who did it and when, as a pin is; unarchiving keeps them as the
+  last time it was archived.
+  """
+  @spec archive(String.t(), boolean(), String.t()) :: {:ok, Session.t()} | {:error, term()}
+  def archive(session_id, archived?, actor) do
+    case Repo.get(Session, session_id) do
+      nil ->
+        {:error, :not_found}
+
+      session ->
+        attrs =
+          if archived? do
+            %{archived: true, archived_by: actor, archived_at: DateTime.utc_now()}
+          else
+            %{archived: false}
+          end
+
+        session |> Session.changeset(attrs) |> Repo.update()
+    end
+  end
+
+  @doc """
   Remove a session row outright.
 
   Only for unwinding a `session.create` that did not complete: a row whose placement or
@@ -919,6 +942,11 @@ defmodule Troupe.Plane.Sessions do
 
       {:source, source}, acc when is_binary(source) ->
         from(s in acc, where: fragment("?->>'source'", s.origin) == ^source)
+
+      # Archived or not: the session list asks for the ones not archived unless told,
+      # an administrator's listing asks for neither and sees both.
+      {:archived, archived?}, acc when is_boolean(archived?) ->
+        from(s in acc, where: s.archived == ^archived?)
 
       {:needs_review, true}, acc ->
         needs_review(acc)

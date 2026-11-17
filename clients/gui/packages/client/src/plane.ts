@@ -140,6 +140,11 @@ export interface SessionRow {
   reviewed_by: string | null;
   reviewed_at: string | null;
   your_role: "owner" | "collaborator" | "viewer" | null;
+  /**
+   * Hidden from the session list by its owner, for everyone who sees it, and kept whole:
+   * listed only when `sessions.list` is asked for archived ones. Absent from a plane before it.
+   */
+  archived?: boolean;
   [k: string]: unknown;
 }
 
@@ -195,6 +200,8 @@ export interface SessionsFilter {
   origin?: string;
   trigger?: string;
   needs_review?: boolean;
+  /** True lists only the archived sessions; omitted or false, only those not archived. */
+  archived?: boolean;
   limit?: number;
 }
 
@@ -474,6 +481,20 @@ export class PlaneClient {
 
   pinSession(planeToken: string, sessionId: string, pinned: boolean): Promise<unknown> {
     return this.rpc(planeToken, pinned ? "session.pin" : "session.unpin", { session_id: sessionId });
+  }
+
+  /**
+   * Hide a session from the session list, for everyone who sees it, keeping it whole; a
+   * running one is put to sleep first. Its owner's alone: anybody else is refused `forbidden`.
+   * Activity does not bring it back; only `unarchiveSession` does.
+   */
+  archiveSession(planeToken: string, sessionId: string): Promise<SessionRow> {
+    return this.rpc<SessionRow>(planeToken, "session.archive", { session_id: sessionId });
+  }
+
+  /** Put an archived session back in the session list. Its owner's alone, as archiving it is. */
+  unarchiveSession(planeToken: string, sessionId: string): Promise<SessionRow> {
+    return this.rpc<SessionRow>(planeToken, "session.unarchive", { session_id: sessionId });
   }
 
   eraseSession(planeToken: string, sessionId: string): Promise<unknown> {

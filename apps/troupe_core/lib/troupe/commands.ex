@@ -421,14 +421,34 @@ defmodule Troupe.Commands do
             "already showed.",
         example: "/uninvite bea@example.com"
       ),
+      entry(
+        "archive",
+        "session",
+        "Archive this session: hide it from the session list, for everyone who sees it",
+        usage: "/archive",
+        detail:
+          "Its owner's to do. The session goes to sleep and leaves the session list, yours " <>
+            "and your team's, and is kept whole: its conversation, its workspace and its " <>
+            "files. Anybody who could open it still can, from the archived sessions; " <>
+            "working in it again does not bring it back. /unarchive does.",
+        example: "/archive"
+      ),
+      entry("unarchive", "session", "Unarchive this session: put it back in the session list",
+        usage: "/unarchive",
+        detail:
+          "Its owner's to do. The session is back in the session list for everyone who " <>
+            "sees it, where it was before it was archived.",
+        example: "/unarchive"
+      ),
       entry("sessions", "navigate", "Your sessions, newest first",
         aliases: ["resume"],
-        usage: "/sessions [n | id]",
+        usage: "/sessions [archived | n | id]",
         args: [arg("session", false, "text")],
         detail: "The list of your sessions; this one carries on while you look.",
         details: %{
           "tui" =>
-            "Enter switches the window to one; /resume 2 or /resume <id> goes straight there."
+            "Enter switches the window to one; /resume 2 or /resume <id> goes straight there. " <>
+              "/sessions archived lists the archived ones: Enter opens one, u unarchives it."
         },
         example: "/resume 2"
       ),

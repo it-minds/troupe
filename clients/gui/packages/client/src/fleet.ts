@@ -10,11 +10,13 @@
 // The store holds no session state either. A row is what a source last said, and
 // closing the window loses a cache and nothing else.
 
+import { TroupeRpcError } from "./connection.js";
 import { invitationsFrom } from "./invites.js";
 import type { Invitation } from "./invites.js";
 import { named } from "./people.js";
 import type { PlaneClient, SessionRow, SessionsFilter } from "./plane.js";
 import { watchRemote } from "./remote.js";
+import { ErrorCodes } from "./types.js";
 import type { Unseen } from "./types.js";
 
 /**
@@ -177,6 +179,12 @@ export interface FleetRow {
   costMicros: number | null;
   lastActiveAt: string | null;
   pinned: boolean;
+  /**
+   * Hidden from the session list by its owner, for everyone who sees it, and kept whole.
+   * The sources' lists hold none; their archived lists (`FleetSource.listArchived`) hold
+   * nothing else.
+   */
+  archived?: boolean;
   yourRole: string | null;
   origin: { kind?: string; trigger?: string; [k: string]: unknown } | null;
   reviewedBy: string | null;
@@ -212,6 +220,8 @@ export interface FleetSource {
   readonly id: string;
   readonly kind: SessionKind;
   list(): Promise<FleetRow[]>;
+  /** Its archived sessions, which `list` leaves out; absent from a source that archives nothing. */
+  listArchived?(): Promise<FleetRow[]>;
   /**
    * A source that is told what changes rather than asked: `push` is its whole list each
    * time it changes, `live` whether it is being told now. While it is, the store's poll
@@ -249,6 +259,7 @@ export function rowFromPlane(row: SessionRow, source = "plane"): FleetRow {
     costMicros: row.cost_micros ?? null,
     lastActiveAt: row.last_active_at ?? null,
     pinned: Boolean(row.pinned),
+    archived: row.archived === true,
     yourRole: row.your_role ?? null,
     origin: row.origin ?? null,
     reviewedBy: row.reviewed_by ?? null,
@@ -281,6 +292,13 @@ export class PlaneSource implements FleetSource {
     const token = await this.token();
     const { sessions } = await this.plane.listSessions(token, this.filter);
     return sessions.map((s) => rowFromPlane(s, this.id));
+  }
+
+  /** The archived sessions; a plane from before archiving ignores the filter, and its rows, none archived, are dropped. */
+  async listArchived(): Promise<FleetRow[]> {
+    const token = await this.token();
+    const { sessions } = await this.plane.listSessions(token, { ...this.filter, archived: true });
+    return sessions.filter((s) => s.archived === true).map((s) => rowFromPlane(s, this.id));
   }
 }
 
@@ -539,6 +557,48 @@ export class FleetStore {
   }
 
   /**
+   * Ask every source after something changed: a round already out was asked before the
+   * change, so it is waited for and not joined, and its answer is not the last word.
+   */
+  async refreshAfterChange(): Promise<void> {
+    if (this.inFlight) await this.inFlight;
+    return this.ask(() => true);
+  }
+
+  /**
+   * The archived sessions, from every source that archives any, merged and ordered as the
+   * list is. Asked when somebody looks, never on the poll: nothing in them is waiting on
+   * anybody. A source that fails is recorded against it, as in the list.
+   */
+  async archived(): Promise<Pick<FleetSnapshot, "rows" | "sources">> {
+    const bySource = new Map<string, FleetRow[]>();
+    const sources: FleetSnapshot["sources"] = {};
+    await Promise.all(
+      this.sources.map(async (s) => {
+        if (!s.listArchived) return;
+        try {
+          bySource.set(s.id, await s.listArchived());
+          sources[s.id] = { at: Date.now(), error: null };
+        } catch (e) {
+          sources[s.id] = { at: 0, error: e instanceof Error ? e.message : String(e) };
+        }
+      }),
+    );
+    return { rows: merge(this.sources, bySource).filter((r) => r.archived === true), sources };
+  }
+
+  /**
+   * Take a session off the list at once, from every source's rows, until a source lists it
+   * again: what archiving it does, without waiting for the next round to say so.
+   */
+  drop(id: string): void {
+    for (const [source, rows] of this.bySource) {
+      if (rows.some((r) => r.id === id)) this.bySource.set(source, rows.filter((r) => r.id !== id));
+    }
+    this.recompute();
+  }
+
+  /**
    * The poll's round: every source but a watched one whose watch is up, which is asked
    * only once the safety net is due.
    */
@@ -619,25 +679,8 @@ export class FleetStore {
   }
 
   private recompute(): void {
-    // A private session is one session with two rows — the plane's and the daemon's.
-    // The daemon's copy wins on everything the daemon actually knows, because it is the
-    // one running the agent; the plane's contributes the fact that it exists elsewhere.
-    //
-    // A session this computer offered is also on the plane's list of relayed ones; this
-    // computer's own row comes after it and wins, since here it is not remote at all.
-    const merged = new Map<string, FleetRow>();
-    for (const kind of ["team", "remote", "local", "private"] as const) {
-      for (const source of this.sources.filter((s) => s.kind === kind)) {
-        for (const row of this.bySource.get(source.id) ?? []) {
-          const existing = merged.get(row.id);
-          // An invitation marks the row the plane already lists with who invited the person,
-          // and is a row of its own only where nothing else lists the session.
-          if (existing && row.invitation) merged.set(row.id, { ...existing, invitation: row.invitation });
-          else merged.set(row.id, existing ? joined(existing, row) : row);
-        }
-      }
-    }
-    const rows = [...merged.values()].sort(byActivity);
+    // The list holds no archived session, whatever a source still says of one.
+    const rows = merge(this.sources, this.bySource).filter((r) => r.archived !== true);
     this.emit({ ...this.snapshot, rows, loading: false });
   }
 
@@ -645,6 +688,52 @@ export class FleetStore {
     this.snapshot = s;
     for (const l of this.listeners) l(s);
   }
+}
+
+/**
+ * Every source's rows as one list, newest activity first.
+ *
+ * A private session is one session with two rows — the plane's and the daemon's. The
+ * daemon's copy wins on everything the daemon actually knows, because it is the one
+ * running the agent; the plane's contributes the fact that it exists elsewhere.
+ *
+ * A session this computer offered is also on the plane's list of relayed ones; this
+ * computer's own row comes after it and wins, since here it is not remote at all.
+ */
+function merge(sources: FleetSource[], bySource: Map<string, FleetRow[]>): FleetRow[] {
+  const merged = new Map<string, FleetRow>();
+  for (const kind of ["team", "remote", "local", "private"] as const) {
+    for (const source of sources.filter((s) => s.kind === kind)) {
+      for (const row of bySource.get(source.id) ?? []) {
+        const existing = merged.get(row.id);
+        // An invitation marks the row the plane already lists with who invited the person,
+        // and is a row of its own only where nothing else lists the session.
+        if (existing && row.invitation) merged.set(row.id, { ...existing, invitation: row.invitation });
+        else merged.set(row.id, existing ? joined(existing, row) : row);
+      }
+    }
+  }
+  return [...merged.values()].sort(byActivity);
+}
+
+/**
+ * Whether the person may archive a session, and unarchive it: its owner, on the platform
+ * or on this computer. Somebody else's session, and one on another computer, is not
+ * theirs to hide from the people who see it.
+ */
+export function mayArchive(row: Pick<FleetRow, "kind" | "yourRole"> | null | undefined): boolean {
+  return Boolean(row && row.yourRole === "owner" && (row.kind === "team" || onThisComputer(row.kind)));
+}
+
+/**
+ * Why archiving a session, or unarchiving it, was refused, in words a person can act on.
+ * Anything but `forbidden` is said as the error says it.
+ */
+export function archiveRefusal(e: unknown, archiving = true): string {
+  if (e instanceof TroupeRpcError && e.code === ErrorCodes.forbidden) {
+    return `Only its owner can ${archiving ? "archive" : "unarchive"} this session`;
+  }
+  return e instanceof Error ? e.message : String(e);
 }
 
 /**

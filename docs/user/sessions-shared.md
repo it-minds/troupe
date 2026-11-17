@@ -78,6 +78,18 @@ anything more, the next time you sign it in.
 already showed: the person may have kept what they read, and the key it was sealed under.
 Taking it back keeps them from everything that follows, not from what they already saw.
 
+## Archiving a session
+
+A session you own and are done with can be archived rather than erased: `/archive` in
+either client, or **Archive session** under the session's ⋯ in the desktop app. It goes to
+sleep and leaves the session list, yours and everybody's it was shared with, your team's
+for a team session. Nothing in it is deleted. The desktop app's **Archived** filter and the
+terminal's `/sessions archived` (where `u` unarchives the one on the cursor) and HQ's `a`
+list archived sessions, and anybody who could open one still
+can; working in it does not put it back in the list. Its owner does, with `/unarchive` or
+**Unarchive**. Only the owner archives or unarchives a session, since it changes what
+other people see.
+
 ## Erasing a session somebody was invited into
 
 Erasing a session erases it for everybody it was shared with. For a private session the

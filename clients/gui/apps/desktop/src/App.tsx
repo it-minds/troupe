@@ -14,7 +14,7 @@ import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "rea
 import type { JSX } from "react";
 import { PlaneOwn, awaitingYou, onThisComputer, planeAddress } from "@troupe/client";
 import type { AuthSession, FleetRow, OwnPlane, SessionKind } from "@troupe/client";
-import { useAdmin, useDaemon, useFleet } from "./hooks";
+import { useAdmin, useArchived, useDaemon, useFleet } from "./hooks";
 import { useUpdates } from "./updates";
 import { UpdateBanner } from "./views/Update";
 import { Agents } from "./views/Agents";
@@ -249,6 +249,7 @@ export function App(): JSX.Element {
   const planeAuth = refused ? null : auth;
   const mode: AppMode = localOnly || offline || refused ? "local" : "plane";
   const { snapshot, store, refresh } = useFleet(planeAuth, daemon.client);
+  const archived = useArchived(store, planeAuth, daemon.client);
   // Not known while the daemon is still being found, or has not answered its first list.
   const daemonUnheard = daemon.status === "searching" || (daemon.client !== null && !snapshot.sources["daemon"]);
   rowsNow.current = daemonUnheard ? null : snapshot.rows;
@@ -503,7 +504,9 @@ export function App(): JSX.Element {
 
   const waiting = awaitingYou(snapshot.rows).length;
   const planeError = snapshot.sources["plane"]?.error ?? null;
-  const row = where.screen === "session" ? snapshot.rows.find((r) => r.id === where.id) : undefined;
+  // An archived session is in no list but the archived ones, and opens as any other does.
+  const row =
+    where.screen === "session" ? (snapshot.rows.find((r) => r.id === where.id) ?? archived.rows.find((r) => r.id === where.id)) : undefined;
   const caps = capabilities();
   const local = snapshot.rows.filter((r) => onThisComputer(r.kind)).length;
 
@@ -745,6 +748,7 @@ export function App(): JSX.Element {
               onOpen={(id) => setWhere({ screen: "session", id })}
               onStart={() => setWhere({ screen: "new" })}
               onClaim={claim}
+              archived={archived}
             />
           )}
 
@@ -845,6 +849,12 @@ export function App(): JSX.Element {
                 created={where.kind}
                 startedIn={where.workspace}
                 onBack={() => setWhere({ screen: "sessions" })}
+                onArchive={async (on) => {
+                  if (!row) return;
+                  await archived.set(row, on);
+                  // Archived, it is no longer in the list the person came from, which is where they go.
+                  if (on) setWhere({ screen: "sessions" });
+                }}
                 onGo={(screen) => setWhere({ screen })}
                 onAgents={(agent) => setWhere({ screen: "agents", ...workspaceOf(row), ...(agent ? { agent } : {}) })}
                 onProfile={planeAuth ? (profile) => setWhere({ screen: "profiles", profile }) : undefined}

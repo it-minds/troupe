@@ -40,7 +40,7 @@ defmodule Troupe.Sessions.Index do
   alias Troupe.{Config, Events, Paths, Registry, Session}
   alias Troupe.Protocol.Event
   alias Troupe.Session.{Approvals, Log, Questions, Summary, Watcher}
-  alias Troupe.Sessions.{Pin, Title, Unseen}
+  alias Troupe.Sessions.{Archive, Pin, Title, Unseen}
 
   @type meta :: %{
           id: String.t(),
@@ -61,6 +61,7 @@ defmodule Troupe.Sessions.Index do
           created_at: String.t() | nil,
           last_active_at: String.t() | nil,
           pinned: boolean(),
+          archived: boolean(),
           title: String.t() | nil,
           state_dir: Path.t() | nil
         }
@@ -117,8 +118,10 @@ defmodule Troupe.Sessions.Index do
   @doc """
   Every session this daemon knows about, newest first.
 
-  `filter` may carry `"state"` (a list of state strings), `"workspace"` and `"parent"`
-  (a session id: the sessions made as branches of that one).
+  `filter` may carry `"state"` (a list of state strings), `"workspace"`, `"parent"`
+  (a session id: the sessions made as branches of that one) and `"archived"` (`true` for
+  the archived ones alone, `false` for the others; absent, both, which is what lookups by
+  id and the daemon's own passes want: the session list asks for `false` itself).
   """
   @spec list(map()) :: [meta()]
   def list(filter \\ %{}), do: GenServer.call(__MODULE__, {:list, filter}, 15_000)
@@ -245,6 +248,7 @@ defmodule Troupe.Sessions.Index do
       |> Map.put_new(:tokens, 0)
       |> Map.put_new(:cost, 0.0)
       |> Map.put_new(:pinned, false)
+      |> Map.put_new(:archived, false)
       |> Map.put_new(:title, nil)
       |> Map.put_new(:created_at, timestamp())
       |> Map.put(:last_active_at, timestamp())
@@ -632,6 +636,10 @@ defmodule Troupe.Sessions.Index do
           :pinned,
           if(listed, do: Map.get(listed, :pinned, false), else: pinned(session_id))
         )
+        |> Map.put(
+          :archived,
+          if(listed, do: Map.get(listed, :archived, false), else: archived(session_id))
+        )
         |> Map.put(:title, if(listed, do: Map.get(listed, :title), else: titled(session_id)))
 
       :error ->
@@ -649,6 +657,13 @@ defmodule Troupe.Sessions.Index do
   # The pin beside the log, which a session pinned while it was dormant woke with.
   defp pinned(session_id) do
     session_id |> Log.path() |> Path.dirname() |> Pin.pinned?()
+  catch
+    :exit, _ -> false
+  end
+
+  # The archive mark beside the log, which a session archived while dormant woke with.
+  defp archived(session_id) do
+    session_id |> Log.path() |> Path.dirname() |> Archive.archived?()
   catch
     :exit, _ -> false
   end
@@ -684,7 +699,7 @@ defmodule Troupe.Sessions.Index do
 
     disk
     |> Map.merge(view.live, fn _id, from_disk, live ->
-      Map.merge(live, Map.take(from_disk, [:unseen, :failed, :pinned, :title]))
+      Map.merge(live, Map.take(from_disk, [:unseen, :failed, :pinned, :archived, :title]))
     end)
     |> Map.values()
     |> Enum.sort_by(& &1.last_active_at, :desc)
@@ -700,6 +715,9 @@ defmodule Troupe.Sessions.Index do
     end)
     |> filter_by(filter, "parent", fn session, parent ->
       Map.get(session, :parent) == parent
+    end)
+    |> filter_by(filter, "archived", fn session, archived? ->
+      Map.get(session, :archived, false) == (archived? == true)
     end)
   end
 
@@ -770,11 +788,18 @@ defmodule Troupe.Sessions.Index do
     # The pin and the title are read each time, a file's presence and a few bytes: they
     # change without the log changing.
     pinned = Pin.pinned?(dir)
+    archived = Archive.archived?(dir)
     title = Title.read(dir)
 
     Enum.map(
       rows,
-      &%{&1 | unseen: Unseen.unseen_now(&1.id, &1.unseen), pinned: pinned, title: title}
+      &%{
+        &1
+        | unseen: Unseen.unseen_now(&1.id, &1.unseen),
+          pinned: pinned,
+          archived: archived,
+          title: title
+      }
     )
   end
 
@@ -827,6 +852,7 @@ defmodule Troupe.Sessions.Index do
           created_at: first.ts,
           last_active_at: last.ts,
           pinned: false,
+          archived: false,
           title: nil,
           state_dir: root
         }
