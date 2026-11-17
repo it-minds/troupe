@@ -75,7 +75,7 @@ when it is left out:
 ```
 
 An agent asked for a file puts it there first, before an [artifact](artifacts.md) or the
-workspace ([where a file goes](README.md#where-a-file-goes)); every session's prompt names
+workspace ([where a file goes](artifacts.md#where-a-file-goes)); every session's prompt names
 the tools so marked. Nothing is read from a tool's name: a server without `stores` is not
 where files go, whatever its tools are called. The same two keys work in `config.yaml`'s
 `mcp:`, and a server you offer to a pod's session carries the marking with its tools.

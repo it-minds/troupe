@@ -23,7 +23,7 @@ paths:
   - apps/troupe_core/test/troupe/bench_test.exs
   - apps/troupe_core/test/troupe/agent/scratch_compaction_test.exs
   - apps/troupe_core/test/troupe/bench_live_test.exs
-  - docs/user/README.md
+  - docs/user/transcript.md
   - docs/developer/bench.md
 symbols:
   - Troupe.Tools.Patch

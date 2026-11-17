@@ -67,7 +67,7 @@ Troupe sends no telemetry. Nothing in it reports usage or crashes anywhere, and 
   `auto` still asks, and nothing it names outside the repository is read. A file under its
   `.troupe/` that links outside the workspace is never read. A pod takes none of these keys
   from a repository (Decisions 825, 829 and 830;
-  [trusted workspaces](../user/configuration.md#trusted-workspaces)).
+  [trusted workspaces](../user/configuration-layers.md#trusted-workspaces)).
 - **Its own git runs nothing the repository names.** The git Troupe runs for itself turns
   off the repository's hooks, filters, `fsmonitor` and diff and merge drivers, inherits no
   `GIT_*` variable, and refuses a repository whose objects lead out of the checkout

@@ -258,7 +258,7 @@ that save one, all of them when left out
 
 An agent on the profile asked for a file puts it there first, before an artifact or the
 workspace, and names the tools in what it was told was open
-([where a file goes](../user/README.md#where-a-file-goes), Decision 956). Nothing is
+([where a file goes](../user/artifacts.md#where-a-file-goes), Decision 956). Nothing is
 inferred from a tool's name. Writing to the store is the server's: Troupe calls the tool
 as it calls any other, under the same permission. A `files` without `stores` is refused at
 publish.

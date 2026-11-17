@@ -27,7 +27,7 @@ paths:
   - clients/tui/lib/troupe/ui/tui/new_session_page.ex
   - clients/tui/lib/troupe/cli/run_target.ex
   - PROTOCOL.md
-  - docs/user/README.md
+  - docs/user/sessions.md
   - clients/gui/README.md
 symbols:
   - autoPickProfile

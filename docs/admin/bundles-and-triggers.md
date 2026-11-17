@@ -133,7 +133,7 @@ act as the person who signed in, refusing a service account's token: a bundle se
 shared token is what they refuse, and a person-mode `credential_ref` slot holds a pasted
 value, not a sign-in refreshed every hour. Each person adds such a server to their own
 `mcp.json` with an `oauth.client_id` and signs in from the TUI or the desktop app
-([configuration](../user/configuration.md#a-server-that-wants-you-to-sign-in)); the daemon
+([a server that wants you to sign in](../user/mcp.md#a-server-that-wants-you-to-sign-in)); the daemon
 on their machine keeps and refreshes the tokens, and nothing of them reaches a pod or the
 plane (Decision 741). What you provide is the client: register one public client (no
 secret, PKCE, a loopback redirect such as `http://localhost`, any port where the provider
