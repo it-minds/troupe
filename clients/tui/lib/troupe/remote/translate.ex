@@ -703,7 +703,7 @@ defmodule Troupe.Remote.Translate do
 
       "session_resumed" ->
         {[
-           emit.(:remote_note, %{text: "session resumed" <> on(data)}),
+           emit.(:remote_note, %{text: "session resumed" <> moved(data)}),
            emit.(:remote_status, %{state: :active})
          ], memory}
 
@@ -728,12 +728,6 @@ defmodule Troupe.Remote.Translate do
       # the call was, and a row of `/scratch` (TUI Decision 159).
       "scratch_updated" ->
         {[emit.(:scratch_updated, scratch(data))], memory}
-
-      "acl_granted" ->
-        {[emit.(:remote_note, %{text: "access granted" <> subject(data)})], memory}
-
-      "acl_revoked" ->
-        {[emit.(:remote_note, %{text: "access revoked" <> subject(data)})], memory}
 
       "session_tainted" ->
         {[emit.(:remote_note, %{text: tainted(data)})], memory}
@@ -1304,16 +1298,15 @@ defmodule Troupe.Remote.Translate do
   defp state_atom(value) when is_atom(value) and not is_nil(value), do: value
   defp state_atom(_value), do: :idle
 
-  defp on(%{"worker" => worker}) when is_binary(worker), do: " on #{worker}"
-  defp on(%{"pod" => pod}) when is_binary(pod), do: " on #{pod}"
-  defp on(_data), do: ""
+  # `moved`: the session came back in another workspace than the one it was created in,
+  # in the desktop app's words.
+  defp moved(%{"moved" => true}), do: " on another device"
+  defp moved(_data), do: ""
 
-  defp version(%{"version" => version}), do: " to #{version}"
+  # `from` is absent where the version the session was pinned to is not known.
+  defp version(%{"from" => from, "to" => to}) when is_integer(from), do: " from #{from} to #{to}"
+  defp version(%{"to" => to}), do: " to #{to}"
   defp version(_data), do: ""
-
-  defp subject(%{"subject" => subject}) when is_binary(subject), do: ": #{subject}"
-  defp subject(%{"principal" => principal}) when is_binary(principal), do: ": #{principal}"
-  defp subject(_data), do: ""
 
   defp truncated(data) do
     what =

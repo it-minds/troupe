@@ -36,12 +36,9 @@ defmodule Troupe.Gateway.ArchiveTest do
     assert kept.id in ids(%{})
     assert ids(%{"archived" => true}) == [session.id]
 
-    # It still opens, and says it is archived; the fleet leaves it out as the list does.
+    # It still opens, and says it is archived.
     assert {:ok, %{"archived" => true, "state" => "dormant"}} =
              Dispatch.call("session.get", %{"session_id" => session.id}, context(:observe))
-
-    {:ok, %{"sessions" => fleet}} = Dispatch.call("fleet.get", %{}, context(:observe))
-    refute Enum.any?(fleet, &(&1["id"] == session.id))
 
     # Archiving again is what a retry does; unarchiving brings it back into the list.
     assert {:ok, %{"archived" => true}} =

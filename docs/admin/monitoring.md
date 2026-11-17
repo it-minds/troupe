@@ -72,8 +72,8 @@ operator, workers and A2A log in Elixir's default text format. Lines worth alert
 | `troupe operator: pruning <kind>/<name>` | a scale-down, a revoked grant or `ciliumAvailable` switched off took an object away |
 | `sandbox: this worker runs every command in a sandbox and …, so no command will run` | the worker cannot start bubblewrap, and refuses every command until it can (Decision 832) |
 
-`troupe_core` also emits `:telemetry` events — `[:troupe, :llm, :start|:stop|:retry|:unpriced]`,
-`[:troupe, :tool, :stop]`, `[:troupe, :agent, :transition]` — and the plane's endpoint
+`troupe_core` also emits two `:telemetry` events, `[:troupe, :llm, :retry]`, which
+`troupe bench --live` counts, and `[:troupe, :llm, :unpriced]`, and the plane's endpoint
 Phoenix's own; nothing in a deployment attaches to them.
 
 ## 6. Fleet mechanics

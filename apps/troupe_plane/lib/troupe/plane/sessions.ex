@@ -1125,7 +1125,7 @@ defmodule Troupe.Plane.Sessions do
 
   # -- the ACL ----------------------------------------------------------------
 
-  @doc "Mirror an `acl_granted` event from the session log."
+  @doc "Give `subject` `role` on a session, or change the role they hold."
   @spec grant_access(String.t(), String.t(), String.t(), String.t() | nil) ::
           {:ok, ACL.t()} | {:error, Ecto.Changeset.t()}
   def grant_access(session_id, subject, role, granted_by \\ nil) do
@@ -1142,7 +1142,7 @@ defmodule Troupe.Plane.Sessions do
     |> Repo.insert_or_update()
   end
 
-  @doc "Mirror an `acl_revoked` event. A revoked collaborator's next command is refused."
+  @doc "Take `subject` off a session's ACL. A revoked collaborator's next command is refused."
   @spec revoke_access(String.t(), String.t()) :: :ok
   def revoke_access(session_id, subject) do
     Repo.delete_all(from(a in ACL, where: a.session_id == ^session_id and a.subject == ^subject))

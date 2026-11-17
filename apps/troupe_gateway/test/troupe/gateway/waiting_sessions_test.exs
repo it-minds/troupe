@@ -71,10 +71,6 @@ defmodule Troupe.Gateway.WaitingSessionsTest do
 
     assert waiting == eventually(fn -> row(client, session.id, &(&1["status"] == "waiting")) end)
 
-    # `fleet.get` answers with the same rows.
-    {:ok, %{"sessions" => fleet}} = Client.call(client, "fleet.get")
-    assert waiting == fleet |> Enum.find(&(&1["id"] == session.id)) |> Map.take(@counted)
-
     {:ok, _} = Client.call(client, "turn.cancel", command(session.id, %{}))
 
     assert %{"status" => "idle", "pending_approvals" => 0, "pending_questions" => 0} =

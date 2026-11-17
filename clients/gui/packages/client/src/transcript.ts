@@ -1010,10 +1010,6 @@ function systemText(d: DurableEvent): string {
       return d.data["moved"] ? "session resumed on another device" : "session resumed";
     case "fs_changed":
       return `${str(d.data["path"], "a file")} changed`;
-    case "acl_granted":
-      return `${str(d.data["subject"], "somebody")} was granted ${str(d.data["role"], "access")}`;
-    case "acl_revoked":
-      return `${str(d.data["subject"], "somebody")}'s access was revoked`;
     case "session_tainted":
       return taintedText(d);
     case "tools_unregistered":
@@ -1228,8 +1224,6 @@ const SYSTEM_TYPES = new Set([
   "session_activated",
   "session_resumed",
   "fs_changed",
-  "acl_granted",
-  "acl_revoked",
   "session_tainted",
   "tools_unregistered",
 ]);

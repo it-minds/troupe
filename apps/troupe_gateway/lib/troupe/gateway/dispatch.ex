@@ -92,7 +92,6 @@ defmodule Troupe.Gateway.Dispatch do
     "session.list" => :observe,
     "session.get" => :observe,
     "blob.get" => :observe,
-    "fleet.get" => :observe,
     "fs.list" => :observe,
     "fs.read" => :observe,
     "fs.upload" => :control,
@@ -530,11 +529,6 @@ defmodule Troupe.Gateway.Dispatch do
          {:ok, session} <- lookup(session_id) do
       {:ok, Map.put(session_json(session), "head_seq", Troupe.head_seq(session_id))}
     end
-  end
-
-  defp handle("fleet.get", _params, _context) do
-    sessions = Troupe.list_live_sessions(%{"archived" => false})
-    {:ok, %{"sessions" => Enum.map(sessions, &session_json/1)}}
   end
 
   # -- files ------------------------------------------------------------------

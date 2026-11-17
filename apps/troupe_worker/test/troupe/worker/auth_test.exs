@@ -28,8 +28,8 @@ defmodule Troupe.Worker.AuthTest do
   @connection_own ["initialize", "client.mode"]
 
   # What a session's own client needs besides the commands that name the session: its
-  # topics, and the two listings, which are narrowed to it.
-  @connection_level ["subscribe", "unsubscribe", "session.list", "fleet.get"]
+  # topics, and the listing, which is narrowed to it.
+  @connection_level ["subscribe", "unsubscribe", "session.list"]
 
   # What the daemon serves about itself, its paths and its machine.
   @daemon_level [
