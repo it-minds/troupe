@@ -51,19 +51,12 @@ anybody in (a registration saved wrong, a group nobody carries, a tenant outage,
 installation with no admin group yet) the way in is the break-glass token. **Break glass**
 on the sign-in screen takes it, and the plane answers a plane token for the break-glass
 subject (`POST /auth/breakglass`,
-[roles-and-permissions.md §4](roles-and-permissions.md#4-break-glass)). The console then
-opens as a platform admin with no teams, marked on every screen, for the token's lifetime
-and no longer: nothing refreshes it, and once it has run out the next call is refused and
-the sign-in screen is back. What is wrong is put right where it is set, as any platform
-admin would: **Sign-in** for the provider, **Policy and settings** for
-`platform_admin_group` and `groups_claim`, each with *back to the deployment*; a value the
-deployment itself has wrong is changed in the deployment and rolled. Every change is in the
-audit trail under the break-glass subject.
+[roles-and-permissions.md §4](roles-and-permissions.md#4-break-glass), which says what it
+may do and for how long). The steps that put the wrong value right are
+[locked out of the console](routine-tasks.md#locked-out-of-the-console).
 
 The sign-in screen offers **Break glass** only on a plane whose door is configured, which
-`/.well-known/troupe` says (`breakglass`). The door is the plane's, not the console's: on a
-plane deployed without the console, the token `POST /auth/breakglass` answers is a plane
-token like any other, and `troupe admin` and a `/rpc` caller use it as a bearer.
+`/.well-known/troupe` says (`breakglass`).
 
 ## What it does
 

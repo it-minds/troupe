@@ -7,9 +7,9 @@ repository out of its installation.
 
 With it a session can clone a repository with a token it never holds
 ([§6](#6-name-a-repository)), propose a fix as a draft pull request on its own `troupe/*`
-branch and never merge ([§7](github-runs.md#the-fix-loop)), start from an issue and go back to work on
-a review ([§8](github-runs.md#github-as-the-trigger)), within limits each team and profile sets
-([§9](#9-how-far-a-run-may-go)). It does **not** scan what a push carries for secrets by
+branch and never merge ([runs on GitHub](github-runs.md#the-fix-loop)), start from an issue and go back to work on
+a review ([the same page](github-runs.md#github-as-the-trigger)), within limits each team and profile sets
+([§7](#7-how-far-a-run-may-go)). It does **not** scan what a push carries for secrets by
 their content. This is [#147](https://github.com/it-minds/troupe/issues/147) and what came
 after it (Decisions 885, 891, 905, 911 and 917).
 
@@ -28,7 +28,7 @@ On GitHub, as an owner of the organisation: **Settings → Developer settings �
 | Callback URL | none |
 | Request user authorization (OAuth) during installation | off |
 | Enable Device Flow | off |
-| Webhook → Active | **on**, for runs that start from GitHub ([§8](github-runs.md#github-as-the-trigger)); off if the plane only clones and pushes |
+| Webhook → Active | **on**, for runs that start from GitHub ([runs on GitHub](github-runs.md#github-as-the-trigger)); off if the plane only clones and pushes |
 | Webhook URL | the plane's, `https://troupe.example.com/webhook/github` |
 | Webhook secret | a random string of at least 32 characters, such as `openssl rand -hex 32` makes; the plane is given the same one in step 4 |
 | Where can this GitHub App be installed? | **Only on this account** |
@@ -103,26 +103,12 @@ token; the token is in the audit trail as `github.token`, "for the App's test". 
   the matching host.
 - Only the keys you send change. `installations` is the whole list.
 - In `gitops` mode `app_id`, `api_url` and `installations` are the `GitHubApp` resource's
-  ([§10](#10-the-app-from-a-repository)) and are refused here as `managed_by_gitops`; the
+  ([§8](#8-the-app-from-a-repository)) and are refused here as `managed_by_gitops`; the
   key and the webhook secret are sent here as ever.
 
 The plane's OpenBao role needs the policy `Troupe.KMS.Policy.github_app/3` renders, beside
-the plane and signing policies
-([roles-and-permissions.md §8](roles-and-permissions.md#8-openbao-policies)):
-
-```hcl
-path "transit/wrapping_key"                          { capabilities = ["read"] }
-path "transit/keys/troupe-github-app"                { capabilities = ["read", "delete"] }
-path "transit/keys/troupe-github-app/config"         { capabilities = ["update"] }
-path "transit/keys/troupe-github-app/import"         { capabilities = ["create", "update"] }
-path "transit/keys/troupe-github-app/import_version" { capabilities = ["create", "update"] }
-path "transit/sign/troupe-github-app"                { capabilities = ["create", "update"] }
-path "transit/keys/troupe-github-webhook"                { capabilities = ["read", "delete"] }
-path "transit/keys/troupe-github-webhook/config"         { capabilities = ["update"] }
-path "transit/keys/troupe-github-webhook/import"         { capabilities = ["create", "update"] }
-path "transit/keys/troupe-github-webhook/import_version" { capabilities = ["create", "update"] }
-path "transit/hmac/troupe-github-webhook/sha2-256"       { capabilities = ["create", "update"] }
-```
+the plane and signing policies: `troupe-plane-github` in
+[openbao.md](openbao.md#troupe-plane-github), with the lines that write it.
 
 `delete` and the `config` paths are for `admin.github.delete`, which takes the key and the
 secret out of transit with the App: transit adds a version only of the type a key already
@@ -174,7 +160,7 @@ First the team lists it. On the console's team page, **GitHub** tab, a team's ow
 administrators list the repositories its sessions and triggers may name, one per line, as
 `example-org/widgets` or `example-org/*` for every repository of the owner; or
 `admin.team.update` with `{"github": {"repositories": [...]}}`. A team that lists none names
-none ([§9](#9-how-far-a-run-may-go)).
+none ([§7](#7-how-far-a-run-may-go)).
 
 `session.create` on the plane takes `repository`, as `"example-org/widgets"` or as
 `{"owner": "example-org", "name": "widgets", "ref": "main"}`. It is refused, with
@@ -196,27 +182,9 @@ file, nor through a helper, so a `git fetch` or `git push` from the shell cannot
 authenticate. No log names a token; the audit trail has a `github.token` entry for each,
 naming the session, the repository, the permissions and when it expires.
 
-## 7. The fix loop
+<a id="9-how-far-a-run-may-go"></a>
 
-A session created with a repository gets four tools on its pod, `git_push`, `pr_open`,
-`pr_comment` and `pr_checks`, and rules the pod keeps whatever the agent asks: `troupe/*`
-only, never a force, a merge or an approval, a draft or nothing, and three red CI rounds
-then stop. [Runs on GitHub](github-runs.md#the-fix-loop) has the tools and the rules, an
-agent for it, a ruleset for `troupe/*`, and what a run records.
-
-## 8. GitHub as the trigger
-
-A trigger on a repository turns a labelled issue, or a command in a comment, into a run,
-and a review on the run's draft sends its session back to work.
-[Runs on GitHub](github-runs.md#github-as-the-trigger) has the webhook's checks, the
-trigger, what the session is given and what resumes it:
-
-- <a id="a-sweep"></a>[A sweep](github-runs.md#a-sweep): the open issues on a schedule,
-  one run each that is not being fixed and has not been tried as often as it may be.
-- <a id="fix-this"></a>["Fix this"](github-runs.md#fix-this): one run on one issue, from
-  the trigger's page in the console or `admin.trigger.fix`.
-
-## 9. How far a run may go
+## 7. How far a run may go
 
 Two people decide it, each for what is theirs, and the stricter of the two holds. The
 plane keeps what it can see itself (which repositories, how many pushes); the pod keeps
@@ -279,7 +247,7 @@ What each does:
 - **A cap of attempts per issue.** The lower of the profile's `maxAttempts` and the team's
   `max_attempts`, and one where neither says: how many runs a sweep starts on one issue
   that may end without a fix before it leaves the issue for a person
-  ([§8](github-runs.md#a-sweep)). A person asking again, with the label, the command or "fix this", is
+  ([a sweep](github-runs.md#a-sweep)). A person asking again, with the label, the command or "fix this", is
   not held to it, and starts the count again.
 - **Tokens revoked at dormancy.** When a session goes dormant or stops, its pod revokes
   its installation tokens at GitHub (`DELETE /installation/token`) rather than leaving
@@ -289,7 +257,7 @@ What each does:
 A profile that extends another gets its parent's denied paths with its own added, keeps a
 parent's `allowPublic: false` whatever it says, and can only lower a parent's caps.
 
-## 10. The App from a repository
+## 8. The App from a repository
 
 On a plane in `gitops` mode ([gitops.md](gitops.md)) the App's settings are a repository's
 too: one `GitHubApp` resource, named `github`, in the plane's namespace, which the plane

@@ -112,18 +112,7 @@ the first time somebody uses it.
 
 Every command a session runs on a pod runs in bubblewrap, and three things on the nodes
 decide whether it can start there. [The workers' sandbox](worker-sandbox.md) says what each
-needs, how to check a cluster before installing, and what bubblewrap's refusals mean:
-
-- <a id="the-workers-seccomp-profile"></a>[The workers' seccomp profile](worker-sandbox.md#the-workers-seccomp-profile):
-  `worker.seccomp`, by default the chart's `Localhost` profile, which the DaemonSet
-  `troupe-worker-profiles` copies to every node.
-- <a id="the-workers-apparmor-profile"></a>[The workers' AppArmor profile](worker-sandbox.md#the-workers-apparmor-profile):
-  `worker.appArmor`, a profile of the worker's own that the same DaemonSet loads on every
-  node; `enabled: false` on nodes without AppArmor.
-- <a id="the-workers-user-namespaces"></a>[The workers' user namespaces](worker-sandbox.md#the-workers-user-namespaces):
-  `worker.userNamespaces`, a user namespace per pod with its `/proc` unmasked, and what
-  the cluster needs for it: Kubernetes ≥ 1.33, containerd ≥ 2.0, Linux ≥ 6.3, and storage that
-  takes idmapped mounts.
+needs, how to check a cluster before installing, and what bubblewrap's refusals mean.
 
 ## 3. Prove it is up
 
@@ -293,6 +282,3 @@ To take everything away, [decommission each profile](routine-tasks.md#decommissi
 while the operator still runs, which removes its namespace, then uninstall, look at what is
 left (`kubectl -n troupe-system get all,secrets,pvc`), and `kubectl delete namespace
 troupe-system`. The database and the bucket are yours and are not touched.
-
-The keep is in the chart from 0.7.1. An install from an older chart gets it at its first
-upgrade, and loses it again if rolled back to a revision from before.

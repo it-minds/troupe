@@ -28,7 +28,7 @@ flat `WorkerProfile`.
 | `max_sessions` | the **lower** of the two: a child can narrow a ceiling, never raise it |
 | `budget_micros` | the **lower** of the two; one set above the parent's is **refused** with a sentence |
 | `personalTools`, `repositoryOverridesBundle`, `memoryProposals` | a parent's `forbid` or `false` **holds** whatever the child says, and the preview and the effective view say so where the child says otherwise; otherwise the child's, or the parent's |
-| `image`, `size_class`, `provisioner`, the `llm` fields, `storage.storageClassName`, `configBundleChannel`, `github`, `orgMount` and any other field | the child's where it sets one, the parent's where it does not (for `github`'s caps and denied paths, see [github.md §9](github.md#9-how-far-a-run-may-go)) |
+| `image`, `size_class`, `provisioner`, the `llm` fields, `storage.storageClassName`, `configBundleChannel`, `github`, `orgMount` and any other field | the child's where it sets one, the parent's where it does not (for `github`'s caps and denied paths, see [github.md §7](github.md#7-how-far-a-run-may-go)) |
 | `llm.secretRef`, `mcpIdentities`, grants, `warm_workers` | **never inherited**: a key and an identity are each profile's own, in its own namespace, and a grant of the standard does not make a team a user of its extensions |
 
 An empty field is one the child does not set, so a child cannot take away what its parent

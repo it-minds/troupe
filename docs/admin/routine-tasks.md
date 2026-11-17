@@ -11,118 +11,8 @@ Arguments and their meanings are in the method table
 ## Upgrade
 
 The whole of it, with the backup before, what to watch, going back and the restore, is
-[upgrading.md](upgrading.md); one release at a time. In short:
-
-1. `helm show crds "$chart" --version "$version" | kubectl apply --server-side
-   --force-conflicts -f -`, with `$chart` and `$version` as in
-   [installing.md §2](installing.md#2-crds-then-the-chart) — Helm never upgrades CRDs,
-   and a new field is invisible without it.
-2. Set the image tags in your values (empty means the chart's `appVersion`) and
-   `helm upgrade troupe "$chart" --version "$version" -n troupe-system --values
-   my-values.yaml --wait --timeout 10m --rollback-on-failure` (`--atomic` on Helm 3).
-   The `pre-upgrade` hook migrates first; `kubectl -n troupe-system logs
-   job/troupe-plane-migrate` if it fails. A single plane replica rolls by `Recreate`:
-   seconds without a plane, live sessions unaffected.
-3. `kubectl -n troupe-system rollout status deployment/troupe-plane`, then
-   `curl -sS https://<plane host>/.well-known/troupe | jq .plane.build`: the version and
-   commit must be the ones you rolled, or the rollout has not finished or a tag did not
-   move. `kubectl -n troupe-system get pods -o
-   custom-columns='POD:.metadata.name,IMAGE:.status.containerStatuses[0].imageID'` shows
-   the digest each pod runs: a tag that already existed with `IfNotPresent` leaves the old
-   image serving while Helm reports success. Then `admin.overview`.
-4. Profiles whose image is `release` follow the chart; the others keep theirs until
-   `admin.profile.put`. A pod moves to a new revision once it holds no active session: the
-   plane drains it and the operator replaces it, one at a time; `admin.pod.drain` rolls a
-   busy one sooner ([profiles-and-policy.md §3](profiles-and-policy.md#3-upgrades-and-drains)).
-
-**Upgrading to 0.17.0 from earlier, with workers running.** Workers before it ran under
-the runtime's default seccomp profile and masked `/proc`, so their pods refused every
-command. The chart now gives the worker container its own seccomp profile
-(`worker.seccomp`), with a DaemonSet that puts it on the nodes, and runs each worker pod in
-a user namespace of its own with its `/proc` unmasked (`worker.userNamespaces`)
-([worker-sandbox.md](worker-sandbox.md#the-workers-seccomp-profile)). Before upgrading:
-
-1. Run the cluster check in
-   [worker-sandbox.md](worker-sandbox.md#the-workers-user-namespaces): Kubernetes 1.33 or later,
-   containerd 2.0 or later, Linux 6.3 or later, and storage, team volumes' included, that
-   takes idmapped mounts. A cluster that cannot sets `worker.userNamespaces: false`, and
-   its workers go on refusing commands.
-2. Give each worker namespace (`troupe-w-<profile>`) the `privileged` Pod Security level
-   where the cluster's default is higher, or every replacement pod is refused, and the same
-   for `troupe-system`, where the DaemonSet runs; or set
-   `worker.seccomp.install.enabled: false` and install the profile another way. From
-   0.25.0 nothing to do: the operator labels every worker namespace and the chart
-   `troupe-system` (`podSecurity`).
-
-After step 2 of the upgrade, `kubectl -n troupe-system rollout status
-daemonset/troupe-worker-profiles` (`troupe-worker-seccomp` before 0.19.0). Both settings
-change every profile's pod template, so each reports `UpgradePending` and its pods are
-replaced as they empty (step 4); a pod replaced before the DaemonSet reached its node waits
-in `CreateContainerError` until it has.
-
-**Upgrading to 0.19.0 from earlier, with workers running.** On nodes that enforce
-AppArmor (Ubuntu's), workers before it ran under the runtime's default AppArmor profile,
-which refuses bubblewrap's mounts, so their pods refused every command there. The chart now
-gives the worker container an AppArmor profile of its own (`worker.appArmor`, on by
-default) and loads it into every node's kernel
-([worker-sandbox.md](worker-sandbox.md#the-workers-apparmor-profile)); the node's sysctl stays as
-it is. What changes:
-
-1. The DaemonSet is now `troupe-worker-profiles` (Helm removes `troupe-worker-seccomp` and
-   makes it), with a second container, `apparmor`, which has **a new privilege**: root in
-   the node's user namespace with `MAC_ADMIN`, unconfined by AppArmor, and the host's
-   `/sys/kernel/security`. It runs the operator's image, which carries `apparmor_parser`.
-   `troupe-system` already has the `privileged` Pod Security level it needs.
-2. Where the nodes run no AppArmor (most non-Ubuntu node images), set
-   `worker.appArmor.enabled: false`, or the kubelet refuses every worker pod ("Cannot
-   enforce AppArmor"). Where something else loads the profile, set
-   `worker.appArmor.install.enabled: false` and `worker.appArmor.profile` to its name.
-
-Each profile then reports `UpgradePending` and its pods are replaced as they empty;
-`kubectl -n troupe-system rollout status daemonset/troupe-worker-profiles` says every node
-has the profile.
-
-**Upgrading to 0.20.0 from earlier.** The control port now takes TLS only by default
-(`plane.controlTls.requireTls: true`): a worker that dials it in plaintext is closed
-before it is read, and cannot reach the plane until it is replaced. Every pod a 0.19
-operator made dials with TLS, so check first that none older is left:
-
-1. `kubectl -n troupe-system logs <plane pod> | grep 'enrolled as'` on every plane
-   replica: each pod says once, when it enrols, whether it came "over TLS" or "in
-   plaintext", and every pod enrols again when the plane restarts. A pod whose last line
-   says "in plaintext" and that still runs is one an operator before 0.19 made;
-   `admin.pod.drain` it, or wait for it to empty and be replaced, until none is left.
-2. Or upgrade with `plane.controlTls.requireTls: false`, and turn it on once the log is
-   clear. An installation without TLS on the control port
-   (`plane.controlTls.enabled: false`) sets `requireTls: false` too, or the chart refuses
-   to render.
-
-From 0.25.0 neither is needed: a pod that dials in plaintext cannot enrol to be drained,
-so the operator replaces it once the plane requires TLS, one at a time, and the pod puts
-its own sessions to sleep as it stops. Turning `requireTls` from `false` to `true` is the
-upgrade and nothing else.
-
-After the upgrade, a pod still dialling in plaintext shows as a warning, "refused a
-plaintext control connection", once a minute per address with the count of the rest. A
-profile whose namespace has no `troupe-plane-ca` yet says so in its `PlaneCAMissing`
-condition.
-
-**Worker Secrets and the ingress label, from 0.26.0.** The operator copies the Secrets a
-worker namespace mounts from `troupe-system` ([configuration.md Part D](configuration.md#a-worker-namespaces-secrets)),
-and the role the chart gives it reads them by name. The ones you copied by hand keep
-working: where `troupe-system` has the source, the copy replaces yours at the first pass
-(the same data, if yours was a copy); where it has none, yours is used as it is. A model
-or MCP key a profile names is copied only once its Secret in `troupe-system` carries
-`troupe.dev/worker-secret=true`, which `SecretMissing` says with the line. Name the
-ingress controller's namespace in `operator.ingressNamespace` for the operator to keep its
-label; your own label stays either way.
-
-**Identity, from 0.20.0.** A sign-in or a SCIM push adopts the row SCIM gave its subject
-as `externalId` only when the email or `userName` agrees; otherwise a push is refused and
-the pair is listed, to be settled as in [SCIM](#scim). A `PUT` changes the person at its id,
-a `removed:` or `svc:` subject is refused, and a person SCIM deletes leaves every trigger's
-`notify` list ([integrations.md §8](integrations.md#8-scim)).
-
+[upgrading.md](upgrading.md); one release at a time. A release that needs a step of its
+own before the upgrade says so in its release notes, under *Before you upgrade a plane*.
 A release publishes the chart and the images and deploys nothing; every deployment rolls
 it this way, from wherever it keeps its own values.
 
@@ -220,9 +110,9 @@ itself and the troupe-daemon beside it to the `desktop` component's recommended 
 backwards, only from a release the release key signed, and asks before it restarts.
 
 Write versions as releases are numbered (`0.13.0-beta`): they are ordered as SemVer orders
-them, which puts `0.13.0-beta` before `0.13.0`. A client from before 0.13 does not say its
-version and is not held to any of this, and neither is a desktop app from before 0.15;
-nor is anything that calls `/rpc` without saying which client it is.
+them, which puts `0.13.0-beta` before `0.13.0`. A client that does not say its version is
+not held to any of this, nor is anything that calls `/rpc` without saying which client it
+is.
 
 A change here reaches machines already signed in within a minute: their `troupe-daemon`
 asks the plane again every thirty seconds while it holds a token, is judged again, and
@@ -315,8 +205,7 @@ plane destroys the key first, then every object version goes; the owner is not t
 stays in the ledger; the audit row keeps your name. The answer's `state` says whether the
 key went: `erased`, or `erasure_pending` when OpenBao refused or could not be reached,
 which the session list shows too. Erase it again to retry; the plane also retries every
-five minutes (Decision 811), and its first pass after an upgrade from before 0.9.0 destroys
-the keys earlier team-session erasures left, logging how many it could not.
+five minutes (Decision 811).
 
 A team session's objects are deleted by a pod of its profile: with no healthy pod they wait
 until one enrols. A private session has no pod: the owner's daemon retries the key too the

@@ -91,10 +91,73 @@ Troupe sends no telemetry. Nothing in it reports usage or crashes anywhere, and 
 
 ## 3. A worker: isolation and egress
 
-How a worker pod is held, as a user-namespaced, unprivileged, sandboxed pod whose egress is
-the profile's to grant, what its sessions' agents may reach and do, and the GitHub and
-OpenBao credentials it is given, is on a page of its own:
-[A worker: isolation and egress](security-worker.md).
+How a worker pod is held, what it may reach, and what a session's agents on it may do.
+
+- **The pod** (`Troupe.Operator.Resources`) runs as uid 1000, not root, every capability
+  dropped and no privilege escalation. Its root filesystem is writable. No ServiceAccount
+  token is mounted; two projected tokens are, one for enrolling with the plane and one for
+  OpenBao.
+- **Every command runs in bubblewrap**, the shell's and every process Troupe starts there
+  (git, ripgrep, a stdio MCP server), over the session's own directory, in a pod that runs
+  in a user namespace of its own (`worker.userNamespaces`), so every user in it is an
+  unprivileged user on the node. The worker container's seccomp and AppArmor profiles let
+  bubblewrap make its namespaces and mount the sandbox, and no more; what each allows and
+  denies, and the one new privilege their loader takes, is
+  [the workers' sandbox](worker-sandbox.md).
+- **Network.** Each profile's namespace has a NetworkPolicy: ingress only from the
+  namespace labelled `troupe.dev/ingress=true`, egress to DNS, the plane, OpenBao, object
+  storage, the model, the MCP servers and the git hosts. **With Cilium** the profile's
+  allowlist is enforced on the wire by name, and Decision 856's addresses are denied
+  whatever a name resolves to. **Without Cilium** a worker reaches any public address on 443
+  and 80 (link-local, the private ranges and `100.64.0.0/10` left out), and the allowlist is
+  checked only when a profile is admitted
+  ([profiles-and-policy.md](profiles-and-policy.md#4-troupepolicy)).
+- **Admission.** A cluster admin's `TroupePolicy` caps images, replicas, resources, egress
+  and storage, enforced by a `ValidatingAdmissionPolicy` and again by the operator. The
+  plane cannot write it and has no verb on Secrets, so a compromised plane can only submit
+  profiles that must still pass both ([roles-and-permissions.md §7](roles-and-permissions.md#7-kubernetes-rbac-the-chart-grants)).
+  An egress entry is an exact name or a one-label wildcard (`*.example.com`), in the
+  policy and in a profile alike; a bare `*` or any other star is refused, and a policy
+  holding one admits no profile, so no rule for every name is ever written (Decision 883).
+- **Reaching a pod.** Each pod has an Ingress of its own and is internet-facing by design.
+  A client needs a session token the plane signed for that pod, and the pod checks the
+  plane's access list at every command, so a role the plane narrows or revokes holds at the
+  person's next command (Decision 859). A browser page gets a socket only from an origin
+  the deployment lists (`operator.workerAllowedOrigins`, and the plane's own where the
+  chart serves the GUI); with none listed, no page does. The desktop app and `troupe` are
+  not pages and need no entry (Decision 884).
+- **The control channel.** A worker dials the plane's control port, never the other way
+  round. A pod enrols with its projected token, bound to the plane's audience and good for
+  an hour, on the pod network, where the plane's NetworkPolicy admits the port from worker
+  namespaces alone, over TLS against the CA the operator gives its namespace; the plane
+  closes a plaintext connection unless `plane.controlTls.requireTls` is off (Decision 906).
+  A pod made before its namespace had the CA, which dials in plaintext and so can neither
+  enrol nor be drained, is replaced by the operator once TLS is required, and puts its
+  sessions to sleep as it stops.
+  A machine registered outside the cluster ([single-machine.md](single-machine.md)) enrols
+  with a secret that lasts until rotated, so over TLS only: it is given the control
+  certificate's CA at registration and trusts no other, does not dial without it, and a
+  secret sent in plaintext anyway is refused unread, with a sentence saying to rotate it
+  (Decision 893).
+- **GitHub: a token the session never holds, its own branch, never a merge.** A session
+  that names a repository is cloned with an installation token for that one repository,
+  `contents: read`, for an hour, which the pod's own git takes through a credential helper;
+  `.git/config`, the agent's `shell` and every tool's output have no way to it. On a
+  profile that grants it, four tools the pod runs outside the sandbox push the session's
+  one `troupe/*` branch as a commit the App's bot signs, never with force, open a draft
+  pull request and read its CI; no tool merges or approves, and three red CI rounds close
+  its pushes. A push goes only to a repository the team lists, private unless the profile
+  allows public ones, and never carries `.env`, a key file, a denied path or a copy of a
+  mounted secret; tokens are revoked when the session goes dormant. Every token, push and
+  stop is an audit entry (Decisions 885, 891 and 911; [github-runs.md](github-runs.md#the-fix-loop),
+  [§7](github.md#7-how-far-a-run-may-go)).
+- **One OpenBao role for every profile, by default.** Every worker logs in as
+  `troupe-worker`. `bao.workerRolePerProfile` gives each profile a role of its own, so one
+  profile's pods cannot read another's session keys
+  ([roles-and-permissions.md §8](roles-and-permissions.md#8-openbao-policies)).
+
+[What a worker can reach](profiles-and-policy.md#what-a-worker-can-reach) has the same in
+one list, with links to where each part is set.
 
 ## 4. Keys and tokens
 

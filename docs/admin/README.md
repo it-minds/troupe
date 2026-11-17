@@ -7,23 +7,28 @@ and backups on top.
 | Document | What it covers |
 |---|---|
 | [installing.md](installing.md) | A cluster with nothing on it, to a first team in the console; a worked example on managed services |
+| [worker-sandbox.md](worker-sandbox.md) | What the nodes must give bubblewrap: the workers' seccomp and AppArmor profiles and user namespaces, what each allows, a cluster check, and what each refusal means |
 | [configuration.md](configuration.md) | Every environment variable, Helm value, platform setting, expected Secret, port and NetworkPolicy |
+| [client-config.md](client-config.md) | The `config.yaml` a session reads, and the defaults and limits an organisation gives people's machines |
 | [console.md](console.md) | The console at `/console`: where it is, how it is signed in to, and what each area does |
-| [roles-and-permissions.md](roles-and-permissions.md) | Identity from the provider, admin roles, service principals, break-glass, session roles, how each surface authenticates, RBAC, OpenBao policies, the admin methods |
+| [roles-and-permissions.md](roles-and-permissions.md) | Identity from the provider, admin roles, service principals, break-glass, session roles, how each surface authenticates, RBAC, the workers' and people's OpenBao policies, the admin methods |
 | [profiles-and-policy.md](profiles-and-policy.md) | Worker profiles, what the operator creates, conditions, upgrades and drains, `TroupePolicy`, team volumes, provisioning, sizing |
+| [profile-options.md](profile-options.md) | A profile that extends another, an MCP identity of its own, a repository's agents and skills, a person's own tools, memory proposals, per-tool rules, which agents it has |
+| [mcp-identity-keys.md](mcp-identity-keys.md) | Making, registering and rotating the key a profile signs its MCP client assertions with |
 | [gitops.md](gitops.md) | Profiles held in a repository: what the plane reads, the manifests, and switching a running plane |
 | [bundles-and-triggers.md](bundles-and-triggers.md) | Config bundles and MCP servers, triggers and the scheduler, unattended terms, budgets |
 | [integrations.md](integrations.md) | What the identity provider, OpenBao, PostgreSQL, object storage, the LLM gateway, Kubernetes, MCP, SCIM and the GUI require |
 | [openbao.md](openbao.md) | What OpenBao must grant the plane, generated from the code that checks it at start and on the Overview, and the lines an OpenBao administrator runs |
-| [github.md](github.md) | The plane's GitHub App: registering and installing it, giving the plane its key, the read-only token a session clones its repository with, and the fix loop: a `troupe/*` branch, a draft pull request and its CI, never a merge |
+| [github.md](github.md) | The plane's GitHub App: registering and installing it, giving the plane its key, the read-only token a session clones its repository with, and how far a run may go |
+| [github-runs.md](github-runs.md) | The fix loop: a `troupe/*` branch, a draft pull request and its CI, never a merge; and GitHub as the trigger |
 | [authentik.md](authentik.md) | Connecting a plane's sign-in and provisioning to Authentik, in order |
 | [single-machine.md](single-machine.md) | A worker on a machine you already have, and what it gives up |
 | [plane-light.md](plane-light.md) | The plane and its own worker on one machine from one compose file, for an office without a cluster, and what that gives up |
 | [upgrading.md](upgrading.md) | From one release to the next: the backup, the CRDs, the chart and its migration, what to watch, what the plane checks, going back, and the restore |
 | [backup-restore.md](backup-restore.md) | Where state lives, what can be rebuilt, restore procedures |
 | [monitoring.md](monitoring.md) | Health endpoints, signals, the audit log, logs worth alerting on, a troubleshooting table |
-| [routine-tasks.md](routine-tasks.md) | Step lists: upgrades, teams, principals, bundles, drains, settings, lock-outs, SCIM, rotations, erasure |
-| [security.md](security.md) | For a security reviewer: what Troupe does unasked and never does, isolation, keys, signed releases, unsigned apps, the limits' strength, logs and erasure |
+| [routine-tasks.md](routine-tasks.md) | Step lists: teams, principals, bundles, drains, settings, client versions, lock-outs, SCIM, rotations, erasure |
+| [security.md](security.md) | For a security reviewer: what Troupe does unasked and never does, a worker's isolation and egress, keys, signed releases, unsigned apps, the limits' strength, logs and erasure |
 
 Also: [../a2a.md](../a2a.md) and [../egress-allowlist.md](../egress-allowlist.md).
 
