@@ -302,6 +302,38 @@ defmodule Troupe.Plane.Fleet do
   end
 
   @doc """
+  A profile's room right now, as a person choosing it is told: every pod, which of them
+  are gone, and the pods that count, neither draining nor gone, with the places they
+  hold at most and the sessions they run now. `profiles.list` and `profile.get` both
+  answer from this, so the listing and the profile's page cannot disagree.
+
+  A gone pod is listed until the sweep forgets it and counts for nothing, whatever its
+  last flags said. A draining pod is listed, so a person can see it, and counts for
+  nothing either: it takes no session and is out of its Service, so it is neither room
+  nor health, and the sessions still on it are on their way elsewhere.
+  """
+  @spec room(String.t(), Profile.t() | nil) :: %{
+          workers: [Worker.t()],
+          gone: MapSet.t(Ecto.UUID.t()),
+          placeable: [Worker.t()],
+          capacity: non_neg_integer(),
+          active_sessions: non_neg_integer()
+        }
+  def room(name, profile) do
+    workers = list_workers(name)
+    gone = MapSet.new(Enum.filter(workers, &gone?(&1, profile)), & &1.id)
+    placeable = Enum.reject(workers, &(&1.draining or MapSet.member?(gone, &1.id)))
+
+    %{
+      workers: workers,
+      gone: gone,
+      placeable: placeable,
+      capacity: Enum.sum(Enum.map(placeable, & &1.capacity)),
+      active_sessions: Enum.sum(Enum.map(placeable, & &1.active_sessions))
+    }
+  end
+
+  @doc """
   Forget the pods that are gone for good, and say which.
 
   A row whose pod the substrate no longer has, that has not been heard from for longer

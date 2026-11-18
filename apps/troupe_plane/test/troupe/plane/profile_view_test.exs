@@ -15,6 +15,7 @@ defmodule Troupe.Plane.ProfileViewTest do
   use Troupe.Plane.DataCase, async: false
 
   alias Troupe.Plane.{Bundles, Fleet, Harness, Identity}
+  alias Troupe.Plane.Fleet.Worker
   alias Troupe.Protocol.AgentDefinition
 
   setup do
@@ -235,6 +236,33 @@ defmodule Troupe.Plane.ProfileViewTest do
       assert view["bundle_hash"] == bundle.hash
     end
 
+    # The profile's page and the profiles screen count the same pods: a draining pod and
+    # one the operator removed that has gone quiet are neither room nor sessions running,
+    # in either answer, however long the gone one lingers before the sweep forgets it.
+    test "counts the room as profiles.list does, a draining pod and a gone one left out",
+         ctx do
+      {:ok, draining} = enrol(1, active_sessions: 2)
+      Repo.update_all(from(w in Worker, where: w.id == ^draining.id), set: [draining: true])
+
+      # Past the profile's one replica and quiet past its lease; its last flags healthy
+      # and not draining, as a row could be left.
+      {:ok, gone} = enrol(2, active_sessions: 3)
+      quiet = DateTime.add(DateTime.utc_now(), -(Fleet.lease_timeout_ms() + 1_000), :millisecond)
+
+      Repo.update_all(from(w in Worker, where: w.id == ^gone.id),
+        set: [last_heartbeat_at: quiet]
+      )
+      assert Fleet.gone?(Fleet.get_worker(gone.id), Fleet.get_profile("dev"))
+
+      limits = view!(ctx.ada)["limits"]
+      assert {:ok, %{"profiles" => [listed]}} = Harness.call("profiles.list", %{}, as(ctx.ada))
+
+      counts = ["capacity", "active_sessions"]
+      assert %{"capacity" => 4, "active_sessions" => 1} = limits
+      assert Map.take(listed, counts) == Map.take(limits, counts)
+      assert length(listed["pods"]) == 3
+    end
+
     test "has the team picked as session.create picks it: theirs alone, or the one named", ctx do
       assert %{"team" => "engineering", "teams" => ["engineering"]} = view!(ctx.ada)
 
@@ -299,6 +327,17 @@ defmodule Troupe.Plane.ProfileViewTest do
   # -- helpers ----------------------------------------------------------------
 
   defp as(user), do: %{user: user, platform_admin?: false}
+
+  defp enrol(ordinal, opts) do
+    Fleet.enrol(%{
+      profile: "dev",
+      ordinal: ordinal,
+      pod_name: "troupe-w-dev-#{ordinal}",
+      namespace: "troupe-w-dev",
+      capacity: 4,
+      active_sessions: Keyword.fetch!(opts, :active_sessions)
+    })
+  end
 
   defp view!(user) do
     assert {:ok, view} = Harness.call("profile.get", %{"name" => "dev"}, as(user))
