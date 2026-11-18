@@ -14,6 +14,8 @@ defmodule Troupe.Gateway.BackpressureTest do
 
   use ExUnit.Case, async: false
 
+  import Troupe.Eventually
+
   alias Troupe.Gateway.{Connection, Connections, Daemon}
   alias Troupe.Protocol.Endpoint
 
@@ -62,9 +64,9 @@ defmodule Troupe.Gateway.BackpressureTest do
     # Wait until the pressure is real — the byte bound reached and ephemerals going
     # over the side — so what follows measures the stalled case rather than the moment
     # before it.
-    await(
+    eventually(
       fn -> Connection.info(connection).dropped_ephemerals > 0 end,
-      "the client never fell behind, so nothing was under pressure"
+      10_000
     )
 
     stalled = Enum.map(1..5, fn _ -> time_turn(session.id) end) |> median()
@@ -236,14 +238,6 @@ defmodule Troupe.Gateway.BackpressureTest do
     Troupe.send_input(session_id, "go")
     await_idle(session_id)
     System.monotonic_time(:millisecond) - started
-  end
-
-  defp await(predicate, message, attempts \\ 400) do
-    cond do
-      predicate.() -> :ok
-      attempts > 0 -> Process.sleep(25) && await(predicate, message, attempts - 1)
-      true -> flunk(message)
-    end
   end
 
   defp median(values) do

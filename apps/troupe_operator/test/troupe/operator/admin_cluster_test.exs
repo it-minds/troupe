@@ -121,7 +121,8 @@ defmodule Troupe.Operator.AdminClusterTest do
 
       eventually(
         fn -> condition(profile(context.conn, name), "SecretMissing")["status"] == "True" end,
-        "SecretMissing was never reported for a secret nobody created"
+        60_000,
+        250
       )
 
       current = profile(context.conn, name)
@@ -153,7 +154,8 @@ defmodule Troupe.Operator.AdminClusterTest do
 
       eventually(
         fn -> condition(profile(context.conn, name), "SecretMissing")["status"] == "True" end,
-        "SecretMissing was never reported"
+        60_000,
+        250
       )
 
       # In the *worker's* namespace, because that is the only one its pods can mount
@@ -188,7 +190,8 @@ defmodule Troupe.Operator.AdminClusterTest do
 
       eventually(
         fn -> condition(profile(context.conn, name), "SecretMissing")["status"] == "False" end,
-        "SecretMissing never cleared after the secret was created"
+        60_000,
+        250
       )
     end
 
@@ -220,7 +223,8 @@ defmodule Troupe.Operator.AdminClusterTest do
 
       eventually(
         fn -> condition(profile(context.conn, name), "Ready") != nil end,
-        "the profile never reported a Ready condition"
+        60_000,
+        250
       )
 
       # What the operator writes back is a reference and a condition. The value stays in

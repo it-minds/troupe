@@ -86,7 +86,7 @@ defmodule Troupe.Worker.GitCloneTest do
     )
 
     start_supervised!(GitCredentials)
-    eventually(fn -> Link.connected?() end)
+    eventually(fn -> Link.connected?() end, 10_000)
 
     # GitHub, with the App installed on example-org for widgets alone, and the repository.
     fake = FakeGitHub.start()
@@ -320,7 +320,7 @@ defmodule Troupe.Worker.GitCloneTest do
       {:ok, _} = PlaneSessions.place(session_id, pod)
       Process.sleep(300)
       PlaneSessions.get(session_id).worker_id == pod.id
-    end)
+    end, 10_000)
   end
 
   defp activate_with_repository(context, opts \\ []) do

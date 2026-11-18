@@ -9,7 +9,7 @@ defmodule Troupe.RelayedAnswersTest do
   use ExUnit.Case, async: false
 
   import Troupe.RemoteHelpers
-  import Troupe.TestHelpers, only: [eventually: 1, eventually: 2]
+  import Troupe.TestHelpers, only: [eventually: 2]
 
   alias Troupe.FakeRemote
   alias Troupe.Remote.Worker

@@ -49,8 +49,8 @@ defmodule Troupe.Operator.ClusterTest do
       for name <- names do
         eventually(
           fn -> ready?(conn, name) end,
-          "#{name} never reached Ready",
-          180_000
+          180_000,
+          250
         )
       end
 
@@ -165,7 +165,8 @@ defmodule Troupe.Operator.ClusterTest do
                 name: "troupe-worker-profile-policy")
             )
           end,
-          "the admission binding was never removed"
+          60_000,
+          250
         )
       end
 
@@ -179,8 +180,8 @@ defmodule Troupe.Operator.ClusterTest do
             _ -> false
           end
         end,
-        "#{name} was never marked PolicyViolation",
-        120_000
+        120_000,
+        250
       )
 
       assert %{"status" => "False"} = condition(fetch_profile(conn, name), "Ready")
@@ -199,7 +200,7 @@ defmodule Troupe.Operator.ClusterTest do
 
       apply!(conn, profile_resource(name))
       on_exit(fn -> cleanup(conn, name) end)
-      eventually(fn -> ready?(conn, name) end, "#{name} never reached Ready", 180_000)
+      eventually(fn -> ready?(conn, name) end, 180_000, 250)
 
       before = fetch(conn, "v1", "Service", namespace: namespace, name: "#{name}-1")
       assert before
@@ -213,8 +214,8 @@ defmodule Troupe.Operator.ClusterTest do
             service -> get_in(service, ["metadata", "uid"]) != get_in(before, ["metadata", "uid"])
           end
         end,
-        "the deleted Service was not recreated within 30s",
-        30_000
+        30_000,
+        250
       )
     end
 
@@ -241,7 +242,7 @@ defmodule Troupe.Operator.ClusterTest do
         )
       end
 
-      eventually(fn -> ready?(conn, name) end, "#{name} never reached Ready after the crashes", 180_000)
+      eventually(fn -> ready?(conn, name) end, 180_000, 250)
 
       for {api_version, kind, expected} <- [
             {"v1", "Service", 3},
@@ -263,7 +264,7 @@ defmodule Troupe.Operator.ClusterTest do
 
       apply!(conn, profile_resource(name))
       on_exit(fn -> cleanup(conn, name) end)
-      eventually(fn -> ready?(conn, name) end, "#{name} never reached Ready", 180_000)
+      eventually(fn -> ready?(conn, name) end, 180_000, 250)
 
       assert fetch(conn, "networking.k8s.io/v1", "Ingress", namespace: namespace, name: "#{name}-1")
 
@@ -273,8 +274,8 @@ defmodule Troupe.Operator.ClusterTest do
         fn ->
           is_nil(fetch(conn, "networking.k8s.io/v1", "Ingress", namespace: namespace, name: "#{name}-1"))
         end,
-        "the Ingress for the removed pod was never pruned",
-        60_000
+        60_000,
+        250
       )
 
       assert fetch(conn, "networking.k8s.io/v1", "Ingress", namespace: namespace, name: "#{name}-0")

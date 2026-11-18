@@ -10,6 +10,7 @@ defmodule Troupe.Gateway.LoopbackTest do
   use ExUnit.Case, async: false
 
   import ExUnit.CaptureLog
+  import Troupe.Eventually
 
   alias Troupe.Gateway.Daemon
   alias Troupe.Identity
@@ -290,8 +291,13 @@ defmodule Troupe.Gateway.LoopbackTest do
       {:ok, _} = Client.subscribe(client, "session:#{session.id}", from_seq: 0)
       {:ok, _} = Client.call(client, "input.send", %{"command_id" => "c-1", "session_id" => session.id, "text" => "hello"})
 
-      assert actor_of(session.id, "input_queued") == "ada@example.test" or
-               actor_of(session.id, "user_input") == "ada@example.test"
+      assert eventually(
+               fn ->
+                 actor_of(session.id, "input_queued") == "ada@example.test" or
+                   actor_of(session.id, "user_input") == "ada@example.test"
+               end,
+               2_000
+             )
 
       # A second connection, which never saw the link, is the same person.
       {:ok, other} = connect_ws(context.ws)
@@ -379,24 +385,13 @@ defmodule Troupe.Gateway.LoopbackTest do
   end
 
   defp event_of(session_id, type) do
-    wait_for(fn -> Enum.find(events(session_id), &(&1.type == type)) end)
+    eventually(fn -> Enum.find(events(session_id), &(&1.type == type)) end, 1_000)
   end
 
   defp actor_of(session_id, type) do
-    case wait_for(fn -> Enum.find(events(session_id), &(&1.type == type)) end) do
+    case Enum.find(events(session_id), &(&1.type == type)) do
       nil -> nil
       event -> event.actor.subject
-    end
-  end
-
-  defp wait_for(fun, attempts \\ 50) do
-    case fun.() do
-      nil when attempts > 0 ->
-        Process.sleep(20)
-        wait_for(fun, attempts - 1)
-
-      answer ->
-        answer
     end
   end
 end

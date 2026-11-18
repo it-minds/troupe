@@ -73,7 +73,7 @@ defmodule Troupe.Worker.SealerTest do
 
     eventually(fn ->
       match?({:ok, %{"last_seq" => last}} when last >= seq, Storage.get_manifest(context.store, context.session_id))
-    end)
+    end, 10_000)
 
     assert Sealer.status(session.sealer).sealed_through >= seq
   end
@@ -123,7 +123,7 @@ defmodule Troupe.Worker.SealerTest do
 
     Log.append(context.session_id, ["root"], :progress_note, %{"n" => 1})
     # Give the message time to reach the sealer's mailbox before stopping it.
-    eventually(fn -> Sealer.status(session.sealer).pending > 0 end)
+    eventually(fn -> Sealer.status(session.sealer).pending > 0 end, 10_000)
 
     GenServer.stop(session.sealer, :normal)
 

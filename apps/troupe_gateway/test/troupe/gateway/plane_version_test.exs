@@ -12,6 +12,7 @@ defmodule Troupe.Gateway.PlaneVersionTest do
   use ExUnit.Case, async: false
 
   import ExUnit.CaptureLog
+  import Troupe.Eventually
 
   alias Troupe.Gateway.{Daemon, FakePlane, Plane}
   alias Troupe.LLM.Identify
@@ -197,14 +198,6 @@ defmodule Troupe.Gateway.PlaneVersionTest do
 
       assert {:ok, identity} = Client.call(client, "identity.get", %{})
       refute Map.has_key?(identity, "update_required")
-    end
-  end
-
-  defp eventually(check, deadline \\ 5_000) do
-    cond do
-      check.() -> true
-      deadline <= 0 -> false
-      true -> Process.sleep(50) && eventually(check, deadline - 50)
     end
   end
 end

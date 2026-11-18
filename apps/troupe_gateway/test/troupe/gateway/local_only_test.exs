@@ -12,6 +12,8 @@ defmodule Troupe.Gateway.LocalOnlyTest do
 
   use ExUnit.Case, async: false
 
+  import Troupe.Eventually
+
   alias Troupe.Config.Org
   alias Troupe.Gateway.{Daemon, FakePlane, LocalOnly}
   alias Troupe.LLM.Fake
@@ -474,16 +476,5 @@ defmodule Troupe.Gateway.LocalOnlyTest do
     |> Troupe.events()
     |> Enum.filter(&(&1.type == "tool_call_completed"))
     |> Enum.map_join("\n", &inspect(&1.data))
-  end
-
-  defp eventually(fun, tries \\ 100) do
-    case fun.() do
-      falsy when falsy in [nil, false] and tries > 0 ->
-        Process.sleep(50)
-        eventually(fun, tries - 1)
-
-      result ->
-        result
-    end
   end
 end

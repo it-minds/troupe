@@ -746,18 +746,6 @@ defmodule Troupe.Plane.RemoteTest do
 
   # -- the rest -----------------------------------------------------------------
 
-  defp eventually(fun, deadline \\ 5_000) do
-    case fun.() do
-      falsy when falsy in [nil, false] ->
-        if deadline <= 0, do: flunk("condition never held")
-        Process.sleep(50)
-        eventually(fun, deadline - 50)
-
-      truthy ->
-        truthy
-    end
-  end
-
   defp fake_verify("good:" <> subject) do
     {:ok, %{"sub" => subject, "email" => subject, "name" => subject, "groups" => []}}
   end

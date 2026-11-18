@@ -73,7 +73,7 @@ defmodule Troupe.Worker.DormancyTest do
 
       report = await_dormant()
       assert report["reason"] == "dormant"
-      eventually(fn -> Sessions.whereis(context.session_id) == nil end)
+      eventually(fn -> Sessions.whereis(context.session_id) == nil end, 10_000)
       refute File.exists?(context.workspace)
     end
   end
@@ -198,7 +198,7 @@ defmodule Troupe.Worker.DormancyTest do
       {:ok, before} = Storage.list_segments(context.store, context.session_id)
 
       assert :ok = Sessions.fence(context.session_id, 2)
-      eventually(fn -> Sessions.whereis(context.session_id) == nil end)
+      eventually(fn -> Sessions.whereis(context.session_id) == nil end, 10_000)
 
       # Nothing of this pod's reached storage after the fence, and nothing of it is left
       # on the PVC either — the cache was for a session this pod no longer owns.

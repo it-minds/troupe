@@ -137,7 +137,7 @@ defmodule Troupe.Agent.CrashLoopTest do
     on_exit(fn -> Troupe.stop_session(sid) end)
     Troupe.clear_goal(sid)
     Troupe.send_input(sid, "again")
-    until(fn -> match?(%{failed: nil}, GenServer.call(index, {:get, sid})) end, "the next turn")
+    eventually(fn -> match?(%{failed: nil}, GenServer.call(index, {:get, sid})) end)
   end
 
   # A session that has answered one turn, subscribed and monitored.
@@ -167,17 +167,5 @@ defmodule Troupe.Agent.CrashLoopTest do
   end
 
   defp unregistered(sid, timeout \\ 5_000),
-    do: until(fn -> is_nil(Registry.whereis({:session, sid})) end, "the session to go", timeout)
-
-  defp until(fun, what, timeout \\ 5_000), do: poll(fun, what, now() + timeout)
-
-  defp poll(fun, what, deadline) do
-    cond do
-      fun.() -> :ok
-      now() > deadline -> flunk("timed out waiting for #{what}")
-      true -> Process.sleep(20) && poll(fun, what, deadline)
-    end
-  end
-
-  defp now, do: System.monotonic_time(:millisecond)
+    do: eventually(fn -> is_nil(Registry.whereis({:session, sid})) end, timeout)
 end

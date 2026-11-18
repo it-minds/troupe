@@ -19,7 +19,7 @@ defmodule Troupe.MCPPageTest do
   alias Troupe.Client.Daemon.Link
   alias Troupe.Remote.RPC
 
-  @stub Path.expand("../support/mcp_stub.exs", __DIR__)
+  @stub Path.expand("../../../../apps/troupe_core/test/support/mcp_stub.exs", __DIR__)
 
   setup do
     config_home = System.fetch_env!("TROUPE_CONFIG_HOME")
@@ -134,7 +134,7 @@ defmodule Troupe.MCPPageTest do
   # which key it wants, `p` asks for it as dots, and the entry gets the reference alone.
   test "p keeps a missing secret in the keychain, typed as dots, and the server starts", context do
     elixir = System.find_executable("elixir") || "elixir"
-    stub = Path.expand("../../../../apps/troupe_core/test/support/mcp_stub.exs", __DIR__)
+    stub = @stub
     file = Path.join(context.config_home, "mcp.json")
 
     File.write!(

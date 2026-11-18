@@ -18,6 +18,7 @@ defmodule Troupe.Gateway.HarnessCase do
 
   using do
     quote do
+      import Troupe.Eventually
       import Troupe.Gateway.HarnessCase
 
       alias Troupe.Protocol.{Client, Event}
@@ -158,27 +159,6 @@ defmodule Troupe.Gateway.HarnessCase do
       after
         remaining -> Enum.reverse(acc)
       end
-    end
-  end
-
-  @doc "Wait for a condition, polling, with a readable failure when it never holds."
-  @spec eventually((-> any()), timeout()) :: any()
-  def eventually(fun, timeout \\ 5_000) do
-    poll(fun, System.monotonic_time(:millisecond) + timeout)
-  end
-
-  defp poll(fun, deadline) do
-    case fun.() do
-      falsy when falsy in [nil, false] ->
-        if System.monotonic_time(:millisecond) >= deadline do
-          ExUnit.Assertions.flunk("condition never held")
-        else
-          Process.sleep(20)
-          poll(fun, deadline)
-        end
-
-      truthy ->
-        truthy
     end
   end
 end

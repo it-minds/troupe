@@ -18,6 +18,7 @@ defmodule Troupe.Plane.DataCase do
       import Ecto
       import Ecto.Changeset
       import Ecto.Query
+      import Troupe.Eventually
       import Troupe.Plane.DataCase
 
       alias Troupe.Plane.Repo

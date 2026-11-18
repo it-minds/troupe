@@ -194,11 +194,11 @@ defmodule Troupe.Worker.UnattendedSessionTest do
 
       # Nobody answers: the session goes dormant on the idle timer, the question owed.
       assert %{"status" => "waiting", "pending_questions" => 1} = await_dormant()
-      eventually(fn -> Sessions.whereis(context.session_id) == nil end)
+      eventually(fn -> Sessions.whereis(context.session_id) == nil end, 10_000)
 
       # The first client back finds the same question, and its answer carries the turn on.
       assert {:ok, _} = activate(context, fake: fake, epoch: 2, terms: @managed, config_overrides: [max_turns: 1])
-      eventually(fn -> Enum.any?(Questions.pending(context.session_id), &(&1.call_id == "budget-1")) end)
+      eventually(fn -> Enum.any?(Questions.pending(context.session_id), &(&1.call_id == "budget-1")) end, 10_000)
 
       Troupe.answer(context.session_id, "budget-1", "+10")
       await_responses(context.session_id, 3)

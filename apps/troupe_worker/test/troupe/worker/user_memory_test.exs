@@ -43,7 +43,7 @@ defmodule Troupe.Worker.UserMemoryTest do
        }}
     )
 
-    eventually(fn -> Link.connected?() end)
+    eventually(fn -> Link.connected?() end, 10_000)
     context
   end
 

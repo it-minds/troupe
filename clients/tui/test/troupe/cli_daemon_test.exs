@@ -8,6 +8,7 @@ defmodule Troupe.CLIDaemonTest do
   use ExUnit.Case, async: false
 
   import ExUnit.CaptureIO
+  import Troupe.TestHelpers, only: [eventually: 1]
 
   alias Troupe.CLI
 
@@ -194,15 +195,6 @@ defmodule Troupe.CLIDaemonTest do
     case File.read(path) do
       {:ok, text} -> if String.ends_with?(text, "\n"), do: String.trim(text)
       {:error, _} -> nil
-    end
-  end
-
-  # The check's value once it has one, within five seconds, or nil.
-  defp eventually(check, tries \\ 100) do
-    case check.() do
-      value when value not in [nil, false] -> value
-      _ when tries == 0 -> nil
-      _ -> Process.sleep(50) && eventually(check, tries - 1)
     end
   end
 

@@ -18,6 +18,10 @@ defmodule Troupe.Test.ErrorStandIn do
   with a 200 (#427, Decision 805).
   """
 
+  import Troupe.Test.LoopbackHTTP, only: [event: 2]
+
+  alias Troupe.Test.{LoopbackHTTP, ModelStream}
+
   @doc "Start one. Options: `script` (required), `test` (the caller)."
   @spec start(keyword()) :: map()
   def start(opts) do
@@ -73,7 +77,7 @@ defmodule Troupe.Test.ErrorStandIn do
   # A model call is answered as scripted. Anything else, the model list a session's catalog
   # refresh asks for among them, is not found.
   defp serve(socket, context) do
-    with {:ok, raw} <- read_request(socket, "") do
+    with {:ok, raw} <- LoopbackHTTP.read_request(socket) do
       case parse(raw) do
         {:ok, path, body} when path in ["/v1/messages", "/v1/chat/completions"] ->
           n = Agent.get_and_update(context.counter, &{&1 + 1, &1 + 1})
@@ -89,35 +93,6 @@ defmodule Troupe.Test.ErrorStandIn do
     end
 
     :gen_tcp.close(socket)
-  end
-
-  defp read_request(socket, acc) do
-    case :gen_tcp.recv(socket, 0, 5_000) do
-      {:ok, data} ->
-        acc = acc <> data
-        if complete?(acc), do: {:ok, acc}, else: read_request(socket, acc)
-
-      {:error, _reason} ->
-        :error
-    end
-  end
-
-  defp complete?(raw) do
-    case String.split(raw, "\r\n\r\n", parts: 2) do
-      [head, body] -> byte_size(body) >= content_length(head)
-      _ -> false
-    end
-  end
-
-  defp content_length(head) do
-    head
-    |> String.split("\r\n")
-    |> Enum.find_value(0, fn line ->
-      case String.split(String.downcase(line), ":", parts: 2) do
-        ["content-length", value] -> String.to_integer(String.trim(value))
-        _ -> nil
-      end
-    end)
   end
 
   defp parse(raw) do
@@ -194,69 +169,11 @@ defmodule Troupe.Test.ErrorStandIn do
     [message_start(), event("error", %{"type" => "error", "error" => error})]
   end
 
-  defp stream("/v1/messages", n, answer) do
-    {block, delta, stop_reason} =
-      case answer do
-        {:text, text} ->
-          {%{"type" => "text", "text" => ""}, %{"type" => "text_delta", "text" => text},
-           "end_turn"}
+  defp stream("/v1/messages" = path, n, answer),
+    do: ModelStream.events(path, n, answer, %{"input_tokens" => 100})
 
-        {:tool, name, input} ->
-          {%{"type" => "tool_use", "id" => "toolu_#{n}", "name" => name, "input" => %{}},
-           %{"type" => "input_json_delta", "partial_json" => Jason.encode!(input)}, "tool_use"}
-      end
-
-    [
-      event("message_start", %{
-        "type" => "message_start",
-        "message" => %{"usage" => %{"input_tokens" => 100, "output_tokens" => 1}}
-      }),
-      event("content_block_start", %{
-        "type" => "content_block_start",
-        "index" => 0,
-        "content_block" => block
-      }),
-      event("content_block_delta", %{
-        "type" => "content_block_delta",
-        "index" => 0,
-        "delta" => delta
-      }),
-      event("content_block_stop", %{"type" => "content_block_stop", "index" => 0}),
-      event("message_delta", %{
-        "type" => "message_delta",
-        "delta" => %{"stop_reason" => stop_reason},
-        "usage" => %{"output_tokens" => 10}
-      }),
-      event("message_stop", %{"type" => "message_stop"})
-    ]
-  end
-
-  defp stream("/v1/chat/completions", n, answer) do
-    {delta, finish} =
-      case answer do
-        {:text, text} ->
-          {%{"role" => "assistant", "content" => text}, "stop"}
-
-        {:tool, name, input} ->
-          call = %{
-            "index" => 0,
-            "id" => "call_#{n}",
-            "type" => "function",
-            "function" => %{"name" => name, "arguments" => Jason.encode!(input)}
-          }
-
-          {%{"role" => "assistant", "tool_calls" => [call]}, "tool_calls"}
-      end
-
-    [
-      data(%{"choices" => [%{"delta" => delta}]}),
-      data(%{
-        "choices" => [%{"delta" => %{}, "finish_reason" => finish}],
-        "usage" => %{"prompt_tokens" => 100, "completion_tokens" => 10}
-      }),
-      "data: [DONE]\n\n"
-    ]
-  end
+  defp stream("/v1/chat/completions" = path, n, answer),
+    do: ModelStream.events(path, n, answer, %{"prompt_tokens" => 100})
 
   defp message_start do
     event("message_start", %{
@@ -275,7 +192,4 @@ defmodule Troupe.Test.ErrorStandIn do
       event("message_stop", %{"type" => "message_stop"})
     ]
   end
-
-  defp event(name, data), do: ["event: ", name, "\ndata: ", Jason.encode!(data), "\n\n"]
-  defp data(data), do: ["data: ", Jason.encode!(data), "\n\n"]
 end

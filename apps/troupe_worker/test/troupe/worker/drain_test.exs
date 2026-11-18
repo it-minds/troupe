@@ -49,9 +49,9 @@ defmodule Troupe.Worker.DrainTest do
 
   test "the turn finishes, the session goes dormant, and the volume is then disposable", context do
     link = start_link!(context, "troupe-w-dev-1")
-    eventually(fn -> Link.connected?(link) end)
+    eventually(fn -> Link.connected?(link) end, 10_000)
 
-    one = eventually(fn -> Fleet.list_workers("dev") |> Enum.find(&(&1.ordinal == 1)) end)
+    one = eventually(fn -> Fleet.list_workers("dev") |> Enum.find(&(&1.ordinal == 1)) end, 10_000)
 
     # A real session on ordinal 1, with something in its workspace worth not losing.
     {:ok, _} =
@@ -75,7 +75,7 @@ defmodule Troupe.Worker.DrainTest do
     Troupe.send_input(context.session_id, "start something slow")
 
     # In flight: this is the state the drain has to be patient with.
-    eventually(fn -> busy?(context.session_id) end)
+    eventually(fn -> busy?(context.session_id) end, 10_000)
 
     assert Fleet.placeable("dev") |> Enum.map(& &1.ordinal) == [0, 1]
 
@@ -137,8 +137,8 @@ defmodule Troupe.Worker.DrainTest do
 
   test "a turn that will not finish is cancelled at the timeout, and nothing before it is lost", context do
     link = start_link!(context, "troupe-w-dev-1")
-    eventually(fn -> Link.connected?(link) end)
-    one = eventually(fn -> Fleet.list_workers("dev") |> Enum.find(&(&1.ordinal == 1)) end)
+    eventually(fn -> Link.connected?(link) end, 10_000)
+    one = eventually(fn -> Fleet.list_workers("dev") |> Enum.find(&(&1.ordinal == 1)) end, 10_000)
 
     {:ok, _} =
       PlaneSessions.create(%{
@@ -161,7 +161,7 @@ defmodule Troupe.Worker.DrainTest do
     {:ok, _} = Log.append(context.session_id, ["root"], :progress_note, %{"before" => true})
 
     Troupe.send_input(context.session_id, "the turn that will not finish")
-    eventually(fn -> busy?(context.session_id) end)
+    eventually(fn -> busy?(context.session_id) end, 10_000)
 
     assert {:ok, report} = Drain.pod(one, timeout_ms: 800, poll_ms: 50)
 
@@ -202,8 +202,8 @@ defmodule Troupe.Worker.DrainTest do
 
   test "a pod stopped by anything but the plane puts its sessions to sleep first", context do
     link = start_link!(context, "troupe-w-dev-1")
-    eventually(fn -> Link.connected?(link) end)
-    one = eventually(fn -> Fleet.list_workers("dev") |> Enum.find(&(&1.ordinal == 1)) end)
+    eventually(fn -> Link.connected?(link) end, 10_000)
+    one = eventually(fn -> Fleet.list_workers("dev") |> Enum.find(&(&1.ordinal == 1)) end, 10_000)
 
     {:ok, _} =
       PlaneSessions.create(%{
@@ -226,7 +226,7 @@ defmodule Troupe.Worker.DrainTest do
 
     Troupe.subscribe(context.session_id)
     Troupe.send_input(context.session_id, "start something slow")
-    eventually(fn -> busy?(context.session_id) end)
+    eventually(fn -> busy?(context.session_id) end, 10_000)
 
     # A pod, where the worker's tree is the pod's, stopped the way a SIGTERM stops a
     # release: nobody drained it first.
@@ -239,7 +239,7 @@ defmodule Troupe.Worker.DrainTest do
     assert Enum.any?(sealed, &(&1["type"] == "llm_response"))
     refute Enum.any?(sealed, &(&1["type"] == "cancelled"))
     assert Sessions.whereis(context.session_id) == nil
-    eventually(fn -> PlaneSessions.get(context.session_id).state == "dormant" end)
+    eventually(fn -> PlaneSessions.get(context.session_id).state == "dormant" end, 10_000)
 
     # And the files written since the last archive are in the one it made on the way out.
     File.rm_rf!(context.base)

@@ -8,6 +8,8 @@ defmodule Troupe.Gateway.CommandsListTest do
 
   use ExUnit.Case, async: false
 
+  import Troupe.Eventually
+
   alias Troupe.Gateway.{Daemon, Dispatch}
   alias Troupe.Protocol.{Client, Endpoint, Error}
 
@@ -377,20 +379,6 @@ defmodule Troupe.Gateway.CommandsListTest do
 
   defp events_of(session, type), do: Enum.filter(Troupe.events(session.id), &(&1.type == type))
   defp find_event(session, type), do: List.first(events_of(session, type))
-
-  defp eventually(fun, tries \\ 100) do
-    case fun.() do
-      nil when tries > 0 ->
-        Process.sleep(50)
-        eventually(fun, tries - 1)
-
-      nil ->
-        flunk("condition not met")
-
-      value ->
-        value
-    end
-  end
 
   test "reading the table needs a session id and an existing session", context do
     assert {:error, %Error{message: "invalid_params", data: %{"missing" => "session_id"}}} =

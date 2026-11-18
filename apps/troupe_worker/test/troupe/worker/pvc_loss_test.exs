@@ -34,7 +34,7 @@ defmodule Troupe.Worker.PvcLossTest do
 
     # And the workspace archived by its own interval, which is what bounds the *files* a
     # lost volume costs the way the seal interval bounds the history.
-    eventually(fn -> archived?(context) end)
+    eventually(fn -> archived?(context) end, 10_000)
 
     # Now some events that are not sealed yet. In production this is at most sixty
     # seconds' worth; here the interval is long so the window is under the test's control
@@ -50,9 +50,9 @@ defmodule Troupe.Worker.PvcLossTest do
     Process.exit(session.sealer, :kill)
     manager = Sessions.whereis(context.session_id)
     Process.exit(manager, :kill)
-    eventually(fn -> Sessions.whereis(context.session_id) == nil end)
+    eventually(fn -> Sessions.whereis(context.session_id) == nil end, 10_000)
     Troupe.Sessions.stop_session(context.session_id)
-    eventually(fn -> Troupe.agent_tree(context.session_id) == [] end)
+    eventually(fn -> Troupe.agent_tree(context.session_id) == [] end, 10_000)
     File.rm_rf!(context.base)
 
     refute File.exists?(context.workspace)
@@ -108,7 +108,7 @@ defmodule Troupe.Worker.PvcLossTest do
         {:ok, %{"last_seq" => last}} -> last >= seq
         _ -> false
       end
-    end)
+    end, 10_000)
 
     elapsed = System.monotonic_time(:millisecond) - written_at
 

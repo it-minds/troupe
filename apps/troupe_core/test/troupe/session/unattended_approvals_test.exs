@@ -11,22 +11,6 @@ defmodule Troupe.Session.UnattendedApprovalsTest do
 
   alias Troupe.Session.Approvals
 
-  # Polled, because what is under test is a thing that must *happen* rather than a thing
-  # that is already there, and every `await_` here is satisfied by the past.
-  defp eventually(check, deadline \\ 5_000) do
-    cond do
-      check.() ->
-        :ok
-
-      deadline <= 0 ->
-        flunk("it did not happen")
-
-      true ->
-        Process.sleep(50)
-        eventually(check, deadline - 50)
-    end
-  end
-
   test "an unattended session is told no at once, durably, by the system", context do
     %{session: session} =
       start_session(context,

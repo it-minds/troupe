@@ -70,7 +70,7 @@ defmodule Troupe.Plane.FleetTest do
 
     start_supervised!({Sweeper, interval_ms: 50})
 
-    eventually(fn -> not Fleet.get_worker(lost.id).healthy end, "the pod was never marked unhealthy")
+    eventually(fn -> not Fleet.get_worker(lost.id).healthy end)
   end
 
   test "a pod that comes back is the same pod, with its sessions cleared" do
@@ -250,22 +250,6 @@ defmodule Troupe.Plane.FleetTest do
       silence(orphan, Fleet.drain_deadline_ms() + 1_000)
 
       assert Enum.map(Fleet.forget_gone(), & &1.id) == [orphan.id]
-    end
-  end
-
-  defp eventually(predicate, message, timeout_ms \\ 5_000) do
-    deadline = System.monotonic_time(:millisecond) + timeout_ms
-
-    Stream.repeatedly(fn ->
-      if predicate.(), do: :ok, else: Process.sleep(25)
-    end)
-    |> Enum.find(fn
-      :ok -> true
-      _ -> System.monotonic_time(:millisecond) > deadline
-    end)
-    |> case do
-      :ok -> :ok
-      _ -> flunk(message)
     end
   end
 end

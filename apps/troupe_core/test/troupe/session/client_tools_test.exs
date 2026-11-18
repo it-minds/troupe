@@ -210,7 +210,7 @@ defmodule Troupe.Session.ClientToolsTest do
 
       send(registrant, :stop)
 
-      assert eventually(fn -> ClientTools.owner(session.id, "client.mail.send") == :error end)
+      assert eventually(fn -> ClientTools.owner(session.id, "client.mail.send") == :error end, 2_000)
 
       unregistered =
         session.id
@@ -247,7 +247,7 @@ defmodule Troupe.Session.ClientToolsTest do
         )
 
       send(registrant, :stop)
-      assert eventually(fn -> ClientTools.owner(session.id, "client.mail.send") == :error end)
+      assert eventually(fn -> ClientTools.owner(session.id, "client.mail.send") == :error end, 2_000)
 
       unregistered = session.id |> Log.replay() |> Enum.find(&(&1.type == "tools_unregistered"))
       assert unregistered.actor == actor
@@ -289,7 +289,7 @@ defmodule Troupe.Session.ClientToolsTest do
       consent = consent!(session.id, registrant, "bob", ["mail.send"])
       {:ok, _} = ClientTools.register(session.id, registrant, consent, specs: [spec("mail.send")], subject: "bob")
       send(registrant, :stop)
-      assert eventually(fn -> ClientTools.owner(session.id, "client.mail.send") == :error end)
+      assert eventually(fn -> ClientTools.owner(session.id, "client.mail.send") == :error end, 2_000)
 
       parked = Task.async(fn -> ClientTools.await(session.id, "client.mail.send", 2_000) end)
 
@@ -323,26 +323,6 @@ defmodule Troupe.Session.ClientToolsTest do
   end
 
   defp await_taint(session_id) do
-    eventually(fn -> Map.get(Summary.snapshot(session_id), "taint") end)
-  end
-
-  defp eventually(fun, timeout \\ 2_000) do
-    deadline = System.monotonic_time(:millisecond) + timeout
-    poll(fun, deadline)
-  end
-
-  defp poll(fun, deadline) do
-    case fun.() do
-      falsy when falsy in [nil, false] ->
-        if System.monotonic_time(:millisecond) >= deadline do
-          flunk("condition never held")
-        else
-          Process.sleep(20)
-          poll(fun, deadline)
-        end
-
-      truthy ->
-        truthy
-    end
+    eventually(fn -> Map.get(Summary.snapshot(session_id), "taint") end, 2_000)
   end
 end

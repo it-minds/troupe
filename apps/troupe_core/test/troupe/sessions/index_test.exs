@@ -325,16 +325,6 @@ defmodule Troupe.Sessions.IndexTest do
     {result, div(us, 1_000)}
   end
 
-  defp gone(sid, timeout) do
-    deadline = System.monotonic_time(:millisecond) + timeout
-    poll(fn -> is_nil(Registry.whereis({:session, sid})) end, deadline)
-  end
-
-  defp poll(fun, deadline) do
-    cond do
-      fun.() -> :ok
-      System.monotonic_time(:millisecond) > deadline -> flunk("the session never stopped")
-      true -> Process.sleep(50) && poll(fun, deadline)
-    end
-  end
+  defp gone(sid, timeout),
+    do: eventually(fn -> is_nil(Registry.whereis({:session, sid})) end, timeout)
 end

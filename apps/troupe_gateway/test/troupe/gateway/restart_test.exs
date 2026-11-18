@@ -14,6 +14,8 @@ defmodule Troupe.Gateway.RestartTest do
 
   use ExUnit.Case, async: false
 
+  import Troupe.Eventually
+
   alias Troupe.Protocol.{Client, Endpoint}
   alias Troupe.Protocol.Daemon, as: DaemonClient
 
@@ -76,9 +78,9 @@ defmodule Troupe.Gateway.RestartTest do
       "text" => "take your time"
     })
 
-    await(
+    eventually(
       fn -> count(context, third, "tool_call_started") == 1 end,
-      "the third session never started its tool call"
+      20_000
     )
 
     calls_before = Enum.map([first, second, third], &count(context, &1, "llm_request"))
@@ -117,9 +119,9 @@ defmodule Troupe.Gateway.RestartTest do
       "text" => "carry on"
     })
 
-    await(
+    eventually(
       fn -> count(context, third, "llm_request") > 1 end,
-      "new input did not restart the session"
+      20_000
     )
 
     # The interrupted call was closed off rather than re-run: the log has a completion
@@ -140,9 +142,9 @@ defmodule Troupe.Gateway.RestartTest do
     workspace = hd(context.workspaces)
     session_id = create(client, workspace)
 
-    await(
+    eventually(
       fn -> state_of(client, session_id) == "dormant" end,
-      "the session never went dormant"
+      20_000
     )
 
     # A dormant session still has its history, and asking for it starts nothing.
@@ -277,7 +279,7 @@ defmodule Troupe.Gateway.RestartTest do
     File.chmod!(script, 0o700)
     {_output, 0} = System.cmd("/bin/sh", ["-c", "nohup #{script} >/dev/null 2>&1 &"])
 
-    await(fn -> reachable?(context) end, "the daemon never came up", 600)
+    eventually(fn -> reachable?(context) end, 30_000)
     :ok
   end
 
@@ -306,13 +308,5 @@ defmodule Troupe.Gateway.RestartTest do
     end
 
     :ok
-  end
-
-  defp await(predicate, message, attempts \\ 400) do
-    cond do
-      predicate.() -> :ok
-      attempts > 0 -> Process.sleep(50) && await(predicate, message, attempts - 1)
-      true -> flunk(message)
-    end
   end
 end

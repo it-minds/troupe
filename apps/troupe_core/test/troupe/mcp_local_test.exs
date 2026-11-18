@@ -131,7 +131,7 @@ defmodule Troupe.MCPLocalTest do
       [question] = wait_for_question(denied.id)
       Troupe.answer(denied.id, question.call_id, "deny")
 
-      assert %{state: :stopped, error: "not approved" <> _} = wait_for_state(denied.id, "stub", [:stopped])
+      assert %{state: :stopped, error: "not approved" <> _} = await_mcp(denied.id, "stub", [:stopped], 5_000)
       assert Questions.pending(denied.id) == []
       assert MCP.tools(denied.id) == []
 
@@ -337,16 +337,6 @@ defmodule Troupe.MCPLocalTest do
 
       questions ->
         questions
-    end
-  end
-
-  defp wait_for_state(session_id, name, states, waited \\ 0) do
-    entry = Enum.find(MCP.status(session_id), &(&1.name == name))
-
-    cond do
-      entry && entry.state in states -> entry
-      waited < 5_000 -> Process.sleep(50) && wait_for_state(session_id, name, states, waited + 50)
-      true -> entry
     end
   end
 

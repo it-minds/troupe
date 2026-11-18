@@ -347,8 +347,6 @@ a plane-token cache, the stream registry, and Bandit when autostarted.
 
 - The operator and the worker both compose a pod's hostname `<ordinal>-<profile>.<domain>`;
   the two cannot share a function across the boundary, and both say so.
-- `apps/troupe_protocol/test/troupe/policy_test.exs` imports `Troupe.Operator.Fixtures`
-  without declaring the dependency ([testing.md §1](testing.md#1-running)).
 - `troupe_plane` reads what it needs of the design (the front page's theme, which
   `mix troupe.theme` writes to `priv/static/theme.css`) from `priv/`, not from
   `clients/gui/docs/design/themes/` directly: the image build does not see `docs/`.

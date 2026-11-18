@@ -29,16 +29,9 @@ defmodule Troupe.Watch.WatchBranchTest do
     {event.data, child}
   end
 
-  defp eventually(fun, tries \\ 100) do
-    case fun.() do
-      falsy when falsy in [nil, false, []] and tries > 0 ->
-        Process.sleep(50)
-        eventually(fun, tries - 1)
-
-      other ->
-        other
-    end
-  end
+  # Nothing yet is `nil`, so `eventually` waits for the first of a kind.
+  defp present([]), do: nil
+  defp present(events), do: events
 
   defp watching(context, overrides, steps) do
     start_session(context,
@@ -105,12 +98,12 @@ defmodule Troupe.Watch.WatchBranchTest do
 
     # The session's own agent was told nothing; the branch was, as a watch input.
     assert events_of_type(session.id, "user_input") == []
-    [input] = eventually(fn -> events_of_type(child, "user_input") end)
+    [input] = eventually(fn -> present(events_of_type(child, "user_input")) end)
     assert input.data["source"] == "watch"
     assert input.data["text"] =~ "lib/calc.ex:2"
 
     # Its write asks, though the session auto-approves.
-    [asked] = eventually(fn -> events_of_type(child, "approval_requested") end)
+    [asked] = eventually(fn -> present(events_of_type(child, "approval_requested")) end)
     assert asked.data["tool"] == "edit_file"
     assert read_file(context, "lib/calc.ex") =~ "AI!"
 
@@ -147,7 +140,7 @@ defmodule Troupe.Watch.WatchBranchTest do
     assert data["mode"] == "question"
     assert Troupe.get_session(child).profile == "answer"
 
-    [attempt] = eventually(fn -> events_of_type(child, "tool_call_completed") end)
+    [attempt] = eventually(fn -> present(events_of_type(child, "tool_call_completed")) end)
     refute attempt.data["ok"]
     assert attempt.data["content"] =~ "not available in the current profile"
     assert read_file(context, "lib/thing.ex") =~ "def n, do: 0"
@@ -189,7 +182,7 @@ defmodule Troupe.Watch.WatchBranchTest do
 
     {_data, child} = triggered(session)
 
-    [attempt] = eventually(fn -> events_of_type(child, "tool_call_completed") end)
+    [attempt] = eventually(fn -> present(events_of_type(child, "tool_call_completed")) end)
     refute attempt.data["ok"]
     assert read_file(context, "lib/thing.ex") =~ "def n, do: 0"
   end
@@ -219,7 +212,7 @@ defmodule Troupe.Watch.WatchBranchTest do
 
     path = write_file(context, "lib/calc.ex", @marked)
     {_data, child} = triggered(session)
-    [asked] = eventually(fn -> events_of_type(child, "approval_requested") end)
+    [asked] = eventually(fn -> present(events_of_type(child, "approval_requested")) end)
 
     write_file(context, "lib/calc.ex", @marked <> "# saved again\n")
     :ok = Watcher.scan_now(session.id, [path])
@@ -261,7 +254,7 @@ defmodule Troupe.Watch.WatchBranchTest do
     write_file(context, "lib/calc.ex", @marked)
     {_data, child} = triggered(session)
 
-    [asked] = eventually(fn -> events_of_type(child, "approval_requested") end)
+    [asked] = eventually(fn -> present(events_of_type(child, "approval_requested")) end)
     assert asked.data["tool"] == "edit_file"
     assert read_file(context, "lib/calc.ex") =~ "AI!"
   end
@@ -288,9 +281,9 @@ defmodule Troupe.Watch.WatchBranchTest do
     assert Tool.default_permission(greet(child)) == :ask
 
     # Its first turn ended; asked to call the server's tool, it asks.
-    eventually(fn -> events_of_type(child, "turn_ended") end)
+    eventually(fn -> present(events_of_type(child, "turn_ended")) end)
     Troupe.send_input(child, "greet the world")
-    [asked] = eventually(fn -> events_of_type(child, "approval_requested") end)
+    [asked] = eventually(fn -> present(events_of_type(child, "approval_requested")) end)
     assert asked.data["tool"] == "mcp.stub.greet"
   end
 

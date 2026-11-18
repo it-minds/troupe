@@ -58,16 +58,6 @@ defmodule Troupe.MCPOAuthTest do
     started
   end
 
-  defp wait_for_state(session_id, name, states, waited \\ 0) do
-    entry = Enum.find(MCP.status(session_id), &(&1.name == name))
-
-    cond do
-      entry && entry.state in states -> entry
-      waited > 10_000 -> flunk("#{name} never reached #{inspect(states)}: #{inspect(entry)}")
-      true -> Process.sleep(50) && wait_for_state(session_id, name, states, waited + 50)
-    end
-  end
-
   defp tool(session_id) do
     Enum.find(MCP.tools(session_id), &(Tool.name(&1) == "mcp.notes.search"))
   end
@@ -103,7 +93,7 @@ defmodule Troupe.MCPOAuthTest do
       %{session: session} = with_server(context)
 
       assert %{state: :sign_in, tools: [], error: "sign in to notes" <> _} =
-               wait_for_state(session.id, "notes", [:sign_in])
+               await_mcp(session.id, "notes", [:sign_in])
 
       assert MCP.tools(session.id) == []
       # Nothing was sent: there was no token, and a call without one is not worth making.
@@ -139,7 +129,7 @@ defmodule Troupe.MCPOAuthTest do
       assert {200, page} = FakeOAuth.browse(started.url)
       assert page =~ "Signed in to notes as ada@example.test"
 
-      assert %{state: :ready, tools: ["search"]} = wait_for_state(session.id, "notes", [:ready])
+      assert %{state: :ready, tools: ["search"]} = await_mcp(session.id, "notes", [:ready])
       assert %{state: :signed_in, account: "ada@example.test"} = OAuth.status(sign_in_of(context))
 
       assert {:ok, "notes on trains, for ada@example.test"} =
@@ -193,7 +183,7 @@ defmodule Troupe.MCPOAuthTest do
       %{session: session} = with_server(context)
       started = sign_in(context)
       {200, _page} = FakeOAuth.browse(started.url)
-      wait_for_state(session.id, "notes", [:ready])
+      await_mcp(session.id, "notes", [:ready])
       search = tool(session.id)
 
       # The server stopped taking the token: refreshed, and the call goes through.
@@ -220,14 +210,14 @@ defmodule Troupe.MCPOAuthTest do
       assert %{state: :expired, account: "ada@example.test"} = OAuth.status(sign_in_of(context))
 
       assert %{state: :sign_in, error: "the sign-in to notes has run out" <> _} =
-               wait_for_state(session.id, "notes", [:sign_in])
+               await_mcp(session.id, "notes", [:sign_in])
 
       refute Map.has_key?(Store.get(context.state_dir, sign_in_of(context).key), "refresh_token")
 
       # Signing in again brings it back without restarting anything.
       FakeOAuth.set(context.fake, :refuse_refresh, false)
       {200, _page} = context |> sign_in() |> Map.fetch!(:url) |> FakeOAuth.browse()
-      assert %{state: :ready} = wait_for_state(session.id, "notes", [:ready])
+      assert %{state: :ready} = await_mcp(session.id, "notes", [:ready])
 
       assert {:ok, "notes on cars" <> _} =
                Tool.invoke(search, %{"topic" => "cars"}, ctx(session, context))
@@ -239,7 +229,7 @@ defmodule Troupe.MCPOAuthTest do
          context do
       %{session: session} = with_server(context)
       {200, _page} = context |> sign_in() |> Map.fetch!(:url) |> FakeOAuth.browse()
-      assert %{tools: ["search", "write"]} = wait_for_state(session.id, "notes", [:ready])
+      assert %{tools: ["search", "write"]} = await_mcp(session.id, "notes", [:ready])
       search = tool(session.id)
       write = Enum.find(MCP.tools(session.id), &(Tool.name(&1) == "mcp.notes.write"))
       _ = requests()
@@ -269,7 +259,7 @@ defmodule Troupe.MCPOAuthTest do
                Store.get(context.state_dir, sign_in_of(context).key)
 
       assert %{state: :signed_in, step_up: "notes.write"} = OAuth.status(sign_in_of(context))
-      assert %{state: :ready} = wait_for_state(session.id, "notes", [:ready])
+      assert %{state: :ready} = await_mcp(session.id, "notes", [:ready])
 
       assert {:ok, "notes on trains" <> _} =
                Tool.invoke(search, %{"topic" => "trains"}, ctx(session, context))
@@ -289,7 +279,7 @@ defmodule Troupe.MCPOAuthTest do
                Tool.invoke(search, %{"topic" => "planes"}, ctx(session, context))
 
       assert {200, _page} = FakeOAuth.browse(started.url)
-      assert %{state: :ready} = wait_for_state(session.id, "notes", [:ready])
+      assert %{state: :ready} = await_mcp(session.id, "notes", [:ready])
 
       assert {:ok, "wrote a note on boats, for ada@example.test"} =
                Tool.invoke(write, %{"topic" => "boats"}, ctx(session, context))
@@ -302,7 +292,7 @@ defmodule Troupe.MCPOAuthTest do
     test "a step-up the person refuses leaves the sign-in held as it was", context do
       %{session: session} = with_server(context)
       {200, _page} = context |> sign_in() |> Map.fetch!(:url) |> FakeOAuth.browse()
-      wait_for_state(session.id, "notes", [:ready])
+      await_mcp(session.id, "notes", [:ready])
       write = Enum.find(MCP.tools(session.id), &(Tool.name(&1) == "mcp.notes.write"))
 
       assert {:ok, output} = Tool.invoke(write, %{"topic" => "x"}, ctx(session, context))
@@ -330,7 +320,7 @@ defmodule Troupe.MCPOAuthTest do
       )
 
       %{session: session} = start_session(context)
-      assert %{state: :error, error: error} = wait_for_state(session.id, "notes", [:error])
+      assert %{state: :error, error: error} = await_mcp(session.id, "notes", [:error])
       assert error =~ "oauth.client_id"
     end
   end
@@ -589,11 +579,11 @@ defmodule Troupe.MCPOAuthTest do
     test "an mcp.json entry whose oauth is {} waits for the sign-in and gets its tools as the registered client",
          context do
       %{session: session} = with_server(context, %{})
-      assert %{state: :sign_in} = wait_for_state(session.id, "notes", [:sign_in])
+      assert %{state: :sign_in} = await_mcp(session.id, "notes", [:sign_in])
 
       assert {:ok, started} = sign_in_unconfigured(context)
       assert {200, _page} = FakeOAuth.browse(started.url)
-      assert %{state: :ready, tools: ["search"]} = wait_for_state(session.id, "notes", [:ready])
+      assert %{state: :ready, tools: ["search"]} = await_mcp(session.id, "notes", [:ready])
 
       assert {:ok, "notes on trains, for ada@example.test"} =
                Tool.invoke(tool(session.id), %{"topic" => "trains"}, ctx(session, context))

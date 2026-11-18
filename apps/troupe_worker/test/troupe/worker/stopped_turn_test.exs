@@ -75,7 +75,7 @@ defmodule Troupe.Worker.StoppedTurnTest do
     # What it cost is what it cost before the tree went, not the nothing a projection that
     # has stopped answers.
     assert dormant["cost_micros"] > 0
-    eventually(fn -> is_nil(Sessions.whereis(sid)) end)
+    eventually(fn -> is_nil(Sessions.whereis(sid)) end, 10_000)
   end
 
   test "a session woken after a failed turn says so until a turn starts", context do
@@ -90,7 +90,7 @@ defmodule Troupe.Worker.StoppedTurnTest do
     Log.append(sid, ["root"], :user_input, %{"source" => "user", "text" => "carry on"})
     Process.exit(Troupe.Registry.agent_pid(sid, ["root"]), :kill)
     {_statuses, _dormant} = reports_until_dormant(15_000)
-    eventually(fn -> is_nil(Sessions.whereis(sid)) end)
+    eventually(fn -> is_nil(Sessions.whereis(sid)) end, 10_000)
 
     # Woken without a word from anybody: the failure is still the last thing that
     # happened to a turn, and the first report says so rather than clearing it.
