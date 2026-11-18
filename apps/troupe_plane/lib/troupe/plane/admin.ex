@@ -1390,7 +1390,10 @@ defmodule Troupe.Plane.Admin do
          {:ok, existing} <- not_another_team(group, attrs, link == true),
          :ok <- team_github_unlocked(actor, "team.enable", group_id, attrs),
          {:ok, attrs} <- read_team_github(attrs, existing && existing.github),
-         :ok <- same_settings(existing, group, attrs, link == true) do
+         :ok <- same_settings(existing, group, attrs, link == true),
+         # The settings sent are held to the rungs above the team as an update's are; the
+         # plane's defaults for a new team are the platform's own and need no check.
+         :ok <- within_the_ladder(existing, settable(attrs, @team_keys)) do
       # Its name and its settings. The group it is enabled from, and when and by whom, are
       # the record of this call, written by it.
       sent = settable(attrs, ["name" | @team_keys])
@@ -1957,7 +1960,7 @@ defmodule Troupe.Plane.Admin do
          {:ok, team} <- fetch_team(actor, name),
          :ok <- enforced_enough(team, profile),
          before <- entitlement_names(team, profile),
-         {:ok, _grant} <- granted(team, profile, attrs) do
+         {:ok, _grant} <- granted(team, profile, Map.put(attrs, "granted_by", actor.subject)) do
       detail = grant_detail(profile, Audit.diff(before, entitlement_names(team, profile)))
 
       {:ok, _} = Audit.record(actor.subject, "team.grant", name, detail)
@@ -5545,7 +5548,7 @@ defmodule Troupe.Plane.Admin do
       grants:
         Enum.map(
           Identity.grants_for_team(team),
-          &%{profile: &1.profile, volume_mode: &1.volume_mode}
+          &%{profile: &1.profile, volume_mode: &1.volume_mode, granted_by: &1.granted_by}
         ),
       # The groups this team draws its members from. A team links to any number of them
       # and its membership is the union, so this is the list an administrator edits —

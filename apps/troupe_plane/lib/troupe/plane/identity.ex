@@ -1319,8 +1319,8 @@ defmodule Troupe.Plane.Identity do
   # One row per name, because that is what the unique index holds and what an editor of
   # three checklists can express. A list that names the same thing twice is a caller
   # saying two things at once, and the safe reading is the one that grants less — the
-  # same rule `Entitlement.resolve/2` applies when rows arrive together from several
-  # grants, reached here before anything is written rather than after.
+  # same rule `Entitlement.resolve/2` applies to rows that name one thing both ways,
+  # reached here before anything is written rather than after.
   defp collapse(rows) do
     rows
     |> Enum.group_by(&{&1["kind"], &1["name"]})
