@@ -515,7 +515,7 @@ defmodule Troupe.Worker.HarnessAuthTest do
       expired = token(context, lifetime: 1, now: now - 3_600)
       assert {:error, _} = Client.call(client, "auth.refresh", %{"auth" => %{"token" => expired}})
 
-      assert eventually(fn -> not Process.alive?(client) end)
+      assert eventually(fn -> not Process.alive?(client) end, 10_000)
     end
   end
 

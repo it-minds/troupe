@@ -11,6 +11,8 @@ defmodule Troupe.MCPTest do
 
   use ExUnit.Case, async: false
 
+  import Troupe.Test.LoopbackHTTP, only: [headers: 1, read_request: 1, respond: 3]
+
   alias Troupe.MCP
   alias Troupe.MCP.{Client, Server}
   alias Troupe.Protocol.Principal
@@ -407,59 +409,8 @@ defmodule Troupe.MCPTest do
   defp reply(id, result), do: json(%{"jsonrpc" => "2.0", "id" => id, "result" => result})
   defp error(id, message), do: json(%{"jsonrpc" => "2.0", "id" => id, "error" => %{"code" => -32_000, "message" => message}})
 
-  defp json(payload) do
-    body = Jason.encode!(payload)
+  defp json(payload), do: respond(200, "application/json", Jason.encode!(payload))
 
-    [
-      "HTTP/1.1 200 OK\r\n",
-      "content-type: application/json\r\n",
-      "content-length: #{byte_size(body)}\r\n",
-      "connection: close\r\n\r\n",
-      body
-    ]
-  end
-
-  defp headers(head) do
-    head
-    |> String.split("\r\n")
-    |> Enum.drop(1)
-    |> Enum.flat_map(fn line ->
-      case String.split(line, ": ", parts: 2) do
-        [name, value] -> [{String.downcase(name), value}]
-        _ -> []
-      end
-    end)
-    |> Map.new()
-  end
-
-  defp read_request(socket, acc \\ "") do
-    case :gen_tcp.recv(socket, 0, 5_000) do
-      {:ok, data} ->
-        acc = acc <> data
-        if complete?(acc), do: {:ok, acc}, else: read_request(socket, acc)
-
-      {:error, _reason} ->
-        :error
-    end
-  end
-
-  defp complete?(request) do
-    case String.split(request, "\r\n\r\n", parts: 2) do
-      [head, body] -> byte_size(body) >= content_length(head)
-      _ -> false
-    end
-  end
-
-  defp content_length(head) do
-    head
-    |> String.split("\r\n")
-    |> Enum.find_value(0, fn line ->
-      case String.split(String.downcase(line), ": ", parts: 2) do
-        ["content-length", value] -> String.to_integer(String.trim(value))
-        _ -> nil
-      end
-    end)
-  end
   # A session has one identity: the owner, fixed at activation, which is what a pod is
   # told in its attribution and what a person-mode call goes out as however many people
   # are attached.

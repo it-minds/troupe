@@ -17,6 +17,8 @@ defmodule Troupe.Gateway.SleepTest do
 
   use ExUnit.Case, async: false
 
+  import Troupe.Eventually
+
   alias Troupe.Gateway.Daemon
   alias Troupe.Protocol.{Client, Endpoint, Event}
   alias Troupe.Sessions.Index
@@ -417,16 +419,6 @@ defmodule Troupe.Gateway.SleepTest do
     after
       10_000 ->
         flunk("never saw it; saw #{inspect(acc |> Enum.reverse() |> Enum.map(& &1.type))}")
-    end
-  end
-
-  defp eventually(fun, timeout), do: poll(fun, System.monotonic_time(:millisecond) + timeout)
-
-  defp poll(fun, deadline) do
-    cond do
-      fun.() -> :ok
-      System.monotonic_time(:millisecond) > deadline -> flunk("condition never held")
-      true -> Process.sleep(20) && poll(fun, deadline)
     end
   end
 end

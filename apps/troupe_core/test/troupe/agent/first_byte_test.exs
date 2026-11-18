@@ -31,7 +31,7 @@ defmodule Troupe.Agent.FirstByteTest do
 
       # Stopped as a call that outlasts llm_timeout_ms is: ended, and counted as a call
       # nobody priced.
-      assert eventually(fn -> streams(sid) == [] end), "the stream is still running"
+      assert eventually(fn -> streams(sid) == [] end, 1_000), "the stream is still running"
       assert error.data["stopped"] == %{"model" => "fake-model"}
       assert %{"calls" => 1, "unpriced" => 1} = ended.data["turn"]
     end
@@ -58,7 +58,7 @@ defmodule Troupe.Agent.FirstByteTest do
       await_state(sid, [:idle], 5_000)
 
       assert events_of_type(sid, :compacted) == []
-      assert eventually(fn -> streams(sid) == [] end), "the summariser's stream is still running"
+      assert eventually(fn -> streams(sid) == [] end, 1_000), "the summariser's stream is still running"
     end
   end
 
@@ -124,14 +124,4 @@ defmodule Troupe.Agent.FirstByteTest do
   end
 
   defp streams(sid), do: Task.Supervisor.children(Registry.tasks(sid, ["root"]))
-
-  defp eventually(fun, tries \\ 50) do
-    cond do
-      fun.() -> true
-      tries == 0 -> false
-      true ->
-        Process.sleep(20)
-        eventually(fun, tries - 1)
-    end
-  end
 end

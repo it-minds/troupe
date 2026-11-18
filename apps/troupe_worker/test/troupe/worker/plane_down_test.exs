@@ -51,7 +51,7 @@ defmodule Troupe.Worker.PlaneDownTest do
 
   test "an attached harness finishes its turn and the session keeps sealing", context do
     link = start_link!(context)
-    eventually(fn -> Link.connected?(link) end)
+    eventually(fn -> Link.connected?(link) end, 10_000)
 
     assert {:ok, _} = activate(context, report: Link.reporter(link))
 
@@ -60,7 +60,7 @@ defmodule Troupe.Worker.PlaneDownTest do
 
     # The plane goes away, connections and all.
     PlaneHelper.stop_plane()
-    eventually(fn -> not Link.connected?(link) end)
+    eventually(fn -> not Link.connected?(link) end, 10_000)
 
     # Subscribed before the input, not after: a turn against a scripted model can be over
     # before a subscription taken out afterwards exists, and `agent_state` is ephemeral —
@@ -79,7 +79,7 @@ defmodule Troupe.Worker.PlaneDownTest do
 
     # And it sealed, with no plane to tell.
     sealer = Sessions.whereis(context.session_id) |> Manager.status() |> Map.fetch!(:sealer)
-    head = eventually(fn -> with %{sealed_through: seq} when seq > 0 <- Sealer.status(sealer), do: seq end)
+    head = eventually(fn -> with %{sealed_through: seq} when seq > 0 <- Sealer.status(sealer), do: seq end, 10_000)
 
     {:ok, manifest} = Storage.get_manifest(context.store, context.session_id)
     assert manifest["last_seq"] == head
@@ -87,7 +87,7 @@ defmodule Troupe.Worker.PlaneDownTest do
     # The reports are not lost, only waiting. Polled, because a report is a cast from the
     # sealer: the seal is visible in the sealer's own state a moment before the report it
     # produced has reached the link.
-    assert eventually(fn -> Link.info(link).queued > 0 end),
+    assert eventually(fn -> Link.info(link).queued > 0 end, 10_000),
            "nothing was queued for the plane, so the reports went somewhere else"
   end
 

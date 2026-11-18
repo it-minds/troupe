@@ -110,7 +110,7 @@ defmodule Troupe.Worker.GitHubFixLoopTest do
 
     start_supervised!(GitCredentials)
     start_supervised!(GitHub)
-    eventually(fn -> Link.connected?() end)
+    eventually(fn -> Link.connected?() end, 10_000)
 
     # GitHub: the App installed on example-org for widgets, a ruleset that lets it write
     # only troupe/* branches, as an organisation would set one up.
@@ -319,7 +319,7 @@ defmodule Troupe.Worker.GitHubFixLoopTest do
 
     # Going dormant revoked both at GitHub rather than leaving them their hour: neither
     # reads the repository now.
-    eventually(fn -> Enum.sort(FakeGitHub.revoked(context.fake)) == Enum.sort(tokens) end)
+    eventually(fn -> Enum.sort(FakeGitHub.revoked(context.fake)) == Enum.sort(tokens) end, 10_000)
 
     for token <- tokens do
       assert {:ok, %{status: 401}} =
@@ -727,7 +727,7 @@ defmodule Troupe.Worker.GitHubFixLoopTest do
 
     # The token that could push was revoked at GitHub; the next one cannot push, and the
     # plane refuses a push it is told of all the same.
-    eventually(fn -> before["token"] in FakeGitHub.revoked(context.fake) end)
+    eventually(fn -> before["token"] in FakeGitHub.revoked(context.fake) end, 10_000)
     {:ok, credential} = GitCredentials.credential(id, access: :write)
     assert credential["permissions"]["contents"] == "read"
     assert {:error, why} = GitHub.push(id, ws, "Four", nil)
@@ -746,7 +746,7 @@ defmodule Troupe.Worker.GitHubFixLoopTest do
 
     Troupe.stop_session(context.session_id)
 
-    eventually(fn -> Enum.sort(FakeGitHub.revoked(context.fake)) == Enum.sort(tokens) end)
+    eventually(fn -> Enum.sort(FakeGitHub.revoked(context.fake)) == Enum.sort(tokens) end, 10_000)
     assert GitCredentials.sessions() == []
     finish()
   end
@@ -1209,7 +1209,7 @@ defmodule Troupe.Worker.GitHubFixLoopTest do
       {:ok, _} = PlaneSessions.place(session_id, pod)
       Process.sleep(300)
       PlaneSessions.get(session_id).worker_id == pod.id
-    end)
+    end, 10_000)
   end
 
   # The plane's record as it was before a push, as if recording that push had failed after

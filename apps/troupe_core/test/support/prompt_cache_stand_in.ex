@@ -22,6 +22,8 @@ defmodule Troupe.Test.PromptCacheStandIn do
   its decoded body returning `{:text, text}` or `{:tool, name, input}`.
   """
 
+  alias Troupe.Test.{LoopbackHTTP, ModelStream}
+
   @lookback 20
 
   @doc "Start one. Options: `script` (required), `test` (the caller), `gateway`."
@@ -83,7 +85,7 @@ defmodule Troupe.Test.PromptCacheStandIn do
   end
 
   defp serve(socket, context) do
-    with {:ok, raw} <- read_request(socket, ""),
+    with {:ok, raw} <- LoopbackHTTP.read_request(socket),
          {:ok, path, body} when path in ["/v1/messages", "/v1/chat/completions"] <- parse(raw) do
       {n, usage} = Agent.get_and_update(context.agent, &charge(&1, path, body, context.gateway))
       send(context.test, {:prompt_cache_stand_in, n, path, body, usage})
@@ -92,40 +94,11 @@ defmodule Troupe.Test.PromptCacheStandIn do
 
       :gen_tcp.send(socket, [
         "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\nconnection: close\r\n\r\n",
-        stream(path, n, answer, usage)
+        ModelStream.events(path, n, answer, usage)
       ])
     end
 
     :gen_tcp.close(socket)
-  end
-
-  defp read_request(socket, acc) do
-    case :gen_tcp.recv(socket, 0, 5_000) do
-      {:ok, data} ->
-        acc = acc <> data
-        if complete?(acc), do: {:ok, acc}, else: read_request(socket, acc)
-
-      {:error, _reason} ->
-        :error
-    end
-  end
-
-  defp complete?(raw) do
-    case String.split(raw, "\r\n\r\n", parts: 2) do
-      [head, body] -> byte_size(body) >= content_length(head)
-      _ -> false
-    end
-  end
-
-  defp content_length(head) do
-    head
-    |> String.split("\r\n")
-    |> Enum.find_value(0, fn line ->
-      case String.split(String.downcase(line), ":", parts: 2) do
-        ["content-length", value] -> String.to_integer(String.trim(value))
-        _ -> nil
-      end
-    end)
   end
 
   defp parse(raw) do
@@ -276,73 +249,4 @@ defmodule Troupe.Test.PromptCacheStandIn do
 
   defp total([]), do: 0
   defp total(prefixes), do: List.last(prefixes).length
-
-  # -- the answers --------------------------------------------------------------
-
-  defp stream("/v1/messages", n, answer, usage) do
-    {block, delta, stop_reason} =
-      case answer do
-        {:text, text} ->
-          {%{"type" => "text", "text" => ""}, %{"type" => "text_delta", "text" => text},
-           "end_turn"}
-
-        {:tool, name, input} ->
-          {%{"type" => "tool_use", "id" => "toolu_#{n}", "name" => name, "input" => %{}},
-           %{"type" => "input_json_delta", "partial_json" => Jason.encode!(input)}, "tool_use"}
-      end
-
-    [
-      event("message_start", %{
-        "type" => "message_start",
-        "message" => %{"usage" => Map.put(usage, "output_tokens", 1)}
-      }),
-      event("content_block_start", %{
-        "type" => "content_block_start",
-        "index" => 0,
-        "content_block" => block
-      }),
-      event("content_block_delta", %{
-        "type" => "content_block_delta",
-        "index" => 0,
-        "delta" => delta
-      }),
-      event("content_block_stop", %{"type" => "content_block_stop", "index" => 0}),
-      event("message_delta", %{
-        "type" => "message_delta",
-        "delta" => %{"stop_reason" => stop_reason},
-        "usage" => %{"output_tokens" => 10}
-      }),
-      event("message_stop", %{"type" => "message_stop"})
-    ]
-  end
-
-  defp stream("/v1/chat/completions", n, answer, usage) do
-    {delta, finish} =
-      case answer do
-        {:text, text} ->
-          {%{"role" => "assistant", "content" => text}, "stop"}
-
-        {:tool, name, input} ->
-          call = %{
-            "index" => 0,
-            "id" => "call_#{n}",
-            "type" => "function",
-            "function" => %{"name" => name, "arguments" => Jason.encode!(input)}
-          }
-
-          {%{"role" => "assistant", "tool_calls" => [call]}, "tool_calls"}
-      end
-
-    [
-      data(%{"choices" => [%{"delta" => delta}]}),
-      data(%{
-        "choices" => [%{"delta" => %{}, "finish_reason" => finish}],
-        "usage" => Map.put(usage, "completion_tokens", 10)
-      }),
-      "data: [DONE]\n\n"
-    ]
-  end
-
-  defp event(name, data), do: ["event: ", name, "\ndata: ", Jason.encode!(data), "\n\n"]
-  defp data(data), do: ["data: ", Jason.encode!(data), "\n\n"]
 end

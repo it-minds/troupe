@@ -22,72 +22,66 @@ defmodule Troupe.Gateway.PythonClientTest do
 
   @moduletag timeout: 120_000
 
+  @python System.find_executable("python3")
+
   setup_all do
-    case System.find_executable("python3") do
-      nil -> {:ok, python: nil}
-      path -> {:ok, python: path}
-    end
+    if is_nil(@python),
+      do: IO.puts(:stderr, "SKIPPED: no python3 on PATH, the protocol conformance check did not run")
+
+    :ok
   end
 
-  setup context do
-    if is_nil(context.python) do
-      :ok
-    else
-      base = Path.join(System.tmp_dir!(), "troupe-py-#{System.unique_integer([:positive])}")
-      workspace = Path.join(base, "workspace")
-      state_dir = Path.join(base, "state")
-      File.mkdir_p!(workspace)
-      File.mkdir_p!(state_dir)
+  setup do
+    base = Path.join(System.tmp_dir!(), "troupe-py-#{System.unique_integer([:positive])}")
+    workspace = Path.join(base, "workspace")
+    state_dir = Path.join(base, "state")
+    File.mkdir_p!(workspace)
+    File.mkdir_p!(state_dir)
 
-      previous = System.get_env("TROUPE_STATE_HOME")
-      System.put_env("TROUPE_STATE_HOME", state_dir)
+    previous = System.get_env("TROUPE_STATE_HOME")
+    System.put_env("TROUPE_STATE_HOME", state_dir)
 
-      endpoint = %Endpoint{kind: :unix, path: Path.join(base, "daemon.sock")}
-      start_supervised!({Daemon, endpoint: endpoint, idle_shutdown_ms: :timer.hours(1)})
+    endpoint = %Endpoint{kind: :unix, path: Path.join(base, "daemon.sock")}
+    start_supervised!({Daemon, endpoint: endpoint, idle_shutdown_ms: :timer.hours(1)})
 
-      on_exit(fn ->
-        if previous,
-          do: System.put_env("TROUPE_STATE_HOME", previous),
-          else: System.delete_env("TROUPE_STATE_HOME")
+    on_exit(fn ->
+      if previous,
+        do: System.put_env("TROUPE_STATE_HOME", previous),
+        else: System.delete_env("TROUPE_STATE_HOME")
 
-        File.rm_rf!(base)
-      end)
+      File.rm_rf!(base)
+    end)
 
-      %{base: base, workspace: workspace, state_dir: state_dir, endpoint: endpoint}
-    end
+    %{base: base, workspace: workspace, state_dir: state_dir, endpoint: endpoint}
   end
 
+  @tag skip: is_nil(@python) && "no python3 on PATH"
   test "the Python reference client initializes, lists the fleet, replays, steers, and approves",
        context do
-    if is_nil(context.python) do
-      IO.puts(:stderr, "SKIPPED: no python3 on PATH, the protocol conformance check did not run")
-      assert true
-    else
-      session = start_session(context)
+    session = start_session(context)
 
-      # Something in the log before the client connects, so `from_seq: 0` has a real
-      # replay to walk rather than an empty one.
-      Troupe.send_input(session.id, "warm up")
-      await_idle(session.id)
+    # Something in the log before the client connects, so `from_seq: 0` has a real
+    # replay to walk rather than an empty one.
+    Troupe.send_input(session.id, "warm up")
+    await_idle(session.id)
 
-      {output, status} = run_conformance(context, session.id)
+    {output, status} = run_conformance(context, session.id)
 
-      assert status == 0, "the Python client failed:\n#{output}"
+    assert status == 0, "the Python client failed:\n#{output}"
 
-      report = output |> String.split("\n", trim: true) |> List.last() |> Jason.decode!()
+    report = output |> String.split("\n", trim: true) |> List.last() |> Jason.decode!()
 
-      assert report["server"] == "troupe-daemon"
-      assert report["principal"] == "user"
-      assert Enum.sort(report["scopes"]) == ["admin", "control", "observe"]
-      assert session.id in report["fleet"]
-      assert report["replayed"] == report["head_seq"]
-      assert report["approval"]["tool"] == "needs_approval"
-      assert report["tool"] == "needs_approval"
+    assert report["server"] == "troupe-daemon"
+    assert report["principal"] == "user"
+    assert Enum.sort(report["scopes"]) == ["admin", "control", "observe"]
+    assert session.id in report["fleet"]
+    assert report["replayed"] == report["head_seq"]
+    assert report["approval"]["tool"] == "needs_approval"
+    assert report["tool"] == "needs_approval"
 
-      # The client recomputed the hash chain from what it was handed, with our code
-      # nowhere in the loop.
-      assert report["chain_ok"] == true
-    end
+    # The client recomputed the hash chain from what it was handed, with our code
+    # nowhere in the loop.
+    assert report["chain_ok"] == true
   end
 
   defp start_session(context) do
@@ -121,7 +115,7 @@ defmodule Troupe.Gateway.PythonClientTest do
     client_dir = conformance_dir()
 
     System.cmd(
-      context.python,
+      @python,
       [
         Path.join(client_dir, "conformance.py"),
         "--socket",

@@ -60,19 +60,19 @@ defmodule Troupe.Session.LocalPricingTest do
 
     # The totals are added by a cast from the agent, so they land just after the event
     # the test waited for.
-    assert %{tokens: tokens, cost: cost} = eventually_listed(session.id)
+    assert %{tokens: tokens, cost: cost} = priced_listing(session.id)
     assert tokens > 0
     assert cost > 0.0
   end
 
-  defp eventually_listed(session_id, tries \\ 50) do
-    listed = Enum.find(Troupe.list_live_sessions(%{}), &(&1.id == session_id))
-
-    cond do
-      listed && listed.tokens > 0 -> listed
-      tries == 0 -> listed
-      true -> Process.sleep(20) && eventually_listed(session_id, tries - 1)
-    end
+  defp priced_listing(session_id) do
+    eventually(
+      fn ->
+        listed = Enum.find(Troupe.list_live_sessions(%{}), &(&1.id == session_id))
+        listed && listed.tokens > 0 && listed
+      end,
+      1_000
+    )
   end
 
   test "is nothing, rather than a guess, for a model with no price", context do

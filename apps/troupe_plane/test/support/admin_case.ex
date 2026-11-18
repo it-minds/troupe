@@ -17,6 +17,7 @@ defmodule Troupe.Plane.AdminCase do
   using do
     quote do
       import Phoenix.ConnTest
+      import Troupe.Eventually
       import Troupe.Plane.DataCase
 
       alias Troupe.Plane.Repo

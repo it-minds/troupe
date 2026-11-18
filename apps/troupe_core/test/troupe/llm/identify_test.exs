@@ -10,6 +10,8 @@ defmodule Troupe.LLM.IdentifyTest do
 
   use ExUnit.Case, async: false
 
+  import Troupe.Test.LoopbackHTTP, only: [headers: 1, read_request: 1]
+
   alias Troupe.LLM.{Identify, Message, Request}
   alias Troupe.LLM.Providers.{Anthropic, OpenAI}
   alias Troupe.Test.FakeTransport
@@ -319,39 +321,4 @@ defmodule Troupe.LLM.IdentifyTest do
 
     :gen_tcp.close(socket)
   end
-
-  # Every header by its lower-case name; a name sent twice keeps the last.
-  defp headers(head) do
-    head
-    |> String.split("\r\n")
-    |> Enum.drop(1)
-    |> Enum.flat_map(fn line ->
-      case String.split(line, ":", parts: 2) do
-        [name, value] -> [{String.downcase(name), String.trim(value)}]
-        _ -> []
-      end
-    end)
-    |> Map.new()
-  end
-
-  defp read_request(socket, acc \\ "") do
-    case :gen_tcp.recv(socket, 0, 5_000) do
-      {:ok, data} ->
-        acc = acc <> data
-        if complete?(acc), do: {:ok, acc}, else: read_request(socket, acc)
-
-      {:error, _reason} ->
-        :error
-    end
-  end
-
-  defp complete?(request) do
-    case String.split(request, "\r\n\r\n", parts: 2) do
-      [head, body] -> byte_size(body) >= content_length(head)
-      _ -> false
-    end
-  end
-
-  defp content_length(head),
-    do: head |> headers() |> Map.get("content-length", "0") |> String.to_integer()
 end

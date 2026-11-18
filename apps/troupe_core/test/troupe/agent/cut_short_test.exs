@@ -315,15 +315,4 @@ defmodule Troupe.Agent.CutShortTest do
       0 -> :ok
     end
   end
-
-  defp eventually(fun, timeout \\ 5_000),
-    do: poll(fun, System.monotonic_time(:millisecond) + timeout)
-
-  defp poll(fun, deadline) do
-    cond do
-      fun.() -> :ok
-      System.monotonic_time(:millisecond) > deadline -> flunk("condition never held")
-      true -> Process.sleep(20) && poll(fun, deadline)
-    end
-  end
 end

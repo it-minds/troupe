@@ -20,6 +20,7 @@ defmodule Troupe.Worker.SessionCase do
 
   using do
     quote do
+      import Troupe.Eventually
       import Troupe.Worker.SessionCase
 
       alias Troupe.ObjectStore
@@ -285,28 +286,6 @@ defmodule Troupe.Worker.SessionCase do
         await_done(session_id, timeout)
     after
       timeout -> ExUnit.Assertions.flunk("the root agent never finished its turn")
-    end
-  end
-
-  @doc "Poll until `fun` returns a truthy value, or fail."
-  @spec eventually((-> any()), pos_integer(), pos_integer()) :: any()
-  def eventually(fun, timeout \\ 10_000, step \\ 50) do
-    deadline = System.monotonic_time(:millisecond) + timeout
-    do_eventually(fun, deadline, step)
-  end
-
-  defp do_eventually(fun, deadline, step) do
-    case fun.() do
-      falsy when falsy in [nil, false] ->
-        if System.monotonic_time(:millisecond) < deadline do
-          Process.sleep(step)
-          do_eventually(fun, deadline, step)
-        else
-          ExUnit.Assertions.flunk("condition never became true")
-        end
-
-      truthy ->
-        truthy
     end
   end
 

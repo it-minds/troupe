@@ -138,6 +138,6 @@ defmodule Troupe.Worker.ApprovalDormancyTest do
         [request | _] -> request
         [] -> nil
       end
-    end)
+    end, 10_000)
   end
 end

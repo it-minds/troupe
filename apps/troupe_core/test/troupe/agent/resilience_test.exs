@@ -897,17 +897,6 @@ defmodule Troupe.Agent.ResilienceTest do
     |> MapSet.to_list()
   end
 
-  defp eventually(fun, timeout \\ 5_000),
-    do: poll(fun, System.monotonic_time(:millisecond) + timeout)
-
-  defp poll(fun, deadline) do
-    cond do
-      fun.() -> true
-      System.monotonic_time(:millisecond) > deadline -> false
-      true -> Process.sleep(10) && poll(fun, deadline)
-    end
-  end
-
   defp await_completed_call(session_id, name, timeout \\ 5_000) do
     receive do
       {:troupe_event, ^session_id, %Event{type: "tool_call_completed", data: %{"name" => ^name}}} ->

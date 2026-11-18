@@ -25,7 +25,7 @@ defmodule Troupe.ShellModeTest do
     type(pid, "!ls; exit 4")
     press(pid, "enter")
 
-    entry = eventually_shell(pid, &(&1.status != :running))
+    entry = shell_once(pid, &(&1.status != :running))
     assert entry.command == "ls; exit 4"
     assert entry.status == :exited
     assert entry.exit_status == 4
@@ -66,7 +66,7 @@ defmodule Troupe.ShellModeTest do
     paste(pid, "!echo pasted")
     press(pid, "enter")
 
-    entry = eventually_shell(pid, &(&1.status != :running))
+    entry = shell_once(pid, &(&1.status != :running))
     assert entry.output =~ "pasted"
   end
 
@@ -77,13 +77,13 @@ defmodule Troupe.ShellModeTest do
     type(pid, "!echo begun; sleep 30")
     press(pid, "enter")
 
-    eventually_shell(pid, &(&1.status == :running and &1.output =~ "begun"))
+    shell_once(pid, &(&1.status == :running and &1.output =~ "begun"))
     eventually(fn -> user_state(pid).shell != nil end)
     assert screen_text(pid, session) =~ "Esc kills it"
 
     press(pid, "esc")
 
-    entry = eventually_shell(pid, &(&1.status != :running), 15_000)
+    entry = shell_once(pid, &(&1.status != :running), 15_000)
     assert entry.status == :killed
     assert user_state(pid).shell == nil
     assert screen_text(pid, session) =~ "killed"
@@ -96,7 +96,7 @@ defmodule Troupe.ShellModeTest do
     type(pid, "!!echo private")
     press(pid, "enter")
 
-    entry = eventually_shell(pid, &(&1.status != :running))
+    entry = shell_once(pid, &(&1.status != :running))
     assert entry.command == "echo private"
     assert entry.agent == false
     assert screen_text(pid, session) =~ "kept from the agent"
@@ -139,7 +139,7 @@ defmodule Troupe.ShellModeTest do
 
   defp shells(pid), do: for({:shell, entry} <- transcript(pid), do: entry)
 
-  defp eventually_shell(pid, done?, timeout \\ 10_000) do
+  defp shell_once(pid, done?, timeout \\ 10_000) do
     eventually(fn -> Enum.find(shells(pid), done?) end, timeout)
   end
 end

@@ -29,7 +29,7 @@ defmodule Troupe.Worker.ReaderLogTest do
       follower = held(context)
       assert File.exists?(log_path(context))
       let_go(follower)
-      eventually(fn -> Reader.whereis(context.session_id) == nil end)
+      eventually(fn -> Reader.whereis(context.session_id) == nil end, 10_000)
       refute File.exists?(log_dir(context))
 
       assert {:ok, %{source: :storage}} = Reader.open(context.session_id, reading(context))
@@ -42,7 +42,7 @@ defmodule Troupe.Worker.ReaderLogTest do
       assert {:ok, %{source: :storage}} =
                Reader.open(context.session_id, reading(context, idle_grace_ms: 50))
 
-      eventually(fn -> Reader.whereis(context.session_id) == nil end)
+      eventually(fn -> Reader.whereis(context.session_id) == nil end, 10_000)
       refute File.exists?(log_dir(context))
     end
 
@@ -76,7 +76,7 @@ defmodule Troupe.Worker.ReaderLogTest do
       assert Troupe.replay_from(context.session_id, 0) == history
 
       send(client, :stop)
-      eventually(fn -> Reader.whereis(context.session_id) == nil end)
+      eventually(fn -> Reader.whereis(context.session_id) == nil end, 10_000)
       refute File.exists?(log_dir(context))
     end
   end
@@ -110,7 +110,7 @@ defmodule Troupe.Worker.ReaderLogTest do
       # writes to the log, and the reader, with nothing left to serve or to take away,
       # goes, though the client is still there: it reads the live log now.
       assert {:ok, _summary} = activate(context, epoch: 2)
-      eventually(fn -> Reader.whereis(context.session_id) == nil end)
+      eventually(fn -> Reader.whereis(context.session_id) == nil end, 10_000)
 
       assert File.exists?(log_path(context))
       events = Troupe.replay_from(context.session_id, 0)
@@ -144,7 +144,7 @@ defmodule Troupe.Worker.ReaderLogTest do
 
       # It failed: the log it found was the reader's, and the reader takes it away.
       send(starting, :stop)
-      eventually(fn -> Reader.whereis(context.session_id) == nil end)
+      eventually(fn -> Reader.whereis(context.session_id) == nil end, 10_000)
       refute File.exists?(log_dir(context))
 
       # A reader closed while an activation is starting leaves the log to it.
@@ -181,7 +181,7 @@ defmodule Troupe.Worker.ReaderLogTest do
 
       assert File.exists?(log_path(context))
       let_go(follower)
-      eventually(fn -> Reader.whereis(context.session_id) == nil end)
+      eventually(fn -> Reader.whereis(context.session_id) == nil end, 10_000)
       refute File.exists?(log_dir(context))
     end
   end
@@ -223,7 +223,7 @@ defmodule Troupe.Worker.ReaderLogTest do
       holder = holding_the_log(context.session_id)
 
       reading = Task.async(fn -> Reader.open(context.session_id, reading(context)) end)
-      eventually(fn -> Reader.whereis(context.session_id) end)
+      eventually(fn -> Reader.whereis(context.session_id) end, 10_000)
 
       # The reader has looked, and is fetching the segments or waiting to write them, when
       # an activation registers and puts its log back.

@@ -9,8 +9,8 @@ defmodule Troupe.Gateway.DaemonStopTest do
 
   use ExUnit.Case, async: false
 
-  import Troupe.Gateway.HarnessCase,
-    only: [attach: 2, start_session: 2, collect: 2, eventually: 1]
+  import Troupe.Eventually
+  import Troupe.Gateway.HarnessCase, only: [attach: 2, start_session: 2, collect: 2]
 
   alias Troupe.Gateway.{Daemon, HarnessCase, Listener}
   alias Troupe.Protocol.{Client, Endpoint}

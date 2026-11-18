@@ -46,7 +46,7 @@ defmodule Troupe.Worker.MemoryReadTest do
        }}
     )
 
-    eventually(fn -> Link.connected?() end)
+    eventually(fn -> Link.connected?() end, 10_000)
     :ok = MemoryRead.install()
 
     on_exit(fn ->

@@ -199,10 +199,10 @@ defmodule Troupe.Worker.ErasureTest do
     _link = attach_pod(context)
 
     prefix = Storage.prefix(context.session_id)
-    eventually(fn -> match?({:ok, []}, ObjectStore.list_versions(context.store, prefix)) end)
+    eventually(fn -> match?({:ok, []}, ObjectStore.list_versions(context.store, prefix)) end, 10_000)
 
     # And the plane records that this pod has done it, so it is not asked again.
-    eventually(fn -> Erasure.tombstone_for(context.session_id).applied_by != [] end)
+    eventually(fn -> Erasure.tombstone_for(context.session_id).applied_by != [] end, 10_000)
     assert Erasure.pending_for("dev", "troupe-w-dev-0") == []
   end
 
@@ -253,7 +253,7 @@ defmodule Troupe.Worker.ErasureTest do
 
     eventually(fn ->
       Erasure.tombstone_for(context.session_id).applied_by == ["troupe-w-dev-0"]
-    end)
+    end, 10_000)
 
     assert {:ok, []} = ObjectStore.list_versions(locked, prefix)
     assert Erasure.pending_for("dev", "troupe-w-dev-0") == []
@@ -372,7 +372,7 @@ defmodule Troupe.Worker.ErasureTest do
          claims: %{"pod_name" => "troupe-w-dev-0", "capacity" => 4, "disk_total_bytes" => 1_000_000}}
       )
 
-    eventually(fn -> Link.connected?(link) end)
+    eventually(fn -> Link.connected?(link) end, 10_000)
     link
   end
 

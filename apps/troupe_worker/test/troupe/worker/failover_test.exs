@@ -75,7 +75,7 @@ defmodule Troupe.Worker.FailoverTest do
 
   test "the link comes back on the survivor, and attached sessions never notice", context do
     link = start_link!(context)
-    eventually(fn -> Link.connected?(link) end)
+    eventually(fn -> Link.connected?(link) end, 10_000)
 
     first = Link.info(link).connects
     assert Service.stats(context.service).forwarded == [context.local_port]
@@ -123,10 +123,10 @@ defmodule Troupe.Worker.FailoverTest do
 
   test "creates keep succeeding on the surviving replica", context do
     link = start_link!(context)
-    eventually(fn -> Link.connected?(link) end)
+    eventually(fn -> Link.connected?(link) end, 10_000)
 
     # The pod is enrolled, which is what a create needs to have somewhere to go.
-    worker = eventually(fn -> List.first(Fleet.list_workers("dev")) end)
+    worker = eventually(fn -> List.first(Fleet.list_workers("dev")) end, 10_000)
     assert worker.healthy
 
     Service.put_backends(context.service, [context.peer_port])

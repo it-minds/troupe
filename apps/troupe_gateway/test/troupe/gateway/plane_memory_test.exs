@@ -10,6 +10,8 @@ defmodule Troupe.Gateway.PlaneMemoryTest do
   # The copy is the machine's, in one place for the whole VM.
   use ExUnit.Case, async: false
 
+  import Troupe.Eventually
+
   alias Troupe.Config.Org
   alias Troupe.Gateway.{Daemon, FakePlane, LocalOnly}
   alias Troupe.LLM.Fake
@@ -71,17 +73,6 @@ defmodule Troupe.Gateway.PlaneMemoryTest do
       "plane_url" => ctx.plane.url,
       "plane_token" => "plane-token"
     })
-  end
-
-  defp eventually(fun, tries \\ 100) do
-    case fun.() do
-      falsy when falsy in [nil, false] and tries > 0 ->
-        Process.sleep(50)
-        eventually(fun, tries - 1)
-
-      result ->
-        result
-    end
   end
 
   test "a link with a token keeps the plane's signed memory, and a session after it reads it first",

@@ -79,7 +79,7 @@ defmodule Troupe.Worker.MachineLinkTest do
     {proxy, port} = start_proxy!(context.port)
     link = start_link!(context, port: port, ca: context.ca)
 
-    eventually(fn -> Link.connected?(link) end)
+    eventually(fn -> Link.connected?(link) end, 10_000)
     assert %{tls: true, profile: "laptops", refused: nil} = Link.info(link)
     assert_received :verified
     assert [%{pod_name: "build-box"}] = Fleet.list_workers("laptops")
@@ -95,7 +95,7 @@ defmodule Troupe.Worker.MachineLinkTest do
     {proxy, port} = start_proxy!(context.port)
     link = start_link!(context, port: port)
 
-    eventually(fn -> Link.info(link).refused != nil end)
+    eventually(fn -> Link.info(link).refused != nil end, 10_000)
     assert Link.info(link).refused =~ "set TROUPE_PLANE_CA_PATH"
     refute Link.connected?(link)
 
@@ -110,7 +110,7 @@ defmodule Troupe.Worker.MachineLinkTest do
     {proxy, port} = start_proxy!(context.port)
     link = start_link!(context, port: port, ca: context.other_ca)
 
-    eventually(fn -> Link.info(link).refused != nil end)
+    eventually(fn -> Link.info(link).refused != nil end, 10_000)
     assert Link.info(link).refused =~ "the plane's certificate was refused (unknown_ca)"
     refute Link.connected?(link)
     refute RecordingProxy.captured(proxy) =~ @secret
@@ -121,7 +121,7 @@ defmodule Troupe.Worker.MachineLinkTest do
        context do
     link = start_link!(context, ca: context.ca, server_name: "plane.example.test")
 
-    eventually(fn -> Link.info(link).refused != nil end)
+    eventually(fn -> Link.info(link).refused != nil end, 10_000)
     assert Link.info(link).refused =~ "the plane's certificate was refused"
     assert Link.info(link).refused =~ "name plane.example.test"
     refute_received :verified
@@ -144,7 +144,7 @@ defmodule Troupe.Worker.MachineLinkTest do
           claims: %{"pod_name" => "troupe-w-dev-0"}
         )
 
-      eventually(fn -> Link.connected?(link) end)
+      eventually(fn -> Link.connected?(link) end, 10_000)
       assert %{tls: true, profile: "dev", refused: nil} = Link.info(link)
       assert_received :verified
 
@@ -164,7 +164,7 @@ defmodule Troupe.Worker.MachineLinkTest do
         )
 
       # It tried, and got nowhere: the plane read the first byte and hung up.
-      eventually(fn -> RecordingProxy.captured(proxy) =~ "enrol" end)
+      eventually(fn -> RecordingProxy.captured(proxy) =~ "enrol" end, 10_000)
       refute Link.connected?(link)
       assert Fleet.list_workers("dev") == []
       refute_received :verified

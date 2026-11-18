@@ -169,7 +169,7 @@ defmodule Troupe.Plane.ArtifactCommentEditsTest do
   end
 
   describe "a laptop's daemon, on its poll" do
-    defp poll(user, since),
+    defp asked(user, since),
       do: Harness.call("me.memory", %{"artifact_comments" => %{"since" => since}}, as(user))
 
     test "hears the comments on its person's artifacts from a session on their machine, since its last poll",
@@ -199,7 +199,7 @@ defmodule Troupe.Plane.ArtifactCommentEditsTest do
 
       # The first poll hears nothing written before it, and is given where to start.
       {:ok, _} = comment(context.ada, laptop["id"], "Before the daemon asked.")
-      assert {:ok, %{"artifact_comments" => %{"since" => since, "comments" => []}} = answer} = poll(context.ada, nil)
+      assert {:ok, %{"artifact_comments" => %{"since" => since, "comments" => []}} = answer} = asked(context.ada, nil)
       # Beside the signed memory, not in it.
       refute inspect(answer["signed"]) =~ "artifact_comments"
 
@@ -208,7 +208,7 @@ defmodule Troupe.Plane.ArtifactCommentEditsTest do
       {:ok, _} = comment(context.di, context.page["id"], "On the roadmap.")
       {:ok, _} = comment(context.di, theirs["id"], "On Cy's.")
 
-      assert {:ok, %{"artifact_comments" => %{"since" => next, "comments" => [heard]}}} = poll(context.ada, since)
+      assert {:ok, %{"artifact_comments" => %{"since" => next, "comments" => [heard]}}} = asked(context.ada, since)
 
       assert heard["session_id"] == "s-laptop-1"
       assert heard["artifact"] == %{"id" => laptop["id"], "title" => "Findings"}
@@ -217,10 +217,10 @@ defmodule Troupe.Plane.ArtifactCommentEditsTest do
       assert heard["comment"]["author"]["subject"] == context.di.subject
 
       # Asked again from where it left off: nothing new, and a deleted one is not told.
-      assert {:ok, %{"artifact_comments" => %{"since" => ^next, "comments" => []}}} = poll(context.ada, next)
+      assert {:ok, %{"artifact_comments" => %{"since" => ^next, "comments" => []}}} = asked(context.ada, next)
       {:ok, %{"comment" => %{"id" => gone}}} = comment(context.di, laptop["id"], "Never mind.")
       {:ok, _} = delete(context.di, laptop["id"], gone)
-      assert {:ok, %{"artifact_comments" => %{"comments" => []}}} = poll(context.ada, next)
+      assert {:ok, %{"artifact_comments" => %{"comments" => []}}} = asked(context.ada, next)
     end
 
     test "is not asked about comments by a poll that does not ask", context do

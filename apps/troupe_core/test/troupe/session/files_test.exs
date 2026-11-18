@@ -12,6 +12,8 @@ defmodule Troupe.Session.FilesTest do
 
   use ExUnit.Case, async: true
 
+  import Troupe.Eventually
+
   alias Troupe.Session.Files
   alias Troupe.Workspace
 
@@ -65,7 +67,7 @@ defmodule Troupe.Session.FilesTest do
 
     send(:sys.get_state(files).backend, :stop)
 
-    assert eventually(fn -> Files.backend(context.session_id) == :poll end)
+    assert eventually(fn -> Files.backend(context.session_id) == :poll end, 2_000)
   end
 
   defp start_files!(context, backend) do
@@ -77,19 +79,5 @@ defmodule Troupe.Session.FilesTest do
        backend: backend,
        interval_ms: 60_000}
     )
-  end
-
-  defp eventually(fun, attempts \\ 100) do
-    cond do
-      fun.() ->
-        true
-
-      attempts == 0 ->
-        false
-
-      true ->
-        Process.sleep(20)
-        eventually(fun, attempts - 1)
-    end
   end
 end

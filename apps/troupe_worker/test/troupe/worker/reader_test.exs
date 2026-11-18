@@ -68,7 +68,7 @@ defmodule Troupe.Worker.ReaderTest do
     assert Process.alive?(reader)
 
     send(watcher, :stop)
-    eventually(fn -> Reader.whereis(context.session_id) == nil end)
+    eventually(fn -> Reader.whereis(context.session_id) == nil end, 10_000)
   end
 
   test "a session that is already running needs no reader", context do

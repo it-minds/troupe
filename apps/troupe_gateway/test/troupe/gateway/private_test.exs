@@ -15,6 +15,7 @@ defmodule Troupe.Gateway.PrivateTest do
   use ExUnit.Case, async: false
 
   import ExUnit.CaptureLog
+  import Troupe.Eventually
 
   alias Troupe.Gateway.{Daemon, FakePlane, Plane, Private}
   alias Troupe.ObjectStore
@@ -1516,21 +1517,6 @@ defmodule Troupe.Gateway.PrivateTest do
 
   defp asked_for_erasures(state, asked \\ 0) do
     for {"session.erasures", params} <- Enum.drop(FakePlane.calls(state), asked), do: params
-  end
-
-  # The link answers before the daemon has asked; what it does next is a task of its own.
-  defp eventually(check, deadline \\ 5_000) do
-    cond do
-      check.() ->
-        true
-
-      deadline <= 0 ->
-        false
-
-      true ->
-        Process.sleep(50)
-        eventually(check, deadline - 50)
-    end
   end
 
   # The Sealer subscribes; here nothing publishes, so the events are handed to it
