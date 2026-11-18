@@ -64,7 +64,8 @@ const plane = await FakePlane.start({
   corsOrigins: origins,
   admin,
   version,
-  // The desktop app the plane recommends, which the console's banner offers (#959).
+  // The desktop app the plane recommends, which the console's "Open in the app" offers to
+  // install where nothing opened (#959).
   downloads: {
     version,
     page: `https://github.com/it-minds/troupe/releases/tag/v${version}`,

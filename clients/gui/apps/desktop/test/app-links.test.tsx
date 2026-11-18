@@ -115,11 +115,13 @@ describe("what a link leads to", () => {
     });
   });
 
-  it("Copy link on a session copies its app link, and the console's page for a private one", () => {
-    expect(sessionLinkText("s-1", plane, "https://troupe.example.com/console/", true)).toBe(
-      "troupe://session/s-1?plane=https%3A%2F%2Ftroupe.example.com\nhttps://troupe.example.com/console/#/mine/invited/s-1",
+  it("Copy link on a session copies its app link, the web app at it, and the console's page for a private one", () => {
+    expect(sessionLinkText("s-1", plane, { console: "https://troupe.example.com/console/", privateSession: true })).toBe(
+      "troupe://session/s-1?plane=https%3A%2F%2Ftroupe.example.com\nhttps://troupe.example.com/console/#/sessions/invited/s-1",
     );
-    expect(sessionLinkText("s-1", plane, "https://troupe.example.com/console", false)).toBe("troupe://session/s-1?plane=https%3A%2F%2Ftroupe.example.com");
-    expect(sessionLinkText("s-1", plane, null, true)).toBe("troupe://session/s-1?plane=https%3A%2F%2Ftroupe.example.com");
+    expect(sessionLinkText("s-1", plane, { app: "https://troupe.example.com/app/", console: "https://troupe.example.com/console", privateSession: false })).toBe(
+      "troupe://session/s-1?plane=https%3A%2F%2Ftroupe.example.com\nhttps://troupe.example.com/app/#/session/s-1",
+    );
+    expect(sessionLinkText("s-1", plane, { app: null, console: null, privateSession: true })).toBe("troupe://session/s-1?plane=https%3A%2F%2Ftroupe.example.com");
   });
 });

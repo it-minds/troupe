@@ -140,6 +140,8 @@ export interface PlaneOptions {
    * a plane that recommends no desktop version: the latest release's page and no files.
    */
   downloads?: { version: string | null; page: string; windows: string | null; macos: string | null; linux: string | null };
+  /** Where discovery says the desktop app's browser build is (`plane.app`, #1118). None is a plane that names none. */
+  app?: string;
   /**
    * The admin writes discovery says take `dry_run: true` (`plane.dry_run`); absent, the
    * ones this fake does. An empty list is a plane from before, which would make the write.
@@ -1187,6 +1189,7 @@ export class FakePlane {
           jwks: "/.well-known/jwks.json",
           protocol_version: "1",
           console: null,
+          app: this.opts.app ?? null,
           downloads: this.opts.downloads ?? { version: null, page: "https://github.com/it-minds/troupe/releases/latest", windows: null, macos: null, linux: null },
           ...(this.opts.version ? { build: { version: this.opts.version } } : {}),
           dry_run: this.opts.dryRun ?? ["admin.clients.put"],

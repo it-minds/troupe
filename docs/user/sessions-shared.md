@@ -129,14 +129,18 @@ signs you out of that one. A link opens only what you may already see: a session
 invited into, an artifact published for you. An artifact's share link is the `https` one,
 which gives you its role; the `troupe://` line under it opens it in the app after that.
 
-The console offers the app in a line at the top of every screen, an artifact's page
-included, and the docs site on every page: *Open in the app* follows the link for the page
-you are on, and when nothing opens within a moment the line offers the installer for your
-computer, the version your plane recommends (on the docs site, the release's page).
+The app in a browser (the plane's `/app`) offers the desktop app in a line at the top of
+every screen, and the docs site on every page: *Open in the app* follows the link for the
+place you are on, and when nothing opens within a moment the line offers the installer for
+your computer, the version your plane recommends (on the docs site, the release's page).
+The console offers it only on a session's row and an artifact's card.
 *Dismiss* keeps it away in that browser until the recommended version changes. Whether the
 app opened is the page's guess, since a browser does not say: one that asks "Open Troupe?"
 and is told no is not offered the install. On a phone the line says the app is for a
 computer and copies the page's link for you to send yourself. *Copy link* in a session's
-head copies its `troupe://` link, with the console's page for it under it where it has one;
+head copies its `troupe://` link, with the app in a browser at it under it where the plane
+serves one, and for a private session the console's page for it;
 the console's *Copy link* on a session's view, and on the page of an artifact the session
 published, copies the same, and a browser that will not copy shows it to copy by hand.
+The app in a browser opens `/app/#/session/<id>` and `/app/#/artifact/<id>` at that place,
+or says in a line why not, and its address follows you, so copying it is a link to where you are.

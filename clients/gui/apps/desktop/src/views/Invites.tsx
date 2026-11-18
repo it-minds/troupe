@@ -14,7 +14,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { JSX } from "react";
-import { emptyTranscript, errorText, fold, inviteRefusal, personName, removedSentence, roleWords } from "@troupe/client";
+import { emptyTranscript, errorText, fold, inviteRefusal, personName, removedSentence, roleWords, webAppOf } from "@troupe/client";
 import type { AuthSession, DaemonClient, FleetRow, Invitee, InviteRole, Person, TranscriptState, TroupeEvent } from "@troupe/client";
 import { copyText } from "../clipboard";
 import { sessionLinkText } from "../links";
@@ -226,8 +226,8 @@ export function InviteControl({
 }
 
 /**
- * The link to send with an invitation: the session's `troupe://` link, and under it the
- * console's page for it where it has one (`sessionLinkText`). Neither carries a token; each
+ * The link to send with an invitation: the session's `troupe://` link, under it the web app at it
+ * and the console's page for it where the plane names them (`sessionLinkText`). None carries a token; each
  * opens the session for somebody who signs in and was invited.
  */
 function CopySessionLink({ auth, row }: { auth: AuthSession; row: FleetRow }): JSX.Element {
@@ -236,7 +236,7 @@ function CopySessionLink({ auth, row }: { auth: AuthSession; row: FleetRow }): J
     try {
       const discovery = await auth.discover().catch(() => null);
       const console = typeof discovery?.plane?.["console"] === "string" ? (discovery.plane["console"] as string) : null;
-      await copyText(sessionLinkText(row.id, auth.planeUrl, console, row.kind === "private"));
+      await copyText(sessionLinkText(row.id, auth.planeUrl, { app: webAppOf(discovery), console, privateSession: row.kind === "private" }));
       setSaid("Link copied");
     } catch (e) {
       setSaid(`Not copied: ${errorText(e)}`);

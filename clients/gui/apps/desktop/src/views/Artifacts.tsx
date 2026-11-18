@@ -20,7 +20,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import type { JSX } from "react";
-import { ago, appLink, audienceName, audienceOf, blockedKindWords, blockedWords, bytes, errorText, teamOwned, visibilityWords } from "@troupe/client";
+import { ago, artifactLinkText, audienceName, audienceOf, blockedKindWords, blockedWords, bytes, errorText, teamOwned, visibilityWords } from "@troupe/client";
 import type { Artifact, ArtifactAudience, ArtifactDetail, ArtifactList, ArtifactShareRole, ArtifactThread, ArtifactVersion, DaemonClient, OwnPlane, Person } from "@troupe/client";
 import { goesLine, goesSentence, versionGoes, versionsSentence } from "@troupe/client";
 import { copyText } from "../clipboard";
@@ -195,9 +195,12 @@ export function Artifacts({
   daemonState,
   localOnly,
   onOpenSession,
+  webApp = null,
 }: {
-  /** The artifact a `troupe://artifact/` link named, chosen as the gallery opens. */
+  /** The artifact a `troupe://artifact/` link or the web app's address named, chosen as the gallery opens. */
   open?: string | undefined;
+  /** The plane's web app (`plane.app`), for the web line under a copied link. */
+  webApp?: string | null;
   via: OwnPlane | null;
   daemon: DaemonClient | null;
   daemonState: { status: "unsupported" | "searching" | "absent" | "connected" | "error"; error: string | null };
@@ -429,6 +432,7 @@ export function Artifacts({
             onChanged={reload}
             onOpenSession={onOpenSession}
             planeUrl={list.plane_url ?? null}
+            webApp={webApp}
           />
         )}
       </div>
@@ -510,11 +514,14 @@ function Aside({
   onChanged,
   onOpenSession,
   planeUrl = null,
+  webApp = null,
 }: {
   via: OwnPlane;
   daemon: DaemonClient | null;
   /** The plane the artifact is on, for the `troupe://` line under its link. */
   planeUrl?: string | null;
+  /** The plane's web app, for the line under that one. */
+  webApp?: string | null;
   artifact: Artifact;
   audience: ArtifactAudience;
   teams: string[] | undefined;
@@ -576,12 +583,13 @@ function Aside({
 
   // Its owner's link is a view link made now, shown once; anybody else's is its address, which signs them in.
   // Under it, the app's own link to the same artifact, which carries no part of the link's
-  // key: it opens the artifact in the app for whoever may see it already.
+  // key: it opens the artifact in the app for whoever may see it already; and the web app at
+  // it, for somebody without the app.
   const copy = async (): Promise<void> => {
     setError(null);
     try {
       const url = owner ? (await via.shareArtifact(artifact.id, "view")).url : artifact.url;
-      await copyText(planeUrl ? `${url}\n${appLink({ kind: "artifact", id: artifact.id, plane: planeUrl })}` : url);
+      await copyText(artifactLinkText(url, artifact.id, planeUrl, webApp));
       setCopied(true);
       if (owner) setAsked((n) => n + 1);
     } catch (e) {

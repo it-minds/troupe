@@ -18,6 +18,11 @@ import {
   planeAddress,
   platformOf,
   RELEASES_PAGE,
+  artifactLinkText,
+  installOffer,
+  sessionLinkText,
+  webAppLink,
+  webAppOf,
 } from "../src/index.js";
 import type { OpenWatch } from "../src/index.js";
 
@@ -167,5 +172,44 @@ describe("the banner", () => {
     assert.deepEqual(opened.followed, ["troupe://open"]);
     const nothing = watch(false);
     assert.equal(await followAppLink("troupe://open", nothing.watch), "nothing");
+  });
+});
+
+describe("copied links name the web app", () => {
+  const SESSION = "troupe://session/s-1?plane=https%3A%2F%2Ftroupe.example.com";
+
+  it("a session's: the app's link, the web app at it where the plane names one, and the console for a private one", () => {
+    assert.equal(sessionLinkText("s-1", PLANE), SESSION);
+    assert.equal(sessionLinkText("s-1", PLANE, { app: "https://troupe.example.com/app/" }), `${SESSION}\nhttps://troupe.example.com/app/#/session/s-1`);
+    assert.equal(
+      sessionLinkText("s-1", PLANE, { app: "https://troupe.example.com/app", console: "https://troupe.example.com/console/", privateSession: true }),
+      `${SESSION}\nhttps://troupe.example.com/app/#/session/s-1\nhttps://troupe.example.com/console/#/sessions/invited/s-1`,
+    );
+    assert.equal(sessionLinkText("s-1", PLANE, { console: "https://troupe.example.com/console/", privateSession: false }), SESSION);
+  });
+
+  it("an artifact's: its link, the app's, and the web app's, or the link alone without a plane", () => {
+    const url = "https://artifacts.example.com/a/a-1/?k=view";
+    assert.equal(artifactLinkText(url, "a-1", null, "https://troupe.example.com/app"), url);
+    assert.equal(artifactLinkText(url, "a-1", PLANE), `${url}\ntroupe://artifact/a-1?plane=https%3A%2F%2Ftroupe.example.com`);
+    assert.equal(
+      artifactLinkText(url, "a-1", PLANE, "https://troupe.example.com/app/"),
+      `${url}\ntroupe://artifact/a-1?plane=https%3A%2F%2Ftroupe.example.com\nhttps://troupe.example.com/app/#/artifact/a-1`,
+    );
+  });
+
+  it("reads the web app's address from discovery, and nothing that is not one", () => {
+    assert.equal(webAppOf({ plane: { app: "https://troupe.example.com/app" } }), "https://troupe.example.com/app");
+    assert.equal(webAppOf({ plane: { app: null } }), null);
+    assert.equal(webAppOf({ plane: { app: "javascript:alert(1)" } }), null);
+    assert.equal(webAppOf(null), null);
+    assert.equal(webAppLink("https://x.example/app/", { kind: "artifact", id: "a:1" }), "https://x.example/app/#/artifact/a%3A1");
+  });
+
+  it("offers this platform's installer with the others beside it, or the release page", () => {
+    const d = { version: "1", page: RELEASES_PAGE, windows: "https://r/w.exe", macos: "https://r/m.dmg", linux: null };
+    assert.deepEqual(installOffer("windows", d), { here: "windows", file: "https://r/w.exe", others: ["macos"] });
+    assert.deepEqual(installOffer("linux", d), { here: "linux", file: null, others: [] });
+    assert.deepEqual(installOffer("other", d), { here: null, file: null, others: [] });
   });
 });

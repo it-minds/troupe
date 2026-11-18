@@ -35,7 +35,7 @@
 import { useEffect, useState } from "react";
 import type { JSX } from "react";
 import { ArtifactApi, TroupeRpcError, appLink, blockedKindWords, blockedWords, bytes, ownerWords, teamOwned, visibilityWords as audienceWords } from "@troupe/client";
-import { OpenInApp } from "./AppBanner";
+import { OpenInApp } from "./OpenInApp";
 import type { AdminArtifactPage, Artifact, ArtifactDetail, ArtifactFilter, ArtifactList, ArtifactPerson } from "@troupe/client";
 import { goesLine, goesSentence, versionGoes, versionsSentence } from "@troupe/client";
 import { describeError, useConsole, useLoad } from "../console";
