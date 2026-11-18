@@ -57,7 +57,7 @@ defmodule Troupe.Config do
   alias Troupe.LLM.Catalog.Store
   alias Troupe.LLM.{Endpoint, ProviderType}
   alias Troupe.MCP.{OAuth, Server}
-  alias Troupe.Protocol.Words
+  alias Troupe.Protocol.{Allowance, Words}
 
   require Logger
 
@@ -90,7 +90,7 @@ defmodule Troupe.Config do
             # What each provider last said about its models, from the cache file. Never
             # fetched here: loading a config must not depend on a provider answering.
             catalog: %{},
-            max_tokens: 8192,
+            max_tokens: Allowance.max_tokens(),
             context_window: 200_000,
             compact_at: 0.75,
             # How long one model call may take, and how long a stream may go quiet.
@@ -98,11 +98,11 @@ defmodule Troupe.Config do
             # How long one may take to send its first byte: a host that says nothing is
             # given up on sooner than a model that is thinking.
             llm_first_byte_ms: 60_000,
-            max_turns: 40,
-            max_input_tokens: 2_000_000,
-            max_output_tokens: 400_000,
-            wall_clock_ms: 30 * 60 * 1000,
-            max_depth: 3,
+            max_turns: Allowance.max_turns(),
+            max_input_tokens: Allowance.max_input_tokens(),
+            max_output_tokens: Allowance.max_output_tokens(),
+            wall_clock_ms: Allowance.wall_clock_ms(),
+            max_depth: Allowance.max_depth(),
             # When a `budget_warning` is published: the fraction of any limit — turns,
             # tokens, wall clock, context window — an agent has spent (Decision 655).
             # `full_send` turns the warnings off for a session that wants no nagging.

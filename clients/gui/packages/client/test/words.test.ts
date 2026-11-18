@@ -4,7 +4,7 @@
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { TroupeRpcError, ago, bytes, decisionWords, durationWords, errorText, moneyWords, sessionStateWords } from "../src/index.js";
+import { TroupeRpcError, ago, bytes, countWords, decisionWords, durationWords, errorText, moneyWords, sessionStateWords } from "../src/index.js";
 
 describe("the words both apps say", () => {
   it("an error is the server's reason, else its message, else the value", () => {
@@ -55,6 +55,19 @@ describe("the words both apps say", () => {
     assert.equal(durationWords(1_800_000, "adjective"), "30-minute");
     assert.equal(durationWords(5_400_000, "adjective"), "90-minute");
     assert.equal(durationWords(7_200_000, "adjective"), "2-hour");
+    // A limit said in a sentence, each unit in full.
+    assert.equal(durationWords(1_800_000, "long"), "30 minutes");
+    assert.equal(durationWords(5_400_000, "long"), "1 hour 30 minutes");
+    assert.equal(durationWords(45_000, "long"), "45 seconds");
+    assert.equal(durationWords(61_000, "long"), "1 minute 1 second");
+    assert.equal(durationWords(0, "long"), "0 seconds");
+  });
+
+  it("a count groups its thousands and says one in the singular", () => {
+    assert.equal(countWords(8192, "token"), "8,192 tokens");
+    assert.equal(countWords(1, "level"), "1 level");
+    assert.equal(countWords(40, "model call"), "40 model calls");
+    assert.equal(countWords(2, "person", "people"), "2 people");
   });
 
   it("how long ago is the coarsest unit that still says something, and a date from thirty days", () => {

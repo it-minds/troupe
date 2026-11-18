@@ -6,7 +6,9 @@ defmodule Troupe.BudgetTest do
 
   use ExUnit.Case, async: true
 
-  alias Troupe.Budget
+  alias Troupe.{Budget, Config}
+  alias Troupe.Config.Schema
+  alias Troupe.Protocol.Allowance
 
   # Every limit spent at once, after an hour's work.
   defp spent do
@@ -202,6 +204,42 @@ defmodule Troupe.BudgetTest do
       assert held.lifted == [:max_input_tokens]
       assert {:exhausted, :max_turns} = Budget.check(held)
       assert Budget.hold(Budget.lift(spent(), :max_turns), %{}).lifted == [:max_turns]
+    end
+  end
+
+  # Issue #1121: the plane states these defaults as the limits a pod session runs under, so
+  # the harness's own must be the same numbers, read from the one place both see.
+  describe "the defaults" do
+    test "the configuration's, its schema's and a budget's are the protocol's" do
+      expected = %{
+        max_tokens: Allowance.max_tokens(),
+        max_turns: Allowance.max_turns(),
+        max_input_tokens: Allowance.max_input_tokens(),
+        max_output_tokens: Allowance.max_output_tokens(),
+        wall_clock_ms: Allowance.wall_clock_ms(),
+        max_depth: Allowance.max_depth()
+      }
+
+      fields = Map.keys(expected)
+      assert Map.take(Map.from_struct(%Config{}), fields) == expected
+
+      for field <- fields do
+        assert {_path, %{default: default}} = Schema.by_field(field)
+        assert default == expected[field], "the schema's #{field}"
+      end
+
+      budget = Map.drop(expected, [:max_tokens, :max_depth])
+      assert Map.take(Map.from_struct(%Budget{}), Map.keys(budget)) == budget
+
+      # Nothing changed value when they moved.
+      assert expected == %{
+               max_tokens: 8192,
+               max_turns: 40,
+               max_input_tokens: 2_000_000,
+               max_output_tokens: 400_000,
+               wall_clock_ms: 1_800_000,
+               max_depth: 3
+             }
     end
   end
 end

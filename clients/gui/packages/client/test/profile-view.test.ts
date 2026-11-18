@@ -3,7 +3,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { DaemonClient, TroupeRpcError, accessWords, actsAsWords, budgetWords, capacityWords, missingWords, moneyWords, profileSummary, roomWords, ruleAccessWords, ruleText } from "../src/index.js";
+import { DaemonClient, TroupeRpcError, accessWords, actsAsWords, budgetWords, capacityWords, limitSentences, missingWords, moneyWords, profileSummary, roomWords, ruleAccessWords, ruleText, teamBudgetWords, toolsAreWhole } from "../src/index.js";
 import type { ProfileView } from "../src/index.js";
 import { FakeDaemon } from "./support/daemon.js";
 import { startHarness } from "./support/harness.js";
@@ -28,7 +28,15 @@ test("the plane answers a granted profile with what a session gets, and what is 
   assert.deepEqual(dev.model, { model: "glm-5.2", small_model: "qwen3.6-35b", provider: "openai", host: "llm-gw.example.com", key: "profile" });
   assert.deepEqual(dev.tools.rules.find((r) => r.tool === "bash" && r.pattern === "git push *"), { tool: "bash", pattern: "git push *", access: "ask", from: "profile" });
   assert.ok(dev.tools.rules.every((r) => r.from === "profile"), "a pod reads no organisation layer");
-  assert.deepEqual(dev.limits.budgets, { profile: 200_000_000, team: 500_000_000, you: 150_000_000 });
+  assert.deepEqual(dev.limits.budgets, { profile: 200_000_000, team: 500_000_000, you: 150_000_000, team_period: "monthly" });
+  // The limits a session is held to: the output cap, Troupe's allowance, the team's rest, GitHub's caps.
+  assert.equal(dev.limits.max_tokens, 8192);
+  assert.deepEqual(dev.limits.session, { max_turns: 40, wall_clock_seconds: 1800, max_input_tokens: 2_000_000, max_output_tokens: 400_000, max_depth: 3 });
+  assert.equal(dev.limits.idle_seconds, 1800);
+  assert.deepEqual(dev.github, { permissions: { contents: "write", pull_requests: "write" }, max_pushes: 20, max_runs: null, max_attempts: 1 });
+  assert.equal(dev.agents.find((a) => a.name === "reviewer")?.max_turns, 20);
+  assert.equal(dev.harness_tools?.find((t) => t.name === "shell")?.refused, false);
+  assert.deepEqual([dev.personal_tools, dev.memory_proposals], ["allow", true]);
 
   const ux = await auth.plane.profile(token, "ux");
   assert.deepEqual(ux.agents_not_here.map((a) => `${a.name}:${a.why}`), ["build:profile", "plan:grant", "librarian:profile"]);
@@ -93,4 +101,32 @@ test("the profile page's rail words: room and ceiling, whose credentials, a rule
   assert.equal(actsAsWords([{ access: "system", offered: false }]), "No server to call.");
   assert.equal(ruleText({ tool: "bash", pattern: "git push *" }), "bash(git push *)");
   assert.equal(ruleText({ tool: "webfetch", pattern: null }), "webfetch");
+});
+
+test("the rail's limits are a sentence each, said only where the plane states them", () => {
+  const session = { max_turns: 40, wall_clock_seconds: 1800, max_input_tokens: 2_000_000, max_output_tokens: 400_000, max_depth: 3 };
+  const budgets = { profile: null, team: null, you: null };
+  const github = { permissions: {}, max_pushes: 20, max_runs: null, max_attempts: 1 };
+  assert.deepEqual(limitSentences({ limits: { sessions_per_pod: 4, max_sessions: null, capacity: 4, active_sessions: 0, max_tokens: 8192, session, idle_seconds: 1800, budgets }, github }), [
+    "Each model call writes at most 8,192 tokens.",
+    "An agent works for at most 30 minutes before it asks to go on; time waiting on you does not count.",
+    "At most 40 model calls before it asks.",
+    "Delegates at most 3 levels deep.",
+    "Sleeps after 30 minutes with nothing to do, and wakes with its history.",
+    "Pushes at most 20 times, then stops and says so on its pull request.",
+  ]);
+  // No team, no GitHub cap, a plane before the limits: none of those sentences.
+  assert.deepEqual(limitSentences({ limits: { sessions_per_pod: 4, max_sessions: null, capacity: 4, active_sessions: 0, max_tokens: 4000, session, idle_seconds: null, budgets }, github: { ...github, max_pushes: null } }).length, 4);
+  assert.deepEqual(limitSentences({ limits: { sessions_per_pod: 4, max_sessions: null, capacity: 4, active_sessions: 0, budgets } }), []);
+
+  assert.equal(teamBudgetWords({ profile: null, team: 500_000_000, you: null, team_period: "monthly" }), "$500.00 a month");
+  assert.equal(teamBudgetWords({ profile: null, team: 500_000_000, you: null, team_period: "never" }), "$500.00 in all");
+  assert.equal(teamBudgetWords({ profile: null, team: null, you: null, team_period: "monthly" }), "no cap");
+
+  const tools = (refused: string[]) => ["read_file", "shell", "web_fetch"].map((name) => ({ name, refused: refused.includes(name) }));
+  assert.equal(toolsAreWhole({ harness_tools: tools(["shell", "web_fetch"]), personal_tools: "forbid", github: null }), true);
+  assert.equal(toolsAreWhole({ harness_tools: tools(["shell"]), personal_tools: "forbid", github: null }), false, "web fetch is on");
+  assert.equal(toolsAreWhole({ harness_tools: tools(["shell", "web_fetch"]), personal_tools: "allow", github: null }), false, "a person's own tools");
+  assert.equal(toolsAreWhole({ harness_tools: tools(["shell", "web_fetch"]), personal_tools: "forbid", github }), false, "GitHub's tools");
+  assert.equal(toolsAreWhole({ personal_tools: "forbid", github: null }), false, "a plane that does not say");
 });

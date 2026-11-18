@@ -6037,6 +6037,37 @@ pre.instruction {
 .profile-card > p.note {
   margin: var(--space-2) 0 0;
 }
+/* The harness's own tools on Troupe's card, a line of names that wraps. */
+.profile-card ul.tool-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-3);
+}
+.profile-card ul.tool-list s {
+  color: var(--text-secondary);
+}
+/* The rail's limits: a sentence each, under a small heading. */
+.profile-limits {
+  margin: 0 0 var(--space-3);
+  font: var(--t-ui-small);
+  color: var(--text-body);
+}
+.profile-limits > h4 {
+  margin: 0 0 var(--space-2);
+  font: var(--t-micro);
+  letter-spacing: var(--tracking-micro);
+  color: var(--text-muted);
+  text-transform: uppercase;
+}
+.profile-limits ul.plain > li + li {
+  margin-top: var(--space-1);
+}
+.profile-limits > p.note {
+  margin: var(--space-2) 0 0;
+}
 /* Under the hood: the configuration's tables, folded; its summary reads as a section label. */
 details.under-hood > summary {
   padding: var(--space-4) var(--space-6) var(--space-3);

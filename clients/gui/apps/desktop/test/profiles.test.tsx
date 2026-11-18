@@ -94,13 +94,24 @@ describe("profiles", () => {
     expect(rail.textContent).toContain("8 of 8 places free. Up to 12 sessions at once.");
     expect(rail.textContent).toContain("glm-5.2");
     expect(rail.textContent).toContain("$200.00");
-    expect(rail.textContent).toContain("$500.00");
+    expect(rail.textContent).toContain("$500.00 a month");
     expect(rail.textContent).toContain("$150.00");
     // github is called as the person, jira as the profile; the withheld wiki is not counted.
     expect(rail.textContent).toContain("you, once you connect it; the profile");
     expect(rail.textContent).not.toContain("own identity");
     expect(rail.textContent).toContain("github's tools and bash(git push *)");
     expect(rail.textContent).toContain("Who can use itcore");
+    // The limits a session is held to, a sentence each: Troupe's defaults, the team's rest, the push cap.
+    const limits = [...rail.querySelectorAll(".profile-limits li")].map((li) => li.textContent);
+    expect(limits).toEqual([
+      "Each model call writes at most 8,192 tokens.",
+      "An agent works for at most 30 minutes before it asks to go on; time waiting on you does not count.",
+      "At most 40 model calls before it asks.",
+      "Delegates at most 3 levels deep.",
+      "Sleeps after 30 minutes with nothing to do, and wakes with its history.",
+      "Pushes at most 20 times, then stops and says so on its pull request.",
+    ]);
+    expect(rail.querySelector(".profile-limits .note")?.textContent).toBe("An agent may set fewer.");
     await seesButton("Start a session on dev", rail);
     // The rail is first in the page's order, so a narrow window shows it above the sections.
     const layout = document.querySelector(".profile-layout")!;
@@ -117,9 +128,13 @@ describe("profiles", () => {
     expect(cards[1]!.textContent).toContain("as the profile");
     expect(cards[1]!.textContent).toContain("automatic");
     expect(cards[1]!.textContent).toContain("search_issues, get_issue");
-    // dev's only refusal has a pattern, so nothing of the harness's is turned off whole.
+    // Troupe's card lists the harness's own tools; dev's only refusal has a pattern, so none is struck.
+    const own = [...cards[2]!.querySelectorAll(".tool-list li")].map((li) => li.textContent);
+    expect(own).toContain("shell");
+    expect(own).toContain("web_fetch");
+    expect(own).toHaveLength(24);
     expect(cards[2]!.querySelector("s")).toBeNull();
-    expect(cards[2]!.textContent).toContain("The harness's own tools are on.");
+    expect(cards[2]!.textContent).toContain("Every one is on.");
 
     // What it can't do: the banner, the refusals, the withheld server and the hosts.
     const cannot = await section("What it can't do");
@@ -188,16 +203,17 @@ describe("profiles", () => {
     expect(document.body.textContent).not.toContain("Picked dev");
   });
 
-  it("strikes a whole-tool refusal under Turned off here, and says nothing for a missing primary", async () => {
+  it("strikes a whole-tool refusal among the harness's tools, and says nothing for a missing primary", async () => {
     const view = composeProfile(leanSpec(), { teams: ["core"] }, { capacity: 4, active_sessions: 1 })!;
     let started = "";
     pageOn(view, (name) => (started = name));
     const can = await section("What it can do");
     const troupe = [...can.querySelectorAll<HTMLElement>(".profile-card")].find((c) => c.querySelector("h4")?.textContent === "Troupe")!;
-    expect(troupe.textContent).toContain("Turned off here");
     // Only the whole-tool refusal is the harness's tool turned off; the patterned one is not.
-    expect([...troupe.querySelectorAll("s")].map((s) => s.textContent)).toEqual(["webfetch"]);
-    expect(troupe.textContent).toContain("The harness's other tools are on.");
+    expect([...troupe.querySelectorAll("s")].map((s) => s.textContent)).toEqual(["web_fetch"]);
+    expect(troupe.querySelector(".tool-list")?.textContent).toContain("web_fetch (turned off here)");
+    expect(troupe.textContent).toContain("Struck through: turned off here.");
+    expect(troupe.textContent).toContain("shell");
     // No server is offered: Troupe's card alone, and nobody's credential.
     expect(can.querySelectorAll(".profile-card")).toHaveLength(1);
     expect(document.querySelector(".profile-rail")?.textContent).toContain("No server to call.");
@@ -214,6 +230,32 @@ describe("profiles", () => {
     expect(document.querySelector(".screen-head p")).toBeNull();
     (await seesButton("Start a session on lean")).click();
     expect(started).toBe("lean");
+  });
+
+  it("says the list is whole only where no tool of the person's, no shell and no web fetch can reach past it", async () => {
+    const whole = composeProfile({ ...leanSpec(), personalTools: "forbid", permissions: { deny: ["bash", "webfetch"] } }, { teams: ["core"] }, { capacity: 4, active_sessions: 0 })!;
+    pageOn(whole);
+    const cannot = await section("What it can't do");
+    expect(cannot.querySelector(".banner")?.textContent).toBe("Nothing but the tools above: no tool of your own, no shell, no web fetch, and nothing outside the hosts listed.");
+    const can = await section("What it can do");
+    expect([...can.querySelectorAll("s")].map((s) => s.textContent)).toEqual(["shell", "web_fetch"]);
+  });
+
+  it("from a plane before the limits, says none of them and names only what the rules turn off", async () => {
+    const view = composeProfile(leanSpec(), { teams: ["core"] }, { capacity: 4, active_sessions: 0 })!;
+    delete view.harness_tools;
+    delete view.limits.max_tokens;
+    delete view.limits.session;
+    delete view.limits.idle_seconds;
+    delete view.github;
+    pageOn(view);
+    const can = await section("What it can do");
+    const troupe = [...can.querySelectorAll<HTMLElement>(".profile-card")].find((c) => c.querySelector("h4")?.textContent === "Troupe")!;
+    expect(troupe.textContent).toContain("Turned off here");
+    expect([...troupe.querySelectorAll("s")].map((s) => s.textContent)).toEqual(["webfetch"]);
+    expect(troupe.textContent).toContain("The harness's other tools are on.");
+    expect(document.querySelector(".profile-limits")).toBeNull();
+    expect((await section("What it can't do")).querySelector(".banner")?.textContent).toBe("The tools below, and nothing outside the hosts listed.");
   });
 
   it("names the skills alone from a plane before their details", async () => {

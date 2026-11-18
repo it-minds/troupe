@@ -14,12 +14,21 @@ defmodule Troupe.Plane.ProfileViewTest do
 
   use Troupe.Plane.DataCase, async: false
 
-  alias Troupe.Plane.{Bundles, Fleet, Harness, Identity}
+  alias Troupe.Plane.{Admin, Bundles, Fleet, Harness, Identity}
   alias Troupe.Plane.Fleet.Worker
-  alias Troupe.Protocol.AgentDefinition
+  alias Troupe.Protocol.{AgentCheck, AgentDefinition}
 
   setup do
-    team = team_with_grant("engineering", "dev", name: "engineering", budget_micros: 50_000_000)
+    team =
+      "engineering"
+      |> team_with_grant("dev",
+        name: "engineering",
+        budget_micros: 50_000_000,
+        github: %{"repositories" => ["acme/*"], "max_pushes" => 5, "max_attempts" => 3}
+      )
+      |> Ecto.Changeset.change(idle_timeout_seconds: 900, budget_period: "never")
+      |> Repo.update!()
+
     ada = person("ada@example.test", ["engineering"])
     {:ok, ada} = Identity.set_budget(ada, 20_000_000)
 
@@ -173,6 +182,7 @@ defmodule Troupe.Plane.ProfileViewTest do
                  "access" => "deny",
                  "from" => "profile"
                },
+               %{"tool" => "glob", "pattern" => nil, "access" => "deny", "from" => "profile"},
                %{"tool" => "mcp", "pattern" => "tracker", "access" => "ask", "from" => "profile"},
                %{"tool" => "web_fetch", "pattern" => nil, "access" => "ask", "from" => "profile"},
                %{
@@ -226,7 +236,15 @@ defmodule Troupe.Plane.ProfileViewTest do
                "max_sessions" => 6,
                "capacity" => 4,
                "active_sessions" => 1,
-               "budgets" => %{"profile" => 100_000_000, "team" => 50_000_000, "you" => 20_000_000}
+               "max_tokens" => 16_000,
+               "session" => troupe_allowance(),
+               "idle_seconds" => 900,
+               "budgets" => %{
+                 "profile" => 100_000_000,
+                 "team" => 50_000_000,
+                 "you" => 20_000_000,
+                 "team_period" => "never"
+               }
              }
 
       bundle = Bundles.current("stable")
@@ -263,6 +281,46 @@ defmodule Troupe.Plane.ProfileViewTest do
       assert length(listed["pods"]) == 3
     end
 
+    # #1121: what each agent is held to. An agent's own number lowers the session's and never
+    # raises it: pr-reviewer's 4000 tokens hold, implementer's 80 turns are the session's 40.
+    test "sees an agent's own max_turns and max_tokens where its definition sets them", ctx do
+      agents = view!(ctx.ada)["agents"]
+
+      assert %{"max_turns" => 10, "max_tokens" => 4000} = find(agents, "pr-reviewer")
+      assert %{"max_turns" => 40} = implementer = find(agents, "implementer")
+      refute Map.has_key?(implementer, "max_tokens")
+
+      build = find(agents, "build")
+      refute Map.has_key?(build, "max_turns") or Map.has_key?(build, "max_tokens")
+    end
+
+    test "sees the GitHub permissions and the caps, the lower of the profile's and the team's",
+         ctx do
+      assert view!(ctx.ada)["github"] == %{
+               "permissions" => %{"contents" => "write", "pull_requests" => "write"},
+               "max_pushes" => 5,
+               "max_runs" => 2,
+               "max_attempts" => 3
+             }
+    end
+
+    test "sees the harness's own tools, a whole-tool deny refusing one and a pattern none", ctx do
+      tools = view!(ctx.ada)["harness_tools"]
+
+      assert Enum.map(tools, & &1["name"]) == AgentCheck.harness_tools()
+      assert for(%{"refused" => true, "name" => name} <- tools, do: name) == ["glob"]
+    end
+
+    test "sees whether a person's own tools are offered and whether memory may be proposed",
+         ctx do
+      assert %{"personal_tools" => "forbid", "memory_proposals" => true} = view!(ctx.ada)
+
+      row = Fleet.get_profile("dev")
+      spec = Map.put(row.spec, "memoryProposals", false)
+      {:ok, _} = Fleet.put_profile(%{name: "dev", spec: spec})
+      assert %{"memory_proposals" => false} = view!(ctx.ada)
+    end
+
     test "has the team picked as session.create picks it: theirs alone, or the one named", ctx do
       assert %{"team" => "engineering", "teams" => ["engineering"]} = view!(ctx.ada)
 
@@ -290,6 +348,64 @@ defmodule Troupe.Plane.ProfileViewTest do
 
       assert {:error, %{message: "not_found"}} =
                Harness.call("profile.get", %{"name" => "dev", "team" => "sales"}, as(both))
+    end
+  end
+
+  describe "a profile that sets nothing" do
+    test "states Troupe's defaults, no GitHub, and no team's numbers for an admin's view" do
+      {:ok, _} = Fleet.put_profile(%{name: "bare", replicas: 1, spec: %{}})
+      context = %{user: person("root@example.test", ["platform-admins"]), platform_admin?: true}
+      assert {:ok, view} = Harness.call("profile.get", %{"name" => "bare"}, context)
+
+      assert %{
+               "max_tokens" => 8192,
+               "session" => session,
+               "idle_seconds" => nil,
+               "budgets" => %{"team_period" => nil}
+             } = view["limits"]
+
+      assert session == troupe_allowance()
+      assert %{"github" => nil, "personal_tools" => "allow", "memory_proposals" => true} = view
+      refute Enum.any?(view["harness_tools"], & &1["refused"])
+    end
+  end
+
+  describe "a profile that extends another" do
+    setup do
+      Application.put_env(:troupe_plane, :platform_admin_group, "platform")
+      on_exit(fn -> Application.delete_env(:troupe_plane, :platform_admin_group) end)
+      {:ok, group} = Identity.upsert_group(%{external_id: "platform", display_name: "platform"})
+      {:ok, _} = Identity.enable_team(group, %{name: "platform"})
+      actor = Admin.actor_for(person("root@example.test", ["platform"]))
+
+      llm = %{
+        "endpoint" => "https://llm.example.test/v1",
+        "model" => "big",
+        "maxTokens" => 16_000
+      }
+
+      parent = %{
+        "name" => "base",
+        "image" => "ghcr.io/troupe/worker:1",
+        "spec" => %{"llm" => llm}
+      }
+
+      {:ok, _} = Admin.profile_put(actor, parent)
+      _team = team_with_grant("analysts", "lean", name: "analysts")
+
+      %{actor: actor, analyst: person("eve@example.test", ["analysts"])}
+    end
+
+    test "states the chain's output cap: a child lowers it, and cannot raise it", ctx do
+      lean = fn cap ->
+        %{"name" => "lean", "extends" => "base", "spec" => %{"llm" => %{"maxTokens" => cap}}}
+      end
+
+      {:ok, _} = Admin.profile_put(ctx.actor, lean.(4_000))
+      assert get!(ctx.analyst, "lean")["limits"]["max_tokens"] == 4_000
+
+      {:ok, _} = Admin.profile_put(ctx.actor, lean.(64_000))
+      assert get!(ctx.analyst, "lean")["limits"]["max_tokens"] == 16_000
     end
   end
 
@@ -339,9 +455,22 @@ defmodule Troupe.Plane.ProfileViewTest do
     })
   end
 
-  defp view!(user) do
-    assert {:ok, view} = Harness.call("profile.get", %{"name" => "dev"}, as(user))
+  defp view!(user), do: get!(user, "dev")
+
+  defp get!(user, name) do
+    assert {:ok, view} = Harness.call("profile.get", %{"name" => name}, as(user))
     view
+  end
+
+  # The harness's allowance for each agent, which no profile sets, written out.
+  defp troupe_allowance do
+    %{
+      "max_turns" => 40,
+      "wall_clock_seconds" => 1_800,
+      "max_input_tokens" => 2_000_000,
+      "max_output_tokens" => 400_000,
+      "max_depth" => 3
+    }
   end
 
   defp names(agents), do: Enum.map(agents, & &1["name"])
@@ -358,7 +487,7 @@ defmodule Troupe.Plane.ProfileViewTest do
     %{
       "agents" => %{"deny" => ["explore", "librarian"]},
       "permissions" => %{
-        "deny" => ["shell(git push)"],
+        "deny" => ["shell(git push)", "glob"],
         "ask" => ["mcp(tracker)", "web_fetch"],
         "allow" => ["shell(mix test)"]
       },
@@ -366,8 +495,15 @@ defmodule Troupe.Plane.ProfileViewTest do
         "endpoint" => "https://llm.example.test/v1",
         "model" => "big",
         "smallModel" => "small",
-        "secretRef" => %{"name" => "dev-llm", "key" => "api-key"}
+        "secretRef" => %{"name" => "dev-llm", "key" => "api-key"},
+        "maxTokens" => 16_000
       },
+      "github" => %{
+        "permissions" => %{"contents" => "write", "pull_requests" => "write"},
+        "maxPushes" => 20,
+        "maxRuns" => 2
+      },
+      "personalTools" => "forbid",
       "egress" => %{"fqdns" => ["docs.example.test", "api.github.com", "llm.example.test"]},
       "mcpIdentities" => [
         %{
@@ -387,7 +523,8 @@ defmodule Troupe.Plane.ProfileViewTest do
       "agents" => [
         %{
           "name" => "pr-reviewer",
-          "definition" => "---\ndescription: Reviews code\nmode: primary\n---\nYou review."
+          "definition" =>
+            "---\ndescription: Reviews code\nmode: primary\nmax_turns: 10\nmax_tokens: 4000\n---\nYou review."
         },
         %{"name" => "helper", "definition" => "---\nmode: subagent\n---\nYou help."}
       ],

@@ -68,6 +68,19 @@ defmodule Troupe.Gateway.ProfileGetTest do
 
     assert url == ctx.plane.url
 
+    # The limits a session there is held to come through as the plane states them.
+    assert {:ok, view} = Client.call(ctx.client, "profile.get", %{"name" => "dev"})
+
+    assert %{
+             "limits" => %{"max_tokens" => 8192, "session" => %{"max_turns" => 40}},
+             "github" => %{"max_pushes" => 20},
+             "harness_tools" => [_ | _],
+             "personal_tools" => "allow",
+             "memory_proposals" => true
+           } = view
+
+    assert %{"max_turns" => 40} = Enum.find(view["agents"], &(&1["name"] == "implementer"))
+
     # Only the arguments the plane takes go on.
     assert {"profile.get", %{"name" => "dev", "team" => "engineering"} = sent} =
              Enum.find(FakePlane.calls(ctx.plane.state), &match?({"profile.get", _}, &1))

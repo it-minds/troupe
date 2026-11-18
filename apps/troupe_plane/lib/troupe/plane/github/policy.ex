@@ -271,6 +271,23 @@ defmodule Troupe.Plane.GitHub.Policy do
       @default_attempts
   end
 
+  @doc """
+  The fix loop's three caps for a session on `profile` belonging to `team` (or none), as
+  `profile.get` states them: `max_pushes` and `max_runs`, the lower of the profile's and
+  the team's, `nil` where neither says; `max_attempts` as `max_attempts/2` has it.
+  """
+  @spec caps(String.t() | nil, Team.t() | nil) :: %{String.t() => pos_integer() | nil}
+  def caps(profile, team) do
+    github = profile_github(profile)
+    own = (team && team.github) || %{}
+
+    %{
+      "max_pushes" => lowest([github["maxPushes"], own["max_pushes"]]),
+      "max_runs" => lowest([github["maxRuns"], own["max_runs"]]),
+      "max_attempts" => lowest([github["maxAttempts"], own["max_attempts"]]) || @default_attempts
+    }
+  end
+
   # -- small things ---------------------------------------------------------------------------
 
   defp profile_github(nil), do: %{}
