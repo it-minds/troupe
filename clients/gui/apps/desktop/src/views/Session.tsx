@@ -84,7 +84,7 @@ import { SessionServers } from "./SessionServers";
 import { onboardingNote, StartLine, StartPanel } from "./Onboard";
 import { inviteLine, RemoteLine, RemoteOfferControl } from "./Remote";
 import { InviteControl } from "./Invites";
-import { Cost, Dialog, initials, Loading, personColour, Pill, Sync, When, Where } from "./bits";
+import { archiveItem, Cost, Dialog, initials, Loading, personColour, Pill, Sync, When, Where } from "./bits";
 import { Mask } from "./brand";
 import { RenameField } from "./Rename";
 import { Tasks } from "./Tasks";
@@ -954,18 +954,12 @@ function SessionMenu({
             <span className="d">{row?.pinned ? "Back among the rest, by when it was last active" : "Listed first, for everyone who sees it"}</span>
           </button>
         )}
-        {onArchive &&
-          (row?.archived ? (
-            <button type="button" className="item" onClick={then(() => onArchive(false))}>
-              <span className="t">Unarchive session</span>
-              <span className="d">Put it back in the session list</span>
-            </button>
-          ) : (
-            <button type="button" className="item" onClick={then(() => onArchive(true))}>
-              <span className="t">Archive session</span>
-              <span className="d">Hide it from the session list, for everyone who sees it</span>
-            </button>
-          ))}
+        {onArchive && (
+          <button type="button" className="item" onClick={then(() => onArchive(!row?.archived))}>
+            <span className="t">{archiveItem(Boolean(row?.archived)).title}</span>
+            <span className="d">{archiveItem(Boolean(row?.archived)).line}</span>
+          </button>
+        )}
         {remote && <div className="menu-remote">{remote}</div>}
         <dl className="menu-facts">
           <dt>Session</dt>

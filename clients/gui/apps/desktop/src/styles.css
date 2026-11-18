@@ -852,27 +852,23 @@ main {
 .row.is-dormant {
   border-left-color: var(--dormant-fg);
 }
-/* A private session another device holds, and an archived one its owner may unarchive:
-   Claim or Unarchive stands beside the row, at its edge, since the row itself opens the
-   session. */
+/* A private session another device holds: Claim stands beside the row, at its edge, since
+   the row itself opens the session. */
 .rows li.claimable,
-.rows li.unarchivable,
 .rows li.markable {
   display: flex;
   align-items: center;
 }
 .rows li.claimable .row,
-.rows li.unarchivable .row,
 .rows li.markable .row {
   flex: 1 1 auto;
   min-width: 0;
 }
-.rows li.claimable .claim,
-.rows li.unarchivable .claim {
+.rows li.claimable .claim {
   flex: none;
   margin-right: var(--space-6);
 }
-/* The owner's ⋯ beside a row (rename, keep at the top), its menu drawn as the head's is;
+/* The owner's ⋯ beside a row (rename, keep at the top, archive or unarchive), its menu drawn as the head's is;
    a row being renamed is its name as a field, in the row's place. */
 .rows .row-menu {
   flex: none;
