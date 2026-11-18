@@ -697,9 +697,40 @@ defmodule Troupe.Gateway.FakePlane do
        "team" => params["team"] || "engineering",
        "teams" => ["engineering"],
        "agents" => [
-         %{"name" => "build", "mode" => "primary", "description" => nil, "from" => "builtin"}
+         %{"name" => "build", "mode" => "primary", "description" => nil, "from" => "builtin"},
+         %{
+           "name" => "implementer",
+           "mode" => "subagent",
+           "description" => nil,
+           "from" => "builtin",
+           "max_turns" => 40
+         }
        ],
-       "reach" => ["api.github.com"]
+       "reach" => ["api.github.com"],
+       "limits" => %{
+         "max_tokens" => 8192,
+         "session" => %{
+           "max_turns" => 40,
+           "wall_clock_seconds" => 1800,
+           "max_input_tokens" => 2_000_000,
+           "max_output_tokens" => 400_000,
+           "max_depth" => 3
+         },
+         "idle_seconds" => 1800,
+         "budgets" => %{"profile" => nil, "team" => nil, "you" => nil, "team_period" => "monthly"}
+       },
+       "github" => %{
+         "permissions" => %{"contents" => "write"},
+         "max_pushes" => 20,
+         "max_runs" => nil,
+         "max_attempts" => 1
+       },
+       "harness_tools" => [
+         %{"name" => "shell", "refused" => false},
+         %{"name" => "web_fetch", "refused" => true}
+       ],
+       "personal_tools" => "allow",
+       "memory_proposals" => true
      }}
   end
 

@@ -20,8 +20,8 @@ export type {
   ProfileOffering,
   WorkerPod,
 } from "./plane.js";
-export { FUNCTIONS_HEADING, accessWords, actsAsWords, askWords, budgetWords, capacityWords, keyWords, missingWords, profileSummary, roomWords, ruleAccessWords, ruleText, whoseWords } from "./profile.js";
-export type { ProfileView, ProfileViewAgent, ProfileViewFunction, ProfileViewLimits, ProfileViewMissing, ProfileViewModel, ProfileViewRule, ProfileViewServer, ProfileViewSkill, RuleAccess, ServerAccess } from "./profile.js";
+export { FUNCTIONS_HEADING, accessWords, actsAsWords, askWords, budgetWords, capacityWords, keyWords, limitSentences, missingWords, profileSummary, roomWords, ruleAccessWords, ruleText, teamBudgetWords, toolsAreWhole, whoseWords } from "./profile.js";
+export type { ProfileView, ProfileViewAgent, ProfileViewAllowance, ProfileViewFunction, ProfileViewGitHub, ProfileViewHarnessTool, ProfileViewLimits, ProfileViewMissing, ProfileViewModel, ProfileViewRule, ProfileViewServer, ProfileViewSkill, RuleAccess, ServerAccess } from "./profile.js";
 export {
   LOCAL_DOWN_SENTENCE,
   andList,
@@ -111,7 +111,7 @@ export {
 export { ONCE_ONLY_SENTENCE, callConsequence, callEvidence, callHeadline, callScopedLabel, counted, decisionWords, toolGlyph, toolOutcome, toolTarget } from "./calls.js";
 export type { CallEvidence, CallWhere } from "./calls.js";
 export { foldScratch, scratchDocumentOf, scratchVersion } from "./scratch.js";
-export { ago, bytes, durationWords, errorText, moneyWords, sessionStateWords } from "./words.js";
+export { ago, bytes, countWords, durationWords, errorText, moneyWords, sessionStateWords } from "./words.js";
 export type {
   Entry,
   DelegationGate,

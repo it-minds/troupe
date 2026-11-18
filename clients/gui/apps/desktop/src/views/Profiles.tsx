@@ -10,7 +10,7 @@
 //
 // The page answers "can this profile do my job?" first: a head with the primary agent's
 // sentence, a rail with the room, the model, the budgets, whose credentials and what asks
-// first, and Start; then what it can do, what it can't, how it behaves (guidance, not
+// first, the limits a session is held to in sentences, and Start; then what it can do, what it can't, how it behaves (guidance, not
 // limits), and the configuration's own tables folded away under the hood. On a narrow
 // window the rail comes first; a table scrolls inside itself rather than the page sideways.
 
@@ -26,12 +26,17 @@ import {
   budgetWords,
   capacityWords,
   errorText,
+  countWords,
+  durationWords,
   keyWords,
+  limitSentences,
   missingWords,
   profileSummary,
   roomWords,
   ruleAccessWords,
   ruleText,
+  teamBudgetWords,
+  toolsAreWhole,
   whoseWords,
 } from "@troupe/client";
 import type { AuthSession, ProfileView, ProfileViewAgent, ProfileViewSkill } from "@troupe/client";
@@ -175,6 +180,7 @@ function asksFirst(view: ProfileView): string[] {
 
 function Rail({ view, onStart }: { view: ProfileView; onStart?: ((name: string) => void) | undefined }): JSX.Element {
   const asks = asksFirst(view);
+  const limits = limitSentences(view);
   return (
     <aside className="profile-rail" aria-label="At a glance">
       <dl className="facts wide">
@@ -185,7 +191,7 @@ function Rail({ view, onStart }: { view: ProfileView; onStart?: ((name: string) 
         <dt>Profile's budget</dt>
         <dd>{budgetWords(view.limits.budgets.profile)}</dd>
         <dt>Team's budget</dt>
-        <dd>{budgetWords(view.limits.budgets.team)}</dd>
+        <dd>{teamBudgetWords(view.limits.budgets)}</dd>
         <dt>Your budget</dt>
         <dd>{budgetWords(view.limits.budgets.you)}</dd>
         <dt>Acts as</dt>
@@ -195,6 +201,17 @@ function Rail({ view, onStart }: { view: ProfileView; onStart?: ((name: string) 
         <dt>Who can use it</dt>
         <dd>{whoWords(view)}</dd>
       </dl>
+      {limits.length > 0 && (
+        <div className="profile-limits">
+          <h4>Limits</h4>
+          <ul className="plain">
+            {limits.map((line) => (
+              <li key={line}>{line}</li>
+            ))}
+          </ul>
+          <p className="note">An agent may set fewer.</p>
+        </div>
+      )}
       {view.agents.length === 0 ? (
         <p className="note">No agent: a session cannot start on it.</p>
       ) : (
@@ -210,8 +227,6 @@ function Rail({ view, onStart }: { view: ProfileView; onStart?: ((name: string) 
 
 function CanDo({ view }: { view: ProfileView }): JSX.Element {
   const offered = view.tools.mcp.filter((s) => s.offered);
-  // Whole-tool refusals are what the answer says of the harness's own tools; #1121 brings their full list.
-  const off = view.tools.rules.filter((r) => r.access === "deny" && r.pattern === null);
   return (
     <section className="group can-do">
       <h3>What it can do</h3>
@@ -231,24 +246,60 @@ function CanDo({ view }: { view: ProfileView }): JSX.Element {
             </dl>
           </li>
         ))}
-        <li className="profile-card troupe">
-          <h4>Troupe</h4>
-          {off.length > 0 && (
-            <>
-              <p className="micro">Turned off here</p>
-              <ul className="struck">
-                {off.map((r, i) => (
-                  <li key={`${r.tool}-${i}`}>
-                    <s className="mono">{r.tool}</s>
-                  </li>
-                ))}
-              </ul>
-            </>
-          )}
-          <p className="note">{off.length > 0 ? "The harness's other tools are on." : "The harness's own tools are on."}</p>
-        </li>
+        <TroupeCard view={view} />
       </ul>
     </section>
+  );
+}
+
+/**
+ * Troupe's own card: the harness's tools, each one a rule refuses whole struck through. A
+ * plane before the list names only what the rules turn off, and says the others are on.
+ */
+function TroupeCard({ view }: { view: ProfileView }): JSX.Element {
+  const tools = view.harness_tools;
+  if (!tools) {
+    const off = view.tools.rules.filter((r) => r.access === "deny" && r.pattern === null);
+    return (
+      <li className="profile-card troupe">
+        <h4>Troupe</h4>
+        {off.length > 0 && (
+          <>
+            <p className="micro">Turned off here</p>
+            <ul className="struck">
+              {off.map((r, i) => (
+                <li key={`${r.tool}-${i}`}>
+                  <s className="mono">{r.tool}</s>
+                </li>
+              ))}
+            </ul>
+          </>
+        )}
+        <p className="note">{off.length > 0 ? "The harness's other tools are on." : "The harness's own tools are on."}</p>
+      </li>
+    );
+  }
+  const refused = tools.some((t) => t.refused);
+  return (
+    <li className="profile-card troupe">
+      <h4>Troupe</h4>
+      <p className="micro">Its own tools</p>
+      <ul className="tool-list">
+        {tools.map((t) => (
+          <li key={t.name}>
+            {t.refused ? (
+              <>
+                <s className="mono">{t.name}</s>
+                <span className="visually-hidden"> (turned off here)</span>
+              </>
+            ) : (
+              <span className="mono">{t.name}</span>
+            )}
+          </li>
+        ))}
+      </ul>
+      <p className="note">{refused ? "Struck through: turned off here." : "Every one is on."}</p>
+    </li>
   );
 }
 
@@ -259,7 +310,7 @@ function CannotDo({ view }: { view: ProfileView }): JSX.Element {
     <section className="group cannot-do">
       <h3>What it can't do</h3>
       <div className="banner">
-        <p>The tools below, and nothing outside the hosts listed.</p>
+        <p>{toolsAreWhole(view) ? "Nothing but the tools above: no tool of your own, no shell, no web fetch, and nothing outside the hosts listed." : "The tools below, and nothing outside the hosts listed."}</p>
       </div>
       {refused.length > 0 && (
         <div className="part">
@@ -470,8 +521,52 @@ function UnderTheHood({ view }: { view: ProfileView }): JSX.Element {
           <dd>{limits.max_sessions === null ? "no cap" : `${limits.max_sessions} sessions`}</dd>
           <dt>Now</dt>
           <dd>{capacityWords(limits)}</dd>
+          {limits.max_tokens !== undefined && (
+            <>
+              <dt>Each model call</dt>
+              <dd>{`at most ${countWords(limits.max_tokens, "token")} written`}</dd>
+            </>
+          )}
+          {limits.session && (
+            <>
+              <dt>Each agent</dt>
+              <dd>{`${countWords(limits.session.max_turns, "model call")}, ${durationWords(limits.session.wall_clock_seconds * 1000, "long")} of work, ${countWords(limits.session.max_input_tokens, "token")} read and ${countWords(limits.session.max_output_tokens, "token")} written, ${countWords(limits.session.max_depth, "level")} of delegation`}</dd>
+            </>
+          )}
+          {view.personal_tools !== undefined && (
+            <>
+              <dt>Your own tools</dt>
+              <dd>{view.personal_tools === "forbid" ? "not offered here" : "you may offer them"}</dd>
+            </>
+          )}
+          {view.memory_proposals !== undefined && (
+            <>
+              <dt>Memory proposals</dt>
+              <dd>{view.memory_proposals ? "an agent may propose to a team's or the organisation's memory" : "switched off"}</dd>
+            </>
+          )}
         </dl>
       </div>
+
+      {view.github && (
+        <div className="part">
+          <h4>GitHub</h4>
+          <dl className="facts wide">
+            <dt>Permissions</dt>
+            <dd className="mono">
+              {Object.entries(view.github.permissions)
+                .map(([what, level]) => `${what}: ${level}`)
+                .join(", ") || "clone only"}
+            </dd>
+            <dt>Pushes a run</dt>
+            <dd>{view.github.max_pushes === null ? "no cap" : `at most ${view.github.max_pushes}`}</dd>
+            <dt>Runs at once</dt>
+            <dd>{view.github.max_runs === null ? "no cap" : `at most ${view.github.max_runs} on a repository`}</dd>
+            <dt>Tries on an issue</dt>
+            <dd>{`${countWords(view.github.max_attempts, "run")} before a person is asked`}</dd>
+          </dl>
+        </div>
+      )}
 
       <div className="part">
         <h4>Who</h4>
