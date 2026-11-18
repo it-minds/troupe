@@ -411,18 +411,17 @@ defmodule Troupe.Plane.ProfileView do
 
   # -- limits ----------------------------------------------------------------------
 
-  # The room, as `profiles.list` counts it, and the three ceilings a session's budget is
-  # checked against below the platform's: the profile's, the team's and the person's.
-  # Zero or none is no ceiling, as the ledger reads it.
+  # The room, counted by the same `Fleet.room/2` as `profiles.list`, and the three ceilings
+  # a session's budget is checked against below the platform's: the profile's, the team's
+  # and the person's. Zero or none is no ceiling, as the ledger reads it.
   defp limits(user, name, row, team) do
-    workers = Fleet.list_workers(name)
-    placeable = Enum.reject(workers, & &1.draining)
+    room = Fleet.room(name, row)
 
     %{
       "sessions_per_pod" => row && row.sessions_per_pod,
       "max_sessions" => row && row.max_sessions,
-      "capacity" => Enum.sum(Enum.map(placeable, & &1.capacity)),
-      "active_sessions" => Enum.sum(Enum.map(workers, & &1.active_sessions)),
+      "capacity" => room.capacity,
+      "active_sessions" => room.active_sessions,
       "budgets" => %{
         "profile" => ceiling(row && row.budget_micros),
         "team" => ceiling(team && Ledger.budget_micros(team.id)),

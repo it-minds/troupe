@@ -697,21 +697,15 @@ defmodule Troupe.Plane.Harness do
       user
       |> granted_profiles()
       |> Enum.map(fn profile ->
-        workers = Fleet.list_workers(profile)
         row = Fleet.get_profile(profile)
-        # A pod the operator removed and that has gone quiet is listed `gone` until the
-        # sweep forgets it, and counts for nothing, whatever its last flags said.
-        gone = MapSet.new(Enum.filter(workers, &Fleet.gone?(&1, row)), & &1.id)
-        # A draining pod is listed, so a person can see it, and counts for nothing: it
-        # takes no session and is out of its Service, so it is neither room nor health.
-        placeable = Enum.reject(workers, &(&1.draining or MapSet.member?(gone, &1.id)))
+        room = Fleet.room(profile, row)
 
         %{
           "name" => profile,
-          "pods" => Enum.map(workers, &worker_json(&1, MapSet.member?(gone, &1.id))),
-          "capacity" => Enum.sum(Enum.map(placeable, & &1.capacity)),
-          "active_sessions" => Enum.sum(Enum.map(workers, & &1.active_sessions)),
-          "healthy_pods" => Enum.count(placeable, & &1.healthy),
+          "pods" => Enum.map(room.workers, &worker_json(&1, MapSet.member?(room.gone, &1.id))),
+          "capacity" => room.capacity,
+          "active_sessions" => room.active_sessions,
+          "healthy_pods" => Enum.count(room.placeable, & &1.healthy),
           "max_sessions" => ceiling_of(row),
           "teams" => ProfileView.team_names(user, profile)
         }
@@ -2509,13 +2503,7 @@ defmodule Troupe.Plane.Harness do
   # not a promise). A profile with no ceiling says so rather than a number.
   defp pods_full(profile_name) do
     row = Fleet.get_profile(profile_name)
-
-    capacity =
-      profile_name
-      |> Fleet.list_workers()
-      |> Enum.reject(&(&1.draining or Fleet.gone?(&1, row)))
-      |> Enum.map(& &1.capacity)
-      |> Enum.sum()
+    %{capacity: capacity} = Fleet.room(profile_name, row)
 
     max = row && row.max_sessions
 
