@@ -6,6 +6,15 @@
 // link opened signed out is where the console lands once the provider sends the browser
 // back, not its first screen.
 //
+// An address that is not the console's own (an artifact to open, a link to one to spend)
+// is where the artifacts host sends a viewer whose cookie lapsed, and the person wants the
+// artifact, not this screen. Opened there signed out, the console goes to the plane's
+// provider at once, without drawing the page; a provider that still knows the person
+// answers in a second. The page is drawn instead when there is a reason to stop: a
+// provider that refused or a plane that did not answer (said here), no provider to go to,
+// or a second time round, since one automatic start is all a tab makes before somebody
+// presses the button.
+//
 // Below the provider's button, and only on a plane whose discovery says it has one, is the
 // break-glass door: the plane's break-glass token, typed, for a session that leans on the
 // provider for nothing. It is the way in on the day the provider signs nobody in, which is
@@ -15,7 +24,7 @@
 import { useEffect, useState } from "react";
 import type { JSX } from "react";
 import { AuthSession, PlaneUnreachableError, errorText, hostOf, unregisteredRedirect } from "@troupe/client";
-import { likelyPlaneUrl, newSession, redirectUri, rememberPlace, rememberPlane, restorePlace } from "../plane";
+import { forgetStartedSignIn, likelyPlaneUrl, newSession, redirectUri, rememberPlace, rememberPlane, rememberStartedSignIn, restorePlace, startedSignIn } from "../plane";
 import { parse } from "../route";
 import { Wordmark } from "./brand";
 import { Field } from "./bits";
@@ -24,12 +33,15 @@ export function SignIn({
   onSignedIn,
   navigate = (url) => globalThis.location.assign(url),
   notice = null,
+  arriving = false,
 }: {
   onSignedIn: (auth: AuthSession) => void;
   /** Leave for the provider. A test catches the address instead of going. */
   navigate?: (url: string) => void;
   /** Why the last session ended, when it ended by itself: said here, where the person lands. */
   notice?: string | null;
+  /** Whether this is the page's load, not a sign-out: only then may it go to the provider by itself. */
+  arriving?: boolean;
 }): JSX.Element {
   const [planeUrl, setPlaneUrl] = useState(likelyPlaneUrl);
   const [restoring, setRestoring] = useState(true);
@@ -61,12 +73,27 @@ export function SignIn({
           restorePlace();
         }
       }
-      return (await auth.restore()) ? auth : null;
+      if (await auth.restore()) return auth;
+      const hash = globalThis.location?.hash ?? "";
+      if (!arriving || notice || purposeOf(hash) === null || startedSignIn()) return null;
+      const found = await auth.discover();
+      if (!found.issuer || !live) return null;
+      setStatus(`Taking you to ${hostOf(found.issuer)}…`);
+      // No `select_account` here, unlike the button: the person came for an artifact, and
+      // the account the provider already holds is the one they read it as.
+      const { url: there } = await auth.beginRedirectSignIn({ redirectUri: redirectUri() });
+      if (!live) return null;
+      rememberPlace(hash);
+      rememberStartedSignIn();
+      navigate(there);
+      return "left" as const;
     })().then(
       (signedIn) => {
-        if (!live) return;
-        if (signedIn) onSignedIn(signedIn);
-        else setRestoring(false);
+        if (!live || signedIn === "left") return;
+        if (signedIn) {
+          forgetStartedSignIn();
+          onSignedIn(signedIn);
+        } else setRestoring(false);
       },
       (e: unknown) => {
         if (!live) return;
@@ -78,6 +105,7 @@ export function SignIn({
     return () => {
       live = false;
     };
+    // Asked once, on load: the props are the ones the page arrived with.
   }, [onSignedIn]);
 
   // Whether this plane has a break-glass door is its discovery's to say, asked once the
@@ -112,6 +140,7 @@ export function SignIn({
     setUnreachable(false);
     const url = planeUrl.trim();
     rememberPlane(url);
+    forgetStartedSignIn();
     try {
       const auth = newSession(url);
       const found = await auth.discover();

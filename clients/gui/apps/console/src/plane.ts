@@ -114,6 +114,44 @@ export function rememberPlace(hash: string): void {
   }
 }
 
+const STARTED_KEY = "troupe.console.startedSignIn";
+
+/**
+ * Note that this tab left for the provider without the person pressing anything, so a
+ * load that comes back from it signed out knows not to go again: it draws the page and
+ * says why, rather than sending the browser round once more. Forgotten once a sign-in
+ * holds or the person presses Sign in themselves.
+ */
+export function rememberStartedSignIn(): void {
+  try {
+    globalThis.sessionStorage?.setItem(STARTED_KEY, "1");
+  } catch {
+    // Without storage there is no automatic start either: see `startedSignIn`.
+  }
+}
+
+/**
+ * Whether this tab already left for the provider by itself and has not been signed in
+ * since. A tab with no storage answers yes, since it could not tell a loop from a first
+ * visit.
+ */
+export function startedSignIn(): boolean {
+  try {
+    const storage = globalThis.sessionStorage;
+    return storage ? storage.getItem(STARTED_KEY) !== null : true;
+  } catch {
+    return true;
+  }
+}
+
+export function forgetStartedSignIn(): void {
+  try {
+    globalThis.sessionStorage?.removeItem(STARTED_KEY);
+  } catch {
+    // Nothing kept to forget.
+  }
+}
+
 /** Put the kept place back in the address, once, unless the address already names one. */
 export function restorePlace(): void {
   try {

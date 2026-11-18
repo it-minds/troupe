@@ -20,7 +20,7 @@ import { SignIn } from "./views/SignIn";
 import { Shell } from "./views/Shell";
 import { Wordmark } from "./views/brand";
 
-type Phase = { kind: "signed-out"; notice: string | null } | { kind: "resolving"; auth: AuthSession } | { kind: "failed"; auth: AuthSession; error: unknown } | { kind: "ready"; auth: AuthSession; standing: Standing; discovery: Discovery | null };
+type Phase = { kind: "signed-out"; notice: string | null; arriving?: true } | { kind: "resolving"; auth: AuthSession } | { kind: "failed"; auth: AuthSession; error: unknown } | { kind: "ready"; auth: AuthSession; standing: Standing; discovery: Discovery | null };
 
 export function App({
   navigate,
@@ -30,7 +30,7 @@ export function App({
   /** Open an artifact's link in a tab of its own. A test catches the address instead. */
   openTab?: (url: string) => void;
 } = {}): JSX.Element {
-  const [phase, setPhase] = useState<Phase>({ kind: "signed-out", notice: null });
+  const [phase, setPhase] = useState<Phase>({ kind: "signed-out", notice: null, arriving: true });
   const [toast, setToast] = useState<string | null>(null);
 
   const onSignedIn = useCallback((auth: AuthSession) => setPhase({ kind: "resolving", auth }), []);
@@ -93,7 +93,7 @@ export function App({
     };
   }, [phase, signOut, openTab, navigate]);
 
-  if (phase.kind === "signed-out") return <SignIn onSignedIn={onSignedIn} notice={phase.notice} {...(navigate ? { navigate } : {})} />;
+  if (phase.kind === "signed-out") return <SignIn onSignedIn={onSignedIn} notice={phase.notice} arriving={phase.arriving === true} {...(navigate ? { navigate } : {})} />;
 
   if (phase.kind === "resolving") {
     return (
