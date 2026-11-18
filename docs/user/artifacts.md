@@ -139,10 +139,12 @@ once; the plane keeps only a hash of it.
 **What a link does.** Whoever opens it is signed in at your plane first, as themselves, and
 only then holds its role on that one artifact. The plane records each person it signed in
 through a link, so you see under **Links** who used it, when first and when last. Signed out,
-they sign in once, on the console's page that says it is to open a shared artifact, and land
-on the artifact; an artifact's own address does the same. They find it
-under **Shared with you** in their gallery. A link lasts until it expires or you revoke it,
-and so does the role it gave.
+they sign in once and land on the artifact; an artifact's own address does the same. The
+console goes straight to the plane's identity provider for them, so a lapsed sign-in is
+renewed without a page when the provider still knows them; its page saying it is to open a
+shared artifact shows only when the provider refused or did not answer. They find it under
+**Shared with you** in their gallery. A link lasts until it expires or you revoke it, and so
+does the role it gave.
 
 **What a link does not do.** It opens nothing for somebody who cannot sign in to your plane. It
 gives nothing to anybody who does not hold it, however many others used it. It gives no more
@@ -238,8 +240,8 @@ the desktop app then says how many references its version has that are blocked, 
 on request, and the terminal's `/artifacts` says the count on its row. A page that relies on
 one needs it moved into a file of its own, published beside it.
 
-Opening one signs you in to that host for an hour, through the plane. If you open an
-artifact's address, or follow a link to one, while signed out, you are sent to the console to
+Opening one signs you in to that host through the plane, until an hour after the last page
+or file you read there. If you open an artifact's address, or follow a link to one, while signed out, you are sent to the console to
 sign in first, and it brings you straight back to the artifact.
 
 **In the desktop app**, *Artifacts* in the rail is the same gallery, read from the plane the
