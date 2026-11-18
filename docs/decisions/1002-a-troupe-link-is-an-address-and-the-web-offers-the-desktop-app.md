@@ -8,7 +8,7 @@ paths:
   - clients/gui/packages/client/src/deeplink.ts
   - clients/gui/apps/desktop/src-tauri/src/deep_link.rs
   - clients/gui/apps/desktop/src/links.ts
-  - clients/gui/apps/console/src/views/AppBanner.tsx
+  - clients/gui/apps/desktop/src/views/AppBanner.tsx
 symbols:
   - parseAppLink
   - appLink

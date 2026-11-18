@@ -2,7 +2,7 @@
 // everything a screen needs besides its own calls, worked out once after the sign-in.
 
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
-import { AdminApi, TroupeRpcError, downloadsOf, durationWords, errorText, requiredRole } from "@troupe/client";
+import { AdminApi, TroupeRpcError, downloadsOf, durationWords, errorText, requiredRole, webAppOf } from "@troupe/client";
 import type { AppDownloads, AuthSession, Discovery, Me, ProfileView } from "@troupe/client";
 import type { Role } from "./nav";
 
@@ -15,7 +15,7 @@ export interface Signed {
   /** The teams a team admin administers; every team, for a platform admin, is not listed here. */
   teams: string[];
   /** `dryRun`: the admin writes the plane's discovery says take `dry_run: true`; none from a plane before it. */
-  plane: { url: string; name: string; version: string | null; downloads: AppDownloads; dryRun: string[] };
+  plane: { url: string; name: string; version: string | null; downloads: AppDownloads; app: string | null; dryRun: string[] };
   signOut: () => void;
   /** A short line at the corner of the screen once something has been done. */
   notify: (text: string) => void;
@@ -129,6 +129,7 @@ export function planeOf(auth: AuthSession, discovery: Discovery | null): Signed[
     name: typeof plane.name === "string" ? plane.name : new URL(auth.planeUrl).host,
     version: typeof plane.build?.version === "string" ? plane.build.version : null,
     downloads: downloadsOf(discovery),
+    app: webAppOf(discovery),
     dryRun: Array.isArray(plane.dry_run) ? plane.dry_run.filter((m): m is string => typeof m === "string") : [],
   };
 }

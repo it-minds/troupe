@@ -332,7 +332,9 @@ export function daemonHint(): DaemonEndpoint | null {
 
 /**
  * `#daemon=` off the address bar and into this browser's storage, once: at a load, and when
- * the fragment is set in a tab already open (`hashchange`), as a pasted address does.
+ * the fragment is set in a tab already open (`hashchange`), as a pasted address does. A
+ * fragment that starts with `#/` is a place in the app (links.ts `placeOfAddress`), never
+ * parameters, and is left where it is, so the two never compete for one fragment.
  */
 export function adoptFragment(): DaemonEndpoint | null {
   const at = (globalThis as { location?: Location }).location;

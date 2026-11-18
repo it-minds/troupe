@@ -334,6 +334,8 @@ describe("a profile more than one of the person's teams may use", () => {
     expect([...h.plane.rows.values()].map((r) => r.title)).toEqual(["Tidy the ledger"]);
     expect(localStorage.getItem(`troupe.pref.newSession.team.${h.plane.baseUrl}|dev`)).toBe("design");
     unmount?.();
+    // The address names the session it opened, which a load would open again (#1118): a fresh start.
+    history.replaceState(null, "", location.pathname);
 
     // Asked once: the next start on dev is for design, said on the sentence, and changeable there.
     s = await openStart();

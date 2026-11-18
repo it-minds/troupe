@@ -446,6 +446,7 @@ export {
   downloadsOf,
   followAppLink,
   inDesktopApp,
+  isPlaceId,
   isRefused,
   pageWatch,
   parseAppLink,
@@ -453,5 +454,9 @@ export {
   hostOf,
   platformOf,
   sessionLinkText,
+  artifactLinkText,
+  installOffer,
+  webAppLink,
+  webAppOf,
 } from "./deeplink.js";
-export type { AppDownloads, AppLink, BannerPlatform, OpenWatch, RefusedLink } from "./deeplink.js";
+export type { AppDownloads, AppLink, BannerPlatform, InstallOffer, LinkElsewhere, OpenWatch, RefusedLink } from "./deeplink.js";
