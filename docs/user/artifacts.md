@@ -203,6 +203,11 @@ to say, so every client tabs them alike. A card shows the title and the kind, ne
 itself, and the picture its publisher sent with that version, if they sent one.
 Open one and it shows who published which version and when, the
 session it came from, and **Open**, which opens the artifact in a new tab.
+An artifact a session published leads back to it, to ask for a change there: its page in the
+console says *Published from a session* with *Copy link* and *Open in the app*, the desktop
+app's gallery has *Open session*, which opens it in the app or says it is gone or not shared
+with you, and the terminal's `/artifacts` says `from session <id>` under the list;
+the plane opens the session only for the people it is shared with.
 
 **In the terminal client**, `/artifacts` lists what is published for you on the plane, through this computer's daemon
 and its sign-in, in the desktop app's words: **All**, **◉

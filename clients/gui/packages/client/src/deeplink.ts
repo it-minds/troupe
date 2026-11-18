@@ -60,6 +60,19 @@ export function appLink(link: AppLink): string {
 }
 
 /**
+ * What "Copy link" on a session puts on the clipboard, in the desktop app and the console
+ * alike: its `troupe://` link, and under it the console's page for it where there is a
+ * console and the session has one there (a private session somebody was invited into).
+ * Never a token: both are addresses that sign the reader in themselves, and the plane opens
+ * the session only for somebody it is shared with.
+ */
+export function sessionLinkText(id: string, plane: string, console: string | null, privateSession: boolean): string {
+  const lines = [appLink({ kind: "session", id, plane })];
+  if (console && privateSession) lines.push(`${console.replace(/\/+$/, "")}/#/mine/invited/${encodeURIComponent(id)}`);
+  return lines.join("\n");
+}
+
+/**
  * Read a link handed to the app: one of the three forms, or a sentence saying why it is
  * not followed. Nothing in it is taken beyond the place and the plane's address.
  */

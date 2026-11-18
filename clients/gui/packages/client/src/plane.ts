@@ -431,6 +431,14 @@ export class PlaneClient {
     return this.rpc(planeToken, "sessions.list", filter);
   }
 
+  /**
+   * One session as the list has it. `not_found` both for one that is gone and for one the
+   * person may not see: the plane does not say whether a session it will not show exists.
+   */
+  getSession(planeToken: string, sessionId: string): Promise<SessionRow> {
+    return this.rpc<SessionRow>(planeToken, "session.get", { session_id: sessionId });
+  }
+
   listProfiles(planeToken: string): Promise<{ profiles: ProfileOffering[] }> {
     return this.rpc(planeToken, "profiles.list", {});
   }

@@ -6,7 +6,8 @@ defmodule Troupe.UI.TUI.ArtifactsPage do
   ○ Only you —
   each row its title, kind, version, whose it is (`team finance` for a team's, which every
   member of the team owns; `you`; or who published it) and when, with *new* on a version
-  the person has not opened on this machine.
+  the person has not opened on this machine. Under the list, the row on the cursor says the
+  session it came from, where a session published it.
 
   An artifact is shown where it can touch nothing of the person's: in the browser, through
   the plane's one-time address (`Enter`, `v` for another version). A Markdown one is also
@@ -649,7 +650,15 @@ defmodule Troupe.UI.TUI.ArtifactsPage do
 
   defp status_text(%{filtering: true} = page), do: "/" <> page.filter <> "▏"
   defp status_text(%{status: status}) when is_binary(status), do: status
-  defp status_text(_page), do: ""
+  defp status_text(%{local_only: true}), do: ""
+  defp status_text(page), do: from_session(selected(page))
+
+  # The session the row on the cursor came from, as plain text: the terminal has no
+  # clipboard to put the session's link on.
+  defp from_session(%{"origin" => %{"session_id" => id}}) when is_binary(id) and id != "",
+    do: "from session " <> id
+
+  defp from_session(_row), do: ""
 
   defp kind_word("html"), do: "page"
   defp kind_word("markdown"), do: "markdown"

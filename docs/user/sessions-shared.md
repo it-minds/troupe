@@ -137,4 +137,6 @@ computer, the version your plane recommends (on the docs site, the release's pag
 app opened is the page's guess, since a browser does not say: one that asks "Open Troupe?"
 and is told no is not offered the install. On a phone the line says the app is for a
 computer and copies the page's link for you to send yourself. *Copy link* in a session's
-head copies its `troupe://` link, with the console's page for it under it where it has one.
+head copies its `troupe://` link, with the console's page for it under it where it has one;
+the console's *Copy link* on a session's view, and on the page of an artifact the session
+published, copies the same, and a browser that will not copy shows it to copy by hand.
