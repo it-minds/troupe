@@ -112,6 +112,17 @@ function palette(command: string): Promise<void> {
   })();
 }
 
+/** The ⋯ menu's fold of every turn's working. */
+const foldItem = (): HTMLButtonElement =>
+  [...document.querySelectorAll<HTMLButtonElement>(".session-menu .menu-pop .item")].find((b) => /every turn's working$/.test(b.querySelector(".t")?.textContent ?? ""))!;
+
+/** Open the ⋯ menu and use the fold, the way a person does. */
+async function useFold(): Promise<void> {
+  document.querySelector<HTMLButtonElement>('.session-menu button[aria-label="More session actions"]')!.click();
+  await waitFor(() => !document.querySelector<HTMLElement>(".session-menu .menu-pop")?.hidden, "the ⋯ menu");
+  foldItem().click();
+}
+
 describe("a turn, quiet by default", () => {
   it("shows its answer framed and its working as one strip above it, the failed call open", async () => {
     const session = daemon.seed(WORKSPACE);
@@ -292,6 +303,82 @@ describe("the levels", () => {
     await waitFor(() => strips()[0]?.getAttribute("aria-expanded") === "false", "the turn shut");
     expect(reasoning()).toBeNull();
     expect(toolFrames()).toHaveLength(1);
+  });
+
+  // One control folds and unfolds the whole transcript (troupe #1117): it is /detail's
+  // choice for this session, quiet or everything, so the two never disagree.
+  it("folds and unfolds every turn's working from the ⋯ menu, the live turn too, and agrees with /detail", async () => {
+    const session = daemon.seed(WORKSPACE);
+    await open(session.workspace);
+    turn(session);
+    turn(session, { ids: "u" });
+    await waitFor(() => stream()?.querySelectorAll(".note.turn-cost").length === 2, "both turns");
+    // A third turn, still working: thinking, and a call under way.
+    session.log.append("user_input", { source: "user", text: "and the lexer" }, { kind: "user", subject: "ada" });
+    daemon.ephemeral(session, "agent_state", { state: "thinking" });
+    daemon.ephemeral(session, "llm_delta", { kind: "reasoning", text: "The lexer next." });
+    await waitFor(() => stream().textContent?.includes("and the lexer"), "the live turn");
+    const thoughts = (): HTMLDetailsElement[] => [...stream().querySelectorAll<HTMLDetailsElement>(".reasoning-frame")];
+
+    // Quiet by default: the control offers to unfold, and nothing is open.
+    expect(foldItem().querySelector(".t")?.textContent).toBe("Unfold every turn's working");
+    expect(foldItem().getAttribute("aria-pressed")).toBe("false");
+    expect(foldItem().querySelector(".d")?.textContent).toBe("Now quiet: each turn's thinking and tool steps are in its strip");
+    expect(thoughts()).toHaveLength(0);
+
+    // Unfold: every drawn turn open, the live turn's thinking with them.
+    await useFold();
+    await waitFor(() => strips().length === 2 && strips().every((s) => s.getAttribute("aria-expanded") === "true"), "every turn open");
+    expect(toolFrames()).toHaveLength(8);
+    expect(thoughts().every((t) => t.open)).toBe(true);
+    expect(thoughts().some((t) => t.textContent?.includes("The lexer next."))).toBe(true);
+    expect(foldItem().querySelector(".t")?.textContent).toBe("Fold every turn's working");
+    expect(foldItem().getAttribute("aria-pressed")).toBe("true");
+    expect(foldItem().querySelector(".d")?.textContent).toBe("Now everything: each turn's thinking and tool steps are open");
+
+    // Fold: every turn shut again, the live thinking too; the failed calls stay open.
+    await useFold();
+    await waitFor(() => strips().every((s) => s.getAttribute("aria-expanded") === "false"), "every turn shut");
+    expect(thoughts()).toHaveLength(0);
+    expect(toolFrames()).toHaveLength(2);
+    expect(foldItem().querySelector(".t")?.textContent).toBe("Unfold every turn's working");
+
+    // /detail moves the control, and the control moves what /detail says.
+    await palette("detail tools");
+    await waitFor(() => foldItem().querySelector(".t")?.textContent === "Fold every turn's working", "the control at tools");
+    expect(foldItem().getAttribute("aria-pressed")).toBe("true");
+    expect(foldItem().querySelector(".d")?.textContent).toBe("Now tools: each turn's tool steps are open, its thinking shut");
+    await useFold();
+    await waitFor(() => strips().every((s) => s.getAttribute("aria-expanded") === "false"), "folded from tools");
+    document.querySelector<HTMLButtonElement>('.composer button[aria-label="Commands"]')!.click();
+    const field = await waitFor(() => document.querySelector<HTMLInputElement>('.palette input[aria-label="Command"]'), "the palette");
+    type(field, "detail");
+    await waitFor(() => document.querySelector('.palette .row[aria-selected="true"]:not(.unavailable) .name')?.textContent === "/detail", "the /detail row, runnable");
+    field.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+    await waitFor(() => document.querySelector(".palette .notice")?.textContent === "transcript detail: quiet, for this session (the setting says quiet)", "the level the control chose");
+  });
+
+  it("keeps a turn opened or shut by hand until the control is used again", async () => {
+    const session = daemon.seed(WORKSPACE);
+    await open(session.workspace);
+    turn(session);
+    turn(session, { ids: "u" });
+    await waitFor(() => stream()?.querySelectorAll(".note.turn-cost").length === 2, "both turns");
+    const expanded = (): string[] => strips().map((s) => s.getAttribute("aria-expanded") ?? "");
+
+    // Unfolded, then the first turn shut by hand: it stays shut, the other open.
+    await useFold();
+    await waitFor(() => expanded().join() === "true,true", "both open");
+    strips()[0]!.click();
+    await waitFor(() => expanded().join() === "false,true", "the first shut by hand");
+
+    // The next use of the control draws every turn as it says, the hand's choice gone.
+    await useFold();
+    await waitFor(() => expanded().join() === "false,false", "both folded");
+    strips()[1]!.click();
+    await waitFor(() => expanded().join() === "false,true", "the second opened by hand");
+    await useFold();
+    await waitFor(() => expanded().join() === "true,true", "both unfolded, the second too");
   });
 
   it("says how long a call and the working took, from the events' times", async () => {
