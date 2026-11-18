@@ -138,7 +138,9 @@ once; the plane keeps only a hash of it.
 
 **What a link does.** Whoever opens it is signed in at your plane first, as themselves, and
 only then holds its role on that one artifact. The plane records each person it signed in
-through a link, so you see under **Links** who used it, when first and when last. They find it
+through a link, so you see under **Links** who used it, when first and when last. Signed out,
+they sign in once, on the console's page that says it is to open a shared artifact, and land
+on the artifact; an artifact's own address does the same. They find it
 under **Shared with you** in their gallery. A link lasts until it expires or you revoke it,
 and so does the role it gave.
 
