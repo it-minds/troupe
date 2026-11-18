@@ -137,7 +137,7 @@ defmodule Troupe.Instructions do
   of yours writes them, and `remember`
   writes only the repository's memory and the person's own.
   If you are asked to change one, say that you cannot, and that an administrator edits it in
-  the Troupe console: the organisation's and a team's under Company memory, a worker
+  the Troupe console: the organisation's and a team's under Memory, a worker
   profile's on that profile's page.
   """
 
