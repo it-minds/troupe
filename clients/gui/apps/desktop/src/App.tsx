@@ -49,7 +49,7 @@ import { NavSheet } from "./sheet";
 type Where =
   | { screen: "launcher" }
   | { screen: "sessions" }
-  | { screen: "new" }
+  | { screen: "new"; profile?: string }
   | { screen: "approvals" }
   | { screen: "artifacts"; artifact?: string }
   | { screen: "memory" }
@@ -756,6 +756,8 @@ export function App(): JSX.Element {
 
           {where.screen === "new" && (
             <StartSession
+              key={where.profile ?? ""}
+              profile={where.profile}
               auth={planeAuth}
               daemon={daemon.client}
               daemonStatus={daemon.status}
@@ -807,7 +809,13 @@ export function App(): JSX.Element {
           {where.screen === "profiles" &&
             planeAuth &&
             (where.profile ? (
-              <ProfilePage key={where.profile} auth={planeAuth} name={where.profile} onBack={() => setWhere({ screen: "profiles" })} />
+              <ProfilePage
+                key={where.profile}
+                auth={planeAuth}
+                name={where.profile}
+                onBack={() => setWhere({ screen: "profiles" })}
+                onStart={(profile) => setWhere({ screen: "new", profile })}
+              />
             ) : (
               <Profiles auth={planeAuth} onOpen={(profile) => setWhere({ screen: "profiles", profile })} />
             ))}
