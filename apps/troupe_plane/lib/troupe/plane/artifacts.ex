@@ -1954,8 +1954,9 @@ defmodule Troupe.Plane.Artifacts do
 
   defp wanted_files(_version, _path), do: :error
 
+  # A version's stored file records its size as `bytes`; only an announced upload says `size`.
   defp attachable(files) do
-    size = files |> Enum.map(&(&1["size"] || 0)) |> Enum.sum()
+    size = files |> Enum.map(&(&1["bytes"] || 0)) |> Enum.sum()
 
     if size <= @max_attach,
       do: :ok,
