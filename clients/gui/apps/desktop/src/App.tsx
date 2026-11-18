@@ -22,7 +22,7 @@ import { chooseLocalOnly, storedLocalOnly } from "./mode";
 import type { AppMode } from "./mode";
 import { useNotifications } from "./notify";
 import { capabilities, likelyPlaneUrl, prefs, shell } from "./shell";
-import { signInSentence, stepFor } from "./links";
+import { sessionNotOpen, signInSentence, stepFor } from "./links";
 import type { LinkPlace } from "./links";
 import { useSharedPrefs } from "./shared";
 import { firstRunLook, hasChosen, markChosen, useAppearance } from "./theme";
@@ -820,7 +820,12 @@ export function App(): JSX.Element {
               daemon={daemon.client}
               daemonState={daemon}
               localOnly={localOnly}
-              onOpenSession={(id) => (snapshot.rows.some((r) => r.id === id) ? setWhere({ screen: "session", id }) : undefined)}
+              onOpenSession={async (id) => {
+                const listed = snapshot.rows.some((r) => r.id === id) || archived.rows.some((r) => r.id === id);
+                const sentence = await sessionNotOpen(id, listed, planeAuth);
+                if (sentence === null) setWhere({ screen: "session", id });
+                return sentence;
+              }}
             />
           )}
 

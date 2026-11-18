@@ -448,5 +448,6 @@ export {
   planeAddress,
   hostOf,
   platformOf,
+  sessionLinkText,
 } from "./deeplink.js";
 export type { AppDownloads, AppLink, BannerPlatform, OpenWatch, RefusedLink } from "./deeplink.js";

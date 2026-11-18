@@ -102,6 +102,8 @@ daemon.artifacts = [
     id: "art-weekly",
     title: "Weekly licence audit, October",
     kind: "markdown",
+    // Published from a session on the list, so Open session has one to open; the others name one that is gone.
+    origin: { session_id: stopped.id, profile: "dev", agent: "agent:writer", where: "pod" },
     version: 3,
     current: 3,
     files: [

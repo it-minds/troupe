@@ -37,6 +37,7 @@ import type { Route } from "../route";
 import { ArtifactEditor, editableFiles } from "./ArtifactEditor";
 import { ArtifactComments, ArtifactPeople } from "./ArtifactComments";
 import { ArtifactLinks } from "./ArtifactLinks";
+import { FromSession } from "./SessionLink";
 import { Empty, Fields, Loaded, Preview, Region, Status, count, when } from "./bits";
 
 /** Which artifacts a tab lists. */
@@ -609,6 +610,7 @@ function Origin({ artifact: a }: { artifact: ArtifactDetail }): JSX.Element {
   return (
     <div className="artifact-origin">
       <p>{words ? `${words}.` : "The plane does not say where it was published from."}</p>
+      {session && <FromSession id={session} />}
       {session && role !== "member" && o.where !== "laptop" && (
         <p>
           <a href={href({ page: "sessions", path: [session] })}>View source session</a> <span className="mono">{session}</span>
@@ -621,7 +623,7 @@ function Origin({ artifact: a }: { artifact: ArtifactDetail }): JSX.Element {
       )}
       {session && (role === "member" || o.where === "laptop") && !a.mine && (
         <p className="note">
-          Published from session <span className="mono">{session}</span>, which is {personWords(a.owner)}'s and not yours to open.
+          Published from session <span className="mono">{session}</span>, which is {personWords(a.owner)}'s: the plane opens it only for the people it is shared with.
         </p>
       )}
     </div>
