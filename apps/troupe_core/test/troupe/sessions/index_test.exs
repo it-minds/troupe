@@ -187,6 +187,36 @@ defmodule Troupe.Sessions.IndexTest do
       assert %{state: :dormant} =
                index |> GenServer.call({:list, %{}}) |> Enum.find(&(&1.id == session.id))
     end
+
+    # A daemon restarted: the index that comes up has been told of no session yet.
+    test "is listed after a restart, before any session under its directory starts again",
+         context do
+      elsewhere = Path.join(context.base, "elsewhere")
+      File.mkdir_p!(elsewhere)
+      recorded(context.state_dir, context.workspace, "kept-open", "open")
+      opts = [state_dir: elsewhere, session_idle_ms: :infinity, detached_idle_ms: :infinity]
+      spec = &%{id: {Index, &1}, start: {GenServer, :start_link, [Index, opts]}}
+
+      first = start_supervised!(spec.(:first))
+      %{session: session} = start_session(context)
+
+      GenServer.cast(
+        first,
+        {:register, session.id, session.pid,
+         %{workspace: context.workspace, profile: "build", state_dir: context.state_dir}}
+      )
+
+      assert row(first, "kept-open")
+      :ok = stop_supervised(spec.(:first).id)
+
+      again = start_supervised!(spec.(:again))
+      assert %{state: :dormant} = row(again, "kept-open")
+      assert context.state_dir |> Path.expand() |> Kernel.in(GenServer.call(again, :roots))
+    end
+  end
+
+  test "an erasure of a session found nowhere says so" do
+    assert {:error, :not_found} = Troupe.erase_session("20000101T000000-nobody")
   end
 
   # Decision 855: a listing reads a dormant session's log when the log is new to it or has

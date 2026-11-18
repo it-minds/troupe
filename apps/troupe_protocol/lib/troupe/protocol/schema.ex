@@ -583,6 +583,14 @@ defmodule Troupe.Protocol.Schema do
       },
       "session_dormant" => %{"last_seq" => required(:integer)},
       "session_activated" => %{"epoch" => required(:string), "pod" => optional(:string)},
+      # A wake past what the agent could not read (`session.repair`): the event `event`, its
+      # `seq`, written `at`, is skipped by the agent's replay from here on, as `by` asked.
+      # Appended, never a rewrite, so the chain stays whole.
+      "log_repaired" => %{
+        "event" => required(:integer),
+        "at" => optional(:string),
+        "by" => required(:string)
+      },
       "session_resumed" => %{
         "dormant_ms" => required(:integer),
         "moved" => required(:boolean)
@@ -889,6 +897,12 @@ defmodule Troupe.Protocol.Schema do
       # Compact the conversation now, between turns: activating, like the goal. Refused
       # `conflict` while a turn runs or while there is too little to compact.
       "session.compact" => %{
+        "command_id" => required(:string),
+        "session_id" => required(:string)
+      },
+      # Wake a session whose root cannot start from its log, past each event its replay
+      # raises on: `log_repaired` for each. What `input.send` takes; answers `skipped`.
+      "session.repair" => %{
         "command_id" => required(:string),
         "session_id" => required(:string)
       },

@@ -299,6 +299,7 @@ Plain language, sentence case, active verbs. Name things the way the reader does
 | "WebSocket disconnected" | "Connection lost. Trying again." |
 | "No data" | "No sessions yet." + what a session is + one button |
 | "Are you sure?" | Say the consequence: "Allow every file change for this session" |
+| "Replay failed: corrupt event at seq 412" | "The agent could not start from this session's log: … Wake it anyway" (it skips what it cannot read), and in the transcript "An event from 14:02 could not be read and was skipped" |
 
 Errors say what happened and what to do next. Empty screens invite. Waiting times are given as honest ranges ("about twenty seconds"), never as fake progress.
 

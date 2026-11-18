@@ -19,7 +19,7 @@ defmodule Troupe do
   alias Troupe.{Events, Mounts, Registry, Session, Sessions, Skills, Workflow}
   alias Troupe.LLM.Catalog.Refresher
   alias Troupe.Onboard.Notice
-  alias Troupe.Protocol.Origin
+  alias Troupe.Protocol.{Event, Origin}
   alias Troupe.Session.{Approvals, Blobs, Log, Questions, Watcher}
   alias Troupe.Sessions.{Archive, Fork, Index, Pin, Title, Unseen}
 
@@ -826,18 +826,47 @@ defmodule Troupe do
     end
   end
 
-  defp wake(session_id, opts) do
-    case Index.get(session_id) do
-      nil -> {:error, :not_found}
-      meta -> restore(session_id, meta, Keyword.take(opts, [:client]))
+  @doc """
+  Wake a dormant session past the events its root cannot read: `activate/2` for a session
+  whose root's replay raises on something in its log. Each event the replay raises on, up
+  to the log's head now, is skipped, and a `log_repaired` (`event`, its `seq`; `at`, when
+  it was written; `by`) appended under the root for it, so the log is never rewritten and
+  its chain stays whole. `:actor` is who asked, `:client` as `activate/2` takes it.
+
+  `{:ok, skipped}` lists the `seq` of each event skipped, none for a session already
+  running or one whose root read everything; the errors are `activate/2`'s.
+  """
+  @spec repair(String.t(), keyword()) ::
+          {:ok, [pos_integer()]}
+          | {:error, :not_found | :stopping | {:agent_failed, String.t()} | term()}
+  def repair(session_id, opts \\ []) do
+    through = head_seq(session_id)
+    repair = %{by: Keyword.get(opts, :actor) || Event.Actor.system(), through: through}
+
+    with {:ok, _pid} <- activate(session_id, Keyword.put(opts, :repair, repair)) do
+      skipped =
+        for %Event{type: "log_repaired", seq: seq, data: %{"event" => event}} <-
+              replay_from(session_id, through),
+            seq > through,
+            do: event
+
+      {:ok, skipped}
     end
   end
 
-  defp restore(session_id, meta, overrides) do
+  defp wake(session_id, opts) do
+    case Index.get(session_id) do
+      nil -> {:error, :not_found}
+      meta -> restore(session_id, meta, Keyword.take(opts, [:client]), Keyword.get(opts, :repair))
+    end
+  end
+
+  defp restore(session_id, meta, overrides, repair) do
     case resume(session_id,
            workspace: meta.workspace,
            agent: meta.profile,
-           config_overrides: overrides
+           config_overrides: overrides,
+           repair: repair
          ) do
       {:ok, session} ->
         Log.append(session_id, Session.root_path(), :session_activated, %{
@@ -1009,8 +1038,11 @@ defmodule Troupe do
   What is deleted is the session's directory under its own state directory, the one its
   config named, log and blobs and all, and every other directory named for it under any
   state directory this daemon keeps sessions in (Decision 855).
+
+  `{:error, :not_found}` when there was nothing of it to delete anywhere: an erasure is
+  said done only when something was.
   """
-  @spec erase_session(String.t()) :: :ok
+  @spec erase_session(String.t()) :: :ok | {:error, :not_found}
   def erase_session(session_id) do
     session = get_session(session_id)
     stop_session(session_id)
@@ -1018,12 +1050,15 @@ defmodule Troupe do
 
     state_dirs = [session && Map.get(session, :state_dir) | state_dirs()]
 
-    session
-    |> own_dir(session_id)
-    |> Kernel.++(named_dirs(session_id, state_dirs))
-    |> Enum.each(&File.rm_rf/1)
+    deleted =
+      session
+      |> own_dir(session_id)
+      |> Kernel.++(named_dirs(session_id, state_dirs))
+      |> Enum.uniq()
+      |> Enum.filter(&File.exists?/1)
+      |> Enum.map(&File.rm_rf/1)
 
-    :ok
+    if deleted == [], do: {:error, :not_found}, else: :ok
   end
 
   defp own_dir(nil, _session_id), do: []

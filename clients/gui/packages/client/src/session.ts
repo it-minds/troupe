@@ -429,6 +429,16 @@ export class SessionView {
     await this.conn.call("session.compact", { command_id: this.conn.nextCommandId(), session_id: this.sessionId });
   }
 
+  /**
+   * `session.repair`: wake a session whose agent cannot start from its log, past each event
+   * its replay cannot read; the `seq` of each one skipped, which the log keeps and says it
+   * skipped (`log_repaired`). Offered where a wake failed with `data.repairable`.
+   */
+  async repair(): Promise<number[]> {
+    const woken = await this.conn.call<{ skipped?: number[] }>("session.repair", { command_id: this.conn.nextCommandId(), session_id: this.sessionId });
+    return Array.isArray(woken?.skipped) ? woken.skipped : [];
+  }
+
   /** `session.loop.start`: up to `maxIterations` turns towards the goal, or the session's own cap. */
   startLoop(maxIterations?: number): Promise<LoopStarted> {
     const params: Record<string, unknown> = { command_id: this.conn.nextCommandId(), session_id: this.sessionId };

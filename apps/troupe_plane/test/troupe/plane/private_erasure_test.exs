@@ -24,8 +24,9 @@ defmodule Troupe.Plane.PrivateErasureTest do
   alias Troupe.Plane.{Admin, Erasure, FakePod, Harness, PersonAuth, Sessions}
   alias Troupe.Plane.Control.{Connections, Listener}
   alias Troupe.Plane.Identity.User
-  alias Troupe.Plane.Sessions.Tombstone
+  alias Troupe.Plane.Sessions.{Session, Tombstone}
   alias Troupe.Protocol.SessionId
+  alias Troupe.Sessions.Storage
 
   @moduletag timeout: 60_000
 
@@ -522,6 +523,58 @@ defmodule Troupe.Plane.PrivateErasureTest do
       refute key_present?(root, path)
       assert Erasure.tombstone_for(id).applied_by == []
       assert [%{"session_id" => ^id}] = Erasure.pending_for("dev", "troupe-w-dev-0")
+
+      # Told again by the pass, and by erasing again, not only when a pod next enrols.
+      assert_receive {:pushed, "session.erase", %{"session_id" => ^id}}, 5_000
+      Erasure.retry()
+      assert_receive {:pushed, "session.erase", %{"session_id" => ^id}}, 5_000
+
+      assert {:ok, %Tombstone{applied_by: []}} = Erasure.erase(id, actor: owner.subject)
+      assert_receive {:pushed, "session.erase", %{"session_id" => ^id}}, 5_000
+    end
+
+    # The index lost the row, as a restore from a backup older than the erasure loses it:
+    # the pass reads the tombstone with what the session's manifest says of it.
+    test "whose row is gone has its key destroyed by the pass all the same", %{root: root} do
+      team = team_with_grant("engineering", "dev", name: "engineering")
+      owner = person("owner-#{unique()}@example.test", ["engineering"])
+      id = SessionId.generate()
+
+      {:ok, _} =
+        Sessions.create(%{
+          id: id,
+          owner_id: owner.id,
+          owner_subject: owner.subject,
+          team_id: team.id,
+          profile: "dev",
+          state: "erasure_pending"
+        })
+
+      Repo.insert!(%Tombstone{
+        session_id: id,
+        reason: "requested",
+        actor: owner.subject,
+        erased_at: DateTime.utc_now()
+      })
+
+      {:ok, _} =
+        Storage.put_manifest(ObjectStore.from_env(), id, %{
+          kind: "team",
+          team: "engineering",
+          owner_subject: owner.subject,
+          profile: "dev",
+          epoch: 1,
+          last_seq: 0
+        })
+
+      path = KMS.path("engineering", id)
+      write_key(root, path)
+      Repo.delete_all(from(s in Session, where: s.id == ^id))
+
+      assert %{destroyed: destroyed} = Erasure.retry()
+      assert destroyed >= 1
+      refute key_present?(root, path)
+      assert Erasure.tombstone_for(id).key_destroyed_at
     end
 
     # The upgrade: a team session an earlier release erased still has its key, since the pod

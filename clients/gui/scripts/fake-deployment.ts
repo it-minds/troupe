@@ -156,6 +156,11 @@ daemon.ownProposals = [
   { id: "p-core-1", scope: "team", team: "core", topic: "Releases", entry: "Tag the release before the changelog is written.", session_id: "s-parser", agent: "build", where: "machine", by: "alice@example.com", state: "pending", at: day(1), decided_by: null, decided_at: null, reason: null, version: null, message: "Your proposal for the team core's memory under Releases is awaiting review." },
   { id: "p-org-1", scope: "organisation", team: null, topic: "Dates", entry: "Write dates as 26 October 2026.", session_id: "s-notes", agent: "root", where: "machine", by: "alice@example.com", state: "declined", at: day(3), decided_by: "root@example.com", decided_at: day(2), reason: "ISO dates stay: tools read them.", version: null, message: "Your proposal for the organisation's memory under Dates (\"Write dates as 26 October 2026.\") was declined by root@example.com: ISO dates stay: tools read them." },
 ];
+// A session whose log its agent cannot read (troupe #1053): a message offers to wake it
+// past the event, and the transcript then says where it was skipped.
+const unreadable = daemon.seed("/home/ada/ledger");
+daemon.say(unreadable.id, "Copied the ledger table.");
+daemon.unreadable(unreadable.id);
 const notes = daemon.seed("/home/ada/notes");
 // A scratchpad to look at (issue #472): a plan the agent showed and then wrote again, and
 // a table beside it.

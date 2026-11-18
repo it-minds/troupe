@@ -24,6 +24,7 @@ they are not what the tables say, so edit the tables rather than this page.
 | `troupe run [AGENT] "task" --profile NAME [--team TEAM] [--title "TITLE"] [--headless]` | the task on the platform, on that plane profile, as the TUI's /new would start it; a full profile is waited on, a line a wait; @profile #agent /local /platform in the task set those and are taken out of it; --team names whose session it is where more than one of your teams may use the profile |
 | `troupe resume [SESSION_ID \| latest] [--private]` | no id: the newest session here, picker open; latest, or --private for the newest private one: straight in (troupe --resume is the same) |
 | `troupe resume SESSION_ID\|latest\|--private --headless "message"` | one turn on that session, printed as run --headless prints it, then exit |
+| `troupe resume SESSION_ID --repair [--headless "message"]` | wake a session on this computer whose agent cannot read its log, skipping each event it cannot read (the log keeps them), then open it or run the message |
 | `troupe --remote [PLANE_URL]` | open HQ: teams, profiles and sessions on a plane |
 | `troupe login PLANE_URL` | sign in to a plane with the device flow |
 | `troupe logout [PLANE_URL]` | forget a plane's credentials and sign this machine's daemon out of it (--all: every plane); without a plane named, out of your own MCP servers too, revoked at their providers |

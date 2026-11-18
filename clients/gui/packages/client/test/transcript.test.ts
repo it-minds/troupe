@@ -25,6 +25,7 @@ import {
   stoppedSentence,
 } from "../src/index.js";
 import type { DurableEvent, Entry, TranscriptState, TroupeEvent } from "../src/index.js";
+import { when } from "../src/remote.js";
 import { changedText } from "../src/transcript.js";
 
 let seq = 0;
@@ -975,6 +976,27 @@ describe("questions, and what the daemon says about limits (troupe-remote Decisi
 
     // The next input starts a turn, and the failure is behind it.
     assert.equal(fold(failed, durable("user_input", { text: "again", source: "user" })).failed, undefined);
+  });
+
+  it("says where an event the agent could not read was skipped, and is no longer failed (troupe #1053)", () => {
+    seq = 0;
+    const before = foldAll([
+      durable("user_input", { text: "copy the ledger", source: "user" }),
+      durable("llm_response", { message: { role: "assistant", content: [{ type: "text", text: "Copied." }] } }),
+      durable("tool_results", { results: "not a list" }),
+      durable("llm_response", { message: { role: "assistant", content: [{ type: "text", text: "Checked." }] } }),
+      durable("turn_ended", { reason: "agent_failed", detail: "raised" }),
+    ]);
+    const at = "2026-11-18T09:15:00Z";
+    const repaired = fold(before, durable("log_repaired", { event: 3, at, by: "alice" }));
+    assert.equal(repaired.failed, undefined);
+    const i = repaired.entries.findIndex((e) => e.kind === "system" && e.type === "log_repaired");
+    const line = repaired.entries[i] as Extract<Entry, { kind: "system" }>;
+    assert.equal(line.text, `An event from ${when(at)} could not be read and was skipped`);
+    // Where the skipped event was: after what came before it, before what came after.
+    assert.ok(repaired.entries.slice(0, i).every((e) => e.seq < 3));
+    assert.ok(repaired.entries.slice(i + 1).every((e) => e.seq > 3));
+    assert.ok(i < repaired.entries.length - 1);
   });
 });
 

@@ -96,6 +96,7 @@ defmodule Troupe.UI.TUI.Server do
           answer: answer() | nil,
           gate: map() | nil,
           always: String.t() | nil,
+          repair: {String.t(), String.t()} | nil,
           attached: %{optional(String.t()) => map()},
           audience: map() | nil,
           settings: settings() | nil,
@@ -333,6 +334,10 @@ defmodule Troupe.UI.TUI.Server do
       # The call whose Always allow is asking where its rule goes (`w`): this workspace
       # or everywhere, one more key on the box.
       always: nil,
+      # The window whose message could not wake its session, its agent unable to start from
+      # the log, and the message: `w` on an empty line wakes it past what it cannot read
+      # (`session.repair`) and sends the message then.
+      repair: nil,
       # An artifact attached to a window's message before it is sent, by window path:
       # `%{id, title, version}`, picked on `/artifacts` with `a`.
       attached: %{},
@@ -2082,6 +2087,7 @@ defmodule Troupe.UI.TUI.Server do
   end
 
   # Errors cross the client as strings or as reasons; the notice line takes text.
+  defp to_message({:repairable, sentence}), do: sentence
   defp to_message(reason) when is_binary(reason), do: reason
 
   defp to_message({:choose_team, teams}),
@@ -4265,6 +4271,10 @@ defmodule Troupe.UI.TUI.Server do
   defp window_key(%Key{code: "esc"}, _path, %{always: call_id} = state) when is_binary(call_id),
     do: %{state | always: nil}
 
+  # The offer to wake a session past what its agent cannot read is let go of with Esc.
+  defp window_key(%Key{code: "esc"}, path, %{repair: {path, _text}} = state),
+    do: %{state | repair: nil}
+
   # Esc clears a selection before it leaves the window, so a mis-drag can be
   # cancelled without losing the pane.
   defp window_key(%Key{code: "esc"}, _path, %{selection: %{}} = state),
@@ -4341,6 +4351,27 @@ defmodule Troupe.UI.TUI.Server do
 
       _gone ->
         %{state | always: nil}
+    end
+  end
+
+  # Offered when a message could not wake the session: its agent cannot start from the
+  # log. `w` wakes it past each event it cannot read, which the log keeps and says it
+  # skipped, and sends the message that could not wake it.
+  defp window_key(
+         %Key{code: "w", modifiers: []},
+         path,
+         %{win_text: "", repair: {path, text}} = state
+       ) do
+    state = %{state | repair: nil}
+
+    case Client.repair(state.session_id) do
+      {:ok, skipped} ->
+        state = notice(state, woken(skipped))
+        Client.send_input(state.session_id, path, text)
+        follow(state)
+
+      {:error, reason} ->
+        notice(state, "Not woken: #{to_message(reason)}")
     end
   end
 
@@ -4543,11 +4574,23 @@ defmodule Troupe.UI.TUI.Server do
         Client.send_input(sid, path, text)
     end
     |> case do
-      {:stopped, sentence} -> notice(state, sentence)
-      :attached -> send_attached(state, path, text)
+      {:stopped, sentence} ->
+        notice(state, sentence)
+
+      # Its agent cannot start from the log, and the transcript already says what it
+      # raised: the line says only that, and the offer, first, so a narrow screen keeps
+      # it. The message is kept, and sent once the session is awake.
+      {:error, {:repairable, _raised}} ->
+        state = %{put_win(state, "") | repair: {path, text}}
+        notice(state, "Wake it anyway? [w] Its agent cannot start from this session's log")
+
+      :attached ->
+        send_attached(state, path, text)
+
       # Any Enter that reaches here either answered the question or replaced it
       # with fresh input, so a half-built selection is stale either way.
-      _sent -> follow(%{put_win(state, "") | answer: nil})
+      _sent ->
+        follow(%{put_win(state, "") | answer: nil})
     end
   end
 
@@ -4913,6 +4956,9 @@ defmodule Troupe.UI.TUI.Server do
         %{state | pane: fresh_pane(if(next == path, do: nil, else: next)), selection: nil}
     end
   end
+
+  defp woken([]), do: "The session is awake; nothing in its log had to be skipped"
+  defp woken(skipped), do: "Woken past #{Words.count(length(skipped), "event")} it could not read"
 
   defp notice(state, text),
     do: %{state | model: %{state.model | notices: Enum.take([text | state.model.notices], 3)}}

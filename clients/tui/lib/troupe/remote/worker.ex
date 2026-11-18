@@ -164,6 +164,13 @@ defmodule Troupe.Remote.Worker do
   @spec compact(String.t()) :: :ok | {:error, term()}
   def compact(session_id), do: call(session_id, :compact)
 
+  @doc """
+  Wakes the session past each event its agent cannot read (`session.repair`), answering
+  with what the server said: `skipped`, the `seq` of each.
+  """
+  @spec repair(String.t()) :: {:ok, map()} | {:error, term()}
+  def repair(session_id), do: call(session_id, :repair)
+
   @doc "The session's latest loop as the server reads it from the log; wakes nothing."
   @spec loop(String.t()) :: {:ok, term()} | {:error, term()}
   def loop(session_id), do: call(session_id, {:rpc, "session.loop.get", %{}})
@@ -525,6 +532,9 @@ defmodule Troupe.Remote.Worker do
 
   def handle_call(:stop_loop, from, state),
     do: command(state, from, "session.loop.stop", %{command_id: RPC.command_id()})
+
+  def handle_call(:repair, from, state),
+    do: command(state, from, "session.repair", %{command_id: RPC.command_id()})
 
   # The contract carries the file as a JSON string (PROTOCOL.md §6), so bytes that are
   # not UTF-8 have no spelling in it; they are refused here rather than crashing this
@@ -992,6 +1002,11 @@ defmodule Troupe.Remote.Worker do
       RPC.reason(error) == :unauthenticated ->
         state = reply_and(state, from, {:error, RPC.describe(error)})
         state |> drop_socket() |> schedule_reconnect()
+
+      # An agent that could not start from its log, which `session.repair` wakes past what
+      # it cannot read: said as the error is, and marked so the caller can offer that.
+      match?(%{"repairable" => true}, error.data) ->
+        reply_and(state, from, {:error, {:repairable, RPC.describe(error)}})
 
       true ->
         reply_and(state, from, {:error, RPC.describe(error)})

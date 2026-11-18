@@ -1121,6 +1121,18 @@ defmodule Troupe.RemoteTranslateTest do
 
   # Decision 826: the files a start found and did not read, as a person reads them, not as
   # the event's field names.
+  # A wake past what the agent could not read (root #1053): one line, with when the
+  # skipped event was written.
+  test "log_repaired says an event was skipped, and when it was written" do
+    at = "2026-11-18T09:15:00.123Z"
+    [note] = translate(durable("log_repaired", %{"event" => 7, "at" => at, "by" => "ada"}))
+    assert note.type == :remote_note
+    assert note.data.text == "An event from 2026-11-18 09:15 UTC could not be read and was skipped"
+
+    [bare] = translate(durable("log_repaired", %{"event" => 7, "by" => "ada"}))
+    assert bare.data.text == "An event could not be read and was skipped"
+  end
+
   test "files_skipped says what was not read, how many, and why" do
     bundle =
       "the session's bundle has an agent named build, and on the platform the bundle's beats a " <>
