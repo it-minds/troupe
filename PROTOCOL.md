@@ -367,6 +367,7 @@ Durable:
 | `watch_triggered` | `agent`, `mode`, `markers`, `session_id`, `error` — a saved `AI!` or `AI?` comment started a branch of this session (Decision 844): `agent` (`quick` for a change, `answer` when every comment was a question; `mode` is `change` or `question`) as the session `session_id`, whose `parent` is this one, in this session's checkout, for the comments in `markers`, each `{file, line, comment}`. The session's own agent is told nothing. `error` in place of `session_id` says why no branch started. A client opens the branch as it opens one it started, and says which file and comment started it. The branch asks before every write, edit and shell command unless `watch_auto_approve` is on, and does not watch |
 | `session_dormant` | `last_seq` |
 | `session_activated` | `epoch`, `pod` |
+| `log_repaired` | `event`, the `seq` of an event the agent's replay could not read; `at`, when that event was written; `by`, who asked. Written under the agent by `session.repair`, never as a rewrite, so the chain stays whole; every replay of the agent from then on skips `event`, which stays in the log. A client shows it where `event` was |
 | `session_resumed` | `dormant_ms`, `moved` |
 | `trigger_fired` | `source`, `idempotency_key`, `principal`, `revision`, `payload_digest` |
 | `files_skipped` | `files` — the agent, skill, command and workflow files a session found at a start and did not read, each `{kind, name, path, reason}`: on a pod, a working copy's file of a name its bundle has or a built-in agent's, which those beat unless the profile sets `repositoryOverridesBundle`; in a git worktree, one the main checkout has not committed (Decision 826); a workspace's `.troupe/` file, or directory, that is a link out of it, a skill whose `SKILL.md` can't be read, and what a workspace's `skills.json` links from outside the repository while the workspace is not trusted (Decision 829). A directory not looked into has a null `name`. Written when the list differs from the one the log last recorded, so an empty list says the files went away |
@@ -870,7 +871,8 @@ where no client has handed the daemon a plane token, `"not_owner"` where the dae
 linked to somebody other than the person the session belongs to (Decision 784), or the
 reason the plane did not answer; `plane_url` names the plane the daemon was last linked
 to, where the session is sealed and can be erased. A local session is erased here and
-answers `erased: true`, `state: "erased"`.
+answers `erased: true`, `state: "erased"`; one the daemon finds nothing of under any state
+directory it knows is `not_found`, and nothing is said erased.
 
 #### `session.claim`
 ```json
@@ -1077,6 +1079,16 @@ that fails writes an `llm_error` saying so and leaves the conversation as it was
 `conflict`, with `data.reason` a sentence, while a turn runs (any state but `idle`), and
 while the conversation is no longer than what a compaction keeps. Activating, like
 `session.goal.set`; scope `control`.
+
+#### `session.repair`: `{"command_id", "session_id"}` → `{"woken": true, "skipped": [seq]}`
+Wake a session whose root cannot start from its log. An activating command for one answers
+`unavailable` with `data.reason` what the root raised and `data.repairable: true`; this is
+the wake past it: each event up to the log's head that the root's replay raises on is
+skipped, with a `log_repaired` for each, and the session wakes as any activating command
+leaves it. `skipped` lists their `seq`, none for a session already awake or one whose root
+read everything. A root that still cannot start answers as the activating command did,
+without `repairable`. Scope `control`. A pod answers `unavailable`: there only the plane
+wakes a session.
 
 The goal is part of the root agent's folded state, so it survives a restart and a
 dormancy, and it is read into the root agent's context on **every** turn after it is set —
@@ -2761,7 +2773,7 @@ on from the same `seq`, and what the client sees of it is the log's own lifecycl
 way back), which it may show or ignore.
 
 The **activating** commands are `input.send`, `turn.cancel`, `profile.switch`,
-`session.goal.set`, `session.goal.clear`, `session.loop.start`, `session.compact`, `approval.respond`,
+`session.goal.set`, `session.goal.clear`, `session.loop.start`, `session.compact`, `session.repair`, `approval.respond`,
 `question.answer`, `todo.edit`, `tools.register`, `shell.run` and `commands.run`. Each brings a dormant session's tree
 back by folding its log before taking effect, and the session logs `session_activated`.
 
@@ -2843,7 +2855,7 @@ is asked again, under the same id, and an answer that arrived in the meantime �
 | scope | grants |
 | --- | --- |
 | `observe` | `initialize`, `client.mode`, `subscribe`, `unsubscribe`, `session.list`, `session.get`, `session.invites`, `session.read_sealed`, `session.goal.get`, `session.loop.get`, `blob.get`, `fs.list`, `fs.read`, `scratch.list`, `agents.list`, `agents.get`, `agents.validate`, `commands.list`, `workflows.list`, `context.get`, `mcp.status`, `mcp.list`, `skills.list`, `skills.discover`, `workspace.recent`, `workspace.search`, `worktree.list`, `watch.get`, `presence.set`, `identity.get`, `config.get`, `setup.get`, `me.memory.status`, `artifact.list`, `artifact.get`, `artifact.open`, `artifact.read`, `profile.get` |
-| `control` | everything in `observe`, plus `input.send`, `commands.run`, `turn.cancel`, `profile.switch`, `session.goal.set`, `session.goal.clear`, `session.loop.start`, `session.loop.stop`, `session.compact`, `approval.respond`, `question.answer`, `todo.edit`, `fs.upload`, `tools.register`, `tools.unregister`, `memory.get`, `memory.decline`, `onboard.decline`, `me.memory`, `me.memory.put`, `me.memory.history`, `me.memory.rollback`, `memory.in_effect`, `admin.memory.get`, `admin.memory.preview`, `admin.memory.put`, `artifact.publish`, `artifact.share`, `artifact.unshare`, `artifact.comment`, `artifact.comment.delete`, `artifact.comment.edit`, `artifact.rollback`, `artifact.pin`, `artifact.keep`; and `shell.run` and `shell.cancel`, which also need the session's owner or `admin` (Decision 813) |
+| `control` | everything in `observe`, plus `input.send`, `commands.run`, `turn.cancel`, `profile.switch`, `session.goal.set`, `session.goal.clear`, `session.loop.start`, `session.loop.stop`, `session.compact`, `session.repair`, `approval.respond`, `question.answer`, `todo.edit`, `fs.upload`, `tools.register`, `tools.unregister`, `memory.get`, `memory.decline`, `onboard.decline`, `me.memory`, `me.memory.put`, `me.memory.history`, `me.memory.rollback`, `memory.in_effect`, `admin.memory.get`, `admin.memory.preview`, `admin.memory.put`, `artifact.publish`, `artifact.share`, `artifact.unshare`, `artifact.comment`, `artifact.comment.delete`, `artifact.comment.edit`, `artifact.rollback`, `artifact.pin`, `artifact.keep`; and `shell.run` and `shell.cancel`, which also need the session's owner or `admin` (Decision 813) |
 | `admin` | everything in `control`, plus `session.create`, `session.archive`, `session.unarchive`, `session.pin`, `session.unpin`, `session.title.set`, `session.erase`, `session.claim`, `session.invite`, `session.uninvite`, `session.fork`, `worktree.remove`, `worktree.merge`, `worktree.discard`, `memory.forget`, `onboard.plan`, `onboard.apply`, `watch.set`, `identity.link`, `identity.unlink`, `identity.sign_out`, `identity.accept_plane_key`, `config.models`, `config.set`, `config.import`, `config.organisation`, `config.memory`, `setup.answer`, `mcp.add`, `mcp.remove`, `mcp.check`, `mcp.secret`, `mcp.sign_in`, `mcp.sign_out`, `mcp.tools`, `mcp.call`, `skills.add`, `skills.remove`, `agents.put`, `agents.delete`, `daemon.stop`, `remote.offer`, `remote.withdraw` |
 
 Locally, the socket's permissions authenticate the user and the connection gets all

@@ -135,6 +135,7 @@ defmodule Troupe.Client do
   @callback start_loop(session_id(), pos_integer() | nil) :: :ok | {:error, term()}
   @callback stop_loop(session_id()) :: :ok | {:error, term()}
   @callback compact(session_id()) :: :ok | {:error, term()}
+  @callback repair(session_id()) :: {:ok, [pos_integer()]} | {:error, term()}
   @callback cancel_branch(session_id(), String.t()) :: :ok | {:error, term()}
   @callback dismiss(session_id(), String.t()) :: :ok | {:error, term()}
   @callback merge(session_id(), String.t()) :: {:ok, String.t()} | {:error, term()}
@@ -378,6 +379,15 @@ defmodule Troupe.Client do
   """
   @spec compact(session_id()) :: :ok | {:error, term()}
   def compact(sid), do: impl(sid).compact(sid)
+
+  @doc """
+  Wakes a session whose agent cannot start from its log, past each event its replay
+  cannot read (`session.repair`): the `seq` of each one skipped, which the log keeps and
+  says it skipped. An input that could not wake the session for that reason answers
+  `{:error, {:repairable, sentence}}`, which is when this is offered.
+  """
+  @spec repair(session_id()) :: {:ok, [pos_integer()]} | {:error, term()}
+  def repair(sid), do: impl(sid).repair(sid)
 
   @spec cancel_branch(session_id(), String.t()) :: :ok | {:error, term()}
   def cancel_branch(sid, path), do: impl(sid).cancel_branch(sid, path)

@@ -181,6 +181,14 @@ defmodule Troupe.Client.Remote do
   @impl true
   def compact(sid), do: describe(Worker.compact(sid))
 
+  # On the platform only the plane wakes a session, and a root there that crashes on its
+  # log puts its session to sleep at once.
+  @impl true
+  def repair(_sid),
+    do:
+      {:error,
+       "a session on the platform is woken by its plane, which cannot wake it past an event it cannot read"}
+
   @impl true
   def cancel_branch(sid, _path), do: describe(Worker.cancel(sid))
 

@@ -340,7 +340,8 @@ defmodule Troupe.Agent.Server do
 
     # State is a fold over this agent's own events. A fresh agent replays nothing; a
     # restarted one rebuilds its conversation, todos and profile before doing any work.
-    {state, resume} = replay(state, Keyword.get(opts, :task), start == :cold)
+    {state, resume} =
+      replay(state, Keyword.get(opts, :task), start == :cold, Keyword.get(opts, :repair))
 
     initial = if state.done_reason, do: :done, else: :idle
     publish_state(state, initial)
@@ -361,8 +362,8 @@ defmodule Troupe.Agent.Server do
   # `cold_start?` is asked first and unconditionally, in `init/1`: it is "have I started
   # before under this tree", and an agent whose log is empty on its first start has still
   # started.
-  defp replay(state, task, cold_start?) do
-    events = Log.replay(state.session_id, state.agent_path)
+  defp replay(state, task, cold_start?, repair) do
+    events = state.session_id |> Log.replay(state.agent_path) |> readable(state, repair)
 
     case events do
       # Never started under this path before. This is the only branch that seeds a
@@ -393,6 +394,50 @@ defmodule Troupe.Agent.Server do
         {if(takes_up_turn?(action), do: open_batch(state, events), else: state), action}
     end
   end
+
+  # What the agent folds: its events but those a `log_repaired` skipped. On a wake past what
+  # it cannot read (`Troupe.repair/2`), each event up to `through` that its fold raises on
+  # is skipped too, and a `log_repaired` appended for it, never a rewrite, so the chain
+  # stays whole; a later one is folded as it is, so a restart does not skip what nobody
+  # was asked about.
+  defp readable(events, state, repair) do
+    skipped = for %Event{type: "log_repaired", data: %{"event" => seq}} <- events, into: MapSet.new(), do: seq
+    events = Enum.reject(events, &MapSet.member?(skipped, &1.seq))
+
+    case repair do
+      %{through: through} = repair -> past_unreadable(events, state, repair, through)
+      nil -> events
+    end
+  end
+
+  defp past_unreadable(events, state, repair, through) do
+    {_folded, kept} =
+      Enum.reduce(events, {state, []}, fn event, {folded, kept} ->
+        case fold_past(event, folded, through) do
+          {:ok, folded} ->
+            {folded, [event | kept]}
+
+          :unreadable ->
+            data = %{"event" => event.seq, "at" => event.ts, "by" => by(repair.by)}
+            log(state, :log_repaired, data, repair.by)
+            {folded, kept}
+        end
+      end)
+
+    Enum.reverse(kept)
+  end
+
+  defp fold_past(%Event{seq: seq} = event, state, through) when seq <= through do
+    {:ok, fold_event(event, state)}
+  rescue
+    _raised -> :unreadable
+  end
+
+  defp fold_past(event, state, _through), do: {:ok, fold_event(event, state)}
+
+  defp by(%Event.Actor{display_name: name}) when is_binary(name), do: name
+  defp by(%Event.Actor{subject: subject}) when is_binary(subject), do: subject
+  defp by(_actor), do: "system"
 
   # The ends of the children it started in the background that it was never handed, held
   # again, after closing those its restart took down (Decision 853). Read off the whole log
@@ -4269,7 +4314,15 @@ defmodule Troupe.Agent.Server do
       state.cancelled_by
     )
 
-    state = let_go(Map.merge(clock_off(state), %{turn_mode: nil, turn: %Spend{}, cancelled_by: nil}))
+    # A compaction it stopped leaves nothing behind for the next one to write as its own.
+    compaction = %{compact_reason: nil, compact_prompt: nil, compact_command: nil, compact_resume: :idle}
+
+    state =
+      state
+      |> clock_off()
+      |> Map.merge(%{turn_mode: nil, turn: %Spend{}, cancelled_by: nil})
+      |> Map.merge(compaction)
+      |> let_go()
 
     publish_state(state, :idle)
     {:next_state, :idle, state}
@@ -4719,9 +4772,16 @@ defmodule Troupe.Agent.Server do
   # its turn is over and its session goes down. Straight to the log, since a start that
   # failed has no state to log through; a log that is going too loses nothing the crash
   # does not already report.
+  # Said once: a root whose last word is already this failure, as every failed wake of a log
+  # it cannot read would make it, is not made to say it again.
   defp crash_ended(session_id, agent_path, detail) do
     data = %{"reason" => "agent_failed", "detail" => detail}
-    {:ok, _seq} = Log.append(session_id, agent_path, :turn_ended, data)
+
+    case List.last(Log.replay(session_id, agent_path)) do
+      %Event{type: "turn_ended", data: ^data} -> :ok
+      _other -> {:ok, _seq} = Log.append(session_id, agent_path, :turn_ended, data)
+    end
+
     :ok
   catch
     :exit, _ -> :ok

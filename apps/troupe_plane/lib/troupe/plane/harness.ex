@@ -2382,6 +2382,20 @@ defmodule Troupe.Plane.Harness do
     end
   end
 
+  # Whether a share still opens a session: not one that is gone, or erased or on its way.
+  defp session_there(%Share{session_id: session_id}) do
+    case Sessions.get(session_id) do
+      nil ->
+        {:error, Error.new(:not_found, %{reason: "that session is gone"})}
+
+      %Session{state: state} when state in ["erasure_pending", "erased"] ->
+        {:error, gone(session_id)}
+
+      %Session{} ->
+        :ok
+    end
+  end
+
   defp team_for(user, profile, wanted) do
     teams = Identity.teams_for(user)
 
@@ -3194,10 +3208,16 @@ defmodule Troupe.Plane.Harness do
   # One sentence for each way a link can fail, because "no" on a link somebody was sent is
   # a dead end unless it says which kind of no it is: the wrong link, a link whose time is
   # up, one somebody ended, or one that was not for them.
+  #
+  # A session that is gone, or erased or on its way, is refused before the share is counted
+  # as used and before the audit says it was redeemed.
   defp redeemed(secret, user) do
-    case Sessions.redeem_share(secret, user.subject) do
+    case Sessions.redeem_share(secret, user.subject, &session_there/1) do
       {:ok, share} ->
         {:ok, share}
+
+      {:error, %Error{} = error} ->
+        {:error, error}
 
       {:error, :expired} ->
         {:error, Error.new(:forbidden, %{reason: "that link has expired"})}

@@ -319,6 +319,14 @@ defmodule Troupe.Client.Daemon do
   @impl true
   def compact(sid), do: describe(Worker.compact(sid))
 
+  @impl true
+  def repair(sid) do
+    case Worker.repair(sid) do
+      {:ok, %{"skipped" => skipped}} -> {:ok, skipped}
+      other -> describe(other)
+    end
+  end
+
   # `/cancel` and `x x` on a branch (TUI Decision 57): its turn is cancelled, and once it is
   # at rest the worktree Troupe made for it is discarded and the window closed, so nothing
   # is writing the tree as it goes. That waits on the daemon, which refuses the discard
@@ -1905,6 +1913,8 @@ defmodule Troupe.Client.Daemon do
 
   defp describe(:ok), do: :ok
   defp describe({:ok, _}), do: :ok
+  # Kept marked: the caller offers the wake past what the agent cannot read.
+  defp describe({:error, {:repairable, sentence}}), do: {:error, {:repairable, sentence}}
   defp describe({:error, reason}), do: {:error, message(reason)}
 
   defp message(reason) when is_binary(reason), do: reason

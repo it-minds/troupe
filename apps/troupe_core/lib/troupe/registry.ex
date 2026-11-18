@@ -99,11 +99,15 @@ defmodule Troupe.Registry do
   @spec agent(String.t(), agent_path()) :: GenServer.name()
   def agent(session_id, path), do: via({:agent, session_id, path})
 
-  @doc "The pid registered under a key, or `nil`."
+  @doc """
+  The live pid registered under a key, or `nil`. A lookup does not ask whether the process
+  it names is alive, and the registry gives a name back only once it hears of the exit: a
+  process that has just gone is `nil` here, so nothing is sent to it and lost.
+  """
   @spec whereis(tuple()) :: pid() | nil
   def whereis(key) do
     case Registry.lookup(@registry, key) do
-      [{pid, _}] -> pid
+      [{pid, _}] -> if Process.alive?(pid), do: pid
       [] -> nil
     end
   end

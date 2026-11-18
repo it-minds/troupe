@@ -209,6 +209,36 @@ defmodule Troupe.Agent.OverflowRecoveryTest do
       assert {:error, :busy} = Troupe.compact(session.id)
       await_state(session.id, [:idle], 10_000)
     end
+
+    # A cancel while it summarises leaves nothing of it for the next compaction to write.
+    test "cancelled, leaves no reason or command_id to a compaction after it", context do
+      steps = [
+        {:text, "one"},
+        {:text, "two"},
+        {:text, "three"},
+        {:text, "four"},
+        {:delay, 60_000, {:text, "never read"}},
+        @overflow,
+        {:text, "the summary"},
+        {:text, "carried on"}
+      ]
+
+      %{session: session} = start_session(context, steps: steps)
+      Troupe.subscribe(session.id)
+      Enum.each(["one", "two", "three", "four"], &turn(session.id, &1))
+
+      assert :ok = Troupe.compact(session.id, nil, command_id: "c-compact")
+      await_state(session.id, [:compacting])
+      :ok = Troupe.cancel(session.id)
+      await_state(session.id, [:idle], 10_000)
+
+      turn(session.id, "five")
+
+      assert [%{data: data, actor: actor}] = events_of_type(session.id, "compacted")
+      assert data["reason"] == "context_overflow"
+      refute Map.has_key?(data, "command_id")
+      assert actor.kind == :system
+    end
   end
 
   defp lines(count, tag),

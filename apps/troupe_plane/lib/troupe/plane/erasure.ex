@@ -56,8 +56,8 @@ defmodule Troupe.Plane.Erasure do
 
   Idempotent: a session that is already erased has its tombstone returned rather than a
   second one written, because erasure is the sort of thing a retry must not make worse.
-  A session whose key is not yet destroyed has it tried again, which is what a retry is
-  for.
+  A session whose key is not yet destroyed has it tried again, and a team session no pod
+  has yet been recorded for has its objects, which is what a retry is for.
   """
   @spec erase(Session.t() | String.t(), keyword()) :: {:ok, Tombstone.t()} | {:error, term()}
   def erase(session_id, opts) when is_binary(session_id) do
@@ -73,9 +73,11 @@ defmodule Troupe.Plane.Erasure do
         do_erase(session, opts)
 
       existing ->
-        if unfinished?(session, existing),
-          do: {:ok, again(session, existing)},
-          else: {:ok, existing}
+        cond do
+          unfinished?(session, existing) -> {:ok, again(session, existing)}
+          unapplied?(session, existing) -> {:ok, pod_after_key(session, existing)}
+          true -> {:ok, existing}
+        end
     end
   end
 
@@ -193,7 +195,10 @@ defmodule Troupe.Plane.Erasure do
   end
 
   # The pod the session was on, which holds its copy, or else any healthy pod of the
-  # profile: the object prefix is a property of the session, not of the pod.
+  # profile: the object prefix is a property of the session, not of the pod. A session
+  # known by its tombstone alone, with no manifest, names no profile and so no pod.
+  defp apply_on_pod(%Session{profile: nil}), do: {:error, :no_healthy_worker}
+
   defp apply_on_pod(session) do
     workers = session.profile |> Fleet.list_workers() |> Enum.filter(& &1.healthy)
 
@@ -257,6 +262,11 @@ defmodule Troupe.Plane.Erasure do
   # before Decision 811 erased and left the key of.
   defp unfinished?(%Session{kind: "private", state: state}, _tombstone), do: state != "erased"
   defp unfinished?(_session, %Tombstone{key_destroyed_at: at}), do: is_nil(at)
+
+  # A team session whose key is gone and whose objects no pod has yet said it deleted: none
+  # was healthy, or the one asked could not delete them all.
+  defp unapplied?(%Session{kind: "private"}, _tombstone), do: false
+  defp unapplied?(_session, %Tombstone{applied_by: applied}), do: applied == []
 
   # With the plane's own credential, whose policy has `delete` on the metadata of every
   # session key, a team's and a person's, and no rule for the data path
@@ -339,28 +349,66 @@ defmodule Troupe.Plane.Erasure do
   Every session whose erasure is pending, and, once, every team session a plane from
   before Decision 811 erased: its key was a pod's to destroy, and a pod's credential may
   destroy none. A key that goes takes its session to `erased`, and a team session no pod
-  has yet been recorded for is pushed to one. Run every five minutes by
-  `Troupe.Plane.Erasure.Retry`, which says what this answers; each session's refusal is
-  not logged again here.
+  has yet been recorded for is pushed to one, on every pass until one says it is done, and
+  not only when a pod of its profile next enrols. A tombstone whose session row is gone,
+  as a restore from an older backup loses it, is read with what the session's manifest
+  says of it. Run every five minutes by `Troupe.Plane.Erasure.Retry`, which says what this
+  answers; each session's refusal is not logged again here.
   """
   @spec retry() :: %{destroyed: non_neg_integer(), failed: non_neg_integer()}
   def retry do
+    Enum.reduce(owed(), %{destroyed: 0, failed: 0}, fn {session, tombstone}, counts ->
+      pass(session || from_manifest(tombstone.session_id), tombstone, counts)
+    end)
+  end
+
+  # Every tombstone with a key or a pod's deletion still owed, with its session's row, or
+  # `nil` where the row is gone.
+  defp owed do
     Repo.all(
       from t in Tombstone,
-        join: s in Session,
+        left_join: s in Session,
         on: s.id == t.session_id,
         where:
           (s.kind == "private" and s.state != "erased") or
-            (s.kind == "team" and is_nil(t.key_destroyed_at)),
+            (s.kind == "team" and (is_nil(t.key_destroyed_at) or t.applied_by == ^[])) or
+            (is_nil(s.id) and (is_nil(t.key_destroyed_at) or t.applied_by == ^[])),
         order_by: t.erased_at,
         select: {s, t}
     )
-    |> Enum.reduce(%{destroyed: 0, failed: 0}, fn {session, tombstone}, counts ->
-      case again(session, tombstone, log: false) do
-        %Tombstone{key_destroyed_at: nil} -> %{counts | failed: counts.failed + 1}
-        _destroyed -> %{counts | destroyed: counts.destroyed + 1}
+  end
+
+  # A team session's key went on an earlier pass: only its objects are owed.
+  defp pass(%Session{kind: kind} = session, %Tombstone{key_destroyed_at: at} = tombstone, counts)
+       when kind != "private" and not is_nil(at) do
+    _told = pod_after_key(session, tombstone)
+    counts
+  end
+
+  defp pass(session, tombstone, counts) do
+    case again(session, tombstone, log: false) do
+      %Tombstone{key_destroyed_at: nil} -> %{counts | failed: counts.failed + 1}
+      _destroyed -> %{counts | destroyed: counts.destroyed + 1}
+    end
+  end
+
+  # The row the index lost, as far as the manifest a pod wrote beside the segments says:
+  # whose it is, its team and profile, which is where its key and its objects are. Without
+  # one, a team session's key is looked for under no team, and fails as it does today.
+  defp from_manifest(session_id) do
+    manifest =
+      case Storage.get_manifest(ObjectStore.from_env(), session_id) do
+        {:ok, %{} = manifest} -> manifest
+        _none -> %{}
       end
-    end)
+
+    %Session{
+      id: session_id,
+      kind: Map.get(manifest, "kind", "team"),
+      profile: manifest["profile"],
+      owner_subject: manifest["owner_subject"],
+      state: "erasure_pending"
+    }
   end
 
   @doc """

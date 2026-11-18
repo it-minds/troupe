@@ -12,6 +12,12 @@ the copy on your machine goes the next time your client signs your daemon in. Er
 on your machine needs that sign-in: without it the daemon erases nothing and says which
 plane it is sealed at.
 
+A session on your machine whose agent cannot read something in its log does not wake: the
+message you send is refused with what the agent raised. You can wake it anyway, with `w` in
+the TUI, the composer's **Wake it anyway** in the desktop app, or `troupe resume ID
+--repair`: each event the agent cannot read is skipped, the log keeps it and says so, and
+the transcript shows "An event from … could not be read and was skipped" where it was.
+
 Inviting somebody into a session, archiving, renaming and keeping one at the top, its task
 list, and links into the desktop app are on [sharing a session by name](sessions-shared.md).
 

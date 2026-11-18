@@ -149,6 +149,8 @@ defmodule Troupe.Gateway.Dispatch do
     # Compacting now rewrites what the agent goes on with, as a turn may on its own, and
     # costs a model call: what input takes.
     "session.compact" => :control,
+    # A wake past what the root cannot read: what a message that wakes the session takes.
+    "session.repair" => :control,
     "approval.respond" => :control,
     "question.answer" => :control,
     "todo.edit" => :control,
@@ -1067,6 +1069,26 @@ defmodule Troupe.Gateway.Dispatch do
     end
   end
 
+  # Wake a session whose root cannot start from its log, past the events its replay raises
+  # on. The answer lists them; each one's `log_repaired` is the effect, and the session is
+  # awake as any activating command leaves it. On a pod only the plane wakes a session, and
+  # a root there that crashes on its log puts its session to sleep at once.
+  defp handle("session.repair", _params, %Context{activate: activate}) when activate != nil do
+    {:error,
+     Error.new(:unavailable, %{
+       reason: "a session on a pod is woken by its plane, which cannot wake it past an event it cannot read"
+     })}
+  end
+
+  defp handle("session.repair", params, context) do
+    with {:ok, session_id} <- fetch(params, "session_id") do
+      case Troupe.repair(session_id, actor: actor(context), client: context.client) do
+        {:ok, skipped} -> {:ok, %{"woken" => true, "skipped" => skipped}}
+        error -> activated_error(session_id, error, false)
+      end
+    end
+  end
+
   # A loop towards the goal (Decision 679). Starting one activates the session, since its
   # iterations are the root agent's turns; the answer names the loop and its cap, and the
   # effect is `loop_started`, carrying this `command_id`, then the iterations. A session
@@ -1383,8 +1405,7 @@ defmodule Troupe.Gateway.Dispatch do
         _local ->
           # Nobody steers what is gone: an offer ends with the session.
           Remote.withdraw(session_id)
-          Troupe.erase_session(session_id)
-          {:ok, %{"session_id" => session_id, "erased" => true, "state" => "erased"}}
+          erase_local(session_id)
       end
     end
   end
@@ -2783,9 +2804,15 @@ defmodule Troupe.Gateway.Dispatch do
   # A session whose stop has run past the wait for it is said in words (Decision 855).
   defp activate(session_id, %Context{activate: activate} = context) do
     case (activate || (&Troupe.activate(&1, client: context.client))).(session_id) do
-      {:ok, _pid} ->
-        :ok
+      {:ok, _pid} -> :ok
+      error -> activated_error(session_id, error, true)
+    end
+  end
 
+  # A root that could not start from its log can be woken past what it cannot read, which
+  # `repairable` tells the client to offer; a repair that failed so has nothing more to offer.
+  defp activated_error(session_id, error, repairable?) do
+    case error do
       {:error, :not_found} ->
         {:error, Error.new(:not_found, %{kind: "session", id: session_id})}
 
@@ -2795,7 +2822,7 @@ defmodule Troupe.Gateway.Dispatch do
 
       # Its root could not start from its log: what its `turn_ended` says.
       {:error, {:agent_failed, detail}} ->
-        {:error, Error.new(:unavailable, %{reason: detail})}
+        {:error, Error.new(:unavailable, %{reason: detail, repairable: repairable?})}
 
       {:error, reason} ->
         {:error, Error.new(:unavailable, %{reason: inspect(reason)})}
@@ -3241,6 +3268,14 @@ defmodule Troupe.Gateway.Dispatch do
 
   defp invite_error(session_id, reason),
     do: Error.new(:unavailable, %{session_id: session_id, reason: inspect(reason)})
+
+  # Said erased only where something was deleted: a session found nowhere is not.
+  defp erase_local(session_id) do
+    case Troupe.erase_session(session_id) do
+      :ok -> {:ok, %{"session_id" => session_id, "erased" => true, "state" => "erased"}}
+      {:error, :not_found} -> {:error, Error.new(:not_found, %{kind: "session", id: session_id})}
+    end
+  end
 
   defp erase_private(%{id: session_id} = session) do
     case Private.erase(session) do

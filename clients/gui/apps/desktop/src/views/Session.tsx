@@ -34,6 +34,7 @@ import {
   named,
   nameOrSubject,
   presentMembers,
+  repairable,
   severalSteer,
   rootState,
   scratchVersion,
@@ -2157,6 +2158,10 @@ function Composer({
   const [artifacts, setArtifacts] = useState(false);
   const [dragging, setDragging] = useState(false);
   const [sending, setSending] = useState(false);
+  // What the agent raised when a message could not wake the session, its log unreadable to
+  // it: the composer gives way to the offer to wake it past that, until it is taken.
+  const [unreadable, setUnreadable] = useState<string | null>(null);
+  const [waking, setWaking] = useState(false);
   const text = useRef<HTMLTextAreaElement>(null);
   const picker = useRef<HTMLInputElement>(null);
   const plus = useRef<HTMLDivElement>(null);
@@ -2259,10 +2264,28 @@ function Composer({
       await view.send(message);
       onSent();
     } catch (e) {
-      setError(errorText(e));
+      if (repairable(e)) setUnreadable(reasonOf(e));
+      else setError(errorText(e));
       setDraft((d) => d || words);
     } finally {
       setSending(false);
+    }
+  };
+
+  // Woken past each event its agent cannot read, the message that could not wake it goes.
+  const wake = async (): Promise<void> => {
+    const v = view.view;
+    if (!v) return;
+    setWaking(true);
+    try {
+      await v.repair();
+      setUnreadable(null);
+      await submit();
+    } catch (e) {
+      setUnreadable(null);
+      setError(errorText(e));
+    } finally {
+      setWaking(false);
     }
   };
 
@@ -2300,6 +2323,8 @@ function Composer({
           ? "Needs this computer's daemon"
           : null;
   const folderWhy = !here ? "Only for sessions on this computer" : !pickDirectory ? "Needs the desktop app's folder chooser" : null;
+
+  if (unreadable !== null) return <Unreadable sentence={unreadable} waking={waking} onWake={() => void wake()} />;
 
   return (
     <div className="dock">
@@ -2470,6 +2495,28 @@ function ReadOnly(): JSX.Element {
       <p className="muted">Ask its owner to give you access if you need to take part.</p>
     </div>
   );
+}
+
+/**
+ * A session whose agent cannot start from its log, in the composer's place: what it
+ * raised, and the wake past what it cannot read, which the log keeps.
+ */
+function Unreadable({ sentence, waking, onWake }: { sentence: string; waking: boolean; onWake: () => void }): JSX.Element {
+  return (
+    <div className="instead stopped" role="status">
+      <p>The agent could not start from this session's log: {sentence}</p>
+      <p className="muted">Waking it anyway skips each event it cannot read. The log keeps them, and the transcript says where.</p>
+      <button type="button" disabled={waking} onClick={onWake}>
+        {waking ? "Waking" : "Wake it anyway"}
+      </button>
+    </div>
+  );
+}
+
+/** What the server said was raised: its `data.reason`, else the whole error in words. */
+function reasonOf(e: unknown): string {
+  const data = (e as { data?: Record<string, unknown> }).data;
+  return typeof data?.["reason"] === "string" ? data["reason"] : errorText(e);
 }
 
 /** The notes that say something went wrong: a failed model call, a stop, a message dropped. */

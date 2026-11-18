@@ -425,20 +425,45 @@ defmodule Troupe.CLI.Runner do
   # straight in. With neither: the newest on the session picker, so the others are one
   # keypress away. One that cannot be carried on here is refused in the words the TUI
   # says it in, and `--headless "message"` runs one turn on it and prints it as
-  # `troupe run --headless` does.
+  # `troupe run --headless` does. `--repair` first wakes it past each event its agent
+  # cannot read, which is what a session whose log it cannot fold needs to wake at all.
   defp resume(args) do
     # Said before this VM first speaks to the daemon, as `run/1` says it.
     if args.headless, do: Application.put_env(:troupe, :client_name, client_name(args))
 
     with {:ok, row} <- resumable(args),
          nil <- Client.resume_refusal(row),
-         {:ok, sid} <- open(row) do
+         {:ok, sid} <- open(row),
+         :ok <- repaired(sid, args.repair) do
       if args.headless,
         do: one_turn(sid, args.task),
         else: tui(sid, resume_page(args) ++ mouse_opts(args))
     else
       refusal when is_binary(refusal) -> fail("troupe: " <> refusal)
       {:error, sentence} -> fail("troupe: " <> sentence)
+    end
+  end
+
+  defp repaired(_sid, false), do: :ok
+
+  defp repaired(sid, true) do
+    case Client.repair(sid) do
+      {:ok, []} ->
+        :ok
+
+      {:ok, skipped} ->
+        IO.puts(
+          :stderr,
+          "troupe: woken past #{Words.count(length(skipped), "event")} it could not read"
+        )
+
+        :ok
+
+      {:error, {:repairable, sentence}} ->
+        {:error, sentence}
+
+      {:error, reason} ->
+        {:error, reason(reason)}
     end
   end
 
@@ -516,8 +541,17 @@ defmodule Troupe.CLI.Runner do
 
     code =
       case Client.send_input(sid, "root", message) do
-        :ok -> wait()
-        {:error, reason} -> fail("troupe: could not send the message: " <> reason(reason))
+        :ok ->
+          wait()
+
+        {:error, {:repairable, sentence}} ->
+          fail(
+            "troupe: could not send the message: #{sentence}; " <>
+              "troupe resume #{sid} --repair wakes it past what its agent cannot read"
+          )
+
+        {:error, reason} ->
+          fail("troupe: could not send the message: " <> reason(reason))
       end
 
     _ = DynamicSupervisor.terminate_child(Troupe.UI.Windows, printer)

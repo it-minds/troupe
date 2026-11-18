@@ -51,6 +51,14 @@ export class TroupeRpcError extends Error {
 }
 
 /**
+ * Whether a refusal is a session whose agent cannot start from its log, which
+ * `session.repair` wakes past what it cannot read (`data.repairable`).
+ */
+export function repairable(e: unknown): boolean {
+  return e instanceof TroupeRpcError && e.data?.["repairable"] === true;
+}
+
+/**
  * How long a call waits for its answer before it gives up, in milliseconds. A reply can
  * be lost (a socket that went, a daemon that took the call and never said so), and a
  * button that waits on one reply then waits for good. `defaultMs` is every call's; a

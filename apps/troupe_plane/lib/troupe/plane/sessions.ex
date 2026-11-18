@@ -1227,22 +1227,27 @@ defmodule Troupe.Plane.Sessions do
   — where it named somebody — presented by them. Nothing here re-derives the sharer's
   authority. That was settled at mint, and a link that quietly stopped working because
   somebody changed teams is not what anybody means by sending somebody a link.
-  """
-  @spec redeem_share(String.t(), String.t() | nil) ::
-          {:ok, Share.t()} | {:error, :no_such_share | :expired | :revoked | :not_for_you}
-  def redeem_share(secret, subject \\ nil)
 
-  def redeem_share(secret, subject) when is_binary(secret) do
+  `opens` is asked of the share last, before it is counted as used: a refusal there, such
+  as a session that is erased, leaves the share as it was.
+  """
+  @spec redeem_share(String.t(), String.t() | nil, (Share.t() -> :ok | {:error, term()})) ::
+          {:ok, Share.t()}
+          | {:error, :no_such_share | :expired | :revoked | :not_for_you | term()}
+  def redeem_share(secret, subject \\ nil, opens \\ fn _share -> :ok end)
+
+  def redeem_share(secret, subject, opens) when is_binary(secret) do
     now = DateTime.utc_now()
 
     with {:ok, share} <- share_for_secret(secret),
          :ok <- share_usable(share, now),
-         :ok <- share_audience(share, subject) do
+         :ok <- share_audience(share, subject),
+         :ok <- opens.(share) do
       {:ok, mark_redeemed(share, now)}
     end
   end
 
-  def redeem_share(_secret, _subject), do: {:error, :no_such_share}
+  def redeem_share(_secret, _subject, _opens), do: {:error, :no_such_share}
 
   # The secret names its own share, so this is one indexed lookup rather than a scan of
   # every share in the deployment. The id is public — it is in `share_created` — and the

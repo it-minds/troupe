@@ -26,6 +26,12 @@ if Mix.env() == :test do
   # Nor read the directories of skills other tools keep in the developer's home
   # (`skills.discover`): a test names the home it means.
   config :troupe_core, skills_home: Path.join(System.tmp_dir!(), "troupe-test-no-home")
+
+  # Nor keep the state directories a test's sessions were started with in the developer's
+  # own state directory (`Troupe.Sessions.Index`).
+  config :troupe_core,
+    known_state_dirs:
+      Path.join(System.tmp_dir!(), "troupe-test-#{System.os_time()}/state-dirs.json")
 end
 
 # Bonny reads a handful of things from application configuration rather than from the

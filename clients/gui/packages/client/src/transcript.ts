@@ -7,6 +7,7 @@
 // under load without changing what the transcript says.
 
 import { named } from "./people.js";
+import { when } from "./remote.js";
 import { foldScratch, scratchDocumentOf } from "./scratch.js";
 import type { DurableEvent, LlmDeltaData, LoopInfo, ScratchDocument, TroupeEvent } from "./types.js";
 import { isDurable } from "./types.js";
@@ -1589,6 +1590,17 @@ export function fold(state: TranscriptState, e: TroupeEvent, options: FoldOption
     // one the main checkout has not committed. Said as the terminal client says it.
     case "files_skipped":
       return { ...next, entries: [...state.entries, { kind: "system", ...base, type: d.type, text: filesSkippedText(d) }] };
+
+    // A wake past what the agent could not read (`session.repair`): one line where the
+    // skipped event was, which the log keeps; the session is awake again, so not failed.
+    case "log_repaired": {
+      const at = typeof d.data["at"] === "string" ? d.data["at"] : undefined;
+      const line: Entry = { kind: "system", ...base, type: d.type, text: at ? `An event from ${when(at)} could not be read and was skipped` : "An event could not be read and was skipped" };
+      const skipped = d.data["event"];
+      const after = typeof skipped === "number" ? state.entries.findIndex((e) => e.seq > skipped) : -1;
+      const entries = after < 0 ? [...state.entries, line] : [...state.entries.slice(0, after), line, ...state.entries.slice(after)];
+      return { ...next, failed: undefined, entries };
+    }
 
     // What a session's start found due: onboarding other tools' files, or the brief
     // (troupe Decisions 827 and 835). The harness's own sentence goes in the stream, and
