@@ -236,10 +236,10 @@ defmodule Troupe.Plane.ProfileViewTest do
       assert view["bundle_hash"] == bundle.hash
     end
 
-    # The profile's page and the profiles screen count the same pods: a draining pod and
-    # one the operator removed that has gone quiet are neither room nor sessions running,
-    # in either answer, however long the gone one lingers before the sweep forgets it.
-    test "counts the room as profiles.list does, a draining pod and a gone one left out",
+    # The profile's page and the profiles screen count the same pods: a draining pod is no
+    # room but its sessions still run, and one the operator removed that has gone quiet
+    # counts for nothing, in either answer, however long it lingers before the sweep.
+    test "counts the room as profiles.list does, a draining pod's sessions in, a gone pod out",
          ctx do
       {:ok, draining} = enrol(1, active_sessions: 2)
       Repo.update_all(from(w in Worker, where: w.id == ^draining.id), set: [draining: true])
@@ -258,7 +258,7 @@ defmodule Troupe.Plane.ProfileViewTest do
       assert {:ok, %{"profiles" => [listed]}} = Harness.call("profiles.list", %{}, as(ctx.ada))
 
       counts = ["capacity", "active_sessions"]
-      assert %{"capacity" => 4, "active_sessions" => 1} = limits
+      assert %{"capacity" => 4, "active_sessions" => 3} = limits
       assert Map.take(listed, counts) == Map.take(limits, counts)
       assert length(listed["pods"]) == 3
     end
