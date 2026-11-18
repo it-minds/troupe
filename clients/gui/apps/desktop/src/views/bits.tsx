@@ -360,6 +360,16 @@ export function Confirm({
   );
 }
 
+/**
+ * The archive item's words, one for each way, in a session's ⋯ and in a row's: the same
+ * act from both, so the same name and the same line under it.
+ */
+export function archiveItem(archived: boolean): { title: string; line: string } {
+  return archived
+    ? { title: "Unarchive session", line: "Put it back in the session list" }
+    : { title: "Archive session", line: "Hide it from the session list, for everyone who sees it" };
+}
+
 /** A read that failed, said once and in the same place on every screen. */
 export function Failed({ error }: { error: string | null }): JSX.Element | null {
   if (!error) return null;
