@@ -410,7 +410,7 @@ defmodule Troupe.Commands do
         detail:
           "Invites a person, by email, to follow this session (observe, the default) or " <>
             "steer it (control): they see it in their list in the desktop app and in the " <>
-            "console under Sessions → Mine, and act in it under its own rules. " <>
+            "console under Watch → Sessions, and act in it under its own rules. " <>
             "A pod session is invited at " <>
             "the plane, and only somebody its profile's teams cover may be; a private one " <>
             "from this computer, which puts its key in their own slot at the key manager, " <>
