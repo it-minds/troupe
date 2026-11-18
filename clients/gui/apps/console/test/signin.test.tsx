@@ -84,6 +84,32 @@ describe("signing in to the console", () => {
     expect(location.search).toBe("");
   });
 
+  it("says the sign-in is to open an artifact when the address is one, and nothing more anywhere else", async () => {
+    const line = (): string | null => document.querySelector("main.signin form p")?.textContent ?? null;
+
+    visit("#/artifacts/open/art-carol-weekly/v2");
+    unmount = render(<App />).unmount;
+    await waitFor(() => button("Sign in"), "the sign-in screen");
+    expect(line()).toBe("Sign in to open an artifact");
+    unmount();
+
+    visit("#/artifacts/link/token-followed-abcdefghijklmnop");
+    unmount = render(<App />).unmount;
+    await waitFor(() => button("Sign in"), "the sign-in screen");
+    expect(line()).toBe("Sign in to open a shared artifact");
+    unmount();
+
+    // An artifact's page in the console, or any other screen, is the console's own sign-in.
+    for (const hash of ["#/artifacts/art-carol-weekly", "#/teams/core/limits", ""]) {
+      visit(hash);
+      unmount = render(<App />).unmount;
+      await waitFor(() => button("Sign in"), "the sign-in screen");
+      expect(line()).toBeNull();
+      unmount();
+    }
+    unmount = null;
+  });
+
   it("keeps the sign-in for this tab, and signing out forgets it", async () => {
     await signedInAs(fake, PEOPLE.alice);
     unmount = render(<App />).unmount;

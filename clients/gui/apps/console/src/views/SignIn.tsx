@@ -16,6 +16,7 @@ import { useEffect, useState } from "react";
 import type { JSX } from "react";
 import { AuthSession, PlaneUnreachableError, errorText, hostOf, unregisteredRedirect } from "@troupe/client";
 import { likelyPlaneUrl, newSession, redirectUri, rememberPlace, rememberPlane, restorePlace } from "../plane";
+import { parse } from "../route";
 import { Wordmark } from "./brand";
 import { Field } from "./bits";
 
@@ -151,6 +152,7 @@ export function SignIn({
   }
 
   const mounted = (import.meta.env.BASE_URL || "/") !== "/";
+  const purpose = purposeOf(globalThis.location?.hash ?? "");
   return (
     <main className="signin">
       <header>
@@ -164,6 +166,7 @@ export function SignIn({
           void signIn();
         }}
       >
+        {purpose && <p>{purpose}</p>}
         {!mounted && (
           <Field label="The plane's address">
             {(p) => <input {...p} value={planeUrl} onChange={(e) => setPlaneUrl(e.target.value)} placeholder="https://troupe.example.com" spellCheck={false} disabled={busy} />}
@@ -201,6 +204,22 @@ export function SignIn({
       </footer>
     </main>
   );
+}
+
+/**
+ * What this sign-in is for, when the address says: the artifacts host sends a signed-out
+ * viewer here to open an artifact, or to spend a link to one, and the console goes on there
+ * once signed in. Which artifact it cannot say before then. Any other address is the
+ * console's own sign-in, which needs no line.
+ */
+function purposeOf(hash: string): string | null {
+  const route = parse(hash);
+  if (route?.page !== "artifacts") return null;
+  const [first, second] = route.path ?? [];
+  if (!second) return null;
+  if (first === "open") return "Sign in to open an artifact";
+  if (first === "link") return "Sign in to open a shared artifact";
+  return null;
 }
 
 /**
