@@ -1,6 +1,6 @@
 // The console: sign in to the plane, find out what this person administers there, and
 // show them the console for that role. Everybody the plane knows signs in: a person who
-// administers nothing is a member, whose console is what is theirs (Mine), and an
+// administers nothing is a member, whose console is what is theirs (their own artifacts, memory, sessions and clients), and an
 // administrative role adds the administrative areas.
 //
 // It is an app of its own. It shares the protocol client and the design tokens with the

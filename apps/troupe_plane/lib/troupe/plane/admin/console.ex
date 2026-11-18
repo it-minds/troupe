@@ -15,7 +15,7 @@ defmodule Troupe.Plane.Admin.Console do
 
   ## The console is the one at `/console`
 
-  The areas are the console's map (`clients/gui/apps/console/src/nav.ts`), in its four
+  The areas are the console's map (`clients/gui/apps/console/src/nav.ts`), in its five
   groups. The plane serves no page of its own under `/admin` any more: each address there
   goes to the console, so there is nothing else a method could be placed on.
 
@@ -39,21 +39,28 @@ defmodule Troupe.Plane.Admin.Console do
   """
   @type placement :: {:area, atom()} | {:api_only, String.t()}
 
-  # The console's map, as `nav.ts` has it: what is happening, what the product is, what it
-  # runs on, and who may do what.
+  # The console's map, as `nav.ts` has it: what the plane holds, what is happening, what the
+  # product is, what it runs on, and who may do what.
+  @oversee ~w(artifacts memory)a
   @watch ~w(overview sessions connections runs)a
   @configure ~w(profiles bundles triggers integrations)a
-  @operate ~w(pods hosts budgets published)a
-  @govern ~w(teams identity signin policy clients organisation audit memory)a
+  @operate ~w(pods hosts budgets)a
+  @govern ~w(teams identity signin policy clients organisation audit)a
 
   @doc "Every area of the console's map, in the order the map shows them."
   @spec areas() :: [atom()]
-  def areas, do: @watch ++ @configure ++ @operate ++ @govern
+  def areas, do: @oversee ++ @watch ++ @configure ++ @operate ++ @govern
 
-  @doc "The four groups, as the map heads them."
+  @doc "The five groups, as the map heads them."
   @spec groups() :: [{String.t(), [atom()]}]
   def groups do
-    [{"Watch", @watch}, {"Configure", @configure}, {"Operate", @operate}, {"Govern", @govern}]
+    [
+      {"Oversee", @oversee},
+      {"Watch", @watch},
+      {"Configure", @configure},
+      {"Operate", @operate},
+      {"Govern", @govern}
+    ]
   end
 
   # Keyed by the context function rather than the method name, because the context is the
@@ -123,8 +130,6 @@ defmodule Troupe.Plane.Admin.Console do
     host_set_enabled: {:area, :hosts},
     person_budget: {:area, :budgets},
     budget_explain: {:area, :budgets},
-    artifacts_list: {:area, :published},
-    artifact_takedown: {:area, :published},
 
     # -- Govern --------------------------------------------------------------
     teams_list: {:area, :teams},
@@ -165,15 +170,23 @@ defmodule Troupe.Plane.Admin.Console do
     clients_put: {:area, :clients},
     audit_list: {:area, :audit},
     audit_verify: {:area, :audit},
-    # The organisation's and the teams' documents are on Company memory; a profile's is
-    # edited on the profile's own page as well, through the same three.
+
+    # -- Oversee -------------------------------------------------------------
+    # Every artifact, and an artifact's page as its administrator reads it.
+    artifacts_list: {:area, :artifacts},
+    artifact_get: {:area, :artifacts},
+    artifact_takedown: {:area, :artifacts},
+    # The organisation's, the teams' and the people's documents are on Memory; a profile's
+    # is edited on the profile's own page as well, through the same three.
+    memory_people: {:area, :memory},
+    memory_person: {:area, :memory},
     memory_list: {:area, :memory},
     memory_get: {:area, :memory},
     memory_preview: {:area, :memory},
     memory_put: {:area, :memory},
     memory_rollback: {:area, :memory},
     memory_nudge: {:area, :memory},
-    # What agents proposed waits on Company memory, counted on the Overview.
+    # What agents proposed waits on Memory, counted on the Overview.
     memory_proposals: {:area, :memory},
     memory_accept: {:area, :memory},
     memory_decline: {:area, :memory}

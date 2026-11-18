@@ -740,7 +740,7 @@ defmodule Troupe.Plane.Control.Connection do
            reason:
              "an agent writes only its person's own memory: the organisation's, a team's and " <>
                "a profile's are read-only to agents: an administrator changes them on the " <>
-               "console's Govern → Company memory, and an agent may propose an entry for a " <>
+               "console's Oversee → Memory, and an agent may propose an entry for a " <>
                "team's or the organisation's (session.memory.propose) for one to review"
          }), state}
 

@@ -40,11 +40,11 @@ const rail = (): HTMLElement => document.querySelector<HTMLElement>("nav.rail")!
 const heading = (): string => document.querySelector("h1")?.textContent ?? "";
 
 describe("the shell", () => {
-  it("groups the map as Mine, then Watch, Configure, Operate and Govern, and says who is signed in to which plane", async () => {
+  it("groups the map as Oversee, then Watch, Configure, Operate and Govern, and says who is signed in to which plane", async () => {
     await open();
     const groups = [...rail().querySelectorAll(".group > .screen")].map((g) => g.textContent);
-    expect(groups).toEqual(["Mine", "Watch", "Configure", "Operate", "Govern"]);
-    for (const area of ["Overview", "Sessions", "Profiles", "Configuration bundles", "Pods", "Budgets", "Teams", "Client versions", "Organisation", "Audit"]) {
+    expect(groups).toEqual(["Oversee", "Watch", "Configure", "Operate", "Govern"]);
+    for (const area of ["Artifacts", "Memory", "Overview", "Sessions", "Profiles", "Configuration bundles", "Pods", "Budgets", "Teams", "Client versions", "Organisation", "Audit"]) {
       await seesLink(area, rail());
     }
     await sees("Alice", rail());
@@ -74,10 +74,10 @@ describe("the shell", () => {
     expect(css.slice(0, css.indexOf("@media (max-width: 760px)"))).toMatch(/\.rail \.menu\s*\{[^}]*display:\s*none/);
   });
 
-  it("opens company memory, the last area it drew, and points at no other console", async () => {
+  it("opens Memory, the first group's second area, and points at no other console", async () => {
     await open();
-    link("Company memory", rail())!.click();
-    await waitFor(() => heading() === "Company memory", "the area");
+    link("Memory", rail())!.click();
+    await waitFor(() => heading() === "Memory", "the area");
     await sees("The organisation's memory");
     // The plane's pages under /admin are its break-glass page: nothing here leads there.
     expect([...document.querySelectorAll("a")].filter((a) => a.href.includes("/admin"))).toEqual([]);

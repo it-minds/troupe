@@ -1,4 +1,4 @@
-// Sessions somebody invited you into by name (troupe #765), on Mine.
+// Sessions somebody invited you into by name (troupe #765), under Mine on Sessions.
 //
 // The plane's word as it changes: the invitations ride the person's watch beside the
 // laptops' offers (`invites.changed`), so one made or taken back is shown as it happens.
@@ -20,7 +20,7 @@ import { href } from "../route";
 import { Empty, Loaded } from "./bits";
 import { RemoteSession, useOffered } from "./Remote";
 
-/** Invited to you, on Mine. */
+/** Invited to you, under Mine on Sessions. */
 export function InvitedToYou({ load, reload }: { load: Load<Invitation[]>; reload: () => void }): JSX.Element {
   return (
     <section className="invited" aria-label="Invited to you">
@@ -50,7 +50,7 @@ export function InvitedToYou({ load, reload }: { load: Load<Invitation[]>; reloa
                             {i.title ?? i.session_id}
                           </span>
                         ) : (
-                          <a href={href({ page: "mine", path: ["invited", i.session_id] })}>{i.title ?? i.session_id}</a>
+                          <a href={href({ page: "sessions", path: ["invited", i.session_id] })}>{i.title ?? i.session_id}</a>
                         )}
                       </td>
                       <td>
@@ -60,7 +60,7 @@ export function InvitedToYou({ load, reload }: { load: Load<Invitation[]>; reloa
                       <td>
                         {i.kind === "private" && i.role === "control" ? (
                           i.offered ? (
-                            <a href={href({ page: "mine", path: ["remote", i.session_id] })}>{steerWords(i)}</a>
+                            <a href={href({ page: "sessions", path: ["remote", i.session_id] })}>{steerWords(i)}</a>
                           ) : (
                             steerWords(i)
                           )

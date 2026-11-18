@@ -11,7 +11,7 @@ paths:
   - apps/troupe_plane/lib/troupe/plane/remote/laptop.ex
   - apps/troupe_plane/lib/troupe/plane/clients_seen.ex
   - clients/gui/apps/console/src/App.tsx
-  - clients/gui/apps/console/src/views/Mine.tsx
+  - clients/gui/apps/console/src/views/Yours.tsx
 symbols:
   - Troupe.Plane.Remote.Watch
   - Troupe.Plane.Remote.changed/1

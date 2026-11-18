@@ -18,12 +18,13 @@
 // there to be seen; HOLD_MS=0 for none. GITOPS=1 is a plane in gitops mode, whose profiles
 // and triggers a repository holds, so the Configure area shows them locked.
 //
-// Mine has something of the person's own: a laptop's session offered to them, one of their
-// sessions on a worker, two clients' versions and the organisation's memory. OFFER_AFTER_MS
-// (15000 by default) later, a second laptop session is offered, which the list shows as it
-// is pushed; OFFER_AFTER_MS=0 for none. Artifacts has three: a page of the person's own in two
-// versions, a Markdown document of theirs to edit and share, and somebody else's Markdown for
-// the dev profile's people.
+// Sessions' Mine has something of the person's own: a laptop's session offered to them and
+// one of their sessions on a worker; Client versions two of their clients' versions; Memory
+// the organisation's memory, and Ada's and Carol's own for a platform admin to read.
+// OFFER_AFTER_MS (15000 by default) later, a second laptop session is offered, which the list
+// shows as it is pushed; OFFER_AFTER_MS=0 for none. Artifacts has four: a page of the person's
+// own in two versions, a Markdown document of theirs to edit and share, somebody else's
+// Markdown for the dev profile's people, and Ada's private page, on Every artifact.
 
 import { readFileSync } from "node:fs";
 import { exampleAdmin } from "../packages/client/test/support/admin.js";
@@ -53,7 +54,7 @@ if (process.env["GITOPS"]) {
   admin.gitopsSource = "https://git.example.com/platform/troupe.git";
 }
 // The person's desktop app, beside what the plane has seen of them already, in the records
-// Client versions counts: Mine reads the same ones (`me.clients`), so the two agree.
+// Client versions counts: Your clients reads the same ones (`me.clients`), so the two agree.
 admin.seen.push({ subject: as.subject, display_name: as.displayName, component: "desktop", version: "0.25.0-beta", platform: "windows/x86_64", since: "2026-10-20T09:00:00Z", seen_at: new Date().toISOString() });
 // The plane says the version it runs, this checkout's, as a real one's discovery does.
 const version = (JSON.parse(readFileSync(new URL("../apps/console/package.json", import.meta.url), "utf8")) as { version: string }).version;
@@ -75,7 +76,11 @@ const plane = await FakePlane.start({
   // so the gallery says when each goes; unset, both are off and nothing new is shown.
   ...(process.env["RETENTION"] ? { retention: { versions_days: Number(process.env["RETENTION"].split(",")[0]) || null, unopened_days: Number(process.env["RETENTION"].split(",")[1]) || null } } : {}),
   memory: [{ scope: "organisation", name: null, version: 2, hash: "sha256:fake", updated_at: "2026-10-22T10:00:00Z", text: "We write British English.\nEvery change has a test." }],
+  // People's own memory, which a platform admin's Memory lists and reads, each read audited.
+  own: { "ada@example.com": "## Tone\n\nShort answers, no emoji.\n\n## Reviews\n\nSmall pull requests, one concern each.", "carol@example.com": "I write British English." },
   artifacts: [
+    // Somebody else's private one: on a platform admin's Every artifact, read on its page, audited.
+    artifact("art-fake-diary", { subject: "ada@example.com", display_name: "Ada" }, { title: "Ada's diary", visibility: "private", team: "core", versions: [{ n: 1, files: [{ path: "index.html", content_type: "text/html", content: "<p>Private.</p>" }], published_by: { subject: "ada@example.com", display_name: "Ada" }, published_at: "2026-10-26T09:00:00Z" }] }),
     artifact("art-fake-weekly", { subject: as.subject, display_name: as.displayName }, {
       title: "Weekly report",
       origin: { session_id: "s-fake-1", profile: "dev", agent: "agent:build", where: "pod" },

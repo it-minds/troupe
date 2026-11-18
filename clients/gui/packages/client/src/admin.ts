@@ -14,6 +14,7 @@
 //     gets for a team that is not theirs — whether it exists is itself privileged.
 
 import type { AgentCheck } from "./agents.js";
+import type { ArtifactComment, ArtifactDetail } from "./artifacts.js";
 import type { MemoryEntry } from "./entries.js";
 import type { MemoryProposal } from "./instructions.js";
 
@@ -1346,6 +1347,39 @@ export interface AdminArtifact {
   may_take_down: boolean;
 }
 
+/**
+ * An artifact's page as `admin.artifact.get` answers the administrator who may take it down:
+ * what its owner's page has, with its links, who it is shared with and its comments, a
+ * person's private one too. Never what a file holds. Each answer is a row in the audit.
+ */
+export interface AdminArtifactPage extends ArtifactDetail {
+  /** Its comments, oldest first. */
+  thread: ArtifactComment[];
+  /** Whether you may open it on the artifacts host as anybody may: false for another person's private one. */
+  may_open: boolean;
+}
+
+/** One person who keeps a memory document of their own, as `admin.memory.people` lists them: never its text. */
+export interface PersonMemoryRow {
+  subject: string;
+  name: string | null;
+  /** Where the audit says it is: `user/<subject>`. */
+  document: string;
+  current: MemoryVersion;
+}
+
+/** `admin.memory.people`: everybody who keeps memory of their own, and the limit a document is held to. */
+export interface MemoryPeople {
+  limit: number;
+  people: PersonMemoryRow[];
+}
+
+/** A person's own memory document as `admin.memory.person` answers a platform admin: read only, and each read audited. */
+export interface PersonMemory extends Omit<MemoryDocument, "scope" | "inherited" | "readers"> {
+  scope: "person";
+  person: { subject: string; name: string | null };
+}
+
 /** What draining a pod did: how many sessions it held and moved, and what it cancelled. */
 export interface PodDrained {
   pod: string;
@@ -1573,6 +1607,11 @@ export class AdminApi {
     return this.rpc<AdminArtifact[]>("admin.artifacts.list", {});
   }
 
+  /** One artifact's page for the administrator who may take it down, a private one too; audited as a read. */
+  artifactPage(id: string): Promise<AdminArtifactPage> {
+    return this.rpc<AdminArtifactPage>("admin.artifact.get", { id });
+  }
+
   /** Take an artifact down: every version and byte. Destructive: confirmed by its id. */
   takeDownArtifact(id: string): Promise<{ deleted: boolean; id: string }> {
     return this.rpc<{ deleted: boolean; id: string }>("admin.artifact.takedown", { id });
@@ -1659,6 +1698,16 @@ export class AdminApi {
   /** Every memory document you may read: the organisation's, your teams', and for a platform admin each profile's. */
   memoryList(): Promise<MemoryListing> {
     return this.rpc<MemoryListing>("admin.memory.list", {});
+  }
+
+  /** Everybody who keeps memory of their own, for a platform admin: who, the version in force and its size, never its text. */
+  memoryPeople(): Promise<MemoryPeople> {
+    return this.rpc<MemoryPeople>("admin.memory.people", {});
+  }
+
+  /** One person's own memory, read only, for a platform admin: every read is a row in the audit. */
+  memoryPerson(person: string, version?: number, against?: number): Promise<PersonMemory> {
+    return this.rpc<PersonMemory>("admin.memory.person", { person, ...(version ? { version } : {}), ...(against ? { against } : {}) });
   }
 
   /** One memory document: a version (the one in force where none is named), its change against the one before, and every version. */

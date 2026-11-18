@@ -504,7 +504,8 @@ defmodule Troupe.Plane.Harness do
          "effect" =>
            "Every session you run reads it from its next turn: on the plane's pods at once, and " <>
              "on your machines within five minutes, after your organisation's memory and before " <>
-             "the repository's files. Nobody else reads it."
+             "the repository's files. The plane's platform administrators may read it, and " <>
+             "the audit records each read."
        }}
     end
   end

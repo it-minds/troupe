@@ -1,4 +1,4 @@
-// Company memory (#55): the organisation's and each team's memory document, and a worker
+// Memory (#55): the organisation's and each team's memory document, and a worker
 // profile's on the profile's page, through `admin.memory.*`. A change is previewed line by
 // line against the version in force, saved on confirm, and shown as the audit recorded it;
 // every version opens onto what it changed. A team admin changes their team's and reads the
@@ -26,7 +26,7 @@ afterEach(async () => {
 
 const card = (title: string): HTMLElement | null => document.querySelector<HTMLElement>(`section.memory[aria-label="${title}"]`);
 
-describe("company memory", () => {
+describe("memory", () => {
   it("shows the organisation's memory with its version, previews a change line by line, saves it on confirm and shows the audit", async () => {
     visit("#/memory");
     await signedInAs(fake, PEOPLE.alice);

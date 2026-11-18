@@ -773,6 +773,21 @@ defmodule Troupe.Plane.Admin.API do
       risk: :read
     },
     %Method{
+      name: "admin.artifact.get",
+      function: :artifact_get,
+      summary:
+        "One artifact's page for an administrator who may take it down: what artifact.get answers its owner (title, kind, visibility, owner, owner_team, versions with their files and blocked references, retention), with shares (its links, each with who was signed in through it), people (who it is shared with by name) and thread (its comments), and may_open, whether you may open it as anybody may. A person's private one too for a platform admin; a team admin reads their teams' and those their teams own; another is not_found. Never what a file holds. Audited as artifact.read, one row per read.",
+      risk: :read,
+      arguments: [
+        %Argument{
+          name: "id",
+          type: :string,
+          required: true,
+          description: "The artifact's id, as admin.artifacts.list reports it."
+        }
+      ]
+    },
+    %Method{
       name: "admin.artifact.takedown",
       function: :artifact_takedown,
       summary:
@@ -1564,6 +1579,41 @@ defmodule Troupe.Plane.Admin.API do
                 "Another version to compare the one shown with. Absent is the version before it."
             }
           ]
+    },
+    %Method{
+      name: "admin.memory.people",
+      function: :memory_people,
+      role: :platform_admin,
+      summary:
+        "Every person who keeps a memory document of their own (the level me, which every session they run reads after the organisation's levels): each with subject, name, document (user/<subject>) and current, the version in force with who saved it, when and its size; never its text, and the limit in bytes a document is held to. A person who keeps none is not listed.",
+      risk: :read,
+      arguments: []
+    },
+    %Method{
+      name: "admin.memory.person",
+      function: :memory_person,
+      role: :platform_admin,
+      summary:
+        "One person's own memory document, read only: a version's text (the one in force where no version is named), every version with who saved it and when, the change against the one before or against the version named as against, lines (who wrote each line) and entries, as admin.memory.get answers the organisation's. A person's own is changed by them and their agents alone, and goes when the person is removed. Audited as memory.read on user/<subject>, one row per read, naming the version read.",
+      risk: :read,
+      arguments: [
+        %Argument{
+          name: "person",
+          type: :string,
+          required: true,
+          description: "The person's subject, as admin.memory.people lists it."
+        },
+        %Argument{
+          name: "version",
+          type: :integer,
+          description: "The version to show. Absent is the one in force."
+        },
+        %Argument{
+          name: "against",
+          type: :integer,
+          description: "Another version to compare the one shown with. Absent is the version before it."
+        }
+      ]
     },
     %Method{
       name: "admin.memory.preview",

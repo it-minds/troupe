@@ -62,10 +62,10 @@ function placements(): Array<{ fn: string; area: string }> {
   return [...text.matchAll(/^\s+([a-z_]+):\s*\{:area,\s*:([a-z_]+)\}/gm)].map((m) => ({ fn: m[1]!, area: m[2]! }));
 }
 
-/** The plane's copy of this console's map: its four groups and their areas, in order. */
+/** The plane's copy of this console's map: its five groups and their areas, in order. */
 function planeAreas(): Array<{ group: string; areas: string[] }> {
   const text = readFileSync(join(plane, "console.ex"), "utf8");
-  return [...text.matchAll(/@(watch|configure|operate|govern)\s+~w\(([^)]*)\)a/g)].map((m) => ({ group: m[1]!, areas: m[2]!.trim().split(/\s+/) }));
+  return [...text.matchAll(/@(oversee|watch|configure|operate|govern)\s+~w\(([^)]*)\)a/g)].map((m) => ({ group: m[1]!, areas: m[2]!.trim().split(/\s+/) }));
 }
 
 describe("the console covers the plane's administrative surface", () => {
@@ -89,7 +89,7 @@ describe("the console covers the plane's administrative surface", () => {
 
   it("draws the same map the plane places its methods on", () => {
     const groups = planeAreas();
-    expect(groups.map((g) => g.group), "Admin.Console's groups could not be read").toEqual(["watch", "configure", "operate", "govern"]);
+    expect(groups.map((g) => g.group), "Admin.Console's groups could not be read").toEqual(["oversee", "watch", "configure", "operate", "govern"]);
     expect(groups.map((g) => ({ group: g.group, areas: g.areas }))).toEqual(NAV.map((g) => ({ group: g.label.toLowerCase(), areas: g.areas.map((a) => a.id) })));
   });
 

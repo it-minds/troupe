@@ -150,7 +150,7 @@ describe("artifacts", () => {
   });
 
   it("says how to publish one where a tab has none, and that an administrator switched them off where one did", async () => {
-    await open("#/artifacts", PEOPLE.bob);
+    await open("#/artifacts/mine", PEOPLE.bob);
     await sees("You have published nothing yet");
     // Every way to publish, the desktop app's among them, where a person's own are listed.
     await sees("the desktop app's Publish…");
@@ -191,9 +191,9 @@ describe("artifacts", () => {
     expect(document.querySelector("iframe")).toBeNull();
     expect(document.body.innerHTML).not.toContain("Week forty-three in full");
 
-    // A member's own session is among theirs in Mine.
+    // A member's own session is among theirs under Mine on Sessions.
     const source = await seesLink("View source session");
-    expect(source.getAttribute("href")).toBe("#/mine");
+    expect(source.getAttribute("href")).toBe("#/sessions/mine");
     await sees("s-carol-1");
 
     // Nothing is asked until it is opened, and each Open asks again.
@@ -356,10 +356,16 @@ describe("artifacts' storage", () => {
     await sees("Old versions of an artifact kept", group);
   });
 
-  it("keeps the Artifacts area beside Mine for an administrator too", async () => {
-    await open("#/mine", PEOPLE.bob);
-    const mine = () => [...rail().querySelectorAll(".group")].find((g) => g.querySelector(".screen")?.textContent === "Mine");
-    await waitFor(() => mine() && link("Artifacts", mine()!), "Artifacts in the group Mine");
+  it("keeps the Artifacts area first, in Oversee, for an administrator and a member alike", async () => {
+    await open("#/overview", PEOPLE.bob);
+    const first = () => rail().querySelector(".group");
+    await waitFor(() => first()?.querySelector(".screen")?.textContent === "Oversee" && link("Artifacts", first()!), "Artifacts in the first group");
+    close();
+    await open("#/artifacts", PEOPLE.carol);
+    await waitFor(() => first()?.querySelector(".screen")?.textContent === "Oversee" && link("Artifacts", first()!), "Artifacts in a member's first group");
+    // A member's first tab is their own: there is no Every artifact for them.
+    await waitFor(() => tabs()[0] === "Mine", "Mine first");
+    expect(tabs()).not.toContain("Every artifact");
   });
 });
 

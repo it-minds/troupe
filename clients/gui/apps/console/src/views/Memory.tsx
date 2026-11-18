@@ -1,23 +1,43 @@
-// The organisation's memory (#55): what the organisation, each team and each worker profile
-// wrote for every agent in their scope. Each document reaches the sessions in its scope as
-// instructions from the organisation, before the person's own instructions and the
-// repository's files, and no agent can change one: this is where a person does.
+// Memory (#55): every memory document the plane holds that the role answers for. What the
+// organisation, each team and each worker profile wrote for every agent in their scope: each
+// reaches the sessions in its scope as instructions from the organisation, before the
+// person's own instructions and the repository's files, and no agent can change one: this is
+// where a person does. Then, for a platform admin, each person's own, which every session of
+// theirs reads after those: listed by person with its size and when it changed, and read on
+// a page of its own, each read a row in the audit. And last the signed-in person's own,
+// which a member's Memory is alone.
 //
 // Every save is a new version, kept with who saved it; a save shows what it changes line by
 // line before it is made, and the audit's record after. The organisation's and a profile's
 // are a platform admin's to change, a team's its team admins'. A profile's is edited on the
 // profile's own page, through the same editor, below what it has from the profiles it extends.
+// A person's own is theirs and their agents' to change: an administrator reads it, and it
+// goes when the person is removed.
 
 import { useState } from "react";
 import type { JSX } from "react";
-import { besideRows, nameOrSubject, writtenBy } from "@troupe/client";
-import type { MemoryDocument, MemoryInherited, MemoryPreview, MemoryProposal, MemoryReader, MemoryReaders, MemoryScope, MemorySaved } from "@troupe/client";
+import { besideRows, bytes, nameOrSubject, writtenBy } from "@troupe/client";
+import type { MemoryDocument, MemoryInherited, MemoryPreview, MemoryProposal, MemoryReader, MemoryReaders, MemoryRow, MemoryScope, MemorySaved } from "@troupe/client";
 import { describeError, useConsole, useLoad } from "../console";
 import { href } from "../route";
 import { AuditNote, Empty, Field, Loaded, Preview, Region, TextDiff, count, useChange, when } from "./bits";
+import { YourMemory } from "./Yours";
 
 export function Memory(): JSX.Element {
-  const { admin } = useConsole();
+  const { role } = useConsole();
+  if (role === "member") {
+    return (
+      <div className="page">
+        <p className="lead">What every session of yours starts from: your organisation's memory and your teams', to read, and your own, to change.</p>
+        <YourMemory />
+      </div>
+    );
+  }
+  return <Documents />;
+}
+
+function Documents(): JSX.Element {
+  const { admin, role } = useConsole();
   const [load, reload] = useLoad(() => admin.memoryList(), [admin]);
   // Bumped when a proposal is accepted, so the document it went into is read again.
   const [accepted, setAccepted] = useState(0);
@@ -28,9 +48,10 @@ export function Memory(): JSX.Element {
         {(list) => (
           <>
             <p className="lead">
-              What every agent in a scope starts from: the organisation's for every session, a team's for that team's sessions and its members' machines. Each reaches a
-              session as instructions from the organisation, before the person's own and the repository's. No agent changes one: an agent may propose an entry, which
-              waits below until you accept or decline it. A profile's is on the profile's page. Each document holds at most {list.limit} bytes.
+              What every agent in a scope starts from: the organisation's for every session, a team's for that team's sessions and its members' machines, a profile's for the
+              sessions on it. Each reaches a session as instructions from the organisation, before the person's own and the repository's. No agent changes one: an agent may
+              propose an entry, which waits below until you accept or decline it.{role === "platform_admin" ? " Below them, each person's own, to read." : ""} Each document
+              holds at most {list.limit} bytes.
             </p>
             <Proposals onAccepted={() => setAccepted((n) => n + 1)} />
             <Region>The organisation's</Region>
@@ -41,6 +62,153 @@ export function Memory(): JSX.Element {
             ) : (
               list.teams.map((t) => <MemoryEditor key={`${t.subject}:${accepted}`} scope="team" name={t.name} title={`The ${t.name} team's memory`} />)
             )}
+            {list.profiles.length > 0 && <ProfilesMemory rows={list.profiles} />}
+            {role === "platform_admin" && <PeopleMemory />}
+          </>
+        )}
+      </Loaded>
+      <YourMemory ownOnly />
+    </div>
+  );
+}
+
+/** Each profile's document, edited on the profile's own page, below what it has from those it extends. */
+function ProfilesMemory({ rows }: { rows: MemoryRow[] }): JSX.Element {
+  return (
+    <section aria-label="Profiles' memory">
+      <Region>Profiles'</Region>
+      <p className="note">Each is edited on its profile's page, below the memory it has from the profiles it extends, which its sessions read first.</p>
+      <div className="scroll">
+        <table aria-label="Profiles' memory">
+          <thead>
+            <tr>
+              <th>Profile</th>
+              <th>Version</th>
+              <th className="num">Size</th>
+              <th>Changed</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r) => (
+              <tr key={r.subject}>
+                <td>
+                  <a href={href({ page: "profiles", path: [r.name ?? ""] })}>{r.name}</a>
+                </td>
+                <td>{r.current ? r.current.version : "nothing written"}</td>
+                <td className="num">{r.current ? bytes(r.current.bytes) : "—"}</td>
+                <td>{r.current ? `${when(r.current.changed_at)} by ${r.current.changed_by}` : "—"}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
+}
+
+/**
+ * Each person's own memory, for a platform admin: who keeps one, the version in force, its
+ * size and when it changed, never its text here. Reading one is its own page, so each read
+ * is something an administrator chose to do, and the audit has a row for it.
+ */
+function PeopleMemory(): JSX.Element {
+  const { admin } = useConsole();
+  const [load, reload] = useLoad(() => admin.memoryPeople(), [admin]);
+  return (
+    <section aria-label="People's own memory">
+      <Region>People's own</Region>
+      <p className="note">
+        What each person keeps for every session of theirs, after the levels above. Theirs and their agents' to change; you read it, each read recorded in the audit as{" "}
+        <code>memory.read</code>, and it goes when the person is removed.
+      </p>
+      <Loaded load={load} what="people's own memory" retry={reload}>
+        {({ people }) =>
+          people.length === 0 ? (
+            <Empty title="Nobody keeps memory of their own yet" />
+          ) : (
+            <div className="scroll">
+              <table aria-label="People's own memory">
+                <thead>
+                  <tr>
+                    <th>Person</th>
+                    <th>Version</th>
+                    <th className="num">Size</th>
+                    <th>Changed</th>
+                    <th className="row-actions" aria-label="Actions" />
+                  </tr>
+                </thead>
+                <tbody>
+                  {people.map((p) => (
+                    <tr key={p.subject}>
+                      <td>
+                        {p.name ?? p.subject} {p.name && <span className="mono muted">{p.subject}</span>}
+                      </td>
+                      <td>{p.current.version}</td>
+                      <td className="num">{bytes(p.current.bytes)}</td>
+                      <td>{`${when(p.current.changed_at)} by ${p.current.changed_by}`}</td>
+                      <td className="row-actions">
+                        <a href={href({ page: "memory", path: ["person", p.subject] })} aria-label={`Read ${p.name ?? p.subject}'s memory`}>
+                          Read
+                        </a>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )
+        }
+      </Loaded>
+    </section>
+  );
+}
+
+/**
+ * One person's own memory, read by a platform admin: the version in force, or one picked
+ * from its history, with what it changed against the one before. Each read, this page and
+ * each version opened on it, is a row in the audit naming whose and which version.
+ */
+export function PersonMemoryPage({ person }: { person: string }): JSX.Element {
+  const { admin } = useConsole();
+  const [version, setVersion] = useState<number | undefined>(undefined);
+  const [load, reload] = useLoad(() => admin.memoryPerson(person, version), [admin, person, version]);
+  return (
+    <div className="page">
+      <Loaded load={load} what={`${person}'s own memory`} retry={reload}>
+        {(doc) => (
+          <>
+            <p className="lead">
+              What every session {doc.person.name ?? doc.person.subject} runs reads after the organisation's, their team's and their profile's memory. Theirs and their agents' to
+              change, so nothing here changes it; it goes when they are removed.
+            </p>
+            <p className="note" role="note">
+              This read is in the audit as <code>memory.read</code> on <code>{doc.subject}</code>, version {doc.version ?? 0}, under your name, as every read of a person's own is.
+            </p>
+            <h3>
+              Version {doc.version ?? 0}{" "}
+              <span className="meta">
+                {doc.shown ? `${when(doc.shown.changed_at)} by ${doc.shown.changed_by} · ${count(doc.shown.bytes, "byte")}` : "nothing written"}
+              </span>
+            </h3>
+            {doc.text === "" ? <Empty title="This version is empty" /> : <pre className="memory-text">{doc.text}</pre>}
+            {doc.against && <TextDiff title={`v${doc.against} → v${doc.version ?? 0}`} lines={doc.diff} />}
+            <Region>Versions</Region>
+            <ol className="memory-versions" aria-label="Versions">
+              {doc.versions.map((v) => (
+                <li key={v.version}>
+                  <b>Version {v.version}</b>
+                  <span className="muted">
+                    {" "}
+                    · {when(v.changed_at)} by {v.changed_by} · {count(v.bytes, "byte")}
+                  </span>{" "}
+                  {v.version !== doc.version && (
+                    <button type="button" onClick={() => setVersion(v.version)}>
+                      Read version {v.version}
+                    </button>
+                  )}
+                </li>
+              ))}
+            </ol>
           </>
         )}
       </Loaded>

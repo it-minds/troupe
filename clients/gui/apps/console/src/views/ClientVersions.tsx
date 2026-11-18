@@ -12,6 +12,9 @@
 // current, behind the recommended version, or refused when they next connect, and a list
 // says who is behind and since when. A team admin's are their teams' people.
 //
+// Below them, your clients: which version of each of the signed-in person's clients the
+// plane last saw, which is all a member's Client versions shows them.
+//
 // Above the policies, a platform admin's one button for the usual step after an upgrade:
 // recommend the version this plane runs (its discovery's `plane.build.version`) for every
 // kind of client, previewed and applied as the policies' own changes are (#925).
@@ -23,6 +26,7 @@ import type { ClientCounts, ClientFleet, ClientPolicy, ClientPolicyChange, Clien
 import { describeError, show, useConsole, useLoad } from "../console";
 import { AuditNote, Diff, Empty, Field, Loaded, Loading, Preview, Region, Status, changed, count, when } from "./bits";
 import type { DiffLine } from "./bits";
+import { YourClients } from "./Yours";
 
 /** What each component is to a person, for the ones this console knows the name of. */
 const KNOWN: Record<string, { name: string; program: string; updates: boolean }> = {
@@ -36,6 +40,20 @@ function known(component: string): { name: string; program: string; updates: boo
 }
 
 export function ClientVersions(): JSX.Element {
+  const { role } = useConsole();
+  // A member is held to the policy and sets none of it: theirs is which versions they run.
+  if (role === "member") {
+    return (
+      <div className="page">
+        <p className="lead">Which version of each of your clients this plane last saw, and whether it is the one the plane recommends.</p>
+        <YourClients />
+      </div>
+    );
+  }
+  return <Policies />;
+}
+
+function Policies(): JSX.Element {
   const { admin, role, plane } = useConsole();
   const [load, reload] = useLoad(() => admin.clients(), [admin]);
   const [done, setDone] = useState<ClientPolicyPut[] | null>(null);
@@ -82,6 +100,7 @@ export function ClientVersions(): JSX.Element {
           );
         }}
       </Loaded>
+      <YourClients />
     </div>
   );
 }

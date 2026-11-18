@@ -8,15 +8,54 @@
 // Filtered by state and profile at the plane, searched here over what came back, and paged.
 // A session is erased behind `admin.session.erase.preview`: what goes, that its key goes
 // with it, and the forks that survive because each has its own; then typed by its id.
+//
+// Beside every session, Mine: the signed-in person's own and the laptops' sessions offered
+// to them, which is the whole of a member's Sessions.
 
 import { useState } from "react";
 import type { JSX } from "react";
 import { bytes, nameOrSubject } from "@troupe/client";
 import type { AdminSessionRow, SessionErasePreview, SessionErased, SessionGitHub } from "@troupe/client";
 import { recorded, useConsole, useLoad } from "../console";
+import { href } from "../route";
 import { AuditNote, Empty, Field, Loaded, Preview, Status, count, sessionState, when } from "./bits";
+import { MySessions } from "./Yours";
 
 const PAGE = 25;
+
+/**
+ * An administrator's two tabs: every session their role may see, and Mine, their own and
+ * those offered to them. A member's Sessions is Mine alone, so it has none.
+ */
+function SessionTabs({ mine }: { mine: boolean }): JSX.Element | null {
+  const { role } = useConsole();
+  if (role === "member") return null;
+  return (
+    <nav className="tabs" aria-label="Whose sessions">
+      <a href={href({ page: "sessions" })} aria-current={mine ? undefined : "page"}>
+        Every session
+      </a>
+      <a href={href({ page: "sessions", path: ["mine"] })} aria-current={mine ? "page" : undefined}>
+        Mine
+      </a>
+    </nav>
+  );
+}
+
+/** Sessions' Mine: what is the signed-in person's own, steered from here as themselves. */
+export function SessionsMine(): JSX.Element {
+  const { me, plane } = useConsole();
+  return (
+    <div className="page">
+      <SessionTabs mine />
+      <p className="lead">
+        Yours on {plane.name}, {me.display_name ?? me.subject}: the sessions offered to you from laptops and those you were invited into, to follow and steer from here, and your
+        sessions on the plane.
+      </p>
+      <MySessions />
+    </div>
+  );
+}
 
 /** What the plane answers at most, newest activity first, when asked for no fewer. */
 const PLANE_LIMIT = 200;
@@ -41,6 +80,7 @@ export function Sessions({ query: initial = "" }: { query?: string } = {}): JSX.
 
   return (
     <div className="page">
+      <SessionTabs mine={false} />
       <p className="lead">
         Who owns each session, where it runs, what state it is in and what it holds. Metadata only: no administrative role can read what a session
         said.

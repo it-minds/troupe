@@ -5,8 +5,8 @@ defmodule Troupe.Plane.Memory do
   edited in the console (`Troupe.Plane.Admin`) and handed to the sessions they reach as
   instructions from the organisation, read-only to every agent. A person's own is theirs:
   edited by them alone (`save_own/4`), added to by an agent of theirs one entry at a time
-  (`append_own/3`), read by every session they run and by nobody else, every version kept
-  with who saved it as the others are.
+  (`append_own/3`), read by every session they run and, audited at each read, by a platform
+  administrator (`people/0`), every version kept with who saved it as the others are.
 
   - **On a pod** a session gets its organisation's, its team's and its profile's, with
     every activation (`for_session/2`), so a save reaches a session the next time it wakes.
@@ -679,8 +679,8 @@ defmodule Troupe.Plane.Memory do
 
   @doc """
   A person's own document as they edit it: the version in force (`0` for none), its text,
-  its size and the limit, and who saved it and when. Asked only for the person themselves:
-  no administrator's method reads it.
+  its size and the limit, and who saved it and when. Asked for the person themselves; a
+  platform administrator reads it through `Troupe.Plane.Admin.memory_person/4`, audited.
   """
   @spec own(User.t()) :: map()
   def own(%User{} = user) do
@@ -696,6 +696,36 @@ defmodule Troupe.Plane.Memory do
       "changed_by" => current && current.changed_by,
       "changed_at" => current && DateTime.to_iso8601(current.inserted_at)
     }
+  end
+
+  @doc """
+  Every person who keeps a document of their own, by subject, each with the version in
+  force: what a platform administrator's listing shows, never with its text. A person
+  removed has none: their documents go with them.
+  """
+  @spec people() :: [{User.t(), Document.t()}]
+  def people do
+    latest =
+      from(d in Document,
+        where: d.scope == "user",
+        distinct: d.owner,
+        order_by: [asc: d.owner, desc: d.version]
+      )
+      |> Repo.all()
+
+    users =
+      from(u in User, where: u.id in ^Enum.map(latest, & &1.owner))
+      |> Repo.all()
+      |> Map.new(&{&1.id, &1})
+
+    latest
+    |> Enum.flat_map(fn document ->
+      case Map.fetch(users, document.owner) do
+        {:ok, user} -> [{user, document}]
+        :error -> []
+      end
+    end)
+    |> Enum.sort_by(fn {user, _document} -> user.subject end)
   end
 
   @doc """

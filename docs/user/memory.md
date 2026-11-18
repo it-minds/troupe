@@ -18,7 +18,7 @@ later one wins, so the narrower comes later:
    just before them.
 
 The first three are your organisation's word. An administrator writes them in the console
-(*Company memory*, or the profile's page), and a session reads them as instructions that
+(*Memory*, or the profile's page), and a session reads them as instructions that
 apply as written. Your own comes after them: it is how you like to work. The organisation's
 instructions still come first, except on a topic you wrote about yourself (below).
 
@@ -58,9 +58,10 @@ never its text.
 
 ## Your own memory
 
-Your own memory is one document on the plane that follows you between machines. Nobody else
-reads it: no administrator's page lists it, and a team admin or a platform admin cannot open
-it. It is kept under your account, so it stays yours when the identity provider renames you,
+Your own memory is one document on the plane that follows you between machines. The plane's
+platform administrators may read it, in the console's *Memory*, and each time one does the
+audit trail records who read it and which version; a team admin cannot, and no administrator
+can change it. It is kept under your account, so it stays yours when the identity provider renames you,
 and it is deleted, every version, when you are removed.
 
 You change it in three places, each saving over the version you started from, so a save
@@ -73,7 +74,8 @@ made elsewhere meanwhile is said rather than overwritten:
 - **The desktop app**: *Memory* in the rail (below), read from the plane the app is signed
   in to, or through this computer's daemon and its sign-in when the app is not. A session's
   *Instructions* pane lists it as *Your memory* and opens *Memory* for it.
-- **The console**, under *Mine*: a change is previewed line by line before it is saved.
+- **The console**, under *Your own* on *Memory*: a change is previewed line by line before it
+  is saved.
 
 A save reaches the sessions running on the machine that saved it, and on the plane's pods,
 at their next turn, with a line saying your memory changed; your other machines read it
@@ -142,8 +144,8 @@ A session on the plane's pods asks the plane, as each turn begins, whether it ho
 versions in force, and reads the new ones first if it does not. A session on your machine
 reads the copy your daemon keeps, which it asks the plane for every five minutes. Each of
 those asks tells the plane which version each session's last turn ran under, by version and
-hash and never the text, so your organisation's administrators can see on *Company memory*
-which running sessions are behind a save. Your own memory is not shown there.
+hash and never the text, so your organisation's administrators can see on *Memory* which
+running sessions are behind a save.
 
 `troupe memory --status` prints which versions this machine holds, whether the plane has the
 same in force (it asks, and keeps the answer), and which each session running here read at

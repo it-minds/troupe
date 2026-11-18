@@ -9,7 +9,7 @@
 // namespace the ingress controller may reach the workers from; a team at or near its
 // ceiling; runs started with nobody watching
 // that nobody has looked at since; entries agents proposed for a memory the person may
-// change, waiting on Company memory. An empty list says so in a sentence, because an empty
+// change, waiting on Memory. An empty list says so in a sentence, because an empty
 // region and one that has not loaded look the same. Clients behind the recommended version
 // are one line there, linked to Client versions, where there are any (#657). Read again
 // every few seconds, keeping what is on the screen until the new answer replaces it.
@@ -325,7 +325,7 @@ function attention(overview: FleetOverview, unread: number, platform: boolean, c
       state: "waiting",
       what: `${count(proposed, "memory proposal")} from agents ${proposed === 1 ? "is" : "are"} waiting for you to accept or decline.`,
       where: href({ page: "memory" }),
-      action: "Company memory",
+      action: "Memory",
     });
   }
   const fleet = Object.values(clients?.fleet ?? {});
