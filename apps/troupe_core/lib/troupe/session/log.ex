@@ -26,16 +26,17 @@ defmodule Troupe.Session.Log do
 
   require Logger
 
-  @enforce_keys [:session_id, :path, :device]
+  @enforce_keys [:session_id, :path, :device, :starts]
   defstruct [
     :session_id,
     :path,
     :device,
+    # Which agents have started under this tree, and when each started again lately, newest
+    # first, by path: what `started/3` counts. A table the session's supervisor owns, so a
+    # Log the tree restarts still knows; one of its own for a Log started alone.
+    :starts,
     seq: 0,
-    last: nil,
-    started: MapSet.new(),
-    # When each agent started again lately, newest first, by path: what `started/3` counts.
-    restarts: %{}
+    last: nil
   ]
 
   @type event_type :: atom()
@@ -93,9 +94,11 @@ defmodule Troupe.Session.Log do
   started, while a session tree coming back after a daemon restart must not quietly
   resume work nobody is watching.
 
-  The log process is the right place to ask because its lifetime *is* the session
-  tree's: it is the first child, and anything that takes it down takes the agents with
-  it. True exactly once per agent path per tree.
+  The log process is the right place to ask: it is the first child, and anything that
+  takes it down takes the agents with it. It keeps the answer in a table the session's
+  supervisor owns (`:starts`), whose lifetime *is* the tree's, so a Log the tree restarts
+  does not count every agent's next start as the first again. True exactly once per agent
+  path per tree.
   """
   @spec cold_start?(String.t(), [String.t()]) :: boolean()
   def cold_start?(session_id, agent_path) do
@@ -242,6 +245,8 @@ defmodule Troupe.Session.Log do
 
     Process.set_label("troupe log #{session_id}")
 
+    starts = Keyword.get_lazy(opts, :starts, fn -> :ets.new(__MODULE__, [:set, :public]) end)
+
     dir = Paths.session_dir(workspace_root, session_id, Keyword.get(opts, :state_dir))
     File.mkdir_p!(dir)
     path = Path.join(dir, "events.jsonl")
@@ -258,6 +263,7 @@ defmodule Troupe.Session.Log do
            session_id: session_id,
            path: path,
            device: device,
+           starts: starts,
            seq: (last && last.seq) || 0,
            last: last
          }}
@@ -307,18 +313,17 @@ defmodule Troupe.Session.Log do
   def handle_call(:head_seq, _from, state), do: {:reply, state.seq, state}
 
   def handle_call({:cold_start, agent_path}, _from, state) do
-    {:reply, not MapSet.member?(state.started, agent_path),
-     %{state | started: MapSet.put(state.started, agent_path)}}
+    {:reply, :ets.insert_new(state.starts, {{:started, agent_path}}), state}
   end
 
   def handle_call({:started, agent_path, within_ms}, _from, state) do
-    if MapSet.member?(state.started, agent_path) do
+    if :ets.insert_new(state.starts, {{:started, agent_path}}) do
+      {:reply, :cold, state}
+    else
       now = System.monotonic_time(:millisecond)
       times = [now | recent_restarts(state, agent_path, within_ms, now)]
-      restarts = Map.put(state.restarts, agent_path, times)
-      {:reply, {:warm, length(times)}, %{state | restarts: restarts}}
-    else
-      {:reply, :cold, %{state | started: MapSet.put(state.started, agent_path)}}
+      :ets.insert(state.starts, {{:restarts, agent_path}, times})
+      {:reply, {:warm, length(times)}, state}
     end
   end
 
@@ -332,7 +337,13 @@ defmodule Troupe.Session.Log do
   def handle_call({:first, key}, _from, state), do: {:reply, Troupe.Registry.first?(key), state}
 
   defp recent_restarts(state, agent_path, within_ms, now) do
-    state.restarts |> Map.get(agent_path, []) |> Enum.take_while(&(now - &1 < within_ms))
+    times =
+      case :ets.lookup(state.starts, {:restarts, agent_path}) do
+        [{_key, times}] -> times
+        [] -> []
+      end
+
+    Enum.take_while(times, &(now - &1 < within_ms))
   end
 
   defp decode_lines(contents) do

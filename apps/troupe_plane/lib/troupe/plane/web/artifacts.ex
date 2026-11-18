@@ -26,7 +26,8 @@ defmodule Troupe.Plane.Web.Artifacts do
   **Who reads it.** The viewer this host's own cookie names, and only while they may see
   the artifact now, as `Artifacts.visible/3` reads it at every request. The cookie comes from
   `/enter`, which takes a ticket the plane signed for a signed-in person a minute ago and
-  nobody has redeemed, so the only way onto this host is through the plane. A viewer with no
+  nobody has redeemed, so the only way onto this host is through the plane. The cookie lasts
+  an hour from the viewer's last request here, each answer renewing it. A viewer with no
   cookie, or an expired one, is sent to the console's door for that artifact (and that
   version), which signs them in and comes straight back here with a fresh ticket, rather
   than to the artifact's page in the console, which is a page about it and not it.
@@ -167,7 +168,7 @@ defmodule Troupe.Plane.Web.Artifacts do
 
     with {:ok, viewer} <- Artifacts.viewer(conn.cookies[@cookie]),
          {:ok, id} <- Artifacts.use_link(token, viewer) do
-      conn |> put_resp_header("location", "/a/#{id}/") |> send_resp(303, "")
+      conn |> renew(viewer) |> put_resp_header("location", "/a/#{id}/") |> send_resp(303, "")
     else
       _not_here ->
         case Artifacts.console_url() do
@@ -194,6 +195,7 @@ defmodule Troupe.Plane.Web.Artifacts do
     case Artifacts.viewer(conn.cookies[@cookie]) do
       {:ok, viewer} ->
         {version, path} = address(rest)
+        conn = renew(conn, viewer)
 
         case Artifacts.fetch(id, version, path, viewer) do
           {:ok, found} -> answer(conn, found)
@@ -284,6 +286,14 @@ defmodule Troupe.Plane.Web.Artifacts do
   end
 
   defp console_url, do: Artifacts.console_url()
+
+  # The cookie slides: every answer to a viewer it names carries a fresh one, signed now, so
+  # its hour runs from the last request rather than from `/enter`, and a person reading for
+  # an afternoon is not sent round to sign in every hour. A cookie unused for the hour still
+  # lapses. It renews who the viewer is and nothing else: who they are now, and what they
+  # may see, are still read at every request.
+  defp renew(conn, viewer),
+    do: put_resp_cookie(conn, @cookie, Artifacts.viewer_cookie(viewer.subject), cookie_options())
 
   # Host-only (no `Domain`), so no other host is sent it, and out of every script's reach.
   # `SameSite=None` where it can be `Secure`: a sandboxed page is a document of no site, and

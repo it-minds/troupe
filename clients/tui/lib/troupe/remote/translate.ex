@@ -551,6 +551,11 @@ defmodule Troupe.Remote.Translate do
       "files_skipped" ->
         {[emit.(:remote_note, %{text: files_skipped(data["files"])})], memory}
 
+      # A wake past what the agent could not read (`session.repair`): the event stays in the
+      # log, and every replay from here skips it.
+      "log_repaired" ->
+        {[emit.(:remote_note, %{text: repaired(data["at"])})], memory}
+
       "approval_resolved" ->
         {[], memory}
 
@@ -1384,6 +1389,20 @@ defmodule Troupe.Remote.Translate do
   defp owner_of(_event, _data), do: nil
 
   defp tool_names(data), do: Enum.filter(List.wrap(data["tools"]), &is_binary/1)
+
+  # The skipped event's own time, to the minute, as UTC: a log from before `at` was written
+  # says only that one was.
+  defp repaired(at) when is_binary(at) do
+    case DateTime.from_iso8601(at) do
+      {:ok, written, _offset} ->
+        "An event from #{Calendar.strftime(written, "%Y-%m-%d %H:%M")} UTC could not be read and was skipped"
+
+      {:error, _reason} ->
+        repaired(nil)
+    end
+  end
+
+  defp repaired(_at), do: "An event could not be read and was skipped"
 
   # How many of each kind, then each reason once with the files it covers: a worktree's
   # one reason fits every file, while a pod's names the file it is about. An empty list

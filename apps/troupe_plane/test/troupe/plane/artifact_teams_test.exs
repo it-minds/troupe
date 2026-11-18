@@ -388,4 +388,50 @@ defmodule Troupe.Plane.ArtifactTeamsTest do
       assert {:ok, [_, _]} = API.call("admin.artifacts.list", %{}, Admin.actor_for(context.root))
     end
   end
+
+  describe "admin.artifact.get" do
+    test "is a private one's page for a platform administrator, its shares and thread too, audited",
+         context do
+      {:ok, artifact} = publish(context.ada, %{"title" => "Hers", "visibility" => "private"})
+      id = artifact["id"]
+      {:ok, _link} = call(context.ada, "artifact.share", %{"id" => id, "role" => "view"})
+      {:ok, _comment} = call(context.ada, "artifact.comment", %{"id" => id, "body" => "Draft."})
+
+      assert {:ok, page} = API.call("admin.artifact.get", %{"id" => id}, Admin.actor_for(context.root))
+      assert {page["title"], page["mine"], page["may_open"], page["may_delete"]} == {"Hers", false, false, true}
+      assert [%{"n" => 1, "files" => [%{"path" => "index.html"}]}] = page["versions"]
+      assert [%{"role" => "view"}] = page["shares"]
+      assert [%{"body" => "Draft."}] = page["thread"]
+      assert page["thumbnail_url"] == nil
+      refute inspect(page) =~ "<h1>Hi</h1>"
+
+      [row] = Enum.filter(Audit.list(), &(&1.action == "artifact.read"))
+
+      assert {row.actor, row.subject_id, row.detail["owner"], row.detail["visibility"]} ==
+               {"root@example.test", id, "ada@example.test", "private"}
+
+      # Reading it again is another row: one per read.
+      {:ok, _} = API.call("admin.artifact.get", %{"id" => id}, Admin.actor_for(context.root))
+      assert length(Enum.filter(Audit.list(), &(&1.action == "artifact.read"))) == 2
+    end
+
+    test "is a team administrator's for their teams' alone, and nobody else's", context do
+      {:ok, eng} = publish(context.ada, %{"title" => "Eng", "visibility" => "team:engineering"})
+      {:ok, mine} = publish(context.ada, %{"title" => "Hers", "visibility" => "private"})
+
+      assert {:ok, %{"title" => "Eng", "may_open" => true}} =
+               API.call("admin.artifact.get", %{"id" => eng["id"]}, Admin.actor_for(context.dee))
+
+      assert {:error, %{message: "not_found"}} =
+               API.call("admin.artifact.get", %{"id" => eng["id"]}, Admin.actor_for(context.eve))
+
+      assert {:error, %{message: "not_found"}} =
+               API.call("admin.artifact.get", %{"id" => mine["id"]}, Admin.actor_for(context.dee))
+
+      assert {:error, %{message: "forbidden"}} =
+               API.call("admin.artifact.get", %{"id" => eng["id"]}, Admin.actor_for(context.bo))
+
+      assert [%{actor: "dee@example.test"}] = Enum.filter(Audit.list(), &(&1.action == "artifact.read"))
+    end
+  end
 end

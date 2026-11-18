@@ -33,9 +33,11 @@ You choose when you publish:
 
 Someone who leaves a team, or a profile's team, stops seeing its artifacts at their next
 click. You always see your own. Anybody else sees it only through who it is for, or through a
-[link](#links) you gave them: not a guess at an address. A platform administrator can take
-any artifact down, a private one too; that is the one thing anybody but you may do to a
-private one, and it is in the audit trail.
+[link](#links) you gave them: not a guess at an address. A platform administrator can read
+any artifact's page in the console, a private one too: its versions and their files' names,
+who you shared it with, its links and its comments, never what its files hold, and each read
+is in the audit trail. They can take any artifact down, a private one too, also in the trail;
+a team's administrator can do both for their team's artifacts.
 
 ## A team's artifact
 
@@ -138,9 +140,13 @@ once; the plane keeps only a hash of it.
 
 **What a link does.** Whoever opens it is signed in at your plane first, as themselves, and
 only then holds its role on that one artifact. The plane records each person it signed in
-through a link, so you see under **Links** who used it, when first and when last. They find it
-under **Shared with you** in their gallery. A link lasts until it expires or you revoke it,
-and so does the role it gave.
+through a link, so you see under **Links** who used it, when first and when last. Signed out,
+they sign in once and land on the artifact; an artifact's own address does the same. The
+console goes straight to the plane's identity provider for them, so a lapsed sign-in is
+renewed without a page when the provider still knows them; its page saying it is to open a
+shared artifact shows only when the provider refused or did not answer. They find it under
+**Shared with you** in their gallery. A link lasts until it expires or you revoke it, and so
+does the role it gave.
 
 **What a link does not do.** It opens nothing for somebody who cannot sign in to your plane. It
 gives nothing to anybody who does not hold it, however many others used it. It gives no more
@@ -194,13 +200,19 @@ an agent on its own. The gallery's cards say how many comments an artifact has.
 
 ## Reading
 
-The console's **Artifacts** has a tab for your own (your private ones among them), one for
-those shared with you, one for the organisation's, one for your teams' (each card names its
-team) and one for each profile you are granted. Which tab an artifact is under is the plane's
+The console's **Artifacts** has a tab for your own, **Mine** (your private ones among them),
+one for those shared with you, one for the organisation's, one for your teams' (each card
+names its team) and one for each profile you are granted; an administrator's opens on
+**Every artifact** before them. Which tab an artifact is under is the plane's
 to say, so every client tabs them alike. A card shows the title and the kind, never the page
 itself, and the picture its publisher sent with that version, if they sent one.
 Open one and it shows who published which version and when, the
 session it came from, and **Open**, which opens the artifact in a new tab.
+An artifact a session published leads back to it, to ask for a change there: its page in the
+console says *Published from a session* with *Copy link* and *Open in the app*, the desktop
+app's gallery has *Open session*, which opens it in the app or says it is gone or not shared
+with you, and the terminal's `/artifacts` says `from session <id>` under the list;
+the plane opens the session only for the people it is shared with.
 
 **In the terminal client**, `/artifacts` lists what is published for you on the plane, through this computer's daemon
 and its sign-in, in the desktop app's words: **All**, **◉
@@ -236,8 +248,8 @@ the desktop app then says how many references its version has that are blocked, 
 on request, and the terminal's `/artifacts` says the count on its row. A page that relies on
 one needs it moved into a file of its own, published beside it.
 
-Opening one signs you in to that host for an hour, through the plane. If you open an
-artifact's address, or follow a link to one, while signed out, you are sent to the console to
+Opening one signs you in to that host through the plane, until an hour after the last page
+or file you read there. If you open an artifact's address, or follow a link to one, while signed out, you are sent to the console to
 sign in first, and it brings you straight back to the artifact.
 
 **In the desktop app**, *Artifacts* in the rail is the same gallery, read from the plane the

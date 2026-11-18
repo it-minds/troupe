@@ -112,6 +112,19 @@ defmodule Troupe.Plane.ArtifactsHostTest do
     {cookie, set_cookie, header(response, "location")}
   end
 
+  # The host's cookie as `/enter` would have signed it at `signed_at`.
+  defp aged_cookie(subject, signed_at),
+    do: Plug.Crypto.sign(secret(), "troupe artifact viewer", %{"s" => subject}, signed_at: signed_at)
+
+  defp verify_within(cookie, seconds) do
+    case Plug.Crypto.verify(secret(), "troupe artifact viewer", cookie, max_age: seconds) do
+      {:ok, claims} -> {:ok, claims}
+      {:error, _why} -> :error
+    end
+  end
+
+  defp secret, do: Application.get_env(:troupe_plane, Endpoint)[:secret_key_base]
+
   describe "the policy on every answer" do
     test "sandboxes the page, keeps it to its own files, connects nowhere else, framed by the plane alone",
          context do
@@ -212,6 +225,47 @@ defmodule Troupe.Plane.ArtifactsHostTest do
 
       assert header(get(context, "/a/#{id}/style.css", nil), "location") ==
                "https://plane.example.test/console#/artifacts/open/#{id}"
+    end
+
+    test "slides: each answer to a viewer it names renews it for another hour, and one unused for the hour lapses",
+         context do
+      id = context.artifact["id"]
+      now = System.system_time(:second)
+      # Signed fifty minutes ago, at `/enter`, and in use since.
+      reading = aged_cookie(context.ada.subject, now - 3000)
+
+      for path <- ["/a/#{id}/", "/a/#{id}/probe.js", "/a/#{id}/v1/", "/a/#{id}/missing.txt"] do
+        response = get(context, path, reading)
+        assert response.status in [200, 404], path
+        [set_cookie] = Req.Response.get_header(response, "set-cookie")
+
+        attributes =
+          set_cookie
+          |> String.split(";")
+          |> Enum.map(&(&1 |> String.trim() |> String.downcase()))
+
+        assert "httponly" in attributes
+        assert "secure" in attributes
+        assert "samesite=none" in attributes
+        assert "path=/" in attributes
+        refute Enum.any?(attributes, &String.starts_with?(&1, "domain="))
+        assert Enum.any?(attributes, &String.starts_with?(&1, "max-age=3600"))
+
+        # The renewed cookie is signed now, not fifty minutes ago: it holds for another hour.
+        [_, renewed] = Regex.run(~r/troupe_artifact_viewer=([^;]+)/, set_cookie)
+        assert {:ok, %{"s" => "ada@example.test"}} = verify_within(renewed, 600)
+        assert :error = verify_within(reading, 600)
+      end
+
+      # Unused for more than the hour: sent to sign in, with no cookie renewed.
+      lapsed = aged_cookie(context.ada.subject, now - 3601)
+      response = get(context, "/a/#{id}/", lapsed)
+      assert response.status == 302
+      assert header(response, "location") == "https://plane.example.test/console#/artifacts/open/#{id}"
+      assert Req.Response.get_header(response, "set-cookie") == []
+
+      # Nobody signed in is given none either.
+      assert Req.Response.get_header(get(context, "/a/#{id}/"), "set-cookie") == []
     end
 
     test "a ticket opens once", context do

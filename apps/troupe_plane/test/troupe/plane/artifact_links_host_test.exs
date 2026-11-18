@@ -116,6 +116,9 @@ defmodule Troupe.Plane.ArtifactLinksHostTest do
       response = get(context, path_of(url), cookie)
       assert response.status == 303
       assert header(response, "location") == "/a/#{id}/"
+      # Spending it is a use of this host's sign-in like any other, which renews it.
+      assert [renewed] = Req.Response.get_header(response, "set-cookie")
+      assert renewed =~ "max-age=3600"
       assert get(context, "/a/#{id}/", cookie).status == 200
 
       {:ok, got} = call(context.ada, "artifact.get", %{"id" => id})

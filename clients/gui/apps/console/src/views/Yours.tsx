@@ -1,16 +1,17 @@
-// Mine: what is a person's own on this plane, for everybody who signs in, administrators
-// too. The laptops' sessions offered to them, steered from here as themselves; their own
-// sessions on the plane; which version of each of their clients the plane last saw, against
-// its policy; the memory their organisation gives their machines, to read; and their own
-// memory (#55's user level), which every session of theirs reads on every machine, to
-// change, with the preview the administrators' pages have.
+// What is a person's own on this plane, for everybody who signs in, administrators too, on
+// the page where everybody's of that kind is: on Sessions, the laptops' sessions offered to
+// them and those they were invited into, steered from here as themselves, and their own
+// sessions on the plane; on Client versions, which version of each of their clients the
+// plane last saw, against its policy; on Memory, the memory their organisation gives their
+// machines, to read, and their own memory (#55's user level), which every session of theirs
+// reads on every machine, to change, with the preview the administrators' pages have.
 //
 // Nothing here is an administrative call for a member. Each is what any client of the
 // person's asks the plane as that person (`sessions.list`, `remote.*`, `me.clients`,
 // `me.memory`, `me.memory.preview`, `me.memory.put`), so the plane answers it as it answers
 // the desktop app, and a member is shown nothing of anybody else's. An administrator's role
-// also asks `admin.sessions.list`, only to know which of their own sessions Sessions shows
-// them, so a row links there where it can.
+// also asks `admin.sessions.list`, only to know which of their own sessions the list of
+// every session shows them, so a row links there where it can.
 
 import { useState } from "react";
 import type { JSX } from "react";
@@ -32,21 +33,15 @@ const STANDING: Record<string, { kind: StatusKind; glyph: string; word: string; 
   refused: { kind: "denied", glyph: "✕", word: "refused", why: () => "at its next start: update it" },
 };
 
-export function Mine(): JSX.Element {
-  const { me, plane } = useConsole();
+/** Sessions' Mine: the sessions offered to the person and those they were invited into, then their own on the plane. */
+export function MySessions(): JSX.Element {
   const [offered, reload, invites] = useOffered();
   return (
-    <div className="page mine">
-      <p className="lead">
-        What is yours on {plane.name}, {me.display_name ?? me.subject}: the sessions offered to you from laptops and those you were invited into, to follow and steer from here, your sessions, your clients'
-        versions, and the memory your machines read.
-      </p>
+    <>
       <RemoteSessions load={offered} reload={reload} />
       <InvitedToYou load={invites} reload={reload} />
       <YourSessions />
-      <YourClients />
-      <YourMemory />
-    </div>
+    </>
   );
 }
 
@@ -99,7 +94,7 @@ function YourSessions(): JSX.Element {
                         {onSessions.has(s.id) && (
                           <>
                             {" "}
-                            What the plane keeps of it is on <a href={href({ page: "sessions", path: [s.id] })}>Sessions</a>.
+                            What the plane keeps of it is under <a href={href({ page: "sessions", path: [s.id] })}>Every session</a>.
                           </>
                         )}
                       </td>
@@ -115,7 +110,8 @@ function YourSessions(): JSX.Element {
   );
 }
 
-function YourClients(): JSX.Element {
+/** Client versions' first section: which version of each of the person's clients the plane last saw, against its policy. */
+export function YourClients(): JSX.Element {
   const { auth } = useConsole();
   const [load, reload] = useLoad(
     () =>
@@ -163,7 +159,12 @@ function YourClients(): JSX.Element {
   );
 }
 
-function YourMemory(): JSX.Element {
+/**
+ * Memory's section of the person's own: what their machines read from the organisation, and
+ * their own to change. `ownOnly` where the page above shows the organisation's levels
+ * already, as an administrator's does.
+ */
+export function YourMemory({ ownOnly = false }: { ownOnly?: boolean }): JSX.Element {
   const { auth } = useConsole();
   const [load, reload] = useLoad(
     () =>
@@ -179,16 +180,16 @@ function YourMemory(): JSX.Element {
   return (
     <section aria-label="Your memory">
       <Region>Your memory</Region>
-      <p className="note">What every session on your machines starts from: instructions from your organisation, then your own.</p>
+      {!ownOnly && <p className="note">What every session on your machines starts from: instructions from your organisation, then your own.</p>}
       <Loaded load={load} what="your memory" retry={reload}>
         {({ documents, own }) => (
           <>
-            {documents.length === 0 ? (
+            {ownOnly ? null : documents.length === 0 ? (
               <Empty title="Your organisation keeps no memory for you" />
             ) : (
               <p className="note">Your organisation's and your teams' are read-only here: an administrator of each keeps it.</p>
             )}
-            {documents.map((d) => (
+            {!ownOnly && documents.map((d) => (
                 <article key={`${d.scope}/${d.name ?? ""}`} className="memory-read" aria-label={d.scope === "team" ? `The ${d.name} team's memory` : "The organisation's memory"}>
                   <h3>
                     {d.scope === "team" ? `The ${d.name} team's` : "The organisation's"} <span className="meta">version {show(d.version)}{d.updated_at ? ` · ${when(d.updated_at)}` : ""}</span>
@@ -224,7 +225,7 @@ function YourOwn({ own, onSaved }: { own: OwnMemory; onSaved: () => void }): JSX
       </h3>
       <p className="note">
         Yours to change. Every session you run reads it, on every machine, after your organisation's memory and before the repository's files. An agent of yours only adds an entry when
-        you ask it to remember something. Nobody else reads it.
+        you ask it to remember something. The plane's platform administrators may read it, and each time one does, the audit records who.
       </p>
       {draft === null && own.text !== "" && <pre className="memory-text">{own.text}</pre>}
       {draft === null && (

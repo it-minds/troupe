@@ -1301,6 +1301,23 @@ defmodule Troupe.Plane.Admin do
   end
 
   @doc """
+  One artifact's page for the administrator who may take it down (`Artifacts.admin_get/3`):
+  its versions, who it is shared with, its links and its comments, a person's private one
+  too, never what it holds. Audited as `artifact.read`, so whose page an administrator read
+  is in the trail.
+  """
+  @spec artifact_get(actor(), String.t()) :: result()
+  def artifact_get(actor, id) do
+    with :ok <- require_admin(actor),
+         %Identity.User{} = user <- Identity.get_user(actor.subject) do
+      Artifacts.admin_get(id, user, platform_admin?: actor.role == :platform_admin)
+    else
+      nil -> {:error, Error.new(:not_found, %{id: id})}
+      other -> other
+    end
+  end
+
+  @doc """
   Take an artifact down: every version and byte, and its links stop opening. A platform
   admin's for any artifact, a team admin's for their team's; another's is not there.
   Audited as `artifact.delete` with `by: takedown`.
@@ -1373,7 +1390,10 @@ defmodule Troupe.Plane.Admin do
          {:ok, existing} <- not_another_team(group, attrs, link == true),
          :ok <- team_github_unlocked(actor, "team.enable", group_id, attrs),
          {:ok, attrs} <- read_team_github(attrs, existing && existing.github),
-         :ok <- same_settings(existing, group, attrs, link == true) do
+         :ok <- same_settings(existing, group, attrs, link == true),
+         # The settings sent are held to the rungs above the team as an update's are; the
+         # plane's defaults for a new team are the platform's own and need no check.
+         :ok <- within_the_ladder(existing, settable(attrs, @team_keys)) do
       # Its name and its settings. The group it is enabled from, and when and by whom, are
       # the record of this call, written by it.
       sent = settable(attrs, ["name" | @team_keys])
@@ -1940,7 +1960,7 @@ defmodule Troupe.Plane.Admin do
          {:ok, team} <- fetch_team(actor, name),
          :ok <- enforced_enough(team, profile),
          before <- entitlement_names(team, profile),
-         {:ok, _grant} <- granted(team, profile, attrs) do
+         {:ok, _grant} <- granted(team, profile, Map.put(attrs, "granted_by", actor.subject)) do
       detail = grant_detail(profile, Audit.diff(before, entitlement_names(team, profile)))
 
       {:ok, _} = Audit.record(actor.subject, "team.grant", name, detail)
@@ -2891,6 +2911,83 @@ defmodule Troupe.Plane.Admin do
     end
   end
 
+  @doc """
+  Every person who keeps a memory document of their own, for a platform admin: each with
+  their subject and name and the version in force (who saved it, when, its size), never its
+  text. Reading one is `memory_person/4`.
+  """
+  @spec memory_people(actor()) :: result()
+  def memory_people(actor) do
+    with :ok <- require_platform_admin(actor) do
+      people =
+        Enum.map(Memory.people(), fn {user, document} ->
+          %{
+            subject: user.subject,
+            name: user.display_name,
+            document: Memory.subject(user),
+            current: Memory.summary(document)
+          }
+        end)
+
+      {:ok, %{limit: Troupe.Protocol.Memory.max_bytes(), people: people}}
+    end
+  end
+
+  @doc """
+  A person's own memory document as a platform admin reads it: a version's text, every
+  version, its change against the one before (or `against`), who wrote each line and its
+  entries, as `memory_get/5` answers the organisation's. Read only: a person's own is
+  changed by them and their agents alone, and goes when the person is removed. Every read
+  is audited as `memory.read` on `user/<subject>`, naming the version read, so the person's
+  administrators can be asked who read whose.
+  """
+  @spec memory_person(actor(), String.t(), integer() | nil, integer() | nil) :: result()
+  def memory_person(actor, subject, version, against \\ nil) do
+    with :ok <- require_platform_admin(actor),
+         {:ok, person} <- memory_person_of(subject),
+         {:ok, shown} <- memory_version(person, version),
+         {:ok, before} <- memory_against(person, shown, against) do
+      {:ok, _} =
+        Audit.record(actor.subject, "memory.read", Memory.subject(person), %{
+          "person" => person.subject,
+          "version" => if(shown, do: shown.version, else: 0)
+        })
+
+      {:ok, person_memory(person, shown, before)}
+    end
+  end
+
+  # A person's own as `memory_person/4` answers it: as `memory_get/5`'s, never editable.
+  defp person_memory(person, shown, before) do
+    %{
+      scope: "person",
+      name: person.subject,
+      person: %{subject: person.subject, name: person.display_name},
+      subject: Memory.subject(person),
+      limit: Troupe.Protocol.Memory.max_bytes(),
+      editable: false,
+      version: shown && shown.version,
+      text: (shown && shown.text) || "",
+      shown: shown && Memory.summary(shown),
+      against: before && before.version,
+      against_text: before && before.text,
+      diff: Memory.diff(before && before.text, shown && shown.text),
+      versions: person |> Memory.versions() |> Enum.map(&Memory.summary/1),
+      lines: memory_lines(person, shown),
+      entries: memory_entries(person, shown)
+    }
+  end
+
+  defp memory_person_of(subject) when is_binary(subject) do
+    case Identity.get_user(subject) do
+      %Identity.User{kind: "user", id: id} = user when is_binary(id) -> {:ok, user}
+      _none -> {:error, Error.new(:not_found, %{person: subject})}
+    end
+  end
+
+  defp memory_person_of(_subject),
+    do: {:error, Error.new(:invalid_params, %{field: "person", reason: "person is a person's subject"})}
+
   # Who wrote each line of the version shown, and from which session; nothing for none.
   defp memory_lines(_owner, nil), do: []
   defp memory_lines(owner, shown), do: Memory.blame(owner, shown.version)
@@ -3097,7 +3194,7 @@ defmodule Troupe.Plane.Admin do
        field: "scope",
        reason:
          "scope is one of #{Enum.join(Troupe.Protocol.Memory.organisation_scopes(), ", ")}: " <>
-           "a person's own memory is theirs, and no administrator's method reads or changes it",
+           "a person's own memory is read with admin.memory.person, and changed by them alone",
        scope: scope
      })}
   end
@@ -5451,7 +5548,7 @@ defmodule Troupe.Plane.Admin do
       grants:
         Enum.map(
           Identity.grants_for_team(team),
-          &%{profile: &1.profile, volume_mode: &1.volume_mode}
+          &%{profile: &1.profile, volume_mode: &1.volume_mode, granted_by: &1.granted_by}
         ),
       # The groups this team draws its members from. A team links to any number of them
       # and its membership is the union, so this is the list an administrator edits —

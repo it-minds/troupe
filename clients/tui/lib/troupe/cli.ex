@@ -55,6 +55,7 @@ defmodule Troupe.CLI do
           full_send: boolean() | nil,
           watch: boolean() | nil,
           private: boolean(),
+          repair: boolean(),
           mouse: boolean() | nil,
           workspace: String.t(),
           prompt: String.t() | nil,
@@ -103,6 +104,7 @@ defmodule Troupe.CLI do
     full_send: :boolean,
     watch: :boolean,
     private: :boolean,
+    repair: :boolean,
     mouse: :boolean,
     workspace: :string,
     prompt: :string,
@@ -180,6 +182,10 @@ defmodule Troupe.CLI do
     {~s(troupe resume SESSION_ID|latest|--private --headless "message"),
      "one turn on that session, printed as run --headless prints it, then exit",
      [["resume", "id", "--headless", "hi"], ["resume", "--private", "--headless", "hi"]]},
+    {~s(troupe resume SESSION_ID --repair [--headless "message"]),
+     "wake a session on this computer whose agent cannot read its log, skipping each event " <>
+       "it cannot read (the log keeps them), then open it or run the message",
+     [["resume", "id", "--repair"], ["resume", "id", "--repair", "--headless", "hi"]]},
     {"troupe --remote [PLANE_URL]", "open HQ: teams, profiles and sessions on a plane",
      [["--remote"]]},
     {"troupe login PLANE_URL", "sign in to a plane with the device flow",
@@ -463,6 +469,8 @@ defmodule Troupe.CLI do
       watch: Keyword.get(opts, :watch),
       # Not a setting: `session.create` takes it beside the config, and no file says it.
       private: Keyword.get(opts, :private, false),
+      # `troupe resume ID --repair`: woken past what its agent cannot read (`session.repair`).
+      repair: Keyword.get(opts, :repair, false),
       # nil, not false: no flag means "whatever the `mouse` setting says".
       mouse: Keyword.get(opts, :mouse),
       workspace: Path.expand(Keyword.get(opts, :workspace, File.cwd!())),

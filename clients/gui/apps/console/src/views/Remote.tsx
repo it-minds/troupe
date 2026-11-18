@@ -2,7 +2,7 @@
 //
 // Not an administrative view: these are the sessions a laptop's person offered to the
 // plane, your own from your laptops and those somebody shared with you, and you steer them
-// as yourself, whether you administer anything or not; they are on Mine. The administrative
+// as yourself, whether you administer anything or not; they are under Mine on Sessions. The administrative
 // areas are metadata and never what a session said; this is what you would see at the
 // laptop, because its person said you may.
 //
@@ -68,6 +68,7 @@ import { describeError, useConsole } from "../console";
 import type { Load } from "../console";
 import { href } from "../route";
 import { Empty, Loaded } from "./bits";
+import { CopySessionLink } from "./SessionLink";
 
 interface RemoteRow {
   id: string;
@@ -142,7 +143,7 @@ export function useOffered(): [Load<RemoteRow[]>, () => void, Load<Invitation[]>
   return [load, () => setTick((t) => t + 1), invites];
 }
 
-/** Your laptops' sessions, and those shared with you, on Mine. */
+/** Your laptops' sessions, and those shared with you, under Mine on Sessions. */
 export function RemoteSessions({ load, reload }: { load: Load<RemoteRow[]>; reload: () => void }): JSX.Element {
 
   return (
@@ -172,7 +173,7 @@ export function RemoteSessions({ load, reload }: { load: Load<RemoteRow[]>; relo
                 {rows.map((r) => (
                   <tr key={r.id}>
                     <td className="mono">
-                      <a href={href({ page: "mine", path: ["remote", r.id] })}>{r.id}</a>
+                      <a href={href({ page: "sessions", path: ["remote", r.id] })}>{r.id}</a>
                     </td>
                     <td>{r.your_role === "owner" ? "yours" : (r.owner_name ?? r.owner)}</td>
                     <td>
@@ -498,7 +499,7 @@ export function RemoteSession({ id, pod }: { id: string; pod?: { mode: "read" | 
   return (
     <div className="page remote-session">
       <p className="meta where">
-        <span className="mono">{id}</span> · {whereWords(pod, row)}
+        <span className="mono">{id}</span> · {whereWords(pod, row)} · <CopySessionLink id={id} privateSession={row?.private === true} />
       </p>
       {shared.length > 0 && (
         <p className="meta shared">Shared with {shared.map((i) => `${personName(i)} (${roleWords(i.role)})`).join(", ")}</p>

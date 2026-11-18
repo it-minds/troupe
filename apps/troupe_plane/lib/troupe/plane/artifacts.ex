@@ -1810,6 +1810,62 @@ defmodule Troupe.Plane.Artifacts do
     end
   end
 
+  @doc """
+  One artifact's page as an administrator who may take it down reads it: what `get/3`
+  answers its owner, with its versions, who it is shared with by name, its links and its
+  comments, a private one too, and whether the administrator may open it as anybody may
+  (`may_open`). Never what a file holds, nor its picture. A platform administrator reads
+  any; a team's administrator those for their teams and those their teams own; another is
+  `not_found`. Audited as `artifact.read`, one row each time.
+  """
+  @spec admin_get(String.t(), User.t(), keyword()) :: {:ok, map()} | {:error, Error.t()}
+  def admin_get(id, %User{} = user, opts \\ []) do
+    admin? = Keyword.get(opts, :platform_admin?, false)
+
+    with {:ok, artifact} <- findable(id, user, admin?),
+         true <- oversees?(artifact, user, admin?) do
+      artifact = Repo.preload(artifact, [:owner, :owner_team, :team, :versions])
+
+      {:ok, _event} =
+        Audit.record(
+          user.subject,
+          "artifact.read",
+          artifact.id,
+          %{
+            "title" => artifact.title,
+            "visibility" => artifact.visibility,
+            "owner" => artifact.owner && artifact.owner.subject
+          }
+          |> Map.reject(fn {_key, value} -> is_nil(value) end)
+        )
+
+      {:ok,
+       artifact
+       |> to_json(user, admin?)
+       |> Map.merge(%{
+         "thumbnail_url" => nil,
+         "retention" => retention(),
+         "shares" => Shares.list(artifact),
+         "people" => People.list(artifact),
+         "thread" => Comments.list(artifact, user, role(artifact, user), true),
+         "may_open" => match?({:ok, _artifact}, visible(artifact.id, user, admin?))
+       })}
+    else
+      false -> {:error, Error.new(:not_found, %{id: id})}
+      other -> other
+    end
+  end
+
+  # Whose artifacts an administrator answers for: every one for a platform administrator,
+  # and for a team's those for the team and those it owns, as `admin_list/1` lists them.
+  defp oversees?(_artifact, _user, true), do: true
+
+  defp oversees?(artifact, user, _admin?),
+    do:
+      administers?(artifact, user) or
+        (is_binary(artifact.owner_team_id) and
+           artifact.owner_team_id in Enum.map(administered_teams(user), & &1.id))
+
   defp admin_row(artifact) do
     %{
       "id" => artifact.id,
@@ -1954,8 +2010,9 @@ defmodule Troupe.Plane.Artifacts do
 
   defp wanted_files(_version, _path), do: :error
 
+  # A version's stored file records its size as `bytes`; only an announced upload says `size`.
   defp attachable(files) do
-    size = files |> Enum.map(&(&1["size"] || 0)) |> Enum.sum()
+    size = files |> Enum.map(&(&1["bytes"] || 0)) |> Enum.sum()
 
     if size <= @max_attach,
       do: :ok,

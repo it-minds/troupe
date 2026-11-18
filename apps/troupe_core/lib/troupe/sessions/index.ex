@@ -29,10 +29,12 @@ defmodule Troupe.Sessions.Index do
 
   The state directory is more than one (Decision 855): the platform's, the one the
   person's `config.yaml` names, and every one a session it was told of was started with,
-  since a session's log is wherever its config put it. A dormant session's row is read
-  from its log when the log is new here or has changed, by its size and time, and kept
-  between listings otherwise. And an agent slow to answer the sweep is not taken for gone:
-  only its tree's monitor says that.
+  since a session's log is wherever its config put it; those last are kept in a file
+  (`state-dirs.json` beside its own sessions), so after a restart a dormant session is
+  listed, and erased, before any session under its directory starts again. A dormant
+  session's row is read from its log when the log is new here or has changed, by its size
+  and time, and kept between listings otherwise. And an agent slow to answer the sweep is
+  not taken for gone: only its tree's monitor says that.
   """
 
   use GenServer
@@ -216,7 +218,8 @@ defmodule Troupe.Sessions.Index do
        stops: %{},
        state_dir: Keyword.get(opts, :state_dir),
        configured: configured(opts),
-       roots: MapSet.new(),
+       known: known_path(opts),
+       roots: known(known_path(opts)),
        # A dormant session's row by its log's path, with the stamp it was read at. Written
        # by the reads' tasks, so public; this process owns it and never reads it.
        rows: :ets.new(:troupe_session_rows, [:set, :public, read_concurrency: true]),
@@ -224,6 +227,42 @@ defmodule Troupe.Sessions.Index do
        detached_ms: detached_ms,
        sweep_ms: sweep_ms
      }}
+  end
+
+  # Where the state directories sessions were started with are kept, so a restarted daemon
+  # still lists and erases a dormant session under one before any session there starts
+  # again: beside this index's own sessions, or where the application says (a test run).
+  # `:known_path` is the file, for a test.
+  defp known_path(opts) do
+    Keyword.get_lazy(opts, :known_path, fn ->
+      case Keyword.get(opts, :state_dir) do
+        dir when is_binary(dir) ->
+          Path.join(dir, "state-dirs.json")
+
+        nil ->
+          Application.get_env(:troupe_core, :known_state_dirs) ||
+            Path.join(Paths.state_dir(), "state-dirs.json")
+      end
+    end)
+  end
+
+  defp known(path) do
+    with {:ok, json} <- File.read(path),
+         {:ok, dirs} when is_list(dirs) <- Jason.decode(json) do
+      for dir <- dirs, is_binary(dir), into: MapSet.new(), do: dir
+    else
+      _none -> MapSet.new()
+    end
+  end
+
+  # Written only when the set changes, which is when a session first starts under a state
+  # directory, or a read finds one gone. A write that fails loses only the next restart's
+  # listing of what is under a directory, which a session started there brings back.
+  defp keep_known(%{roots: roots} = state, before) when roots == before, do: state
+
+  defp keep_known(state, _before) do
+    _written = Paths.write_atomic(state.known, Jason.encode!(Enum.sort(state.roots)))
+    state
   end
 
   # The state directory the person's `config.yaml` names, read once as this starts: a
@@ -338,7 +377,8 @@ defmodule Troupe.Sessions.Index do
       for {_id, entry} <- state.live, into: MapSet.new(), do: root(Map.get(entry, :state_dir))
 
     forgotten = MapSet.difference(MapSet.new(gone), used)
-    {:noreply, %{state | roots: MapSet.difference(state.roots, forgotten)}}
+    roots = MapSet.difference(state.roots, forgotten)
+    {:noreply, keep_known(%{state | roots: roots}, state.roots)}
   end
 
   def handle_info(_message, state), do: {:noreply, state}
@@ -551,7 +591,7 @@ defmodule Troupe.Sessions.Index do
   # A state directory a session was started with, read from once it is dormant. The
   # platform's is read anyway.
   defp remember(state, state_dir) when is_binary(state_dir) and state_dir != "",
-    do: %{state | roots: MapSet.put(state.roots, root(state_dir))}
+    do: keep_known(%{state | roots: MapSet.put(state.roots, root(state_dir))}, state.roots)
 
   defp remember(state, _state_dir), do: state
 

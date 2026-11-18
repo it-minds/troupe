@@ -202,8 +202,8 @@ export function Artifacts({
   daemon: DaemonClient | null;
   daemonState: { status: "unsupported" | "searching" | "absent" | "connected" | "error"; error: string | null };
   localOnly: boolean;
-  /** A session the artifact came from, opened in the app where it is one of the list's. */
-  onOpenSession?: ((id: string) => void) | undefined;
+  /** Open the session an artifact came from: null once it is open, or the sentence saying why it is not. */
+  onOpenSession?: ((id: string) => Promise<string | null>) | undefined;
 }): JSX.Element {
   const [list, setList] = useState<(ArtifactList & { plane_url?: string }) | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -468,6 +468,36 @@ function Blocked({ artifact, versions }: { artifact: Artifact; versions: Artifac
   );
 }
 
+/**
+ * The session an artifact came from, opened in the app as its `troupe://session` link opens
+ * it; where the plane answers that there is none to open, the line says so instead. Nothing
+ * is asked until the click.
+ */
+function FromSession({ id, onOpen }: { id: string; onOpen: (id: string) => Promise<string | null> }): JSX.Element {
+  const [said, setSaid] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  if (said) return <p className="muted from-session">{said}</p>;
+  return (
+    <p className="muted from-session">
+      Published from a session.{" "}
+      <button
+        type="button"
+        className="link"
+        disabled={busy}
+        onClick={() => {
+          setBusy(true);
+          void onOpen(id).then((sentence) => {
+            setBusy(false);
+            setSaid(sentence);
+          });
+        }}
+      >
+        {busy ? "Opening…" : "Open session"}
+      </button>
+    </p>
+  );
+}
+
 /** The artifact chosen: what it is, Open and Copy link, who can see it, where it came from, its versions, and its owner's controls. */
 function Aside({
   via,
@@ -491,7 +521,7 @@ function Aside({
   profiles: string[] | undefined;
   onOpened: (version: number) => void;
   onChanged: () => void;
-  onOpenSession?: ((id: string) => void) | undefined;
+  onOpenSession?: ((id: string) => Promise<string | null>) | undefined;
 }): JSX.Element {
   const [detail, setDetail] = useState<ArtifactDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -691,15 +721,7 @@ function Aside({
           {artifact.origin?.session_id && (
             <>
               <dt>SESSION</dt>
-              <dd>
-                {onOpenSession ? (
-                  <button type="button" className="link" onClick={() => onOpenSession(artifact.origin.session_id!)}>
-                    {artifact.origin.session_id}
-                  </button>
-                ) : (
-                  artifact.origin.session_id
-                )}
-              </dd>
+              <dd className="mono">{artifact.origin.session_id}</dd>
             </>
           )}
           {artifact.origin?.profile && (
@@ -709,6 +731,7 @@ function Aside({
             </>
           )}
         </dl>
+        {artifact.origin?.session_id && onOpenSession && <FromSession id={artifact.origin.session_id} onOpen={onOpenSession} />}
       </section>
 
       <section>

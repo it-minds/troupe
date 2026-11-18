@@ -381,7 +381,7 @@ const NOTES: Record<EntryLevel["scope"], { note: string; empty: string; emptyBod
     emptyBody: "Sessions on it use your team's memory as it is.",
   },
   user: {
-    note: "Applies to every session you start, in any team. Nobody else can see these, not even administrators.",
+    note: "Applies to every session you start, in any team. Your plane's platform administrators may read them, and the audit records each read.",
     empty: "Nothing personal yet",
     emptyBody: "Tell the troupe how you like to work: length of answers, language, what to skip. It applies in every team.",
   },

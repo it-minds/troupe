@@ -7,7 +7,8 @@
 // out of that one. A link that is not one of the three forms, or one for a plane while the
 // app uses this computer only, is said in one line and nothing else happens.
 
-import { appLink, hostOf, isRefused, parseAppLink, planeAddress } from "@troupe/client";
+import { TroupeRpcError, errorText, hostOf, isRefused, parseAppLink, planeAddress } from "@troupe/client";
+import type { AuthSession } from "@troupe/client";
 
 /** Where a link leads in the app, once it is signed in to the link's plane. */
 export type LinkPlace = { screen: "session"; id: string } | { screen: "artifacts"; artifact: string } | null;
@@ -57,14 +58,26 @@ export function stepFor(text: string, context: LinkContext): LinkStep {
   };
 }
 
+/** What "Copy link" on a session puts on the clipboard; the console's Copy link writes the same. */
+export { sessionLinkText } from "@troupe/client";
+
+/** What an artifact's "Open session" says where the plane has no session of that id to show the person. */
+export const SESSION_NOT_OPEN = "Published from a session you cannot open: it is gone, or it is not shared with you.";
+
 /**
- * What "Copy link" on a session puts on the clipboard: its `troupe://` link, and under it
- * the console's page for it where the plane names a console and the session has one there
- * (a private session somebody was invited into). Never a token: both are addresses that
- * sign the reader in themselves.
+ * Whether the session an artifact came from can be opened, asked once at the click: null
+ * when it is in the app's own lists or the plane answers it, and the sentence otherwise. The
+ * plane answers `not_found` alike for a session that is gone and for one not shared with
+ * the person, so the sentence says both. Without a plane sign-in it is opened as its link
+ * would open it, and the session's own screen says what it finds.
  */
-export function sessionLinkText(id: string, plane: string, console: string | null, privateSession: boolean): string {
-  const lines = [appLink({ kind: "session", id, plane })];
-  if (console && privateSession) lines.push(`${console.replace(/\/+$/, "")}/#/mine/invited/${encodeURIComponent(id)}`);
-  return lines.join("\n");
+export async function sessionNotOpen(id: string, listed: boolean, auth: AuthSession | null): Promise<string | null> {
+  if (listed || !auth) return null;
+  try {
+    await auth.withToken((plane, token) => plane.getSession(token, id));
+    return null;
+  } catch (e) {
+    if (e instanceof TroupeRpcError && e.code === -32005) return SESSION_NOT_OPEN;
+    return `The session could not be opened: ${errorText(e)}`;
+  }
 }

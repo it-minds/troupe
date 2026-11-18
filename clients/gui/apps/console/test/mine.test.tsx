@@ -1,8 +1,10 @@
-// Mine: what a person who signs in to the console has of their own, whether they administer
-// anything or not. Their sessions on the plane and nobody else's, which version of each of
-// their clients the plane last saw against its policy, the memory their organisation gives
-// their machines, to read and not to change, and their own memory (#55's user level), to
-// change with a preview. Every call is one any client of theirs makes, never `admin.*`.
+// What a person who signs in to the console has of their own, whether they administer
+// anything or not, on the page where everybody's of that kind is: their sessions on the plane
+// and nobody else's under Mine on Sessions, which version of each of their clients the plane
+// last saw against its policy on Client versions, and on Memory the memory their organisation
+// gives their machines, to read and not to change, and their own memory (#55's user level),
+// to change with a preview. Every call a member's console makes is one any client of theirs
+// makes, never `admin.*`.
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { App } from "../src/App";
@@ -36,14 +38,14 @@ afterEach(async () => {
   await fake.stop();
 });
 
-describe("Mine", () => {
+describe("what is a person's own", () => {
   it("shows a member their own sessions, their clients' versions and their memory, read-only, through no administrative call", async () => {
     fake.plane.seed(PEOPLE.carol.subject, { id: "s-carol-1", title: "Tidy the icons", profile: "ux" });
     fake.plane.seed(PEOPLE.alice.subject, { id: "s-alice-1", title: "Somebody else's", profile: "dev" });
     const recorded = recordCalls();
     restore = recorded.restore;
     await signedInAs(fake, PEOPLE.carol);
-    visit("#/mine");
+    visit("#/sessions");
     unmount = render(<App />).unmount;
 
     const sessions = () => document.querySelector('[aria-label="Your sessions"]');
@@ -55,12 +57,14 @@ describe("Mine", () => {
     expect(state?.textContent).toBe("● Active");
     expect(sessions()!.textContent).not.toContain("Active · idle");
 
+    visit("#/clients");
     const clients = () => document.querySelector('[aria-label="Your clients"]');
     await sees("desktop app 0.25.0-beta on windows/x86_64", clients);
     await sees("current", clients);
     await sees("terminal 0.23.0-beta", clients);
     await sees("behind · the plane recommends 0.25.0-beta", clients);
 
+    visit("#/memory");
     const memory = () => document.querySelector('[aria-label="Your memory"]');
     await sees("We write British English.", memory);
     await sees("The design team's", memory);
@@ -83,7 +87,7 @@ describe("Mine", () => {
     });
     fake.plane.seed(PEOPLE.carol.subject, { id: "s-carol-1", title: "Tidy the icons", profile: "ux" });
     await signedInAs(fake, PEOPLE.carol);
-    visit("#/mine");
+    visit("#/sessions");
     unmount = render(<App />).unmount;
 
     const sessions = () => document.querySelector<HTMLElement>('[aria-label="Your sessions"]');
@@ -95,6 +99,7 @@ describe("Mine", () => {
     // at once: the row was waited for above, and drawn whole
     expect([...row()!.querySelectorAll("a")].map((a) => a.getAttribute("href"))).toEqual([`troupe://session/s-carol-1?plane=${encodeURIComponent(fake.plane.baseUrl)}`]);
 
+    visit("#/memory");
     const memory = () => document.querySelector<HTMLElement>('[aria-label="Your memory"]');
     await sees("Your organisation's and your teams' are read-only here", memory);
     const own = () => document.querySelector<HTMLElement>('article[aria-label="Your own memory"]');
@@ -109,7 +114,7 @@ describe("Mine", () => {
     fake.plane.seed(PEOPLE.bob.subject, { id: "s-4b81d003", title: "Icons, again", profile: "ux" });
     fake.plane.seed(PEOPLE.bob.subject, { id: "s-bob-elsewhere", title: "Not on Sessions", profile: "ux" });
     await signedInAs(fake, PEOPLE.bob);
-    visit("#/mine");
+    visit("#/sessions/mine");
     unmount = render(<App />).unmount;
 
     const sessions = () => document.querySelector<HTMLElement>('[aria-label="Your sessions"]');
@@ -129,7 +134,7 @@ describe("Mine", () => {
     const recorded = recordCalls();
     restore = recorded.restore;
     await signedInAs(fake, PEOPLE.carol);
-    visit("#/mine");
+    visit("#/memory");
     unmount = render(<App />).unmount;
 
     const own = () => document.querySelector<HTMLElement>('article[aria-label="Your own memory"]');
@@ -143,7 +148,7 @@ describe("Mine", () => {
     await sees("What will happen", own);
     await sees("your memory v1 → v2", own);
     await sees("Tabs, not spaces.", own);
-    await sees("Nobody else reads it", own);
+    await sees("platform administrators may read it", own);
     // Nothing is written until it is confirmed.
     expect(fake.plane.own.get(PEOPLE.carol.subject)!.version).toBe(1);
 
@@ -170,10 +175,12 @@ describe("Mine", () => {
     await fake.stop();
     fake = await startFake();
     await signedInAs(fake, PEOPLE.carol);
-    visit("#/mine");
+    visit("#/clients");
     unmount = render(<App />).unmount;
     await waitFor(() => document.querySelector('[aria-label="Your clients"]')?.textContent?.includes("No client of yours"), "no clients");
+    visit("#/memory");
     await sees("Your organisation keeps no memory for you");
+    visit("#/sessions");
     await sees("No session of yours on the plane");
   });
 });

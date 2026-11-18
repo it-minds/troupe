@@ -1,11 +1,12 @@
 // A team's artifacts and private ones (#62): the gallery's Teams tab lists the teams' own,
 // the team named on each card, from the plane's `teams: true`; a private one is under its
-// owner's Mine and nobody else's; and Operate's Published artifacts is the administrators'
-// table, every one for a platform admin and a team admin's teams' own, each taken down by
-// typing its id. Against the fake plane, whose people are all in team core.
+// owner's Mine and nobody else's; and an administrator's Artifacts opens on Every artifact,
+// their table, every one for a platform admin and a team admin's teams' own, each opened on
+// its page as its administrator reads it, audited, and taken down by typing its id. Against
+// the fake plane, whose people are all in team core.
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { PEOPLE, button, field, freshBrowser, opener, says, sees, seesLink, startFake, type, waitFor } from "./support";
+import { PEOPLE, button, field, freshBrowser, link, opener, says, sees, seesLink, startFake, type, waitFor } from "./support";
 import type { FakeDeployment } from "./support";
 import { exampleAdmin } from "../../../packages/client/test/support/admin.js";
 import { artifact } from "../../../packages/client/test/support/plane.js";
@@ -54,18 +55,52 @@ describe("a team's artifacts in the gallery", () => {
   });
 });
 
-describe("published artifacts, for administrators", () => {
-  it("is every artifact for a platform admin, a person's private ones too, and nothing opens one", async () => {
-    await open("#/published", PEOPLE.alice);
+describe("every artifact, for administrators", () => {
+  const whose = (): HTMLElement => document.querySelector<HTMLElement>('nav[aria-label="Whose artifacts"]')!;
+
+  it("is a platform admin's first tab, a person's private ones too, with Mine a filter beside it", async () => {
+    await open("#/artifacts", PEOPLE.alice);
     await waitFor(() => row("Ada's diary"), "a private one");
+    expect(link("Every artifact", whose())!.getAttribute("aria-current")).toBe("page");
     await sees("its owner alone", () => row("Ada's diary"));
     await sees("the design team", () => row("Design board"));
     await waitFor(() => row("Core's plan"), "a team's");
     expect(document.querySelector("iframe")).toBeNull();
+
+    // Mine narrows it to what is the administrator's own, as anybody's Mine is.
+    link("Mine", whose())!.click();
+    await sees("You have published nothing yet");
+    expect(document.body.textContent).not.toContain("Ada's diary");
+    expect(globalThis.location.hash).toBe("#/artifacts/mine");
   });
 
-  it("is a team admin's teams' own, taken down once its id is typed", async () => {
-    await open("#/published", PEOPLE.bob);
+  it("opens another person's private one on its page as its administrator reads it, each read audited, and offers its takedown", async () => {
+    await open("#/artifacts", PEOPLE.alice);
+    (await waitFor(() => row("Ada's diary")?.querySelector("a"), "its title, a link")).click();
+    await sees("You read this page as an administrator");
+    await sees("it does not open here");
+    await waitFor(() => document.querySelector('section[aria-label="Versions"]'), "its versions");
+    await waitFor(() => document.querySelector('section[aria-label="Links"]'), "its links, to read");
+    expect([...document.querySelectorAll("button")].some((b) => b.textContent === "Open")).toBe(false);
+    await waitFor(() => button("Take down"), "its takedown");
+    expect(fake.admin.audit.filter((e) => e.action === "artifact.read").map((e) => [e.actor, e.subject_id])).toEqual([[PEOPLE.alice.subject, "art-ada-diary"]]);
+    expect(fake.plane.asked).toContain("admin.artifact.get");
+  });
+
+  it("was Published artifacts: a link kept from then opens every artifact", async () => {
+    await open("#/published", PEOPLE.alice);
+    await waitFor(() => row("Ada's diary"), "every artifact");
+    await waitFor(() => globalThis.location.hash === "#/artifacts", "its new address");
+  });
+
+  it("is a team admin's teams' own, read on its page as their administrator, and taken down once its id is typed", async () => {
+    await open("#/artifacts", PEOPLE.bob);
+    (await waitFor(() => row("Design board")?.querySelector("a"), "the design team's")).click();
+    await waitFor(() => document.querySelector('section[aria-label="Versions"]'), "its page");
+    await waitFor(() => fake.admin.audit.some((e) => e.action === "artifact.read" && e.actor === PEOPLE.bob.subject && e.subject_id === "art-design-board"), "the read in the audit");
+
+    close();
+    await open("#/artifacts", PEOPLE.bob);
     await waitFor(() => row("Design board"), "the design team's artifact");
     expect(row("Core's plan")).toBeNull();
     expect(row("Ada's diary")).toBeNull();

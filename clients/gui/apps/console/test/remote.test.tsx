@@ -1,4 +1,4 @@
-// Laptop sessions offered to you, steered from the console (troupe #58): listed on Mine,
+// Laptop sessions offered to you, steered from the console (troupe #58): listed under Mine on Sessions,
 // opened as yourself, the transcript followed live, a prompt sent and an approval answered
 // once; a laptop that is away is said to be, with since when. A member who administers
 // nothing does all of it, and is shown nothing that was not offered to them. The list is
@@ -40,10 +40,10 @@ const offered = (id: string) => [...document.querySelectorAll<HTMLAnchorElement>
 const PUSHED_MS = 1_000;
 
 describe("laptop sessions offered to you", () => {
-  it("are listed on Mine, opened as yourself, followed, prompted and answered", async () => {
+  it("are listed under Mine on Sessions, opened as yourself, followed, prompted and answered", async () => {
     fake.plane.relay("ada@example.com", { id: "s-laptop-1", ownerName: "Ada", workspace: "billing", shares: [{ subject: PEOPLE.alice.subject, role: "control" }] });
     await signedInAs(fake, PEOPLE.alice);
-    visit("#/mine");
+    visit("#/sessions/mine");
     unmount = render(<App />).unmount;
 
     await sees("Offered to you from laptops");
@@ -68,7 +68,7 @@ describe("laptop sessions offered to you", () => {
     const away = fake.plane.relay("ada@example.com", { id: "s-laptop-2", ownerName: "Ada", workspace: "drafts", shares: [{ subject: PEOPLE.alice.subject, role: "observe" }] });
     fake.plane.offline(away.id, new Date().toISOString());
     await signedInAs(fake, PEOPLE.alice);
-    visit("#/mine/remote/s-laptop-2");
+    visit("#/sessions/remote/s-laptop-2");
     unmount = render(<App />).unmount;
 
     await sees("The laptop is offline since");
@@ -79,7 +79,7 @@ describe("laptop sessions offered to you", () => {
   it("names each person in the transcript as the event's actor names them, the subject where it names nobody", async () => {
     fake.plane.relay("ada@example.com", { id: "s-laptop-6", ownerName: "Ada", workspace: "billing", shares: [{ subject: PEOPLE.alice.subject, role: "observe" }] });
     await signedInAs(fake, PEOPLE.alice);
-    visit("#/mine/remote/s-laptop-6");
+    visit("#/sessions/remote/s-laptop-6");
     unmount = render(<App />).unmount;
     await waitFor(() => document.querySelector('[role="status"]')?.textContent?.startsWith("Idle"), "the session attached");
 
@@ -91,13 +91,15 @@ describe("laptop sessions offered to you", () => {
     await sees("cy@example.com: from Cy", () => document.querySelector('[aria-label="Transcript"]'));
   });
 
-  it("a link from before Mine opens the session where it is now", async () => {
+  it("a link kept from the Mine page opens the session where it is now, and the address becomes its own", async () => {
     fake.plane.relay("ada@example.com", { id: "s-laptop-3", ownerName: "Ada", shares: [{ subject: PEOPLE.alice.subject, role: "control" }] });
     await signedInAs(fake, PEOPLE.alice);
-    visit("#/sessions/remote/s-laptop-3");
+    visit("#/mine/remote/s-laptop-3");
     unmount = render(<App />).unmount;
 
     await waitFor(() => document.querySelector('[role="status"]')?.textContent?.startsWith("Idle"), "the session attached");
+    await waitFor(() => globalThis.location.hash === "#/sessions/remote/s-laptop-3", "the address rewritten");
+    expect(document.querySelector(".banner.refused")).toBeNull();
   });
 });
 
@@ -120,13 +122,13 @@ describe("a member who administers nothing", () => {
   it("is shown nothing that was not offered to them, and cannot open it by its address", async () => {
     fake.plane.relay("ada@example.com", { id: "s-laptop-5", ownerName: "Ada", shares: [{ subject: PEOPLE.bob.subject, role: "control" }] });
     await signedInAs(fake, PEOPLE.carol);
-    visit("#/mine");
+    visit("#/sessions/mine");
     unmount = render(<App />).unmount;
     await sees("Nothing offered to you");
     expect(offered("s-laptop-5")).toBeUndefined();
 
     unmount();
-    visit("#/mine/remote/s-laptop-5");
+    visit("#/sessions/remote/s-laptop-5");
     unmount = render(<App />).unmount;
     await sees("It is no longer offered to you");
     expect(fake.worker.calls.some((c) => c.method === "subscribe" && c.params["topic"] === "session:s-laptop-5")).toBe(false);
@@ -136,7 +138,7 @@ describe("a member who administers nothing", () => {
 describe("the list follows the plane as it changes", () => {
   it("an offer made on a laptop shows within a second, from the plane's push and not a poll; its laptop going and its withdrawal too", async () => {
     await signedInAs(fake, PEOPLE.carol);
-    visit("#/mine");
+    visit("#/sessions/mine");
     unmount = render(<App />).unmount;
     await sees("Nothing offered to you");
     await waitFor(() => fake.plane.watches.size === 1, "the console's watch, its initialize answered");
@@ -167,7 +169,7 @@ const transcript = (): Element | null => document.querySelector('[aria-label="Tr
 async function opened(fake: FakeDeployment, id: string, role: "observe" | "control", who = PEOPLE.carol): Promise<void> {
   fake.plane.relay("ada@example.com", { id, ownerName: "Ada", workspace: "billing", shares: [{ subject: who.subject, role }] });
   await signedInAs(fake, who);
-  visit(`#/mine/remote/${id}`);
+  visit(`#/sessions/remote/${id}`);
   unmount = render(<App />).unmount;
   await waitFor(() => statusLine().startsWith("Idle"), "the session attached");
 }
@@ -272,12 +274,12 @@ describe("a relayed approval (troupe #899)", () => {
 });
 
 describe("the page's head (troupe #899)", () => {
-  it("names Mine once, as the way back, and the page repeats no crumb", async () => {
+  it("names Sessions as the way back, to its Mine, and the page repeats no crumb", async () => {
     await opened(fake, "s-head-1", "control");
     const crumb = document.querySelector(".head .crumb")!;
-    expect(crumb.textContent).toBe("Mine");
-    expect(crumb.querySelector("a")?.getAttribute("href")).toBe("#/mine");
-    expect(document.body.textContent).not.toContain("← Mine");
+    expect(crumb.textContent).toBe("Watch / Sessions");
+    expect(crumb.querySelector("a")?.getAttribute("href")).toBe("#/sessions/mine");
+    expect(document.body.textContent).not.toContain("← Sessions");
     await sees("on Ada's laptop, through the plane");
   });
 });

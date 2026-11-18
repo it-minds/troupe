@@ -678,7 +678,7 @@ defmodule Troupe.UI.TUI.MemoryPage do
         "The baseline: every session in every team starts with these unless a team or you say otherwise."
 
       %{scope: "user"} ->
-        "Applies to every session you start, in any team. Nobody else can see these, not even admins."
+        "Applies to every session you start, in any team. A platform admin may read these, and every read is audited."
 
       %{name: name} ->
         "Applies to every #{name} session; overrides the organisation's memory on the same topic."

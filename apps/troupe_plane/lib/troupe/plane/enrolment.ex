@@ -34,8 +34,9 @@ defmodule Troupe.Plane.Enrolment do
   learn.
   """
 
-  alias Troupe.Plane.Fleet
+  alias Troupe.Plane.{ClusterPolicy, Fleet}
   alias Troupe.Plane.Fleet.Hosts
+  alias Troupe.Policy
 
   require Logger
 
@@ -167,8 +168,7 @@ defmodule Troupe.Plane.Enrolment do
   defp service_account(_user), do: {:error, :not_a_service_account}
 
   # The namespace is the profile. Nothing the worker says about itself is involved. One
-  # without the prefix is refused, and the log says which prefix this plane was deployed
-  # with: a policy whose `namespacePrefix` differs from the chart's leaves every pod here.
+  # without the prefix is refused, and the log says which prefix the plane went by.
   defp profile_of(namespace, prefix) do
     case String.split(namespace, prefix, parts: 2) do
       ["", profile] when profile != "" ->
@@ -177,8 +177,9 @@ defmodule Troupe.Plane.Enrolment do
       _ ->
         Logger.warning(
           "troupe plane: refused a worker enrolling from namespace #{namespace}: worker " <>
-            "namespaces here start with #{prefix} (the chart's policy.namespacePrefix, " <>
-            "TROUPE_NAMESPACE_PREFIX), which must match the TroupePolicy's namespacePrefix"
+            "namespaces here start with #{prefix} (the TroupePolicy's namespacePrefix, or " <>
+            "the chart's policy.namespacePrefix, TROUPE_NAMESPACE_PREFIX, while the policy " <>
+            "cannot be read)"
         )
 
         {:error, {:not_a_worker_namespace, namespace}}
@@ -250,9 +251,18 @@ defmodule Troupe.Plane.Enrolment do
     end
   end
 
-  @doc "The prefix worker namespaces carry, which the policy sets and the plane mirrors."
+  @doc """
+  The prefix worker namespaces carry: the `TroupePolicy`'s, which is where the operator puts
+  a profile's pods, and the chart's `policy.namespacePrefix` while the plane can read no
+  policy.
+  """
   @spec namespace_prefix() :: String.t()
-  def namespace_prefix, do: Application.get_env(:troupe_plane, :namespace_prefix, "troupe-w-")
+  def namespace_prefix do
+    case ClusterPolicy.current() do
+      %Policy{namespace_prefix: prefix} when is_binary(prefix) and prefix != "" -> prefix
+      _none -> Application.get_env(:troupe_plane, :namespace_prefix, "troupe-w-")
+    end
+  end
 
   defp connection do
     cond do

@@ -16,7 +16,7 @@ defmodule Troupe.Plane.SharesTest do
 
   use Troupe.Plane.DataCase, async: false
 
-  alias Troupe.Plane.{Fleet, Harness, Identity, Sessions}
+  alias Troupe.Plane.{Audit, Fleet, Harness, Identity, Repo, Sessions}
   alias Troupe.Plane.Sessions.Share
 
   @moduletag timeout: 60_000
@@ -172,6 +172,27 @@ defmodule Troupe.Plane.SharesTest do
       row = Sessions.get_share(share["id"])
       assert row.redeemed_count == 1
       refute is_nil(row.last_redeemed_at)
+    end
+
+    test "of an erased session is refused before it is counted or audited" do
+      %{ada: ada, bea: bea, session: session} = a_session(members_may_control: true)
+      {:ok, share} = Harness.call("session.share", %{"session_id" => session.id}, context(ada))
+      session |> Ecto.Changeset.change(state: "erased") |> Repo.update!()
+
+      assert {:error, error} =
+               Harness.call("session.redeem", %{"secret" => share["secret"]}, context(bea))
+
+      assert error.message == "not_found"
+      assert error.data.reason == "erased"
+
+      row = Sessions.get_share(share["id"])
+      assert row.redeemed_count == 0
+      assert is_nil(row.last_redeemed_at)
+
+      refute Enum.any?(
+               Audit.list(subject_id: session.id),
+               &(&1.action == "session.redeem")
+             )
     end
 
     test "does not re-ask what the sharer may do today" do

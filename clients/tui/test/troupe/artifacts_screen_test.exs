@@ -18,6 +18,7 @@ defmodule Troupe.ArtifactsScreenTest do
 
   alias Troupe.Client.Daemon.Link
   alias Troupe.FakeRemote
+  alias Troupe.UI.TUI.ArtifactsPage
 
   @now DateTime.utc_now() |> DateTime.add(-7200) |> DateTime.to_iso8601()
 
@@ -259,6 +260,50 @@ defmodule Troupe.ArtifactsScreenTest do
     text = screen_text(pid, session)
     assert text =~ "4 ◐ Shared with you 1"
     assert text =~ ~r/◐  new Hiring plan\s+page\s+v1\s+Dee\s+2 h ago\s+you may comment/
+  end
+
+  # The session an artifact came from (#1099): the row on the cursor says it under the list,
+  # as plain text, and one no session published says nothing of one.
+  test "the row on the cursor says the session it came from" do
+    from = %{
+      "id" => "a-from",
+      "title" => "Weekly figures",
+      "kind" => "html",
+      "visibility" => "organisation",
+      "scope" => "organisation",
+      "version" => 1,
+      "owner" => %{"display_name" => "Bea"},
+      "origin" => %{"session_id" => "s-weekly", "profile" => "dev", "where" => "pod"},
+      "published_at" => @now
+    }
+
+    by_hand = %{
+      "id" => "a-hand",
+      "title" => "Uploaded by hand",
+      "kind" => "file",
+      "visibility" => "organisation",
+      "scope" => "organisation",
+      "version" => 1,
+      "owner" => %{"display_name" => "Bea"},
+      "origin" => %{"session_id" => nil, "where" => "person"},
+      "published_at" => @now
+    }
+
+    signed_in(artifacts: [from, by_hand])
+    {sid, _, _} = start_session!(script: [])
+    {pid, session} = start_tui(sid)
+    type(pid, "/artifacts")
+    press(pid, "enter")
+    eventually(fn -> user_state(pid).focus == :artifacts end)
+
+    eventually(fn -> screen_text(pid, session) =~ "Uploaded by hand" end)
+    shown = user_state(pid).artifacts_page |> ArtifactsPage.visible() |> Enum.map(& &1["id"])
+    {to_from, back} = if shown == ["a-from", "a-hand"], do: {nil, "down"}, else: {"down", "up"}
+    if to_from, do: press(pid, to_from)
+    assert screen_text(pid, session) =~ "from session s-weekly"
+
+    press(pid, back)
+    refute screen_text(pid, session) =~ "from session"
   end
 
   # A retention period an administrator set (#981): the row and its versions say when they

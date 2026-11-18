@@ -68,6 +68,11 @@ interface Session {
   /** The session's goal (`session.goal.*`), once one was set. */
   goal?: string | null;
   /**
+   * The event its root's replay raises on, and what it raises (`unreadable`): every wake
+   * answers `unavailable` with `repairable`, until `session.repair` skips it.
+   */
+  unreadable?: { seq: number; detail: string } | null;
+  /**
    * The head `seq` as of the last moment a client was reading the session, the daemon's
    * `seen` mark: `unseen` counts what came after it. Null for a session nobody ever read.
    */
@@ -1211,6 +1216,18 @@ evoked where nothing is set and there was a sign-in. */
   }
 
   /**
+   * A log its root cannot replay: an event it raises on, the crash that took the session
+   * down saying so, and every wake failing on it, as the daemon's does, until a
+   * `session.repair` wakes it past the event.
+   */
+  unreadable(sessionId: string, detail = "** (Protocol.UndefinedError) protocol Enumerable not implemented for type BitString"): LoggedEvent {
+    const session = this.sessions.get(sessionId)!;
+    const poison = session.log.append("tool_results", { results: "not a list" });
+    session.unreadable = { seq: poison.seq, detail };
+    return this.fail(sessionId, detail);
+  }
+
+  /**
    * How the root agent's last turn failed, as the daemon's row says it for a dormant
    * session: its last `turn_ended` ended `agent_failed`, and no turn has started since.
    */
@@ -1615,6 +1632,7 @@ evoked where nothing is set and there was a sign-in. */
 
       case "input.send": {
         if (!session) return reply(ws, id, null, { code: -32005, message: "not_found" });
+        if (session.unreadable) return reply(ws, id, null, { code: -32010, message: "unavailable", data: { reason: session.unreadable.detail, repairable: true } });
         const commandId = String(params["command_id"] ?? "");
         const actor = { kind: "user", subject: this.principal.subject };
         session.log.append("input_queued", { command_id: commandId, author: this.principal.subject, text: params["text"] }, actor);
@@ -1734,6 +1752,20 @@ evoked where nothing is set and there was a sign-in. */
           { kind: "user", subject: this.principal.subject },
         );
         return reply(ws, id, { accepted: true });
+      }
+
+      // The wake past what the root cannot read: a `log_repaired` for the event, the session
+      // awake, and the skipped `seq` in the answer.
+      case "session.repair": {
+        if (!session) return reply(ws, id, null, { code: -32005, message: "not_found" });
+        const skipped = session.unreadable;
+        session.unreadable = null;
+        if (skipped) {
+          const at = session.log.events.find((e) => e.seq === skipped.seq)?.ts;
+          session.log.append("log_repaired", { event: skipped.seq, at, by: this.principal.subject }, { kind: "user", subject: this.principal.subject });
+        }
+        session.state = "active";
+        return reply(ws, id, { woken: true, skipped: skipped ? [skipped.seq] : [] });
       }
 
       case "session.goal.get":

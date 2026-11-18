@@ -109,6 +109,8 @@ defmodule Troupe.Worker.AuthTest do
     "session.loop.stop",
     # Compacting now, between turns (`/compact`, both clients').
     "session.compact",
+    # Answered on a pod with why it is not done there: the plane wakes its sessions.
+    "session.repair",
     "fs.list",
     "fs.read",
     "fs.upload",

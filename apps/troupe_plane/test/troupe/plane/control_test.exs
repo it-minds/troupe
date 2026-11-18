@@ -331,7 +331,7 @@ defmodule Troupe.Plane.ControlTest do
 
         assert error["message"] == "forbidden"
         assert error["data"]["reason"] =~ "read-only to agents"
-        assert error["data"]["reason"] =~ "an administrator changes them on the console's Govern → Company memory"
+        assert error["data"]["reason"] =~ "an administrator changes them on the console's Oversee → Memory"
         assert error["data"]["reason"] =~ "session.memory.propose"
       end
 
@@ -458,6 +458,20 @@ defmodule Troupe.Plane.ControlTest do
 
       assert {:error, %{"message" => "not_found"}} =
                call(mine, "session.artifact.files", Map.put(ask, "session_id", "s-elsewhere"))
+
+      # Issue #1090: a version past what one attachment carries is refused with its size.
+      {:ok, big} =
+        Artifacts.publish(ada, %{
+          "title" => "Data",
+          "kind" => "file",
+          "visibility" => "private",
+          "files" => [%{"path" => "data.csv", "bytes" => Base.encode64(:binary.copy("a", 2_000_001))}]
+        })
+
+      assert {:error, %{"message" => "invalid_params", "data" => %{"reason" => too_big}}} =
+               call(mine, "session.artifact.files", Map.put(ask, "artifact", big["id"]))
+
+      assert too_big =~ "the version's files are 2000001 bytes together, more than 2000000 attached at once"
     end
   end
 

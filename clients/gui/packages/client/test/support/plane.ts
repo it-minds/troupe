@@ -340,6 +340,12 @@ export const KEPT = (method: string): boolean => method.startsWith("me.memory") 
 export class FakePlane {
   readonly server: Server;
   readonly rows = new Map<string, Row>();
+  /**
+   * Sessions that exist but are not shared with the person asking: left out of
+   * `sessions.list`, and `not_found` from `session.get` and `session.open`, as the plane
+   * answers a session a person may not see without saying whether it exists.
+   */
+  readonly unseen = new Set<string>();
   readonly relayed = new Map<string, Relayed>();
   /** The invitations by name, by session and then by person (troupe #765). */
   readonly invitations = new Map<string, Map<string, Invited>>();
@@ -391,7 +397,7 @@ export class FakePlane {
   private constructor(opts: PlaneOptions) {
     this.opts = opts;
     for (const [subject, text] of Object.entries(opts.own ?? {})) {
-      this.own.set(subject, { version: 1, text, changed_by: subject, changed_at: "2026-10-24T09:00:00Z" });
+      this.keepOwn(subject, { version: 1, text, changed_by: subject, changed_at: "2026-10-24T09:00:00Z" });
     }
     for (const a of opts.artifacts ?? []) this.artifacts.set(a.id, a);
     this.corsOrigins = opts.corsOrigins ?? [];
@@ -791,6 +797,13 @@ export class FakePlane {
     return this.own.get(subject) ?? { version: 0, text: "", changed_by: null, changed_at: null };
   }
 
+  /** A person's own memory saved: the version in force here, and every version where an admin fake keeps them for `admin.memory.person`. */
+  private keepOwn(subject: string, now: { version: number; text: string; changed_by: string; changed_at: string }): void {
+    this.own.set(subject, now);
+    const admin = this.opts.admin;
+    if (admin) admin.personal.set(subject, [...(admin.personal.get(subject) ?? []), now]);
+  }
+
   private ownJson(own: OwnMemory): Record<string, unknown> {
     return { ...own, hash: own.version ? `sha256:own-${own.version}` : null, bytes: new TextEncoder().encode(own.text).length, limit: 8192 };
   }
@@ -941,7 +954,7 @@ export class FakePlane {
     return { result: { ...this.artifactJson(a, subject), blocked: fakeBlocked(files) } };
   }
 
-  /** The administrators' table of artifacts and its takedown (`admin.artifacts.list`, `admin.artifact.takedown`). */
+  /** The administrators' table of artifacts, an artifact's page as they read it, and its takedown (`admin.artifacts.list`, `admin.artifact.get`, `admin.artifact.takedown`). */
   private adminArtifacts(subject: string, method: string, params: Record<string, unknown>): { result: unknown } | { error: { code: number; message: string; data?: unknown } } {
     const role = this.opts.admin?.role(subject) ?? "none";
     if (role === "none") return { error: { code: -32004, message: "forbidden", data: { required_role: "team_admin" } } };
@@ -956,6 +969,25 @@ export class FakePlane {
     }
     const a = this.artifacts.get(String(params["id"] ?? ""));
     if (!a || !mayTake(a)) return { error: { code: -32005, message: "not_found", data: { id: params["id"] } } };
+    if (method === "admin.artifact.get") {
+      // Its page as its owner's has it, a private one's too, and every read in the audit.
+      this.opts.admin?.record(subject, "artifact.read", a.id, { title: a.title, visibility: a.visibility, owner: a.owner.subject });
+      const people = [...(this.named.get(a.id) ?? new Map()).entries()].map(([s, g]) => ({ subject: s, display_name: this.nameOf(s), email: this.people.find((p) => p.subject === s)?.email ?? null, ...g }));
+      const thread = (this.comments.get(a.id) ?? []).map((c) => ({ ...c, may_edit: false, may_delete: true }));
+      const retention = { versions_days: this.opts.retention?.versions_days || null, unopened_days: this.opts.retention?.unopened_days || null };
+      return {
+        result: {
+          ...this.artifactJson(a, subject),
+          thumbnail_url: null,
+          versions: this.artifactVersions(a),
+          retention,
+          shares: [...this.shares.values()].filter((sh) => sh.artifact === a.id).map((sh) => this.shareJson(sh)),
+          people,
+          thread,
+          may_open: this.mayRead(a, subject),
+        },
+      };
+    }
     this.artifacts.delete(a.id);
     return { result: { deleted: true, id: a.id } };
   }
@@ -1230,7 +1262,7 @@ export class FakePlane {
           ? { result: { subject: held.subject, display_name: held.name, kind: "breakglass", teams: [], profiles: [], platform_admin: true, breakglass: true } }
           : this.opts.keeper && KEPT(method)
           ? await this.opts.keeper(method, request.params ?? {})
-          : method === "admin.artifacts.list" || method === "admin.artifact.takedown"
+          : method === "admin.artifacts.list" || method === "admin.artifact.get" || method === "admin.artifact.takedown"
           ? this.adminArtifacts(held.subject, method, request.params ?? {})
           : this.opts.admin && method.startsWith("admin.")
           ? await this.opts.admin.call(held.subject, method, request.params ?? {})
@@ -1369,6 +1401,7 @@ export class FakePlane {
 
       case "sessions.list": {
         const rows = [...this.rows.values()]
+          .filter((r) => !this.unseen.has(r.id))
           .filter((r) => !params["profile"] || r.profile === params["profile"])
           .filter((r) => !params["state"] || r.state === params["state"])
           .filter((r) => !params["status"] || r.status === params["status"])
@@ -1382,7 +1415,7 @@ export class FakePlane {
 
       case "session.get": {
         const row = this.rows.get(String(params["session_id"] ?? ""));
-        if (!row) return { error: { code: -32005, message: "not_found" } };
+        if (!row || this.unseen.has(row.id)) return { error: { code: -32005, message: "not_found" } };
         return { result: this.sessionJson(row, subject) };
       }
 
@@ -1427,7 +1460,7 @@ export class FakePlane {
 
       case "session.open": {
         const row = this.rows.get(String(params["session_id"] ?? ""));
-        if (!row) return { error: { code: -32005, message: "not_found" } };
+        if (!row || this.unseen.has(row.id)) return { error: { code: -32005, message: "not_found" } };
         const mode = params["mode"] === "activate" ? "activate" : "read";
         const role = row.owner === subject ? "owner" : "collaborator";
         return { result: this.attachment(row, subject, name, role, mode) };
@@ -1549,7 +1582,7 @@ export class FakePlane {
             limit: 8192,
             unchanged: own.text === text,
             diff: lineDiff(own.text, text),
-            effect: "Every session you run reads it from its next turn. Nobody else reads it.",
+            effect: "Every session you run reads it from its next turn. The plane's platform administrators may read it, and the audit records each read.",
           },
         };
       }
@@ -1563,7 +1596,7 @@ export class FakePlane {
         }
         if (text === own.text) return { result: { changed: false, entry: null, user: this.ownJson(own) } };
         const now = { version: own.version + 1, text, changed_by: subject, changed_at: new Date().toISOString() };
-        this.own.set(subject, now);
+        this.keepOwn(subject, now);
         return { result: { changed: true, entry: null, user: this.ownJson(now) } };
       }
 

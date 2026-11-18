@@ -1,7 +1,7 @@
 export * from "./types.js";
 export { LINES, first as firstLine, order as lineOrder, pick as pickLine } from "./lines.js";
 export type { LineKind } from "./lines.js";
-export { TroupeConnection, TroupeRpcError, TroupeCallTimedOut, callTimeout, callTimeouts, waitWords } from "./connection.js";
+export { TroupeConnection, TroupeRpcError, TroupeCallTimedOut, callTimeout, callTimeouts, repairable, waitWords } from "./connection.js";
 export type { CallOptions, ConnectOptions, ConnectionHooks } from "./connection.js";
 export { PlaneClient, PlaneHttpError, normalizeEndpoint } from "./plane.js";
 export type {
@@ -289,6 +289,10 @@ export type {
   Manifest,
   PodDrained,
   AdminArtifact,
+  AdminArtifactPage,
+  MemoryPeople,
+  PersonMemory,
+  PersonMemoryRow,
   ProfileChoices,
   ProfilesExport,
   Provisioner,
@@ -448,5 +452,6 @@ export {
   planeAddress,
   hostOf,
   platformOf,
+  sessionLinkText,
 } from "./deeplink.js";
 export type { AppDownloads, AppLink, BannerPlatform, OpenWatch, RefusedLink } from "./deeplink.js";

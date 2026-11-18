@@ -151,6 +151,37 @@ defmodule Troupe.Plane.PolicyLadderTest do
       assert error.data.unit == "minutes"
     end
 
+    test "is refused as it is enabled, as it would be by an update", context do
+      {:ok, _} = Settings.put("default_erase_after_days", "30", context.root.subject)
+      {:ok, _} = Identity.upsert_group(%{external_id: "research", display_name: "research"})
+
+      # A new team, given a wider value than the platform allows as it is made.
+      assert {:error, error} =
+               Admin.team_enable(context.root, "research", %{"erase_after_days" => 90})
+
+      assert error.message == "forbidden"
+      assert error.data.field == "erase_after_days"
+      assert error.data.ceiling == 30
+      assert Identity.get_team("research") == nil
+
+      # And a group linked into a team that is there already, its settings changed with it.
+      {:ok, _} = Identity.upsert_group(%{external_id: "eng-2", display_name: "eng-2"})
+
+      assert {:error, %{message: "forbidden"}} =
+               Admin.team_enable(
+                 context.root,
+                 "eng-2",
+                 %{"name" => "engineering", "erase_after_days" => 90},
+                 true
+               )
+
+      assert Identity.get_team("engineering").erase_after_days == 365
+
+      # Within the ceiling, both go ahead.
+      assert {:ok, _} = Admin.team_enable(context.root, "research", %{"erase_after_days" => 20})
+      assert Identity.get_team("research").erase_after_days == 20
+    end
+
     test "may still narrow, which is the whole point of having its own rung", context do
       {:ok, _} = Settings.put("default_erase_after_days", "90", context.root.subject)
 

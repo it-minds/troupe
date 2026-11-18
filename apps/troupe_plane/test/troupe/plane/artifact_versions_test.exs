@@ -270,6 +270,32 @@ defmodule Troupe.Plane.ArtifactVersionsTest do
       assert {:error, %{message: "not_found"}} = call(context.ada, "artifact.files", %{"id" => id, "path" => "nope.md"})
       assert {:error, %{message: "not_found"}} = call(context.ada, "artifact.files", %{"id" => id, "version" => 9})
     end
+
+    # Issue #1090: the limit is summed over the bytes each stored file records.
+    test "refuses a version past what one attachment carries, with its size, and answers one file of it",
+         context do
+      big = :binary.copy("a", 1_200_000)
+
+      {:ok, %{"id" => id}} =
+        call(context.ada, "artifact.publish", %{
+          "title" => "Data",
+          "kind" => "markdown",
+          "visibility" => "private",
+          "files" => [file("index.md", big), file("appendix.md", big)]
+        })
+
+      assert {:error, %{message: "invalid_params", data: %{reason: reason}}} =
+               call(context.ada, "artifact.files", %{"id" => id})
+
+      assert reason ==
+               "the version's files are 2400000 bytes together, more than 2000000 attached at once; " <>
+                 "name one file with path"
+
+      assert {:ok, %{"files" => [%{"path" => "appendix.md", "bytes" => bytes}]}} =
+               call(context.ada, "artifact.files", %{"id" => id, "path" => "appendix.md"})
+
+      assert Base.decode64!(bytes) == big
+    end
   end
 
   describe "editing in the console" do

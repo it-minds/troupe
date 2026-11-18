@@ -3,7 +3,8 @@ defmodule Troupe.Plane.UserMemoryTest do
   A person's own memory document (#55, the user level): one document a person keeps on the
   plane, versioned and audited as the organisation's levels are, read by every session they
   run after those levels, changed by them (`me.memory.put`) and added to by an agent of
-  theirs one entry at a time, and read by nobody else. A pod's session adds to its owner's
+  theirs one entry at a time, and read by nobody else but a platform administrator, each read
+  audited. A pod's session adds to its owner's
   (`ControlTest`); the push to a pod is in `BundlesTest`.
 
   Against the development OpenBao for the signature, as `MemoryTest` is.
@@ -77,7 +78,7 @@ defmodule Troupe.Plane.UserMemoryTest do
       assert preview["version"] == 1
       assert preview["limit"] == 8192
       assert %{"op" => "add", "text" => "Two."} in preview["diff"]
-      assert preview["effect"] =~ "Nobody else reads it"
+      assert preview["effect"] =~ "platform administrators may read it"
       assert length(Memory.versions(context.ada)) == 1
 
       long = String.duplicate("x", 8193)
@@ -159,9 +160,38 @@ defmodule Troupe.Plane.UserMemoryTest do
     end
   end
 
-  describe "nobody else reads it" do
-    test "no administrator's method lists, reads or changes a person's", context do
+  describe "who else reads it" do
+    test "a platform administrator lists and reads it, each read audited; none changes it",
+         context do
       {:ok, _} = put(context.ada, %{"text" => "Hers alone.", "version" => 0})
+      {:ok, _} = put(context.ada, %{"text" => "Hers alone.\nTabs.", "version" => 1})
+
+      assert {:ok, %{people: [listed], limit: 8192}} = Admin.memory_people(context.root)
+      assert {listed.subject, listed.document} == {"ada@example.test", "user/ada@example.test"}
+      assert listed.current["version"] == 2
+      refute inspect(listed) =~ "Hers alone"
+
+      assert {:ok, read} = Admin.memory_person(context.root, "ada@example.test", nil)
+      assert {read.scope, read.text, read.editable} == {"person", "Hers alone.\nTabs.", false}
+      assert Enum.map(read.versions, & &1["version"]) == [2, 1]
+      assert %{"op" => "add", "text" => "Tabs."} in read.diff
+
+      assert {:ok, %{text: "Hers alone."}} = Admin.memory_person(context.root, "ada@example.test", 1)
+
+      reads = Audit.list() |> Enum.filter(&(&1.action == "memory.read")) |> Enum.sort_by(& &1.detail["version"])
+
+      assert Enum.map(reads, &{&1.actor, &1.subject_id, &1.detail["version"]}) == [
+               {"root@example.test", "user/ada@example.test", 1},
+               {"root@example.test", "user/ada@example.test", 2}
+             ]
+
+      refute inspect(reads) =~ "Hers alone"
+
+      assert {:error, %{message: "not_found"}} = Admin.memory_person(context.root, "nobody@example.test", nil)
+
+      # A team administrator reads no person's, and no administrator's method changes one.
+      assert {:error, %{message: "forbidden"}} = Admin.memory_people(context.lead)
+      assert {:error, %{message: "forbidden"}} = Admin.memory_person(context.lead, "ada@example.test", nil)
 
       for actor <- [context.root, context.lead] do
         assert {:ok, listing} = Admin.memory_list(actor)
@@ -173,6 +203,8 @@ defmodule Troupe.Plane.UserMemoryTest do
         assert {:error, %{message: "invalid_params"}} =
                  Admin.memory_put(actor, "user", "ada@example.test", "x", 1)
       end
+
+      assert length(Enum.filter(Audit.list(), &(&1.action == "memory.read"))) == 2
 
       # Another person's machine, and another person's session on a pod, read none of it.
       assert {:ok, answer} = Harness.call("me.memory", %{}, as(context.bo))

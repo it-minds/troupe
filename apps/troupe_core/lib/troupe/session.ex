@@ -78,6 +78,10 @@ defmodule Troupe.Session do
 
     Process.set_label("troupe session #{session_id}")
 
+    # Which agents have started under this tree: owned here, so it lives exactly as long as
+    # the tree, and a `Log` the tree restarts keeps counting where the last one was.
+    starts = :ets.new(Troupe.Session.Log, [:set, :public])
+
     agent_opts = [
       session_id: session_id,
       agent_path: @root_path,
@@ -87,6 +91,8 @@ defmodule Troupe.Session do
       profile: Keyword.get(opts, :profile, config.default_agent),
       task: Keyword.get(opts, :task),
       bundle: Keyword.get(opts, :bundle),
+      # A wake past what the root cannot read: who asked, and the last event it may skip.
+      repair: Keyword.get(opts, :repair),
       fake: fake_server(session_id, config, opts),
       # Where the session runs: on this machine a root whose first start fails says why
       # before its session's start fails with it.
@@ -101,7 +107,10 @@ defmodule Troupe.Session do
     children =
       [
         {Troupe.Session.Log,
-         session_id: session_id, workspace_root: workspace.root_real, state_dir: config.state_dir},
+         session_id: session_id,
+         workspace_root: workspace.root_real,
+         state_dir: config.state_dir,
+         starts: starts},
         # A person's own commands (`!cmd`, Decision 813): right under the log, so nothing
         # below that restarts — an agent, an MCP server — kills a command someone is
         # watching, and gone with the session, which takes every command it runs with it.
@@ -240,7 +249,10 @@ defmodule Troupe.Session do
   `:kind` says whether this is a `:team` session on a pod or a `:local` one, and
   `:origin` says what started it; both are recorded in `session_created` and nothing
   else reads them. `:hold_auto` is a branch a saved comment started (Decision 844): no
-  agent's `auto` and no MCP server's `permission: auto` applies in it.
+  agent's `auto` and no MCP server's `permission: auto` applies in it. `:repair`,
+  `%{by: actor, through: seq}`, is a wake past what the root cannot read
+  (`Troupe.repair/2`): each of its events up to `through` that its replay raises on is
+  skipped, and `log_repaired` says so.
   """
   @spec build_opts(keyword()) :: {:ok, keyword()} | {:error, term()}
   def build_opts(opts) do
@@ -297,6 +309,7 @@ defmodule Troupe.Session do
          config_overrides: Keyword.get(opts, :config_overrides, []),
          config_sources: Keyword.get(opts, :config_sources, %{}),
          hold_auto: Keyword.get(opts, :hold_auto, false),
+         repair: Keyword.get(opts, :repair),
          layers: layers
        ]}
     end

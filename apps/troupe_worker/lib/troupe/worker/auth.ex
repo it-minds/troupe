@@ -49,7 +49,7 @@ defmodule Troupe.Worker.Auth do
     input.send turn.cancel profile.switch approval.respond question.answer todo.edit
     shell.run shell.cancel
     session.goal.set session.goal.get session.goal.clear
-    session.loop.start session.loop.stop session.loop.get session.compact
+    session.loop.start session.loop.stop session.loop.get session.compact session.repair
     fs.list fs.read fs.upload scratch.list blob.get mcp.status context.get presence.set
     tools.register tools.unregister
   )

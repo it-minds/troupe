@@ -248,7 +248,9 @@ defmodule Troupe.Gateway.DaemonTest do
     end
 
     # Woken by input, the root fails its very first start, inside the session's own
-    # start. Its Node never gets to start it again, so that start is its last.
+    # start. Its Node never gets to start it again, so that start is its last. Its log said
+    # why when the session went down, and is not made to say it again; the answer offers
+    # the wake past what the root cannot read, and `session.repair` is that wake.
     @tag :capture_log
     test "input.send to a session whose root cannot start again answers why, as its log does",
          context do
@@ -259,7 +261,7 @@ defmodule Troupe.Gateway.DaemonTest do
       assert_receive {:troupe_event, ^sid, %Event{type: "turn_ended"}}, 5_000
 
       down = Process.monitor(Troupe.Registry.whereis({:session, sid}))
-      Log.append(sid, ["root"], :tool_results, %{"results" => "not a list"})
+      {:ok, poison} = Log.append(sid, ["root"], :tool_results, %{"results" => "not a list"})
       Process.exit(Troupe.Registry.agent_pid(sid, ["root"]), :kill)
       assert_receive {:DOWN, ^down, :process, _pid, _reason}, 5_000
 
@@ -270,6 +272,14 @@ defmodule Troupe.Gateway.DaemonTest do
         Enum.any?(listed, &(&1["id"] == sid and &1["state"] == "dormant"))
       end)
 
+      # What the session is woken with, read from the files as a client's wake reads them.
+      File.mkdir_p!(Path.join(context.workspace, ".troupe"))
+
+      File.write!(
+        Path.join(context.workspace, ".troupe/config.yaml"),
+        "version: 1\nprovider: fake\nmodel: fake\nauto_approve: true\n"
+      )
+
       failed = fn ->
         sid
         |> Troupe.replay_from(0)
@@ -278,16 +288,25 @@ defmodule Troupe.Gateway.DaemonTest do
 
       before = length(failed.())
 
-      assert {:error, %Error{message: "unavailable", data: %{"reason" => reason}}} =
+      assert {:error,
+              %Error{message: "unavailable", data: %{"reason" => reason, "repairable" => true}}} =
                Client.call(client, "input.send", %{"session_id" => sid, "text" => "again"})
 
       refute reason =~ "failed_to_start_child"
       assert reason =~ "Protocol.UndefinedError"
 
-      # The wake's own failed start is written, saying what the answer said.
+      # Its log already said it, in the answer's words, and says it once.
       assert [_ | _] = ended = failed.()
-      assert length(ended) == before + 1
+      assert length(ended) == before
       assert List.last(ended).data["detail"] == reason
+
+      assert {:ok, %{"woken" => true, "skipped" => [^poison]}} =
+               Client.call(client, "session.repair", %{"session_id" => sid, "command_id" => "c-1"})
+
+      on_exit(fn -> Troupe.stop_session(sid) end)
+
+      assert {:ok, %{"sessions" => listed}} = Client.call(client, "session.list")
+      assert %{"state" => "active"} = Enum.find(listed, &(&1["id"] == sid))
     end
 
     test "session.get reports the head sequence", context do

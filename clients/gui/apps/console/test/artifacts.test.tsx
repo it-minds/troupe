@@ -7,8 +7,9 @@
 // is one any client of the person's makes, never `admin.*`.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { App } from "../src/App";
 import { openInNewTab } from "../src/console";
-import { PEOPLE, button, freshBrowser, link, opener, recordCalls, says, sees, seesButton, seesField, seesLink, startFake, type, visit, waitFor } from "./support";
+import { PEOPLE, button, field, freshBrowser, link, opener, recordCalls, render, says, sees, seesButton, seesField, seesLink, startFake, type, visit, waitFor } from "./support";
 import type { FakeDeployment } from "./support";
 import { exampleAdmin } from "../../../packages/client/test/support/admin.js";
 import { TINY_PNG, artifact } from "../../../packages/client/test/support/plane.js";
@@ -149,7 +150,7 @@ describe("artifacts", () => {
   });
 
   it("says how to publish one where a tab has none, and that an administrator switched them off where one did", async () => {
-    await open("#/artifacts", PEOPLE.bob);
+    await open("#/artifacts/mine", PEOPLE.bob);
     await sees("You have published nothing yet");
     // Every way to publish, the desktop app's among them, where a person's own are listed.
     await sees("the desktop app's Publish…");
@@ -190,9 +191,9 @@ describe("artifacts", () => {
     expect(document.querySelector("iframe")).toBeNull();
     expect(document.body.innerHTML).not.toContain("Week forty-three in full");
 
-    // A member's own session is among theirs in Mine.
+    // A member's own session is among theirs under Mine on Sessions.
     const source = await seesLink("View source session");
-    expect(source.getAttribute("href")).toBe("#/mine");
+    expect(source.getAttribute("href")).toBe("#/sessions/mine");
     await sees("s-carol-1");
 
     // Nothing is asked until it is opened, and each Open asks again.
@@ -355,9 +356,119 @@ describe("artifacts' storage", () => {
     await sees("Old versions of an artifact kept", group);
   });
 
-  it("keeps the Artifacts area beside Mine for an administrator too", async () => {
-    await open("#/mine", PEOPLE.bob);
-    const mine = () => [...rail().querySelectorAll(".group")].find((g) => g.querySelector(".screen")?.textContent === "Mine");
-    await waitFor(() => mine() && link("Artifacts", mine()!), "Artifacts in the group Mine");
+  it("keeps the Artifacts area first, in Oversee, for an administrator and a member alike", async () => {
+    await open("#/overview", PEOPLE.bob);
+    const first = () => rail().querySelector(".group");
+    await waitFor(() => first()?.querySelector(".screen")?.textContent === "Oversee" && link("Artifacts", first()!), "Artifacts in the first group");
+    close();
+    await open("#/artifacts", PEOPLE.carol);
+    await waitFor(() => first()?.querySelector(".screen")?.textContent === "Oversee" && link("Artifacts", first()!), "Artifacts in a member's first group");
+    // A member's first tab is their own: there is no Every artifact for them.
+    await waitFor(() => tabs()[0] === "Mine", "Mine first");
+    expect(tabs()).not.toContain("Every artifact");
+  });
+});
+
+describe("an artifact's address followed signed out", () => {
+  let unmount: (() => void) | null = null;
+  afterEach(() => {
+    unmount?.();
+    unmount = null;
+  });
+
+  /** The console opened at `hash` with nobody signed in, signed in through the provider as Carol: where it went on to. */
+  async function signInAt(hash: string): Promise<string[]> {
+    fake.idp.redirectSubject = { subject: carol.subject, displayName: carol.display_name };
+    visit(hash);
+    let leftFor: string | null = null;
+    unmount = render(<App navigate={(url) => (leftFor = url)} />).unmount;
+    type(await waitFor(() => field("The plane's address"), "the sign-in screen"), fake.plane.baseUrl);
+    (await seesButton("Sign in")).click();
+    const there = await waitFor(() => leftFor, "the way to the provider");
+
+    // The provider sends the browser back to the console's own address, with no fragment.
+    const back = await fetch(there, { redirect: "manual" });
+    const returned = new URL(back.headers.get("location")!);
+    unmount();
+    history.replaceState(null, "", `/${returned.search}`);
+    const gone: string[] = [];
+    unmount = render(<App navigate={(url) => void gone.push(url)} />).unmount;
+    await waitFor(() => gone.length > 0 || null, "gone on to the artifact");
+    return gone;
+  }
+
+  /**
+   * The console opened at `hash` with nobody signed in, on a plane it knows, as the
+   * artifacts host sends a lapsed viewer: to the provider and back with no click, and
+   * where it went on to.
+   */
+  async function followedSignedOut(hash: string): Promise<string[]> {
+    fake.idp.redirectSubject = { subject: carol.subject, displayName: carol.display_name };
+    localStorage.setItem("troupe.console.planeUrl", fake.plane.baseUrl);
+    visit(hash);
+    let leftFor: string | null = null;
+    unmount = render(<App navigate={(url) => (leftFor = url)} />).unmount;
+    const there = await waitFor(() => leftFor, "the way to the provider, with no click");
+    expect(button("Sign in")).toBeNull();
+
+    const back = await fetch(there, { redirect: "manual" });
+    const returned = new URL(back.headers.get("location")!);
+    unmount();
+    history.replaceState(null, "", `/${returned.search}`);
+    const gone: string[] = [];
+    unmount = render(<App navigate={(url) => void gone.push(url)} />).unmount;
+    await waitFor(() => gone.length > 0 || null, "gone on to the artifact");
+    expect(button("Sign in")).toBeNull();
+    return gone;
+  }
+
+  it("goes through the provider to the artifact with no page to click, when the provider answers by itself", async () => {
+    const gone = await followedSignedOut("#/artifacts/open/art-carol-weekly/v1");
+    expect(fake.plane.opened).toHaveLength(1);
+    expect(fake.plane.opened[0]).toMatchObject({ subject: carol.subject, id: "art-carol-weekly", version: 1 });
+    expect(gone).toEqual([fake.plane.opened[0]!.url]);
+  });
+
+  it("spends a shared link through the provider with no page to click, and goes on to the artifact", async () => {
+    fake.plane.shares.set("share-z", {
+      id: "share-z",
+      artifact: "art-carol-weekly",
+      token: "token-no-click-abcdefghijklmnopq",
+      role: "view",
+      public: false,
+      expires_at: null,
+      revoked_at: null,
+      created_by: carol.subject,
+      created_at: "2026-10-25T12:00:00Z",
+      uses: [],
+    });
+    const gone = await followedSignedOut("#/artifacts/link/token-no-click-abcdefghijklmnopq");
+    expect(gone[0]).toMatch(/^https:\/\/artifacts\.example\.test\/enter\?ticket=/);
+    expect(fake.plane.shares.get("share-z")!.uses.map((u) => u.subject)).toEqual([carol.subject]);
+  });
+
+  it("lands on the artifact after one sign-in, not on the console's first screen", async () => {
+    const gone = await signInAt("#/artifacts/open/art-carol-weekly/v1");
+    expect(fake.plane.opened).toHaveLength(1);
+    expect(fake.plane.opened[0]).toMatchObject({ subject: carol.subject, id: "art-carol-weekly", version: 1 });
+    expect(gone).toEqual([fake.plane.opened[0]!.url]);
+  });
+
+  it("spends a shared link after one sign-in and goes on to the artifact", async () => {
+    fake.plane.shares.set("share-y", {
+      id: "share-y",
+      artifact: "art-carol-weekly",
+      token: "token-signed-out-abcdefghijklmnop",
+      role: "view",
+      public: false,
+      expires_at: null,
+      revoked_at: null,
+      created_by: carol.subject,
+      created_at: "2026-10-25T12:00:00Z",
+      uses: [],
+    });
+    const gone = await signInAt("#/artifacts/link/token-signed-out-abcdefghijklmnop");
+    expect(gone[0]).toMatch(/^https:\/\/artifacts\.example\.test\/enter\?ticket=/);
+    expect(fake.plane.shares.get("share-y")!.uses.map((u) => u.subject)).toEqual([carol.subject]);
   });
 });
