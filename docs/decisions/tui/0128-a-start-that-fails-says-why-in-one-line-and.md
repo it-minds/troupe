@@ -10,12 +10,6 @@ paths:
 gist: A start that fails says why in one line and gives the terminal back, and on Windows the VM neither reads the console nor outlives the launcher's…
 ---
 
-Issue #231; root Decision 718 has the cause. In a Burrito binary the runner is the
-application's start, so an exit that escaped it (the daemon link's call timing out)
-failed the VM's boot. The person saw `{exit,terminating,[{application_controller,…`
-and never the reason, the VM hung stopping the rest, and a Ctrl-C then killed
-Burrito's launcher alone and left the VM's break menu reading the console beside the
-shell, which is where the stray keystrokes went.
 - **One line, then halt.** `Runner.guard/1` catches exits, exceptions and throws
   around the command line and prints `troupe: could not start: <reason>`, status 1;
   an exit is told by its reason and the innermost call it stopped. The daemon link
@@ -48,7 +42,3 @@ shell, which is where the stray keystrokes went.
   stays on beside that session's terminal UI, as it was on every run before.
 - **Unix unchanged.** Its launcher dies of SIGINT the same way, and `+Bd`, no break
   handler so the VM dies with it, would be the equivalent; nothing here can show it.
-- **Proof:** `test/troupe/runner_guard_test.exs` (an exit, an exception and a throw
-  are one line and status 1, and the windows close before it is printed),
-  `test/troupe/prompt_test.exs`, and the built binary in real console windows on
-  the machine of the issue, before and after, on the pull request.

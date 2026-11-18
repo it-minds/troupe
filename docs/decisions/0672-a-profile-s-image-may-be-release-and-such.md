@@ -7,7 +7,6 @@ paths:
   - apps/troupe_plane/lib/troupe/plane/admin.ex
   - apps/troupe_plane/lib/troupe/plane/fleet/release_image.ex
   - apps/troupe_plane/lib/troupe/plane/provision.ex
-  - apps/troupe_plane/test/troupe/plane/release_image_test.exs
   - charts/troupe/values.example.yaml
   - charts/troupe/values.small.yaml
 gist: A profile's image may be `release`, and such profiles move with the platform

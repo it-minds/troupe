@@ -6,17 +6,10 @@ status: accepted
 issue: 387
 paths:
   - apps/troupe_core/lib/troupe/config/models.ex
-  - apps/troupe_core/test/troupe/config/models_test.exs
   - clients/tui/lib/troupe/cli/runner.ex
-  - clients/tui/test/troupe/models_cli_test.exs
 gist: "`troupe models --json` prints what `troupe models` says as one JSON object for a program: the models with their prices as numbers, the roles, what…"
 ---
 
-Issue #387, in part: the
-VS Code extension's Models group that reads it is a follow-up in `clients/vscode`.
-The report was words only, so a program that wanted the models, their windows and
-prices (the extension's Settings view first, Decision 765) had to scrape what was
-written for a person.
 - **Built beside the text.** `Troupe.Config.Models.json/2`, reached as
   `Config.models_json/2` beside `explain/3`, takes the config and `asked` as
   `describe/2` does and is built from the calls the text is: `Config.models/1`,
@@ -51,13 +44,3 @@ written for a person.
   than as an `errors` object on standard output as `config --explain --json` does: a
   program that asks for the models has nothing to show of a config that does not
   load but the reason. It has its own line in `troupe --help` and the reference.
-- **Not in this:** the extension's Models group; `troupe-daemon models --json`; cache
-  prices and `max_output`, which `Config.models/1` does not carry.
-- **Proof:** `Troupe.Config.ModelsTest`, against the stand-in gateway: the shape
-  before anything was fetched (no catalog, `served` null, a `models.prices` price as
-  the config's), after a refresh (each source's status, the prices, a role's model
-  not served with what is nearest), a key the gateway refuses (`failed`, the error,
-  the cached count), the JSON and the text agreeing, and neither key, raw or masked,
-  anywhere in it. TUI `ModelsCLITest`: `troupe models --json` decoded, a second run
-  from the cache, a refused key, and a config that does not load said on standard
-  error with nothing on standard output.

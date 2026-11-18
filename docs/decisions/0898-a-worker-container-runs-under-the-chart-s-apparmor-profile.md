@@ -7,39 +7,12 @@ issue: 705
 paths:
   - charts/troupe/files/worker-apparmor
   - charts/troupe/templates/worker-profiles.yaml
-  - charts/troupe/templates/operator-deployment.yaml
-  - charts/troupe/templates/_helpers.tpl
-  - charts/troupe/values.yaml
   - apps/troupe_operator/lib/troupe/operator/settings.ex
   - apps/troupe_operator/lib/troupe/operator/resources.ex
-  - apps/troupe_operator/test/troupe/operator/settings_test.exs
-  - apps/troupe_operator/test/e2e/isolation_test.exs
-  - config/runtime.exs
-  - docker/Dockerfile
-  - dev/kind/values.yaml
-  - dev/kind/cri-containerd.apparmor.d
-  - scripts/kind-up
-  - scripts/remote-up
-  - .github/workflows/cluster.yml
-  - docs/admin/installing.md
-  - docs/admin/worker-sandbox.md
 symbols:
   - Troupe.Operator.Settings.worker_apparmor/1
 gist: "worker.appArmor: Localhost troupe-worker (containerd default + mount/pivot_root, abi 3.0, more denials), loaded by the DaemonSet's MAC_ADMIN container; never Unconfined; sysctl untouched"
 ---
-
-Issue #705, found by the cluster check in `docs/admin/installing.md` on a production cluster
-of Ubuntu 24.04.4 nodes (kernel 6.8, containerd 2.3.4). Decision 890 gave the worker
-container a seccomp profile and a user namespace and left AppArmor unverified, since
-neither kind cluster it was proven on applied AppArmor. On those nodes it stopped
-bubblewrap twice. Under containerd's default AppArmor profile, `cri-containerd.apparmor.d`,
-which has `deny mount`, bubblewrap made its user namespace and its uid map and stopped at
-its first mount: "bwrap: Failed to make / slave: Permission denied". With the container
-`Unconfined` it got one step less far: Ubuntu 23.10 and later set
-`kernel.apparmor_restrict_unprivileged_userns=1`, under which an unconfined process that
-makes a user namespace is moved into a profile with no capabilities, so the namespace's uid
-map could not be written: "bwrap: setting up uid map: Permission denied". CI's cluster job
-had lifted that sysctl on its runner (#686), which is why it never saw the second.
 
 - **A chart value, on by default.** `worker.appArmor` (`enabled`, `profile`, default
   `troupe-worker`, `install`) reaches the operator as `TROUPE_WORKER_APPARMOR_PROFILE`, a
@@ -84,16 +57,14 @@ had lifted that sysctl on its runner (#686), which is why it never saw the secon
   `apparmor` container runs `apparmor_parser --replace --skip-cache` on the profile from a
   ConfigMap, then waits, ready while `/sys/kernel/security/apparmor/profiles` lists it in
   enforce mode. Loading a profile takes root in the node's user namespace with
-  `CAP_MAC_ADMIN`, a task the kernel lets manage policy, which containerd's default profile
-  is not (it denies `/sys/kernel/security`), and the host's securityfs; the container has
-  exactly those: `MAC_ADMIN` added to an empty capability set, `appArmorProfile:
-  Unconfined` on that container alone, the host's `/sys/kernel/security` mounted, a
-  read-only root, no privilege escalation, the runtime's default seccomp profile and no
-  API token. Not `privileged: true`, and not the host's `/etc/apparmor.d`: a loaded profile
-  lasts until the node reboots, when the DaemonSet's pod starts again and loads it again.
-  The parser is in the operator's image (Debian's `apparmor` package, in that image alone),
-  the release's own and already pulled by the DaemonSet. `troupe-system` needs the
-  `privileged` Pod Security level for it, as it already did.
+  `CAP_MAC_ADMIN`, a task the kernel lets manage policy, which containerd's default
+  profile is not (it denies `/sys/kernel/security`), and the host's securityfs; the
+  container has exactly those: `MAC_ADMIN` added to an empty capability set,
+  `appArmorProfile: Unconfined` on that container alone, the host's `/sys/kernel/security`
+  mounted, a read-only root, no privilege escalation, the runtime's default seccomp
+  profile and no API token. Not `privileged: true`, and not the host's `/etc/apparmor.d`:
+  a loaded profile lasts until the node reboots, when the DaemonSet's pod starts again and
+  loads it again.
 - **A node without AppArmor.** The container loads nothing, says so in its log and is
   ready. The worker pod is not changed per node: a pod spec is one for every node, and
   choosing per node would need node labels the installer would have to write with API
@@ -106,17 +77,6 @@ had lifted that sysctl on its runner (#686), which is why it never saw the secon
   profile. It waits; it never runs unconfined.
 - **The Security Profiles Operator**, or nodes built with the profile: `install.enabled:
   false` and `profile` the name it is loaded under.
-- **kind.** `dev/kind/values.yaml` leaves it off, since Docker Desktop's kernel runs no
-  AppArmor and its kubelet would refuse the pods. Where the host's kernel runs AppArmor
-  (CI's Ubuntu runner, an Ubuntu laptop), `scripts/kind-up` gives each node
-  `apparmor_parser` and securityfs and restarts containerd, which takes AppArmor for absent
-  without the parser ("apparmor is not supported"); every other pod there then runs under
-  containerd's default profile, as on an Ubuntu node. That default is compiled by the
-  host's parser (`dev/kind/cri-containerd.apparmor.d`, loaded before the node would load
-  its own): the node's parser is its Debian 12 image's, and on CI's runner kernel (6.17)
-  what it compiled refused every unix socket ("failed protocol match"), so ingress-nginx
-  never started (runs 38470446711 and 38471703207). `scripts/remote-up` turns the
-  profile on where a node's runtime can apply it.
 - **Upgrading** renames the DaemonSet (Helm removes `troupe-worker-seccomp` and makes
   `troupe-worker-profiles`) and adds the loader's privilege. The setting changes every
   profile's pod template: each reports `UpgradePending` and its pods are replaced as they
@@ -126,14 +86,3 @@ had lifted that sysctl on its runner (#686), which is why it never saw the secon
   value: node-wide, and the maintainer's call (2026-10-13) was to leave it. A loader image
   of its own, or the host's parser through a mount of the host's root: an image more to
   build and publish, or the whole node's filesystem for one file.
-- **Proof.** In the operator suite the profile reaches the worker container, nothing else
-  about its confinement changes and the pod keeps the runtime's default, and none is
-  written without a name (`ResourcesTest`); a name the kubelet would not take stops the
-  operator (`SettingsTest`); the chart job checks the chart's refusals. On CI's cluster
-  job, on an Ubuntu 24.04 runner left with AppArmor enforced and
-  `kernel.apparmor_restrict_unprivileged_userns=1`, the step "Bubblewrap on a worker needs
-  the chart's AppArmor profile here" runs the worker image with the worker container's
-  security context and bubblewrap's flags three times: under containerd's default profile
-  and unconfined it is refused, and under the chart's profile, loaded by the DaemonSet, it
-  runs; then the cluster suite checks the worker container wears and runs under the profile
-  and runs a session's command in the sandbox.

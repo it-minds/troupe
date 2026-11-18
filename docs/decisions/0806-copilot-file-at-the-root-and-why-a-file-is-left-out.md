@@ -7,23 +7,11 @@ issue: 123
 supersedes: [706]
 paths:
   - apps/troupe_core/lib/troupe/instructions.ex
-  - apps/troupe_core/test/troupe/instructions_test.exs
-  - apps/troupe_core/test/troupe/instructions_prompt_test.exs
-  - apps/troupe_gateway/test/troupe/gateway/context_test.exs
 symbols:
   - Troupe.Instructions.load/3
   - Troupe.Instructions.provenance/1
 gist: "Copilot's file counts at the repo root only (elsewhere listed as skipped); a file left out carries `reason` in words, null for one read"
 ---
-
-Issue #123, D78's first and fifth items. Decision 706 made `AGENTS.md`, `CLAUDE.md`,
-`GEMINI.md` and `.github/copilot-instructions.md` one file under four names in every
-directory, and 798 kept it. That is true of the first three, whose tools read them in
-nested directories too, and not of the fourth: Copilot reads
-`.github/copilot-instructions.md` at the repository root and nowhere else. So a nested
-one, a package in a monorepo that was once a repository of its own or a vendored
-checkout, reached Troupe's prompt where Copilot never reads it. And `context.get` said
-of a file it did not read only a status, which the TUI printed as a bare "0".
 
 - **Copilot's file at the root only.** At the repository root it is the fourth alias,
   as before: read when it is the only name there, skipped behind the others. In any
@@ -57,14 +45,3 @@ of a file it did not read only a status, which the TUI printed as a bare "0".
 - **Additive to v1.** A new key on each file, a new `status` value and new entries in
   `files`. Neither the result of `context.get` nor the event's `files` items are in the
   committed schema, and `mix troupe.schema.diff` finds nothing.
-- **Proof:** `Troupe.InstructionsTest` (a root Copilot file read, a nested one alone
-  and one beside an `AGENTS.md` listed as skipped with the reason and not in the
-  prompt; aliases listed after the file read, each with `is used`; behind a link out,
-  `comes first`; the reasons for `outside` and `dropped`, in the provenance too),
-  `Troupe.InstructionsPromptTest` (a nested Copilot file on the way to a file the turn
-  read is not in the next turn's prompt, and the event lists it as skipped with the
-  reason; the person's own file outside `<config>` and the repository's outside the
-  repository, each with its reason) and `Troupe.Gateway.ContextTest` (the alias with
-  its reason, a nested Copilot file as skipped with its reason, an outside file's
-  reason, over the protocol). The Copilot test failed on the chunk's tip with the
-  nested file read into the prompt.

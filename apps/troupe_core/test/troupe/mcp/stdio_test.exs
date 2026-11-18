@@ -1,7 +1,7 @@
 defmodule Troupe.MCP.StdioTest do
   @moduledoc """
   A stdio MCP server that is gone before Troupe has finished writing to it gets a status,
-  not a crash (D115). The server's process wrote `initialize` to a port whose program had
+  not a crash. The server's process wrote `initialize` to a port whose program had
   already exited: on Windows, where the server is a plain port, the write ended the port
   with `epipe`, and a write to a port already closed is `badarg` on every OS. Either took
   the server's process down, and with it `mcp.check`'s caller or the session's MCP
@@ -15,7 +15,6 @@ defmodule Troupe.MCP.StdioTest do
   use Troupe.SessionCase, async: true
 
   alias Troupe.MCP.Stdio
-  alias Troupe.Session.MCP
 
   # A server that exits at once with `status`, reading nothing.
   defp exits_at_once(status) do
@@ -43,7 +42,7 @@ defmodule Troupe.MCP.StdioTest do
     end
   end
 
-  # D121: an answer with neither a result nor an error took the server's process down with
+  # An answer with neither a result nor an error took the server's process down with
   # a FunctionClauseError; it is a status like any other refusal.
   test "a server that answers initialize with neither a result nor an error has a status", context do
     if match?({:unix, _}, :os.type()) do
@@ -106,27 +105,9 @@ defmodule Troupe.MCP.StdioTest do
     holder = Troupe.Registry.session_mcp(session.id) |> GenServer.whereis()
 
     assert %{state: :stopped, error: error} =
-             wait_for_state(session.id, "early", [:stopped, :error])
+             await_mcp(session.id, "early", [:stopped, :error], 5_000)
 
     assert error == gone(3)
     assert GenServer.whereis(Troupe.Registry.session_mcp(session.id)) == holder
-  end
-
-  defp wait_for_state(session_id, name, states, waited \\ 0) do
-    entry = Enum.find(MCP.status(session_id), &(&1.name == name))
-
-    cond do
-      entry && entry.state in states -> entry
-      waited < 5_000 -> Process.sleep(50) && wait_for_state(session_id, name, states, waited + 50)
-      true -> entry
-    end
-  end
-
-  defp eventually(check, waited \\ 0) do
-    cond do
-      check.() -> true
-      waited < 5_000 -> Process.sleep(20) && eventually(check, waited + 20)
-      true -> false
-    end
   end
 end

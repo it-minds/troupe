@@ -41,6 +41,9 @@ defmodule Troupe.Agent.Definition do
     tools: :all,
     permissions: %{},
     max_turns: nil,
+    # The most output one model call of this agent asks for, under the session's own
+    # `max_tokens` (a profile's on a pod, the setting on a machine), which it only lowers.
+    max_tokens: nil,
     budget_share: 0.25,
     skills: [],
     # Whether a `delegate` to this agent asks the person first (Decision 850): `:ask`, or
@@ -78,6 +81,7 @@ defmodule Troupe.Agent.Definition do
           tools: :all | [String.t()],
           permissions: %{optional(String.t()) => permission()},
           max_turns: pos_integer() | nil,
+          max_tokens: pos_integer() | nil,
           budget_share: float(),
           skills: :all | [String.t()],
           delegation: :auto | :ask,
@@ -87,10 +91,6 @@ defmodule Troupe.Agent.Definition do
           path: Path.t() | nil,
           acp: map() | nil
         }
-
-  @doc "Whether the harness starts this agent for a job of its own, never a person's pick."
-  @spec function?(t()) :: boolean()
-  def function?(%__MODULE__{mode: mode}), do: mode == :function
 
   @doc """
   The sentence a request is refused with when it names this function agent as a session's
@@ -218,8 +218,8 @@ defmodule Troupe.Agent.Definition do
   @doc """
   The file `parse/3` reads back to this definition, the name aside, which is the file's:
   the frontmatter keys whose values differ from a file without them, in the order the
-  built-ins write them, then the prompt. What onboarding proposes for `.troupe/agents/`
-  (Decision 824). An ACP entry is a bundle's, with no file of its own, and has none.
+  built-ins write them, then the prompt. What onboarding proposes for `.troupe/agents/`.
+  An ACP entry is a bundle's, with no file of its own, and has none.
   """
   @spec render(t()) :: String.t()
   def render(%__MODULE__{acp: nil} = definition) do
@@ -235,6 +235,7 @@ defmodule Troupe.Agent.Definition do
            {tool, Atom.to_string(permission)}
          end), %{}},
         {"max_turns", definition.max_turns, nil},
+        {"max_tokens", definition.max_tokens, nil},
         {"budget_share", definition.budget_share, 0.25},
         {"delegation", Atom.to_string(definition.delegation), "auto"}
       ]
@@ -254,9 +255,9 @@ defmodule Troupe.Agent.Definition do
     end
   end
 
-  @doc "Build the struct from what the shared parser returned."
+  # Build the struct from what the shared parser returned.
   @spec from_parsed(AgentDefinition.t(), source()) :: t()
-  def from_parsed(parsed, source) do
+  defp from_parsed(parsed, source) do
     %__MODULE__{
       name: parsed.name,
       prompt: parsed.prompt,
@@ -266,6 +267,7 @@ defmodule Troupe.Agent.Definition do
       tools: parsed.tools,
       permissions: parsed.permissions,
       max_turns: parsed.max_turns,
+      max_tokens: parsed.max_tokens,
       budget_share: parsed.budget_share,
       skills: parsed.skills,
       delegation: Map.get(parsed, :delegation, :auto),

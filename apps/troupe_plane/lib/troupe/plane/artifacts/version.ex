@@ -4,7 +4,9 @@ defmodule Troupe.Plane.Artifacts.Version do
   content type and size, the hash over all of them, who published it when and what they
   said of it. A file's bytes are in the object store under `artifacts/<id>/<n>/<path>`, or,
   for one a later version carried unchanged from an earlier (an edit of another file, a
-  rollback), under the earlier version's `n`, which the file names as `stored_in`.
+  rollback), under the earlier version's `n`, which the file names as `stored_in`. A file
+  that loads what the artifacts host blocks names it as `blocked` (`Artifacts.Blocked`),
+  read from its bytes when it was published and carried with it.
   """
 
   use Ecto.Schema

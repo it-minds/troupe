@@ -20,6 +20,7 @@ defmodule Troupe.Session.Files do
   use GenServer
 
   alias Troupe.{Gitignore, Registry, Workspace}
+  alias Troupe.Protocol.Digest
   alias Troupe.Session.Log
   alias Troupe.Watch.{FileSystemBackend, PollBackend}
 
@@ -208,7 +209,7 @@ defmodule Troupe.Session.Files do
 
   defp hash(path, size, mtime) when size <= @max_hash_bytes do
     case File.read(path) do
-      {:ok, contents} -> "sha256:" <> (:sha256 |> :crypto.hash(contents) |> Base.encode16(case: :lower))
+      {:ok, contents} -> Digest.tagged(contents)
       {:error, _reason} -> stamp(size, mtime)
     end
   end

@@ -6,9 +6,7 @@ status: accepted
 issue: 124
 paths:
   - apps/troupe_core/lib/troupe/commands.ex
-  - apps/troupe_core/test/troupe/commands_test.exs
   - apps/troupe_gateway/lib/troupe/gateway/dispatch.ex
-  - apps/troupe_gateway/test/troupe/gateway/commands_list_test.exs
   - clients/gui/apps/desktop/src/views/CommandPalette.tsx
   - clients/tui/lib/troupe/client.ex
   - clients/tui/lib/troupe/client/daemon.ex

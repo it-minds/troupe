@@ -483,6 +483,9 @@ label code {
   color: var(--text-muted);
   font: var(--t-code-small);
 }
+.note.blocked {
+  color: var(--waiting-fg);
+}
 .note.error {
   color: var(--error-fg);
 }
@@ -853,12 +856,14 @@ main {
    Claim or Unarchive stands beside the row, at its edge, since the row itself opens the
    session. */
 .rows li.claimable,
-.rows li.unarchivable {
+.rows li.unarchivable,
+.rows li.markable {
   display: flex;
   align-items: center;
 }
 .rows li.claimable .row,
-.rows li.unarchivable .row {
+.rows li.unarchivable .row,
+.rows li.markable .row {
   flex: 1 1 auto;
   min-width: 0;
 }
@@ -866,6 +871,24 @@ main {
 .rows li.unarchivable .claim {
   flex: none;
   margin-right: var(--space-6);
+}
+/* The owner's ⋯ beside a row (rename, keep at the top), its menu drawn as the head's is;
+   a row being renamed is its name as a field, in the row's place. */
+.rows .row-menu {
+  flex: none;
+  position: relative;
+  margin-right: var(--space-2);
+}
+.rows .row.renaming {
+  display: flex;
+  align-items: center;
+}
+.rows .row.renaming .rename {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.rows .kept {
+  color: var(--text-label);
 }
 
 /* -- dialog ----------------------------------------------------------------- */
@@ -1111,7 +1134,8 @@ main {
   color: var(--text-label);
 }
 /* An icon button: the head's ⋯ and the composer's + and /. */
-.session .ib {
+.session .ib,
+.row-menu .ib {
   flex: none;
   width: 36px;
   min-width: 36px;
@@ -1126,6 +1150,8 @@ main {
   color: var(--text-secondary);
 }
 .session .ib:hover:not(:disabled),
+.row-menu .ib:hover:not(:disabled),
+.row-menu .ib[aria-expanded="true"],
 .session .ib[aria-expanded="true"] {
   filter: none;
   color: var(--text-primary);
@@ -1135,7 +1161,8 @@ main {
 .session-menu {
   position: relative;
 }
-.session-menu .menu-pop {
+.session-menu .menu-pop,
+.row-menu .menu-pop {
   position: absolute;
   top: calc(100% + 6px);
   right: 0;
@@ -1148,10 +1175,12 @@ main {
   display: flex;
   flex-direction: column;
 }
-.session-menu .menu-pop[hidden] {
+.session-menu .menu-pop[hidden],
+.row-menu .menu-pop[hidden] {
   display: none;
 }
-.session-menu .item {
+.session-menu .item,
+.row-menu .item {
   flex-direction: column;
   gap: 2px;
 }
@@ -1182,7 +1211,8 @@ main {
   overflow-wrap: anywhere;
 }
 /* A menu's item, here and in the composer's popovers: a word in the name face over a line saying what it does. */
-.session .item {
+.session .item,
+.row-menu .item {
   width: 100%;
   min-height: 0;
   display: flex;
@@ -1194,6 +1224,7 @@ main {
   text-align: left;
 }
 .session .item:hover:not(:disabled),
+.row-menu .item:hover:not(:disabled),
 .session .item[aria-pressed="true"] {
   filter: none;
   background: var(--bg-raised);
@@ -1208,13 +1239,15 @@ main {
   font: var(--t-code);
   color: var(--text-label);
 }
-.session .item .t {
+.session .item .t,
+.row-menu .item .t {
   display: block;
   font: var(--t-ui);
   font-weight: 700;
   color: var(--text-primary);
 }
-.session .item .d {
+.session .item .d,
+.row-menu .item .d {
   display: block;
   margin-top: 1px;
   font: var(--t-ui-small);
@@ -2338,6 +2371,23 @@ details.advanced > summary {
 }
 .tasks li.cancelled::before {
   content: "×";
+}
+/* The person's hand in it: an open task's Complete and Cancel at its edge, and a field at
+   the foot to add one. */
+.tasks .task-text {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.tasks .task-acts {
+  flex: none;
+  display: flex;
+  gap: var(--space-2);
+}
+.task-add {
+  margin-top: var(--space-3);
+}
+.task-add input {
+  width: 100%;
 }
 
 /* The company: who is working, and what each one is at, as a mono label at the edge. */
@@ -4636,18 +4686,6 @@ button.danger {
 }
 .table tr[aria-selected="true"] {
   background: var(--running-bg);
-}
-/* The name opens the agent; a session id opens its window, written as it is. */
-.table th button.agent-name,
-.table td button.session-id {
-  min-height: 0;
-  padding: 0;
-  font: var(--t-code);
-  text-transform: none;
-  letter-spacing: 0;
-}
-.table td button.session-id + button.session-id {
-  margin-left: var(--space-2);
 }
 .chip.permission-auto {
   border-color: var(--waiting-solid);

@@ -13,7 +13,7 @@
 
 import { useEffect, useState } from "react";
 import type { JSX } from "react";
-import { FUNCTIONS_HEADING, TroupeRpcError, accessWords, askWords, budgetWords, capacityWords, keyWords, missingWords, profileSummary, ruleAccessWords, whoseWords } from "@troupe/client";
+import { FUNCTIONS_HEADING, TroupeRpcError, accessWords, askWords, budgetWords, capacityWords, errorText, keyWords, missingWords, profileSummary, ruleAccessWords, whoseWords } from "@troupe/client";
 import type { AuthSession, ProfileView, ProfileViewSkill } from "@troupe/client";
 import { useProfiles } from "../hooks";
 import { Loading, Table } from "./bits";
@@ -28,12 +28,12 @@ function useProfileView(auth: AuthSession, name: string): Read {
     let live = true;
     setRead(null);
     auth
-      .rpc<ProfileView>("profile.get", { name })
+      .withToken((plane, token) => plane.profile(token, name))
       .then((view) => live && setRead({ view }))
       .catch((e: unknown) => {
         if (!live) return;
         if (e instanceof TroupeRpcError && e.code === -32005) setRead({ missing: true });
-        else setRead({ error: e instanceof Error ? e.message : String(e) });
+        else setRead({ error: errorText(e) });
       });
     return () => {
       live = false;

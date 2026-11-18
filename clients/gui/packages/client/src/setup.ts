@@ -9,6 +9,7 @@
 import { TroupeRpcError } from "./connection.js";
 import type { ModelOffer, ModelRole } from "./config.js";
 import { ErrorCodes } from "./types.js";
+import { errorText } from "./words.js";
 
 export type SetupStepName = "where" | "provider" | "key" | "models" | "workspace" | "daemon" | "finish";
 
@@ -218,12 +219,6 @@ export function describeCheck(check: SetupCheck | null, opts: { keyless?: boolea
   return `The key could not be confirmed: ${check.reason ?? "the provider did not answer"}. You can go on and type a model id.`;
 }
 
-/** The step after `step` on this flow's path, or null at the end. */
-export function nextStep(flow: Pick<SetupFlow, "steps">, step: SetupStepName): SetupStepName | null {
-  const at = flow.steps.findIndex((s) => s.name === step);
-  return at >= 0 && at + 1 < flow.steps.length ? flow.steps[at + 1]!.name : null;
-}
-
 /** The step before `step` on this flow's path, or null at the start. */
 export function previousStep(flow: Pick<SetupFlow, "steps">, step: SetupStepName): SetupStepName | null {
   const at = flow.steps.findIndex((s) => s.name === step);
@@ -264,9 +259,5 @@ export function setupUnsupported(e: unknown): boolean {
  */
 export function setupError(e: unknown): string {
   if (setupUnsupported(e)) return "This daemon does not know the first run's questions yet; update troupe-daemon.";
-  if (e instanceof TroupeRpcError) {
-    const reason = e.data?.["reason"];
-    if (typeof reason === "string") return reason;
-  }
-  return e instanceof Error ? e.message : String(e);
+  return errorText(e);
 }

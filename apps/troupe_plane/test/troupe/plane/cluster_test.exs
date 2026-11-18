@@ -14,6 +14,8 @@ defmodule Troupe.Plane.ClusterTest do
 
   use ExUnit.Case, async: false
 
+  import Troupe.Eventually
+
   alias Troupe.Plane.{
     Budget,
     Fleet,
@@ -171,8 +173,8 @@ defmodule Troupe.Plane.ClusterTest do
     # The replica goes away, as a rolling upgrade or a node failure would take it.
     Process.exit(holder, :kill)
 
-    eventually(fn -> :global.whereis_name({Placement, profile}) != holder end,
-      "the dead actor was never forgotten")
+    # The dead actor is forgotten.
+    eventually(fn -> :global.whereis_name({Placement, profile}) != holder end, 10_000, 100)
 
     # The next caller starts it here, and it reads back what the other replica granted:
     # the reservation was written to the database before it was returned.
@@ -227,18 +229,5 @@ defmodule Troupe.Plane.ClusterTest do
     Repo.delete_all(from r in Ledger.Reservation, where: like(r.session_id, ^"s-#{suffix}-%"))
     Repo.delete_all(from t in Identity.Team, where: like(t.name, ^"team-#{suffix}"))
     Repo.delete_all(from g in Identity.Group, where: like(g.external_id, ^"g-#{suffix}"))
-  end
-
-  defp eventually(predicate, message, timeout_ms \\ 10_000) do
-    deadline = System.monotonic_time(:millisecond) + timeout_ms
-    do_eventually(predicate, message, deadline)
-  end
-
-  defp do_eventually(predicate, message, deadline) do
-    cond do
-      predicate.() -> :ok
-      System.monotonic_time(:millisecond) < deadline -> Process.sleep(100) && do_eventually(predicate, message, deadline)
-      true -> flunk(message)
-    end
   end
 end

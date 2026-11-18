@@ -4,7 +4,6 @@ title: A team's name is an identifier, and the plane refuses one that is not
 date: 2026-09-21
 status: accepted
 paths:
-  - apps/troupe_plane/test/troupe/plane/team_name_test.exs
   - apps/troupe_protocol/lib/troupe/worker_profile.ex
 gist: A team's name is an identifier, and the plane refuses one that is not
 ---

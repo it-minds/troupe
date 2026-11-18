@@ -58,11 +58,6 @@ defmodule Troupe.Setup do
   alias Troupe.StartAtLogin
 
   @steps ~w(where provider key models workspace daemon finish)
-  # Every type, the fake among them: a first run can be driven to a written file with no
-  # model behind it.
-  @providers ProviderType.names()
-  # The variables a vendor's key may already be in, by every type that has one.
-  @vendor_vars for type <- ProviderType.all(), type.key_var, do: type.key_var
   @approvals ~w(ask auto)
   @env_reference ~r/^\{env:([A-Za-z_][A-Za-z0-9_]*)\}$/
 
@@ -110,30 +105,6 @@ defmodule Troupe.Setup do
   def kinds, do: ProviderTypes.kinds()
 
   defp kind_of(id), do: Enum.find(kinds(), &(&1["id"] == id))
-
-  @doc """
-  The two ways a session may treat a tool call, each in two sentences, and the safe
-  default first. What the `workspace` step shows.
-  """
-  @spec approval_choices() :: [%{id: String.t(), label: String.t(), consequence: String.t()}]
-  def approval_choices do
-    [
-      %{
-        id: "ask",
-        label: "Ask me first",
-        consequence:
-          "The agent reads freely, and asks before it writes a file or runs a command. " <>
-            "You allow once, allow for the session, or deny, and nothing changes on disk until you say so."
-      },
-      %{
-        id: "auto",
-        label: "Run everything without asking",
-        consequence:
-          "Every write and every command runs as soon as the agent asks for it. " <>
-            "For a directory whose changes you can afford to throw away, and never for one you cannot."
-      }
-    ]
-  end
 
   # -- the record -------------------------------------------------------------------
 
@@ -227,7 +198,7 @@ defmodule Troupe.Setup do
     file = ModelSettings.describe()
 
     %{
-      "env" => Enum.filter(@vendor_vars, &present?(System.get_env(&1))),
+      "env" => Enum.filter(vendor_vars(), &present?(System.get_env(&1))),
       "opencode" => %{
         "path" => OpenCode.config_path(),
         "providers" => OpenCode.provider_names(),
@@ -248,12 +219,10 @@ defmodule Troupe.Setup do
     end
   end
 
-  @doc """
-  Where a key this flow is given ends up: the user's file, there being no keychain here.
-  The path as a person on this platform writes it, since a screen shows it.
-  """
+  # Where a key this flow is given ends up: the user's file, there being no keychain here.
+  # The path as a person on this platform writes it, since a screen shows it.
   @spec key_storage() :: map()
-  def key_storage,
+  defp key_storage,
     do: %{"kind" => "file", "path" => Troupe.Paths.display(Config.user_path()), "keychain" => false}
 
   # -- the report -----------------------------------------------------------------
@@ -707,10 +676,19 @@ defmodule Troupe.Setup do
 
   # -- validation -----------------------------------------------------------------
 
-  defp provider(value) when value in @providers, do: {:ok, value}
+  # Every type, the fake among them: a first run can be driven to a written file with no
+  # model behind it. The provider types are read here and in `vendor_vars/0`, not while
+  # this module compiles, so that it does not recompile with them.
+  defp provider(value) do
+    providers = ProviderType.names()
 
-  defp provider(value),
-    do: {:error, "provider must be one of #{Enum.join(@providers, ", ")}, not #{inspect(value)}"}
+    if value in providers,
+      do: {:ok, value},
+      else: {:error, "provider must be one of #{Enum.join(providers, ", ")}, not #{inspect(value)}"}
+  end
+
+  # The variables a vendor's key may already be in, by every type that has one.
+  defp vendor_vars, do: for(type <- ProviderType.all(), type.key_var, do: type.key_var)
 
   defp kind(nil, provider), do: {:ok, provider}
   defp kind(kind, "fake"), do: {:ok, kind}

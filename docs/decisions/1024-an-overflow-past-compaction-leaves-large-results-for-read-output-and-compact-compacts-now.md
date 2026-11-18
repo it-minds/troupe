@@ -6,30 +6,10 @@ status: accepted
 issue: 1006
 supersedes: [659, 771]
 paths:
-  - apps/troupe_core/lib/troupe/agent/server.ex
-  - apps/troupe_core/lib/troupe/agent/state.ex
   - apps/troupe_core/lib/troupe/tools/output.ex
   - apps/troupe_core/lib/troupe/tools/read_output.ex
-  - apps/troupe_core/lib/troupe/llm/providers/fake.ex
+  - apps/troupe_core/lib/troupe/agent/state.ex
   - apps/troupe_core/lib/troupe/commands.ex
-  - apps/troupe_core/lib/troupe.ex
-  - apps/troupe_core/test/troupe/agent/overflow_recovery_test.exs
-  - apps/troupe_gateway/lib/troupe/gateway/dispatch.ex
-  - apps/troupe_gateway/test/troupe/gateway/daemon_test.exs
-  - apps/troupe_protocol/lib/troupe/protocol/schema.ex
-  - apps/troupe_worker/lib/troupe/worker/auth.ex
-  - apps/troupe_worker/test/troupe/worker/auth_test.exs
-  - clients/gui/apps/desktop/src/views/CommandPalette.tsx
-  - clients/gui/apps/desktop/test/compact.test.tsx
-  - clients/gui/packages/client/src/session.ts
-  - clients/gui/packages/client/src/transcript.ts
-  - clients/gui/packages/client/test/compact.test.ts
-  - clients/tui/lib/troupe/remote/worker.ex
-  - clients/tui/lib/troupe/ui/tui/server.ex
-  - clients/tui/test/troupe/compact_client_test.exs
-  - docs/user/cli-reference.md
-  - PROTOCOL.md
-  - ARCHITECTURE.md
 symbols:
   - Troupe.Agent.Server.compact/2
   - Troupe.compact/3
@@ -38,15 +18,6 @@ symbols:
   - Troupe.Tools.ReadOutput.unread_stub/3
 gist: "Overflow: compact once; if the resend overflows, send once more with every result >16 KiB as a read_output stub (llm_request behind); then fail saying fetch less. /compact: session.compact, control"
 ---
-
-Issue #1006. A pod session on a model with a 262,144-token window failed a turn that had
-fetched hundreds of records per MCP call with "already compacted once this turn; lower
-compact_at or start a new session". The overflow compacted once and sent the turn again
-(659), but a compaction keeps the last six messages whole, with each call and its result
-together (774), and the turn's own calls and large results were in those six. They did
-not fit on their own, so the resend overflowed too and the turn failed. Lowering
-`compact_at` would not have helped: the threshold is checked before a call, and the
-results came in after it.
 
 **The recovery.** On an overflow the agent compacts once, as before. If the compacted
 resend overflows again, or the conversation is too short to compact at all, it sends the
@@ -100,24 +71,3 @@ as it was"), because the person is waiting to hear. A threshold compaction's fai
 stays silent, as before. A pod's session token may call it: the worker's auth lists it
 with the session's other methods. It is not on the relay's table: a steered session's
 remote viewers do not get it, any more than they get the goal.
-
-**Not here.** A `read_output` page is 200 lines, so a result that is one very long line
-(a JSON array on one line) comes back whole and may overflow again. Paging by bytes is
-for another change.
-
-**Proof.** `OverflowRecoveryTest`, using a fake model that refuses any request whose
-messages are over a byte window (`window_bytes`), which takes no step from the script:
-- A turn reading two 28 KB files past a 40 KB window is refused whole, compacted, refused
-  again, then taken with both results as unread stubs. Its `llm_request` carries
-  `behind`, and the next turn still stubs them. On the chunk's tip this failed with
-  "already compacted once this turn".
-- The same turn too short to compact is taken with stubs and no summary, and a restart
-  sends the same request prefix.
-- Refusals past the stubs fail with the tool-results sentence and no `compact_at`.
-- Five results under 16 KiB that do not fit together fail with the same sentence.
-- `Troupe.compact/3` writes a manual `compacted` with its `command_id`, and is refused
-  `:too_little` and `:busy`.
-
-`DaemonTest` covers `session.compact` over the socket, both refusals included.
-`AuthTest` lets a session token call it. The desktop and the terminal client each have
-tests of `/compact`.

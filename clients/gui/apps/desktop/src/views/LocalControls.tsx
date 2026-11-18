@@ -6,7 +6,7 @@
 // session in the same workspace already watching — is shown as the sentence it is rather
 // than as a failed toggle that springs back.
 //
-// What the box shows is the daemon's, never its own record (troupe D114, Decision 852):
+// What the box shows is the daemon's, never its own record:
 // `watch.get` when the controls open, then each `watch_changed` the session writes, so a
 // watch the terminal's `/watch` turned on or off is shown here as it happens, and one
 // another session holds says which.
@@ -14,6 +14,7 @@
 import { useEffect, useState } from "react";
 import type { JSX } from "react";
 import type { DaemonClient, FleetRow, SessionView, WatchState } from "@troupe/client";
+import { errorText } from "@troupe/client";
 
 export function LocalControls({ daemon, row, session }: { daemon: DaemonClient; row: FleetRow; session?: SessionView | null }): JSX.Element | null {
   const raw = row.raw as { workspace?: string; branch?: string | null } | undefined;
@@ -58,7 +59,7 @@ export function LocalControls({ daemon, row, session }: { daemon: DaemonClient; 
       const r = await daemon.setWatch(workspace, next);
       setWatch({ enabled: r.enabled, backend: r.backend ?? (r.enabled ? "poll" : "off"), session_id: r.enabled ? row.id : null });
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errorText(e));
     } finally {
       setBusy(false);
     }

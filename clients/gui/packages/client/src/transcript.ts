@@ -10,6 +10,7 @@ import { named } from "./people.js";
 import { foldScratch, scratchDocumentOf } from "./scratch.js";
 import type { DurableEvent, LlmDeltaData, LoopInfo, ScratchDocument, TroupeEvent } from "./types.js";
 import { isDurable } from "./types.js";
+import { durationWords, moneyWords } from "./words.js";
 
 /** A `data` field the server replaced with a reference because it ran past 16 KiB. */
 export interface BlobRef {
@@ -787,15 +788,8 @@ export function turnLine(turn: TurnCost): string {
 
 function money(turn: TurnCost): string {
   if (turn.unpriced === turn.calls) return "no price";
-  if (turn.unpriced === 0) return dollars(turn.cost_micros);
-  return `${dollars(turn.cost_micros)}, ${turn.unpriced === 1 ? "1 call" : `${turn.unpriced} calls`} unpriced`;
-}
-
-function dollars(micros: number): string {
-  if (micros === 0) return "$0.00";
-  if (micros < 10_000) return "under a cent";
-  const cents = Math.floor((micros + 5_000) / 10_000);
-  return `$${Math.floor(cents / 100)}.${String(cents % 100).padStart(2, "0")}`;
+  if (turn.unpriced === 0) return moneyWords(turn.cost_micros);
+  return `${moneyWords(turn.cost_micros)}, ${turn.unpriced === 1 ? "1 call" : `${turn.unpriced} calls`} unpriced`;
 }
 
 /** A count of tokens, in thousands or millions to one decimal past a thousand. */
@@ -1010,10 +1004,6 @@ function systemText(d: DurableEvent): string {
       return d.data["moved"] ? "session resumed on another device" : "session resumed";
     case "fs_changed":
       return `${str(d.data["path"], "a file")} changed`;
-    case "acl_granted":
-      return `${str(d.data["subject"], "somebody")} was granted ${str(d.data["role"], "access")}`;
-    case "acl_revoked":
-      return `${str(d.data["subject"], "somebody")}'s access was revoked`;
     case "session_tainted":
       return taintedText(d);
     case "tools_unregistered":
@@ -1077,13 +1067,6 @@ function tokenCount(n: number): string {
   return String(n);
 }
 
-/** A working time in milliseconds as a limit's size: 30-minute, 2-hour, 45-second. */
-function duration(ms: number): string {
-  if (ms >= 3_600_000 && ms % 3_600_000 === 0) return `${ms / 3_600_000}-hour`;
-  if (ms >= 60_000) return `${Math.round(ms / 60_000)}-minute`;
-  return `${Math.round(ms / 1000)}-second`;
-}
-
 /**
  * A spent budget limit in words, with its size where the session said it: "its 30-minute
  * working limit", "its 40-turn limit", "its 6M input-token limit"; "its budget" for a limit
@@ -1094,7 +1077,7 @@ export function limitWords(limit: string | undefined, limits: Record<string, num
   const n = dim ? limits[dim] : undefined;
   switch (dim) {
     case "wall":
-      return n ? `its ${duration(n)} working limit` : "its working-time limit";
+      return n ? `its ${durationWords(n, "adjective")} working limit` : "its working-time limit";
     case "turns":
       return n ? `its ${n}-turn limit` : "its turn limit";
     case "input":
@@ -1228,8 +1211,6 @@ const SYSTEM_TYPES = new Set([
   "session_activated",
   "session_resumed",
   "fs_changed",
-  "acl_granted",
-  "acl_revoked",
   "session_tainted",
   "tools_unregistered",
 ]);

@@ -37,7 +37,7 @@ spec:
                 # checks what the two come to. `provider` has no default: one the API
                 # server filled in would be a setting nobody wrote, and an `llm: {}` would
                 # then be refused for it. The operator reads an absent one as openai.
-                - rule: "(has(self.extends) && self.extends != '') || !has(self.llm) || (has(self.llm.endpoint) && self.llm.endpoint != '') || !(has(self.llm.provider) || has(self.llm.model) || has(self.llm.smallModel) || has(self.llm.secretRef) || has(self.llm.prices))"
+                - rule: "(has(self.extends) && self.extends != '') || !has(self.llm) || (has(self.llm.endpoint) && self.llm.endpoint != '') || !(has(self.llm.provider) || has(self.llm.model) || has(self.llm.smallModel) || has(self.llm.secretRef) || has(self.llm.prices) || has(self.llm.maxTokens))"
                   message: "llm settings need llm.endpoint: without it the pods are given none of them and run on Troupe's built-in model settings instead. Set llm.endpoint, or remove the other llm fields."
               properties:
                 extends:
@@ -46,8 +46,8 @@ spec:
                     The one profile this one extends, by name, in this namespace. Say only what
                     differs: the plane resolves the two and writes the profile in effect into
                     status.effective, which the operator and admission read. Egress hosts, MCP
-                    servers and permission rules are added to the parent's; max sessions and
-                    the budget can only be lowered; the parent's personalTools forbid,
+                    servers and permission rules are added to the parent's; max sessions,
+                    the budget and llm.maxTokens can only be lowered; the parent's personalTools forbid,
                     repositoryOverridesBundle false, memoryProposals false and
                     github.allowPublic false hold; the
                     model key (llm.secretRef), mcpIdentities and the grants are never
@@ -140,6 +140,16 @@ spec:
                     smallModel:
                       type: string
                       description: Used only for conversation summarisation, where a cheaper model is enough.
+                    maxTokens:
+                      type: integer
+                      minimum: 1
+                      description: >-
+                        The most output tokens one model call of a session on these pods asks
+                        for (the session's max_tokens, given the pods as TROUPE_MAX_TOKENS).
+                        Absent is Troupe's default, 8192; the model's own output limit still
+                        holds where the provider's catalog gives one. An agent may name a lower
+                        max_tokens of its own. A profile that extends another can only lower
+                        its parent's.
                     prices:
                       type: object
                       description: >-

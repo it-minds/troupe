@@ -4,6 +4,7 @@
 
 import { isBlobRef } from "./transcript.js";
 import type { Entry } from "./transcript.js";
+import { bytes } from "./words.js";
 
 type ToolEntry = Extract<Entry, { kind: "tool" }>;
 
@@ -41,6 +42,17 @@ export function callScopedLabel(tool: string): string {
 }
 
 /**
+ * An answered approval's word, which the record and the line in a transcript both start
+ * with: Allowed, Allowed for this session, Always allowed, Denied.
+ */
+export function decisionWords(decision: string | undefined): string {
+  if (decision === "deny") return "Denied";
+  if (decision === "allow_session") return "Allowed for this session";
+  if (decision === "allow_always") return "Always allowed";
+  return "Allowed";
+}
+
+/**
  * Why an approval answered from another device has two answers and not three, on a laptop
  * whose daemon is from before it took an answer for the session from there (it names no
  * `RELAYED_ALLOW_SESSION`): a call is allowed or denied once.
@@ -71,13 +83,6 @@ export function callEvidence(args: unknown): CallEvidence {
 /** A count in words: `1 row`, `2 rows`. */
 export function counted(n: number, one: string, many = `${one}s`): string {
   return `${n} ${n === 1 ? one : many}`;
-}
-
-/** A size as a person reads it. */
-export function bytes(n: number): string {
-  if (n < 1024) return `${n} bytes`;
-  if (n < 1024 * 1024) return `${Math.round(n / 1024)} KB`;
-  return `${(n / 1024 / 1024).toFixed(1)} MB`;
 }
 
 /** `✓` done, `✗` failed, `⋯` running. */

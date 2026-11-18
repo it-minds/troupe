@@ -7,29 +7,10 @@ issue: 62
 paths:
   - clients/tui/lib/troupe/ui/tui/artifacts_page.ex
   - clients/tui/lib/troupe/ui/tui/memory_page.ex
-  - clients/tui/lib/troupe/ui/tui/server.ex
-  - clients/tui/lib/troupe/ui/tui/view.ex
-  - clients/tui/lib/troupe/ui/hq.ex
-  - clients/tui/lib/troupe/client.ex
   - clients/tui/lib/troupe/client/artifacts.ex
   - clients/tui/lib/troupe/client/own_memory.ex
-  - clients/tui/lib/troupe/client/remote.ex
   - clients/tui/lib/troupe/cli/artifacts.ex
   - clients/tui/lib/troupe/cli/memory.ex
-  - clients/tui/lib/troupe/cli.ex
-  - clients/tui/lib/troupe/clipboard.ex
-  - clients/tui/lib/troupe/browser.ex
-  - apps/troupe_core/lib/troupe/commands.ex
-  - apps/troupe_gateway/lib/troupe/gateway/artifacts.ex
-  - apps/troupe_gateway/lib/troupe/gateway/memory.ex
-  - clients/tui/test/troupe/artifacts_screen_test.exs
-  - clients/tui/test/troupe/memory_screen_test.exs
-  - clients/tui/test/troupe/memory_levels_screen_test.exs
-  - clients/tui/test/troupe/artifacts_cli_test.exs
-  - clients/tui/test/troupe/hq_inbox_test.exs
-  - docs/user/terminal-screen.md
-  - docs/user/cli-reference.md
-  - clients/tui/README.md
 symbols:
   - Troupe.UI.TUI.ArtifactsPage
   - Troupe.UI.TUI.MemoryPage
@@ -42,9 +23,7 @@ gist: "/artifacts by audience (◉◎◐○), opened in the browser via artifact
 Issues #62 and #55, chunk 45's "a person's things, in a person's apps", the maintainer's word
 on #765 of 2026-10-26: the console is the administrators' panel, and what is a person's own —
 their artifacts, what is shared with them, their memory — is seen and edited in the desktop
-app and the terminal. The desktop app's half is root Decision 954; this is the terminal's. On
-the chunk's tip there was no `/artifacts`, no `troupe artifacts`, `/memory` was the
-repository brief's facts alone, and HQ listed no invitations (D137).
+app and the terminal. The desktop app's half is root Decision 954; this is the terminal's.
 
 ## Artifacts
 
@@ -120,16 +99,3 @@ One line per invitation (`invites.list` at the plane HQ looks at), Enter opening
 to follow it — a private session's is the desktop app's to read, with its key, and says so —
 and one for how many artifacts are shared with the person when any are, Enter opening
 `/artifacts` on Shared with you. They are a column of their own while there are any.
-
-## Proof
-
-`artifacts_screen_test.exs` (each tab and its count, `new` gone once opened, Enter and `v`
-through the one-time address, `m` in a frame and cut past 500 lines, `l` the owner's alone,
-`p` for Only you; Local only asking nothing), `memory_screen_test.exs` (in effect with what
-it replaces, a team read, edit in the editor and in a box, a clash refused and one said to
-replace, forget after its confirm, a conflict beside the version saved since and reloaded,
-the versions side by side and a roll back, who wrote each line, Local only read-only from
-the copy), `artifacts_cli_test.exs`, `hq_inbox_test.exs`, against `FakeRemote` with the
-embedded daemon linked to it; the gateway's `artifacts_test.exs` (the forwarded
-methods with `artifact.read` among them) and `plane_memory_test.exs` (`held`). All failed on the
-chunk's tip (`e544a82f`): no screen, command or method.

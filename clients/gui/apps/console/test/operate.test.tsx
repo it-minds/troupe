@@ -5,13 +5,11 @@
 // `admin.provisioners.list` and `admin.host*`, as a platform admin, whose areas these are.
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { App } from "../src/App";
-import { PEOPLE, button, field, freshBrowser, render, says, sees, signedInAs, startFake, type, visit, waitFor } from "./support";
+import { button, field, freshBrowser, opener, says, sees, startFake, type, waitFor } from "./support";
 import type { FakeDeployment } from "./support";
 import { pod } from "../../../packages/client/test/support/admin.js";
 
 let fake: FakeDeployment;
-let unmount: (() => void) | null = null;
 
 beforeEach(async () => {
   freshBrowser();
@@ -19,16 +17,11 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
-  unmount?.();
-  unmount = null;
+  close();
   await fake.stop();
 });
 
-async function open(hash: string, who: { subject: string; name: string } = PEOPLE.alice): Promise<void> {
-  await signedInAs(fake, who);
-  visit(hash);
-  unmount = render(<App />).unmount;
-}
+const { open, close } = opener(() => fake);
 
 const row = (first: string): HTMLTableRowElement | null => [...document.querySelectorAll<HTMLTableRowElement>("tr")].find((r) => r.cells[0]?.textContent === first) ?? null;
 const go = (verb: string) => [...document.querySelectorAll<HTMLButtonElement>(".preview button")].find((b) => (b.textContent ?? "").startsWith(verb) && !b.disabled);

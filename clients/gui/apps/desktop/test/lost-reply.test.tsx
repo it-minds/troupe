@@ -1,5 +1,5 @@
 // A button that waits on one reply gives the person a way back when the reply never comes
-// (troupe #739's follow-up, D131): every call to the daemon has a stated wait, and past it
+// (troupe #739's follow-up): every call to the daemon has a stated wait, and past it
 // the call rejects with a sentence, so the screen says it and offers the button again. The
 // Models panel's Save is the one here; approvals, questions, sign-in's link and the first
 // run's answers wait on their call the same way.

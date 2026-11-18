@@ -8,15 +8,7 @@ supersedes: [708, 877]
 paths:
   - clients/gui/apps/desktop/src/views/Session.tsx
   - clients/gui/apps/desktop/src/views/Approval.tsx
-  - clients/gui/apps/desktop/src/views/AgentSwitch.tsx
-  - clients/gui/apps/desktop/src/views/CommandPalette.tsx
-  - clients/gui/apps/desktop/src/views/Publish.tsx
-  - clients/gui/apps/desktop/src/styles.css
   - clients/gui/packages/client/src/transcript.ts
-  - clients/gui/packages/client/src/session.ts
-  - clients/gui/packages/client/src/daemon.ts
-  - clients/gui/docs/design/DESIGN.md
-  - clients/gui/docs/design/session-chat.dc.html
 symbols:
   - Composer
   - ContextRing
@@ -33,18 +25,14 @@ that comp, and nothing the old screen did was dropped to make it so.
 
 **The shape.** One line of head: back, the mask, the title, the session's setup as mono
 tags (where it runs, the plane profile, the agent this window runs), who is here, the
-status, Invite and ⋯. The transcript is one column centred in its track, 760 px on a laptop and widening with the window to 1200 px (#926): a
-person's words a block on the right, the troupe's reply beside the mask with its working
-folded into the strip (Decision 877's strip, unchanged), and under the reply, on hover or
-focus, Copy, Retry, Publish and the turn's cost line. The cards that wait on the person
-(approval, question, delegation, publication, the offer of your servers, the start's
-questions) stay at the column's foot, in the column's width, with #906's floors: header
-and answers outside a body that scrolls, the transcript keeping its minimum. The composer
-is one box: attachments as tags, the message, then `+` and `/` on the left and the
-profile, the agent chip, the context ring and Send (Stop while the troupe works, Queue
-beside it once something is typed) on the right. Enter sends; the hint is the placeholder,
-and a line over the box says only what is not the usual (asleep, a loop, a wait, offline,
-who else reads). The focus mark is a pink line along its top.
+status, Invite and ⋯. The transcript is one column centred in its track, 760 px on a
+laptop and widening with the window to 1200 px (#926): a person's words a block on the
+right, the troupe's reply beside the mask with its working folded into the strip (Decision
+877's strip, unchanged), and under the reply, on hover or focus, Copy, Retry, Publish and
+the turn's cost line. The cards that wait on the person (approval, question, delegation,
+publication, the offer of your servers, the start's questions) stay at the column's foot,
+in the column's width, with #906's floors: header and answers outside a body that scrolls,
+the transcript keeping its minimum.
 
 **Where the rest went.** The backstage (tasks, files, instructions, memory, settings, the
 company, this computer's controls, what the session costs) and the scratchpad are under
@@ -89,9 +77,3 @@ counts the rest.
 **Not taken.** The backstage open by default on wide windows: the comp is one column, and
 ⋯ is one press. Approval cards inline at their place in the history: they would scroll away
 from the composer, and DESIGN.md §6 keeps them where the eye is.
-
-**Proof.** `session-chat.test.tsx` (the head and ⋯, a reply's row, uploads and their line,
-an artifact's file and a folder, Stop and the `/` popover, the ring with and without a
-window, Always allow as a void and live, the platform's reasons), `context-fill.test.ts`
-(the fold), `command-palette.test.tsx` (twelve lines of forty, the detail outside the
-list), and the suites that now open the backstage from ⋯ and set the goal with `/goal`.

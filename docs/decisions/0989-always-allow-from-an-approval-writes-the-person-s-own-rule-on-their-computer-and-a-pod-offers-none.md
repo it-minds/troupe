@@ -6,21 +6,10 @@ status: accepted
 issue: 920
 supersedes: [986]
 paths:
-  - apps/troupe_gateway/lib/troupe/gateway/dispatch.ex
-  - apps/troupe_gateway/lib/troupe/gateway/connection.ex
   - apps/troupe_core/lib/troupe/session/approvals.ex
   - apps/troupe_core/lib/troupe/config/settings.ex
-  - apps/troupe_core/lib/troupe.ex
   - apps/troupe_protocol/lib/troupe/protocol/relay.ex
-  - apps/troupe_protocol/lib/troupe/protocol/schema.ex
-  - apps/troupe_gateway/test/troupe/gateway/allow_always_test.exs
-  - apps/troupe_worker/test/troupe/worker/harness_auth_test.exs
-  - PROTOCOL.md
   - clients/gui/apps/desktop/src/views/Approval.tsx
-  - clients/gui/packages/client/src/transcript.ts
-  - clients/gui/packages/client/test/support/daemon.ts
-  - clients/gui/packages/client/test/support/worker.ts
-  - clients/gui/docs/design/DESIGN.md
 symbols:
   - Troupe.Config.Settings.allow_rule/3
   - Troupe.Session.Approvals.lasting/2
@@ -86,16 +75,3 @@ done. The record says "Always allowed".
 **What an older client sees.** A capability it does not know, and `approval_decided` with a
 decision word it shows as an allow. An older daemon answers `allow_always` with
 `invalid_params` naming `decision`, and names no capability, so no client offers it there.
-
-## Proof
-
-`allow_always_test.exs` (daemon, over its socket): the capability; `everywhere` writing
-`permissions.allow: [write_file]` into the user's file, the decision carrying the rule and
-the actor, the turn's second write running unasked, `config.changed` and `config.get`'s
-rules listing it; an MCP tool kept as `mcp(github.create_issue)` from either prefix, once;
-`managed_permission_rules_only` refused with nothing written and the call then allowed once;
-`workspace` in an untrusted workspace refused; a scope that is neither. `relay_test.exs`:
-refused over the relay. `harness_auth_test.exs` (a pod): no capability, and `forbidden` with
-the profile's sentence. All failed on the chunk's tip, where `allow_always` was an unknown
-decision. Desktop: `session-chat.test.tsx`, the button absent without the capability, sent
-with its scope with it, and the rule written through the fake daemon and recorded.

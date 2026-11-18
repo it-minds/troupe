@@ -6,36 +6,11 @@ status: accepted
 issue: 765
 paths:
   - apps/troupe_plane/lib/troupe/plane/drain.ex
-  - apps/troupe_plane/lib/troupe/plane/control/connection.ex
-  - apps/troupe_plane/lib/troupe/plane/reach.ex
-  - apps/troupe_plane/test/troupe/plane/drain_test.exs
-  - apps/troupe_plane/test/troupe/plane/reach_test.exs
-  - apps/troupe_plane/test/support/fake_pod.ex
   - apps/troupe_worker/lib/troupe/worker/drain.ex
-  - apps/troupe_worker/lib/troupe/worker/plane/commands.ex
-  - apps/troupe_worker/lib/troupe/worker/plane/link.ex
-  - apps/troupe_worker/test/troupe/worker/drain_test.exs
   - apps/troupe_operator/lib/troupe/operator/skip_observed.ex
-  - apps/troupe_operator/lib/troupe/operator/reconciler.ex
-  - apps/troupe_operator/lib/troupe/operator/watch.ex
-  - apps/troupe_operator/lib/troupe/operator/resources.ex
-  - apps/troupe_operator/test/troupe/operator/reconciler_test.exs
-  - apps/troupe_operator/test/troupe/operator/resources_test.exs
-  - apps/troupe_operator/test/support/fake_cluster.ex
-  - apps/troupe_operator/test/support/e2e/plane.ex
-  - apps/troupe_operator/test/e2e/upgrade_test.exs
-  - apps/troupe_operator/test/e2e/egress_test.exs
   - apps/troupe_protocol/lib/troupe/policy.ex
   - apps/troupe_protocol/lib/troupe/worker_profile.ex
   - apps/troupe_protocol/lib/troupe/worker_profile/reach.ex
-  - apps/troupe_protocol/test/troupe/policy_test.exs
-  - apps/troupe_protocol/test/troupe/worker_profile/reach_test.exs
-  - charts/troupe/crds/workerprofile.yaml
-  - charts/troupe/templates/admission-policy.yaml
-  - dev/kind/values.yaml
-  - docs/admin/monitoring.md
-  - docs/admin/profiles-and-policy.md
-  - docs/admin/configuration.md
 symbols:
   - Troupe.Plane.Drain.pod/2
   - Troupe.Plane.Drain.progress/2
@@ -50,17 +25,12 @@ gist: "Drain waits while pod sends drain.progress; gives up silent or at an audi
 
 # A drain waits for the pod while it reports, and an egress entry means the same under every CNI
 
-Two defects of the plane's edges, D40 and D54, for #765's spine: "a drain waits for the pod
-and the operator acts at once; every egress edge a first organisation hits is closed".
-
 ## The plane waits for a pod that is still draining
 
-`Drain.pod/2` pushed `drain` and waited the drain's timeout and 30 s for the answer. The pod
-lets running turns finish, up to that timeout, and then puts its sessions to sleep one after
-another, each given up to 120 s to seal and upload, so three busy sessions outlast it.
-Reproduced in the plane suite with a fake pod that took eleven seconds a session and a
-timeout of 300 ms: at 30.3 s the push failed, and the plane took the pod for unreachable and
-marked its sessions dormant while the pod was still putting the third to sleep.
+`Drain.pod/2` pushed `drain` and waited the drain's timeout and 30 s for the answer. The
+pod lets running turns finish, up to that timeout, and then puts its sessions to sleep one
+after another, each given up to 120 s to seal and upload, so three busy sessions outlast
+it.
 
 - **The pod reports.** `Troupe.Worker.Drain.run/1` takes `progress:`, told the total and the
   sessions left as the drain starts and again, with the session in hand, before each one it
@@ -85,20 +55,19 @@ marked its sessions dormant while the pod was still putting the third to sleep.
 ## The operator acts on the record at once
 
 The plane records a finished drain in the `troupe.dev/drained` annotation, which no
-generation counts, and `SkipObserved` halted every event whose generation the last pass had
-run: the pod was replaced at the next resync, up to 30 s later. Reproduced in the operator
-suite: a profile whose annotation had just named its pod was `observed?`.
+generation counts, and `SkipObserved` halted every event whose generation the last pass
+had run: the pod was replaced at the next resync, up to 30 s later.
 
-The precedent of `status.effectiveRevision` (Decision 913) is followed rather than a second
-watch: each pass that applies a profile writes `status.drainedRevision`, a hash of the record
-it acted on (`WorkerProfile.drained_revision/1`), and `SkipObserved` halts an event only when
-the record it carries is that one. A new field in the CRD's status, so the CRDs are applied
-before the upgrade as they always are; with an older CRD the field is pruned, every event
-goes through, and a pass that changes nothing writes nothing. A pod still Ready when the
-record lands is not replaced then, and its readiness changing is no event the operator hears,
-so it waits for the resync: that order is unusual, since the plane records a drain a scaler
-step after starting it, by when the pod's readiness probe has failed. The e2e times the
-ordinary order and says when it saw the other.
+The precedent of `status.effectiveRevision` (Decision 913) is followed rather than a
+second watch: each pass that applies a profile writes `status.drainedRevision`, a hash of
+the record it acted on (`WorkerProfile.drained_revision/1`), and `SkipObserved` halts an
+event only when the record it carries is that one. A new field in the CRD's status, so the
+CRDs are applied before the upgrade as they always are; with an older CRD the field is
+pruned, every event goes through, and a pass that changes nothing writes nothing. A pod
+still Ready when the record lands is not replaced then, and its readiness changing is no
+event the operator hears, so it waits for the resync: that order is unusual, since the
+plane records a drain a scaler step after starting it, by when the pod's readiness probe
+has failed.
 
 ## An egress entry's port, under every CNI
 
@@ -121,8 +90,6 @@ nothing; without Cilium it was the public addresses on that port. Now:
   endpoint now (`{:token, server, url}`), admitted on its port, refused where a server is
   refused, in the plane's check at `admin.profile.put` and in the operator's
   `EndpointUnreachable`, and a `*.svc` one is its namespace on its port.
-- **IPv6 in `::/96`** is printed `::2`, not `:inet.ntoa/1`'s `::0.0.0.2`, by `Reach.ntoa/1`,
-  which both the NetworkPolicy's blocks and the Cilium policy's `toCIDR` use.
 
 ## Not decided here
 

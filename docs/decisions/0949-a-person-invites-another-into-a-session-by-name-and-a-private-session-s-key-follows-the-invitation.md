@@ -6,42 +6,14 @@ status: accepted
 issue: 765
 paths:
   - apps/troupe_plane/lib/troupe/plane/invites.ex
-  - apps/troupe_plane/lib/troupe/plane/harness.ex
-  - apps/troupe_plane/lib/troupe/plane/erasure.ex
-  - apps/troupe_plane/lib/troupe/plane/remote/watch.ex
-  - apps/troupe_plane/lib/troupe/plane/sessions/session.ex
-  - apps/troupe_plane/priv/repo/migrations/20261025000949_session_invites.exs
-  - apps/troupe_plane/test/troupe/plane/invites_test.exs
   - apps/troupe_protocol/lib/troupe/kms.ex
-  - apps/troupe_protocol/lib/troupe/kms/open_bao.ex
-  - apps/troupe_protocol/lib/troupe/kms/policy.ex
-  - apps/troupe_protocol/lib/troupe/sessions/cipher.ex
-  - apps/troupe_protocol/lib/troupe/sessions/context.ex
   - apps/troupe_protocol/lib/troupe/sessions/sealer.ex
-  - apps/troupe_protocol/lib/troupe/protocol/schema.ex
-  - apps/troupe_worker/lib/troupe/worker/plane/commands.ex
   - apps/troupe_gateway/lib/troupe/gateway/invites.ex
   - apps/troupe_gateway/lib/troupe/gateway/private.ex
-  - apps/troupe_gateway/lib/troupe/gateway/dispatch.ex
-  - apps/troupe_gateway/test/troupe/gateway/invites_test.exs
-  - apps/troupe_core/lib/troupe/commands.ex
-  - clients/tui/lib/troupe/client/invites.ex
-  - clients/tui/lib/troupe/client/daemon.ex
-  - clients/tui/lib/troupe/client/remote.ex
-  - clients/tui/lib/troupe/ui/tui/server.ex
-  - clients/gui/packages/client/src/invites.ts
-  - clients/gui/packages/client/src/fleet.ts
-  - clients/gui/packages/client/src/remote.ts
-  - clients/gui/apps/desktop/src/views/Invites.tsx
-  - clients/gui/apps/console/src/views/Invited.tsx
-  - clients/gui/apps/console/src/views/Remote.tsx
-  - docs/user/sessions-shared.md
-  - docs/admin/roles-and-permissions.md
-  - PROTOCOL.md
 symbols:
   - Troupe.Plane.Invites
   - Troupe.Gateway.Invites
-  - Troupe.KMS.invited_slot/4
+  - Troupe.KMS.invited_slot/3
   - Troupe.KMS.generation/2
   - Troupe.Sessions.Sealer.rekey/4
 gist: "Invite = grant made visible; a private session's key goes into the invitee's own slot from its owner's daemon, the plane holding paths it cannot read; revoke re-keys forward"
@@ -71,16 +43,9 @@ prefix on the display name, email or subject, offers only people who share a tea
 caller and, given a session they may invite into, those its profile covers, at most 25.
 
 **Told over the watch.** `invites.changed {invites}`, the whole list, on the watch socket
-Decision 942 opened (`initialize` carries `invites` and `capabilities.invites_changed`), each
-time an invitation to that person changes, and `invites.list` over `/rpc` for a plane from
-before or a watch that is down. The console's Mine has *Invited to you*, and opens a pod
-session from it with `session.open` (read to follow it, activate to steer it) on the same
-attachment its laptop sessions use; the desktop app marks the plane's row with who invited
-the person. A view open under an invitation that is no longer listed closes with a sentence.
-
-**Everybody present is named.** `session.invites` to anybody who may see the session or is
-invited into it; the desktop head says *Shared with Bea (follows), Cy (steers)*, and its
-owner's head has *Invite*, a picker and *Remove*; the terminal's `/invite` alone says the same.
+Decision 942 opened (`initialize` carries `invites` and `capabilities.invites_changed`),
+each time an invitation to that person changes, and `invites.list` over `/rpc` for a plane
+from before or a watch that is down.
 
 ## A private session
 
@@ -145,30 +110,4 @@ rule, extended), and a plane without the invites grant leaves such an erasure pe
 
 - A copy put in a slot for an invitation the plane then refuses stays in the invitee's slot:
   the slot check before makes it a race, and nothing but the plane may delete there.
-- The terminal reads no shared private session; the desktop app does. HQ does not list
-  invitations.
 - A dormant pod session gets no log line for an invitation until it is told again.
-
-## Proof
-
-- `apps/troupe_plane/test/troupe/plane/invites_test.exs` (12), with a fake pod over the real
-  control channel and the development OpenBao with a plane credential of the plane's policies
-  and nothing more: an invitation by email is the ACL row, pushed and logged, listed to the
-  invitee and named in the head; a non-member refused and nothing written; a platform admin
-  invited; only the owner or team admin invites; taking it back ends the grant and tells the
-  watch; the picker; the watch pushes `invites.changed` to the invitee alone. A private
-  session's key in the invitee's slot: the plane's credential cannot read it, nor the owner's,
-  nor an uninvited person's, and the invitee's can; invited only with every generation, in the
-  invitee's slot, and observe only; revoking destroys the copy, refuses the removed person
-  everything, and re-keys with the remaining invitee holding both generations; erasure
-  destroys every generation and copy, and stays pending without the invites grant. All twelve
-  failed on the tip.
-- `apps/troupe_gateway/test/troupe/gateway/invites_test.exs` (5), real MinIO and OpenBao:
-  every generation put in the invitee's slot and the log line; revoking seals what follows
-  under a second key the removed person was not given (the second segment does not open under
-  the first key); an invitee's daemon reads the whole log with its keys; a plane-listed person
-  the log never invited is given no key; a link re-keys first where it was taken back
-  elsewhere.
-- `clients/gui`: the desktop app's `invites.test.tsx` (5) and the console's `invited.test.tsx`
-  (2) against the fake plane and daemon; `fleet.test.ts` for the rows. The terminal's
-  `invite_command_test.exs`.

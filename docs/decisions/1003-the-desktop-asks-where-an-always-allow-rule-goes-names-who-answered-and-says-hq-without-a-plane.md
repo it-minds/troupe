@@ -10,26 +10,11 @@ paths:
   - clients/gui/apps/desktop/src/views/Question.tsx
   - clients/gui/apps/desktop/src/views/Session.tsx
   - clients/gui/apps/desktop/src/views/StartSession.tsx
-  - clients/gui/apps/desktop/src/views/CommandPalette.tsx
-  - clients/gui/apps/desktop/src/styles.css
-  - clients/gui/packages/client/src/transcript.ts
-  - clients/gui/packages/client/src/types.ts
-  - clients/gui/packages/client/test/support/commands.ts
-  - apps/troupe_core/lib/troupe/commands.ex
-  - apps/troupe_core/test/troupe/commands_test.exs
-  - PROTOCOL.md
-  - clients/gui/apps/desktop/test/session-chat.test.tsx
-  - clients/gui/apps/desktop/test/people-by-name.test.tsx
-  - clients/gui/apps/desktop/test/command-palette.test.tsx
-  - clients/gui/apps/desktop/test/new-session.test.tsx
 symbols:
   - severalSteer
   - Troupe.Commands.for_client/2
 gist: "Always allow asks This workspace (default) / Everywhere; 'answered by <name>' with 2+ steerers; usages/examples maps (/hq takes no plane on the desktop); brand once (the rail's); local session's Owner is the signed-in name"
 ---
-
-Issue #956, the desktop's half of what chunk 47 left (#938, #940, #946 and the chunk 46
-audit). The terminal client's half is TUI Decision 175.
 
 **Where an Always allow rule goes.** Decision 989 had the desktop send `scope:
 "everywhere"` and never ask, although the daemon takes `workspace` too. Now the approval's
@@ -52,13 +37,12 @@ one person steers reads as before: naming the only person there says nothing. Th
 own word on its budget and failure questions names nobody, and none is drawn.
 
 **A client's own usage.** Decision 984 chose no `usages` map, and 996 left `/hq`'s usage
-and example naming a plane URL on the desktop, which is signed in to one plane and takes no
-address. A row now also carries `usages` and `examples`, maps from a client's name to its
-own usage and example (`null`, none), chosen as `summaries` and `details` are: `/hq` has
-`{"desktop": "/hq"}` and `{"desktop": null}`. A client's own usage keeps only the `args` it
-names, so the palette's row and its detail pane read the same strings. `for_client/2` makes
-the choice for the terminal client and the reference; the desktop applies its own entry
-before it filters. An older harness sends neither map, and each client shows what it did.
+and example naming a plane URL on the desktop, which is signed in to one plane and takes
+no address. A row now also carries `usages` and `examples`, maps from a client's name to
+its own usage and example (`null`, none), chosen as `summaries` and `details` are: `/hq`
+has `{"desktop": "/hq"}` and `{"desktop": null}`. A client's own usage keeps only the
+`args` it names, so the palette's row and its detail pane read the same strings. An
+older harness sends neither map, and each client shows what it did.
 
 **The brand once.** The start screen drew its own head (the mask and "troupe") under the
 rail's lockup, so the name stood twice, one above the other. DESIGN.md §0 gives the brand to
@@ -70,16 +54,3 @@ session on this computer, where the daemon's list carries no `owner_name`. Where
 is signed in to a plane it now says their name as the plane's `me` gives it (Decision
 992's "a name that is only the subject is no name"), and "you" while nobody is signed in,
 when this computer's user is the only name there is. A team session's owner is as before.
-
-## Proof
-
-Desktop: `session-chat.test.tsx` (Always allow asks where with This workspace focused and
-sends nothing until told; `workspace` and `everywhere` sent as pressed; the rule written
-through the fake daemon into the workspace's `config.local.yaml`), `people-by-name.test.tsx`
-(another's answer named, the reader's own "you" beside another's, one steerer unchanged;
-the Owner the signed-in name, and "you" signed out), `command-palette.test.tsx` (`/hq`'s
-usage `/hq`, no plane, no example), `new-session.test.tsx` (no head of the start screen's
-own, one lockup). Core: `commands_test.exs` ("a row a client types with other arguments
-carries that client's usage and example"). Each failed before the change: the desktop sent
-`everywhere` at once, drew no author, showed `/hq [plane]` and its URL example, drew two
-brand heads and said "you".

@@ -21,7 +21,7 @@ defmodule Troupe.Plane.Fleet.Profile do
 
   alias Troupe.Plane.Fleet.{Provisioner, SizeClass}
   alias Troupe.Plane.GitHub
-  alias Troupe.Protocol.{AgentRule, PermissionRule, ProviderTypes}
+  alias Troupe.Protocol.{AgentRule, PermissionRule, ProviderTypes, Words}
 
   @primary_key {:name, :string, autogenerate: false}
   @derive {Phoenix.Param, key: :name}
@@ -222,10 +222,25 @@ defmodule Troupe.Plane.Fleet.Profile do
   # would be a setting that silently does nothing while the pods run on the built-in
   # model settings. It is refused instead, naming the fields, as the resource's schema
   # refuses it.
-  @llm_fields ~w(provider model smallModel secretRef prices)
+  @llm_fields ~w(provider model smallModel secretRef prices maxTokens)
 
-  defp llm_problems(llm) when is_map(llm), do: llm_type(llm["provider"]) ++ llm_endpoint(llm)
+  defp llm_problems(llm) when is_map(llm),
+    do: llm_type(llm["provider"]) ++ llm_max_tokens(llm) ++ llm_endpoint(llm)
+
   defp llm_problems(_llm), do: []
+
+  # `llm.maxTokens` is a number of tokens a pod's every model call asks no more than: a
+  # "16000" or a 0 would be a cap the pods could not read, which the resource's schema
+  # refuses too.
+  defp llm_max_tokens(llm) do
+    case Map.fetch(llm, "maxTokens") do
+      {:ok, value} when not (is_integer(value) and value > 0) and not is_nil(value) ->
+        [spec: "llm.maxTokens must be a whole number of tokens above 0, not #{inspect(value)}"]
+
+      _absent_or_positive ->
+        []
+    end
+  end
 
   defp llm_type(nil), do: []
 
@@ -248,15 +263,12 @@ defmodule Troupe.Plane.Fleet.Profile do
 
       [
         spec:
-          "#{listed(set)} #{verb} set without llm.endpoint, and the pods are given the llm " <>
+          "#{Words.and_list(set)} #{verb} set without llm.endpoint, and the pods are given the llm " <>
             "settings only with an endpoint: without one they would run on Troupe's built-in " <>
             "model settings instead. Set llm.endpoint, or take #{pronoun} out"
       ]
     end
   end
-
-  defp listed([one]), do: one
-  defp listed(many), do: Enum.join(Enum.drop(many, -1), ", ") <> " and " <> List.last(many)
 
   @doc "The `llm` fields a profile may set only beside `llm.endpoint`, as the resource names them."
   @spec llm_fields() :: [String.t()]

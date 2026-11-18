@@ -6,21 +6,8 @@ status: accepted
 supersedes: [675]
 paths:
   - apps/troupe_plane/lib/troupe/plane/settings.ex
-  - apps/troupe_plane/lib/troupe/plane/harness.ex
-  - apps/troupe_plane/test/troupe/plane/client_defaults_test.exs
   - apps/troupe_core/lib/troupe/config/org.ex
   - apps/troupe_core/lib/troupe/config/model_settings.ex
-  - apps/troupe_core/test/troupe/config/org_test.exs
-  - clients/tui/lib/troupe/cli/config_setup.ex
-  - clients/tui/lib/troupe/cli.ex
-  - clients/tui/lib/troupe/cli/runner.ex
-  - clients/tui/test/troupe/config_setup_test.exs
-  - clients/gui/packages/client/src/config.ts
-  - clients/gui/packages/client/test/config.test.ts
-  - clients/gui/apps/desktop/src/views/Models.tsx
-  - clients/gui/apps/console/src/views/Organisation.tsx
-  - docs/admin/client-config.md
-  - PROTOCOL.md
 symbols:
   - Troupe.Config.Org.key_help/0
   - Troupe.CLI.ConfigSetup.key/2
@@ -49,27 +36,3 @@ keys and would hand everybody the same one. Troupe is built for all three.
   writes that copy readable by the owner alone, since it may now hold a key.
   `config.get` carries `key_help`, and `api_key_source` says `organisation` where the key
   in force is the document's: the environment and the person's file still come first.
-- **Where a key is asked for.** `troupe config` says the organisation's word before it
-  asks anything; `troupe config key` says it, then whether the organisation's key is in
-  use, then takes a key or `{env:VAR}` without echo and writes it alone into the person's
-  file (`config.set` with `key: api_key`), naming an unset variable; after `troupe config`
-  pulls a plane's settings it asks for the key there and then, where there is a terminal
-  and no key is in force. The desktop app's Models panel shows the word beside the key
-  field, an address as a link, says when the key in force is the organisation's and that
-  one pasted wins, and says so when *Use my organisation* fills in from a plane that hands
-  one out.
-- **Not done.** The first run's key step asks before any plane is signed in, so it has no
-  word to show; the daemon's own copy of the document is what `troupe config` reads, so a
-  machine that has never pulled says nothing. The browser build and the TUI's settings
-  page are unchanged.
-- **Proof.** `client_defaults_test` (no key and no word by default; the word in the
-  answer; the stored key in `defaults`, cleared with the setting, never in the settings
-  list). `org_test` (the key a default below the person's file, the copy `0600`, the word
-  kept and reported by `ModelSettings.describe/1` as `key_help` with `api_key_source`
-  `organisation`, gone with the next pull). `config_setup_test` (`troupe config key` says
-  the word, saves what is pasted alone, names an unset variable; the organisation's key in
-  use is said and Enter changes nothing; no terminal says where to put one; a plane's
-  settings pulled are followed by the key prompt, and by none where the plane hands one
-  out). `config.test.ts` (the word trimmed, an address told from a sentence, whether a key
-  is handed out, the form never taking it). `organisation.test.tsx` (a secret setting
-  shown as set or unset, edited behind a password field, previewed without the value).

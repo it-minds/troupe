@@ -1,6 +1,6 @@
 defmodule Troupe.Plane.GitHubLineageTest do
   @moduledoc """
-  A sibling and a fork start on their parent's repository (D126): `session.spawn` and
+  A sibling and a fork start on their parent's repository: `session.spawn` and
   `session.fork` carry `repository` over, checked against the plane's App and the profile
   the new session starts on as `session.create` checks one, and handed to its pod on
   activation like any other session's.

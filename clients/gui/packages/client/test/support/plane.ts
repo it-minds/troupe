@@ -12,6 +12,7 @@ import { composeProfile, exampleProfiles, specOfAdminProfile } from "./profiles.
 import type { FakeProfileSpec } from "./profiles.js";
 import { readBody, subjectOfIdToken, type FakeIdp } from "./idp.js";
 import { encodeToken, type FakeWorker } from "./worker.js";
+import { fakeBlocked } from "./blocked.js";
 import { inEffect, parse, render, type FakeLevel } from "./entries.js";
 
 interface Row {
@@ -905,7 +906,7 @@ export class FakePlane {
       if (!["owner", "edit"].includes(this.roleOf(a, subject) ?? "")) return { error: { code: -32004, message: "forbidden" } };
       if (params["owner"] !== undefined && params["owner"] !== null) return { error: { code: -32602, message: "invalid_params", data: { reason: "whose an artifact is does not change with a version; artifact.transfer moves it" } } };
       this.publish(a, subject, files, { note: typeof params["note"] === "string" ? params["note"] : null, thumbnail: sentPicture(params) });
-      return { result: this.artifactJson(a, subject) };
+      return { result: { ...this.artifactJson(a, subject), blocked: fakeBlocked(files) } };
     }
     const admin = this.opts.admin?.role(subject) === "platform_admin";
     const forTeam = visibility.startsWith("team:") ? visibility.slice("team:".length) : null;
@@ -937,7 +938,7 @@ export class FakePlane {
       versions: [{ n: 1, files, published_by: { subject, display_name: name }, published_at: "2026-10-25T10:00:00Z", note: typeof params["note"] === "string" ? params["note"] : null, thumbnail: sentPicture(params) }],
     };
     this.artifacts.set(id, a);
-    return { result: this.artifactJson(a, subject) };
+    return { result: { ...this.artifactJson(a, subject), blocked: fakeBlocked(files) } };
   }
 
   /** The administrators' table of artifacts and its takedown (`admin.artifacts.list`, `admin.artifact.takedown`). */
@@ -1024,6 +1025,8 @@ export class FakePlane {
       url: `https://artifacts.example.test/a/${a.id}/`,
       // The served version's picture, which this fake serves itself, standing in for the artifacts host.
       thumbnail_url: this.pictureOf(a) ? `${this.baseUrl}/t/${a.id}/${a.pinned ?? latest.n}` : null,
+      // What the artifacts host blocks in the served version, as the plane read it at publish.
+      blocked_count: fakeBlocked((a.versions.find((v) => v.n === (a.pinned ?? latest.n)) ?? latest).files).length,
       published_at: latest.published_at,
       may_delete: this.owns(a, subject) || this.opts.admin?.role(subject) === "platform_admin" || this.administers(a, subject),
     };
@@ -1061,6 +1064,7 @@ export class FakePlane {
           hash: `sha256:${a.id}-${v.n}`,
           bytes: files.reduce((n, f) => n + f.bytes, 0),
           files,
+          blocked: fakeBlocked(v.files),
           published_by: v.published_by,
           published_at: v.published_at,
           note: v.note ?? null,
@@ -1845,6 +1849,19 @@ export class FakePlane {
         const row = this.rows.get(String(params["session_id"] ?? ""));
         if (!row) return { error: { code: -32005, message: "not_found" } };
         row.pinned = method === "session.pin";
+        return { result: this.sessionJson(row, subject) };
+      }
+
+      // Its owner's, as archiving is: trimmed, at most 200 bytes, an empty one taking it off.
+      case "session.title.set": {
+        const row = this.rows.get(String(params["session_id"] ?? ""));
+        if (!row) return { error: { code: -32005, message: "not_found" } };
+        if (row.owner !== subject) return { error: { code: -32004, message: "forbidden", data: { required_role: "owner" } } };
+        const title = String(params["title"] ?? "").trim();
+        if (new TextEncoder().encode(title).length > 200) {
+          return { error: { code: -32602, message: "invalid_params", data: { field: "title", reason: "a title is at most 200 bytes" } } };
+        }
+        row.title = title || null;
         return { result: this.sessionJson(row, subject) };
       }
 

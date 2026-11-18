@@ -26,12 +26,12 @@ defmodule Troupe.Agent.FirstByteTest do
       ended = await_event(sid, :turn_ended, 5_000)
 
       assert error.data["reason"] ==
-               "the model at fake sent nothing for 300 ms: the address, the key or a proxy " <>
+               "the model at fake sent nothing for 0.3 s: the address, the key or a proxy " <>
                  "between here and there is the usual reason; `troupe doctor` tries a small request"
 
       # Stopped as a call that outlasts llm_timeout_ms is: ended, and counted as a call
       # nobody priced.
-      assert eventually(fn -> streams(sid) == [] end), "the stream is still running"
+      assert eventually(fn -> streams(sid) == [] end, 1_000), "the stream is still running"
       assert error.data["stopped"] == %{"model" => "fake-model"}
       assert %{"calls" => 1, "unpriced" => 1} = ended.data["turn"]
     end
@@ -58,7 +58,7 @@ defmodule Troupe.Agent.FirstByteTest do
       await_state(sid, [:idle], 5_000)
 
       assert events_of_type(sid, :compacted) == []
-      assert eventually(fn -> streams(sid) == [] end), "the summariser's stream is still running"
+      assert eventually(fn -> streams(sid) == [] end, 1_000), "the summariser's stream is still running"
     end
   end
 
@@ -111,7 +111,7 @@ defmodule Troupe.Agent.FirstByteTest do
       assert_received {:sid, sid}
       lines = log |> String.split("\n") |> Enum.filter(&String.contains?(&1, "troupe: #{sid} "))
 
-      assert Enum.any?(lines, &(&1 =~ ~r/root turn 1 failed after \d+ ms: the model at fake sent nothing for 200 ms/))
+      assert Enum.any?(lines, &(&1 =~ ~r/root turn 1 failed after \d+ ms: the model at fake sent nothing for 0.2 s/))
       refute Enum.any?(lines, &(&1 =~ "first byte after"))
     end
   end
@@ -124,14 +124,4 @@ defmodule Troupe.Agent.FirstByteTest do
   end
 
   defp streams(sid), do: Task.Supervisor.children(Registry.tasks(sid, ["root"]))
-
-  defp eventually(fun, tries \\ 50) do
-    cond do
-      fun.() -> true
-      tries == 0 -> false
-      true ->
-        Process.sleep(20)
-        eventually(fun, tries - 1)
-    end
-  end
 end

@@ -204,18 +204,4 @@ defmodule Troupe.Session.PermissionRulesTest do
       assert why =~ "managed_permission_rules_only"
     end
   end
-
-  defp eventually(check, deadline \\ 5_000) do
-    cond do
-      check.() ->
-        :ok
-
-      deadline <= 0 ->
-        flunk("it did not happen")
-
-      true ->
-        Process.sleep(50)
-        eventually(check, deadline - 50)
-    end
-  end
 end

@@ -197,24 +197,28 @@ defmodule Troupe.TestHelpers do
     event
   end
 
-  @doc "Waits until `fun` returns truthy, polling; fails after timeout."
+  @doc """
+  Calls `fun` every `step` milliseconds until it answers something other than `nil` or
+  `false`, and answers that; after `timeout` milliseconds the test fails, naming the last
+  answer. The suite's one polling helper.
+  """
   def eventually(fun, timeout \\ 5_000, step \\ 20) do
     deadline = System.monotonic_time(:millisecond) + timeout
-    do_eventually(fun, deadline, step)
+    do_eventually(fun, deadline, timeout, step)
   end
 
-  defp do_eventually(fun, deadline, step) do
+  defp do_eventually(fun, deadline, timeout, step) do
     case fun.() do
       falsy when falsy in [false, nil] ->
         if System.monotonic_time(:millisecond) > deadline do
-          flunk("condition not met within timeout")
+          flunk("condition never held within #{timeout} ms; last answer: #{inspect(falsy)}")
         else
           receive do
           after
             step -> :ok
           end
 
-          do_eventually(fun, deadline, step)
+          do_eventually(fun, deadline, timeout, step)
         end
 
       value ->

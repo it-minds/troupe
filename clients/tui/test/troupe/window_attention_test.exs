@@ -119,7 +119,7 @@ defmodule Troupe.WindowAttentionTest do
       assert Model.attention_summary(finished) == "1 done"
     end
 
-    # D42: a root that kept crashing ends its turn with `agent_failed` and what it raised
+    # A root that kept crashing ends its turn with `agent_failed` and what it raised
     # (Decision 727), and the window counted that as a turn done.
     test "a turn a crashing agent ended is failed, and the window says what it raised" do
       crashed = %{"reason" => "agent_failed", "detail" => "** (RuntimeError) boom"}
@@ -190,7 +190,7 @@ defmodule Troupe.WindowAttentionTest do
       end
     end
 
-    # D36: `Codec` gave an agent state back with `to` as the string it wrote and `reason` as
+    # `Codec` gave an agent state back with `to` as the string it wrote and `reason` as
     # an atom, the other way round from what was published, so every reader of either had
     # to know which copy it held.
     test "an event read back from the journal is the event that was published" do
@@ -215,7 +215,7 @@ defmodule Troupe.WindowAttentionTest do
       for event <- events, do: assert(journaled(event) == event)
     end
 
-    # D36: a subagent's end arrives as its own `agent_done`, which nothing read, so a
+    # A subagent's end arrives as its own `agent_done`, which nothing read, so a
     # finished one was never marked ended and said `done` with a spinner for ever.
     test "a subagent that finished has ended, and says nothing more" do
       model = fold(delegated() ++ [wire(@child, "agent_done", %{"reason" => "finished"})])
@@ -228,7 +228,7 @@ defmodule Troupe.WindowAttentionTest do
                :done
     end
 
-    # D36: a cancel stops the subagents with it and none of them says so, so what one was
+    # A cancel stops the subagents with it and none of them says so, so what one was
     # last doing stayed on the window and came back beside the next turn's spinner.
     test "a cancel stops a subagent where it was" do
       {events, memory} = translate("s-1", delegated())

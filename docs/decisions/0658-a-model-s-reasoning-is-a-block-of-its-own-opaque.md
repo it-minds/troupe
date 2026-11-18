@@ -8,10 +8,7 @@ paths:
   - apps/troupe_core/lib/troupe/llm/providers/anthropic.ex
   - apps/troupe_core/lib/troupe/llm/providers/openai.ex
   - apps/troupe_core/lib/troupe/llm/request.ex
-  - apps/troupe_core/test/troupe/agent/reasoning_shape_test.exs
-  - apps/troupe_core/test/troupe/llm/reasoning_test.exs
   - clients/gui/packages/client/src/transcript.ts
-  - clients/gui/packages/client/test/transcript.test.ts
 gist: A model's reasoning is a block of its own — opaque, provider-bound, replayed verbatim to the provider that made it and to no other
 ---
 

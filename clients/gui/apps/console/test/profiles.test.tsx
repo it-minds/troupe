@@ -4,14 +4,12 @@
 // carries every other part of the spec through a save as it was loaded.
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { App } from "../src/App";
 import { budgetMicros, draftOf, keptOf, llmWithoutEndpoint } from "../src/views/Profiles";
-import { PEOPLE, button, field, freshBrowser, link, recordCalls, render, says, sees, seesButton, seesField, signedInAs, startFake, type, visit, waitFor } from "./support";
+import { PEOPLE, button, field, freshBrowser, link, opener, recordCalls, says, sees, seesButton, seesEnabled, seesField, startFake, type, visit, waitFor } from "./support";
 import { PROVIDER_TYPES } from "../../../packages/client/test/support/provider-types.js";
 import type { FakeDeployment } from "./support";
 
 let fake: FakeDeployment;
-let unmount: (() => void) | null = null;
 
 beforeEach(async () => {
   freshBrowser();
@@ -19,8 +17,7 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
-  unmount?.();
-  unmount = null;
+  close();
   await fake.stop();
 });
 
@@ -28,11 +25,7 @@ const heading = (): string => document.querySelector("h1")?.textContent ?? "";
 const row = (name: string): HTMLTableRowElement | null =>
   [...document.querySelectorAll<HTMLTableRowElement>("table.profiles tbody tr")].find((r) => (r.cells[0]?.textContent ?? "") === name) ?? null;
 
-async function open(hash: string, who: { subject: string; name: string } = PEOPLE.alice): Promise<void> {
-  await signedInAs(fake, who);
-  visit(hash);
-  unmount = render(<App />).unmount;
-}
+const { open, close } = opener(() => fake);
 
 describe("the profile list", () => {
   it("lists every profile with its state, its pods, its image and the teams it is granted to", async () => {
@@ -203,6 +196,7 @@ describe("the editor", () => {
         provider: "",
         model: "",
         smallModel: "",
+        maxTokens: "",
         secretName: "",
         secretKey: "",
         fqdns: "b.example.com",
@@ -255,6 +249,7 @@ describe("the editor", () => {
       provider: "",
       model: "",
       smallModel: "",
+      maxTokens: "",
       secretName: "",
       secretKey: "",
       fqdns: "",
@@ -312,6 +307,24 @@ describe("the editor", () => {
     await waitFor(() => says("Recorded in the audit as profile.put on dev"), "the audit's note");
     expect(fake.admin.profiles.find((p) => p.name === "dev")!.spec!["memoryProposals"]).toBe(false);
     await waitFor(() => says("refused for its sessions"), "dev read again");
+  });
+
+  // #1080: how much output one model call on the profile's pods asks for, beside the models.
+  it("sets the output a model call asks for, behind the plane's preview, and reads it back", async () => {
+    await open("#/profiles/dev");
+    await waitFor(() => heading() === "dev" && says("Output per model call"), "dev");
+    await sees("Troupe's default, 8192 tokens");
+    button("Change dev")!.click();
+    type(await waitFor(() => field("Output per model call, in tokens"), "the editor"), "32000");
+    button("Preview")!.click();
+    await waitFor(() => says("What will happen"), "the preview");
+    await sees("spec.llm.maxTokens");
+    button("Apply")!.click();
+    await waitFor(() => says("Recorded in the audit as profile.put on dev"), "the audit's note");
+    expect((fake.admin.profiles.find((p) => p.name === "dev")!.spec!["llm"] as Record<string, unknown>)["maxTokens"]).toBe(32000);
+    await waitFor(() => says("at most 32000 tokens"), "dev read again");
+    button("Change dev")!.click();
+    expect(((await waitFor(() => field("Output per model call, in tokens"), "the editor")) as HTMLInputElement).value).toBe("32000");
   });
 
   it("says at the endpoint, before anything is sent, that model settings need one", async () => {
@@ -428,8 +441,7 @@ describe("a profile that extends another", () => {
     expect((field("How demanding") as HTMLSelectElement).value).toBe("");
     type(field("Allowed hosts")!, "wiki.example.com");
     // No image of its own: it is dev's.
-    expect((await seesButton("Preview")).disabled).toBe(false);
-    button("Preview")!.click();
+    (await seesEnabled("Preview")).click();
     await waitFor(() => says("What will happen") && says("extends"), "the preview");
     button("Create data-team")!.click();
     await waitFor(() => says("Recorded in the audit as profile.put on data-team"), "the audit's note");
@@ -524,6 +536,20 @@ describe("a profile that extends another", () => {
     button("Preview")!.click();
     await waitFor(() => says("What will happen"), "the preview");
     await sees("data-team sets memoryProposals to true, and dev's false holds: a profile cannot undo a restriction of the profile it extends.");
+  });
+
+  // #1080: a parent's output cap holds below it; a child's higher one is said, not obeyed.
+  it("has its parent's output cap, which the preview says a higher one of its own cannot raise", async () => {
+    (fake.admin.profiles.find((p) => p.name === "dev")!.spec!["llm"] as Record<string, unknown>)["maxTokens"] = 16000;
+    await fake.admin.call(PEOPLE.alice.subject, "admin.profile.put", { profile: dataTeam });
+    await open("#/profiles/data-team");
+    await waitFor(() => heading() === "data-team" && says("at most 16000 tokens"), "data-team");
+
+    button("Change data-team")!.click();
+    type(await waitFor(() => field("Output per model call, in tokens"), "the editor"), "64000");
+    button("Preview")!.click();
+    await waitFor(() => says("What will happen"), "the preview");
+    await sees("data-team sets llm.maxTokens to 64000, and dev's 16000 holds: a profile cannot raise a limit of the profile it extends.");
   });
 
   it("keeps its parent from being deleted while it extends it", async () => {

@@ -32,17 +32,8 @@ setups put it; `TROUPE_VSCODE_CLI` names another. A VS Code window open already 
 **Developer: Reload Window**. `--uninstall` (`-Uninstall`) removes the extension as well.
 
 The `.vsix` by itself installs with **Extensions: Install from VSIX…** in the command
-palette, or `code --install-extension troupe.vsix`. CI also builds one on every pull
-request that changes the extension, as the run's `troupe-vscode` artifact.
-
-To build it yourself, with Node and pnpm (the versions in `.tool-versions` and
-`clients/vscode/package.json`):
-
-```
-cd clients/vscode
-pnpm install
-pnpm package        # writes troupe.vsix
-```
+palette, or `code --install-extension troupe.vsix`. Building it yourself is in
+[its README](../../clients/vscode/README.md).
 
 `troupe` itself has to be installed where the terminal runs
 ([quick start](../quick-start.md#1-install)); the extension does not install it.
@@ -257,8 +248,8 @@ declares, the models the config names or prices, and what each provider's own li
 - **The default, cheap and expensive models** are starred and say which they are. A role
   you have not set is the default model's, so that one says all three.
 - **A model its provider does not serve** has a warning and says so, with what the
-  provider does serve on hover. It shows no window: `troupe models` gives it none, and
-  before 0.8.6 gave it Troupe's fallback, which no provider said. A turn on it would fail.
+  provider does serve on hover. It shows no window: `troupe models` gives it none. A turn
+  on it would fail.
 - **Each provider's list**: how many models it listed and when, or, when it did not
   answer, why, and what is still kept from before.
 
@@ -338,32 +329,3 @@ or when you press the group's button, as `troupe models` does in a terminal.
 Not yet: changing a setting, or trusting the workspace, from the Settings view; and a
 version check against the TUI. The panel that would show a session inside VS Code over the
 daemon's Agent Client Protocol is a later version.
-
-## How it is built and tested
-
-`clients/vscode` is a pnpm project of its own, TypeScript compiled with `tsc`, with no
-runtime dependencies: the `.vsix` is its own code, its two icons, `package.json`, the
-README, LICENSE and NOTICE. Its build and test tools are under the repository's licence
-policy like every other package ([third-party-licences.md](../third-party-licences.md)).
-
-- `pnpm test`: unit tests for everything above that needs no VS Code: the folder choice,
-  the search for `troupe` (the extensionless file included), the line each command types
-  and the path "Ask Troupe" writes, the Settings view's rows and its Models group (never a
-  key), opening with the folder, and the manifest (no Windows key on Ctrl+Alt, every icon
-  in the package). The line is also put through each shell the machine has (sh, bash,
-  zsh, dash, fish, Windows PowerShell, PowerShell 7, cmd.exe), with a folder name full of
-  quotes, `$`, `&` and backticks and a task with double quotes, a line break, `%PATH%` and
-  backslashes, and has to arrive as the arguments it was meant to be; so does the call a
-  `.cmd` gets through cmd.exe for the Settings view.
-- `pnpm test:vscode`: the extension inside a real VS Code, on a workspace of four folders,
-  against a fake `troupe` that writes down how it was started, then waits, quits or fails
-  as told, and answers `config --explain --json` and `models --json` with its own: every
-  way of opening Troupe, the side bar, the four commands, "Ask Troupe", the profile, and
-  `troupe.openOnFolderOpen` in two more windows on one folder. A run ends when its window
-  reloads and runs with workspace trust off, so a real reload and the untrusted case were
-  checked by hand (Decision 816). VS Code is downloaded, or `TROUPE_VSCODE_EXECUTABLE`
-  names one, and runs with its own user data and extensions under `.vscode-test/`, so
-  nobody's profile is read or changed. On Linux without a display, run it under
-  `xvfb-run -a`.
-- CI runs both on Linux and Windows, and macOS in a full run, then builds the `.vsix`
-  ([ci.md](../developer/ci.md)).

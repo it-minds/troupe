@@ -6,7 +6,6 @@ status: accepted
 issue: 190
 paths:
   - apps/troupe_plane/lib/troupe/plane/placement.ex
-  - apps/troupe_plane/test/troupe/plane/grant_enforcement_test.exs
 gist: A session that leaves its pod for good gives back its slot and its budget slice, each once, however it left
 ---
 

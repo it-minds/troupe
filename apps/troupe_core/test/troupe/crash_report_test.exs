@@ -15,7 +15,6 @@ defmodule Troupe.CrashReportTest do
   import ExUnit.CaptureLog
 
   alias Troupe.Config
-  alias Troupe.Session.MCP
 
   @stub Path.expand("../support/mcp_stub.exs", __DIR__)
   @elixir System.find_executable("elixir") || "elixir"
@@ -121,7 +120,7 @@ defmodule Troupe.CrashReportTest do
       """)
 
       %{session: session} = start_session(context)
-      wait_for_ready(session.id, "stub")
+      await_mcp(session.id, "stub", [:ready], 20_000, 100)
       %{session: session}
     end
 
@@ -237,15 +236,5 @@ defmodule Troupe.CrashReportTest do
     pid |> :sys.get_status(1_000) |> inspect(limit: :infinity, printable_limit: :infinity)
   catch
     :exit, _ -> ""
-  end
-
-  defp wait_for_ready(session_id, name, waited \\ 0) do
-    entry = Enum.find(MCP.status(session_id), &(&1.name == name))
-
-    cond do
-      entry && entry.state == :ready -> entry
-      waited < 20_000 -> Process.sleep(100) && wait_for_ready(session_id, name, waited + 100)
-      true -> flunk("#{name} never became ready: #{inspect(entry)}")
-    end
   end
 end

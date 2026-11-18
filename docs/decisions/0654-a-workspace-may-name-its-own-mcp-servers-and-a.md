@@ -11,8 +11,6 @@ paths:
   - apps/troupe_core/lib/troupe/session.ex
   - apps/troupe_core/lib/troupe/session/mcp.ex
   - apps/troupe_core/lib/troupe/tools.ex
-  - apps/troupe_core/test/troupe/mcp_local_test.exs
-  - apps/troupe_core/test/troupe/reaper_test.exs
   - clients/tui/lib/troupe/client/daemon.ex
 gist: A workspace may name its own MCP servers, and a stdio one runs under the reaper like everything else
 ---

@@ -9,36 +9,15 @@ paths:
   - apps/troupe_plane/lib/troupe/plane/remote.ex
   - apps/troupe_plane/lib/troupe/plane/remote/watch.ex
   - apps/troupe_plane/lib/troupe/plane/remote/laptop.ex
-  - apps/troupe_plane/lib/troupe/plane/web/router.ex
-  - apps/troupe_plane/lib/troupe/plane/harness.ex
   - apps/troupe_plane/lib/troupe/plane/clients_seen.ex
   - clients/gui/apps/console/src/App.tsx
-  - clients/gui/apps/console/src/console.ts
-  - clients/gui/apps/console/src/nav.ts
-  - clients/gui/apps/console/src/views/Shell.tsx
   - clients/gui/apps/console/src/views/Mine.tsx
-  - clients/gui/apps/console/src/views/Remote.tsx
-  - clients/gui/apps/desktop/src/hooks.ts
-  - clients/gui/apps/desktop/src/views/Remote.tsx
-  - clients/gui/packages/client/src/remote.ts
-  - clients/gui/packages/client/src/fleet.ts
-  - clients/gui/packages/client/src/session.ts
-  - clients/gui/packages/client/src/transcript.ts
-  - PROTOCOL.md
-  - docs/admin/console.md
 symbols:
   - Troupe.Plane.Remote.Watch
   - Troupe.Plane.Remote.changed/1
   - Troupe.Plane.ClientsSeen.of/1
 gist: "Console signs in everybody, a member to Mine only, admins add the four groups; offers pushed over /v1/relay/watch (remote.changed), steering from presence:<id>; polls only as fallback"
 ---
-
-#58's rest, pulled forward into chunk 42 by the maintainer on 2026-10-24. Two things were
-left after slice 2 (Decision 928): a person who administers nothing could steer only from
-the desktop app or the terminal, because the console signed in administrators and told
-anybody else "Nothing to administer here"; and the desktop app learned of an offer, a
-withdrawal or a laptop going away by asking `remote.list` again every four seconds, and
-who was steering this computer's own session from the daemon's listing on the same poll.
 
 ## A person's own console
 
@@ -119,20 +98,3 @@ is down, and as a five-minute safety net (`fleetTiming.safetyNetMs`), so a plane
 the watch is asked as it was; the console asks `remote.list` once at each failed dial. The
 team half (`sessions.list`) and the daemon's own listing are still polled every four
 seconds: they are not presence, and the daemon's `fleet` topic is a later change.
-
-## Proof
-
-- `apps/troupe_plane/test/troupe/plane/remote_test.exs`, a person's watch: an offer, a new
-  share, the laptop going and a withdrawal reaching the people they concern within a second
-  and nobody else; a member who administers nothing listing, watching and opening only what
-  is offered to them, a relay token refused at the watch; a page from another origin refused.
-- `apps/troupe_plane/test/troupe/plane/client_versions_test.exs`: `me.clients`, the person's
-  own and nobody else's.
-- `clients/gui/apps/console/test/remote.test.tsx`: offered sessions on Mine, steered;
-  a member steering one, shown nothing not offered to them, refused one by its address; an
-  offer, its laptop going and its withdrawal shown within a second with no `remote.list`
-  asked again. `mine.test.tsx`, `signin.test.tsx` (a member lands on Mine with no
-  administrative area), `shell.test.tsx`.
-- `clients/gui/apps/desktop/test/remote-sessions.test.tsx`: an offer, its laptop going and its
-  withdrawal shown within a second with no `remote.list` asked again; who is steering this
-  computer's session named as they arrive and leave, from its presence.

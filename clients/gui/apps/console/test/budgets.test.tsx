@@ -4,12 +4,10 @@
 // `admin.person.budget` and `admin.connections.list`.
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { App } from "../src/App";
-import { PEOPLE, button, field, freshBrowser, render, says, sees, signedInAs, startFake, type, visit, waitFor } from "./support";
+import { PEOPLE, button, field, freshBrowser, opener, says, sees, startFake, type, waitFor } from "./support";
 import type { FakeDeployment } from "./support";
 
 let fake: FakeDeployment;
-let unmount: (() => void) | null = null;
 
 beforeEach(async () => {
   freshBrowser();
@@ -17,16 +15,11 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
-  unmount?.();
-  unmount = null;
+  close();
   await fake.stop();
 });
 
-async function open(hash: string, who: { subject: string; name: string } = PEOPLE.alice): Promise<void> {
-  await signedInAs(fake, who);
-  visit(hash);
-  unmount = render(<App />).unmount;
-}
+const { open, close } = opener(() => fake);
 
 const go = (verb: string) => [...document.querySelectorAll<HTMLButtonElement>(".preview button")].find((b) => (b.textContent ?? "").startsWith(verb) && !b.disabled);
 

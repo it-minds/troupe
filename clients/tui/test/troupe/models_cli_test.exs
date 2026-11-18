@@ -60,7 +60,7 @@ defmodule Troupe.ModelsCLITest do
     refute out =~ "named providers"
   end
 
-  # Defects D70 and D76, root Decision 799: a model nobody serves has no window, in the text
+  # A model nobody serves has no window, in the text
   # whether or not a role names it, and in the JSON.
   test "a model the gateway does not serve that no role names says so, in place of a window",
        ctx do

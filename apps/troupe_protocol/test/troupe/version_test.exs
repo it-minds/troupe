@@ -20,6 +20,15 @@ defmodule Troupe.VersionTest do
 
   defp version, do: "VERSION" |> read!() |> String.trim()
 
+  defp built_version(app) do
+    app_file = Path.join([Mix.Project.build_path(), "lib", "#{app}", "ebin", "#{app}.app"])
+
+    case :file.consult(app_file) do
+      {:ok, [{:application, ^app, spec}]} -> to_string(spec[:vsn])
+      {:error, _not_built} -> nil
+    end
+  end
+
   describe "the release version" do
     test "is a plain semantic version, on one line" do
       assert version() =~ ~r/^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$/,
@@ -41,11 +50,13 @@ defmodule Troupe.VersionTest do
       # Read from the compiled projects rather than by parsing `mix.exs`, because what
       # matters is the version an app actually has — a file that reads `VERSION` and a file
       # that hard-codes the same string are not the same thing next month, and only one of
-      # them is what `Application.spec/2` answers.
+      # them is what `Application.spec/2` answers. The `.app` in the build is what that
+      # reads, and reading the file serves this suite run alone, where only this app and
+      # its dependencies are loaded.
       for app <- ~w(troupe_protocol troupe_core troupe_gateway troupe_worker
                     troupe_plane troupe_operator troupe_a2a)a do
-        assert to_string(Application.spec(app, :vsn)) == version(),
-               "#{app} is #{Application.spec(app, :vsn)} and VERSION is #{version()}"
+        assert built_version(app) == version(),
+               "#{app} is #{inspect(built_version(app))} in the build and VERSION is #{version()}"
       end
     end
 

@@ -12,18 +12,13 @@ paths:
   - apps/troupe_core/lib/troupe/bench/scenario.ex
   - apps/troupe_core/lib/troupe/llm/provider.ex
   - apps/troupe_core/lib/troupe/reaper.ex
-  - apps/troupe_core/test/support/fake_openai.exs
-  - apps/troupe_core/test/troupe/bench_live_test.exs
   - clients/tui/lib/troupe/cli/bench.ex
-  - docs/developer/bench.md
 gist: "`troupe bench --live` runs small tasks against the person's own model, under a cap it says before it starts, and keeps a history `--compare` reads"
 ---
 
-Issue #390, its local
-live mode, on Decision 772's runner, scenario format and report; the nightly's wiring
-and `troupe doctor --bench` stay open. The offline suite says what the harness does
-with a scripted model; what a turn costs on a person's own gateway and model, and
-whether the work gets done there, only a real model can say.
+The offline suite says what the harness does with a scripted model; what a turn costs on a
+person's own gateway and model, and whether the work gets done there, only a real model
+can say.
 - **Tasks a script checks, not the offline scenarios.** `Troupe.Bench.LiveScenarios`:
   write a file with given content; fix a failing test without touching it (`elixir
   calc_test.exs` exits 0); delegate a question to `explore` and write its answer; read
@@ -105,21 +100,4 @@ whether the work gets done there, only a real model can say.
 - **`--repeat N`, default 1.** One run of each is the cheapest answer to "does it work
   here and what does it cost"; to compare, three or more. The issue's open question
   (3 or 5) is the nightly's.
-- **The nightly, later.** It never runs for a pull request. The nightly should run it
-  after `scripts/live-check`, with the model and prices the `live` job already has
-  (`TROUPE_NIGHTLY_MODEL`, `qwen3-235b` by default), `--repeat 3 --yes --json`, its
-  table in the run's summary, and the history carried from night to night (an Actions
-  cache keyed by the branch) so `--compare` shows a trend break. That wiring is a
-  change to `live.yml` of its own.
-- **Proof:** `Troupe.BenchLiveTest`, against a stand-in for an OpenAI-compatible
-  endpoint on a loopback port (`test/support/fake_openai.exs`, streamed scripted
-  answers with usage and delays, a `500` first when asked): the plan's cap and its
-  words, the key in none of them; no price, a cap in tokens; no key, refused; a
-  missing program, left out; four scenarios twice with every live field filled and the
-  delegation timed across two agents with the same call ids; a retry counted; a run
-  past its wall clock stopped; a run past its share of the cap stopped; the history
-  and `--compare` by last, version and model; a file's text; a release's runtime out
-  of a command's `PATH`; a compaction's summary as a call with its prompt and cost.
-  The TUI's `bench_cli_test.exs`, which failed on #397's tip with `troupe bench
-  --live: not yet`; and the installed `troupe bench --live --repeat 2 --json` against
-  the stand-in, on the pull request.
+- **The nightly, later.** It never runs for a pull request.

@@ -43,6 +43,7 @@ gitops mode a manifest names its image, and a release reaches the workers with a
 | `llm.endpoint`, `.provider`, `.model` | the worker's `TROUPE_BASE_URL`, `TROUPE_PROVIDER` (one of the [provider types](../user/configuration.md#provider-types); absent is `openai`, Chat Completions, which a gateway serves) and `TROUPE_MODEL`. The endpoint's host is an egress destination. Every other `llm` field needs `llm.endpoint`, because the pods are given the `llm` settings only with one: the plane and the resource's schema refuse a profile that sets any without it, naming them |
 | `llm.secretRef.{name,key}` | the Secret injected as `TROUPE_API_KEY` (key `api-key`); not optional. Kept in `troupe-system` labelled `troupe.dev/worker-secret=true`, it is copied into the worker namespace ([configuration.md Part D](configuration.md#part-d--secrets-the-chart-expects)) |
 | `llm.prices` | dollars per million tokens by model, `{"qwen3-235b": {"input": …, "output": …}}` with optional `cacheRead` and `cacheWrite`, injected as `TROUPE_MODEL_PRICES`, for models the gateway does not price (with LiteLLM, every streamed call). An unpriced call costs nothing on the ledger and no money budget applies to it; the gateway's price wins where it gives one. Set through the API: the console's editor keeps it but does not show it |
+| `llm.maxTokens` | the most output tokens one model call of a session on the pods asks for, injected as `TROUPE_MAX_TOKENS` (the session's `max_tokens`); a whole number above 0, absent is Troupe's default of 8192. The model's own output limit still holds where the provider's catalog gives one, an agent's own `max_tokens` may only lower it, and an organisation's ceiling for people's machines does not reach a pod (Decision 1047). A change replaces the pods. The console's editor has it as *Output per model call* |
 | `egress.fqdns`, `egress.gitHosts` | extra hosts the pods may reach, each matching a policy pattern. A wildcard is one leading label (`*.example.com`) and passes only a policy holding that same wildcard; any other star, a bare `*` included, is refused by name ([§4](#4-troupepolicy)) |
 | `storage.storageClassName` | the class a worker's disk comes from, one `allowedStorageClasses` names; absent is the cluster's default |
 | `configBundleChannel` | the bundle channel the profile follows (`stable`) |
@@ -52,7 +53,7 @@ gitops mode a manifest names its image, and a release reaches the workers with a
 | `memoryProposals` | `false` refuses every proposal its sessions make to a team's or the organisation's memory; absent, the platform setting decides ([a profile's options](profile-options.md#proposals-to-shared-memory-from-a-pod)) |
 | `permissions` | per-tool `deny`, `ask` and `allow` rules every session on these pods obeys ([a profile's options](profile-options.md#per-tool-rules-on-a-profile)) |
 | `agents` | which agents exist on these pods, built-ins included: `allow` and `deny` lists of names, a grant narrowing only what they leave ([a profile's options](profile-options.md#which-agents-a-profile-has)) |
-| `github.*` | what a session's token may do on GitHub beyond cloning (`permissions`, [github.md §5](github.md#5-let-a-profile-reach-github)) and how far the fix loop goes (`allowPublic`, `denyPaths`, `maxPushes`, `maxRuns`, `maxAttempts`, [github.md §9](github.md#9-how-far-a-run-may-go)) |
+| `github.*` | what a session's token may do on GitHub beyond cloning (`permissions`, [github.md §5](github.md#5-let-a-profile-reach-github)) and how far the fix loop goes (`allowPublic`, `denyPaths`, `maxPushes`, `maxRuns`, `maxAttempts`, [github.md §7](github.md#7-how-far-a-run-may-go)) |
 | `mcpIdentities` | who the profile is at each MCP server its bundle calls with client credentials ([a profile's options](profile-options.md#calling-an-mcp-server-as-the-profile)). Yours to write in direct and gitops mode alike; nothing in it is secret |
 | `mcpServers` | MCP servers the profile adds to its bundle's (Decision 910). The resource's list, which its pods load, is its channel's bundle's with these added by name; one named like a bundle server replaces it only with `"override": true`. A publish to the channel composes the two again and keeps the profile's own. `admin.profile.get` answers the own ones in `spec`, and a put that sends back the resource's whole list has the bundle's dropped |
 | `teams` | **written by the plane** from grants; do not set it |
@@ -64,23 +65,7 @@ removes one left from before; in gitops mode, where the repository holds it as a
 `WorkerProfile` like any other, the plane writes `spec.replicas: 0` onto it.
 
 The rest of what a profile can say is on a page of its own, [a profile's
-options](profile-options.md):
-
-- <a id="a-profile-that-extends-another"></a>[A profile that extends another](profile-options.md#a-profile-that-extends-another):
-  one standard profile, and a team's that says only what differs; what a child inherits,
-  adds or may only narrow.
-- <a id="calling-an-mcp-server-as-the-profile"></a>[Calling an MCP server as the profile](profile-options.md#calling-an-mcp-server-as-the-profile):
-  `mcpIdentities`, an OAuth client of the profile's own whose assertion OpenBao transit
-  signs; setting one up, rotating it, and what is reported.
-- <a id="a-repositorys-agents-and-skills-on-a-pod"></a>[A repository's agents and skills on a pod](profile-options.md#a-repositorys-agents-and-skills-on-a-pod):
-  the bundle's and the built-ins beat a working copy's of the same name unless
-  `repositoryOverridesBundle` is `true`.
-- <a id="a-persons-own-tools-on-a-pod"></a>[A person's own tools on a pod](profile-options.md#a-persons-own-tools-on-a-pod):
-  `personalTools: forbid` refuses the tools a person offers from their own machine.
-- <a id="per-tool-rules-on-a-profile"></a>[Per-tool rules on a profile](profile-options.md#per-tool-rules-on-a-profile):
-  `permissions`, the `deny`, `ask` and `allow` rules every session on the pods obeys.
-- <a id="which-agents-a-profile-has"></a>[Which agents a profile has](profile-options.md#which-agents-a-profile-has):
-  `agents`, the `allow` and `deny` lists of names that say which agents exist on the pods.
+options](profile-options.md), which the rows above link.
 
 ### A worker image of the profile's own
 
@@ -232,8 +217,7 @@ a session, or waits its turn), `is draining`, `is drained and waits its turn`, `
 replaced`. A profile with one pod keeps giving it new sessions, having nowhere else to put
 them, and it rolls the first time they are all dormant; for the half-minute its replacement
 takes to start, a new session on the profile waits, as on a cold profile. To roll a busy
-pod sooner, `admin.pod.drain` it. The plane needs the pod's uid from its enrolment token, so
-a pod that enrolled with a plane older than 0.6.3 is drained only after it next connects.
+pod sooner, `admin.pod.drain` it.
 
 `admin.pod.drain` on a pod that is not behind marks it draining, stops placing on it, and
 waits until every session on it is dormant in object storage. **Nothing then restarts or
@@ -254,7 +238,7 @@ pod you drained yourself is left to you unless it is above the count the profile
 itself as it stops: running turns get 150 s, half the worker's drain timeout, then its
 sessions are put to sleep and reported, inside the pod's grace period
 (`operator.drainTimeoutSeconds`). Keep that at 300 s or more; below it, the kill can come
-before the sessions are asleep, as every stop did before 0.6.3.
+before the sessions are asleep.
 
 ## 4. TroupePolicy
 
@@ -365,7 +349,8 @@ pod is `session:/` and `skills:/`, so `publish` and `import` have nowhere to go 
 
 `plane.provisioningMode` (`TROUPE_PROVISIONING_MODE`) decides who writes a profile's
 `WorkerProfile`. It is the deployment's: the console's **Policy and settings** shows it and
-cannot change it, and a value stored there before 0.7.0 is not read.
+cannot change it, and `admin.provisioning.mode` answers it before a write that the mode
+would refuse.
 
 | Mode | The profiles are | The plane writes | Reported |
 |---|---|---|---|

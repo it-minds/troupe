@@ -10,7 +10,7 @@ defmodule Troupe.Gateway.OrganisationTest do
   # The copy is the machine's, in one place for the whole VM.
   use ExUnit.Case, async: false
 
-  require Logger
+  import Troupe.Eventually
 
   alias Troupe.Config.Org
   alias Troupe.Gateway.{Daemon, FakePlane}
@@ -316,13 +316,5 @@ defmodule Troupe.Gateway.OrganisationTest do
     refute Map.has_key?(elem(Org.read_cache(), 1), "signed")
     assert {:ok, identity} = Client.call(ctx.client, "identity.get", %{})
     refute Map.has_key?(identity, "plane_key")
-  end
-
-  defp eventually(check, deadline \\ 5_000) do
-    cond do
-      check.() -> true
-      deadline <= 0 -> false
-      true -> Process.sleep(50) && eventually(check, deadline - 50)
-    end
   end
 end

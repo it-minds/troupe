@@ -22,9 +22,10 @@ import { TEAM_TABS, href } from "../route";
 import type { TeamTab } from "../route";
 import { recorded, show, useConsole, useLoad } from "../console";
 import type { Load } from "../console";
-import { AuditNote, Empty, Field, Loaded, Locked, Preview, Region, Status, bytes, changed, count, duration, money, useChange, when } from "./bits";
+import { AuditNote, Empty, Field, Loaded, Locked, Preview, Region, Status, changed, count, useChange, when } from "./bits";
 import type { DiffLine, Done, FieldProps } from "./bits";
 import { Spend, Twice } from "./Teams";
+import { bytes, durationWords, moneyWords } from "@troupe/client";
 
 const TAB_LABELS: Record<TeamTab, string> = {
   members: "Members and groups",
@@ -240,8 +241,8 @@ function Members({ team, onApplied }: { team: AdminTeam; onApplied: () => void }
                 <tr key={m.subject}>
                   <td>{m.display_name ?? m.subject}</td>
                   <td className="mono">{m.subject}</td>
-                  <td className="num">{money(m.spent_micros ?? 0)}</td>
-                  <td className="num">{m.budget_micros ? money(m.budget_micros) : <span className="muted">none</span>}</td>
+                  <td className="num">{moneyWords(m.spent_micros ?? 0)}</td>
+                  <td className="num">{m.budget_micros ? moneyWords(m.budget_micros) : <span className="muted">none</span>}</td>
                 </tr>
               ))}
             </tbody>
@@ -588,9 +589,9 @@ function valueWords(limit: Limit, value: unknown): string {
   if (value === null || value === undefined || value === "") return "unset";
   switch (limit.kind) {
     case "money":
-      return Number(value) === 0 ? "no ceiling" : money(Number(value));
+      return Number(value) === 0 ? "no ceiling" : moneyWords(Number(value));
     case "seconds":
-      return Number.isFinite(Number(value)) ? duration(Number(value)) : String(value);
+      return Number.isFinite(Number(value)) ? durationWords(Number(value) * 1000) : String(value);
     case "days":
       return `${String(value)} days`;
     case "mebibytes":
@@ -832,7 +833,7 @@ function limitRefusal(field: string, asked: unknown, ceiling: unknown): string {
   const days = (n: unknown): string => (Number(n) === 1 ? "1 day" : `${String(n)} days`);
   switch (field) {
     case "idle_timeout_seconds":
-      return `The platform allows at most ${duration(Number(ceiling))} idle; ${duration(Number(asked))} is more than that.`;
+      return `The platform allows at most ${durationWords(Number(ceiling) * 1000)} idle; ${durationWords(Number(asked) * 1000)} is more than that.`;
     case "cache_eviction_days":
       return `The platform allows at most ${days(ceiling)} for a sleeping session's cache; ${days(asked)} is more than that.`;
     case "erase_after_days":
@@ -857,11 +858,11 @@ function consequence(team: string, line: DiffLine, laddered: LadderValue | undef
   }
   switch (line.field) {
     case "budget_micros":
-      return to === 0 || to === null ? `${team} has no spending ceiling.` : `${team}'s new sessions are held to a ceiling of ${money(Number(to))} a period.`;
+      return to === 0 || to === null ? `${team} has no spending ceiling.` : `${team}'s new sessions are held to a ceiling of ${moneyWords(Number(to))} a period.`;
     case "budget_period":
       return to === "never" ? "The ceiling never turns over: what is spent stays spent." : "The ceiling turns over on the 1st of each month, UTC.";
     case "idle_timeout_seconds":
-      return `A ${team} session idle for ${typeof to === "number" ? duration(to) : show(to)} falls asleep: it stops costing anything and wakes with its history.`;
+      return `A ${team} session idle for ${typeof to === "number" ? durationWords(to * 1000) : show(to)} falls asleep: it stops costing anything and wakes with its history.`;
     case "cache_eviction_days":
       return `A sleeping ${team} session keeps its cache ${show(to)} days.`;
     case "erase_after_days":

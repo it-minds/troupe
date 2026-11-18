@@ -8,6 +8,7 @@ defmodule Troupe.CLIDaemonTest do
   use ExUnit.Case, async: false
 
   import ExUnit.CaptureIO
+  import Troupe.TestHelpers, only: [eventually: 1]
 
   alias Troupe.CLI
 
@@ -138,7 +139,7 @@ defmodule Troupe.CLIDaemonTest do
       end
     end
 
-    # D115: `open` starts a daemon that is to outlive it, detached, and returns. On Windows
+    # `open` starts a daemon that is to outlive it, detached, and returns. On Windows
     # the reaper's job took everything `open` had left running when `open` returned, the
     # daemon with it, so `troupe daemon open` left none where `troupe-daemon open` did.
     # `open` runs under no reaper; the sweep here is the Unix reaper's, which takes what a
@@ -175,7 +176,7 @@ defmodule Troupe.CLIDaemonTest do
     assert Troupe.CLI.Daemon.command() == :error
     output = capture_io(:stderr, fn -> assert Troupe.CLI.Daemon.run(["run"]) == 1 end)
 
-    # The release's installers, downloaded and then run, as the README says (D125): not
+    # The release's installers, downloaded and then run, as the README says: not
     # a script from the main branch piped into a shell.
     assert output =~
              "curl -fsSLO https://github.com/it-minds/troupe/releases/latest/download/install.sh"
@@ -194,15 +195,6 @@ defmodule Troupe.CLIDaemonTest do
     case File.read(path) do
       {:ok, text} -> if String.ends_with?(text, "\n"), do: String.trim(text)
       {:error, _} -> nil
-    end
-  end
-
-  # The check's value once it has one, within five seconds, or nil.
-  defp eventually(check, tries \\ 100) do
-    case check.() do
-      value when value not in [nil, false] -> value
-      _ when tries == 0 -> nil
-      _ -> Process.sleep(50) && eventually(check, tries - 1)
     end
   end
 

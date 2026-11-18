@@ -6,20 +6,8 @@ status: accepted
 issue: 62
 paths:
   - clients/tui/lib/troupe/ui/tui/model.ex
-  - clients/tui/lib/troupe/ui/tui/server.ex
-  - clients/tui/lib/troupe/ui/tui/view.ex
   - clients/tui/lib/troupe/ui/tui/artifacts_page.ex
-  - clients/tui/lib/troupe/ui/headless/printer.ex
-  - clients/tui/lib/troupe/remote/translate.ex
-  - clients/tui/lib/troupe/remote/worker.ex
-  - clients/tui/lib/troupe/client.ex
   - clients/tui/lib/troupe/client/artifacts.ex
-  - clients/tui/lib/troupe/cli/artifacts.ex
-  - clients/tui/lib/troupe/cli.ex
-  - clients/tui/test/troupe/publish_gate_test.exs
-  - clients/tui/test/troupe/artifacts_cli_test.exs
-  - clients/tui/test/troupe/artifacts_screen_test.exs
-  - docs/user/terminal-screen.md
 symbols:
   - Troupe.UI.TUI.Model.publish_choices/2
   - Troupe.UI.TUI.Model.publish_draft/3
@@ -61,26 +49,6 @@ the root's (the `owner_team`, `may_transfer` and `role` of a row; `artifact.publ
   version (the plane refuses a `publish` with `id` and `owner`), so for a `publication`
   with `id` the choices carry no owner, each team once, and the answer is the visibility
   alone.
-- **The draft is the window's**, as the delegation gate's: `state.gate` holds the pick
-  for the call on screen (`Model.publish_draft/3`), fresh for another call, dropped when
-  another window is activated, sent only with the answer; `approval.respond` carries it
-  as `visibility` and `owner` beside the decision (`Troupe.Remote.Worker` passes those
-  keys through as it passes `agent`, `brief` and `reason`).
 - **Headless** denies it, as every request with nobody to ask, with a line saying what
   the publication is and whom the agent proposed it for; one the agent named nobody for
   says `--auto-approve` would not have answered it either.
-- **Whose a row is** is said by `Troupe.Client.Artifacts.owner/1` everywhere a row is
-  drawn (`/artifacts`, `troupe artifacts list`, `--json`'s `by`): `team finance` for a
-  team's, whoever first published it, since every member owns it; `you`; else who
-  published it. The listing adds `transferable` where `may_transfer` says so. `troupe
-  artifacts publish --to team:<name>` sends `owner: "team"` unless `--owner me`, and
-  says `(team finance's)` on its line; `/publish` and the page's `p` take `me` or `team`
-  as a third word. `troupe artifacts transfer ID --to team:<name>|me` is
-  `artifact.transfer`, which the daemon forwards as it forwards the viewer's methods.
-  `show` prints an artifact's text, as it always has, so the owner is on the listing's
-  row and in `--json`, not in `show`.
-- **Proof:** `Troupe.PublishGateTest` over a session on `FakeRemote` with the daemon
-  linked to it (the box with the proposal picked, a digit and `y`, `y` alone, `a`, `n`,
-  nobody named, a new version without ownership; headless; the choices and the draft),
-  `Troupe.ArtifactsCLITest` and `Troupe.ArtifactsScreenTest` (whose each row is, `--owner`,
-  `transfer` and its refusals in the plane's sentences, `p` with `me`).

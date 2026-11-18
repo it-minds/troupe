@@ -7,44 +7,12 @@ status: accepted
 issue: 55
 paths:
   - apps/troupe_core/lib/troupe/tools/remember.ex
-  - apps/troupe_core/lib/troupe/user_memory.ex
   - apps/troupe_core/lib/troupe/plane_memory.ex
-  - apps/troupe_core/lib/troupe/agent/server.ex
-  - apps/troupe_protocol/lib/troupe/protocol/schema.ex
-  - apps/troupe_plane/lib/troupe/plane/memory.ex
   - apps/troupe_plane/lib/troupe/plane/memory/proposal.ex
   - apps/troupe_plane/lib/troupe/plane/memory/proposals.ex
-  - apps/troupe_plane/priv/repo/migrations/20261116001004_memory_proposals.exs
-  - apps/troupe_plane/lib/troupe/plane/control/connection.ex
-  - apps/troupe_plane/lib/troupe/plane/harness.ex
-  - apps/troupe_plane/lib/troupe/plane/admin.ex
-  - apps/troupe_plane/lib/troupe/plane/admin/api.ex
-  - apps/troupe_plane/lib/troupe/plane/admin/console.ex
-  - apps/troupe_plane/lib/troupe/plane/settings.ex
-  - apps/troupe_plane/lib/troupe/plane/fleet.ex
-  - apps/troupe_plane/lib/troupe/plane/erasure.ex
-  - apps/troupe_worker/lib/troupe/worker/user_memory.ex
-  - apps/troupe_worker/lib/troupe/worker/plane/commands.ex
-  - apps/troupe_gateway/lib/troupe/gateway/memory.ex
-  - clients/gui/packages/client/src/admin.ts
-  - clients/gui/packages/client/src/instructions.ts
-  - clients/gui/packages/client/src/own.ts
-  - clients/gui/packages/client/test/support/admin.ts
+  - apps/troupe_plane/lib/troupe/plane/memory.ex
   - clients/gui/apps/console/src/views/Memory.tsx
-  - clients/gui/apps/console/src/views/Overview.tsx
-  - clients/gui/apps/desktop/src/views/OwnMemory.tsx
-  - PROTOCOL.md
-  - docs/admin/console.md
 ---
-
-#55's last slice. Decisions 922, 929, 943, 947, 951, 954, 957 and 976 gave every level a
-document on the plane, a save that reaches running sessions at their next turn, a person's
-own level an agent may add to (`remember` with `level: "me"`), who wrote each line, entries
-per topic and "used in N sessions". The organisation's, a team's and a profile's documents
-stayed read-only to every agent: what an agent learned that a whole team should know had
-nowhere to go but the person's own memory, and an administrator heard of it only by being
-told. This records how an agent may write back above `me`, and the issue's other open line,
-a change to a profile's `extends` reaching running sessions.
 
 ## A proposal, not a write
 
@@ -97,25 +65,9 @@ says proposals are off above it. A profile cannot switch them off for its sessio
 that would be a field on every profile's spec, its resource and its form, for a choice no one
 has asked to make per profile yet; it is left as #965.
 
-## Where it is seen
-
-- **The console's Company memory page** opens with "Waiting for review": each proposal with
-  where it would go, its topic, the entry, the agent, the session, the person and whether it
-  came from a pod or a machine. Accept is previewed as every save is, saying who will be
-  named as having written the line and which sessions read it; Decline asks for the sentence
-  the session will be told. The Overview's "Needs attention" counts them, linked to Company
-  memory. Not the Runs and review page: that is a run's transcript waiting to be read, this a
-  change to a document, decided where the document is edited.
-- **The person's own app** (Decision 954's Memory screen): under the level a proposal is for,
-  "Proposed by your agents", each awaiting review (in nobody's memory yet, and who decides) or
-  declined with who declined it and why. An accepted one is among the level's entries.
-
 ## A profile's `extends` reaching running sessions
 
-Decision 947's turn check already re-read the chain: `Memory.turn/2` compares what a session
-holds with `for_session/3`, which walks `extends` as it is now, so a pod's session whose
-profile came to extend another was behind at its next turn and given the documents. What was
-missing was the push and the words. Now a save of a profile whose `extends` moved
+Now a save of a profile whose `extends` moved
 (`Fleet.put_profile/1`, and a gitops profile followed from its resource) tells the running
 sessions of the profile and of every profile that extends it at once, as a save of a
 document in the chain does (`Memory.announce/1`). And each profile's document the plane sends
@@ -125,15 +77,6 @@ compares the chain before and after (`Troupe.PlaneMemory.chain_change/2`) and th
 dev)", with `chain: {from, to}` on the event. A plane from before it sends no chain, and the
 line is as it was. The chain is not part of a stamp: what a session runs under is the
 documents.
-
-## Provenance and history beyond the audit row
-
-Already given, and not added to: every version is kept and listed in the console's editor,
-each opening read-only onto what it changed, any two side by side, a rollback as a new
-version (Decision 947); who wrote each line and from which session (951); each entry's
-author, time and "used in N sessions" (957). "Forget" is a version without the section, the
-old text kept as every version is, so "what did this say last week" is a version in the list.
-Nothing is soft-deleted because nothing is deleted.
 
 ## Not chosen
 

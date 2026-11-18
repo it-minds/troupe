@@ -5,22 +5,12 @@ date: 2026-10-16
 status: accepted
 issue: 722
 paths:
-  - clients/gui/apps/console/src/owed.ts
   - clients/gui/apps/console/src/views/Triggers.tsx
   - clients/gui/apps/console/src/views/Organisation.tsx
   - clients/gui/apps/console/src/views/PermissionRules.tsx
-  - clients/gui/apps/console/test/coverage.test.ts
-  - clients/gui/apps/console/test/triggers.test.tsx
-  - clients/gui/apps/console/test/organisation.test.tsx
   - clients/gui/packages/client/src/rules.ts
   - clients/gui/packages/client/src/admin.ts
-  - clients/gui/packages/client/test/rules.test.ts
-  - clients/gui/packages/client/test/support/admin.ts
-  - apps/troupe_protocol/test/support/permission_rules.json
-  - apps/troupe_protocol/test/troupe/protocol/permission_rule_test.exs
   - apps/troupe_plane/lib/troupe/plane/admin.ex
-  - apps/troupe_plane/test/troupe/plane/channel_servers_test.exs
-  - docs/admin/console.md
 symbols:
   - Troupe.Plane.Admin.profile_put/2
   - Troupe.Protocol.PermissionRule.parse/1
@@ -107,17 +97,3 @@ write. Judgement calls:
 - **A profile that extends another and names no channel of its own** has its servers from its
   parent, as before. One that names its own channel takes that channel's servers into what it
   wrote, as a publish to that channel does, and has its parent's added.
-
-## Proof
-
-On the chunk's tip, `channel_servers_test.exs` failed four of six (a profile created after a
-publish, moved onto a channel, written again on its channel, and a child on its own channel
-each had no servers or the wrong ones on the resource `FakeWorkerProfiles` was sent). Now all
-pass, beside `extends_test.exs`, `bundles_test.exs`, `reach_test.exs` and
-`provision_test.exs`. `permission_rule_test.exs` holds the module to the shared cases, and
-`rules.test.ts` the port. The console's `triggers.test.tsx` runs a trigger behind its confirm
-and finds the run on Runs, rotates a key typed by name after the warning and shows the new
-one once, and offers neither where the plane would refuse; `organisation.test.tsx` reads,
-adds, edits and removes rules with the plane's sentences at the field, keeps the rules when
-another key changes, and lets a team admin read them only; `coverage.test.ts` holds the empty
-`owed.ts`. In a browser against `pnpm console:fake`, as both roles, at 320 px.

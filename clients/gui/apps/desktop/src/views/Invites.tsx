@@ -14,7 +14,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { JSX } from "react";
-import { emptyTranscript, fold, inviteRefusal, personName, removedSentence, roleWords } from "@troupe/client";
+import { emptyTranscript, errorText, fold, inviteRefusal, personName, removedSentence, roleWords } from "@troupe/client";
 import type { AuthSession, DaemonClient, FleetRow, Invitee, InviteRole, Person, TranscriptState, TroupeEvent } from "@troupe/client";
 import { copyText } from "../clipboard";
 import { sessionLinkText } from "../links";
@@ -38,9 +38,9 @@ function inviting(row: FleetRow, auth: AuthSession | null, daemon: DaemonClient 
   }
   if (row.kind === "team" && auth) {
     return {
-      list: () => auth.rpc<{ invites: Invitee[] }>("session.invites", { session_id: row.id }).then((r) => r.invites),
-      invite: (subject, role) => auth.rpc("session.invite", { session_id: row.id, subject, role }),
-      uninvite: (subject) => auth.rpc("session.uninvite", { session_id: row.id, subject }),
+      list: () => auth.withToken((plane, token) => plane.sessionInvites(token, row.id)).then((r) => r.invites),
+      invite: (subject, role) => auth.withToken((plane, token) => plane.inviteToSession(token, row.id, subject, role)),
+      uninvite: (subject) => auth.withToken((plane, token) => plane.uninviteFromSession(token, row.id, subject)),
     };
   }
   return null;
@@ -97,7 +97,7 @@ export function InviteControl({
     let live = true;
     const t = setTimeout(() => {
       auth
-        .rpc<{ people: Person[] }>("people.search", row.kind === "team" ? { query: q, session_id: row.id } : { query: q })
+        .withToken((plane, token) => plane.searchPeople(token, q, row.kind === "team" ? row.id : undefined))
         .then((r) => live && setFound(r.people.filter((p) => !invites.some((i) => i.subject === p.subject))))
         .catch(() => live && setFound([]));
     }, 150);
@@ -239,7 +239,7 @@ function CopySessionLink({ auth, row }: { auth: AuthSession; row: FleetRow }): J
       await copyText(sessionLinkText(row.id, auth.planeUrl, console, row.kind === "private"));
       setSaid("Link copied");
     } catch (e) {
-      setSaid(`Not copied: ${e instanceof Error ? e.message : String(e)}`);
+      setSaid(`Not copied: ${errorText(e)}`);
     }
   };
   return (
@@ -279,7 +279,7 @@ export function InvitedSession({ daemon, row, onBack }: { daemon: DaemonClient |
           for (const e of events) if (typeof e.seq === "number") seen.current = Math.max(seen.current, e.seq);
           if (events.length > 0) setState((s) => events.reduce((acc, e) => fold(acc, e, { now: Date.now() }), s));
         })
-        .catch((e: unknown) => live && setError(e instanceof Error ? e.message : String(e)))
+        .catch((e: unknown) => live && setError(errorText(e)))
         .finally(() => live && setReading(false));
     };
     read();

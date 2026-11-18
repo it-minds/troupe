@@ -20,8 +20,10 @@ defmodule Troupe.Plane.Admin.API.Argument do
           # For an `:object`: the properties it is known to take. `nil` means free-form,
           # which for a configuration bundle is the truth rather than a gap.
           properties: [t()] | nil,
-          # For a string with a closed set of values.
-          values: [String.t()] | nil,
+          # For a string with a closed set of values. In `Troupe.Plane.Admin.API`'s table
+          # a set another module owns is an atom naming it, which the API's readers
+          # replace with the list.
+          values: [String.t()] | atom() | nil,
           required: boolean()
         }
 end

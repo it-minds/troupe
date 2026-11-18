@@ -29,6 +29,7 @@ let followed: string[] = [];
 
 const banner = (): HTMLElement | null => document.querySelector<HTMLElement>('[aria-label="The Troupe app"]');
 
+// Its own open, not support's: each test starts the deployment, with the release it offers.
 async function open(hash: string, version = "0.39.0-beta"): Promise<void> {
   fake = await startFake(exampleAdmin(), {
     downloads: downloads(version),

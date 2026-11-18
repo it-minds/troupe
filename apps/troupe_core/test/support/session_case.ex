@@ -14,9 +14,11 @@ defmodule Troupe.SessionCase do
   use ExUnit.CaseTemplate
 
   alias Troupe.Protocol.Event
+  alias Troupe.Session.MCP
 
   using do
     quote do
+      import Troupe.Eventually
       import Troupe.SessionCase
       alias Troupe.LLM.Fake
       alias Troupe.Protocol.Event
@@ -193,6 +195,16 @@ defmodule Troupe.SessionCase do
   @doc "The persisted event types in order, for asserting a whole sequence."
   @spec event_types(String.t()) :: [String.t()]
   def event_types(session_id), do: session_id |> Troupe.events() |> Enum.map(& &1.type)
+
+  @doc "A session's MCP server `name` once it is in one of `states`, as `Troupe.Session.MCP.status/1` lists it."
+  @spec await_mcp(String.t(), String.t(), [atom()], timeout(), pos_integer()) :: map()
+  def await_mcp(session_id, name, states, timeout \\ 10_000, interval \\ 20) do
+    Troupe.Eventually.eventually(
+      fn -> Enum.find(MCP.status(session_id), &(&1.name == name and &1.state in states)) end,
+      timeout,
+      interval
+    )
+  end
 
   @doc """
   Everything a request tells the model in words: its system prompt, then the text of each

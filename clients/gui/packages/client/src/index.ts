@@ -1,6 +1,7 @@
 export * from "./types.js";
-export { LINES, first as firstLine, order as lineOrder, orderOf as lineOrderOf, pick as pickLine } from "./lines.js";export type { LineKind } from "./lines.js";
-export { TroupeConnection, TroupeRpcError, TroupeConnectionClosed, TroupeCallTimedOut, callTimeout, callTimeouts, waitWords } from "./connection.js";
+export { LINES, first as firstLine, order as lineOrder, pick as pickLine } from "./lines.js";
+export type { LineKind } from "./lines.js";
+export { TroupeConnection, TroupeRpcError, TroupeCallTimedOut, callTimeout, callTimeouts, waitWords } from "./connection.js";
 export type { CallOptions, ConnectOptions, ConnectionHooks } from "./connection.js";
 export { PlaneClient, PlaneHttpError, normalizeEndpoint } from "./plane.js";
 export type {
@@ -11,6 +12,7 @@ export type {
   PlaneCredential,
   Attachment,
   Me,
+  OwnClient,
   Team,
   SessionRow,
   SessionsFilter,
@@ -18,7 +20,7 @@ export type {
   ProfileOffering,
   WorkerPod,
 } from "./plane.js";
-export { FUNCTIONS_HEADING, accessWords, askWords, budgetWords, capacityWords, keyWords, missingWords, moneyWords, profileSummary, ruleAccessWords, whoseWords } from "./profile.js";
+export { FUNCTIONS_HEADING, accessWords, askWords, budgetWords, capacityWords, keyWords, missingWords, profileSummary, ruleAccessWords, whoseWords } from "./profile.js";
 export type { ProfileView, ProfileViewAgent, ProfileViewFunction, ProfileViewLimits, ProfileViewMissing, ProfileViewModel, ProfileViewRule, ProfileViewServer, ProfileViewSkill, RuleAccess, ServerAccess } from "./profile.js";
 export {
   LOCAL_DOWN_SENTENCE,
@@ -41,30 +43,23 @@ export {
 export type { AutoPick, MessageTokens, NewSessionWhere, ProfileRoom, ProfileRoomRow, TokenNames } from "./newSession.js";
 export { ALLOW_ALWAYS, RELAYED_ALLOW_SESSION, UPLOAD_ARTIFACT, SessionView, createLocalSession, turnCompleted } from "./session.js";
 export type { ApprovalDecision, ArtifactAttached, SessionViewHooks, TurnResult } from "./session.js";
-export { AuthSession, PlaneUnreachableError, memoryReachedMarks, memoryTokenStore, webReachedMarks, webTokenStore, currentOrigin } from "./auth.js";
+export { AuthSession, PlaneUnreachableError, memoryReachedMarks, memoryTokenStore, unregisteredRedirect, webTokenStore } from "./auth.js";
 export type { AuthSessionOptions, ReachedMarks, SignInProgress, TokenStore, UnreachableContext } from "./auth.js";
 export { beginRedirect, completeRedirect, hasRedirectAnswer, scrubRedirect, idpMetadata, pkcePair } from "./pkce.js";
 export type { BeginRedirectOptions, IdpMetadata, PkcePair, PendingRedirect, RedirectResult } from "./pkce.js";
-export { SessionAttachment, waitOn } from "./attach.js";
+export { SessionAttachment, planeOpener } from "./attach.js";
 export type { AttachOptions, AttachStatus } from "./attach.js";
-export { ServerOffer, offeredName } from "./offer.js";
+export { ServerOffer } from "./offer.js";
 export { initials, named, nameOrSubject } from "./people.js";
-export { draftOf, draftProblems, joinCommand, pairsFromText, pairsToText, readsEnvironment, serverChanges, serverPatch, serverTrial, splitCommand } from "./servers.js";
+export { draftOf, draftProblems, joinCommand, pairsFromText, pairsToText, serverChanges, serverPatch, serverTrial, splitCommand } from "./servers.js";
 export type { DraftOAuth, DraftPair, SecretChange, ServerDraft } from "./servers.js";
 export type { OfferAnswer, OfferAsk, OfferOptions, OfferState } from "./offer.js";
 export {
   LIBRARIAN_PROMPT,
-  LIBRARIAN_REWRITING,
-  LIBRARIAN_WRITING,
   StartQuestions,
-  briefQuestion,
-  createQuestion,
   describeItem,
-  onboardQuestion,
 } from "./onboard.js";
 export {
-  FACT_KINDS,
-  LIBRARIAN_FIRST_PROMPT,
   factStatusLine,
   factsByKind,
   learnedBy,
@@ -108,15 +103,15 @@ export {
   turnLine,
   partsOf,
   limitWords,
-  stoppedBecause,
   stoppedSentence,
   BRIEF_PARTS,
   FINISH_PARTS,
   LEGACY_BUDGET_OPTIONS,
 } from "./transcript.js";
-export { ONCE_ONLY_SENTENCE, bytes, callConsequence, callEvidence, callHeadline, callScopedLabel, counted, toolGlyph, toolOutcome, toolTarget } from "./calls.js";
+export { ONCE_ONLY_SENTENCE, callConsequence, callEvidence, callHeadline, callScopedLabel, counted, decisionWords, toolGlyph, toolOutcome, toolTarget } from "./calls.js";
 export type { CallEvidence, CallWhere } from "./calls.js";
-export { SCRATCH_KINDS, foldScratch, scratchDocumentOf, scratchLine, scratchSize, scratchVersion } from "./scratch.js";
+export { foldScratch, scratchDocumentOf, scratchVersion } from "./scratch.js";
+export { ago, bytes, durationWords, errorText, moneyWords, sessionStateWords } from "./words.js";
 export type {
   Entry,
   DelegationGate,
@@ -144,9 +139,7 @@ export {
   PlaneSource,
   rowFromPlane,
   filterRows,
-  awaitingApproval,
   awaitingYou,
-  totalCostMicros,
   hasUnseen,
   describeUnseen,
   unseenSummary,
@@ -154,7 +147,6 @@ export {
   syncWords,
   claimable,
   RemoteSource,
-  fleetTiming,
   rowFromRemote,
   rowFromInvite,
   remoteOffer,
@@ -164,6 +156,7 @@ export {
   onThisComputer,
   mayArchive,
   archiveRefusal,
+  markRefusal,
 } from "./fleet.js";
 export { invitationWords, invitationsFrom, inviteRefusal, personName, removedSentence, roleWords, steerWords } from "./invites.js";
 export type { Invitation, Invitee, InviteRole, Person, SealedEvent, SealedRead } from "./invites.js";
@@ -177,15 +170,15 @@ export type {
   RemoteOffer,
   RemotePerson,
 } from "./fleet.js";
-export { ArtifactApi, audienceName, audienceOf, ownerWords, teamOwned, textBytes, visibilityWords } from "./artifacts.js";
+export { ArtifactApi, audienceName, audienceOf, blockedKindWords, blockedWords, ownerWords, teamOwned, textBytes, visibilityWords } from "./artifacts.js";
 export { besideRows, renderEntries, replacedBy, topicKey, writtenBy } from "./entries.js";
 export type { EntryDraft, EntryLevel, InEffect, MemoryEntry, MemoryInEffect } from "./entries.js";
 export type { ArtifactComment, ArtifactPersonShare, ArtifactShareRole, ArtifactThread } from "./artifacts.js";
 export type { ArtifactThumbnail } from "./artifacts.js";
-export type { ArtifactRetention } from "./artifacts.js";
+export type { ArtifactBlocked, ArtifactBlockedKind, ArtifactRetention } from "./artifacts.js";
 export { goesDate, goesLine, goesSentence, versionGoes, versionsSentence } from "./retention.js";
 export type { Artifact, ArtifactAudience, ArtifactDetail, ArtifactFile, ArtifactFilter, ArtifactKind, ArtifactLinkUse, ArtifactList, ArtifactNewLink, ArtifactOrigin, ArtifactOwner, ArtifactPerson, ArtifactPublish, ArtifactPut, ArtifactRole, ArtifactScope, ArtifactShare, ArtifactText, ArtifactTicket, ArtifactTransferTo, ArtifactUpload, ArtifactVersion } from "./artifacts.js";
-export { openRemote, remoteRefusal, watchRemote, watchUrl, when as remoteWhen } from "./remote.js";
+export { openRemote, remoteRefusal, watchRemote, when as remoteWhen } from "./remote.js";
 export type { RemoteListRow, RemoteWatch, RemoteWatchOptions } from "./remote.js";
 export { AdminApi, bundleErrors, ceilingAboveWords, clientStanding, releaseVersion, requiredRole, versionOlder } from "./admin.js";
 export type {
@@ -312,7 +305,6 @@ export {
   originOf,
   parseAgent,
   permissionsOf,
-  validAgentName,
   widenedAutos,
   withBody,
   withFields,
@@ -334,14 +326,14 @@ export type {
   AgentWritten,
   ProfileSwitch,
 } from "./agents.js";
-export { DESKTOP_CLIENT, askPlane, suggestion, updateRequiredSentence } from "./update.js";
+export { askPlane, suggestion, updateRequiredSentence } from "./update.js";
 export { fingerprintOf, refusalSentence, verifySigned } from "./planeSignature.js";
 export type { PlaneKey, SignatureRefusal, SignedAnswer, SignedKind, Verified } from "./planeSignature.js";
 export type { ClientUpdate, PlaneVersionWord, SignatureWord, UpdateRequired, VersionPolicy } from "./update.js";
 export { DaemonClient, DaemonSource, claimRefusal, daemonUrl, revocationText, rowFromDaemon } from "./daemon.js";
 export type { EntriesOrText } from "./daemon.js";
 export { PlaneOwn } from "./own.js";
-export type { OwnPlane } from "./own.js";
+export type { OwnPlane, PlaneDocument } from "./own.js";
 export type {
   ClaimResult,
   CreateLocalParams,
@@ -374,7 +366,6 @@ export type {
 } from "./daemon.js";
 export {
   MODEL_ROLES,
-  OLDER_DAEMON_PROVIDER_TYPES,
   applyClientDefaults,
   clientDefaults,
   keyHelp,
@@ -417,12 +408,10 @@ export type { InstructionFile, InstructionLayer, InstructionRow, InstructionsCon
 export type { ReadRule, RuleAction, RuleKind, RuleSet } from "./rules.js";
 export {
   APPROVAL_CHOICES,
-  OLDER_DAEMON_KINDS,
   answeredKind,
   asksAddress,
   describeCheck,
   finishedFlow,
-  nextStep,
   previousStep,
   setupError,
   setupFinishedSince,
@@ -445,8 +434,6 @@ export type {
 export {
   BANNER_DISMISSED,
   BANNER_WORDS,
-  LINK_SCHEME,
-  OPEN_WAIT_MS,
   PLATFORM_NAME,
   RELEASES_PAGE,
   appLink,
@@ -459,7 +446,7 @@ export {
   pageWatch,
   parseAppLink,
   planeAddress,
-  planeHost,
+  hostOf,
   platformOf,
 } from "./deeplink.js";
 export type { AppDownloads, AppLink, BannerPlatform, OpenWatch, RefusedLink } from "./deeplink.js";

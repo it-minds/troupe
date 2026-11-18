@@ -12,7 +12,7 @@ It is also a worked example. Every method here maps to something in
     from troupe import Troupe
 
     with Troupe.connect_unix("/run/user/1000/troupe/daemon.sock") as client:
-        fleet = client.call("fleet.get")
+        fleet = client.call("session.list")
         client.subscribe("session:" + session_id, from_seq=0)
         for envelope in client.events(timeout=30):
             ...

@@ -8,8 +8,6 @@ paths:
   - clients/tui/lib/troupe/ui/tui/key_line.ex
   - clients/tui/lib/troupe/ui/tui/view.ex
   - clients/tui/lib/troupe/ui/tui/new_session_page.ex
-  - clients/tui/test/troupe/key_line_test.exs
-  - clients/tui/test/troupe/console_paths_test.exs
 symbols:
   - Troupe.UI.TUI.KeyLine
 gist: "Key line fitted to the width: label, then keys from the end; Esc/Enter stay; what leaves is shown under the line; console named as Group → Area, admin pages said as an administrator's"

@@ -356,14 +356,16 @@ jobs:
       - run: mix credo --strict
 
       # Files that are generated and committed: the theme stylesheet a browser is served,
-      # and the config.yaml schema with its key reference. Each task's own moduledoc says
-      # CI checks it with `--check` — so a token changed without regenerating fails here
-      # rather than reaching a browser as a colour that is slightly wrong, and a config key
-      # cannot be added without its schema.
+      # the config.yaml schema with its key reference, and PROTOCOL.md's admin method
+      # table. Each task's own moduledoc says CI checks it with `--check` — so a token
+      # changed without regenerating fails here rather than reaching a browser as a colour
+      # that is slightly wrong, and a config key or an admin method cannot be added without
+      # its reference.
       - name: Generated assets are current
         run: |
           MIX_ENV=test mix troupe.theme --check
           MIX_ENV=test mix troupe.config.schema --check
+          MIX_ENV=test mix troupe.admin.reference --check
 
       # The architecture is a claim about coupling, and claims like that decay
       # silently. This is the thing that makes it fail loudly instead.
@@ -1082,7 +1084,7 @@ jobs:
           otp-version: ${{ env.OTP_VERSION }}
       - run: elixir scripts/version.exs check
       - run: elixir scripts/doc-links.exs
-      # No hand-written page past 400 lines, and the known defects only open ones.
+      # No hand-written page past 400 lines.
       - run: elixir scripts/doc-size.exs
       - run: elixir scripts/check-neutral.exs
       # Code states its own invariants and cites no decision by number; the citations

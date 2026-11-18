@@ -7,17 +7,7 @@ issue: 503
 paths:
   - clients/tui/lib/troupe/ui/tui/agents.ex
   - clients/tui/lib/troupe/ui/tui/agent_chooser.ex
-  - clients/tui/lib/troupe/editor.ex
-  - clients/tui/lib/troupe/client.ex
-  - clients/tui/lib/troupe/client/daemon.ex
-  - clients/tui/lib/troupe/client/remote.ex
-  - clients/tui/lib/troupe/remote/translate.ex
   - clients/tui/lib/troupe/ui/tui/model.ex
-  - clients/tui/lib/troupe/ui/tui/server.ex
-  - clients/tui/lib/troupe/ui/tui/view.ex
-  - clients/tui/test/troupe/agents_manager_test.exs
-  - clients/tui/test/troupe/agents_palette_test.exs
-  - clients/tui/test/troupe/editor_test.exs
 symbols:
   - Troupe.UI.TUI.Agents
   - Troupe.UI.TUI.Agents.widened/2
@@ -27,14 +17,6 @@ symbols:
   - Troupe.Client.edit_file/2
 gist: "/agents writes only via agents.*; edits kept when refused; a save names its autos and re-asks when one is added or leaves trust; Tab picks a window's agent"
 ---
-
-Issue #503, the terminal's half (section 1's manager, section 2's switch, section 3's
-palette), on root Decision 841's methods. On the chunk's tip `/agents` was a notice line,
-`agents: build, plan, …, worktree` (`worktree` is a command, D107); nothing in the TUI could
-read an agent's instruction, change one, or say which agent a window ran after a switch;
-Tab in a window stepped blind to the next name in that same list, `worktree` included,
-which the daemon now refuses; and the palette drew `/plan`, `/merge` and a repository's
-`/review` as the same kind of row.
 
 - **The manager.** `/agents` opens a page (`Troupe.UI.TUI.Agents`), a list beside the
   selected agent: from `agents.list`, each row's name, its layer (built-in, bundle, mine,
@@ -80,19 +62,12 @@ which the daemon now refuses; and the palette drew `/plan`, `/merge` and a repos
   `/bin/sh` with `:nouse_stdio`, so it has the TUI's terminal as its standard input and
   output; the shell first turns off mouse reporting and bracketed paste and leaves the
   alternate screen, and after it returns to it and turns them on again (mouse only when
-  the screen had it). The TUI is waiting meanwhile, so nothing else reads the terminal.
-  The renderer remembers the last frame and draws only what differs, while the screen it
-  gets back is blank, so one blank frame is drawn first and the next is drawn whole. On
+  the screen had it). The TUI is waiting meanwhile, so nothing else reads the terminal. On
   Windows the editor is a program with a window of its own (Notepad, `code --wait`); one
-  that wants the console is not supported there. A console program there (`code`'s
-  `.cmd`, a script's interpreter) is started with the port's `:hide`, without which it
-  did not run at all from a port on this machine (exit 0, nothing done); a program whose
-  executable's header says it has a window is started without it, since `:hide` would
-  hide that window too. A frame saying "editing … close the
-  editor to come back" is drawn before the editor opens. This is the one process the TUI
-  starts outside `Troupe.OS.Process` beside the file watcher (Decision 19): the reaper
-  takes the child's standard input and output for its own pipe, and an editor needs the
-  terminal; the person's editor on the person's file is left open if the TUI goes.
+  that wants the console is not supported there. This is the one process the TUI starts
+  outside `Troupe.OS.Process` beside the file watcher (Decision 19): the reaper takes the
+  child's standard input and output for its own pipe, and an editor needs the terminal;
+  the person's editor on the person's file is left open if the TUI goes.
 - **Each window says its agent, and Tab chooses it.** The tile title is `1 build-1 (plan)`
   and the pane's `build-1 (plan)`, and command mode's row for the window (TUI Decision 155)
   names the same agent: the window keeps the name it started with, and the agent follows
@@ -124,18 +99,3 @@ which the daemon now refuses; and the palette drew `/plan`, `/merge` and a repos
   is run (TUI Decision 155): `/upload <path>` from a window, `/copy` taken with Tab. A new query's cursor lands
   on the exact name, else the first name or alias it begins, so `wor` and Tab give
   `/worktree`. A command a file defines that takes arguments (its `argument-hint`) is put
-  on the line by Enter rather than run with `$ARGUMENTS` empty.
-- **Proof.** `agents_manager_test.exs`: the list with its badges and windows, and no
-  `worktree` (failing on the tip, where `/agents` was a notice); the whole instruction;
-  `c` copying `plan` into the repository and `x` taking it away with the built-in named
-  after, a built-in refused; an edit with an unknown tool refused at once and kept, the next
-  `e` opening the kept text, the fix saved; an added `auto` asked once in the repository,
-  a no writing nothing, and a copy into mine asked again for the same `auto`; `n` from the
-  template into mine and its palette row; an unchanged edit saving nothing; a bundle's
-  agent refused with its reason; on a pod (the suite's `FakeRemote`) read-only, saying
-  why, nothing sent. `agents_palette_test.exs`: the three kinds and an agent's badges; an
-  agent that cannot run greyed with why; a branch's row and `build-1 (build)`, Tab's
-  chooser with the instruction beside it, the switch to `plan` in the header and the
-  transcript; and the three D107 rows. `editor_test.exs`: `VISUAL` over `EDITOR`, split as a
-  shell splits it, a missing editor said, and a scripted editor run, waited for and its
-  exit status read.

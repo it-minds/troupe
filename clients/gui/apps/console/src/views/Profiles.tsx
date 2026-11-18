@@ -50,11 +50,11 @@
 
 import { useState } from "react";
 import type { JSX } from "react";
-import { RULE_ACTIONS, ceilingAboveWords } from "@troupe/client";
+import { RULE_ACTIONS, ceilingAboveWords, moneyWords } from "@troupe/client";
 import type { AdminProfile, AdminTeam, EffectiveBundle, EffectiveProfile, ProfileBelow, ProfileDetail, ProfilePreview, ProfileWrite, ProviderTypeChoice, RuleAction } from "@troupe/client";
 import { href } from "../route";
 import { describeError, recorded, show, useConsole, useLoad } from "../console";
-import { AuditNote, Empty, Field, Fields, GitopsProblem, Loaded, Locked, Preview, Region, Status, count, linesOf, modeOf, money, useChange } from "./bits";
+import { AuditNote, Empty, Field, Fields, GitopsProblem, Loaded, Locked, Preview, Region, Status, count, linesOf, modeOf, useChange } from "./bits";
 import type { DiffLine, Done } from "./bits";
 import { MemberView } from "./MemberView";
 import { MemoryEditor } from "./Memory";
@@ -304,6 +304,7 @@ const READ_HERE = [
   "llm.provider",
   "llm.model",
   "llm.smallModel",
+  "llm.maxTokens",
   "llm.secretRef",
   "llm.prices",
   "egress.fqdns",
@@ -430,6 +431,7 @@ function ProfileReading({ detail, granted }: { detail: ProfileDetail; granted: s
           ["Provider", show(at(spec, "llm.provider"))],
           ["Model", show(at(spec, "llm.model"))],
           ["Small model", show(at(spec, "llm.smallModel"))],
+          ["Output per model call", typeof at(spec, "llm.maxTokens") === "number" ? `at most ${count(at(spec, "llm.maxTokens") as number, "token")}` : "Troupe's default, 8192 tokens"],
           ["Credential", at(spec, "llm.secretRef") ? <span className="mono">{`${show(at(spec, "llm.secretRef.name"))} · ${show(at(spec, "llm.secretRef.key") ?? "api-key")}`}</span> : "—"],
           ["Prices, per million tokens", Object.keys(prices).length ? Object.entries(prices).map(([m, v]) => `${m}: ${show(v?.input)} in, ${show(v?.output)} out`).join("; ") : "none: the gateway's"],
         ]}
@@ -761,7 +763,7 @@ function BudgetLine({ name, budget }: { name: string; budget: ProfileDetail["bud
   const used = budget.spent_micros + budget.reserved_micros;
   return (
     <>
-      {money(budget.budget_micros)} a month
+      {moneyWords(budget.budget_micros)} a month
       {budget.set_by && budget.set_by !== name && (
         <>
           , from <a href={href({ page: "profiles", path: [budget.set_by] })}>{budget.set_by}</a>
@@ -769,7 +771,7 @@ function BudgetLine({ name, budget }: { name: string; budget: ProfileDetail["bud
       )}
       <span className="hint">
         {" "}
-        {money(budget.spent_micros)} spent this month{budget.reserved_micros ? `, ${money(budget.reserved_micros)} held by running sessions` : ""}; {money(Math.max(budget.budget_micros - used, 0))} left. It turns over on the 1st, in UTC.
+        {moneyWords(budget.spent_micros)} spent this month{budget.reserved_micros ? `, ${moneyWords(budget.reserved_micros)} held by running sessions` : ""}; {moneyWords(Math.max(budget.budget_micros - used, 0))} left. It turns over on the 1st, in UTC.
       </span>
     </>
   );
@@ -844,6 +846,7 @@ const FORM_PATHS = [
   ["llm", "provider"],
   ["llm", "model"],
   ["llm", "smallModel"],
+  ["llm", "maxTokens"],
   ["llm", "secretRef"],
   ["egress", "fqdns"],
   ["egress", "gitHosts"],
@@ -917,7 +920,7 @@ function dollars(micros: unknown): string {
 }
 
 /** The `llm` fields a profile may set only beside `llm.endpoint`, as the plane names them. */
-const LLM_FIELDS = ["provider", "model", "smallModel", "secretRef", "prices"];
+const LLM_FIELDS = ["provider", "model", "smallModel", "secretRef", "prices", "maxTokens"];
 
 /**
  * The plane's rule, said at the field before anything is sent: every `llm` field but the
@@ -945,6 +948,8 @@ interface Form {
   provider: string;
   model: string;
   smallModel: string;
+  /** The most output tokens one model call asks for, as typed; empty is the default, or the parent's. */
+  maxTokens: string;
   secretName: string;
   secretKey: string;
   fqdns: string;
@@ -987,6 +992,7 @@ function formOf(detail: ProfileDetail | null): Form {
     provider: text(at(spec, "llm.provider")),
     model: text(at(spec, "llm.model")),
     smallModel: text(at(spec, "llm.smallModel")),
+    maxTokens: text(at(spec, "llm.maxTokens")),
     secretName: text(at(spec, "llm.secretRef.name")),
     secretKey: text(at(spec, "llm.secretRef.key")),
     fqdns: lines(at(spec, "egress.fqdns")),
@@ -1016,6 +1022,7 @@ export function draftOf(form: Form, servers: Plain[], kept: Plain, rules: RuleLi
       provider: form.provider.trim(),
       model: form.model.trim(),
       smallModel: form.smallModel.trim(),
+      maxTokens: whole(form.maxTokens),
       secretRef: compact({ name: form.secretName.trim(), key: form.secretKey.trim() }),
     }),
     egress: compact({ fqdns: split(form.fqdns), gitHosts: split(form.gitHosts) }),
@@ -1282,6 +1289,12 @@ export function ProfileEditor({
       </Field>
       <Field label="Small model" hint="Used only to summarise a long conversation.">
         {(p) => <input {...p} value={form.smallModel} onChange={(e) => set({ smallModel: e.target.value })} autoComplete="off" spellCheck={false} />}
+      </Field>
+      <Field
+        label="Output per model call, in tokens"
+        hint={`The most one model call of a session asks for, held to the model's own limit; an agent may ask for less. ${parent ? `Empty is ${parent}'s; a number above ${parent}'s has ${parent}'s in effect.` : "Empty is Troupe's default, 8192."}`}
+      >
+        {(p) => <input {...p} value={form.maxTokens} placeholder={theirs ?? undefined} onChange={(e) => set({ maxTokens: e.target.value })} inputMode="numeric" />}
       </Field>
       <Field
         label="Credential: secret name"
@@ -1597,7 +1610,7 @@ function effectsOf(policy: { "allowed?": boolean; violations: unknown[] }, mode:
   // What it wrote itself, as the form loaded it: for one that extends another, not what it has in effect.
   const had = detail ? ((detail.written ? (detail.written.budget_micros ?? null) : (detail.profile.budget_micros ?? null)) as number | null) : null;
   if (budget !== had && !Number.isNaN(budget))
-    out.push(budget ? `Its sessions may spend ${money(budget)} a month from now; a session that would go past it is refused, and told it is ${draft.name}'s budget.` : draft.extends ? `It has ${draft.extends}'s monthly budget from now, if ${draft.extends} has one.` : "Its sessions have no monthly budget of their own from now.");
+    out.push(budget ? `Its sessions may spend ${moneyWords(budget)} a month from now; a session that would go past it is refused, and told it is ${draft.name}'s budget.` : draft.extends ? `It has ${draft.extends}'s monthly budget from now, if ${draft.extends} has one.` : "Its sessions have no monthly budget of their own from now.");
   const channel = String(draft.spec?.["configBundleChannel"] ?? "stable");
   if (detail && channel !== String(detail.spec?.["configBundleChannel"] ?? detail.bundle?.channel ?? "stable")) out.push(`Its pods follow ${channel} from now, and are told to update.`);
   return out;

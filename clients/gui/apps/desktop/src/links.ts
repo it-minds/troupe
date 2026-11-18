@@ -7,7 +7,7 @@
 // out of that one. A link that is not one of the three forms, or one for a plane while the
 // app uses this computer only, is said in one line and nothing else happens.
 
-import { appLink, isRefused, parseAppLink, planeAddress, planeHost } from "@troupe/client";
+import { appLink, hostOf, isRefused, parseAppLink, planeAddress } from "@troupe/client";
 
 /** Where a link leads in the app, once it is signed in to the link's plane. */
 export type LinkPlace = { screen: "session"; id: string } | { screen: "artifacts"; artifact: string } | null;
@@ -32,7 +32,7 @@ export interface LinkContext {
 
 /** The one sentence a link to a plane the app is not signed in to is asked with. */
 export function signInSentence(plane: string): string {
-  return `This link is for ${planeHost(plane)}. Sign in there?`;
+  return `This link is for ${hostOf(plane)}. Sign in there?`;
 }
 
 export function stepFor(text: string, context: LinkContext): LinkStep {
@@ -43,7 +43,7 @@ export function stepFor(text: string, context: LinkContext): LinkStep {
   if (context.localOnly) {
     return {
       do: "say",
-      sentence: `This link is for ${planeHost(link.plane)}, and this app uses this computer only. Turn Local only off on This computer to follow it.`,
+      sentence: `This link is for ${hostOf(link.plane)}, and this app uses this computer only. Turn Local only off on This computer to follow it.`,
     };
   }
   const here = context.signedIn ? planeAddress(context.signedIn) ?? context.signedIn : null;
@@ -52,7 +52,7 @@ export function stepFor(text: string, context: LinkContext): LinkStep {
   return {
     do: "switch",
     plane: link.plane,
-    sentence: `This link is for ${planeHost(link.plane)}, and this app is signed in to ${planeHost(here)}.`,
+    sentence: `This link is for ${hostOf(link.plane)}, and this app is signed in to ${hostOf(here)}.`,
     then,
   };
 }

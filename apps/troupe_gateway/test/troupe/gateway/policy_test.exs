@@ -10,6 +10,8 @@ defmodule Troupe.Gateway.PolicyTest do
 
   use ExUnit.Case, async: false
 
+  import Troupe.Eventually
+
   alias Troupe.Config.Org
   alias Troupe.Gateway.{Daemon, FakePlane, Plane, Policy}
   alias Troupe.LLM.Fake
@@ -77,7 +79,7 @@ defmodule Troupe.Gateway.PolicyTest do
 
     # The link keeps the document as it stands, which every later poll is compared with.
     assert_receive {:troupe_notification, "config.changed", %{"scope" => "org"}}, 20_000
-    assert eventually(fn -> match?({:ok, %{"signed" => _}}, Org.read_cache()) end)
+    assert eventually(fn -> match?({:ok, %{"signed" => _}}, Org.read_cache()) end, 20_000)
     _first = Policy.poll()
 
     %{plane: plane, client: client, workspace: workspace}
@@ -181,14 +183,6 @@ defmodule Troupe.Gateway.PolicyTest do
         await_idle(sid)
     after
       10_000 -> flunk("the session did not finish its turn")
-    end
-  end
-
-  defp eventually(check, deadline \\ 20_000) do
-    cond do
-      check.() -> true
-      deadline <= 0 -> false
-      true -> Process.sleep(50) && eventually(check, deadline - 50)
     end
   end
 end

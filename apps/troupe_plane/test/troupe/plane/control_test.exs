@@ -482,7 +482,7 @@ defmodule Troupe.Plane.ControlTest do
       # Without this the session is unreachable for good: the plane keeps saying it is
       # already running, hands out an endpoint, never tells the pod to restore, and the
       # client's `subscribe` answers `not_found` however long anybody retries.
-      assert until(fn -> Sessions.get("s-live").state == "dormant" end),
+      assert eventually(fn -> Sessions.get("s-live").state == "dormant" end, 2_000),
              "the session stayed active on a pod that no longer has it"
 
       assert is_nil(Sessions.get("s-live").worker_id)
@@ -504,12 +504,12 @@ defmodule Troupe.Plane.ControlTest do
       second = enrolled(port, "dev-token", "troupe-w-dev-0")
       answer_index(second, [])
 
-      assert until(fn -> Sessions.get("s-stranded").state == "dormant" end),
+      assert eventually(fn -> Sessions.get("s-stranded").state == "dormant" end, 2_000),
              "the session stayed active on a pod replaced under its own name"
 
       # The predecessor's connection is closed from the plane's side. That the session
       # went dormant is already the proof the question reached the new pod.
-      assert until(fn -> match?({:error, :closed}, :gen_tcp.recv(first.socket, 0, 100)) end),
+      assert eventually(fn -> match?({:error, :closed}, :gen_tcp.recv(first.socket, 0, 100)) end, 6_000),
              "the old connection was left open"
     end
 
@@ -530,8 +530,10 @@ defmodule Troupe.Plane.ControlTest do
       again = enrolled(port, "dev-token", "troupe-w-dev-0")
       answer_index(again, [%{"id" => "s-kept"}])
 
-      refute until(fn -> Sessions.get("s-kept").state == "dormant" end, 12),
-             "a session the pod still holds was dormanted"
+      # A session the pod still holds is not dormanted while the reconciliation runs.
+      assert_raise ExUnit.AssertionError, ~r/condition never held/, fn ->
+        eventually(fn -> Sessions.get("s-kept").state == "dormant" end, 600)
+      end
 
       assert Sessions.get("s-kept").state == "active"
     end
@@ -952,15 +954,6 @@ defmodule Troupe.Plane.ControlTest do
 
       _other ->
         answer_index(worker, sessions, attempts - 1)
-    end
-  end
-
-  # The reconciliation runs off the enrolment, so it lands a moment after the answer.
-  defp until(check, attempts \\ 40) do
-    cond do
-      check.() -> true
-      attempts == 0 -> false
-      true -> Process.sleep(50) && until(check, attempts - 1)
     end
   end
 

@@ -5,11 +5,7 @@ date: 2026-10-03
 status: accepted
 issue: 356
 paths:
-  - apps/troupe_plane/test/troupe/plane/scim_answers_test.exs
-  - apps/troupe_plane/test/troupe/plane/scim_connector_test.exs
-  - apps/troupe_plane/test/troupe/plane/scim_entra_test.exs
-  - apps/troupe_plane/test/troupe/plane/subject_claim_test.exs
-  - apps/troupe_plane/test/troupe/plane/web_test.exs
+  - apps/troupe_plane/lib/troupe/plane/scim.ex
 gist: "A SCIM create answers `201` with where the resource is, a delete of an id the plane does not have answers `404`, and a push with `active: false`…"
 ---
 

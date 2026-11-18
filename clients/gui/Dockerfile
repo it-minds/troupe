@@ -44,6 +44,7 @@ WORKDIR /src
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY packages/client/package.json packages/client/
 COPY packages/bench/package.json packages/bench/
+COPY packages/test-support/package.json packages/test-support/
 COPY apps/desktop/package.json apps/desktop/
 COPY apps/console/package.json apps/console/
 RUN pnpm install --frozen-lockfile

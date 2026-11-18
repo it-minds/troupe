@@ -63,7 +63,7 @@ defmodule Troupe.Plane.Admin.API do
       name: "extends",
       type: :string,
       description:
-        "The one profile this one extends, or null for none. The plane resolves the two into the profile in effect, which is all the cluster sees: egress.fqdns, egress.gitHosts and MCP servers are added to the parent's (a server with a parent's name replaces it only with override: true); on a channel of its own, its pods load one bundle, the parent's with its channel's agents, skills, MCP servers and ACP agents added, an entry with a parent's name replacing it only where that channel's document says override: true; max_sessions and budget_micros are the lower of the two, and a budget_micros above the parent's is refused; permissions.deny, ask and allow are added to the parent's, which a child cannot drop; a parent's personalTools forbid, repositoryOverridesBundle false and memoryProposals false hold whatever this one says; image, size_class, provisioner, the llm fields, the channel and every other spec field are the parent's where this one sets none; llm.secretRef, mcpIdentities, warm_workers and grants are never inherited. Send only what differs from the parent: what this profile sets stops following the parent. A chain is at most four profiles; a missing parent or a cycle is refused. Puts are refused on a gitops plane, where a manifest names its parent in spec.extends and the plane writes the profile in effect into its status."
+        "The one profile this one extends, or null for none. The plane resolves the two into the profile in effect, which is all the cluster sees: egress.fqdns, egress.gitHosts and MCP servers are added to the parent's (a server with a parent's name replaces it only with override: true); on a channel of its own, its pods load one bundle, the parent's with its channel's agents, skills, MCP servers and ACP agents added, an entry with a parent's name replacing it only where that channel's document says override: true; max_sessions, budget_micros and llm.maxTokens are the lower of the two, and a budget_micros above the parent's is refused; permissions.deny, ask and allow are added to the parent's, which a child cannot drop; a parent's personalTools forbid, repositoryOverridesBundle false and memoryProposals false hold whatever this one says; image, size_class, provisioner, the llm fields, the channel and every other spec field are the parent's where this one sets none; llm.secretRef, mcpIdentities, warm_workers and grants are never inherited. Send only what differs from the parent: what this profile sets stops following the parent. A chain is at most four profiles; a missing parent or a cycle is refused. Puts are refused on a gitops plane, where a manifest names its parent in spec.extends and the plane writes the profile in effect into its status."
     },
     %Argument{
       name: "size_class",
@@ -92,7 +92,7 @@ defmodule Troupe.Plane.Admin.API do
     %Argument{
       name: "provisioner",
       type: :string,
-      values: Provisioner.names(),
+      values: :provisioners,
       description:
         "What makes the workers exist: kubernetes (the default; the operator runs pods) or ssh (machines registered with admin.host.register, which dial the plane; nothing is written to the cluster). A profile on ssh gives none of the cluster's guarantees, and a team may be granted it only once a platform admin has allowed that team unenforced workers."
     },
@@ -100,7 +100,7 @@ defmodule Troupe.Plane.Admin.API do
       name: "spec",
       type: :object,
       description:
-        "The rest of the WorkerProfile spec, in the resource's own camelCase: llm, egress, mcpServers, configBundleChannel, orgMount, repositoryOverridesBundle, personalTools, memoryProposals, github, permissions, agents, storage.storageClassName. agents says which agents exist on the profile's pods, built-ins and the bundle's alike: {\"allow\": [names], \"deny\": [names]}; allow present means only those, in every mode (primary and subagent), deny takes names away, deny over allow, absent is every agent the bundle and Troupe give. A team's grant can only narrow what it leaves. A name no agent has today is kept, since a bundle may gain it (admin.profile.agents lists it as unmatched); a name in both lists, or one that is not a name, is refused; an empty allow offers none. A profile that extends another has its parent's rule as well: its allow is cut to the parent's, its deny adds. permissions is per-tool rules every session on the profile's pods obeys, as config's: {\"deny\": [\"shell(curl)\"], \"ask\": [\"mcp(issues.delete)\"], \"allow\": [...]}; an enforced layer, the strictest rule that matches a call holding, so a session's own configuration cannot loosen them, and a shell deny refuses a command a person types with ! there too; a rule the pods could not read is refused. mcpServers are the profile's own servers, which its pods load beside its bundle's: the resource's list is the bundle's with these added by name, one with a bundle server's name replacing it only with override: true, and a publish to the channel composes the two again rather than overwriting these; servers sent back that are the bundle's are dropped as the bundle's. configBundleChannel is the bundle channel the profile follows, stable where absent. repositoryOverridesBundle true lets a session's working copy replace the bundle's agents and skills, and the built-in agents, of the same name with its own; absent or false, those win and the working copy's are skipped and listed. personalTools is allow (the default, also when absent) or forbid: forbid has the profile's pods refuse a person's offer of their own signed-in tools (tools.register), saying why. memoryProposals false has the plane refuse every proposal the profile's sessions make to a team's or the organisation's memory (remember at level team or organisation), in the words the setting memory_proposals refuses with, naming the profile; absent or true, the setting decides. github.permissions is what a session's token may do on GitHub beyond cloning, in GitHub's names: contents (read or write: write pushes its troupe/* branch), pull_requests (read or write: write opens its draft pull request and comments), checks and statuses (read: its CI); absent, sessions clone and do no more. Every llm field but endpoint needs llm.endpoint, without which the pods are given none of them, and is refused without it. llm.prices is dollars per million tokens by model, as {\"<model>\": {\"input\": 0.5, \"output\": 1.5}}, for models the gateway does not price: a model with no price counts as free against every budget. storage.storageClassName is the storage class a worker's disk comes from, one the cluster policy allows; absent is the cluster's default. mcpIdentities says who the profile is at each server its bundle calls with client credentials: {server, clientId, scope, tokenUrl, transitKey, keyVersion, certificateThumbprint, subject, algorithm}, none of it secret, subject being the assertion's iss and sub where the identity provider names the system apart from each server's client (absent: clientId); the answer's identity_problems lists a server the bundle marks client_credentials that has none, or an identity that is incomplete. Replicas, sessionsPerPod, resources and storage.size are not among them: the plane writes those from the size class and from what is running. Read the profile first and send it back changed rather than composing one from nothing."
+        "The rest of the WorkerProfile spec, in the resource's own camelCase: llm, egress, mcpServers, configBundleChannel, orgMount, repositoryOverridesBundle, personalTools, memoryProposals, github, permissions, agents, storage.storageClassName. agents says which agents exist on the profile's pods, built-ins and the bundle's alike: {\"allow\": [names], \"deny\": [names]}; allow present means only those, in every mode (primary and subagent), deny takes names away, deny over allow, absent is every agent the bundle and Troupe give. A team's grant can only narrow what it leaves. A name no agent has today is kept, since a bundle may gain it (admin.profile.agents lists it as unmatched); a name in both lists, or one that is not a name, is refused; an empty allow offers none. A profile that extends another has its parent's rule as well: its allow is cut to the parent's, its deny adds. permissions is per-tool rules every session on the profile's pods obeys, as config's: {\"deny\": [\"shell(curl)\"], \"ask\": [\"mcp(issues.delete)\"], \"allow\": [...]}; an enforced layer, the strictest rule that matches a call holding, so a session's own configuration cannot loosen them, and a shell deny refuses a command a person types with ! there too; a rule the pods could not read is refused. mcpServers are the profile's own servers, which its pods load beside its bundle's: the resource's list is the bundle's with these added by name, one with a bundle server's name replacing it only with override: true, and a publish to the channel composes the two again rather than overwriting these; servers sent back that are the bundle's are dropped as the bundle's. configBundleChannel is the bundle channel the profile follows, stable where absent. repositoryOverridesBundle true lets a session's working copy replace the bundle's agents and skills, and the built-in agents, of the same name with its own; absent or false, those win and the working copy's are skipped and listed. personalTools is allow (the default, also when absent) or forbid: forbid has the profile's pods refuse a person's offer of their own signed-in tools (tools.register), saying why. memoryProposals false has the plane refuse every proposal the profile's sessions make to a team's or the organisation's memory (remember at level team or organisation), in the words the setting memory_proposals refuses with, naming the profile; absent or true, the setting decides. github.permissions is what a session's token may do on GitHub beyond cloning, in GitHub's names: contents (read or write: write pushes its troupe/* branch), pull_requests (read or write: write opens its draft pull request and comments), checks and statuses (read: its CI); absent, sessions clone and do no more. Every llm field but endpoint needs llm.endpoint, without which the pods are given none of them, and is refused without it. llm.prices is dollars per million tokens by model, as {\"<model>\": {\"input\": 0.5, \"output\": 1.5}}, for models the gateway does not price: a model with no price counts as free against every budget. llm.maxTokens is the most output tokens one model call of a session on the pods asks for, a whole number above 0; absent is the harness's default, and the model's own output limit still holds. storage.storageClassName is the storage class a worker's disk comes from, one the cluster policy allows; absent is the cluster's default. mcpIdentities says who the profile is at each server its bundle calls with client credentials: {server, clientId, scope, tokenUrl, transitKey, keyVersion, certificateThumbprint, subject, algorithm}, none of it secret, subject being the assertion's iss and sub where the identity provider names the system apart from each server's client (absent: clientId); the answer's identity_problems lists a server the bundle marks client_credentials that has none, or an identity that is incomplete. Replicas, sessionsPerPod, resources and storage.size are not among them: the plane writes those from the size class and from what is running. Read the profile first and send it back changed rather than composing one from nothing."
     }
   ]
 
@@ -223,7 +223,7 @@ defmodule Troupe.Plane.Admin.API do
     %Argument{
       name: "budget_period",
       type: :string,
-      values: Team.budget_periods(),
+      values: :budget_periods,
       description:
         "What the ceiling is measured over: monthly, which turns over on the 1st of the month (UTC), or never for one that does not turn over."
     },
@@ -398,7 +398,7 @@ defmodule Troupe.Plane.Admin.API do
         %Argument{
           name: "kind",
           type: :string,
-          values: Trigger.source_kinds(),
+          values: :source_kinds,
           required: true,
           description:
             "schedule (fired by cron), webhook (fired at POST /trigger/<id> with its own key, minted when the trigger is created and answered once; or, naming a repository, by the GitHub App's signed deliveries) or manual (fired only by hand)."
@@ -531,7 +531,7 @@ defmodule Troupe.Plane.Admin.API do
       name: "admin.profiles.list",
       function: :profiles_list,
       summary:
-        "Every profile, with its pods, conditions and load. On a gitops plane each carries `gitops`: the repository it comes from, the resource generation it was read at, and any problem the last pass reported — `refused` (the resource fails the plane's checks and is not used, with the reasons), `missing` (a row the cluster has no resource for), `plane_only` (nothing applies it from a repository yet) or `unwritten`. A refused resource with no row is listed too.",
+        "Every profile, with its pods, conditions and load. A pod carries gone: true once its substrate no longer runs it and it has been quiet past its lease. at_once is the most sessions the profile's pods could run at once and what bounds it, {sessions, by}: by hosts (the hosts registered for it) or policy (the cluster policy's maxReplicas), and both null where nothing does. On a gitops plane each carries `gitops`: the repository it comes from, the resource generation it was read at, and any problem the last pass reported — `refused` (the resource fails the plane's checks and is not used, with the reasons), `missing` (a row the cluster has no resource for), `plane_only` (nothing applies it from a repository yet) or `unwritten`. A refused resource with no row is listed too.",
       risk: :read
     },
     %Method{
@@ -552,6 +552,7 @@ defmodule Troupe.Plane.Admin.API do
     %Method{
       name: "admin.profile.agents",
       function: :profile_agents,
+      role: :platform_admin,
       summary:
         "A profile's agents, as its bundle in effect has them (composed through what it extends), for the console's builder: each with its mode, description, model, delegate (the subagents it may hand work to: its bundle's, when it holds the delegate tool), max_turns, skills (its own frontmatter's), loads (the bundle's skills it may load: those its skills opens and those whose agents names it or says all, before a team's grant narrows them; empty is no skill tool), permissions, from (the profile whose channel gave it) and channel, builtin (a primary Troupe ships that the profile offers because its bundle has none of that name), its definition, offered (whether the profile's spec.agents rule, composed through what it extends, lets it exist there; a subagent it excludes is in no agent's delegate), and teams, each team granted the profile with may (whether its grant lets it run the agent). Beside them channel, the one the profile follows in effect, skills, the names of the skills its bundle in effect carries, builtins, every agent Troupe ships with its definition, to copy from, teams, rule (spec.agents in effect: allow and deny, or null), and unmatched, the names the rule speaks of that are no agent the profile has today. A platform admin's, as editing a bundle is.",
       risk: :read,
@@ -567,6 +568,7 @@ defmodule Troupe.Plane.Admin.API do
     %Method{
       name: "admin.profiles.export",
       function: :profiles_export,
+      role: :platform_admin,
       summary:
         "Every profile, the cluster policy, every trigger and the GitHub App as a repository would hold them, to bootstrap one before switching a plane to gitops mode: a path and the YAML for each, and notes where something needs deciding first. Left out of every profile's manifest is what the plane or the cluster writes (spec.replicas, spec.teams, spec.mcpServers, the troupe.dev/drained annotation, status), listed in left_out: a repository must not hold them. A trigger's manifest has no key, runs or revisions, which stay with the plane. The GitHubApp's (github) has the App's ID, API URL and installations and each team's repositories and caps, and never its private key or webhook secret, which stay in OpenBao.",
       risk: :read
@@ -574,6 +576,7 @@ defmodule Troupe.Plane.Admin.API do
     %Method{
       name: "admin.hosts.list",
       function: :hosts_list,
+      role: :platform_admin,
       summary:
         "Every machine registered to a profile, with whether it has ever enrolled. Registered-and-never-seen is its own state: a worker nobody has installed yet is a different job from a machine that is off.",
       risk: :read,
@@ -589,6 +592,7 @@ defmodule Troupe.Plane.Admin.API do
     %Method{
       name: "admin.host.register",
       function: :host_register,
+      role: :platform_admin,
       summary:
         "Register a machine against a profile and mint the secret it enrols with. The secret is returned once and stored only as a hash; there is no method that shows it again. The answer also carries ca, the PEM of the CA that signed the control port's certificate, which the machine pins: it enrols over TLS only. Refused while the control port has no certificate.",
       risk: :write,
@@ -624,6 +628,7 @@ defmodule Troupe.Plane.Admin.API do
     %Method{
       name: "admin.host.rotate",
       function: :host_rotate,
+      role: :platform_admin,
       summary:
         "Mint a new enrolment secret for a machine, keeping the machine. The old secret stops working immediately, and the new one is shown once, with ca as registering answers it.",
       risk: :write,
@@ -642,6 +647,7 @@ defmodule Troupe.Plane.Admin.API do
       # `set_enabled` would not survive the trip back.
       name: "admin.host.enabled",
       function: :host_set_enabled,
+      role: :platform_admin,
       summary:
         "Stop a machine enrolling, or let it again. Nothing here reaches the machine: a worker already connected keeps its sessions until it is drained.",
       risk: :write,
@@ -671,6 +677,7 @@ defmodule Troupe.Plane.Admin.API do
     %Method{
       name: "admin.profile.get",
       function: :profile_get,
+      role: :platform_admin,
       summary:
         "One profile in full: the spec that was asked for, what policy makes of it, and what is actually running. Read this before changing one. For a profile that extends another, spec and written are what it sets itself, which is what to send back, and profile is the profile in effect; extended_by names the profiles that extend this one.",
       risk: :read,
@@ -692,6 +699,7 @@ defmodule Troupe.Plane.Admin.API do
     %Method{
       name: "admin.profile.put",
       function: :profile_put,
+      role: :platform_admin,
       summary:
         "Create or update a profile, returning the diff that was applied. Refused on a gitops plane as managed_by_gitops: there a repository holds the profiles, and a change is a commit to it. Refused as invalid_params, with Cilium or without, for a profile whose workers are pods and whose LLM endpoint, MCP servers (its own or its channel's) or egress.fqdns name a loopback or link-local address, which those pods do not reach: `unreachable` names each, `reason` says what to do. Without Cilium, one on another port, or at another address, gets a rule of its own in the pods' NetworkPolicy. A change to a profile others extend rewrites each of them as it now resolves, after checking each as a put of it would be, and is audited once with extended_by naming them; the answer's extended_by has each one's changes and provisioning.",
       risk: :write,
@@ -709,6 +717,7 @@ defmodule Troupe.Plane.Admin.API do
     %Method{
       name: "admin.profile.preview",
       function: :preview,
+      role: :platform_admin,
       summary:
         "What policy makes of a profile and what would change, without writing anything. The same check admission makes. A profile that extends another is judged as it would be in effect; extended_by lists every profile below this one as the write would leave it, each with its changes, the policy's verdict and a problem that would refuse the write; problems lists what resolving this one against its parent has to say and does not refuse, such as a parent's restriction holding over what it sets.",
       risk: :read,
@@ -725,6 +734,7 @@ defmodule Troupe.Plane.Admin.API do
     %Method{
       name: "admin.profile.delete",
       function: :profile_delete,
+      role: :platform_admin,
       summary:
         "Remove a profile. Sessions on it become read-only rather than being erased, and its pods go away. Refused on a gitops plane as managed_by_gitops, except for a row the cluster has no resource for (reported missing), which it deletes and nothing else. Refused as conflict while other profiles extend it, naming them in extended_by.",
       risk: :destructive,
@@ -741,6 +751,7 @@ defmodule Troupe.Plane.Admin.API do
     %Method{
       name: "admin.pod.drain",
       function: :pod_drain,
+      role: :platform_admin,
       summary:
         "Drain a pod: it stops taking new sessions and hands back what it was holding. Reversible, and sessions are moved rather than lost.",
       risk: :destructive,
@@ -758,7 +769,7 @@ defmodule Troupe.Plane.Admin.API do
       name: "admin.artifacts.list",
       function: :artifacts_list,
       summary:
-        "Published artifacts, newest first: every one for a platform admin, private ones included, and for a team admin the artifacts of the teams they administer (visibility team:<name>). Each its title, kind, visibility, owner, team, versions and bytes, never its content.",
+        "Published artifacts, newest first: every one for a platform admin, private ones included, and for a team admin the artifacts for the teams they administer (visibility team:<name>) and those the teams own (owner_team). Each its title, kind, visibility, owner, owner_team, team, version, bytes and when the retention pass removes it (goes_at), never its content; none while artifacts are off.",
       risk: :read
     },
     %Method{
@@ -786,6 +797,7 @@ defmodule Troupe.Plane.Admin.API do
     %Method{
       name: "admin.team.enable",
       function: :team_enable,
+      role: :platform_admin,
       summary:
         "Make an identity-provider group into a team. Enabling is the only thing Troupe adds to a group: membership stays the provider's. A name another team already has is refused as conflict unless link is true, because under it the group would be linked into that team and the team's settings changed; enabling a team's own group again is the same team, and a setting sent that differs from the team's is refused as conflict too, naming it in `settings`, unless link is true (a team's settings change with admin.team.update). A team that exists takes only the settings sent; the plane's defaults are a new team's.",
       risk: :write,
@@ -839,6 +851,7 @@ defmodule Troupe.Plane.Admin.API do
     %Method{
       name: "admin.identity.duplicates",
       function: :identity_duplicates,
+      role: :platform_admin,
       summary:
         "People and groups that look like one held twice: the same email or display name under different keys. Each set says which rows, where each came from (a sign-in or SCIM), and the mismatch it most likely comes from. Nothing is merged on this evidence.",
       risk: :read
@@ -846,6 +859,7 @@ defmodule Troupe.Plane.Admin.API do
     %Method{
       name: "admin.identity.adopt",
       function: :identity_adopt,
+      role: :platform_admin,
       summary:
         "Settle a refused adoption that admin.identity.duplicates lists by external_id: the row SCIM gave the subject as its externalId is that person's. A row a sign-in made under the subject is folded into SCIM's row, which takes the subject; with none, the next push or sign-in adopts SCIM's row. It hands that row, with its sessions and administration, to whoever signs in under the subject.",
       risk: :destructive,
@@ -868,6 +882,7 @@ defmodule Troupe.Plane.Admin.API do
     %Method{
       name: "admin.team.link",
       function: :team_link,
+      role: :platform_admin,
       summary:
         "Draw a team's members from one more identity-provider group. Membership stays the provider's; this says which groups count.",
       risk: :write,
@@ -884,6 +899,7 @@ defmodule Troupe.Plane.Admin.API do
     %Method{
       name: "admin.team.unlink.preview",
       function: :team_unlink_preview,
+      role: :platform_admin,
       summary:
         "What unlinking a group would do: how many people are in the team only through it, how many keep access another way, and how many sessions they can currently open. Read this first.",
       risk: :read,
@@ -900,6 +916,7 @@ defmodule Troupe.Plane.Admin.API do
     %Method{
       name: "admin.team.unlink",
       function: :team_unlink,
+      role: :platform_admin,
       summary:
         "Stop drawing a team's members from a group. Removes access for everybody who was in the team only through it. Sessions do not move: their team is fixed at create.",
       risk: :destructive,
@@ -917,6 +934,7 @@ defmodule Troupe.Plane.Admin.API do
     %Method{
       name: "admin.team.disable.preview",
       function: :team_disable_preview,
+      role: :platform_admin,
       summary:
         "What removing a team would take with it: its grants, administrators, service principals, triggers and group links, and how many sessions stay behind with no team. Read this first.",
       risk: :read,
@@ -927,6 +945,7 @@ defmodule Troupe.Plane.Admin.API do
     %Method{
       name: "admin.team.disable",
       function: :team_disable,
+      role: :platform_admin,
       summary:
         "Remove a team. Its grants are revoked, its sessions go read-only, and its administrators, service principals, triggers and group links go with it. The people and the groups stay; the sessions stay, with no team.",
       risk: :destructive,
@@ -938,6 +957,7 @@ defmodule Troupe.Plane.Admin.API do
     %Method{
       name: "admin.team.grant",
       function: :team_grant,
+      role: :platform_admin,
       summary: "Give a team access to a profile. Effective for sessions started after it.",
       risk: :write,
       arguments: [
@@ -962,6 +982,7 @@ defmodule Troupe.Plane.Admin.API do
     %Method{
       name: "admin.team.revoke",
       function: :team_revoke,
+      role: :platform_admin,
       summary:
         "Take a profile away from a team. Sessions already running on it become read-only rather than stopping.",
       risk: :destructive,
@@ -979,6 +1000,7 @@ defmodule Troupe.Plane.Admin.API do
     %Method{
       name: "admin.team.admin.add",
       function: :team_admin_add,
+      role: :platform_admin,
       summary: "Make somebody an administrator of one team.",
       risk: :write,
       arguments: [
@@ -994,6 +1016,7 @@ defmodule Troupe.Plane.Admin.API do
     %Method{
       name: "admin.team.admin.remove",
       function: :team_admin_remove,
+      role: :platform_admin,
       summary: "Take the team-admin role away. The person keeps their membership of the team.",
       risk: :write,
       arguments: [
@@ -1031,6 +1054,7 @@ defmodule Troupe.Plane.Admin.API do
     %Method{
       name: "admin.audit.verify",
       function: :audit_verify,
+      role: :platform_admin,
       summary:
         "Check the audit trail's hash chain and name the first row that does not verify: altered content, or a predecessor that is not the one that was there. result is ok, or that row with its reason (altered or chain_broken). Rows written before the chain existed are counted as unchained rather than reported as bad.",
       risk: :read
@@ -1121,6 +1145,7 @@ defmodule Troupe.Plane.Admin.API do
     %Method{
       name: "admin.provider.put",
       function: :provider_put,
+      role: :platform_admin,
       summary:
         "Save the identity provider. Refused unless admin.provider.check passes for these values, or force is true. A blank field is left as it was; the secret is never returned or written to the audit trail.",
       risk: :write,
@@ -1142,6 +1167,7 @@ defmodule Troupe.Plane.Admin.API do
     %Method{
       name: "admin.provider.reset",
       function: :provider_reset,
+      role: :platform_admin,
       summary:
         "Put every sign-in setting back to what this plane was deployed with. The way back from a provider saved in error.",
       risk: :write,
@@ -1158,6 +1184,7 @@ defmodule Troupe.Plane.Admin.API do
     %Method{
       name: "admin.scim.rotate",
       function: :scim_rotate,
+      role: :platform_admin,
       summary:
         "Mint the SCIM connector's token and return it, once. The previous token stops working immediately; paste the new one into the provider.",
       risk: :write,
@@ -1166,6 +1193,7 @@ defmodule Troupe.Plane.Admin.API do
     %Method{
       name: "admin.scim.delete",
       function: :scim_delete,
+      role: :platform_admin,
       summary:
         "Forget the SCIM connector's token. Every push presenting it answers 401 until a new one is made. A token in the deployment's own environment is not touched.",
       risk: :destructive,
@@ -1182,6 +1210,7 @@ defmodule Troupe.Plane.Admin.API do
     %Method{
       name: "admin.scim.update",
       function: :scim_update,
+      role: :platform_admin,
       summary:
         "Change the connector's switch. `teams_from_groups` true makes a pushed group a team on arrival, named from its display name with the platform's defaults; false leaves it a group until somebody enables it. Off creates no more teams and deletes none.",
       risk: :write,
@@ -1211,7 +1240,8 @@ defmodule Troupe.Plane.Admin.API do
     %Method{
       name: "admin.bundle.get",
       function: :bundle_get,
-      summary: "One version of a channel: its document, its summary and its hash.",
+      summary:
+        "One version of a channel: its document, its summary and its hash, its detail (agents with their mode and skills, skills with their files and the agents they open to, MCP servers with the Secret each needs) and adoption: for each profile on the channel, which of its pods run this version, a newer one or an older one, and whether every pod has it.",
       risk: :read,
       arguments: [
         %Argument{name: "channel", type: :string, required: true, description: "The channel."},
@@ -1226,8 +1256,9 @@ defmodule Troupe.Plane.Admin.API do
     %Method{
       name: "admin.bundle.validate",
       function: :bundle_validate,
+      role: :platform_admin,
       summary:
-        "Check a bundle without publishing it: its shape, and whether policy lets a pod reach the MCP servers it names.",
+        "Check a bundle without publishing it: its shape, each agent by the rules the daemon's agents.validate applies, each skill's agents against the bundle's agents and the built-ins, and whether policy lets a pod reach the MCP servers it names. Answers ok with the summary and hash, or invalid_params with data.errors, one sentence each.",
       risk: :read,
       arguments: [
         %Argument{
@@ -1242,6 +1273,7 @@ defmodule Troupe.Plane.Admin.API do
     %Method{
       name: "admin.agent.check",
       function: :agent_check,
+      role: :platform_admin,
       summary:
         "Check one agent's definition as a bundle's agent is checked, by the rules the daemon's agents.validate applies: {ok, errors, warnings}, each finding with its field. Writes nothing.",
       risk: :read,
@@ -1290,6 +1322,7 @@ defmodule Troupe.Plane.Admin.API do
     %Method{
       name: "admin.bundle.publish",
       function: :bundle_publish,
+      role: :platform_admin,
       summary:
         "Publish a new version of a channel, which pushes config.updated to every pod on it. History is append-only: a rollback is a new version carrying the old content. Refused, with Cilium or without, for an MCP server at a loopback or link-local address when a profile whose workers are pods follows the channel.",
       risk: :write,
@@ -1307,6 +1340,7 @@ defmodule Troupe.Plane.Admin.API do
     %Method{
       name: "admin.bundle.retire",
       function: :bundle_retire,
+      role: :platform_admin,
       summary: "Retire a version, so nothing new starts on it. Running sessions are untouched.",
       risk: :write,
       arguments: [
@@ -1360,6 +1394,7 @@ defmodule Troupe.Plane.Admin.API do
     %Method{
       name: "admin.setting.put",
       function: :setting_put,
+      role: :platform_admin,
       summary:
         "Change one platform setting. Some take effect on the next call and some at the next restart; the answer says which.",
       risk: :write,
@@ -1403,6 +1438,7 @@ defmodule Troupe.Plane.Admin.API do
     %Method{
       name: "admin.setting.reset",
       function: :setting_reset,
+      role: :platform_admin,
       summary:
         "Drop a setting's stored value, so it goes back to whatever this plane was deployed with.",
       risk: :write,
@@ -1421,6 +1457,7 @@ defmodule Troupe.Plane.Admin.API do
     %Method{
       name: "admin.clients.put",
       function: :clients_put,
+      role: :platform_admin,
       summary:
         "Change one component's version policy. Only the keys sent change, null clears one, and blocked is the whole list. Versions are written as releases are numbered (0.13.0-beta). A client is held to it at its next initialize: raising the minimum turns away every older client of that component. Answers, and audits, how many of the component's clients last seen the new policy finds current, behind and refused (affected).",
       risk: :write,
@@ -1429,7 +1466,7 @@ defmodule Troupe.Plane.Admin.API do
           name: "component",
           type: :string,
           required: true,
-          values: ClientVersions.components(),
+          values: :client_components,
           description:
             "Which client: tui (the terminal, troupe), daemon (troupe-daemon) or desktop (the desktop app)."
         },
@@ -1459,6 +1496,7 @@ defmodule Troupe.Plane.Admin.API do
     %Method{
       name: "admin.signing.rotate",
       function: :signing_rotate,
+      role: :platform_admin,
       summary:
         "Make a new version of the plane's signing key, which signs from then on. Every machine that pinned the old one refuses what the new one signs until its person accepts the new fingerprint. Confirmed by the current key's fingerprint.",
       risk: :destructive,
@@ -1483,6 +1521,7 @@ defmodule Troupe.Plane.Admin.API do
     %Method{
       name: "admin.releases.mirror",
       function: :releases_mirror,
+      role: :platform_admin,
       summary:
         "Copy a release into this plane's object store from where releases are published, for people's machines to update from. Its manifest is checked against the release keys first: one they did not sign, or one naming another version, is refused and nothing is copied. The files are then copied in the background, each held to the manifest, and the release is listed as mirrored once its manifest is written, last. Machines check every file against the release key again before installing it.",
       risk: :write,
@@ -1638,6 +1677,7 @@ defmodule Troupe.Plane.Admin.API do
     %Method{
       name: "admin.github.put",
       function: :github_put,
+      role: :platform_admin,
       summary:
         "Change the plane's GitHub App, the one identity its pods clone with. Only the keys sent change; installations is the whole list; private_key is imported into OpenBao transit and never readable again, by anybody. Refused with the field and the reason, and nothing written, for anything that does not read. On a gitops plane app_id, api_url and installations are the GitHubApp resource's and are refused as managed_by_gitops; private_key and webhook_secret, which no repository holds, are taken.",
       risk: :write,
@@ -1654,6 +1694,7 @@ defmodule Troupe.Plane.Admin.API do
     %Method{
       name: "admin.github.check",
       function: :github_check,
+      role: :platform_admin,
       summary:
         "Test the plane's GitHub App without changing it: an App ID is set, OpenBao transit signs with its key, GitHub knows the App by the JWT that key signs, and every installation set here is one GitHub lists for it. Four named checks, each with what it found, and GitHub's slug and name for the App once GitHub has answered. With a repository, a fifth (Repository): a token for it is minted with what the App's installation may do there, the repository is read with it, and it is revoked; the answer's repository is {name, installation_id, permissions, revoked}, GitHub's list of what the token could do, and never the token.",
       risk: :read,
@@ -1669,6 +1710,7 @@ defmodule Troupe.Plane.Admin.API do
     %Method{
       name: "admin.github.deliveries",
       function: :github_deliveries,
+      role: :platform_admin,
       summary:
         "The deliveries the App's webhook took, newest first: GitHub's id for each (X-GitHub-Delivery), its event and action, when it came, and what the plane did with it (the runs it fired, the session it resumed, or why neither). Never a body.",
       risk: :read,
@@ -1684,6 +1726,7 @@ defmodule Troupe.Plane.Admin.API do
     %Method{
       name: "admin.github.delete",
       function: :github_delete,
+      role: :platform_admin,
       summary:
         "Forget the plane's GitHub App: its App ID, API URL, installations, and which key version and webhook secret version are its own. A session naming a repository is refused from then on, a pod is given no token for one, and a delivery to /webhook/github is refused. The key and the secret stay in OpenBao transit, unused. Confirmed by the App ID.",
       risk: :destructive,
@@ -1774,6 +1817,7 @@ defmodule Troupe.Plane.Admin.API do
     %Method{
       name: "admin.person.budget",
       function: :person_budget,
+      role: :platform_admin,
       summary:
         "Set or clear a person's own monthly spend ceiling, in millionths, across every team they are in. It counts the calendar month in UTC and turns over on the 1st. 0 or absent is no ceiling.",
       risk: :write,
@@ -1794,6 +1838,7 @@ defmodule Troupe.Plane.Admin.API do
     %Method{
       name: "admin.budget.explain",
       function: :budget_explain,
+      role: :platform_admin,
       summary:
         "Every spend ceiling that applies to a person, narrowest first: which would bind, what each has left, the period its spend is counted over, and which rung set it. With a profile that has a monthly budget, that ceiling too (scope profile), after the person's: what the profile's sessions have spent this month, and set_by, the profile whose budget is in effect, itself or one it extends.",
       risk: :read,
@@ -1979,15 +2024,41 @@ defmodule Troupe.Plane.Admin.API do
 
   @doc "Every admin method, keyed by name."
   @spec methods() :: %{String.t() => Method.t()}
-  def methods, do: @by_name
+  def methods, do: Map.new(@methods, &{&1.name, resolved(&1)})
 
   @doc "Every admin method, in the order the table declares them."
   @spec list() :: [Method.t()]
-  def list, do: @methods
+  def list, do: Enum.map(@methods, &resolved/1)
 
   @doc "One method, or `nil`."
   @spec method(String.t()) :: Method.t() | nil
-  def method(name), do: Map.get(@by_name, name)
+  def method(name) do
+    case Map.fetch(@by_name, name) do
+      {:ok, method} -> resolved(method)
+      :error -> nil
+    end
+  end
+
+  # The table is built while this module compiles, so a closed set of values another plane
+  # module owns is named in it by an atom and read here, when a method is asked for:
+  # calling that module from the table would recompile this one with it, and with
+  # everything it reaches, which includes this module.
+  defp resolved(%Method{arguments: arguments} = method),
+    do: %{method | arguments: Enum.map(arguments, &resolved/1)}
+
+  defp resolved(%Argument{values: values, properties: properties} = argument) do
+    %{
+      argument
+      | values: values(values),
+        properties: properties && Enum.map(properties, &resolved/1)
+    }
+  end
+
+  defp values(:provisioners), do: Provisioner.names()
+  defp values(:budget_periods), do: Team.budget_periods()
+  defp values(:source_kinds), do: Trigger.source_kinds()
+  defp values(:client_components), do: ClientVersions.components()
+  defp values(values), do: values
 
   @doc "Whether a method name is an admin one."
   @spec admin_method?(String.t()) :: boolean()

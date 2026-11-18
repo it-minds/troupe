@@ -10,6 +10,8 @@ defmodule Troupe.TerminalTest do
 
   use ExUnit.Case, async: true
 
+  import Troupe.TestHelpers, only: [eventually: 2]
+
   alias Troupe.CLI.Terminal
 
   @linux match?({:unix, :linux}, :os.type())
@@ -61,7 +63,7 @@ defmodule Troupe.TerminalTest do
       end)
 
       # Until the shell has handed over to `sleep`, its standard output is the port's.
-      assert eventually(fn -> Terminal.stdout_of(pid, {:unix, :linux}) == out end)
+      assert eventually(fn -> Terminal.stdout_of(pid, {:unix, :linux}) == out end, 2_000)
       %{pid: pid, out: out}
     end
 
@@ -79,14 +81,6 @@ defmodule Troupe.TerminalTest do
     test "is read with lsof and ps elsewhere", %{pid: pid, out: out} do
       assert Terminal.stdout_of(pid, {:unix, :darwin}) == out
       assert Terminal.parent(pid, {:unix, :darwin}) == Terminal.parent(pid, {:unix, :linux})
-    end
-  end
-
-  defp eventually(check, tries \\ 100) do
-    cond do
-      check.() -> true
-      tries == 0 -> false
-      true -> Process.sleep(20) && eventually(check, tries - 1)
     end
   end
 end

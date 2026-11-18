@@ -7,29 +7,10 @@ issue: 657
 paths:
   - clients/gui/apps/desktop/src-tauri/src/plane_word.rs
   - clients/gui/apps/desktop/src-tauri/src/update.rs
-  - clients/gui/apps/desktop/src-tauri/src/daemon.rs
-  - clients/gui/apps/desktop/src/updates.ts
-  - clients/gui/apps/desktop/src/shell.ts
-  - clients/gui/packages/client/src/update.ts
-  - clients/gui/packages/client/src/planeSignature.ts
-  - clients/gui/apps/console/src/views/Integrations.tsx
-  - apps/troupe_protocol/lib/troupe/protocol/plane_signature.ex
-  - apps/troupe_protocol/lib/troupe/release/minisign.ex
-  - apps/troupe_protocol/lib/troupe/release/manifest.ex
-  - apps/troupe_plane/lib/troupe/plane/harness.ex
   - apps/troupe_plane/lib/troupe/plane/releases.ex
-  - apps/troupe_plane/lib/troupe/plane/admin.ex
-  - apps/troupe_plane/lib/troupe/plane/web/router.ex
   - apps/troupe_core/lib/troupe/plane_keys.ex
-  - apps/troupe_core/lib/troupe/session.ex
   - apps/troupe_core/lib/troupe/session/organisation.ex
-  - apps/troupe_core/lib/troupe/agent/server.ex
-  - apps/troupe_gateway/lib/troupe/gateway/plane.ex
   - apps/troupe_gateway/lib/troupe/gateway/policy.ex
-  - clients/tui/lib/troupe/remote/plane.ex
-  - PROTOCOL.md
-  - docs/user/updating.md
-  - docs/admin/routine-tasks.md
 symbols:
   - Troupe.Gateway.Policy
   - Troupe.Session.Organisation
@@ -40,13 +21,8 @@ gist: "Shell checks the signed policy itself before any URL; daemon polls initia
 
 # The plane's word reaches the desktop updater signed, a policy change reaches connected clients, and releases are mirrored
 
-#657 slice 2, after Decision 919 (slice 1) gave the plane a non-exportable signing key,
-the two signed answers and a pin per plane, and left four things: the desktop app's
-updater following the plane's release URL, a policy change reaching clients already
-connected, a way to put a release into the plane's object store, and `initialize`'s
-`update_required` and `/downloads`, which said things unsigned. This records how each was
-done. It replaces two things of Decision 919: `initialize` standing unsigned, and
-`/downloads` refusing a version no component is served; the rest of 919 stands.
+It replaces two things of Decision 919: `initialize` standing unsigned, and `/downloads`
+refusing a version no component is served; the rest of 919 stands.
 
 ## The desktop app's shell checks the plane's signature itself
 
@@ -172,39 +148,3 @@ file that is in the store and answers a bare 404, with no body, for anything els
 the policy says: the list of refused versions comes only from the signed, signed-in
 `me.client_versions`. A blocked version that is mirrored is handed out, as GitHub hands it
 out; no client installs a version the policy it holds refuses.
-
-## Proof
-
-- `clients/gui/apps/desktop/src-tauri`: `cargo test` — `plane_word`: the shared vector
-  through the Rust verifier, a policy naming where releases are, one signed by another key
-  (named), edited, of another kind, expired or unreadable refused with the sentence, the pin
-  taken only for its plane; `update`: a release URL taken only from a policy the pinned key
-  signed, the manifest then fetched from `<url>/v<version>/` and held to the release key, a
-  forged policy and a missing pin or daemon refused before anything is fetched, a release
-  URL needing a version; `daemon`: `identity.get` asked over the daemon's socket.
-- `clients/gui/apps/desktop/test/updates.test.tsx`: the signed policy handed to the shell as
-  it came, beside the page's fields; a `config.changed` with scope `versions` asks again.
-- `clients/gui/packages/client/test/client-update.test.ts`: the signed policy kept for the
-  shell; a refusal acted on as signed, and not when unsigned or signed by another key.
-- `apps/troupe_gateway/test/troupe/gateway/policy_test.exs`: a limit changed on the plane
-  reaching a running session at its next turn with the line, and every client hearing it; a
-  changed version policy told, an unchanged revision fetching nothing; an unsigned refusal
-  from a pinned plane not taken, a signed one taken and shown in `identity.get`.
-- `apps/troupe_core/test/troupe/session/organisation_test.exs`: a running session resolved
-  again, the change taken at the next turn and not before, the keys held until a restart
-  named apart, the same document again saying nothing, every session resolved.
-- `apps/troupe_core/test/troupe/plane_keys_test.exs`: `held_refusal/5` against signed,
-  unsigned, other-key, edited, other-version and expired refusals, and a plane with no pin.
-- `clients/tui/test/troupe/plane_version_test.exs`: a signed refusal said in HQ's sentence,
-  an unsigned one from a pinned plane not taken.
-- `apps/troupe_plane/test/troupe/plane/signing_test.exs`: the refusal signed as
-  `update_required` for an hour, the revision moving when either answer does, `/downloads`
-  answering the same bare 404 for blocked, too-old and served versions not kept.
-- `apps/troupe_plane/test/troupe/plane/releases_test.exs`: a release mirrored against the
-  development object store from a stand-in for GitHub serving the shared release vectors,
-  every file and the manifest last, listed, audited and handed out at `/downloads`; a
-  manifest signed by another key, changed, of another version or missing refused with
-  nothing copied; a file that is not the manifest's stopping the copy with no manifest
-  written. `admin_parity_test` and `console_coverage_test` hold the two methods to the
-  table, the MCP tools and Integrations; `clients/gui/apps/console/test/integrations.test.tsx`
-  the card, the mirror, the refusal's sentence and a team admin reading only.

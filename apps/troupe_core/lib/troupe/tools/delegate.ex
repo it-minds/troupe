@@ -38,6 +38,7 @@ defmodule Troupe.Tools.Delegate do
 
   alias Troupe.Agent.{Definition, Definitions, Local}
   alias Troupe.{Paths, Tool, Tools}
+  alias Troupe.Protocol.Words
   alias Troupe.Tools.Finish
 
   @parts ~w(goal context constraints deliverable do_not)
@@ -151,13 +152,13 @@ defmodule Troupe.Tools.Delegate do
 
           {_found, missing} ->
             {:error,
-             "the brief has no #{Finish.and_list(missing)}: each of goal, context, constraints, " <>
+             "the brief has no #{Words.and_list(missing)}: each of goal, context, constraints, " <>
                "deliverable and do_not needs something, none where it has nothing"}
         end
 
       others ->
         {:error,
-         "#{Finish.and_list(others)} #{if match?([_], others), do: "is", else: "are"} no part of a " <>
+         "#{Words.and_list(others)} #{if match?([_], others), do: "is", else: "are"} no part of a " <>
            "brief: its parts are goal, context, constraints, deliverable and do_not"}
     end
   end
@@ -238,7 +239,7 @@ defmodule Troupe.Tools.Delegate do
         do: " The single `task` field is gone: split what it said into the five parts.",
         else: ""
 
-    "delegate refused: the brief has no #{Finish.and_list(missing)}. A brief has five " <>
+    "delegate refused: the brief has no #{Words.and_list(missing)}. A brief has five " <>
       "parts, each its own field: goal, context, constraints, deliverable and do_not; " <>
       "write none where one has nothing, and delegate again with all five." <> old
   end

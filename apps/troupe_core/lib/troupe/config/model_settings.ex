@@ -27,10 +27,6 @@ defmodule Troupe.Config.ModelSettings do
   alias Troupe.LLM.Catalog.Store
   alias Troupe.Protocol.ProviderTypes
 
-  # Every type a file may name (`Troupe.LLM.ProviderType`), so saving a file whose provider
-  # a screen has no name for keeps it: the fake too, so a packaged binary's first run can
-  # be driven to a written file with no model behind it (Decision 705).
-  @providers ProviderType.names()
   @auths ~w(api_key bearer)
   @roles ~w(default cheap expensive)
 
@@ -463,10 +459,17 @@ defmodule Troupe.Config.ModelSettings do
 
   # -- validation ---------------------------------------------------------------
 
-  defp provider(value) when value in @providers, do: {:ok, value}
+  # Every type a file may name (`Troupe.LLM.ProviderType`), so saving a file whose provider
+  # a screen has no name for keeps it: the fake too, so a packaged binary's first run can
+  # be driven to a written file with no model behind it. Read here, not while this module
+  # compiles, so that it does not recompile with the provider types.
+  defp provider(value) do
+    providers = ProviderType.names()
 
-  defp provider(value),
-    do: {:error, "provider must be one of #{Enum.join(@providers, ", ")}, not #{inspect(value)}"}
+    if value in providers,
+      do: {:ok, value},
+      else: {:error, "provider must be one of #{Enum.join(providers, ", ")}, not #{inspect(value)}"}
+  end
 
   defp auth(value) when value in @auths, do: {:ok, value}
 

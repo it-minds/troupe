@@ -49,7 +49,7 @@ const TRIGGER_KEYS = ["principal", "profile", "agent", "enabled", "source", "pro
 const TRIGGER_DEFAULTS: Record<string, unknown> = { enabled: true, visibility: "team", review: "required", notify: [], concurrency: 1 };
 
 /** The `llm` fields a profile may set only beside `llm.endpoint`. */
-const LLM_FIELDS = ["provider", "model", "smallModel", "secretRef", "prices"];
+const LLM_FIELDS = ["provider", "model", "smallModel", "secretRef", "prices", "maxTokens"];
 
 /** The plane's sentence for `llm` settings without an endpoint, or null where they have one or set nothing. */
 export function llmProblem(llm: Record<string, unknown>): string | null {
@@ -3070,6 +3070,10 @@ export class FakeAdmin {
     if (typeof attrs["image"] !== "string" || attrs["image"] === "") return refuse(INVALID_PARAMS, "invalid_params", { reason: "image: can't be blank" });
     const llm = spec["llm"];
     if (typeof llm === "object" && llm !== null) {
+      const cap = (llm as Record<string, unknown>)["maxTokens"];
+      if (cap !== undefined && cap !== null && !(Number.isInteger(cap) && (cap as number) > 0)) {
+        return refuse(INVALID_PARAMS, "invalid_params", { reason: `spec: llm.maxTokens must be a whole number of tokens above 0, not ${JSON.stringify(cap)}` });
+      }
       const problem = llmProblem(llm as Record<string, unknown>);
       if (problem) return refuse(INVALID_PARAMS, "invalid_params", { reason: `spec: ${problem}` });
     }

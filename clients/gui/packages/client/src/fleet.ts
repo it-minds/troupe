@@ -18,6 +18,7 @@ import type { PlaneClient, SessionRow, SessionsFilter } from "./plane.js";
 import { watchRemote } from "./remote.js";
 import { ErrorCodes } from "./types.js";
 import type { Unseen } from "./types.js";
+import { errorText } from "./words.js";
 
 /**
  * Where a session runs, which is the one thing a person must be able to see at a glance.
@@ -380,12 +381,12 @@ export class RemoteSource implements FleetSource {
     const token = await this.token();
     const [offered, invited] = await Promise.all([
       this.plane
-        .rpc<{ sessions: Record<string, unknown>[] }>(token, "remote.list", {})
+        .remoteSessions(token)
         .then(({ sessions }) => (sessions ?? []).map((s) => rowFromRemote(s, this.id)))
         // A plane from before #58 relays nothing, which is no sessions rather than a fault.
         .catch(none),
       this.plane
-        .rpc<{ invites: unknown }>(token, "invites.list", {})
+        .listInvites(token)
         .then(({ invites }) => invitationsFrom(invites).map((i) => rowFromInvite(i, this.id)))
         // Nor does a plane from before #765 invite anybody.
         .catch(none),
@@ -500,11 +501,6 @@ export class FleetStore {
     this.recompute();
   }
 
-  /** Whether a watched source is being told what changes now. */
-  isLive(id: string): boolean {
-    return this.live.has(id);
-  }
-
   private watchOne(source: FleetSource): void {
     if (!source.watch || this.watches.has(source.id)) return;
     const stop = source.watch(
@@ -580,7 +576,7 @@ export class FleetStore {
           bySource.set(s.id, await s.listArchived());
           sources[s.id] = { at: Date.now(), error: null };
         } catch (e) {
-          sources[s.id] = { at: 0, error: e instanceof Error ? e.message : String(e) };
+          sources[s.id] = { at: 0, error: errorText(e) };
         }
       }),
     );
@@ -634,7 +630,7 @@ export class FleetStore {
         } catch (e) {
           // Keep what the source last said. A list that empties because a token expired
           // is worse than a list that is briefly stale and says so.
-          next[s.id] = { at: next[s.id]?.at ?? 0, error: e instanceof Error ? e.message : String(e) };
+          next[s.id] = { at: next[s.id]?.at ?? 0, error: errorText(e) };
         }
       }),
     );
@@ -733,7 +729,19 @@ export function archiveRefusal(e: unknown, archiving = true): string {
   if (e instanceof TroupeRpcError && e.code === ErrorCodes.forbidden) {
     return `Only its owner can ${archiving ? "archive" : "unarchive"} this session`;
   }
-  return e instanceof Error ? e.message : String(e);
+  return errorText(e);
+}
+
+/**
+ * Why renaming a session, or keeping it at the top or letting it go, was refused: the
+ * owner's refusal in words, a name too long as the server says it, anything else as the
+ * error says it. Who may is `mayArchive`'s rule: the owner, of a session that has a list.
+ */
+export function markRefusal(e: unknown, what: "rename" | "keep" | "let go"): string {
+  if (e instanceof TroupeRpcError && e.code === ErrorCodes.forbidden) {
+    return `Only its owner can ${what === "rename" ? "rename this session" : what === "keep" ? "keep this session at the top" : "let this session go from the top"}`;
+  }
+  return errorText(e);
 }
 
 /**
@@ -768,11 +776,6 @@ export function filterRows(rows: FleetRow[], filter: FleetFilter): FleetRow[] {
   });
 }
 
-/** Every session with an approval waiting. */
-export function awaitingApproval(rows: FleetRow[]): FleetRow[] {
-  return rows.filter((r) => r.pendingApprovals > 0);
-}
-
 /**
  * Every session waiting on its person, which is what the inbox is a list of: an approval
  * or a question, the agent's or the harness's. A session waiting on a question used to
@@ -780,10 +783,6 @@ export function awaitingApproval(rows: FleetRow[]): FleetRow[] {
  */
 export function awaitingYou(rows: FleetRow[]): FleetRow[] {
   return rows.filter((r) => r.pendingApprovals > 0 || r.pendingQuestions > 0);
-}
-
-export function totalCostMicros(rows: FleetRow[]): number {
-  return rows.reduce((n, r) => n + (r.costMicros ?? 0), 0);
 }
 
 /** Whether a row has anything to say about while nobody was reading it. */

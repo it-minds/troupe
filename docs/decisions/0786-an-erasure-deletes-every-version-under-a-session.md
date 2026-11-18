@@ -5,10 +5,8 @@ date: 2026-10-05
 status: accepted
 paths:
   - apps/troupe_plane/lib/troupe/plane/erasure.ex
-  - apps/troupe_plane/test/troupe/plane/private_erasure_test.exs
   - apps/troupe_protocol/lib/troupe/object_store.ex
   - apps/troupe_protocol/lib/troupe/sessions/storage.ex
-  - apps/troupe_protocol/test/troupe/object_store_test.exs
 gist: "An erasure deletes every version under a session's prefix, however many: the list it deletes from follows S3's markers to the last page"
 ---
 

@@ -6,8 +6,6 @@ status: accepted
 issue: 1001
 paths:
   - clients/gui/apps/desktop/src/frames.ts
-  - clients/gui/apps/desktop/test/frames.test.tsx
-  - docs/design/frames.md
 symbols:
   - layout
   - LIFECYCLE_NOTES

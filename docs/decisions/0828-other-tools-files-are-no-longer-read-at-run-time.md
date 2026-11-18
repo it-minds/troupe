@@ -9,22 +9,8 @@ paths:
   - apps/troupe_core/lib/troupe/instructions.ex
   - apps/troupe_core/lib/troupe/instructions/front_matter.ex
   - apps/troupe_core/lib/troupe/instructions/check.ex
-  - apps/troupe_core/lib/troupe/config.ex
   - apps/troupe_core/lib/troupe/config/open_code.ex
   - apps/troupe_core/lib/troupe/config/model_settings.ex
-  - clients/tui/lib/troupe/cli/config_setup.ex
-  - install.sh
-  - install.ps1
-  - docs/user/configuration.md
-  - docs/user/instructions.md
-  - apps/troupe_core/test/troupe/instructions_test.exs
-  - apps/troupe_core/test/troupe/instructions_prompt_test.exs
-  - apps/troupe_core/test/troupe/instructions_check_test.exs
-  - apps/troupe_core/test/troupe/instructions/front_matter_test.exs
-  - apps/troupe_core/test/troupe/config_providers_test.exs
-  - apps/troupe_gateway/test/troupe/gateway/context_test.exs
-  - clients/tui/test/troupe/context_command_test.exs
-  - clients/tui/test/troupe/config_setup_test.exs
 symbols:
   - Troupe.Instructions.load/3
   - Troupe.Instructions.FrontMatter
@@ -34,13 +20,13 @@ symbols:
 gist: "No run-time read of CLAUDE.md, GEMINI.md, Copilot's, Cursor's or opencode's files; each found is listed skipped; rules are .troupe/rules/*.md"
 ---
 
-Issue #516, its sixth slice. The maintainer decided that other tools' configuration stops
-being read at run time: it is brought into Troupe's own files once (`troupe onboard`,
-Decision 823), and a session reads only those, `AGENTS.md` and `.agents/` (Decision 822).
-For this wave the maintainer also decided the two things #516 left open for this slice:
-**Cursor's rules are onboarded too**, not read in place (#516's first decision, against
-its recommendation), and **the readers go now**, with no release of warning and no key to
-keep the old reading (its fifth). Two run-time readers were left, and this removes both.
+The maintainer decided that other tools' configuration stops being read at run time: it is
+brought into Troupe's own files once (`troupe onboard`, Decision 823), and a session reads
+only those, `AGENTS.md` and `.agents/` (Decision 822). For this wave the maintainer also
+decided the two things #516 left open for this slice: **Cursor's rules are onboarded
+too**, not read in place (#516's first decision, against its recommendation), and **the
+readers go now**, with no release of warning and no key to keep the old reading (its
+fifth).
 
 **What a person upgrading sees.** A repository whose agents' instructions are in a
 `CLAUDE.md`, a `GEMINI.md`, `.github/copilot-instructions.md`, `.cursorrules` or
@@ -91,10 +77,9 @@ import-opencode` makes it.
   in (Decision 827): each at the repository root is listed after Cursor's, and a
   `.github/instructions` linked out once as `outside`; not below the root, where Copilot
   does not read them and onboarding does not take them. Not chosen: reading
-  `.cursor/rules` in place and
-  `.troupe/rules` beside it (#516's recommendation, overruled), which keeps a format Troupe
-  does not own read at every turn; a `<config>/rules` for the person, which nothing
-  writes.
+  `.cursor/rules` in place and `.troupe/rules` beside it (#516's recommendation,
+  overruled), which keeps a format Troupe does not own read at every turn; a
+  `<config>/rules` for the person, which nothing writes.
 - **A file that cannot be read is listed (D84, D99).** One found in a directory, an
   `AGENTS.md`, an `.agents/AGENTS.md` or a rule, that is there and cannot be read was
   logged and left out of `context.get`. It is now listed with the new `status`
@@ -103,8 +88,7 @@ import-opencode` makes it.
 - **An `.agents` directory has no file of its own.** A session that worked on a file
   under `.agents/` walked `.agents` as a directory on the way and read its `AGENTS.md` a
   second time, as that directory's own, beside its parent's `.agents/AGENTS.md` (822).
-  It is read once, as the parent's. Found by `troupe instructions check`, which works on
-  every file.
+  It is read once, as the parent's.
 - **`troupe instructions check` follows the loader (810, unchanged).** It checks what the
   loader reads, so `.troupe/rules` are checked and the files listed as skipped are not.
   A path written in `<dir>/.agents/AGENTS.md`, or in a rule in `<dir>/.troupe/rules`, is
@@ -126,32 +110,3 @@ import-opencode` makes it.
   say the same and go on to `troupe config` after a no. opencode's agents, commands and
   MCP servers were never read at run time; onboarding (824) and `/mcp import` (820) copy
   them.
-- **Not in this slice.** The first session's proposal and the instruction files'
-  onboarding source and the librarian's prompt (Decision 827); a file
-  already onboarded still saying `run troupe onboard` (it does not read
-  `.troupe/onboarded.json`); the desktop app's and VS Code's labels for a model `from
-  opencode`, which no daemon now sends.
-- **Proof.** `Troupe.InstructionsTest` (each other tool's file, at the root and nested,
-  listed as skipped with the reason and none of it in the prompt; Copilot's nested file
-  with 806's reason; an unreadable `AGENTS.md` and `.agents/AGENTS.md` listed; `.agents`
-  read once when the session works under it; each kind of rule in `.troupe/rules`, its
-  globs' forms, a nested one, linked out, the budget), `Troupe.InstructionsPromptTest`
-  (a repository with only another tool's file reaches no prompt and the event says to run
-  `troupe onboard`; the three kinds of rule in a real session),
-  `Troupe.Instructions.CheckTest` (`.troupe/rules` checked and the skipped files not; a
-  path in a nested `.agents/AGENTS.md` and a nested rule resolved from their directory),
-  `Troupe.ConfigProvidersTest` (no
-  opencode provider, default, warning, ladder entry or report line with no key of its
-  own), `Troupe.Config.ModelSettingsTest` (nothing of opencode's before the copy, the
-  copy as before), `Troupe.Gateway.ContextTest` (`context.get` lists a `CLAUDE.md`, a
-  Cursor rule and an unreadable `.agents/AGENTS.md`), and the TUI's `ContextCommandTest`
-  and `ConfigSetupTest`. On the chunk's tip ten of the loader's and the config's tests
-  failed: a `CLAUDE.md` was read, `.troupe/rules` were not, an unreadable file was not
-  listed, and opencode's providers and default model were the configuration's; the check's
-  `.agents` test failed with the paths called missing, and the loader's with the file
-  read twice. The second wave's leftovers (#516): `Troupe.Instructions.FrontMatterTest`
-  (each form of the keys, both readers' tests', and the loader and onboarding reading one
-  front matter alike), `Troupe.InstructionsTest` and `Troupe.Gateway.ContextTest` (a root
-  `.github/instructions/*.instructions.md` listed as skipped with the reason, a nested one
-  not, a linked-out directory once as `outside`); on the chunk's tip the loader read
-  `"docs/**,lib/**"` as two broken globs and listed no Copilot rule.

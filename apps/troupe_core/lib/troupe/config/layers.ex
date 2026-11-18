@@ -118,6 +118,8 @@ defmodule Troupe.Config.Layers do
     # JSON, the shape `models.prices` has in a file: how a profile hands its pods the
     # prices of the models it serves, since a pod has no file of its own.
     {"TROUPE_MODEL_PRICES", {:json, ["models", "prices"]}},
+    # A whole number: how a profile's `llm.maxTokens` reaches its pods.
+    {"TROUPE_MAX_TOKENS", {:integer, ["max_tokens"]}},
     {"TROUPE_FAKE_SCRIPT", ["fake_script"]},
     # Issue #465's settings, which is how a live bench is run with one changed without a
     # file of the person's being changed (Decisions 815 and 863).
@@ -967,6 +969,15 @@ defmodule Troupe.Config.Layers do
     end
   end
 
+  # The environment holds text; one that is not a whole number is refused as a file's
+  # value of the wrong type is, naming the variable.
+  defp env_value(acc, var, {:integer, key_path}, value) do
+    case Integer.parse(String.trim(value)) do
+      {number, ""} -> env_value(acc, var, key_path, number)
+      _other -> env_value(acc, var, key_path, value)
+    end
+  end
+
   defp env_value(acc, var, key_path, value) do
     spec = Schema.at(key_path)
 
@@ -1202,15 +1213,13 @@ defmodule Troupe.Config.Layers do
   def show(value) when is_list(value), do: "a list"
   def show(value), do: inspect(value)
 
-  @doc """
-  The line a key is on, found in the text by indentation — close enough to point a
-  person at it, and `nil` when it is written inline (`models: {default: x}` points at
-  `models`).
-  """
+  # The line a key is on, found in the text by indentation — close enough to point a
+  # person at it, and `nil` when it is written inline (`models: {default: x}` points at
+  # `models`).
   @spec line_of(String.t() | nil, [String.t()]) :: pos_integer() | nil
-  def line_of(nil, _key_path), do: nil
+  defp line_of(nil, _key_path), do: nil
 
-  def line_of(text, key_path) do
+  defp line_of(text, key_path) do
     lines = text |> String.split("\n") |> Enum.with_index(1)
     find_line(lines, key_path, -1, nil)
   end

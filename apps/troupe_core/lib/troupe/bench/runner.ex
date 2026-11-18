@@ -24,7 +24,7 @@ defmodule Troupe.Bench.Runner do
   """
 
   alias Troupe.Bench.{Model, Scenario}
-  alias Troupe.Protocol.Event
+  alias Troupe.Protocol.{Event, Words}
 
   # Long enough for a slow machine, short enough that a hung scenario fails the bench
   # rather than the job's own timeout.
@@ -58,12 +58,10 @@ defmodule Troupe.Bench.Runner do
   # What a host installs that changes the tools a session is offered, or how one reads.
   @hosts [:artifacts, :artifacts_ready, :user_memory]
 
-  @doc """
-  Run `fun` with none of the hosts that change a session's tools installed, putting back
-  what was there before, however it ends.
-  """
+  # Run `fun` with none of the hosts that change a session's tools installed, putting back
+  # what was there before, however it ends.
   @spec without_hosts((-> result)) :: result when result: term()
-  def without_hosts(fun) do
+  defp without_hosts(fun) do
     previous = Map.new([:extra_tools | @hosts], &{&1, Application.fetch_env(:troupe_core, &1)})
     Enum.each(@hosts, &Application.delete_env(:troupe_core, &1))
     extra = Application.get_env(:troupe_core, :extra_tools, [])
@@ -179,7 +177,7 @@ defmodule Troupe.Bench.Runner do
       {:troupe_event, ^sid, %Event{type: ^type, agent: ["root"], ephemeral?: false} = event} ->
         event
     after
-      timeout -> raise "no #{type} from the root agent within #{div(timeout, 1000)} s"
+      timeout -> raise "no #{type} from the root agent within #{Words.duration(timeout)}"
     end
   end
 

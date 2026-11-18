@@ -130,8 +130,8 @@ defmodule Troupe.Worker.FailedActivationTest do
     proxy = start_supervised!(relay(context, drop: listing_of(context.session_id, "workspace/")))
     options = activation(through(context, proxy), epoch: 2)
     activating = Task.async(fn -> Sessions.activate(context.session_id, options) end)
-    manager = eventually(fn -> Sessions.whereis(context.session_id) end)
-    eventually(fn -> waiting_for_the_log?(manager) end)
+    manager = eventually(fn -> Sessions.whereis(context.session_id) end, 10_000)
+    eventually(fn -> waiting_for_the_log?(manager) end, 10_000)
 
     send(reader, :write)
 

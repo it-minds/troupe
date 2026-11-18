@@ -115,10 +115,6 @@ export class SessionView {
     return this.connection;
   }
 
-  get bound(): boolean {
-    return this.connection !== null;
-  }
-
   /** Point the view at a (new) socket. The cursor is untouched. */
   bind(conn: TroupeConnection): void {
     this.connection = conn;

@@ -5,20 +5,10 @@ date: 2026-11-17
 status: accepted
 issue: 1005
 paths:
-  - apps/troupe_plane/lib/troupe/plane/harness.ex
+  - apps/troupe_core/lib/troupe/sessions/archive.ex
   - apps/troupe_plane/lib/troupe/plane/sessions.ex
   - apps/troupe_plane/lib/troupe/plane/sessions/session.ex
-  - apps/troupe_plane/lib/troupe/plane/admin.ex
-  - apps/troupe_plane/priv/repo/migrations/20261117001021_session_archived.exs
-  - apps/troupe_core/lib/troupe.ex
-  - apps/troupe_core/lib/troupe/sessions/archive.ex
-  - apps/troupe_core/lib/troupe/sessions/pin.ex
   - apps/troupe_core/lib/troupe/sessions/index.ex
-  - apps/troupe_core/lib/troupe/commands.ex
-  - apps/troupe_gateway/lib/troupe/gateway/dispatch.ex
-  - apps/troupe_worker/lib/troupe/worker/auth.ex
-  - apps/troupe_protocol/lib/troupe/protocol/schema.ex
-  - PROTOCOL.md
 symbols:
   - Troupe.Plane.Sessions.archive/3
   - Troupe.archive_session/2

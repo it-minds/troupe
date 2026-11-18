@@ -9,12 +9,9 @@ paths:
   - clients/tui/lib/troupe/ui/headless/printer.ex
   - clients/tui/lib/troupe/remote/translate.ex
   - clients/tui/lib/troupe/settings.ex
-  - clients/tui/test/troupe/first_prompt_wait_test.exs
   - clients/gui/apps/desktop/src/frames.ts
   - clients/gui/apps/desktop/src/views/Session.tsx
-  - clients/gui/apps/desktop/test/model-wait.test.tsx
   - clients/gui/packages/client/src/transcript.ts
-  - docs/user/terminal-screen.md
 symbols:
   - Troupe.UI.TUI.Model.waiting/3
   - Troupe.UI.TUI.Model.wait_lines/3
@@ -23,14 +20,6 @@ symbols:
   - Troupe.Settings.daemon_log/0
 gist: "Facts from the first second: preparing (10 s: the daemon has not sent the model request yet), thinking (20 s: no answer from <host> yet); a box at 45 s with the times, the last event and Esc/doctor/daemon.log; headless one line"
 ---
-
-A person on Windows started the terminal, typed a first line, and for two minutes saw
-nothing: no output, no error, and at the gateway no token used. The curtain line of TUI
-Decision 161 showed a flourish with no counter while nothing had happened (`the house
-lights go down`), and would have shown `thinking (02:00)` ticking for the harness's five
-minutes had the request gone out. They would rather see an error, or something that says
-what is being waited on. This is the terminal's half; the harness's first-byte limit is
-a root decision of the same date.
 
 **What the terminal knows.** Three events stamp a turn's wait, and the window keeps the
 three times: the prompt (`input`, the first copy of it by command id, since the same line
@@ -79,11 +68,6 @@ and `no answer from <host> for 45 s after the request; ...`, both ending with `t
 doctor` and the log's path. A byte or the log's word that the turn is over stops the
 timer; a line is never repeated for the same wait.
 
-**The desktop app, small**, from the same three stamps in its fold: the composer's hint
-says `the daemon has not sent the model request yet (00:14)` from ten seconds after a
-prompt with no request, and `waiting on the model (00:35), nothing back yet` from twenty
-seconds after the request with nothing streaming; nothing more.
-
 **Not chosen.** A spinner alone, which is what there was: it says the terminal is alive
 and nothing else, and the report is of a person watching one for two minutes. A modal,
 which would take the keys from the composer and the pane: the box is drawn where an
@@ -92,13 +76,3 @@ information, not a question. Saying the host in the curtain line from the first 
 `thinking` is right while a model takes its usual ten seconds, and the host is news only
 once it is late. A new event from the harness: everything here is derived from what the
 daemon already sends, so a daemon from before the harness's own change gets the box too.
-
-**Proof.** `Troupe.FirstPromptWaitTest`: the curtain's words at each threshold, from a
-fold with the clock driven by hand, in the pane and in a tile; the next prompt preparing
-again and a queued copy no turn; the box's lines at 46 s before and after the request,
-unacknowledged, and gone with a byte, the turn's end or a question; the model's sentence
-from the error on, over this client's events and over the wire, and against the daemon
-with the fake failing the request; the host from `base_url`, the type and neither; the
-headless line once at the prompt and once at the request, none after a byte.
-`transcript.test.ts` stamps the three times; `model-wait.test.tsx` holds the events back
-and moves the clock.

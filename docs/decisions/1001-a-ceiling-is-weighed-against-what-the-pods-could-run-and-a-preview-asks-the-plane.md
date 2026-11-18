@@ -7,24 +7,8 @@ issue: 957
 supersedes: []
 paths:
   - apps/troupe_plane/lib/troupe/plane/fleet/scaler.ex
-  - apps/troupe_plane/lib/troupe/plane/admin.ex
-  - apps/troupe_plane/lib/troupe/plane/admin/api.ex
-  - apps/troupe_plane/lib/troupe/plane/client_versions.ex
   - apps/troupe_plane/lib/troupe/plane/harness.ex
-  - apps/troupe_plane/lib/troupe/plane/scim.ex
-  - apps/troupe_plane/lib/troupe/plane/web/router.ex
-  - clients/gui/packages/client/src/admin.ts
-  - clients/gui/packages/client/src/plane.ts
-  - clients/gui/packages/client/test/support/admin.ts
-  - clients/gui/packages/client/test/support/plane.ts
-  - clients/gui/apps/console/src/console.ts
-  - clients/gui/apps/console/src/views/Audit.tsx
-  - clients/gui/apps/console/src/views/ClientVersions.tsx
   - clients/gui/apps/console/src/views/Profiles.tsx
-  - clients/gui/apps/console/src/views/Team.tsx
-  - clients/tui/lib/troupe/client/remote.ex
-  - PROTOCOL.md
-  - docs/admin/integrations.md
 symbols:
   - Troupe.Plane.Fleet.Scaler.at_once/2
   - Troupe.Plane.ClientVersions.put/4
@@ -34,10 +18,6 @@ symbols:
   - teamChangesInUnit
 gist: "max_sessions vs the pods' most (hosts or policy maxReplicas x per pod, not replicas now), saved with a sentence; clients.put dry_run only where discovery lists it; refusal limit in the setting's unit; audit rows and profiles.list in units and gone; SCIM ServiceProviderConfig"
 ---
-
-Issue #957 gathers what chunk 47's pull requests (#937, #939, #940, #941) left, and #870.
-Most of it applies decisions already taken (992's names, 991's units, 994's gone pods);
-four points needed choosing.
 
 ## What a ceiling is weighed against
 

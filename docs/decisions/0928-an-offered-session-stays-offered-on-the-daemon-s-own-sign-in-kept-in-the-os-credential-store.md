@@ -9,23 +9,8 @@ paths:
   - apps/troupe_protocol/lib/troupe/keyring/*.ex
   - apps/troupe_core/lib/troupe/keyring/steering.ex
   - apps/troupe_gateway/lib/troupe/gateway/remote.ex
-  - apps/troupe_gateway/lib/troupe/gateway/idle.ex
-  - apps/troupe_gateway/lib/troupe/gateway/presence.ex
-  - apps/troupe_gateway/lib/troupe/gateway/dispatch.ex
   - apps/troupe_plane/lib/troupe/plane/remote.ex
   - apps/troupe_plane/lib/troupe/plane/remote/*.ex
-  - apps/troupe_plane/lib/troupe/plane/harness.ex
-  - apps/troupe_plane/lib/troupe/plane/web/router.ex
-  - apps/troupe_plane/lib/troupe/plane/identity/team.ex
-  - apps/troupe_plane/priv/repo/migrations/20261023000928_remote_grants.exs
-  - clients/tui/lib/troupe/client/remote.ex
-  - clients/tui/lib/troupe/remote/worker.ex
-  - clients/tui/lib/troupe/remote/translate.ex
-  - clients/tui/lib/troupe/ui/hq.ex
-  - clients/tui/lib/troupe/ui/tui/model.ex
-  - clients/tui/lib/troupe/cli/remote.ex
-  - clients/gui/apps/console/src/views/Team.tsx
-  - PROTOCOL.md
 symbols:
   - Troupe.Keyring
   - Troupe.Keyring.Steering
@@ -33,15 +18,10 @@ symbols:
 gist: "Offers ride the daemon's own grant, kept in the OS keyring and swapped at /auth/relay for a laptop-door token; last withdraw or sign-out drops it"
 ---
 
-#58, slice 2. Slice 1 (Decision 921) dialled the relay with the plane token a client had
-handed the daemon (Decision 764): fifteen minutes, renewed only while that client ran, so an
-offered session went offline when the terminal or the desktop app closed, which is when
-steering it from elsewhere matters. The maintainer decided on 2026-10-23 that the daemon
-keeps its own sign-in while a session is offered: in the operating system's credential
-store, owner-only, renewed for as long as anything is offered, and dropped by withdrawing the
-last offer, by signing out and by `troupe logout`. The rest of the slice is the TUI steering
-what is offered to its person, a team switch that forbids offering, and the idle watch
-counting the relay.
+The maintainer decided on 2026-10-23 that the daemon keeps its own sign-in while a session
+is offered: in the operating system's credential store, owner-only, renewed for as long as
+anything is offered, and dropped by withdrawing the last offer, by signing out and by
+`troupe logout`.
 
 ## How the daemon gets its sign-in
 
@@ -109,10 +89,6 @@ store under a test service.
 unrenewed; the plane's socket dropping; the daemon restarting, which reads the grant back
 and dials with no client at all.
 
-The brief for this slice also said the offer stays online across "the client's sign-out".
-The maintainer's decision lists signing out among what drops it, and that is what this does:
-what the offer outlives is the client's sign-in lapsing, not the person signing out.
-
 ## The idle watch counts the relay
 
 `Troupe.Gateway.Idle.busy?/0` is also true while `Remote.offering?/0`: something offered and
@@ -120,26 +96,6 @@ the daemon's own sign-in to keep it offered, read from the offers table so the w
 waits on the steering process. A remote person steering was already a connection. Withdrawn,
 or signed out, the daemon stops at its quiet period as before. A daemon is started by a
 client; one stopped by hand, or a machine restarted, is offline until something starts it.
-
-## Steering from the TUI
-
-- **Listed beside the plane's sessions.** `Troupe.Client.Remote.sessions/2` adds the plane's
-  `remote.list` as rows of kind `remote` (*Ada's laptop · project*, `online` or `offline
-  since`), which HQ (`/remote`) shows as `laptop` rows. A plane without `remote.list` adds
-  none.
-- **Opened through the relay** exactly as the desktop app attaches: `remote.open`, then the
-  same `Troupe.Remote.Worker` a daemon session uses, at the relay's address with the token it
-  minted; a dropped view asks `remote.open` again where it went, and `auth.expiring` is
-  answered with the next `remote.open` token on the open socket. Follow, prompt, approve,
-  cancel and switch agent are the client's ordinary commands, and the laptop holds them to
-  Decision 921's table: an approval from elsewhere is once (`allow_session` is refused there,
-  with its sentence).
-- **Presence is drawn, not dropped.** Every window subscribes to its session's
-  `presence:<id>` topic after its own, so its own arrival is not news; `joined` and `left`
-  are lines in the session's window (*Bea joined from another device*), and the status line
-  names whoever is there now (*with Bea (another device)*). The daemon's presence carries
-  `via: "plane"` for a person attached through the relay, which is how a client tells them
-  from somebody at the laptop.
 
 ## A team's administrators may forbid offering
 
@@ -153,25 +109,3 @@ administrators do not allow offering a laptop session for steering from another 
 `remote.open` refuses an offer made before the switch. A person in several teams may offer
 only where every one allows it, the strictest holding as everywhere else. The daemon passes
 the plane's refusal through to the client as it came, so `/steer on` says it.
-
-## Proof
-
-- `apps/troupe_plane/test/troupe/plane/remote_test.exs`: a grant asked with the person's
-  token exchanged for the laptop's door alone, for its device, renewed on the open socket,
-  refused at `/rpc`, a viewer's door and another device's, audited without the secret; a
-  released, forged, deactivated person's grant refused, a second grant replacing the first;
-  the team switch refusing a grant, an offer and an attach by name, audited, and a grant made
-  before it refused at its next exchange.
-- `apps/troupe_gateway/test/troupe/gateway/remote_test.exs`, against `FakePlane` and
-  `FakeRelay`: the first offer asking for a grant of its own, keeping it in the store and in
-  no file, and dialling with the laptop token; the offer steerable after its client closed;
-  a restarted daemon online from the store with no client and no new grant; the last
-  withdrawal and a sign-out releasing it, emptying the store and closing the relay, the
-  record kept and offered again at the next link; a team's refusal passed through; renewal
-  before expiry and at the plane's warning; the idle watch busy for an offer with nothing
-  attached and not after its withdrawal.
-- `apps/troupe_protocol/test/troupe/keyring_test.exs`, `apps/troupe_core/test/troupe/keyring_steering_test.exs`.
-- `clients/tui/test/troupe/remote_steering_test.exs`: the offered rows beside the plane's,
-  one opened through `remote.open` and prompted, approved once, cancelled, switched and
-  reopened after a drop; presence drawn as joined and left and named on the status line.
-- `clients/gui/apps/console/test/teams.test.tsx`: the switch previewed, applied and audited.

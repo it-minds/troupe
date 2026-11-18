@@ -7,21 +7,10 @@ supersedes: [904, 906]
 paths:
   - apps/troupe_plane/lib/troupe/plane/web/body_limit.ex
   - apps/troupe_plane/lib/troupe/plane/web/endpoint.ex
-  - apps/troupe_plane/lib/troupe/plane/web/router.ex
   - apps/troupe_plane/lib/troupe/plane/control/tls.ex
-  - apps/troupe_plane/lib/troupe/plane/control/listener.ex
-  - config/runtime.exs
-  - charts/troupe/templates/plane-deployment.yaml
   - apps/troupe_plane/lib/troupe/plane/github.ex
   - apps/troupe_plane/lib/troupe/plane/github/key.ex
-  - apps/troupe_plane/lib/troupe/plane/github/webhook_secret.ex
   - apps/troupe_protocol/lib/troupe/kms/policy.ex
-  - clients/gui/apps/desktop/src-tauri/src/daemon.rs
-  - apps/troupe_plane/test/troupe/plane/body_limit_test.exs
-  - apps/troupe_plane/test/troupe/plane/control_tls_test.exs
-  - apps/troupe_plane/test/troupe/plane/github_test.exs
-  - docs/admin/github.md
-  - docs/admin/configuration.md
 symbols:
   - Troupe.Plane.Web.BodyLimit
   - Troupe.Plane.Control.TLS.required?/0
@@ -29,10 +18,6 @@ symbols:
   - Troupe.KMS.Policy.github_app/3
 gist: "4 MiB body limit at the endpoint, 413 by Content-Length unread; with a control cert, TLS only unless \"false\"; App delete deletes its transit keys; alive = initialize answered"
 ---
-
-A sweep of small defects from `docs/developer/defects.md` D128 and what the chunk 36
-fixers noticed. Four of them change a rule somebody could undo without knowing why; the
-rest are bugs with tests of their own and are named in the pull request.
 
 **One limit on a request body, held where the body is read.** The endpoint parsed every
 body with `Plug.Parsers`' own default, eight megabytes, before either router saw the
@@ -45,7 +30,6 @@ only that far and is `413` too. The router keeps both for when it is mounted alo
 mebibytes stays the figure because `admin.bundle.publish` is the largest legitimate body.
 A client that keeps sending a body after the refusal may see the connection close under
 it rather than the answer; that is what "before it is read" costs.
-`body_limit_test.exs` sends the head alone and is answered `413` on six routes.
 
 **A plane with a control certificate takes TLS only, left unsaid** (partly replaces 906,
 which turned it on in the chart alone, and through it 902's "unset is off").

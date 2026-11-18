@@ -52,19 +52,3 @@ on`, and that its uninstall should run `login off` first; neither did. Now both 
   uninstall goes on: stopping would leave the entry and the daemon both.
 - **`--clean-install` leaves the entry**, since it puts the daemon back where the entry
   expects it.
-- **The installers have checks of their own**: `scripts/check-installers` runs
-  `install.sh` under `sh` and `bash`, and
-  `scripts/check-installers.ps1` runs `install.ps1` under whichever PowerShell runs it,
-  each against a release of stand-ins in a scratch directory. The stand-in `troupe-daemon`
-  writes down what it is asked and keeps its entry in a file, so no check writes a real
-  login entry; a download is a copy, and nothing reaches the real install, the `PATH` or
-  (on Windows) the desktop app's registry entry, which reads as absent. `install.sh`'s
-  questions are answered through a pseudo-terminal; `install.ps1`'s need a console, so
-  `Set-StartAtLogin` is lifted out of the script with the parser and run with Read-Host
-  answering.
-- **Proof.** Both checks failing on the chunk's tip (21 of 40 under each of `sh` and
-  `bash`, 17 under each of Windows PowerShell 5.1 and PowerShell 7: the flags unknown or
-  ignored, nothing asked, an uninstall leaving the entry behind) and every one passing on
-  this change, in WSL Ubuntu and on Windows 11. Not run: macOS; the installers against a published release, which has no
-  copy of them yet; the real `troupe-daemon login on` through an installer, which a check
-  must not do; and a person answering at a Windows console.

@@ -202,7 +202,7 @@ defmodule Troupe.Worker.HarnessWebSocketTest do
 
       Client.close(client)
 
-      assert eventually(fn -> connection_count() < before end)
+      assert eventually(fn -> connection_count() < before end, 10_000)
     end
   end
 

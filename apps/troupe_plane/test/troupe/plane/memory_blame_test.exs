@@ -12,7 +12,7 @@ defmodule Troupe.Plane.MemoryBlameTest do
 
   use Troupe.Plane.DataCase, async: false
 
-  alias Troupe.Plane.{Admin, Harness, Memory}
+  alias Troupe.Plane.{Admin, Harness}
 
   @moduletag timeout: 60_000
 

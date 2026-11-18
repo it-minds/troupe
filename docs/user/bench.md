@@ -152,7 +152,7 @@ only above 0.43, thirty above 0.88. The cost per success is everything the runs 
 failed ones too, over the ones that succeeded: the price of getting the work done once.
 The prompt prefix counts the calls whose system prompt or tools changed from the call
 before, which costs the cache and, on a model that binds its thinking, the thinking
-([what changes in front of a prompt](../developer/prompt-prefix.md)).
+([ARCHITECTURE.md §2.3](../../ARCHITECTURE.md#23-tools)).
 A line under it says which tasks failed, and how; standard error has a line for each run
 as it ends.
 

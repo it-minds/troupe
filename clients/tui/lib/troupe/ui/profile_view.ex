@@ -17,6 +17,7 @@ defmodule Troupe.UI.ProfileView do
   out: the profile, or the team's grant.
   """
 
+  alias Troupe.Protocol.Words
   alias Troupe.UI.TUI.Model
 
   @type kind :: :group | :sub | :line | :muted | :dimmed
@@ -52,7 +53,7 @@ defmodule Troupe.UI.ProfileView do
   @spec name(map()) :: String.t()
   def name(page), do: to_string(page["name"] || "?")
 
-  defp agents_count(agents) when is_list(agents), do: count(length(agents), "agent")
+  defp agents_count(agents) when is_list(agents), do: Words.count(length(agents), "agent")
   defp agents_count(_unsaid), do: "agents " <> @unsaid
 
   defp servers(page) do
@@ -365,7 +366,7 @@ defmodule Troupe.UI.ProfileView do
 
   defp running(_limits), do: nil
 
-  defp at_most(n) when is_integer(n), do: "#{count(n, "session")} at once"
+  defp at_most(n) when is_integer(n), do: "#{Words.count(n, "session")} at once"
   defp at_most(_unsaid), do: nil
 
   defp budgets(%{} = budgets) do
@@ -441,7 +442,4 @@ defmodule Troupe.UI.ProfileView do
 
   defp field(label, nil), do: {:muted, "  " <> String.pad_trailing(label, 13) <> @unsaid}
   defp field(label, value), do: {:line, "  " <> String.pad_trailing(label, 13) <> to_string(value)}
-
-  defp count(1, noun), do: "1 #{noun}"
-  defp count(n, noun), do: "#{n} #{noun}s"
 end

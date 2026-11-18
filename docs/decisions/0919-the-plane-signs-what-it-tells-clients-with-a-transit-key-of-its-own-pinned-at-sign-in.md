@@ -8,26 +8,8 @@ paths:
   - apps/troupe_protocol/lib/troupe/protocol/plane_signature.ex
   - apps/troupe_protocol/lib/troupe/kms/policy.ex
   - apps/troupe_plane/lib/troupe/plane/signing.ex
-  - apps/troupe_plane/lib/troupe/plane/harness.ex
-  - apps/troupe_plane/lib/troupe/plane/client_versions.ex
-  - apps/troupe_plane/lib/troupe/plane/settings.ex
-  - apps/troupe_plane/lib/troupe/plane/web/router.ex
-  - apps/troupe_plane/lib/troupe/plane/admin.ex
-  - apps/troupe_plane/lib/troupe/plane/admin/api.ex
   - apps/troupe_core/lib/troupe/plane_keys.ex
-  - apps/troupe_core/lib/troupe/config/org.ex
-  - apps/troupe_core/lib/troupe/config/layers.ex
   - apps/troupe_core/lib/troupe/update.ex
-  - apps/troupe_gateway/lib/troupe/gateway/dispatch.ex
-  - clients/tui/lib/troupe/cli/remote.ex
-  - clients/tui/lib/troupe/cli.ex
-  - clients/gui/packages/client/src/planeSignature.ts
-  - clients/gui/packages/client/src/update.ts
-  - clients/gui/apps/desktop/src/updates.ts
-  - clients/gui/apps/desktop/src/views/Update.tsx
-  - clients/gui/apps/console/src/views/Integrations.tsx
-  - PROTOCOL.md
-  - docs/user/updating.md
 symbols:
   - Troupe.Protocol.PlaneSignature
   - Troupe.Plane.Signing
@@ -36,14 +18,10 @@ symbols:
 gist: "Plane key: transit ed25519, made on first use, never exportable, not the release key; clients pin per plane, take only what it signed; a new key only by a person's yes"
 ---
 
-#657, after Decisions 865 (releases signed with one minisign key compiled into every
-client), 868 (a plane's version policy, said at `initialize` and read by `troupe update`)
-and 869 (the organisation's document a machine keeps a copy of). Both 868 and 869 said
-their answers carried no signature of their own and left a signed channel document to this
-issue. The maintainer decided the shape on 2026-10-18: a non-exportable transit key per
-plane in OpenBao signs what the plane tells clients, the versions it serves and recommends
-and the defaults and limits; clients pin its public key at sign-in, and the console shows
-it; it is separate from the release key. This records how, and what is left.
+The maintainer decided the shape on 2026-10-18: a non-exportable transit key per plane in
+OpenBao signs what the plane tells clients, the versions it serves and recommends and the
+defaults and limits; clients pin its public key at sign-in, and the console shows it; it
+is separate from the release key.
 
 ## The key
 
@@ -60,13 +38,12 @@ nothing here, since what is signed is a JSON answer, not a file somebody checks 
 
 Its public half is served at `GET /.well-known/troupe-signing-key` (algorithm, base64 of
 the 32 bytes, fingerprint, version, when transit made it), anonymous as the JWKS is, and
-`/.well-known/troupe` names it as `plane.signing_key`. The fingerprint is `SHA256:` and the
-unpadded base64 of the key's SHA-256, as `ssh-keygen -l` writes one, so a person comparing
-it with what their machine says compares the same string. The OpenBao policy is
+`/.well-known/troupe` names it as `plane.signing_key`. The fingerprint is `SHA256:` and
+the unpadded base64 of the key's SHA-256, as `ssh-keygen -l` writes one, so a person
+comparing it with what their machine says compares the same string. The OpenBao policy is
 `Troupe.KMS.Policy.plane_signing/2`: create, read and update on the key, update on its
 `rotate`, create and update on its `sign`; no `export`, `backup` or `config` path, so not
-even the plane can make it exportable later. The suite proves a token holding only that
-policy makes the key, signs and rotates, and is refused export and config.
+even the plane can make it exportable later.
 
 **Not the release key.** The release key signs releases in CI and is compiled into every
 client (Decision 865); nothing at run time adds a release key. This one is learned from the
@@ -191,60 +168,3 @@ current fingerprint) are the methods, audited as `signing.rotate` with the finge
 versions, placed on Integrations (`Troupe.Plane.Admin.Console`). A rotation makes a new
 transit version, which signs from then on; every machine that pinned the old one refuses
 what it signs until its person accepts it.
-
-## In this pull request, and later
-
-In it: the key and its policy, the two signed answers, the pin and every client's check
-(terminal, daemon, desktop app), `troupe plane-key`, the checked copy, the console's card
-and rotation, the release URL, `/downloads`, and `troupe update` from either.
-
-Later slices of #657:
-- **The desktop app updating from the plane's release URL.** Its shell takes no URL from
-  the page (Decision 874), and a URL the page verified is still the page's; the shell
-  checking the plane's signature itself, against the daemon's pin, is the way, and is its
-  own change to `update.rs`.
-- **A policy change reaching clients already connected**, and **the plane recording which
-  version each client runs** (#56), both in the issue and not in the slot's list.
-- **A daemon refreshing the document on its own schedule** rather than at each link, so a
-  copy is renewed before it expires on a machine that stays signed in.
-
-## Proof
-
-- `apps/troupe_protocol/test/troupe/protocol/plane_signature_test.exs`: the document's
-  canonical form, a signed answer verified, forged, by another key (named), expired, of the
-  other kind, unsigned and malformed; the shared vector.
-- `apps/troupe_plane/test/troupe/plane/signing_test.exs`, against the development OpenBao
-  and object store: the key made on first use, `ed25519`, not exportable, served with its
-  fingerprint and named in discovery; a token with only `Policy.plane_signing/2` makes,
-  signs and rotates and is refused export and config; both answers signed and verified,
-  `release.url` in the policy; an answer the plane cannot sign goes out unsigned with a log
-  line; `admin.signing.get` by either admin, `rotate` refused to a team admin and for the
-  wrong fingerprint with nothing changed, audited; after a rotation the old pin refuses
-  naming the new key; `/downloads` redirects to a presigned URL that fetches the file, and
-  404s a version nobody is served and anything not a release file; the setting refuses a
-  URL that is not http or https. `admin_parity_test` and `console_coverage_test` hold the
-  two methods to the table and to Integrations.
-- `apps/troupe_core/test/troupe/plane_keys_test.exs`: pinned first, the same again, a
-  changed key offered and refused, accepted only by its fingerprint, an edited answer
-  refused, unsigned taken without a pin and refused with one, a signed answer from an
-  unpinned plane pinning the key it serves.
-- `apps/troupe_core/test/troupe/config/org_test.exs`: a signed copy used; the same copy
-  edited on disk refused with the sentence, and with the signature taken away; an expired
-  copy holding with its warning. `update_test.exs`: installed from the plane's release URL
-  under `v<version>/`, a mirror's other release refused, no version asks for one.
-- `apps/troupe_gateway/test/troupe/gateway/organisation_test.exs`: a link pins the fake
-  plane's key and keeps the signed copy, `identity.get` showing the pin; a rotated key
-  logged, its document refused and the copy before kept, `identity.accept_plane_key`
-  refusing the wrong fingerprint and pinning the right one, after which the new document is
-  kept; `config.organisation` refusing a document signed by another key and an unsigned
-  one; a plane that signs nothing kept as before with the line.
-- `clients/tui/test/troupe/plane_version_test.exs`: `troupe login` pins and says so; the
-  policy taken as signed with `release_url`; another key's refused with the sentence, `troupe
-  plane-key` showing both, `accept` refusing the wrong fingerprint and taking the right one;
-  a plane that signs nothing said at sign-in and on `troupe update`.
-- `clients/gui/packages/client/test/plane-signature.test.ts` (the shared vector and every
-  refusal) and `client-update.test.ts` (signed, another key's, unsigned, unchecked);
-  `clients/gui/apps/desktop/test/updates.test.tsx` (a signed policy followed; a changed key
-  shown with both fingerprints, nothing followed until accepted, then followed);
-  `clients/gui/apps/console/test/integrations.test.tsx` (the card, the rotation typed by the
-  fingerprint, a team admin reading only).

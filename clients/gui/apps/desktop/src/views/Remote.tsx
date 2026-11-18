@@ -10,7 +10,7 @@
 
 import { useEffect, useState } from "react";
 import type { JSX } from "react";
-import { PRIVATE_OFFER_SENTENCE, RESTART_SENTENCE, invitationWords, offerRestartWords, remoteOffer, remoteWhen, steerWords } from "@troupe/client";
+import { PRIVATE_OFFER_SENTENCE, RESTART_SENTENCE, errorText, invitationWords, offerRestartWords, remoteOffer, remoteWhen, steerWords } from "@troupe/client";
 import type { DaemonClient, FleetRow, Invitation, PresenceMember, RemoteOffer, RemotePerson } from "@troupe/client";
 import { Dialog } from "./bits";
 
@@ -106,7 +106,7 @@ export function RemoteOfferControl({ daemon, row, presence = [] }: { daemon: Dae
       setRestart(offering && made?.lasts === "until_restart");
       setOpen(false);
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errorText(e));
     } finally {
       setBusy(false);
     }

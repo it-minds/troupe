@@ -48,7 +48,7 @@ defmodule Troupe.ClipboardTest do
     end
   end
 
-  # D109: on every OS, what cmd.exe is given on Windows. `clip < "<path>"` as one argument
+  # On every OS, what cmd.exe is given on Windows. `clip < "<path>"` as one argument
   # reached cmd.exe with Erlang's escaped quotes, which it cannot read.
   test "on Windows, cmd.exe is given clip by its path on PATH and the staged file by its name" do
     bin = Path.join(System.tmp_dir!(), "troupe-clipboard-bin-#{System.unique_integer([:positive])}")
@@ -63,7 +63,7 @@ defmodule Troupe.ClipboardTest do
     assert clip == String.replace(Path.join(bin, "clip.exe"), "/", "\\")
   end
 
-  # D115: clip.exe reads a file with no byte-order mark in the console's code page, so text
+  # On Windows, clip.exe reads a file with no byte-order mark in the console's code page, so text
   # with anything but ASCII in it could arrive garbled. `clip` is given UTF-16LE with the
   # mark; every other command gets the text as it is. What the real clip.exe reads was
   # checked with a stand-in for it on Windows, never with the clipboard.
@@ -78,7 +78,7 @@ defmodule Troupe.ClipboardTest do
     assert Clipboard.staged("pbcopy", text, {:unix, :darwin}) == text
   end
 
-  # D115: a clipboard_command takes the text by `<`, which PowerShell, the platform shell on
+  # A clipboard_command takes the text by `<`, which PowerShell, the platform shell on
   # Windows without Git Bash, does not have: it failed with PowerShell's parser error.
   test "a clipboard_command in a shell without `<` is refused with a sentence" do
     staged = Path.join(System.tmp_dir!(), "troupe-clip-7")

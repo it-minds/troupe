@@ -78,18 +78,10 @@ defmodule Troupe.MCP.OAuth.Store do
   def put(state_dir, key, entry), do: write(path(state_dir), Map.put(all(state_dir), key, entry))
 
   defp write(file, map) do
-    tmp = file <> ".tmp"
+    case Troupe.Paths.write_atomic(file, Jason.encode!(map, pretty: true) <> "\n", owner_only: true) do
+      :ok ->
+        :ok
 
-    # The temporary file is restricted before anything is in it, so there is no moment
-    # at which the tokens sit in a file anybody else could read; the rename keeps its
-    # access as it is.
-    with :ok <- File.mkdir_p(Path.dirname(file)),
-         :ok <- File.write(tmp, ""),
-         :ok <- Troupe.OwnerOnly.restrict(tmp),
-         :ok <- File.write(tmp, Jason.encode!(map, pretty: true) <> "\n"),
-         :ok <- File.rename(tmp, file) do
-      :ok
-    else
       {:error, reason} ->
         {:error, "could not write #{Troupe.Paths.display(file)}: #{:file.format_error(reason)}"}
     end

@@ -313,6 +313,24 @@ defmodule Troupe.ArtifactsScreenTest do
     refute text =~ ~r/v2\s+Dee\s+2 h ago · goes/
   end
 
+  test "a row says how many references the artifacts host blocks in it, and one it blocks none of says nothing" do
+    broken =
+      Map.merge(hd(@rows), %{"id" => "a-broken", "title" => "Broken page", "blocked_count" => 3})
+
+    clean = Map.merge(Enum.at(@rows, 2), %{"blocked_count" => 0})
+
+    signed_in(artifacts: [broken, clean])
+    {sid, _, _} = start_session!(script: [])
+    {pid, session} = start_tui(sid)
+    type(pid, "/artifacts")
+    press(pid, "enter")
+    eventually(fn -> user_state(pid).focus == :artifacts end)
+
+    text = screen_text(pid, session)
+    assert text =~ ~r/Broken page.*3 blocked by the host/
+    refute text =~ ~r/Interview guide.*blocked/
+  end
+
   test "Shared with you, empty, says where a share by name lands" do
     signed_in(artifacts: [])
     {sid, _, _} = start_session!(script: [])

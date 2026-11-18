@@ -6,40 +6,15 @@ status: accepted
 issue: 739
 paths:
   - apps/troupe_core/lib/troupe/config/explain.ex
-  - apps/troupe_core/lib/troupe/config/settings.ex
-  - apps/troupe_gateway/lib/troupe/gateway/dispatch.ex
-  - apps/troupe_worker/test/troupe/worker/config_explain_test.exs
-  - clients/gui/apps/desktop/src/views/PodConfig.tsx
-  - clients/gui/packages/client/src/config.ts
   - clients/gui/packages/client/src/connection.ts
   - clients/gui/packages/client/src/daemon.ts
-  - clients/gui/packages/client/test/call-timeout.test.ts
-  - clients/gui/apps/desktop/test/lost-reply.test.tsx
   - clients/tui/lib/troupe/ui/setup.ex
-  - clients/tui/lib/troupe/cli/config_setup.ex
-  - clients/tui/test/troupe/setup_screen_test.exs
-  - clients/tui/lib/troupe/remote/worker.ex
   - clients/tui/lib/troupe/client/daemon.ex
-  - apps/troupe_worker/lib/troupe/worker/plane/commands.ex
-  - apps/troupe_core/lib/troupe/tools/output.ex
-  - apps/troupe_core/test/test_helper.exs
-  - apps/troupe_a2a/test/test_helper.exs
-  - apps/troupe_operator/test/test_helper.exs
-  - apps/troupe_worker/test/test_helper.exs
-  - apps/troupe_core/test/support/session_case.ex
-  - apps/troupe_operator/lib/troupe/operator/resources.ex
-  - apps/troupe_protocol/lib/troupe/kms/open_bao.ex
-  - charts/troupe/templates/operator-deployment.yaml
 symbols:
   - Troupe.Config.Explain.withhold/2
   - Troupe.UI.Setup
 gist: "config.get for a viewer withholds base_url and state_dir; every client call has a stated wait; TUI first run trusts the daemon's record; test helpers put the log level back"
 ---
-
-Chunk 39's criticals sweep (slot C39): the maintainer's decision on what a pod session's
-viewers see, the follow-ups Decision 916 and Decision 918 left (D131), and the medium
-defects of `defects.md` that a sweep can fix at their cause. Each part had a test that
-failed on the chunk's tip.
 
 ## A viewer is not shown what a session runs on
 
@@ -115,19 +90,3 @@ finished the run. As Decision 916 did for the desktop:
 - **The pods log in at the installation's OpenBao mount (D55).** The chart gives the operator
   `bao.authPath`, which it names to pods where it is not `kubernetes`; an empty
   `TROUPE_BAO_TOKEN` is no static token.
-- **Smaller ones.** A client tool's failure reaches the model with the client's `reason` and
-  `detail` (D50); `DaemonClient.registerTools` and `unregisterTools` send the shapes the
-  daemon reads (D50); the offline bench counts the system prompt's tail (D65); a fragment
-  `#daemon=` put into an open tab is taken (D79).
-
-## Test hygiene
-
-- **A test helper that sets the log level puts it back as its suite ends**
-  (`ExUnit.after_suite/1`), core's, A2A's, the operator's and the worker's: one `mix test`
-  naming files of several apps runs their suites in one VM, and core's `:critical` left the
-  next app's `capture_log` empty. This was also the gateway's "order-dependent" failures:
-  `LoopbackTest`, `PlaneVersionTest` and `PrivateTest` assert on log lines, and fail only
-  after a suite that lowered the level; the gateway's own files in any order pass.
-- **The stand-in provider is strict by default** in core's `SessionCase` (D66): it refuses a
-  tool result without its call, and tool blocks in a request without tools, as the real
-  APIs do.

@@ -284,8 +284,7 @@ arrives.
 
 Worth knowing before Authentik's first sync, because a client that expects more gets a
 refusal rather than a degraded answer: [integrations.md §8](integrations.md#8-scim) lists
-what the endpoint takes. In short, whole-resource `POST` and `PUT`, `PATCH` on what a push
-sets, one `eq` filter, and no pagination, sort, bulk, ETag, `/Schemas` or `/ResourceTypes`.
+what the endpoint takes.
 
 Refusing an unreadable filter (`invalidFilter`) is deliberate. A provider asks
 `userName eq "…"` to find out whether it has already created somebody, and an endpoint that

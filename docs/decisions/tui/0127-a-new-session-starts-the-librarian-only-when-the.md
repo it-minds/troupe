@@ -5,7 +5,6 @@ date: 2026-09-27
 status: accepted
 paths:
   - clients/tui/lib/troupe/client/daemon.ex
-  - clients/tui/test/troupe/memory_client_test.exs
 gist: A new session starts the librarian only when the daemon says the refresh is due
 ---
 

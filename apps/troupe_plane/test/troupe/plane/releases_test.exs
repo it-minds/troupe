@@ -150,7 +150,7 @@ defmodule Troupe.Plane.ReleasesTest do
       assert {:ok, %{"version" => @version, "state" => "mirroring", "files" => 1}} =
                API.call("admin.releases.mirror", %{"version" => "v" <> @version}, @root)
 
-      wait_until(fn ->
+      eventually(fn ->
         ObjectStore.exists?(context.store, "releases/v#{@version}/manifest.json")
       end)
 
@@ -162,7 +162,7 @@ defmodule Troupe.Plane.ReleasesTest do
 
       assert listed["source"] == "https://github.com/it-minds/troupe/releases/download"
 
-      wait_until(fn ->
+      eventually(fn ->
         match?(
           [_],
           Audit.list(kind: "release") |> Enum.filter(&(&1.action == "release.mirrored"))
@@ -193,14 +193,6 @@ defmodule Troupe.Plane.ReleasesTest do
       assert data.reason =~ "it is not the release key's, and nothing is mirrored"
       assert {:ok, []} = ObjectStore.list(context.store, "releases/v#{@version}/")
       assert Audit.list(kind: "release") == []
-    end
-  end
-
-  defp wait_until(fun, tries \\ 100) do
-    cond do
-      fun.() -> :ok
-      tries == 0 -> flunk("not done in time")
-      true -> Process.sleep(50) && wait_until(fun, tries - 1)
     end
   end
 end

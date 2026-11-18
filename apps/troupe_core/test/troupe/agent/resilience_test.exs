@@ -316,8 +316,8 @@ defmodule Troupe.Agent.ResilienceTest do
       assert [task] = third.messages
       assert Message.text(task) =~ ~r/^Goal: second task\n/
 
-      # The child the restart took down is done in its own log too, with nothing left open
-      # (D19): it never reports and its path is never used again.
+      # The child the restart took down is done in its own log too, with nothing left open:
+      # it never reports and its path is never used again.
       old = session.id |> Troupe.events() |> Enum.filter(&(&1.agent == ["root", "general#2"]))
       assert %{type: "agent_done", data: %{"reason" => "interrupted"}} = List.last(old)
       assert open_calls(old) == []
@@ -326,7 +326,7 @@ defmodule Troupe.Agent.ResilienceTest do
 
   # A delegation the session stopped in the middle of is closed as interrupted when the
   # session comes back, and nothing restarts its child. The child's own calls stayed open,
-  # so an approval it was waiting on stayed open in every reader that follows the log (D18).
+  # so an approval it was waiting on stayed open in every reader that follows the log.
   describe "a delegation a restored session closes" do
     test "closes what its subagent had open, so the subagent's approval is not left waiting",
          context do
@@ -374,7 +374,7 @@ defmodule Troupe.Agent.ResilienceTest do
   end
 
   # A failed request's note is part of the conversation the model is sent next, so it has
-  # to be in the log that rebuilds the conversation (D19).
+  # to be in the log that rebuilds the conversation.
   describe "a root whose model request failed" do
     test "still has the failure in its conversation after the session comes back", context do
       %{session: session, fake: fake} =
@@ -397,7 +397,7 @@ defmodule Troupe.Agent.ResilienceTest do
   # The results of a turn's calls reach the conversation together, once the last is back.
   # A restart in the middle kept only the calls it re-ran or closed, so the results already
   # back went missing — the model is owed a result for every call it made — and a `finish`
-  # among them took another model turn instead of ending the agent (D19).
+  # among them took another model turn instead of ending the agent.
   describe "a turn a restart takes up in the middle" do
     test "keeps the results already back when the session comes back", context do
       %{session: session, fake: fake} =
@@ -895,17 +895,6 @@ defmodule Troupe.Agent.ResilienceTest do
       _event, open -> open
     end)
     |> MapSet.to_list()
-  end
-
-  defp eventually(fun, timeout \\ 5_000),
-    do: poll(fun, System.monotonic_time(:millisecond) + timeout)
-
-  defp poll(fun, deadline) do
-    cond do
-      fun.() -> true
-      System.monotonic_time(:millisecond) > deadline -> false
-      true -> Process.sleep(10) && poll(fun, deadline)
-    end
   end
 
   defp await_completed_call(session_id, name, timeout \\ 5_000) do

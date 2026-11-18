@@ -4,31 +4,12 @@ title: A model call the agent gives up on is stopped, at its timeout in a turn o
 date: 2026-10-05
 status: accepted
 paths:
-  - ARCHITECTURE.md
-  - PROTOCOL.md
-  - apps/troupe_core/lib/troupe/agent/server.ex
-  - apps/troupe_core/lib/troupe/agent/state.ex
-  - apps/troupe_core/lib/troupe/bench/live.ex
   - apps/troupe_core/lib/troupe/llm/provider.ex
   - apps/troupe_core/lib/troupe/llm/providers/anthropic.ex
   - apps/troupe_core/lib/troupe/llm/providers/openai.ex
-  - apps/troupe_core/lib/troupe/session/usage.ex
-  - apps/troupe_core/lib/troupe/sessions/index.ex
-  - apps/troupe_core/test/support/endless_stand_in.ex
-  - apps/troupe_core/test/troupe/agent/stopped_call_test.exs
-  - apps/troupe_core/test/troupe/llm/providers_test.exs
-  - apps/troupe_core/test/troupe/log/fold_test.exs
-  - apps/troupe_core/test/troupe/session/usage_test.exs
-  - apps/troupe_protocol/lib/troupe/protocol/schema.ex
 gist: A model call the agent gives up on is stopped, at its timeout in a turn or in a compaction and on a cancel alike, and what the provider had…
 ---
 
-The first item of D69. `llm_timeout_ms` gave a
-call up and left it running: `clear_llm/1` only demonitored the task streaming it,
-and Req's `receive_timeout` bounds only the gap between packets, so a reply that kept
-coming went on being generated, and billed, up to `max_tokens` while the agent went
-on without it, and nothing of it was counted. A cancel did stop the stream, since it
-ends every task the agent runs while a call is in flight, but counted nothing either.
 - **Stopped by ending the task.** The timeout in `:thinking`, the timeout in
   `:compacting` and a cancel go through one `stop_llm/1`, which ends the task as a
   cancel did. The HTTP connection is checked out to that process, so the pool closes
@@ -66,25 +47,3 @@ ends every task the agent runs while a call is in flight, but counted nothing ei
   what the model wrote before `llm_timeout_ms` ran out, rather than everything up to
   `max_tokens`. The same holds for the output an Anthropic reply had written, which
   its provider reports only at the end.
-- **A summary given up on** is stopped and counted live, in the turn's figures, the
-  budget and the listing, but is written nowhere: a failed summary never was (774),
-  and the events in that path are ones it must not look like (`llm_error` ends a turn
-  for the desktop app and fails an A2A task). Writing it is a new event type, left for
-  later; until then a restart in the same turn forgets it, and the ledger has no row.
-- **Proof:** core's `StoppedCallTest`. Against the fake model with a step that streams
-  for ever (`{:endless, ms}`, after reporting the prompt's usage, or `:no_usage`): a
-  turn's call and a compaction's summary still streaming at `llm_timeout_ms` are
-  stopped (the agent's task supervisor is empty), the `llm_error` says what the call
-  reported and the turn counts it (one call and 100 tokens; six calls and 600 with the
-  compaction); one that reported nothing is a call and `unpriced`; a cancel says what
-  it stopped; and a restart charges the budget what the live agent was charged.
-  Against a loopback stand-in speaking Anthropic's and OpenAI's wire, streaming a
-  delta every 100 ms for ever: the connection of a call stopped at its timeout is
-  closed after deltas were sent, Anthropic's `message_start` is counted and priced
-  (6,165 micro-dollars), and the OpenAI-compatible call had reported nothing. All seven
-  fail on the chunk's tip: three still had a stream running after the timeout, the
-  two on the wire a connection still open, and the cancel and the restart counted
-  nothing.
-  `ProvidersTest`: each adapter says usage as it comes, Anthropic's prompt before the
-  first delta; `UsageTest`: a stopped call is a ledger row when it had usage;
-  `FoldTest`: its tokens are the agent's.

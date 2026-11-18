@@ -6,7 +6,6 @@ status: accepted
 issue: 390
 paths:
   - clients/tui/lib/troupe/cli/bench.ex
-  - clients/tui/test/troupe/bench_cli_test.exs
 gist: "`troupe bench` runs the harness's offline suite in this VM, against the harness compiled into this binary, and `Troupe.Bench` is a door the TUI may…"
 ---
 

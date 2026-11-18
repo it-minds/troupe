@@ -7,7 +7,6 @@ issue: 898
 supersedes: [963]
 paths:
   - clients/gui/apps/desktop/src/App.tsx
-  - clients/gui/apps/desktop/test/daemon-ready.test.tsx
 symbols:
   - DaemonReady
   - hasDraft

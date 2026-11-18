@@ -6,22 +6,10 @@ status: accepted
 paths:
   - apps/troupe_protocol/lib/troupe/protocol/agent_definition.ex
   - apps/troupe_protocol/lib/troupe/protocol/agent_check.ex
-  - apps/troupe_protocol/lib/troupe/protocol/bundle.ex
   - apps/troupe_core/lib/troupe/agent/definition.ex
   - apps/troupe_core/lib/troupe/agent/definitions.ex
-  - apps/troupe_core/lib/troupe/session.ex
-  - apps/troupe_core/lib/troupe.ex
-  - apps/troupe_core/priv/agents/answer.md
-  - apps/troupe_core/priv/agents/quick.md
-  - apps/troupe_core/priv/agents/ask.md
-  - apps/troupe_core/priv/agents/librarian.md
-  - apps/troupe_gateway/lib/troupe/gateway/dispatch.ex
   - apps/troupe_plane/lib/troupe/plane/bundles.ex
   - apps/troupe_plane/lib/troupe/plane/profile_view.ex
-  - apps/troupe_plane/lib/troupe/plane/harness.ex
-  - clients/tui/lib/troupe/client/daemon.ex
-  - clients/tui/lib/troupe/ui/profile_view.ex
-  - clients/gui/packages/client/src/profile.ts
 symbols:
   - Troupe.Agent.Definitions.functions/1
   - Troupe.Agent.Definitions.ruled_out?/2
@@ -31,15 +19,14 @@ symbols:
 gist: "mode: function = the harness's own job (answer, quick, ask, librarian); out of every picker and delegate list, refused as a session's agent, started by name as a branch; built-in primaries read from the files; spec.agents still removes one"
 ---
 
-Troupe ships agents it starts itself for one job: `answer` for an `AI?` comment and `quick`
-for an `AI!` (the watcher, `Troupe.Watch.Branch`), `ask` for `/ask` across a session's
-branches, and `librarian` for the project brief (the terminal client's `/memory refresh`
-and its start, and the desktop app's `startLibrarian`, each a `session.create` with a
-`parent`). Every one was `mode: primary`, so it was in every agent picker (the terminal's
-Ctrl-N and Tab, the desktop app's switch and Agents page) and a person could start or
-switch a session to the librarian, while the plane's `@builtin_primaries ~w(build plan)`
-and so the pod left them all out of a session's set, which nothing wrote down. Defect D142
-recorded that as unexplained. It was not a defect: it was this concept, unnamed.
+Troupe ships agents it starts itself for one job: `answer` for an `AI?` comment and
+`quick` for an `AI!` (the watcher, `Troupe.Watch.Branch`), `ask` for `/ask` across a
+session's branches, and `librarian` for the project brief (the terminal client's `/memory
+refresh` and its start, and the desktop app's `startLibrarian`, each a `session.create`
+with a `parent`). Every one was `mode: primary`, so it was in every agent picker (the
+terminal's Ctrl-N and Tab, the desktop app's switch and Agents page) and a person could
+start or switch a session to the librarian, while the plane's `@builtin_primaries ~w(build
+plan)` and so the pod left them all out of a session's set, which nothing wrote down.
 
 This extends Decision 968, whose rule applies to every mode and so to this one, and
 Decision 969, whose view gets a third list.
@@ -75,15 +62,14 @@ parser the pod uses, so the offering and a pod's `primaries/1` cannot disagree. 
 not want it denies it.
 
 **The profile's rule still applies.** A function agent is narrowed by no grant (the set
-names primaries) and removed by `spec.agents` like any agent. `Troupe.start_session/1`
-now refuses an agent the definitions lack, `{:not_on_profile, name}` where the rule took it
+names primaries) and removed by `spec.agents` like any agent. `Troupe.start_session/1` now
+refuses an agent the definitions lack, `{:not_on_profile, name}` where the rule took it
 (`Definitions.ruled_out?/2`), `{:unknown_agent, name}` otherwise, instead of the root
 failing to start; a branch so refused writes one `config_note` (`key: agents`) in its
 parent's log, not repeated while the log already says it. `profile.get` answers
 `functions` (`[{name, description, from}]`), and a function agent appears in
 `agents_not_here` only with `why: profile`; `admin.profile.agents` lists the built-in ones
-with `mode: function`. The desktop app's and the console's Profiles pages and the
-terminal's profile page show them under Agents as "What the harness may run here".
+with `mode: function`.
 
 ## Not chosen
 

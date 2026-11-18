@@ -9,7 +9,6 @@ paths:
   - clients/gui/apps/desktop/src/views/Onboard.tsx
   - clients/gui/apps/desktop/src/views/Offer.tsx
   - clients/gui/apps/desktop/src/styles.css
-  - clients/gui/apps/desktop/test/start-onboarding.test.tsx
 gist: "An offer blocks nothing: no Waiting for you pill, no pink edge; the head stays Idle and the rail's count leaves it out. Reserved colour is for approvals and questions"
 ---
 

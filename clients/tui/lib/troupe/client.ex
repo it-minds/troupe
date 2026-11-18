@@ -156,6 +156,8 @@ defmodule Troupe.Client do
               {:ok, String.t()} | {:error, term()}
   @callback invites(session_id(), invite_verb()) :: {:ok, String.t()} | {:error, term()}
   @callback archive(session_id(), boolean()) :: {:ok, String.t()} | {:error, String.t()}
+  @callback rename(session_id(), String.t()) :: {:ok, String.t()} | {:error, String.t()}
+  @callback keep(session_id(), boolean()) :: {:ok, String.t()} | {:error, String.t()}
   @callback fs_list(session_id(), String.t()) :: {:ok, [map()]} | {:error, term()}
   @callback fs_read(session_id(), String.t()) :: {:ok, String.t()} | {:error, term()}
   @callback scratch_read(session_id(), String.t() | nil, String.t()) ::
@@ -564,6 +566,24 @@ defmodule Troupe.Client do
   def archive(sid, archived?), do: impl(sid).archive(sid, archived?)
 
   @doc """
+  Name a session, for everyone who sees it, which only its owner may do; an empty name
+  takes it off. A pod session is named at the plane. Answers the sentence to show.
+  """
+  @spec rename(session_id(), String.t()) :: {:ok, String.t()} | {:error, String.t()}
+  def rename(sid, title), do: impl(sid).rename(sid, title)
+
+  @doc """
+  Keep a session at the top of the session list (`true`) or let it go, which only its owner
+  may do (`session.pin`). A pod session is kept at the plane. Answers the sentence to show.
+  """
+  @spec keep(session_id(), boolean()) :: {:ok, String.t()} | {:error, String.t()}
+  def keep(sid, kept?), do: impl(sid).keep(sid, kept?)
+
+  @doc "What `/keep` names after the command: nothing to keep it, `off` to let it go."
+  @spec keep_args(String.t()) :: {:ok, boolean()} | {:error, String.t()}
+  defdelegate keep_args(text), to: Troupe.Client.Marks
+
+  @doc """
   What `/invite` names after the command: a person, and `observe` (the default) or
   `control`; anything else is the sentence saying what it takes.
   """
@@ -599,7 +619,7 @@ defmodule Troupe.Client do
   @doc """
   Whether a file of `size` bytes can go in one `fs_upload/3`: `:ok`, or the sentence saying
   it is larger than the daemon or worker takes in one message. Asked before the file is
-  read, so one that could never be sent is not read whole (D115).
+  read, so one that could never be sent is not read whole.
   """
   @spec upload_fits(session_id(), non_neg_integer()) :: :ok | {:error, String.t()}
   def upload_fits(sid, size), do: impl(sid).upload_fits(sid, size)
@@ -721,10 +741,6 @@ defmodule Troupe.Client do
   @spec artifact_audience(Artifacts.audience(), String.t() | nil) :: {String.t(), String.t()}
   def artifact_audience(audience, organisation \\ nil), do: Artifacts.label(audience, organisation)
 
-  @doc "The four audiences, in the gallery's order."
-  @spec artifact_audiences() :: [Artifacts.audience()]
-  def artifact_audiences, do: Artifacts.audiences()
-
   @doc "A row's audience."
   @spec audience_of(map()) :: Artifacts.audience()
   def audience_of(row), do: Artifacts.audience_of(row)
@@ -749,10 +765,6 @@ defmodule Troupe.Client do
   @spec artifact_owner(map()) :: String.t()
   def artifact_owner(row), do: Artifacts.owner(row)
 
-  @doc "Hand an artifact to a team (`team:<name>`) or take it back (`me`): `Troupe.Client.Artifacts.transfer/2`."
-  @spec transfer_artifact(String.t(), String.t()) :: {:ok, map()} | {:error, String.t()}
-  def transfer_artifact(id, to), do: Artifacts.transfer(id, to)
-
   @doc "Publish one file of this machine (`/publish`): `Troupe.Client.Artifacts.publish/3`."
   @spec publish_file(Path.t(), String.t(), keyword()) :: {:ok, map()} | {:error, String.t()}
   def publish_file(path, visibility, opts \\ []), do: Artifacts.publish(path, visibility, opts)
@@ -773,11 +785,6 @@ defmodule Troupe.Client do
   @doc "The person's own memory on the plane, through the daemon: `Troupe.Client.OwnMemory.own/1`."
   @spec own_memory(keyword()) :: {:ok, map()} | {:error, String.t()}
   def own_memory(opts \\ []), do: OwnMemory.own(opts)
-
-  @doc "Save the person's own memory over the version it was edited from, or the version that came first."
-  @spec save_own_memory(String.t(), non_neg_integer()) ::
-          {:ok, map()} | {:conflict, map()} | {:error, String.t()}
-  def save_own_memory(text, version), do: OwnMemory.save(text, version)
 
   @doc "The person's own memory's versions, and two of their texts side by side."
   @spec memory_history(keyword()) :: {:ok, map()} | {:error, String.t()}

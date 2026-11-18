@@ -20,7 +20,10 @@ import {
   RELAYED_ALLOW_SESSION,
   UPLOAD_ARTIFACT,
   archiveRefusal,
+  markRefusal,
+  bytes,
   configKey,
+  errorText,
   isBusy,
   isRoot,
   mayArchive,
@@ -33,7 +36,6 @@ import {
   presentMembers,
   severalSteer,
   rootState,
-  scratchSize,
   scratchVersion,
   settleLoop,
   stoppedSentence,
@@ -48,7 +50,6 @@ import type {
   Entry,
   FleetRow,
   LoopInfo,
-  LoopState,
   OwnPlane,
   ScratchDocument,
   SessionKind,
@@ -57,7 +58,7 @@ import type {
 } from "@troupe/client";
 import { useSessionView, useStartQuestions } from "../hooks";
 import { useNarrow } from "../narrow";
-import type { SessionHandle } from "../hooks";
+import type { Marks, SessionHandle } from "../hooks";
 import { curtainLine, curtainUp, DEFAULT_DETAIL, isDetail, layout, waitingOn, waitingWords } from "../frames";
 import type { Detail, Drawn } from "../frames";
 import { copyText } from "../clipboard";
@@ -84,6 +85,9 @@ import { inviteLine, RemoteLine, RemoteOfferControl } from "./Remote";
 import { InviteControl } from "./Invites";
 import { Cost, Dialog, initials, Loading, personColour, Pill, Sync, When, Where } from "./bits";
 import { Mask } from "./brand";
+import { RenameField } from "./Rename";
+import { Tasks } from "./Tasks";
+import type { TodoEdit } from "./Tasks";
 
 /**
  * A backstage pane: the running order, the files, what the instructions are read from, the
@@ -107,6 +111,7 @@ export function Session({
   startedIn,
   onBack,
   onArchive,
+  marks,
   onGo,
   onAgents,
   onStarted,
@@ -126,6 +131,8 @@ export function Session({
   onBack: () => void;
   /** Archive the session (`true`) or unarchive it, where it runs; it rejects with the server's refusal. */
   onArchive?: ((on: boolean) => Promise<void>) | undefined;
+  /** Rename the session and keep it at the top of the list, where it runs: its owner's. */
+  marks?: Marks | undefined;
   /** Leave for another screen, for the palette's Navigate and Setup commands. */
   onGo?: (screen: PaletteScreen) => void;
   /** Open the agents manager on this session's workspace, at one agent if named: a session on this computer's. */
@@ -208,6 +215,42 @@ export function Session({
         }
       }
     : undefined;
+  // Its name and its place at the top of the list, from the ⋯ or the palette, as archiving
+  // is: the owner's, where the session has a list. The name is a field in the head while
+  // it is being changed.
+  const [renaming, setRenaming] = useState(false);
+  const [markError, setMarkError] = useState<string | null>(null);
+  useEffect(() => {
+    setMarkError(null);
+    setRenaming(false);
+  }, [sessionId]);
+  const marking = marks && row && !row.archived && mayArchive(row) ? { marks, row } : undefined;
+  const rename = marking
+    ? async (title: string): Promise<string | null> => {
+        setMarkError(null);
+        try {
+          await marking.marks.rename(marking.row, title);
+          return null;
+        } catch (e) {
+          const why = markRefusal(e, "rename");
+          setMarkError(`It was not renamed. ${why}.`);
+          return why;
+        }
+      }
+    : undefined;
+  const keep = marking
+    ? async (on: boolean): Promise<string | null> => {
+        setMarkError(null);
+        try {
+          await marking.marks.keep(marking.row, on);
+          return null;
+        } catch (e) {
+          const why = markRefusal(e, on ? "keep" : "let go");
+          setMarkError(`It was not ${on ? "kept at the top" : "let go from the top"}. ${why}.`);
+          return why;
+        }
+      }
+    : undefined;
   // Onboarding, then the brief, as the session's start found them due (Decision 835), and
   // the librarian for a session started here; what they came to is said in the transcript.
   const start = useStartQuestions(daemon, sessionId, view.state.onboarding, { local: here, canAnswer: !readOnly, startedIn });
@@ -250,7 +293,7 @@ export function Session({
         const where = await saveFile(path.split("/").pop() || path, file.content);
         return where ? `saved to ${where}` : "not saved";
       } catch (e) {
-        return `not saved: ${e instanceof Error ? e.message : String(e)}`;
+        return `not saved: ${errorText(e)}`;
       }
     },
     [sessionView],
@@ -319,6 +362,24 @@ export function Session({
               },
             }
           : {}),
+        ...(rename
+          ? {
+              rename: async (name: string) => {
+                if (name === "") return void setRenaming(true);
+                // Renamed, the head says so: the palette closes on it.
+                return (await rename(name)) ?? undefined;
+              },
+            }
+          : {}),
+        ...(keep
+          ? {
+              keep: async (on: boolean) => {
+                if (row && row.pinned === on) return on ? "this session is already kept at the top" : "this session is not kept at the top";
+                const why = await keep(on);
+                return why ?? (on ? "kept at the top of the session list" : "let go from the top");
+              },
+            }
+          : {}),
       }}
     />
   ) : null;
@@ -337,6 +398,7 @@ export function Session({
         self={self}
         agent={current}
         onBack={onBack}
+        renaming={rename && renaming ? { onRename: async (title) => void (await rename(title)), onDone: () => setRenaming(false) } : null}
         invites={row ? <InviteControl auth={auth} daemon={daemon} row={row} /> : null}
         remoteLine={row?.kind === "remote" ? <RemoteLine row={row} /> : null}
         menu={
@@ -352,6 +414,8 @@ export function Session({
             }
             onAbout={here && onAgents && current ? () => onAgents(current) : undefined}
             onArchive={archive && mayArchive(row) ? (on) => void archive(on) : undefined}
+            onRename={rename ? () => setRenaming(true) : undefined}
+            onKeep={keep ? (on) => void keep(on) : undefined}
             remote={
               row && daemon && auth && (row.kind === "local" || row.kind === "private") ? (
                 <RemoteOfferControl daemon={daemon} row={row} presence={view.state.presence} />
@@ -378,6 +442,11 @@ export function Session({
       {archiveError && (
         <div className="banner error" role="alert">
           <p>{archiveError}</p>
+        </div>
+      )}
+      {markError && (
+        <div className="banner error" role="alert">
+          <p>{markError}</p>
         </div>
       )}
       <Banners status={view.status} detail={view.detail} dormant={dormant} readOnly={readOnly} error={view.error} />
@@ -480,6 +549,7 @@ export function Session({
             view={view}
             daemon={daemon}
             row={row}
+            onEditTodo={!readOnly && view.view ? (action, params) => view.view!.editTodo(action, params) : undefined}
             self={self}
             selfName={named(auth?.me?.display_name, auth?.me?.subject)}
             pane={pane}
@@ -699,6 +769,7 @@ function Header({
   self,
   agent,
   onBack,
+  renaming,
   invites,
   remoteLine,
   menu,
@@ -710,6 +781,8 @@ function Header({
   /** The agent this window runs. */
   agent: string | null;
   onBack: () => void;
+  /** The title as a field while it is being renamed, from the ⋯ or /rename; null otherwise. */
+  renaming?: { onRename: (title: string) => Promise<void>; onDone: () => void } | null;
   /** Whom it is shared with by name, and for its owner the invitation (troupe #765). */
   invites?: JSX.Element | null;
   /** Whose laptop a relayed session is on. */
@@ -729,9 +802,13 @@ function Header({
       <span className="head-mask" aria-hidden="true">
         <Mask size={22} />
       </span>
-      <h1 className="title" title={title}>
-        {title}
-      </h1>
+      {renaming ? (
+        <RenameField title={row?.title ?? ""} onRename={renaming.onRename} onDone={renaming.onDone} />
+      ) : (
+        <h1 className="title" title={title}>
+          {title}
+        </h1>
+      )}
       <div className="crumbs">
         {row && (
           <>
@@ -798,6 +875,8 @@ function SessionMenu({
   scratchpad,
   onAbout,
   onArchive,
+  onRename,
+  onKeep,
   remote,
 }: {
   sessionId: string;
@@ -810,6 +889,10 @@ function SessionMenu({
   onAbout?: (() => void) | undefined;
   /** Archive it (`true`) or unarchive it: its owner's alone. */
   onArchive?: ((on: boolean) => void) | undefined;
+  /** Turn the title into a field to rename it: its owner's alone. */
+  onRename?: (() => void) | undefined;
+  /** Keep it at the top of the session list (`true`) or let it go: its owner's alone. */
+  onKeep?: ((on: boolean) => void) | undefined;
   /** Steering from another device: this computer's offer. */
   remote?: JSX.Element | null;
 }): JSX.Element {
@@ -856,6 +939,18 @@ function SessionMenu({
           <button type="button" className="item" onClick={then(onAbout)}>
             <span className="t">About the agent</span>
             <span className="d">Open it in the agents manager</span>
+          </button>
+        )}
+        {onRename && (
+          <button type="button" className="item" onClick={then(onRename)}>
+            <span className="t">Rename session</span>
+            <span className="d">The name the session list shows, for everyone who sees it</span>
+          </button>
+        )}
+        {onKeep && (
+          <button type="button" className="item" onClick={then(() => onKeep(!row?.pinned))}>
+            <span className="t">{row?.pinned ? "Let go from the top" : "Keep at the top"}</span>
+            <span className="d">{row?.pinned ? "Back among the rest, by when it was last active" : "Listed first, for everyone who sees it"}</span>
           </button>
         )}
         {onArchive &&
@@ -1495,7 +1590,7 @@ function ScratchCard({ entry, onOpen }: { entry: Extract<Entry, { kind: "scratch
       </p>
     );
   }
-  const facts = [entry.name, entry.size === undefined ? undefined : scratchSize(entry.size), scratchVersion(entry.version)].filter(Boolean);
+  const facts = [entry.name, entry.size === undefined ? undefined : bytes(entry.size), scratchVersion(entry.version)].filter(Boolean);
   return (
     <button type="button" className="scratch-card" disabled={!entry.name} onClick={() => onOpen(entry.name)} title="Open it in the scratchpad">
       <span className="title">{entry.title || entry.name || "A document"}</span>
@@ -1550,7 +1645,7 @@ function Scratchpad({
       {doc ? (
         <div className="doc" role="tabpanel">
           <h3>{doc.title}</h3>
-          <p className="note">{[doc.name, scratchSize(doc.size), scratchVersion(doc.version)].join(" · ")}</p>
+          <p className="note">{[doc.name, bytes(doc.size), scratchVersion(doc.version)].join(" · ")}</p>
           {read.error ? (
             <p className="note error">{read.error}</p>
           ) : read.content === null ? (
@@ -1585,7 +1680,7 @@ function useScratchText(view: SessionView | null, doc: ScratchDocument | undefin
     view
       .scratchRead({ path })
       .then((file) => live && setRead({ name, content: file.content, error: null }))
-      .catch((e: unknown) => live && setRead({ name, content: null, error: e instanceof Error ? e.message : String(e) }));
+      .catch((e: unknown) => live && setRead({ name, content: null, error: errorText(e) }));
     return () => {
       live = false;
     };
@@ -1597,6 +1692,7 @@ function Backstage({
   view,
   daemon,
   row,
+  onEditTodo,
   self,
   selfName,
   pane,
@@ -1609,6 +1705,8 @@ function Backstage({
   view: SessionHandle;
   daemon: DaemonClient | null;
   row: FleetRow | undefined;
+  /** Change the task list (`todo.edit`); absent where the person may only read the session. */
+  onEditTodo?: TodoEdit | undefined;
   self: string | undefined;
   /** The signed-in person's name, where the plane knows one; undefined signed out. */
   selfName?: string | undefined;
@@ -1709,17 +1807,7 @@ function Backstage({
       ) : shown === "tasks" ? (
         <section>
           <h3>Running order</h3>
-          {view.state.todo.length === 0 ? (
-            <p className="note">No task list yet.</p>
-          ) : (
-            <ul className="tasks">
-              {view.state.todo.map((t) => (
-                <li key={t.id} className={t.status}>
-                  {t.content}
-                </li>
-              ))}
-            </ul>
-          )}
+          <Tasks todo={view.state.todo} onEdit={onEditTodo} />
         </section>
       ) : (
         <section>
@@ -1804,7 +1892,7 @@ function ReplyFoot({
   const act = (what: () => Promise<unknown>, done: string): void => {
     what().then(
       () => setSaid(done),
-      (e: unknown) => setSaid(e instanceof Error ? e.message : String(e)),
+      (e: unknown) => setSaid(errorText(e)),
     );
   };
   return (
@@ -1865,11 +1953,6 @@ interface Attachment {
 
 let attached = 0;
 
-/** A size as the chip says it. */
-function sizeWords(bytes: number): string {
-  return bytes >= 1_000_000 ? `${(bytes / 1_000_000).toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1000))} KB`;
-}
-
 /** A token count as the ring says it: `24.1k`. */
 function tokens(n: number): string {
   return n >= 1000 ? `${(n / 1000).toFixed(1).replace(/\.0$/, "")}k` : String(n);
@@ -1881,14 +1964,14 @@ function tokens(n: number): string {
  */
 async function readAttachment(file: File, max: number | undefined): Promise<Attachment> {
   // What a message carries around the file, kept clear of the server's limit.
-  if (max !== undefined && file.size > max - 4096) throw new Error(`${file.name} is larger than this session takes in one message (${sizeWords(max)})`);
+  if (max !== undefined && file.size > max - 4096) throw new Error(`${file.name} is larger than this session takes in one message (${bytes(max)})`);
   let content: string;
   try {
     content = new TextDecoder("utf-8", { fatal: true }).decode(await file.arrayBuffer());
   } catch {
     throw new Error(`${file.name} is not UTF-8 text; an upload carries text only`);
   }
-  return { id: `a${++attached}`, kind: "file", name: baseName(file.name), content, about: sizeWords(file.size) };
+  return { id: `a${++attached}`, kind: "file", name: baseName(file.name), content, about: bytes(file.size) };
 }
 
 function baseName(path: string): string {
@@ -1949,7 +2032,7 @@ function ArtifactPicker({
     let live = true;
     source.artifacts({}).then(
       (l) => live && setList(l.artifacts),
-      (e: unknown) => live && setError(reasonOf(e)),
+      (e: unknown) => live && setError(errorText(e)),
     );
     return () => {
       live = false;
@@ -1977,7 +2060,7 @@ function ArtifactPicker({
       );
       onPick(files);
     } catch (e) {
-      setError(reasonOf(e));
+      setError(errorText(e));
     } finally {
       setBusy(null);
     }
@@ -2013,12 +2096,6 @@ function ArtifactPicker({
       </div>
     </Dialog>
   );
-}
-
-function reasonOf(e: unknown): string {
-  const data = (e as { data?: { reason?: unknown } } | null)?.data;
-  if (data && typeof data.reason === "string") return data.reason;
-  return e instanceof Error ? e.message : String(e);
 }
 
 /**
@@ -2098,7 +2175,7 @@ function Composer({
       setError(null);
       const read = await Promise.allSettled([...list].map((f) => readAttachment(f, view.view?.maxMessageBytes)));
       const ok = read.flatMap((r) => (r.status === "fulfilled" ? [r.value] : []));
-      const refused = read.flatMap((r) => (r.status === "rejected" ? [reasonOf(r.reason)] : []));
+      const refused = read.flatMap((r) => (r.status === "rejected" ? [errorText(r.reason)] : []));
       if (ok.length > 0) setFiles((had) => [...had, ...ok]);
       if (refused.length > 0) setError(refused.join("; "));
     },
@@ -2182,7 +2259,7 @@ function Composer({
       await view.send(message);
       onSent();
     } catch (e) {
-      setError(reasonOf(e));
+      setError(errorText(e));
       setDraft((d) => d || words);
     } finally {
       setSending(false);
@@ -2340,7 +2417,7 @@ function Composer({
           {agent}
           <ContextRing fill={context} />
           {busy && (
-            <button type="button" className="send stop" onClick={() => void view.cancel().catch((e: unknown) => setError(reasonOf(e)))} title="Stop what the troupe is doing">
+            <button type="button" className="send stop" onClick={() => void view.cancel().catch((e: unknown) => setError(errorText(e)))} title="Stop what the troupe is doing">
               <span className="visually-hidden">Stop</span>
               <span aria-hidden="true">■</span>
             </button>

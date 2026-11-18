@@ -12,7 +12,7 @@ defmodule Troupe.Phase3ClientTest do
   alias Troupe.Client
 
   # The same stdio stub the core tests with, kept here because the dependency is only `lib`.
-  @stub Path.expand("../support/mcp_stub.exs", __DIR__)
+  @stub Path.expand("../../../../apps/troupe_core/test/support/mcp_stub.exs", __DIR__)
 
   test "the /mcp page lists the workspace's own servers from the daemon" do
     elixir = System.find_executable("elixir") || "elixir"

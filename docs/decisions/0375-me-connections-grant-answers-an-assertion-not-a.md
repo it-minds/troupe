@@ -4,7 +4,7 @@ title: "`me.connections.grant` answers an assertion, not a token"
 date: 2026-09-15
 status: accepted
 paths:
-  - apps/troupe_plane/test/troupe/plane/person_credentials_test.exs
+  - apps/troupe_plane/lib/troupe/plane/harness.ex
 gist: "`me.connections.grant` answers an assertion, not a token"
 ---
 

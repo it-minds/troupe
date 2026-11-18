@@ -10,10 +10,6 @@ paths:
   - clients/tui/lib/troupe/ui/tui/view.ex
   - clients/tui/lib/troupe/client/daemon.ex
   - clients/tui/lib/troupe/client/remote.ex
-  - clients/tui/test/troupe/agent_picker_test.exs
-  - clients/tui/test/troupe/command_mode_test.exs
-  - clients/tui/test/troupe/agents_palette_test.exs
-  - clients/tui/test/support/fake_remote.ex
 symbols:
   - Troupe.UI.TUI.AgentChooser
   - Troupe.UI.TUI.AgentChooser.key/3
@@ -23,10 +19,7 @@ gist: "Ctrl-N and Tab open one picker (session's agents.list): b starts (w/c), s
 
 Issue #594's terminal slice, on root Decision 920's list. Amends TUI Decision 155 (Ctrl-N's
 chooser is no longer command mode's own page) and 156 (Tab's chooser is the same picker,
-and does more than switch). On the chunk's tip Ctrl-N opened a page of names and
-descriptions (`Client.profiles/2`) that could only start a branch, and refused outright on a
-pod; Tab's popup (`AgentChooser`) could only switch; editing was `/agents` alone; and
-neither said where an agent came from in a person's words.
+and does more than switch).
 
 - **One picker.** `Troupe.UI.TUI.AgentChooser` is the popup both keys open, over what they
   were opened from: command mode for Ctrl-N, the window for Tab. Its rows are the daemon's
@@ -56,13 +49,3 @@ neither said where an agent came from in a person's words.
   worker refuses a write with).
 - **Not here**: `/agents` and `/new` opening the picker, the manager density, copy and new
   from a template in the picker, and save → start (the issue's other slices).
-
-Proof: `test/troupe/agent_picker_test.exs` (Ctrl-N's rows with their origins, a
-repository's agent standing in for a shipped one, `s` refused in command mode, an agent
-that cannot run refused with why; Tab's `e` opening the agent's file in the editor through
-`/agents`, `b` then `c` leaving the choice on the command line, and `s` switching the
-window), failing on the tip where Ctrl-N's page had no rows of origins and Tab's popup had
-no `e`, `b` or `s`. `command_mode_test.exs` keeps Ctrl-N's start with its instruction on
-screen and its worktree step, and on a pod now opens the picker on the bundle's agent with
-its profile, refuses a start and an edit with their sentences, and switches the session's
-agent with `s`. `agents_palette_test.exs` keeps Tab's switch, its row in the four words.

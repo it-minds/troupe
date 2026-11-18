@@ -118,7 +118,7 @@ defmodule Troupe.SharedSettingsTest do
     assert %{"value" => "limelight"} = Enum.find(served, &(&1["key"] == "ui.theme"))
   end
 
-  # D125: the page edited `transcript.detail` as text, though it has a menu of its levels.
+  # The page edited `transcript.detail` as text, though it has a menu of its levels.
   test "transcript.detail is offered as a menu of its three levels", ctx do
     {pid, session} = start_tui(ctx.sid)
     type(pid, "/settings")

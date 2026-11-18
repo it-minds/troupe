@@ -15,6 +15,7 @@ defmodule Troupe.Remote.Translate do
 
   alias Troupe.Client.Message
   alias Troupe.Event
+  alias Troupe.Protocol.Words
 
   require Logger
 
@@ -88,7 +89,7 @@ defmodule Troupe.Remote.Translate do
     data = data(event)
 
     case event["type"] do
-      type when type in ["llm.delta", "llm_delta"] ->
+      "llm_delta" ->
         reasoning? = Map.get(data, "reasoning") == true or data["kind"] in ["reasoning", "thinking"]
         text = %{text: text_of(data)}
         text = if reasoning?, do: Map.put(text, :reasoning, true), else: text
@@ -315,9 +316,8 @@ defmodule Troupe.Remote.Translate do
     shell_note? = data["source"] == "shell"
     subagent_end? = data["source"] == "subagent"
 
-    # Two spellings of one vocabulary: the worker's (`llm_response`,
-    # `tool_call_started` — PROTOCOL.md §4) and the older dotted one the contract's
-    # example and the fake use. Both land on the same local events (Decision 98).
+    # The worker's vocabulary (`llm_response`, `tool_call_started` — PROTOCOL.md §4),
+    # under the protocol schema's names and no others.
     case type do
       # The note the harness gives a model whose reply was cut or empty (troupe-remote
       # Decision 659): shown as what it is rather than as the person's words.
@@ -339,8 +339,8 @@ defmodule Troupe.Remote.Translate do
         {[emit.(:user_shell, user_shell(data, memory))], memory}
 
       # A line sent while the agent works comes back twice, queued and then taken, and both
-      # copies name the send's command id; the window draws it once (Decision 117).
-      type when type in ["input.queued", "input_queued", "user_input"] ->
+      # copies name the send's command id; the window draws it once.
+      type when type in ["input_queued", "user_input"] ->
         {[
            emit.(
              :input,
@@ -358,10 +358,10 @@ defmodule Troupe.Remote.Translate do
            )
          ], memory}
 
-      type when type in ["input.accepted", "input_accepted"] ->
+      "input_accepted" ->
         {[emit.(:input_accepted, %{command_id: cid})], memory}
 
-      type when type in ["message.completed", "llm_response"] ->
+      "llm_response" ->
         {[emit.(:assistant_message, message(data))], memory}
 
       # The request carries the model it went to, which the window names when nothing
@@ -376,7 +376,7 @@ defmodule Troupe.Remote.Translate do
            emit.(:llm_error, llm_error(data["reason"] || "the model call failed", memory.isolation))
          ], memory}
 
-      type when type in ["tool.started", "tool_call_started"] ->
+      "tool_call_started" ->
         {[
            emit.(:tool_started, %{
              call_id: call_id(data),
@@ -385,7 +385,7 @@ defmodule Troupe.Remote.Translate do
            })
          ], memory}
 
-      type when type in ["tool.completed", "tool_call_completed"] ->
+      "tool_call_completed" ->
         {[emit.(:tool_call_completed, completed(data))], memory}
 
       # What the prompt was read from (`instructions_loaded`) is `/context`'s to show, not a
@@ -399,10 +399,10 @@ defmodule Troupe.Remote.Translate do
            ] ->
         {[], memory}
 
-      # A delegation a person asked to see first (root Decision 850) carries what the gate
-      # shows, as the daemon wrote it: the agent, its definition, the brief, the tools, the
-      # budget and the depth, and the subagents it could go to instead.
-      type when type in ["approval.requested", "approval_requested"] ->
+      # A delegation a person asked to see first carries what the gate shows, as the daemon
+      # wrote it: the agent, its definition, the brief, the tools, the budget and the depth,
+      # and the subagents it could go to instead.
+      "approval_requested" ->
         {[
            emit.(:approval_requested, %{
              call_id: call_id(data),
@@ -417,7 +417,7 @@ defmodule Troupe.Remote.Translate do
            })
          ], memory}
 
-      type when type in ["approval.resolved", "approval_decided"] ->
+      "approval_decided" ->
         {[emit.(:approval_answered, %{call_id: call_id(data), decision: decision(data)})], memory}
 
       # `ask_user` (troupe-remote Decision 651): the agent hands a decision to the person
@@ -554,11 +554,8 @@ defmodule Troupe.Remote.Translate do
       "approval_resolved" ->
         {[], memory}
 
-      type when type in ["todo.changed", "todo_updated"] ->
+      "todo_updated" ->
         {[emit.(:todo_updated, %{items: todos(data)})], memory}
-
-      "agent.state" ->
-        {[emit.(:agent_state, %{to: state_atom(data["to"] || data["state"])})], memory}
 
       # What the window runs is named by the agent itself, whatever the window is called
       # (TUI Decision 156).
@@ -698,28 +695,28 @@ defmodule Troupe.Remote.Translate do
       "trigger_fired" = type ->
         {[emit.(:remote_note, %{text: generic(type, data)})], memory}
 
-      type when type in ["session.activated", "session_activated"] ->
+      "session_activated" ->
         {[
            emit.(:remote_note, %{text: "session woke on the platform"}),
            emit.(:remote_status, %{state: :active})
          ], memory}
 
-      type when type in ["session.resumed", "session_resumed"] ->
+      "session_resumed" ->
         {[
-           emit.(:remote_note, %{text: "session resumed" <> on(data)}),
+           emit.(:remote_note, %{text: "session resumed" <> moved(data)}),
            emit.(:remote_status, %{state: :active})
          ], memory}
 
-      type when type in ["session.dormant", "session_dormant"] ->
+      "session_dormant" ->
         {[
            emit.(:remote_note, %{text: "session went to sleep"}),
            emit.(:remote_status, %{state: :dormant})
          ], memory}
 
-      type when type in ["config.upgraded", "config_upgraded"] ->
+      "config_upgraded" ->
         {[emit.(:remote_note, %{text: "config upgraded" <> version(data)})], memory}
 
-      type when type in ["fs.changed", "fs_changed"] ->
+      "fs_changed" ->
         {[emit.(:fs_changed, %{paths: paths(data)})], memory}
 
       # A file the agent made for the person (`write_file` with `deliverable`, root issue
@@ -732,13 +729,7 @@ defmodule Troupe.Remote.Translate do
       "scratch_updated" ->
         {[emit.(:scratch_updated, scratch(data))], memory}
 
-      type when type in ["acl.granted", "acl_granted"] ->
-        {[emit.(:remote_note, %{text: "access granted" <> subject(data)})], memory}
-
-      type when type in ["acl.revoked", "acl_revoked"] ->
-        {[emit.(:remote_note, %{text: "access revoked" <> subject(data)})], memory}
-
-      type when type in ["session.tainted", "session_tainted"] ->
+      "session_tainted" ->
         {[emit.(:remote_note, %{text: tainted(data)})], memory}
 
       # Written beside the taint each time somebody's tools are offered, and when their
@@ -900,7 +891,7 @@ defmodule Troupe.Remote.Translate do
     head =
       cond do
         files != [] ->
-          "#{count(length(files), "file")}, +#{changed["added"] || 0} -#{changed["removed"] || 0}"
+          "#{Words.count(length(files), "file")}, +#{changed["added"] || 0} -#{changed["removed"] || 0}"
 
         commands > 0 ->
           "no file through its file tools"
@@ -919,7 +910,7 @@ defmodule Troupe.Remote.Translate do
       shown ++
         if(length(files) > @listed, do: ["and #{length(files) - @listed} more"], else: []) ++
         if(commands > 0,
-          do: ["not counted: what its #{count(commands, "command")} changed"],
+          do: ["not counted: what its #{Words.count(commands, "command")} changed"],
           else: []
         ) ++
         if(is_binary(changed["said"]), do: ["it says: " <> changed["said"]], else: [])
@@ -928,9 +919,6 @@ defmodule Troupe.Remote.Translate do
   end
 
   defp changed_line(_changed), do: "not reported"
-
-  defp count(1, noun), do: "1 #{noun}"
-  defp count(n, noun), do: "#{n} #{noun}s"
 
   # How a window's agent ended that the harness wakes no more: every end but `finished`
   # (new input resumes it) and `llm_error` (a root rests on one, and the next message is a
@@ -1020,7 +1008,7 @@ defmodule Troupe.Remote.Translate do
     n = dim && Map.get(limits, dim)
 
     case {dim, n} do
-      {"wall", n} when is_number(n) -> "its #{duration(n)} working limit"
+      {"wall", n} when is_number(n) -> "its #{Words.duration(n, :adjective)} working limit"
       {"wall", _} -> "its working-time limit"
       {"turns", n} when is_number(n) -> "its #{n}-turn limit"
       {"turns", _} -> "its turn limit"
@@ -1031,12 +1019,6 @@ defmodule Troupe.Remote.Translate do
       _ -> "its budget"
     end
   end
-
-  defp duration(ms) when ms >= 3_600_000 and rem(trunc(ms), 3_600_000) == 0,
-    do: "#{div(trunc(ms), 3_600_000)}-hour"
-
-  defp duration(ms) when ms >= 60_000, do: "#{round(ms / 60_000)}-minute"
-  defp duration(ms), do: "#{round(ms / 1000)}-second"
 
   defp token_count(n) when n >= 1_000_000, do: one_place(n / 1_000_000) <> "M"
   defp token_count(n) when n >= 1_000, do: one_place(n / 1_000) <> "k"
@@ -1307,16 +1289,15 @@ defmodule Troupe.Remote.Translate do
   defp state_atom(value) when is_atom(value) and not is_nil(value), do: value
   defp state_atom(_value), do: :idle
 
-  defp on(%{"worker" => worker}) when is_binary(worker), do: " on #{worker}"
-  defp on(%{"pod" => pod}) when is_binary(pod), do: " on #{pod}"
-  defp on(_data), do: ""
+  # `moved`: the session came back in another workspace than the one it was created in,
+  # in the desktop app's words.
+  defp moved(%{"moved" => true}), do: " on another device"
+  defp moved(_data), do: ""
 
-  defp version(%{"version" => version}), do: " to #{version}"
+  # `from` is absent where the version the session was pinned to is not known.
+  defp version(%{"from" => from, "to" => to}) when is_integer(from), do: " from #{from} to #{to}"
+  defp version(%{"to" => to}), do: " to #{to}"
   defp version(_data), do: ""
-
-  defp subject(%{"subject" => subject}) when is_binary(subject), do: ": #{subject}"
-  defp subject(%{"principal" => principal}) when is_binary(principal), do: ": #{principal}"
-  defp subject(_data), do: ""
 
   defp truncated(data) do
     what =
@@ -1434,14 +1415,8 @@ defmodule Troupe.Remote.Translate do
     kinds = Enum.map(files, &skipped_kind/1)
     many = Enum.frequencies(kinds)
 
-    case Enum.map(Enum.uniq(kinds), &count_of(&1, many[&1])) do
-      [one] -> one
-      some -> Enum.join(Enum.drop(some, -1), ", ") <> " and " <> List.last(some)
-    end
+    kinds |> Enum.uniq() |> Enum.map(&Words.count(many[&1], &1)) |> Words.and_list()
   end
-
-  defp count_of(kind, 1), do: "1 #{kind}"
-  defp count_of(kind, n), do: "#{n} #{kind}s"
 
   # How a person's command ended, and where it ran: a session on a plane says which
   # profile's pod, and is otherwise drawn as a local one is.

@@ -24,7 +24,7 @@ end
 
 defmodule Troupe.Worker.PlaneCommandsDrainingTest do
   @moduledoc """
-  A draining pod takes no new session (D40): one placed in the moments after the drain
+  A draining pod takes no new session: one placed in the moments after the drain
   began would be in no list of what the drain puts to sleep, and go down with the pod. The
   plane hears `unavailable`, gives the slot back and places it again.
 

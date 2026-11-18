@@ -36,7 +36,7 @@ defmodule Troupe.Protocol.AgentCheck do
 
   alias Troupe.Protocol.AgentDefinition
 
-  @keys ~w(description mode model tools permissions max_turns budget_share skills override delegation)
+  @keys ~w(description mode model tools permissions max_turns max_tokens budget_share skills override delegation)
   @provenance ~w(imported_from imported_hash imported_at imported_also imported_version)
 
   # The harness's own tools, by name: what `Troupe.Tools` holds in every session.
@@ -171,6 +171,7 @@ defmodule Troupe.Protocol.AgentCheck do
       skills(Map.get(meta, "skills")) ++
       model(Map.get(meta, "model"), opts[:model]) ++
       max_turns(Map.fetch(meta, "max_turns")) ++
+      max_tokens(Map.fetch(meta, "max_tokens")) ++
       budget_share(Map.fetch(meta, "budget_share")) ++
       override(Map.fetch(meta, "override")) ++
       delegation(Map.fetch(meta, "delegation")) ++
@@ -184,7 +185,7 @@ defmodule Troupe.Protocol.AgentCheck do
       error(
         key,
         "#{key} is not a key an agent has: the keys are description, mode, model, tools, " <>
-          "permissions, max_turns, budget_share, skills, override and delegation"
+          "permissions, max_turns, max_tokens, budget_share, skills, override and delegation"
       )
     end
   end
@@ -300,6 +301,12 @@ defmodule Troupe.Protocol.AgentCheck do
 
   defp max_turns({:ok, other}),
     do: [error("max_turns", "max_turns must be a whole number above 0, not #{inspect(other)}")]
+
+  defp max_tokens(:error), do: []
+  defp max_tokens({:ok, n}) when is_integer(n) and n > 0, do: []
+
+  defp max_tokens({:ok, other}),
+    do: [error("max_tokens", "max_tokens must be a whole number above 0, not #{inspect(other)}")]
 
   defp budget_share(:error), do: []
 

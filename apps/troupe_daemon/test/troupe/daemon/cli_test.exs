@@ -225,7 +225,7 @@ defmodule Troupe.Daemon.CLITest do
     assert Enum.all?(String.to_charlist(described <> explained), &(&1 < 128))
   end
 
-  # D68, Decision 854: set but empty is unset. On the chunk's tip the daemon took `""` for a
+  # Set but empty is unset. On the chunk's tip the daemon took `""` for a
   # socket's path and died at once with `listen_failed unix: eafnosupport`.
   test "an empty TROUPE_DAEMON_SOCKET means unset, and the daemon starts as it would without it" do
     unset = Endpoint.default()
@@ -342,7 +342,7 @@ defmodule Troupe.Daemon.CLITest do
       assert "https://plane.example.test" in Loopback.admitted()
     end
 
-    # D79, Decision 802: the plane's discovery document says where its web app is, and
+    # The plane's discovery document says where its web app is, and
     # `open` went to `/app/` whatever it said. Asked of a plane on this machine, over HTTP.
     test "linked, it opens the web app the plane's discovery document names" do
       plane =

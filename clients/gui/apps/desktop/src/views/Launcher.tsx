@@ -10,11 +10,11 @@
 
 import { useState } from "react";
 import type { JSX } from "react";
-import { awaitingYou, onThisComputer } from "@troupe/client";
+import { ago, awaitingYou, hostOf, onThisComputer } from "@troupe/client";
 import type { AuthSession, FleetRow } from "@troupe/client";
 import { capabilities, prefs } from "../shell";
 import { Mask } from "./brand";
-import { failedTitle, hostOf, relative, statusOf, Unread } from "./bits";
+import { failedTitle, statusOf, Unread } from "./bits";
 import type { DaemonState } from "./Local";
 
 /** The one word for where a row runs, as the list's pill says it. */
@@ -135,7 +135,7 @@ export function Launcher({
               <span className="title">
                 {waiting.length} waiting for you
               </span>
-              <span className="copy">{oldest === undefined ? "A decision is waiting." : `The oldest stopped ${relative(oldest)}.`}</span>
+              <span className="copy">{oldest === undefined ? "A decision is waiting." : `The oldest stopped ${ago(oldest)}.`}</span>
             </button>
           ) : (
             <button type="button" className="tile" onClick={onApprovals}>

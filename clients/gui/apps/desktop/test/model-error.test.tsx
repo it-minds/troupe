@@ -33,6 +33,7 @@ afterEach(async () => {
   await daemon.stop();
 });
 
+// Its own open, not support's: the list's one row, open once the view says it is here, then the error.
 async function open(reason: string): Promise<void> {
   const session = daemon.seed("/home/ada/project");
   unmount = render(<App />).unmount;

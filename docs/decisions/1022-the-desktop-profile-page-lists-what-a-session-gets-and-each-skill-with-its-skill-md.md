@@ -6,14 +6,9 @@ status: accepted
 issue: 1003
 paths:
   - apps/troupe_plane/lib/troupe/plane/profile_view.ex
-  - apps/troupe_plane/test/troupe/plane/profile_view_test.exs
   - clients/gui/apps/desktop/src/views/Profiles.tsx
   - clients/gui/apps/desktop/src/styles.css
-  - clients/gui/apps/desktop/test/profiles.test.tsx
   - clients/gui/packages/client/src/profile.ts
-  - clients/gui/packages/client/test/support/profiles.ts
-  - PROTOCOL.md
-  - docs/user/profiles.md
 symbols:
   - Troupe.Plane.ProfileView.get/3
   - Skills

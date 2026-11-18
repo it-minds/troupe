@@ -5,22 +5,12 @@ date: 2026-11-16
 status: accepted
 issue: 979
 paths:
-  - apps/troupe_plane/lib/troupe/plane/artifacts.ex
   - apps/troupe_plane/lib/troupe/plane/artifacts/comments.ex
   - apps/troupe_plane/lib/troupe/plane/artifacts/comment.ex
-  - apps/troupe_plane/lib/troupe/plane/harness.ex
-  - apps/troupe_plane/priv/repo/migrations/20261116001016_artifact_comment_edits.exs
-  - apps/troupe_plane/test/troupe/plane/artifact_comment_edits_test.exs
+  - apps/troupe_plane/lib/troupe/plane/artifacts.ex
   - apps/troupe_gateway/lib/troupe/gateway/artifacts.ex
-  - apps/troupe_gateway/lib/troupe/gateway/dispatch.ex
-  - apps/troupe_protocol/lib/troupe/protocol/schema.ex
-  - clients/gui/packages/client/src/artifacts.ts
-  - clients/gui/packages/client/src/own.ts
-  - clients/gui/packages/client/src/daemon.ts
   - clients/gui/apps/desktop/src/views/Artifacts.tsx
   - clients/gui/apps/console/src/views/ArtifactComments.tsx
-  - PROTOCOL.md
-  - docs/user/artifacts.md
 symbols:
   - Troupe.Plane.Artifacts.delete_comment/4
   - Troupe.Plane.Artifacts.edit_comment/5
@@ -28,9 +18,6 @@ symbols:
   - Troupe.Plane.Artifacts.Comments.edit/5
 gist: "comment delete: author, owners, takedown (platform admin, team admin), row removed, audited without text; edit: author while a writer, edited_at; may_edit/may_delete per comment"
 ---
-
-Decision 1007 gave every artifact one thread and left taking a comment back to #979: the
-only way to remove one was deleting the artifact.
 
 ## Who
 
@@ -77,21 +64,3 @@ thread and the console's show **Edit** (the text in a box, **Save** and **Cancel
 everybody, and cannot be brought back."), with **Delete** and **Keep it** (DESIGN §11: say
 the consequence, not "Are you sure?"). The daemon forwards both methods with only their
 arguments and refuses them under Local only, as every `artifact.*` (Decision 1007).
-
-## Proof
-
-- `apps/troupe_plane/test/troupe/plane/artifact_comment_edits_test.exs`: the author deletes
-  their own and another writer may not; an owner deletes anybody's and the rows count what is
-  left; a platform administrator's takedown, audited with who and `by: takedown` and without
-  the text; a comment not in the thread, or no id, refused; the author edits, marked edited,
-  audited without the text, an owner may not edit it, and the thread's `may_edit` and
-  `may_delete` per reader; an author whose role was taken may not edit but may delete.
-- `apps/troupe_gateway/test/troupe/gateway/artifacts_test.exs` (both forwarded with only their
-  arguments) and `local_only_test.exs` (both refused under Local only).
-- The desktop app's `artifacts-gallery.test.tsx` and the console's
-  `artifact-comments.test.tsx`: Edit and Delete only where the plane says, an edit marked
-  edited, a delete asked once and Keep it keeping it, an owner's Delete on another's comment
-  and no Edit, a reader's none on another's.
-
-All failed on the chunk's tip: there was no `artifact.comment.delete` or `.edit`, no
-`edited_at` and no `may_edit` or `may_delete`.

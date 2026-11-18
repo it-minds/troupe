@@ -18,6 +18,7 @@ defmodule Troupe.Tools.Finish do
   @behaviour Troupe.Tool
 
   alias Troupe.Agent.Writes
+  alias Troupe.Protocol.Words
 
   @parts ~w(summary ran passed unverified needs)
 
@@ -70,7 +71,7 @@ defmodule Troupe.Tools.Finish do
   # said of it (Decision 853).
   defp none_running(%{children: [_ | _] = running}) do
     {:error,
-     "finish refused: #{and_list(running)} still #{if match?([_], running), do: "runs", else: "run"} " <>
+     "finish refused: #{Words.and_list(running)} still #{if match?([_], running), do: "runs", else: "run"} " <>
        "in the background. End your turn to wait for its end, or stop it with stop_child, " <>
        "then finish."}
   end
@@ -179,13 +180,8 @@ defmodule Troupe.Tools.Finish do
   end
 
   defp refusal(missing) do
-    "finish refused: it has no #{and_list(missing)}. A finish has summary, ran, passed, " <>
+    "finish refused: it has no #{Words.and_list(missing)}. A finish has summary, ran, passed, " <>
       "unverified and needs, each its own field; write none where one has nothing, and " <>
       "call finish again with all five."
   end
-
-  @doc false
-  @spec and_list([String.t()]) :: String.t()
-  def and_list([one]), do: one
-  def and_list(items), do: Enum.join(Enum.drop(items, -1), ", ") <> " and " <> List.last(items)
 end

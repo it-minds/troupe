@@ -1,4 +1,4 @@
-// A turn the root agent failed (defects.md D42; Decision 727). A root that crashes as
+// A turn the root agent failed. A root that crashes as
 // often as it may be restarted ends its turn with `turn_ended`, `reason: agent_failed` and
 // what it raised, and its session stops. That is a failure, and the app says so wherever it
 // says how a session is: the transcript's end of the turn, the session's status, the

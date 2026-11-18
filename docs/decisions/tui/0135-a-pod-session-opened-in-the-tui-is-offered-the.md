@@ -9,8 +9,6 @@ paths:
   - clients/tui/lib/troupe/remote/worker.ex
   - clients/tui/lib/troupe/remote/rpc.ex
   - clients/tui/lib/troupe/client/remote.ex
-  - clients/tui/test/support/fake_remote.ex
-  - clients/tui/test/troupe/remote_client_tools_test.exs
 symbols:
   - Troupe.Remote.Offer
   - Troupe.Remote.Worker.asking/1

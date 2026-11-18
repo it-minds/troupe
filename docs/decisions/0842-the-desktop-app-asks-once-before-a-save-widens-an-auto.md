@@ -15,8 +15,8 @@ symbols:
 gist: "Form keeps untouched lines; ask once when a save adds/widens an auto vs the replaced file (a copy counts all); switch offers agents, never plane profiles"
 ---
 
-Issue #503 in the desktop app (the daemon's side is Decision 841). Three choices the
-issue and 841 leave to the client.
+Issue #503 in the desktop app (the daemon's side is Decision 841). Three choices the issue
+and 841 leave to the client.
 
 - **The file's text is what is edited, and the daemon is its only judge.** The form reads
   the frontmatter keys it knows (`description`, `mode`, `model`, `tools`, `permissions`,
@@ -32,8 +32,8 @@ issue and 841 leave to the client.
   agent may do, every `auto` named, and the save is asked about once when it lets a tool
   run without asking that did not before: an `auto` added, or an `ask` or `deny` made
   `auto` (`widenedAutos`). The comparison is with the file the save replaces, the
-  definition the editor was opened from when it has the same name and layer; anything
-  else is a new file and every `auto` in it counts, so copying an agent with an `auto` into
+  definition the editor was opened from when it has the same name and layer; anything else
+  is a new file and every `auto` in it counts, so copying an agent with an `auto` into
   your own layer is asked about, since there it applies in every workspace and no trust is
   asked (Decision 825 gates only a repository's). A save that keeps the autos it had is
   not asked about again. A repository's save is asked about too, worded for the trust it
@@ -51,13 +51,3 @@ issue and 841 leave to the client.
   writes as the agent it runs, `Troupe.Session` taking the plane's `agent` or the default,
   then each `profile_switched`), and until that arrives a daemon row's `profile`, never a
   plane row's, which names the plane's profile.
-- **Proof:** `clients/gui/apps/desktop/test/agents-manager.test.tsx` against the fake
-  daemon (the list's facts and running windows, a built-in copied in one press, an unknown
-  tool refused at its field with nothing written, a mended edit that leaves the other lines
-  as they were, the question asked once and not again, a copy deleted with its layer named,
-  a bundle's agent not editable, another client's save followed, an older daemon said, the
-  switch and its transcript line, `/agents` from the palette, a session on the platform
-  offered its own agents and switched on its pod, a refused switch);
-  `clients/gui/packages/client/test/agents.test.ts` (the form's round trip, `widenedAutos`,
-  the methods over the socket). On the chunk's tip the first failed: there was no Agents
-  screen and nothing to edit.

@@ -1,6 +1,6 @@
 defmodule Troupe.Sessions.LifecycleTest do
   @moduledoc """
-  A session's life after D117 (Decision 855): where its files are, how it stops, and what
+  A session's life: where its files are, how it stops, and what
   a command that arrives while it stops is told.
 
   - A session's files are under its own state directory, the one its config names, and
@@ -106,7 +106,14 @@ defmodule Troupe.Sessions.LifecycleTest do
       await_state(session.id, [:idle, :done], 10_000)
       :ok = Troupe.stop_session(session.id)
 
-      assert %{state: :dormant} = eventually(fn -> Troupe.get_session(session.id) end)
+      settled = fn ->
+        case Troupe.get_session(session.id) do
+          %{state: :active} -> nil
+          found -> found
+        end
+      end
+
+      assert %{state: :dormant} = eventually(settled, 5_000, 100)
       assert [_dir] = dirs(context.state_dir, session.id)
 
       :ok = Troupe.erase_session(session.id)
@@ -229,13 +236,5 @@ defmodule Troupe.Sessions.LifecycleTest do
   defp timed(fun) do
     {us, result} = :timer.tc(fun)
     {result, div(us, 1_000)}
-  end
-
-  defp eventually(fun, tries \\ 50) do
-    case fun.() do
-      nil when tries > 0 -> Process.sleep(100) && eventually(fun, tries - 1)
-      %{state: :active} when tries > 0 -> Process.sleep(100) && eventually(fun, tries - 1)
-      result -> result
-    end
   end
 end

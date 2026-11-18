@@ -11,8 +11,8 @@
 
 import { useEffect, useState } from "react";
 import type { JSX } from "react";
-import { visibilityWords } from "@troupe/client";
-import type { Artifact, ArtifactKind, ArtifactList, ArtifactThumbnail, ArtifactUpload, DaemonClient } from "@troupe/client";
+import { blockedKindWords, blockedWords, errorText, visibilityWords } from "@troupe/client";
+import type { Artifact, ArtifactBlocked, ArtifactKind, ArtifactList, ArtifactThumbnail, ArtifactUpload, DaemonClient } from "@troupe/client";
 import { shell } from "../shell";
 
 /** The person's real browser where there is a shell; a webview does nothing useful with a new window. */
@@ -46,12 +46,6 @@ export function replyTitle(text: string): string {
   const first = text.split("\n").find((l) => l.trim() !== "") ?? "";
   const plain = first.replace(/^#+\s*/, "").replace(/[*_`]/g, "").trim();
   return plain.length > 80 ? `${plain.slice(0, 79)}…` : plain;
-}
-
-function sentence(e: unknown): string {
-  const data = (e as { data?: { reason?: unknown } } | null)?.data;
-  if (data && typeof data.reason === "string") return data.reason;
-  return e instanceof Error ? e.message : String(e);
 }
 
 /**
@@ -106,13 +100,13 @@ export function Publish({
   const [picture, setPicture] = useState<File | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [done, setDone] = useState<Artifact | null>(null);
+  const [done, setDone] = useState<(Artifact & { blocked?: ArtifactBlocked[] }) | null>(null);
 
   useEffect(() => {
     let live = true;
     daemon.artifacts({ mine: true }).then(
       (l) => live && setList(l),
-      (e: unknown) => live && setListError(sentence(e)),
+      (e: unknown) => live && setListError(errorText(e)),
     );
     return () => {
       live = false;
@@ -144,7 +138,7 @@ export function Publish({
       });
       setDone(published);
     } catch (e) {
-      setError(sentence(e));
+      setError(errorText(e));
     } finally {
       setBusy(false);
     }
@@ -162,6 +156,19 @@ export function Publish({
               {done.title} is published as {done.id}, version {done.version}, for {visibilityWords(done.visibility)}
               {done.owner_team ? `, owned by the ${done.owner_team} team` : ""}.
             </p>
+            {/* What the artifacts host will block in it, as the plane read the files. */}
+            {done.blocked && done.blocked.length > 0 && (
+              <div className="note blocked" role="note">
+                <p>{blockedWords(done.blocked.length)}</p>
+                <ul>
+                  {done.blocked.map((b, i) => (
+                    <li key={i}>
+                      <code>{b.file}</code> {b.reference} ({blockedKindWords(b.kind)})
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
             <div className="actions">
               {gallery && (
                 <button type="button" onClick={() => void openExternal(`${gallery}/${done.id}`)}>
@@ -176,6 +183,7 @@ export function Publish({
         ) : (
           <>
             <p className="copy">Files from this computer, published on your Troupe plane as you, served from a host of their own that can reach nothing of yours.</p>
+            <p className="hint">An artifact may load only its own files: no stylesheet, script, font or image from another site, and no inline script.</p>
             {listError && <p className="banner error">{listError}</p>}
             <fieldset>
               <legend>What to publish</legend>
@@ -205,7 +213,7 @@ export function Publish({
             </label>
             {files.length > 0 && <p className="hint">{kind === "html" ? "A page" : kind === "markdown" ? "A Markdown document" : "A file"}: {paths.join(", ")}</p>}
             <label>
-              A picture of it for its card, if you have one (PNG, JPEG or WebP, at most 256 KB)
+              A picture of it for its card, if you have one (PNG, JPEG or WebP, at most 256 KiB)
               <input type="file" accept="image/png,image/jpeg,image/webp" onChange={(e) => setPicture(e.target.files?.[0] ?? null)} />
             </label>
             {mode === "new" && (

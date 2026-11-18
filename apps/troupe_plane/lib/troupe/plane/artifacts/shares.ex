@@ -23,11 +23,10 @@ defmodule Troupe.Plane.Artifacts.Shares do
   alias Troupe.Plane.Artifacts.{Artifact, Share, ShareUse}
   alias Troupe.Plane.{Audit, Repo, Settings}
   alias Troupe.Plane.Identity.User
+  alias Troupe.Protocol.Digest
   alias Troupe.Protocol.Error
 
   alias Troupe.Plane.Artifacts.People
-
-  @roles People.roles()
 
   # A public link is a bearer anybody may forward; it does not outlive a quarter.
   @max_public_days 90
@@ -53,7 +52,7 @@ defmodule Troupe.Plane.Artifacts.Shares do
       share =
         Repo.insert!(%Share{
           artifact_id: artifact.id,
-          token_hash: hash(token),
+          token_hash: Digest.sha256(token),
           role: role,
           public: public,
           expires_at: expires,
@@ -73,8 +72,13 @@ defmodule Troupe.Plane.Artifacts.Shares do
     end
   end
 
-  defp role(role) when role in @roles, do: {:ok, role}
-  defp role(other), do: {:error, invalid("a link's role is view, comment or edit, not #{inspect(other)}")}
+  # A person's roles are the ones a link may give. Read when a link is made, not while this
+  # module compiles, so that it does not recompile with `People` and everything it reaches.
+  defp role(role) do
+    if role in People.roles(),
+      do: {:ok, role},
+      else: {:error, invalid("a link's role is view, comment or edit, not #{inspect(role)}")}
+  end
 
   defp expires(nil), do: {:ok, nil}
 
@@ -238,7 +242,7 @@ defmodule Troupe.Plane.Artifacts.Shares do
     Repo.one(
       from(s in Share,
         where:
-          s.token_hash == ^hash(token) and is_nil(s.revoked_at) and
+          s.token_hash == ^Digest.sha256(token) and is_nil(s.revoked_at) and
             (is_nil(s.expires_at) or s.expires_at > ^now)
       )
     )
@@ -354,8 +358,6 @@ defmodule Troupe.Plane.Artifacts.Shares do
         end)
     }
   end
-
-  defp hash(token), do: :sha256 |> :crypto.hash(token) |> Base.encode16(case: :lower)
 
   defp invalid(reason), do: Error.new(:invalid_params, %{reason: reason})
 end

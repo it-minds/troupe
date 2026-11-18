@@ -20,7 +20,9 @@ defmodule Troupe.Tools.PublishArtifact do
   audience and whose it is there, and the call runs with what they chose laid over its
   arguments (`as_answered/2`), its answer saying so. What it published is on the call's own
   event, as `artifact` (`id`, `version`, `url`, and `owner_team` for a team's), and in the
-  plane's audit trail with the session.
+  plane's audit trail with the session. What the artifacts host will block in it (a
+  stylesheet from another site, an inline script), as the plane read it from the files, is
+  in the answer by file and reference, so the agent can publish a corrected version.
 
   Offered only where the host installed somewhere for it to go (`Troupe.Artifacts`). There,
   signed out, it is refused with a sentence naming the file, which the person can open or
@@ -45,7 +47,7 @@ defmodule Troupe.Tools.PublishArtifact do
     """
     Publish a report or page from the workspace for people to read in their organisation's gallery: `html` (a page and its CSS, JS and images), `markdown` (a document, rendered with code highlighting and Mermaid flowcharts), or `file` (one file, as a PDF or an image).
 
-    `files`: workspace paths; they keep their paths below the directory they share, so relative links still work. A page opens `index.html`; a document `index.md` or `README.md`. Pages run sandboxed: scripts only from the artifact's own .js files (no inline script), and nothing outside the artifact can be fetched. Keep it to a few megabytes.
+    `files`: workspace paths; they keep their paths below the directory they share, so relative links still work. A page opens `index.html`; a document `index.md` or `README.md`. An artifact may load only its own files: no stylesheet, script, font or image from another site, and no inline script or onclick; put the CSS and JS in files of their own and publish them with the page. Nothing outside the artifact can be fetched. The answer names anything the artifacts host will block. Keep it to a few megabytes.
 
     `thumbnail`: optional, a workspace PNG, JPEG or WebP of at most 256 KiB shown on the gallery card; send one only if you already have a screenshot of the page. Never required.
 
@@ -352,8 +354,35 @@ defmodule Troupe.Tools.PublishArtifact do
 
     "published #{artifact["kind"] || "artifact"} \"#{artifact["title"]}\" (#{length(files)} file#{if length(files) == 1, do: "", else: "s"}) " <>
       "as #{artifact["id"]} version #{artifact["version"]}, for #{audience(artifact["visibility"])}#{chose}, at #{where}. " <>
-      "Republish it with id #{artifact["id"]}"
+      blocked(artifact["blocked"], artifact["id"])
   end
+
+  # What the artifacts host will block of the version, as the plane read it from the files:
+  # said while the agent can still publish it corrected.
+  defp blocked([_ | _] = found, id) do
+    "The artifacts host will block #{length(found)} reference#{if length(found) == 1, do: "", else: "s"}: " <>
+      Enum.map_join(found, "; ", &blocked_one/1) <>
+      ". An artifact may load only its own files; publish a corrected version with id #{id}"
+  end
+
+  defp blocked(_none, id), do: "Republish it with id #{id}"
+
+  defp blocked_one(found) do
+    line = if is_integer(found["line"]), do: ", line #{found["line"]}", else: ""
+    "#{found["file"]}: #{found["reference"]} (#{blocked_kind(found["kind"])}#{line})"
+  end
+
+  defp blocked_kind("stylesheet"), do: "a stylesheet from another site"
+  defp blocked_kind("script"), do: "a script from another site"
+  defp blocked_kind("image"), do: "an image from another site"
+  defp blocked_kind("font"), do: "a font from another site"
+  defp blocked_kind("media"), do: "a sound or film from another site"
+  defp blocked_kind("frame"), do: "a page from another site in a frame"
+  defp blocked_kind("object"), do: "an embedded object, which the host never runs"
+  defp blocked_kind("connect"), do: "a connection to another site"
+  defp blocked_kind("inline_script"), do: "an inline script"
+  defp blocked_kind("event_handler"), do: "an inline event handler"
+  defp blocked_kind(other), do: to_string(other)
 
   defp chosen?(%{answer: %{"edited" => [_ | _]}}), do: true
   defp chosen?(_ctx), do: false

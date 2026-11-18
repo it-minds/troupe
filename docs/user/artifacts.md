@@ -202,14 +202,39 @@ itself, and the picture its publisher sent with that version, if they sent one.
 Open one and it shows who published which version and when, the
 session it came from, and **Open**, which opens the artifact in a new tab.
 
-In the terminal client, `/artifacts` lists them by who can see them and opens one in your
-browser; a Markdown one can be read there too, and `troupe artifacts` does the same from the
-command line ([the terminal client's screen](terminal-screen.md#artifacts)).
+**In the terminal client**, `/artifacts` lists what is published for you on the plane, through this computer's daemon
+and its sign-in, in the desktop app's words: **All**, **◉
+Everyone at** your organisation, **◎ Your teams** (a team's and a profile's), **◐ Shared
+with you** (through a link) and **○ Only you**, ←/→ or `1`–`5`. A row is its title,
+kind, version, whose it is (`team finance` for a team's, which every member of the team
+owns; `you`; or who published it) and when, and `new` on a version you have not opened on
+this machine. `/` filters; Enter opens it in your browser through the plane's one-time
+address, never in the terminal; `v` lists its versions to open one; `m` reads a Markdown
+one here, drawn as a reply is, in a frame, which past 500 lines is cut and offers the
+browser; `p` publishes a file of the workspace as `/publish` does, for you alone where
+you name nobody, and a team's where you name a team unless `me` follows (`/publish
+report.html team:core me`); `l` copies a view link to one of yours, through the terminal (OSC 52)
+where it takes it, else the clipboard, and shows it either way; `r` reads the list again;
+Esc goes back. Typed in a session's window, `/artifacts` is also the picker for its
+message: `a` attaches the one on the cursor, the window's box shows it until you send
+(Backspace in the empty box takes it off), and the session's server fetches its files from
+the plane as the message goes, which then says where each landed. Under Local only the page
+says the plane is not asked, and asks it nothing. HQ has a line for what is shared with you, and one per invitation into a session.
+`troupe artifacts list`, `open`, `show`, `publish` (`--owner me` keeps a team publication
+yours), `transfer` (hand one of yours to a team you are in with `--to team:<name>`, or take a
+team's back with `--to me` as its administrator; the listing says `transferable` where you
+may) and `link` are the same from the command line ([the command reference](cli-reference.md)).
 
 The artifact is served from a host of its own, not the plane's. A page there runs sandboxed:
-its scripts are only its own `.js` files (no inline script), it cannot read a cookie or call
-the plane as you, and it cannot fetch anything from anywhere else. A page that relied on a
-script from the web, or on inline script, needs those moved into files of its own.
+it cannot read a cookie or call the plane as you, and it may load only its own files. A
+stylesheet, script, font, image or frame from another site, an inline `<script>`, an
+`onclick=` and a `fetch` to another site are all blocked; inline styles and `data:` images
+and fonts are not. The plane reads each page, stylesheet and script as it is published, and
+the publish says what the host will block, file by file, so an agent can publish a corrected
+version straight away; it is published all the same. The artifact's page in the console and
+the desktop app then says how many references its version has that are blocked, with the list
+on request, and the terminal's `/artifacts` says the count on its row. A page that relies on
+one needs it moved into a file of its own, published beside it.
 
 Opening one signs you in to that host for an hour, through the plane. If you open an
 artifact's address, or follow a link to one, while signed out, you are sent to the console to
@@ -235,3 +260,16 @@ only* the gallery asks the plane nothing.
 **Let go from the top** puts it back under when it was published. It is yours alone and kept
 on the plane, so the desktop app shows it there on every computer you sign in on, and nobody
 else, its owner included, sees what you keep.
+
+## Where a file goes
+
+When you ask for a file (a document, a report, a spreadsheet, a page), the agent puts it
+where your organisation keeps files if one of its tools does that (an MCP server marked
+[`stores: files`](mcp.md#where-your-organisation-keeps-files)), else publishes it as an
+artifact people can share, else makes it in the workspace and says where:
+on your machine it is already there, and from a pod's session the desktop app's **Save…**
+on the transcript's "File ready" line, or the TUI's `/save <path> [to]`, brings it here.
+Saying where ("put it on SharePoint", "just make the file") decides it, and so does an
+instruction file that says so; when more than one way is open and you named none, it asks
+you once, the ways as the options. Each session's `instructions_loaded` lists this as its
+`harness` layer, with what was open.

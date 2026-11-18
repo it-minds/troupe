@@ -5,29 +5,16 @@ date: 2026-11-15
 status: accepted
 issue: 189
 paths:
-  - docs/README.md
   - docs/overrides/landing.html
   - docs/overrides/main.html
   - docs/overrides/partials/search.html
   - docs/assets/landing.css
   - docs/assets/site.css
-  - docs/assets/afterglow.css
-  - docs/assets/social-card.png
-  - docs/llms.txt
   - mkdocs.yml
   - clients/gui/scripts/tokens.ts
   - clients/gui/scripts/social-card.ts
 gist: Front page in Afterglow (tokens.ts writes docs/assets/afterglow.css), screenshots per theme, Figtree self-hosted (font false), social card from tokens, llms.txt
 ---
-
-**Why.** #189 asked for a face on the web: what Troupe is, the install and a picture above
-the fold, the three things that are distinctive, who it is for, what it costs, ten minutes,
-two ways on, and the search and sharing basics done properly. Decision 940 made
-`docs/README.md` the front page and gave it the search basics; what was left was a page
-that looked like the theme rather than the product, a picture of the app from before its
-redesign that named a cost it did not show, a card that was a screenshot cropped by
-whoever showed it, the theme's fonts fetched from Google on every page, and nothing for an
-assistant to read.
 
 **The decision.**
 
@@ -70,11 +57,3 @@ assistant to read.
 - **The theme's search dialog has a name.** `overrides/partials/search.html` is the
   theme's partial with `aria-label` added, the one accessibility finding Lighthouse had
   left; it is to be compared with the theme's own when Material is bumped.
-
-**Proof.** `mkdocs build --strict`; Lighthouse 12.8 on the built site served locally,
-desktop and mobile, light and dark: accessibility, best practices and SEO 100 each.
-Performance is 77 to 85 under Lighthouse's simulated throttling and 100 on desktop under
-applied throttling; with the search index removed it is 99. The index is 4.7 MB, 60 % of
-it the decisions' pages, which the theme fetches on load; whether decisions stay in the
-site's search is left to the maintainers. The page walked at 1280 and 375 wide in both
-themes, with no horizontal scroll at 375.

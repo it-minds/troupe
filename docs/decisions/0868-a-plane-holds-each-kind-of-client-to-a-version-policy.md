@@ -6,15 +6,8 @@ status: accepted
 issue: 66
 paths:
   - apps/troupe_plane/lib/troupe/plane/client_versions.ex
-  - apps/troupe_plane/priv/repo/migrations/20261011000868_client_versions.exs
-  - apps/troupe_plane/lib/troupe/plane/harness.ex
-  - clients/gui/apps/console/src/views/Policy.tsx
   - apps/troupe_protocol/lib/troupe/protocol/client_update.ex
-  - apps/troupe_gateway/lib/troupe/gateway/plane.ex
   - apps/troupe_core/lib/troupe/update.ex
-  - clients/tui/lib/troupe/remote/plane.ex
-  - clients/tui/lib/troupe/cli/remote.ex
-  - docs/user/updating.md
 symbols:
   - Troupe.Plane.ClientVersions
   - Troupe.Protocol.ClientUpdate
@@ -22,28 +15,13 @@ symbols:
 gist: "Policy per component judged only at the plane's initialize (update_required -32016); troupe update: recommended, never blocked or below minimum, no downgrade unless named"
 ---
 
-#66 slice 1b, after slice 1a (Decision 865) made releases signed and `troupe update`
-install only what the release key signed. The maintainer decided the shape on 2026-10-11:
-the plane's version policy is a floor, a recommended version and a blocklist per
-component; it reaches clients through `initialize` and `troupe update`; and a client below
-the floor gets a clear "update required". This records how.
-
 ## The policy
 
 Per component — `tui` (the terminal, `troupe`), `daemon` (`troupe-daemon`) and `desktop`
 (the desktop app) — a `recommended` version, a `minimum` and a `blocked` list, in the
 plane's `client_versions` table, one row per component, written the first time an
 administrator sets something. No row is no policy: every plane upgrading into this serves
-every version until somebody decides otherwise. `admin.clients.get` (either admin role) and
-`admin.clients.put` (platform admin) are the methods, audited as `clients.put` with the
-diff, as every admin write is. A put changes the keys it sends, `null` clears one, and
-`blocked` is the whole list; it is refused, with nothing written, for a version SemVer
-cannot read, a `minimum` newer than `recommended`, or a `recommended` that is blocked.
-
-The console has a small **Client versions** panel on the Policy page rather than a screen:
-three fields per component, the same two calls. The real screen, with who runs what and a
-"require update now", is #56's redo; the panel is what the console's patterns allowed for
-almost nothing, and `Troupe.Plane.Admin.Console` places both methods on Policy.
+every version until somebody decides otherwise.
 
 **Ordering.** Versions are ordered as SemVer orders them, as `troupe update` already
 ordered them (Decision 865), so `0.13.0-beta` comes before `0.13.1-beta` and also before
@@ -52,12 +30,6 @@ administrator who types `0.13.0`, and would have made the plane and `troupe upda
 disagree about which of two versions is older. So a policy names versions as releases are
 numbered, the docs say so with an example, and a version that is not SemVer is refused at
 the put. A client version that is not SemVer (`dev`) is judged against `blocked` alone.
-
-`Troupe.Protocol.ClientUpdate` is the one reading of it: which component a client name is
-(the names PROTOCOL.md §3 already gives: `troupe` and `troupe-headless`, `troupe-daemon`,
-`troupe-gui`), what a policy says to a version, and the sentence a refusal is. It is in the
-protocol app because the plane judging and the terminal and the daemon wording a refusal
-must agree, and the TUI may call it (`troupe.xref`).
 
 ## Where it is judged: the plane's `initialize`, and only there
 
@@ -71,10 +43,7 @@ what to run (`troupe update`; nothing for the desktop app, which has no updater 
 all of it as one sentence in `reason`.
 
 The TUI's handshake over `POST` is now `initialize`, and `me` where the plane answers
-`method_not_found`, so TUI Decision 93 still holds for a plane from before this. The
-daemon has no connection to the plane, only a link a client hands it a token on
-(Decision 764), so it makes the same `initialize` (as `troupe-daemon`) when a link brings a
-token, before it asks for erasures or seals anything.
+`method_not_found`, so TUI Decision 93 still holds for a plane from before this.
 
 Only `initialize` judges. Every other `/rpc` call stands on its token, as before, and the
 client is what stops: the TUI's plane connection goes down with the sentence as its
@@ -86,11 +55,6 @@ here, because the version is the client's own word either way. The refusal is a 
 to the person — it tells them what they need — and not a way to keep anybody out: a
 client that lies about its version, or one from before 0.13 that says none, is served,
 and the plane cannot tell either from a script calling `/rpc`, which is held to nothing.
-
-A refusal reads as itself. HQ's banner is the sentence rather than "the plane is
-unreachable", which would send somebody to check their network; `troupe whoami` and every
-plane call answer it; the daemon logs it once and `identity.get` carries it as
-`update_required`.
 
 ## `troupe update`, signed in
 
@@ -113,9 +77,7 @@ own, because the client that most needs to update is the one `initialize` refuse
 With no plane signed in, or a plane with no policy, it is Decision 865's `troupe update`
 unchanged. A plane that cannot be asked is said in a line and the update goes on as
 without one: the release key still decides what may be installed, and a person whose plane
-is down is not stranded on an old build by it. This closes slice 1a's held-back finding
-for a signed-in client: a mirror that keeps serving an older signed release is refused,
-because the version asked for is the one the plane names (`the release at … is X, not Y`).
+is down is not stranded on an old build by it.
 
 ## Why the policy carries no signature of its own in this slice
 
@@ -131,31 +93,3 @@ outlives the connection — cached, checked offline, with an `expires_at` so a s
 cannot pin a fleet — signed by a plane key pinned at sign-in, so a document served by a
 mirror or carried to an air-gapped machine is still the plane's word. That is for when the
 plane serves the assets itself.
-
-## Not in this slice
-
-The plane hosting the release assets (`/downloads/*`) and its channel document; the desktop
-app's updater (Tauri) and its `desktop` policy being acted on by anything but the plane's
-refusal; OS code signing (notarisation, Authenticode); the compatibility floor the plane
-would compute from its own build; re-evaluating clients already connected when the policy
-changes; the daily start-up check; and the Client versions screen with who runs what (#56).
-
-## Proof
-
-- `apps/troupe_plane/test/troupe/plane/client_versions_test.exs`: the methods over `/rpc`
-  (roles, the audit, partial puts, every refusal with nothing written), `initialize`'s
-  `client_update`, `update_required` below the minimum and on a blocked version, the
-  daemon's own policy, a client the plane cannot place, and `me.client_versions`. On the
-  tip before this, `admin.clients.get` and `initialize` were `method_not_found`.
-- `panel_test.exs`: the Policy page's panel saves, audits and refuses; `admin_parity_test`
-  and `console_coverage_test` hold the new methods to the table, the tools and a screen.
-- `apps/troupe_gateway/test/troupe/gateway/plane_version_test.exs`: the daemon's
-  handshake, a refusal answering every call, a later handshake lifting it, a plane from
-  before the policy, and through the daemon: a refused link asks nothing more and
-  `identity.get` says why.
-- `apps/troupe_core/test/troupe/update_test.exs` ("signed in to a plane"): the recommended
-  version installed, a mirror's older release refused, blocked and below-minimum versions
-  never installed, no downgrade unless named, a newer version left alone.
-- `clients/tui/test/troupe/plane_version_test.exs`: the handshake is `initialize`; a refusal
-  is the sentence in HQ, `troupe whoami` and every call; `troupe update` asks
-  `me.client_versions`.

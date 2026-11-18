@@ -1,6 +1,6 @@
 defmodule Troupe.Onboard.LeftoversTest do
   @moduledoc """
-  Onboarding's leftovers after #516's second half (D102, Decision 854): a file onboarding
+  Onboarding's leftovers after #516's second half: a file onboarding
   brought in says where it went in `context.get`'s listing rather than asking for `troupe
   onboard`; the first notice finds other tools' files below the root too, within the walk's
   bounds; a second `troupe onboard` counts what it brought in as unchanged instead of

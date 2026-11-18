@@ -11,13 +11,9 @@ paths:
   - clients/tui/lib/troupe/ui/tui/palette.ex
   - clients/tui/lib/troupe/ui/tui/theme.ex
   - clients/tui/lib/troupe/ui/tui/view.ex
-  - clients/tui/test/troupe/tui_theme_test.exs
 gist: The TUI draws in Afterglow's palette, generated from the design tokens, at the depth the terminal can show, and its pink means a person is needed
 ---
 
-Issue #228,
-root Decisions 702 and 716. Every colour was a literal in `view.ex` and `hq.ex`,
-magenta on code and reasoning, yellow on what waited for you.
 - **Roles, generated.** `mix troupe.palette` writes `Troupe.UI.TUI.Palette` from
   `afterglow.tokens.json`: fourteen roles, each a token with its dark and light
   values, the nearest of xterm's fixed 240 to each (CIELAB, never 0 to 15, which
@@ -51,11 +47,3 @@ magenta on code and reasoning, yellow on what waited for you.
   in the middle of a session's window until its first line, over the empty strip,
   and beside HQ's lists. With no colour the lit half is solid ink against the
   hollow one.
-- **Not in this slice:** the theme picker and the other three themes (#57, #122),
-  the ◐ glyph family in each window's corner and as the spinner, a `blink` setting,
-  and painting the canvas on request.
-- **Proof:** `test/troupe/tui_theme_test.exs` (the palette against the tokens,
-  detection and each depth, the pink's tags, an approval drawn at truecolor, 256,
-  16 and none, the light values, the mask's rules, the fresh window, HQ), `mix
-  check`, and the installed build's screens at each depth, headless and in Windows
-  Terminal, on the pull request.

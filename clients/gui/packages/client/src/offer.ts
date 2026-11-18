@@ -28,6 +28,7 @@ import { TroupeRpcError } from "./connection.js";
 import type { TroupeConnection } from "./connection.js";
 import type { DaemonClient, LocalServer } from "./daemon.js";
 import type { ToolInvoke } from "./types.js";
+import { errorText } from "./words.js";
 
 /** What the session asks the person before it takes their tools. */
 export interface OfferAsk {
@@ -167,7 +168,7 @@ export class ServerOffer {
     } catch (e) {
       // A socket that went while it was being offered is offered again on the next.
       if (conn.closed) return;
-      this.set({ state: "refused", reason: reasonOf(e) });
+      this.set({ state: "refused", reason: errorText(e) });
     }
   }
 
@@ -271,7 +272,7 @@ export class ServerOffer {
       const asked = consentAsked(e);
       if (asked) return asked;
       // Refused outright, before any challenge: for the whole attachment.
-      if (e instanceof TroupeRpcError && e.code === FORBIDDEN) this.refused = reasonOf(e);
+      if (e instanceof TroupeRpcError && e.code === FORBIDDEN) this.refused = errorText(e);
       throw e;
     }
   }
@@ -332,11 +333,6 @@ function offeredState(offered: Offered[]): OfferState {
   return { state: "offered", tools: namesOf(offered), servers: serversOf(offered) };
 }
 
-/** Why an offer failed, in the session's words where it gave some. */
-function reasonOf(e: unknown): string {
-  if (e instanceof TroupeRpcError && typeof e.data?.["reason"] === "string") return e.data["reason"];
-  return e instanceof Error ? e.message : String(e);
-}
 
 /** The session's challenge, when this is the session asking for consent. */
 function consentAsked(e: unknown): Challenge | null {

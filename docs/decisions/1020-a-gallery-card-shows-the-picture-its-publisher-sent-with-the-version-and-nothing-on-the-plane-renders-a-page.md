@@ -5,35 +5,15 @@ date: 2026-11-16
 status: accepted
 issue: 977
 paths:
-  - apps/troupe_plane/lib/troupe/plane/artifacts.ex
-  - apps/troupe_plane/lib/troupe/plane/artifacts/version.ex
-  - apps/troupe_plane/lib/troupe/plane/artifacts/artifact.ex
   - apps/troupe_plane/lib/troupe/plane/web/artifacts.ex
-  - apps/troupe_plane/priv/repo/migrations/20261116001020_artifact_thumbnails.exs
-  - apps/troupe_plane/test/troupe/plane/artifact_thumbnails_test.exs
+  - apps/troupe_plane/lib/troupe/plane/artifacts/version.ex
+  - apps/troupe_plane/lib/troupe/plane/artifacts.ex
   - apps/troupe_core/lib/troupe/tools/publish_artifact.ex
-  - apps/troupe_gateway/lib/troupe/gateway/artifacts.ex
-  - apps/troupe_worker/lib/troupe/worker/artifacts.ex
-  - apps/troupe_protocol/lib/troupe/protocol/schema.ex
-  - clients/gui/packages/client/src/artifacts.ts
   - clients/gui/apps/desktop/src/views/Artifacts.tsx
-  - clients/gui/apps/desktop/src/views/Publish.tsx
-  - clients/gui/apps/desktop/src-tauri/tauri.conf.json
-  - clients/gui/apps/console/src/views/Artifacts.tsx
-  - clients/gui/docker/headers.conf
-  - PROTOCOL.md
-  - docs/user/artifacts.md
 symbols:
   - Troupe.Plane.Artifacts.thumbnail/1
 gist: "Thumbnail = the publisher's own image per version (png/jpeg/webp, 256 KiB, not decoded); served at /t/<signed> for that person, visibility read per request; no renderer"
 ---
-
-Issue #977, left from #62 ("its Gallery section asks for thumbnails"). A card in the desktop
-app's and the console's gallery was the title, the kind and the size, and never the page,
-which is a stranger's code to either app (Decision 948). A picture of the page needs
-something to draw it, and the only place an artifact's scripts may run is the artifacts
-host's sandboxed origin. The issue asked who renders, when, and where the picture is kept and
-served.
 
 ## Who draws it: the publisher
 
@@ -77,10 +57,6 @@ Each version's own, so a card never shows a picture of a page that is not the on
 - the row's picture is the version its address serves: the pinned one, else the newest,
   moved by `artifact.pin` as `bytes` is.
 
-**A Markdown document or a file** shows what it showed: the kind and the title (the desktop's
-striped placeholder with the kind and size; the console's title and kind). A publisher may
-send a picture for one, and then it is shown as a page's is.
-
 ## Where it is served
 
 On the artifacts host, under its policy (`Web.Artifacts.CSP`, with `nosniff`): `GET
@@ -114,28 +90,3 @@ The terminal's `/publish` takes no picture: its arguments are positional (a path
 audience, an owner), and a picture needs a flag the parser does not have. The terminal's
 gallery draws no image. The administrators' table (**Published artifacts**) stays a table of
 titles, owners and sizes. A renderer, as above.
-
-## Proof
-
-- `apps/troupe_plane/test/troupe/plane/artifact_thumbnails_test.exs`: a publish with a
-  picture keeps it beside the files, not among them, and puts its address on the list's and
-  `get`'s rows; one without, and the next version sent without, has none; a put sending no
-  file keeps its base's, a rollback the brought-back version's, carried not copied; a pin
-  shows the pinned version's; past 256 KiB, a GIF, a script sent as a PNG, a path and bad
-  base64 are refused in words and keep nothing; the bytes count against the quota; the host
-  serves it to a member whose row gave the address, with its type and the policy, no cookie;
-  a made-up or altered address, a member once the owner made it private, and a deleted
-  artifact get nothing.
-- `apps/troupe_core/test/troupe/tools/publish_artifact_test.exs` (the tool sends a workspace
-  picture, none when not given, refuses a GIF, one past 256 KiB and one outside the
-  workspace); `apps/troupe_gateway/test/troupe/gateway/artifacts_test.exs` (the daemon sends
-  it inline beside the files and beside an upload handle); `apps/troupe_worker/test/troupe/
-  worker/artifacts_test.exs` (over a real control link into the store).
-- `clients/gui/packages/client/test/artifact-thumbnail.test.ts`, the desktop's
-  `artifacts-gallery.test.tsx` (the image first on its card, the title as `alt`, the
-  placeholder without one and after a failed load), `publish.test.tsx` (**Publish…** sends
-  the picked picture) and `content-security-policy.test.tsx`, and the console's
-  `artifacts.test.tsx`.
-
-All of the plane's, the tool's, the daemon's and the clients' failed on the chunk's tip
-(`d6beea37`): there was no `thumbnail` and no `thumbnail_url`.

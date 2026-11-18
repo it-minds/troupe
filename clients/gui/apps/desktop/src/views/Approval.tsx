@@ -11,7 +11,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { JSX } from "react";
-import { BRIEF_PARTS, callConsequence as consequence, callEvidence, callHeadline as headline, callScopedLabel as scopedLabel, ruleScope, visibilityWords } from "@troupe/client";
+import { BRIEF_PARTS, callConsequence as consequence, callEvidence, callHeadline as headline, callScopedLabel as scopedLabel, decisionWords, errorText, ruleScope, visibilityWords } from "@troupe/client";
 import type { ApprovalDecision, DelegationGate, Entry, GateAnswer, PublicationGate } from "@troupe/client";
 import { Pill } from "./bits";
 import { Mask } from "./brand";
@@ -103,11 +103,10 @@ export function ApprovalPanel({
   if (entry.publication && entry.decision === undefined) {
     return <PublishPanel entry={entry} publication={entry.publication} audiences={audiences ?? null} canAnswer={canAnswer} others={others} onAnswer={onAnswer} onceOnly={onceOnly} />;
   }
-  // A delegation a person asked to see first has five answers, not three (troupe Decision 850).
+  // A delegation a person asked to see first has five answers, not three.
   if (entry.delegation && entry.decision === undefined) {
     return (
       <DelegationPanel
-        entry={entry}
         gate={entry.delegation}
         canAnswer={canAnswer}
         others={others}
@@ -170,7 +169,7 @@ function ToolApproval({
       // and refuses where only the platform's rules count, or in a workspace not trusted.
       await (decision === "allow_always" ? onAnswer(decision, { scope: scope ?? "workspace" }) : onAnswer(decision));
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errorText(e));
     } finally {
       setBusy(null);
     }
@@ -287,7 +286,6 @@ function ToolApproval({
  * linked, never edited here: an edit for one run would be a fork nobody finds again.
  */
 function DelegationPanel({
-  entry,
   gate,
   canAnswer,
   others,
@@ -295,7 +293,6 @@ function DelegationPanel({
   onDefinition,
   onceOnly,
 }: {
-  entry: Approval;
   gate: DelegationGate;
   canAnswer: boolean;
   others: string[];
@@ -324,7 +321,7 @@ function DelegationPanel({
     try {
       await onAnswer(decision, given);
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errorText(e));
     } finally {
       setBusy(null);
     }
@@ -597,7 +594,7 @@ function PublishPanel({
     try {
       await onAnswer(decision, answer);
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errorText(e));
     } finally {
       setBusy(null);
     }
@@ -678,7 +675,7 @@ function PublishPanel({
 export function DecisionRecord({ entry, self }: { entry: Approval; self: string | undefined }): JSX.Element {
   const by = entry.resolvedBy ?? self;
   const mine = by === undefined || by === self;
-  const verb = entry.decision === "deny" ? "Denied" : entry.decision === "allow_session" ? "Allowed for this session" : entry.decision === "allow_always" ? "Always allowed" : "Allowed";
+  const verb = decisionWords(entry.decision);
   const said = entry.answered;
   // A delegation's answer says what it changed: where it went, which parts, the word back.
   // A publication's says whom it went to and whose it is.

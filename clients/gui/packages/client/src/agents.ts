@@ -246,11 +246,6 @@ export function layerOf(row: Pick<AgentRow, "layer" | "source">): AgentLayer {
   return row.source === "global" ? "user" : row.source === "project" ? "project" : row.source === "bundle" ? "bundle" : "builtin";
 }
 
-/** A name an agent may have, as the daemon checks it: lowercase letters, digits and dashes, at most 64. */
-export function validAgentName(name: string): boolean {
-  return /^[a-z0-9][a-z0-9-]{0,63}$/.test(name);
-}
-
 /** A new agent's file: a primary agent with every tool, Troupe's permissions, and an instruction to write. */
 export function agentTemplate(description = "What this agent is for, in one line."): string {
   return `---\ndescription: ${scalar(description)}\nmode: primary\n---\nYou are … Say what this agent does, what it must not do, and how it knows it is finished.\n`;

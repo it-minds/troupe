@@ -5,17 +5,9 @@ date: 2026-10-12
 status: accepted
 issue: 474
 paths:
-  - docs/design/frames.md
-  - clients/tui/lib/troupe/ui/tui/model.ex
   - clients/tui/lib/troupe/ui/tui/view.ex
-  - clients/tui/lib/troupe/ui/tui/server.ex
   - clients/tui/lib/troupe/ui/tui/theme.ex
-  - clients/tui/lib/troupe/ui/tui/palette.ex
-  - clients/tui/lib/mix/tasks/troupe.palette.ex
-  - clients/tui/lib/troupe/settings.ex
-  - clients/tui/lib/troupe/remote/worker.ex
-  - apps/troupe_core/lib/troupe/config/schema.ex
-  - clients/tui/test/troupe/frames_test.exs
+  - clients/tui/lib/troupe/ui/tui/model.ex
 symbols:
   - Troupe.UI.TUI.Model.transcript_blocks/3
   - Troupe.UI.TUI.Model.curtain_line/4
@@ -24,12 +16,6 @@ symbols:
   - Troupe.UI.TUI.Theme.on_surface/1
 gist: "Quiet by default: answer framed on the surface, working one strip; e opens a turn; failed calls, asks, budget stops stay open; flourish only in the pane"
 ---
-
-Issue #474, slice 1: the shared design document, `docs/design/frames.md`, and the
-terminal's half of it. The maintainer's word on the issue ("Collapsed by default, and a
-curtain line while it works") settles how much is open; the issue's body settles what a
-frame is. The desktop app builds its half from the same page in the next slice. #228 is
-closed by TUI Decisions 126 and 149, and the frames take their colours from those roles.
 
 **One frame, six kinds.** Prose, code, diff, tool, reasoning and data, each with the header
 grammar the design page writes down (`┌─ elixir · lib/p.ex`, `diff · path +n −m`,
@@ -101,31 +87,3 @@ starts the lists again. Reads have their own list. The facts now say how many wh
 calls run (`running 3 tools: …`). No flourish when the window waits on a person, after a
 model error, or in a subagent's pane; and none outside the pane — a tile is a glance, and
 the headless printer, `troupe bench` and `--json` never drew this line at all.
-
-**Markdown** gains pipe tables (header bold over a rule, columns aligned as the rule says,
-a cell past 32 columns cut with `…`) and nested lists (two columns a level, `•` `◦` `▪`,
-and a wrapped item's rows under its text), and fenced `diff`, `csv`, `tsv` and `json`
-become their frames. A table wider than 100 columns is shown as written under a line that
-says so; raw HTML, images and footnotes are left as written.
-
-**Not in this slice**, as #474 and the brief say: tree-sitter grammars a person installs
-(a later slice of #474); the viewer (#61), where a frame past 500 lines will open; and the
-desktop app's half, which builds from `docs/design/frames.md`.
-
-**Proof.** `test/troupe/frames_test.exs`: the reproduction (a turn with reasoning, four
-calls, one failed, and an answer with a table, a nested list and a fenced block, drawn
-quiet: one strip above the answer, the failed call open, the answer on the surface out to
-its edge, a person's line not), which failed on the chunk's tip with every call and the
-reasoning on a line of their own, no strip and no surface; the surface at truecolor and
-256, none with sixteen colours and the rail and rules still there, and no colour at all
-under `NO_COLOR` with the frames still reading; `tools` and `everything`; `e` opening and
-closing a turn, and closing one at `everything`; the level drawing every turn again with
-the fold unchanged; a long frame cut and opened in place; a budget stop, an approval and a
-scratchpad card; tables, nested lists, data and diff fences, a table too wide; the curtain
-line's prefix, its facts, its order within a turn and its start again, and no flourish
-where there must be none, in a tile or from the headless printer; and against the daemon,
-`e`, `/detail` and the log unchanged, reasoning streamed in the frame its answer starts in
-drawn as reasoning (on the tip it arrived as the answer's first words), and
-`transcript.detail` from a project's file.
-`transcript_rows_test.exs`, `tui_theme_test.exs` and the rest of the suite updated to the
-frames.

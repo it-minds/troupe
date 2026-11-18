@@ -6,6 +6,7 @@
 import { useState } from "react";
 import type { JSX } from "react";
 import { shell } from "../shell";
+import { errorText } from "@troupe/client";
 
 /** The button, where this host has a chooser, and what became of the last press, where it failed. */
 export function useChooseFolder(onPick: (path: string) => void): { button: JSX.Element | null; failed: JSX.Element | null } {
@@ -17,7 +18,7 @@ export function useChooseFolder(onPick: (path: string) => void): { button: JSX.E
     chooser()
       .then((path) => path && onPick(path))
       .catch((e: unknown) => {
-        const why = (e instanceof Error ? e.message : String(e)).replace(/\.$/, "");
+        const why = (errorText(e)).replace(/\.$/, "");
         setFailed(`The folder chooser did not open: ${why}. Type the path instead.`);
       });
   };

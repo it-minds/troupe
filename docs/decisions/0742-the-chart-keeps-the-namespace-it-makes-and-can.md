@@ -5,7 +5,6 @@ date: 2026-10-01
 status: accepted
 issue: 303
 paths:
-  - apps/troupe_plane/test/troupe/plane/scaling_test.exs
   - charts/troupe/templates/namespace.yaml
 gist: The chart keeps the namespace it makes and can be told not to make one, and a count the cluster did not take is sent again
 ---

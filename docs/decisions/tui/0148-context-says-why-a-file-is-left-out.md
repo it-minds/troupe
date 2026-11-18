@@ -6,7 +6,6 @@ status: accepted
 issue: 123
 paths:
   - clients/tui/lib/troupe/client/instructions.ex
-  - clients/tui/test/troupe/context_command_test.exs
 gist: "`/context` prints a left-out file's `reason` as given, not a bare 0, and each unfollowed import in words; an answer without `reason` prints as before"
 ---
 

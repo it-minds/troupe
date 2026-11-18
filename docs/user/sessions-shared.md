@@ -31,8 +31,8 @@ session**, which has no profile, anybody who shares a team with you. A platform
 administrator can be invited into either. The picker only offers people you could invite.
 
 A session on your computer alone is not invited this way: offer it for steering from
-another device instead (`/steer on bea@example.com`, see the
-[guide](README.md#words-you-will-meet)).
+another device instead (`/steer on bea@example.com`, see
+[steering from another device](sessions.md#steering-from-another-device)).
 
 ## A private session
 
@@ -55,7 +55,8 @@ through the plane unsealed, so offering a private session asks you first, in the
 plane unsealed, and the plane relays it to whoever you invited with control. The plane keeps
 none of it. Offer it?* Only a yes offers it (`/steer on yes`, or *Offer it* in the desktop
 app). While it is offered, the people you invited with `control` steer it from the desktop
-app or the console, and their list says *offered · you can steer*; otherwise it says *not
+app or the console, and nobody else; it is listed as private on every device, and your
+computer goes on sealing it as before, the relay in addition. Their list says *offered · you can steer*; otherwise it says *not
 offered · read-only*, and they read the sealed copy. Withdrawing the offer (`/steer off`)
 makes it sealed only again: their views through the plane close with a sentence saying so,
 and their own computer still reads the sealed copy.
@@ -90,12 +91,22 @@ can; working in it does not put it back in the list. Its owner does, with `/unar
 **Unarchive**. Only the owner archives or unarchives a session, since it changes what
 other people see.
 
+The owner also names a session and keeps it at the top, for everybody it is listed for.
+`/rename <name>` in either client, or **Rename** under a row's ⋯ in the desktop app's list or
+the session's ⋯, renames it; there the title becomes a field, Enter keeps what is typed, an
+empty one takes the name off, and Esc leaves it. `/keep`, or **Keep at the top** in the same
+two menus, lists it first with the mark **Kept**, and the plane does not clear a kept team
+session away under its retention; `/keep off` or **Let go from the top** puts it back.
+Anybody who may steer a session changes its task list: the desktop app's Tasks pane, in
+the backstage, completes or cancels a task still open and adds one, as `/todo` does in the
+terminal; the agent is told what changed.
+
 ## Erasing a session somebody was invited into
 
 Erasing a session erases it for everybody it was shared with. For a private session the
 plane destroys every copy of its key, the ones in invitees' slots first, and then every key
 the session was sealed under; until all are gone it says the erasure is pending, as it
-does for any private session ([guide](README.md#words-you-will-meet)).
+does for any private session ([sessions](sessions.md)).
 
 ## Links into the desktop app
 

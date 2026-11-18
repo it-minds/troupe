@@ -375,7 +375,7 @@ defmodule Troupe.Tools.DelegationGateTest do
   defp stopped(sid) do
     Troupe.stop_session(sid)
 
-    wait_until(fn ->
+    eventually(fn ->
       is_nil(Registry.whereis({:session, sid})) and is_nil(Registry.whereis({:log, sid}))
     end)
   end
@@ -396,19 +396,5 @@ defmodule Troupe.Tools.DelegationGateTest do
       )
 
     Troupe.subscribe(session.id)
-  end
-
-  defp wait_until(check, deadline \\ 5_000) do
-    cond do
-      check.() ->
-        :ok
-
-      deadline <= 0 ->
-        flunk("it did not happen")
-
-      true ->
-        Process.sleep(20)
-        wait_until(check, deadline - 20)
-    end
   end
 end

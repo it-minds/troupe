@@ -63,7 +63,7 @@ export interface OwnPlane {
 const SCOPES = ["organisation", "team", "profile", "user"];
 
 /** A level as the plane answers it in `me.memory`'s `documents`. */
-interface PlaneDocument {
+export interface PlaneDocument {
   scope: string;
   name?: string | null;
   version: number;

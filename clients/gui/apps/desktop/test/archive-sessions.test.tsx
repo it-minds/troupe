@@ -34,6 +34,7 @@ function key(target: EventTarget, key: string): void {
 }
 
 /** Open the session whose row says `text`, from the list. */
+// Its own open, not support's: a row of the list already drawn, by its entry, answering the head.
 async function open(text: string): Promise<HTMLElement> {
   (await waitFor(() => entry(text)?.querySelector<HTMLButtonElement>("button.row"), `the row for ${text}`)).click();
   return waitFor(() => document.querySelector<HTMLElement>(".session-head"), "the session");

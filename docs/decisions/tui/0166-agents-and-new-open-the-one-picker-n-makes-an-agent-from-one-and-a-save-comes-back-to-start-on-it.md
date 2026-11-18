@@ -10,11 +10,6 @@ paths:
   - clients/tui/lib/troupe/ui/tui/server.ex
   - clients/tui/lib/troupe/ui/tui/view.ex
   - apps/troupe_core/lib/troupe/commands.ex
-  - clients/tui/test/troupe/agent_picker_test.exs
-  - clients/tui/test/troupe/agents_manager_test.exs
-  - clients/tui/test/troupe/agents_mend_test.exs
-  - clients/tui/test/troupe/new_session_test.exs
-  - clients/tui/README.md
 symbols:
   - Troupe.UI.TUI.AgentChooser.key/3
   - Troupe.UI.TUI.AgentChooser.reload/4
@@ -24,10 +19,7 @@ gist: "/agents = picker at manager density; /new = picker then a session on it; 
 
 Issue #594's terminal rest, on TUI Decision 164's picker and root Decision 920's list.
 Amends TUI Decision 156 (`/agents` is no longer a page of its own) and 151 (`/new` asks for
-its agent first). On the chunk's tip `/agents` opened the manager's page, a list beside
-the picker with its own rows and words, and `/new` made a session on the default agent
-with no choice; a new agent started from a blank template, and a save left the person on
-the page with nothing to start.
+its agent first).
 
 - **`/agents` is the picker at the manager's density.** The same popup Ctrl-N and Tab open
   (`AgentChooser`), listing the subagents too (`agents.list` with `subagents: true`) and,
@@ -62,14 +54,3 @@ the page with nothing to start.
   session here could run.
 - **A subagent is never started or switched to** from a picker: an agent hands work to
   one. The refusal says so, and that `n` makes a primary from it.
-
-Proof: `agent_picker_test.exs` ("/new opens the picker, and Enter starts a session on the
-agent chosen"; "/new's n makes an agent from a built-in, and Enter starts a session on it
-once saved"; Tab's `e` coming back to the picker with the selection kept), failing on the
-tip where `/new` made the session at once and the picker had no `n`;
-`agents_manager_test.exs` and `agents_mend_test.exs` drive `/agents` through the picker: its
-rows in the four words with each fact, the whole instruction, copy and delete coming back,
-`n` from a built-in saved and then started with `b`, an unchanged copy saved, a subagent
-refused a start, a file not read mended through it, a conflict that keeps the edit on the
-page, and a pod's picker read-only with its sentence for `e`, `c`, `x` and `n`.
-`new_session_test.exs` passes through the picker for `/new` and `/new --private`.

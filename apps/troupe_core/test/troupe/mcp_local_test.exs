@@ -131,7 +131,7 @@ defmodule Troupe.MCPLocalTest do
       [question] = wait_for_question(denied.id)
       Troupe.answer(denied.id, question.call_id, "deny")
 
-      assert %{state: :stopped, error: "not approved" <> _} = wait_for_state(denied.id, "stub", [:stopped])
+      assert %{state: :stopped, error: "not approved" <> _} = await_mcp(denied.id, "stub", [:stopped], 5_000)
       assert Questions.pending(denied.id) == []
       assert MCP.tools(denied.id) == []
 
@@ -142,7 +142,7 @@ defmodule Troupe.MCPLocalTest do
       assert Trust.approved(context.state_dir, context.workspace) == %{}
     end
 
-    # A branch command mode starts is a session of its own on the same workspace (D134): a
+    # A branch command mode starts is a session of its own on the same workspace: a
     # client that keys answers by call id must not take the root's answer for its question.
     test "each session asks under a call id of its own", context do
       %{session: first} = with_workspace_file(context)
@@ -337,16 +337,6 @@ defmodule Troupe.MCPLocalTest do
 
       questions ->
         questions
-    end
-  end
-
-  defp wait_for_state(session_id, name, states, waited \\ 0) do
-    entry = Enum.find(MCP.status(session_id), &(&1.name == name))
-
-    cond do
-      entry && entry.state in states -> entry
-      waited < 5_000 -> Process.sleep(50) && wait_for_state(session_id, name, states, waited + 50)
-      true -> entry
     end
   end
 

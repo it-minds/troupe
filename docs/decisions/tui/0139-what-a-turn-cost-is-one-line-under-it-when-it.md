@@ -7,8 +7,6 @@ issue: 389
 paths:
   - clients/tui/lib/troupe/ui/headless/printer.ex
   - clients/tui/lib/troupe/ui/tui/model.ex
-  - clients/tui/test/troupe/cli_test.exs
-  - clients/tui/test/troupe/turn_cost_test.exs
 gist: "What a turn cost is one line under it when it ends: its calls, `↑` sent, cached, `↓` received and the money, apart from the window's count, which…"
 ---
 

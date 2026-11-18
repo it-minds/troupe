@@ -61,7 +61,7 @@ defmodule Troupe.Worker.PlaneLinkTest do
     test "the worker dials the plane and the fleet records the pod", context do
       link = start_link!(context)
 
-      eventually(fn -> Link.connected?(link) end)
+      eventually(fn -> Link.connected?(link) end, 10_000)
       assert Link.info(link).profile == "dev"
 
       assert [worker] = Fleet.list_workers("dev")
@@ -69,7 +69,7 @@ defmodule Troupe.Worker.PlaneLinkTest do
       assert worker.healthy
 
       # And it has asked whether it reaches its object store, which it does.
-      eventually(fn -> Link.info(link).object_store == :ok end)
+      eventually(fn -> Link.info(link).object_store == :ok end, 10_000)
     end
 
     test "a worker that cannot reach its object store says so when it enrols", context do
@@ -80,7 +80,7 @@ defmodule Troupe.Worker.PlaneLinkTest do
       log =
         capture_log(fn ->
           link = start_link!(context, store: store)
-          eventually(fn -> Link.info(link).object_store != nil end)
+          eventually(fn -> Link.info(link).object_store != nil end, 10_000)
 
           assert {:error, {:object_store_unreachable, "http://127.0.0.1:1", :econnrefused}} =
                    Link.info(link).object_store
@@ -92,21 +92,21 @@ defmodule Troupe.Worker.PlaneLinkTest do
 
     test "a heartbeat carries how much of the volume is gone", context do
       link = start_link!(context, heartbeat_ms: 100)
-      eventually(fn -> Link.connected?(link) end)
+      eventually(fn -> Link.connected?(link) end, 10_000)
 
       eventually(fn ->
         case Fleet.list_workers("dev") do
           [%{disk_total_bytes: total}] when total > 0 -> true
           _ -> false
         end
-      end)
+      end, 10_000)
     end
   end
 
   describe "sealed heads" do
     test "every head a worker seals reaches the plane with the same hash", context do
       link = start_link!(context)
-      eventually(fn -> Link.connected?(link) end)
+      eventually(fn -> Link.connected?(link) end, 10_000)
 
       assert {:ok, _} = activate(context, report: Link.reporter(link))
       run_turn(context.session_id, "hello")
@@ -117,7 +117,7 @@ defmodule Troupe.Worker.PlaneLinkTest do
       eventually(fn ->
         session = PlaneSessions.get(context.session_id)
         session && session.last_seq == worker_head.sealed_through
-      end)
+      end, 10_000)
 
       session = PlaneSessions.get(context.session_id)
       assert session.head_hash == worker_head.head_hash
@@ -135,13 +135,13 @@ defmodule Troupe.Worker.PlaneLinkTest do
 
     test "going dormant tells the plane where the session got to", context do
       link = start_link!(context)
-      eventually(fn -> Link.connected?(link) end)
+      eventually(fn -> Link.connected?(link) end, 10_000)
 
       assert {:ok, _} = activate(context, report: Link.reporter(link))
       run_turn(context.session_id, "hello")
       assert {:ok, sealed} = Sessions.dormant(context.session_id)
 
-      eventually(fn -> PlaneSessions.get(context.session_id).state == "dormant" end)
+      eventually(fn -> PlaneSessions.get(context.session_id).state == "dormant" end, 10_000)
 
       session = PlaneSessions.get(context.session_id)
       assert session.last_seq == sealed.sealed_through
@@ -153,13 +153,13 @@ defmodule Troupe.Worker.PlaneLinkTest do
     test "nothing a session said appears in the control traffic", context do
       {proxy, port} = start_proxy!(context.port)
       link = start_link!(context, port: port)
-      eventually(fn -> Link.connected?(link) end)
+      eventually(fn -> Link.connected?(link) end, 10_000)
 
       assert {:ok, _} = activate(context, report: Link.reporter(link))
       run_turn(context.session_id, @marker)
       assert {:ok, _} = Sessions.dormant(context.session_id)
 
-      eventually(fn -> PlaneSessions.get(context.session_id).state == "dormant" end)
+      eventually(fn -> PlaneSessions.get(context.session_id).state == "dormant" end, 10_000)
 
       captured = RecordingProxy.captured(proxy)
 
@@ -177,7 +177,7 @@ defmodule Troupe.Worker.PlaneLinkTest do
   describe "losing the plane" do
     test "the link comes back on its own when the listener returns", context do
       link = start_link!(context)
-      eventually(fn -> Link.connected?(link) end)
+      eventually(fn -> Link.connected?(link) end, 10_000)
       connects = Link.info(link).connects
 
       # The plane goes away and comes back on the same address, which is what a killed
@@ -185,7 +185,7 @@ defmodule Troupe.Worker.PlaneLinkTest do
       # listener that stops does not close the sockets it has already handed over.
       port = context.port
       PlaneHelper.stop_plane()
-      eventually(fn -> not Link.connected?(link) end)
+      eventually(fn -> not Link.connected?(link) end, 10_000)
 
       start_supervised!(Connections)
       start_supervised!({Listener, port: port, verify: &verify/1})
@@ -198,13 +198,13 @@ defmodule Troupe.Worker.PlaneLinkTest do
 
     test "reports made while the plane is down are delivered when it returns", context do
       link = start_link!(context)
-      eventually(fn -> Link.connected?(link) end)
+      eventually(fn -> Link.connected?(link) end, 10_000)
 
       assert {:ok, _} = activate(context, report: Link.reporter(link))
 
       port = context.port
       PlaneHelper.stop_plane()
-      eventually(fn -> not Link.connected?(link) end)
+      eventually(fn -> not Link.connected?(link) end, 10_000)
 
       # Sealing does not depend on the plane being up, so this still reaches object
       # storage — and the report for it waits in the link.
@@ -225,16 +225,16 @@ defmodule Troupe.Worker.PlaneLinkTest do
       eventually(fn ->
         session = PlaneSessions.get(context.session_id)
         session && session.last_seq == head.sealed_through
-      end)
+      end, 10_000)
     end
   end
 
   describe "what the plane may push" do
     test "activate, dormant and drain, each of them twice", context do
       link = start_link!(context)
-      eventually(fn -> Link.connected?(link) end)
+      eventually(fn -> Link.connected?(link) end, 10_000)
 
-      connection = eventually(fn -> List.first(Connections.for_profile("dev")) end)
+      connection = eventually(fn -> List.first(Connections.for_profile("dev")) end, 10_000)
 
       fake = start_supervised!({Fake, steps: [], default: {:text, "done"}})
       defaults = activation(context, fake: fake, report: Link.reporter(link))
@@ -262,8 +262,8 @@ defmodule Troupe.Worker.PlaneLinkTest do
     test "session.dormant puts a running session to sleep, and the plane has heard by the answer",
          context do
       link = start_link!(context)
-      eventually(fn -> Link.connected?(link) end)
-      connection = eventually(fn -> List.first(Connections.for_profile("dev")) end)
+      eventually(fn -> Link.connected?(link) end, 10_000)
+      connection = eventually(fn -> List.first(Connections.for_profile("dev")) end, 10_000)
 
       assert {:ok, _} = activate(context, report: Link.reporter(link))
       run_turn(context.session_id, "hello")
@@ -289,7 +289,7 @@ defmodule Troupe.Worker.PlaneLinkTest do
   describe "archiving through the plane" do
     test "the owner's session.archive reaches the pod and the session goes dormant", context do
       link = start_link!(context)
-      eventually(fn -> Link.connected?(link) end)
+      eventually(fn -> Link.connected?(link) end, 10_000)
 
       assert {:ok, _} = activate(context, report: Link.reporter(link))
       run_turn(context.session_id, "hello")
@@ -324,8 +324,8 @@ defmodule Troupe.Worker.PlaneLinkTest do
     test "stops the session on its pod, and the pod's report of it leaves it read-only",
          context do
       link = start_link!(context)
-      eventually(fn -> Link.connected?(link) end)
-      connection = eventually(fn -> List.first(Connections.for_profile("dev")) end)
+      eventually(fn -> Link.connected?(link) end, 10_000)
+      connection = eventually(fn -> List.first(Connections.for_profile("dev")) end, 10_000)
 
       {:ok, group} =
         Identity.upsert_group(%{external_id: "engineering", display_name: "engineering"})
@@ -346,8 +346,8 @@ defmodule Troupe.Worker.PlaneLinkTest do
       :ok = Identity.revoke(team, "dev")
 
       # The pod's copy goes the way an archive's does: sealed, uploaded, and gone from here.
-      eventually(fn -> Sessions.whereis(context.session_id) == nil end)
-      eventually(fn -> not File.exists?(context.workspace) end)
+      eventually(fn -> Sessions.whereis(context.session_id) == nil end, 10_000)
+      eventually(fn -> not File.exists?(context.workspace) end, 10_000)
 
       # One more round trip on the same socket, so the dormancy report the pod sent before
       # it deleted its copy has reached the plane.

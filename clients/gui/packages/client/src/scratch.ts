@@ -9,9 +9,6 @@
 
 import type { DurableEvent, ScratchDocument } from "./types.js";
 
-/** What a document is, as `show` and `scratch_updated` name it; a client renders each its own way. */
-export const SCRATCH_KINDS = ["markdown", "mermaid", "json", "csv", "text"] as const;
-
 /** The document a `scratch_updated` says was written, or nothing for one without a name. */
 export function scratchDocumentOf(d: DurableEvent): ScratchDocument | undefined {
   const data = d.data;
@@ -46,30 +43,10 @@ export function foldScratch(docs: ScratchDocument[], d: DurableEvent): ScratchDo
   return docs.map((x, i) => (i === at ? doc : x));
 }
 
-/** A document's size the way a person reads one: `512 bytes`, `2.3 KB`, `1.4 MB`. */
-export function scratchSize(bytes: number): string {
-  if (bytes === 1) return "1 byte";
-  if (bytes < 1024) return `${bytes} bytes`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
-}
-
 /** Which write of its name a version is: `new` for the first, `updated N times` after. */
 export function scratchVersion(version: number | undefined): string | undefined {
   if (version === undefined) return undefined;
   return version <= 1 ? "new" : `updated ${version} times`;
-}
-
-/**
- * A `show` call's card in one line: the title, the name, the size and which write it is,
- * each once it is known. Until the call's `scratch_updated` arrives the card has what the
- * call's arguments said, and no count.
- */
-export function scratchLine(card: { title: string; name: string; size: number | undefined; version: number | undefined }): string {
-  const size = card.size === undefined ? undefined : scratchSize(card.size);
-  return [card.title || card.name || "a document", card.name && card.name !== card.title ? card.name : undefined, size, scratchVersion(card.version)]
-    .filter((part): part is string => Boolean(part))
-    .join(" · ");
 }
 
 function whole(v: unknown): number | undefined {

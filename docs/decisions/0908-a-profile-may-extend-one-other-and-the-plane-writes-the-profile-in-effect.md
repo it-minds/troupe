@@ -8,19 +8,7 @@ paths:
   - apps/troupe_plane/lib/troupe/plane/fleet/extends.ex
   - apps/troupe_plane/lib/troupe/plane/fleet/profile.ex
   - apps/troupe_plane/lib/troupe/plane/admin.ex
-  - apps/troupe_plane/lib/troupe/plane/admin/api.ex
-  - apps/troupe_plane/lib/troupe/plane/bundles.ex
   - apps/troupe_plane/lib/troupe/plane/provision.ex
-  - apps/troupe_plane/lib/troupe/plane/gitops/profiles.ex
-  - apps/troupe_plane/priv/repo/migrations/20261016000908_profile_extends.exs
-  - apps/troupe_plane/test/troupe/plane/extends_test.exs
-  - clients/gui/apps/console/src/views/Profiles.tsx
-  - clients/gui/apps/console/test/profiles.test.tsx
-  - clients/gui/packages/client/src/admin.ts
-  - clients/gui/packages/client/test/support/admin.ts
-  - clients/gui/packages/client/test/support/extends.ts
-  - docs/admin/profiles-and-policy.md
-  - docs/admin/profile-options.md
 symbols:
   - Troupe.Plane.Fleet.Extends
   - Troupe.Plane.Admin.profile_put/2
@@ -31,8 +19,6 @@ gist: "extends: one parent, resolved by the plane into the flat profile the clus
 ---
 
 #655 slice 1: a profile that extends a standard profile, in the plane, in direct mode.
-Bundle composition (slice 2), a per-profile budget (slice 3) and extends in a repository's
-manifest (slice 4) are not here.
 
 ## One parent
 
@@ -76,9 +62,7 @@ Choices #655's table does not make:
   narrowed. The default for a field nobody has classified is "replaced where the child sets
   it", so a new field is inherited rather than silently lost; a new credential must be added
   to the never-inherited list in `Troupe.Plane.Fleet.Extends` when it arrives.
-- **Profiles have no default terms yet.** #655 lists them with `max_sessions` as narrow-only;
-  there is no field to narrow, and the per-profile budget is slice 3. When either arrives it
-  takes the narrow rule.
+
 - **Bundles stay as they are** (slice 2 composes them): the child's `configBundleChannel` is
   its own, or its parent's where it sets none, and its pods load that channel's one bundle.
   The resource's `mcpServers` is the parent's servers with the child's added: a child on its
@@ -136,17 +120,3 @@ parent (`spec.extends` or the `troupe.dev/extends` annotation) is refused, not r
 A row read from a resource extends nothing. `admin.profiles.export` writes a child's manifest
 whole, as it is in effect, with a note that the repository's copy no longer follows its
 parent.
-
-## Proof
-
-On the chunk tip the new `extends_test.exs` failed eleven of twelve: `extends` was dropped by
-`admin.profile.put`, and `data-team`'s `llm.model` was refused for want of the endpoint its
-parent gives. Now, against `FakeWorkerProfiles`, the resource written for `data-team` is
-exactly the merge (egress and servers added, endpoint and permissions inherited, model
-replaced, `forbid` held, key and identities and grants not inherited, ceiling narrowed); a
-change to `standard` is previewed in `data-team` and then reaches its resource, audited once
-with `extended_by`; a bundle published to `standard`'s channel reaches `data-team`; a missing
-parent, a cycle, a fifth profile, a parent deletion, and a gitops put and manifest are
-refused with their sentences. The console's `profiles.test.tsx` reads a child's fields with
-where they came from, makes a child in the editor leaving the rest to its parent, previews a
-parent's change in the child and applies it, and shows a parent's deletion refused.

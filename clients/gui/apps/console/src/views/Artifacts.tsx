@@ -27,7 +27,7 @@
 
 import { useEffect, useState } from "react";
 import type { JSX } from "react";
-import { ArtifactApi, TroupeRpcError, appLink, ownerWords, teamOwned, visibilityWords as audienceWords } from "@troupe/client";
+import { ArtifactApi, TroupeRpcError, appLink, blockedKindWords, blockedWords, bytes, ownerWords, teamOwned, visibilityWords as audienceWords } from "@troupe/client";
 import { OpenInApp } from "./AppBanner";
 import type { Artifact, ArtifactDetail, ArtifactFilter, ArtifactList, ArtifactPerson } from "@troupe/client";
 import { goesLine, goesSentence, versionGoes, versionsSentence } from "@troupe/client";
@@ -37,7 +37,7 @@ import type { Route } from "../route";
 import { ArtifactEditor, editableFiles } from "./ArtifactEditor";
 import { ArtifactComments, ArtifactPeople } from "./ArtifactComments";
 import { ArtifactLinks } from "./ArtifactLinks";
-import { Empty, Fields, Loaded, Preview, Region, Status, bytes, count, when } from "./bits";
+import { Empty, Fields, Loaded, Preview, Region, Status, count, when } from "./bits";
 
 /** Which artifacts a tab lists. */
 export type ArtifactTab = { kind: "mine" } | { kind: "shared" } | { kind: "organisation" } | { kind: "teams" } | { kind: "profile"; name: string };
@@ -85,7 +85,8 @@ function same(a: ArtifactTab, b: ArtifactTab): boolean {
 
 const KIND: Record<string, string> = { html: "HTML page", markdown: "Markdown", file: "File" };
 
-function kindWords(kind: string): string {
+/** What an artifact is, in the words its kind has here: an HTML page, Markdown, a file. */
+export function kindWords(kind: string): string {
   return KIND[kind] ?? kind;
 }
 
@@ -240,6 +241,37 @@ export function ArtifactPage({ id }: { id: string }): JSX.Element {
   );
 }
 
+/**
+ * What the artifacts host blocks in the version its address serves, as the plane read its
+ * files at publish: one line, and the references themselves on request.
+ */
+function Blocked({ artifact: a, current }: { artifact: ArtifactDetail; current: number }): JSX.Element | null {
+  const line = blockedWords(a.blocked_count);
+  if (!line) return null;
+  const found = a.versions.find((v) => v.n === current)?.blocked ?? [];
+  return (
+    <div className="note blocked" role="note">
+      <p>{line}</p>
+      {found.length > 0 && (
+        <details>
+          <summary>What is blocked</summary>
+          <ul>
+            {found.map((b, i) => (
+              <li key={i}>
+                <code>
+                  {b.file}
+                  {b.line ? `:${b.line}` : ""}
+                </code>{" "}
+                {b.reference} ({blockedKindWords(b.kind)})
+              </li>
+            ))}
+          </ul>
+        </details>
+      )}
+    </div>
+  );
+}
+
 function Detail({ artifact: a, reload }: { artifact: ArtifactDetail; reload: () => void }): JSX.Element {
   const { me, notify, reserveTab, plane } = useConsole();
   const api = useArtifacts();
@@ -321,6 +353,7 @@ function Detail({ artifact: a, reload }: { artifact: ArtifactDetail; reload: () 
         ]}
       />
       {a.goes_at && <p className="muted">{goesSentence(a)}</p>}
+      <Blocked artifact={a} current={current} />
       <Region>Where it came from</Region>
       <Origin artifact={a} />
       <div className="actions">

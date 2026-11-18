@@ -13,7 +13,7 @@ defmodule Troupe.FakeRemote do
 
       {:ok, remote} = FakeRemote.start_link(sessions: [...])
       FakeRemote.url(remote)                    # the plane URL to log in to
-      FakeRemote.emit(remote, sid, "message.completed", %{"text" => "hi"})
+      FakeRemote.emit(remote, sid, "llm_response", FakeRemote.said("hi"))
       FakeRemote.kill_workers(remote)           # drop every worker socket
       FakeRemote.plane(remote, :down)           # the plane stops answering
       FakeRemote.calls(remote)                  # every RPC the client made
@@ -179,12 +179,16 @@ defmodule Troupe.FakeRemote do
   def emit(remote, session_id, type, data \\ %{}, opts \\ []),
     do: GenServer.call(remote, {:emit, session_id, type, data, opts})
 
+  @doc "An `llm_response`'s data for a reply that says `text`, as the worker writes one."
+  @spec said(String.t()) :: map()
+  def said(text), do: %{"message" => %{"content" => [%{"type" => "text", "text" => text}]}}
+
   @doc "Pushes an ephemeral event, which subscribers may drop."
   @spec ephemeral(pid(), String.t(), String.t(), map(), keyword()) :: :ok
   def ephemeral(remote, session_id, type, data \\ %{}, opts \\ []),
     do: GenServer.call(remote, {:ephemeral, session_id, type, data, opts})
 
-  @doc "Pushes `n` `llm.delta` frames as fast as the socket takes them."
+  @doc "Pushes `n` `llm_delta` frames as fast as the socket takes them."
   @spec flood(pid(), String.t(), pos_integer(), String.t()) :: :ok
   def flood(remote, session_id, n, text \\ "x"),
     do: GenServer.call(remote, {:flood, session_id, n, text}, 120_000)
@@ -498,8 +502,8 @@ defmodule Troupe.FakeRemote do
       event = %{
         "ephemeral" => true,
         "agent" => agent,
-        "type" => "llm.delta",
-        "data" => %{"text" => text}
+        "type" => "llm_delta",
+        "data" => %{"kind" => "text", "text" => text}
       }
 
       push(state, session_id, notification(session_id, event))
@@ -997,6 +1001,41 @@ defmodule Troupe.FakeRemote do
     end
   end
 
+  # The plane's name for a session and its place at the top: the owner's alone, as the
+  # plane's archive is; an empty name takes it off.
+  defp dispatch(state, :plane, method, %{"session_id" => id} = params, _pid)
+       when method in ["session.title.set", "session.pin", "session.unpin"] do
+    me = state.principal["sub"]
+
+    case Map.fetch(state.sessions, id) do
+      {:ok, %{owner: ^me} = session} ->
+        session =
+          case method do
+            "session.title.set" ->
+              %{
+                session
+                | title:
+                    if(String.trim(params["title"] || "") == "",
+                      do: nil,
+                      else: String.trim(params["title"])
+                    )
+              }
+
+            pin ->
+              Map.put(session, :pinned, pin == "session.pin")
+          end
+
+        state = put_in(state.sessions[id], session)
+        {{:ok, Map.put(live_summary(session), "pinned", Map.get(session, :pinned, false))}, state}
+
+      {:ok, _theirs} ->
+        {{:error, -32_004, "forbidden", %{"required_role" => "owner"}}, state}
+
+      :error ->
+        {{:error, -32_005, "no such session"}, state}
+    end
+  end
+
   defp dispatch(state, _kind, "session.open", params, _pid) do
     id = params["session_id"]
 
@@ -1102,9 +1141,9 @@ defmodule Troupe.FakeRemote do
     command = params["command_id"]
 
     {queued, state} =
-      append(state, id, "input.queued", %{"text" => params["text"]}, command_id: command)
+      append(state, id, "input_queued", %{"text" => params["text"]}, command_id: command)
 
-    {accepted, state} = append(state, id, "input.accepted", %{}, command_id: command)
+    {accepted, state} = append(state, id, "input_accepted", %{}, command_id: command)
     push(state, id, notification(id, queued))
     push(state, id, notification(id, accepted))
 
@@ -1168,9 +1207,7 @@ defmodule Troupe.FakeRemote do
     case {Enum.find(state.artifacts, &(&1["id"] == artifact)), state.artifact_texts[artifact]} do
       {%{} = row, text} when is_binary(text) ->
         {event, state} =
-          append(state, id, "fs.changed", %{"paths" => ["index.md"]},
-            command_id: params["command_id"]
-          )
+          append(state, id, "fs_changed", %{"path" => "index.md"}, command_id: params["command_id"])
 
         push(state, id, notification(id, event))
 
@@ -1192,9 +1229,7 @@ defmodule Troupe.FakeRemote do
     id = session_of(state, pid)
 
     {event, state} =
-      append(state, id, "fs.changed", %{"paths" => [params["path"]]},
-        command_id: params["command_id"]
-      )
+      append(state, id, "fs_changed", %{"path" => params["path"]}, command_id: params["command_id"])
 
     push(state, id, notification(id, event))
     {{:ok, %{"path" => params["path"], "bytes" => byte_size(params["content"])}}, state}
@@ -1459,10 +1494,12 @@ defmodule Troupe.FakeRemote do
       "mine" => true,
       "role" => "owner",
       "owner_team" => owner_team,
-      "may_transfer" => true
+      "may_transfer" => true,
+      "blocked_count" => 0
     }
 
-    {{:ok, Map.put(row, "url", "http://127.0.0.1:#{state.port}/a/#{id}/")},
+    # What the artifacts host blocks in it, which the plane reads from the files: none here.
+    {{:ok, Map.merge(row, %{"url" => "http://127.0.0.1:#{state.port}/a/#{id}/", "blocked" => []})},
      %{state | artifacts: [row | state.artifacts]}}
   end
 

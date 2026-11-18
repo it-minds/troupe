@@ -21,6 +21,9 @@ defmodule Troupe.Memory do
     answers. Overview, layout, notes and what did not work come through `recall`.
   """
 
+  alias Troupe.Protocol.Digest
+  alias Troupe.Protocol.Words
+
   @type section :: {String.t(), String.t()}
   @type t :: %__MODULE__{
           built_at: DateTime.t() | nil,
@@ -86,10 +89,6 @@ defmodule Troupe.Memory do
   @doc "An empty brief."
   @spec empty() :: t()
   def empty, do: %__MODULE__{}
-
-  @doc "The view's section titles, in the order it shows them."
-  @spec canonical_titles() :: [String.t()]
-  def canonical_titles, do: Enum.map(@titles, &elem(&1, 1))
 
   @doc "The kinds a fact may be, in the order the contract names them."
   @spec kinds() :: [String.t()]
@@ -231,9 +230,9 @@ defmodule Troupe.Memory do
 
   def unit(fact), do: fact["claim"]
 
-  @doc "The kind a section title stands for, or `nil`."
+  # The kind a section title stands for, or `nil`.
   @spec kind_of_title(String.t()) :: String.t() | nil
-  def kind_of_title(title) do
+  defp kind_of_title(title) do
     want = title |> String.trim() |> String.downcase()
 
     Enum.find_value(@titles, fn {kind, t} ->
@@ -289,17 +288,15 @@ defmodule Troupe.Memory do
     end
   end
 
-  @doc """
-  Whether a fact may no longer be true: an anchor's file changed (`moved`) or is gone
-  (`missing`), or, with no anchors, it was last checked longer ago than `:max_age_days`.
-  """
+  # Whether a fact may no longer be true: an anchor's file changed (`moved`) or is gone
+  # (`missing`), or, with no anchors, it was last checked longer ago than `:max_age_days`.
   @spec doubtful?(fact(), keyword()) :: boolean()
-  def doubtful?(%{"status" => status}, _opts) when status in ["moved", "missing"], do: true
+  defp doubtful?(%{"status" => status}, _opts) when status in ["moved", "missing"], do: true
 
-  def doubtful?(%{"status" => "unanchored"} = fact, opts),
+  defp doubtful?(%{"status" => "unanchored"} = fact, opts),
     do: aged?(fact["verified_at"], Keyword.get(opts, :max_age_days, @max_age_days))
 
-  def doubtful?(_fact, _opts), do: false
+  defp doubtful?(_fact, _opts), do: false
 
   ## Staleness
 
@@ -406,7 +403,7 @@ defmodule Troupe.Memory do
 
   defp recall_line(rest, core?) do
     n = rest |> Map.values() |> Enum.sum()
-    counted = "#{n} #{if core?, do: "more ", else: ""}#{if n == 1, do: "fact", else: "facts"}"
+    counted = "#{n} #{if core?, do: "more ", else: ""}#{Words.plural(n, "fact")}"
 
     {verb, them} = if n == 1, do: {"is", "it"}, else: {"are", "them"}
 
@@ -420,16 +417,13 @@ defmodule Troupe.Memory do
     rest
     |> Enum.sort_by(fn {kind, _n} -> Enum.find_index(order, &(&1 == kind)) || length(order) end)
     |> Enum.map(fn {kind, n} -> "#{n} #{kind_words(kind, n)}" end)
-    |> and_list()
+    |> Words.and_list()
   end
 
   defp kind_words("negative", _n), do: "of what did not work"
   defp kind_words(kind, 1), do: kind
   defp kind_words(kind, _n) when kind in ["overview", "layout"], do: kind
   defp kind_words(kind, _n), do: kind <> "s"
-
-  defp and_list([one]), do: one
-  defp and_list(items), do: Enum.join(Enum.drop(items, -1), ", ") <> " and " <> List.last(items)
 
   ## The view's body
 
@@ -643,7 +637,7 @@ defmodule Troupe.Memory do
   # it aside, so a checkout that turned its line endings into CRLF is still as generated.
   defp digest(body) do
     text = body |> lf() |> String.trim()
-    "sha256:" <> Base.encode16(:crypto.hash(:sha256, text), case: :lower)
+    Digest.tagged(text)
   end
 
   defp lf(text), do: String.replace(text, "\r\n", "\n")

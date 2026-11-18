@@ -41,6 +41,7 @@ import { PROVIDER_TYPES, SETUP_KINDS } from "./provider-types.js";
 import { FakeScratch } from "./scratch.js";
 import type { ProfileView } from "../../src/profile.js";
 import { PRIVATE_OFFER_SENTENCE } from "../../src/fleet.js";
+import { fakeBlocked, type FakeBlocked } from "./blocked.js";
 
 /** A document's entries as the plane answers them: each with the version, who saved it, when, and how many sessions used it. */
 function entriesOf(text: string, version: number, by: string): Array<Record<string, unknown>> {
@@ -77,6 +78,10 @@ interface Session {
   kind?: "local" | "private";
   /** Hidden from `session.list` unless its filter asks for archived ones. */
   archived?: boolean;
+  /** Kept at the top of the list (`session.pin`), as `session.list` says it. */
+  pinned?: boolean;
+  /** The task list, as the last `todo_updated` in its log left it. */
+  todos?: Array<{ id: string; content: string; status: string }>;
   /** How a private session's sealing stands here, as `session.list` says it. */
   sync?: "current" | "behind" | "paused" | "elsewhere" | "erasure_pending";
   /** The other device that holds a private one, where `sync` is `elsewhere`. */
@@ -726,6 +731,8 @@ evoked where nothing is set and there was a sign-in. */
   artifacts: Array<Record<string, unknown>> | null = null;
   /** Every `artifact.publish` asked, in order. */
   readonly publishedArtifacts: Array<Record<string, unknown>> = [];
+  /** What the artifacts host blocks in each artifact's newest version, by id, as a publish here found it. */
+  readonly artifactBlocked = new Map<string, FakeBlocked[]>();
   memoryAutoRefresh = true;
   /** The agent files of every layer (troupe Decision 841): the built-ins, the person's and each workspace's. */
   readonly agents: FakeAgents;
@@ -1178,6 +1185,13 @@ evoked where nothing is set and there was a sign-in. */
     this.ephemeral(session, "context_status", { window_tokens: 200_000, used_tokens: 10 });
   }
 
+  /** Give a session a task list, as the agent's `todo_write` does. */
+  todos(sessionId: string, items: Array<{ id: string; content: string; status: string }>): LoggedEvent {
+    const session = this.sessions.get(sessionId)!;
+    session.todos = items;
+    return session.log.append("todo_updated", { items, source: "agent" });
+  }
+
   /** Make a session say something, so a test can watch it arrive on the right view. */
   say(sessionId: string, text: string): LoggedEvent {
     const session = this.sessions.get(sessionId)!;
@@ -1439,6 +1453,15 @@ evoked where nothing is set and there was a sign-in. */
         return reply(ws, id, { session_id: session.id, title: session.title });
       }
 
+      // Kept at the top of the list, running or dormant; the mark outlives both.
+      case "session.pin":
+      case "session.unpin": {
+        const session = this.sessions.get(String(params["session_id"] ?? ""));
+        if (!session) return reply(ws, id, null, { code: -32005, message: "not_found" });
+        session.pinned = method === "session.pin";
+        return reply(ws, id, { session_id: session.id, pinned: session.pinned });
+      }
+
       // A session offered to the plane for steering from another device, and taken back
       // (troupe #58): a private one only with its person's yes, and to the people it
       // invited with control (troupe #765), as the daemon offers it.
@@ -1596,6 +1619,30 @@ evoked where nothing is set and there was a sign-in. */
         const actor = { kind: "user", subject: this.principal.subject };
         session.log.append("input_queued", { command_id: commandId, author: this.principal.subject, text: params["text"] }, actor);
         session.log.append("input_accepted", { command_id: commandId, author: this.principal.subject }, actor);
+        return reply(ws, id, { accepted: true });
+      }
+
+      // A person's change to the task list, as the harness applies it: the list again, and
+      // the sentence the model is told, between turns or during one.
+      case "todo.edit": {
+        if (!session) return reply(ws, id, null, { code: -32005, message: "not_found" });
+        const action = String(params["action"] ?? "");
+        const todos = session.todos ?? [];
+        const actor = { kind: "user", subject: this.principal.subject };
+        let note: string;
+        if (action === "add" && typeof params["content"] === "string") {
+          const added = { id: `t${todos.length + 1}`, content: params["content"], status: "pending" };
+          session.todos = [...todos, added];
+          note = `The user added task ${added.id}: ${added.content}`;
+        } else if ((action === "cancel" || action === "complete") && typeof params["id"] === "string") {
+          const status = action === "cancel" ? "cancelled" : "completed";
+          session.todos = todos.map((t) => (t.id === params["id"] ? { ...t, status } : t));
+          note = `The user ${action === "cancel" ? "cancelled" : "marked"} task ${params["id"]}${action === "complete" ? " completed" : ""}.`;
+        } else {
+          return reply(ws, id, null, { code: -32602, message: "invalid_params", data: { field: "action" } });
+        }
+        session.log.append("todo_updated", { items: session.todos, source: "tui" });
+        session.log.append("user_input", { source: "tui_todo_edit", text: note, command_id: String(params["command_id"] ?? "") }, actor);
         return reply(ws, id, { accepted: true });
       }
 
@@ -2080,7 +2127,7 @@ evoked where nothing is set and there was a sign-in. */
           this.artifactCalls.push({ method, params });
           const found = mine.find((a) => a["id"] === params["id"]);
           if (!found) return reply(ws, id, null, { code: -32005, message: "not_found", data: { id: params["id"] } });
-          const versions = Array.from({ length: Number(found["version"]) }, (_, i) => Number(found["version"]) - i).map((n) => ({ n, note: n === 1 ? null : `Version ${n}'s note`, published_at: "2026-10-26T08:00:00Z", url: `https://artifacts.example.test/a/${String(found["id"])}/v${n}/`, files: artifactFiles(found).map((f) => ({ path: f.path, sha256: "sha256:fake", content_type: "text/markdown", bytes: f.text.length })), hash: `sha256:${n}`, bytes: 10, published_by: { subject: "ada@example.test" }, goes_at: (found["version_goes_at"] as Record<string, string> | undefined)?.[String(n)] ?? null }));
+          const versions = Array.from({ length: Number(found["version"]) }, (_, i) => Number(found["version"]) - i).map((n) => ({ n, note: n === 1 ? null : `Version ${n}'s note`, published_at: "2026-10-26T08:00:00Z", url: `https://artifacts.example.test/a/${String(found["id"])}/v${n}/`, files: artifactFiles(found).map((f) => ({ path: f.path, sha256: "sha256:fake", content_type: "text/markdown", bytes: f.text.length })), hash: `sha256:${n}`, bytes: 10, blocked: n === Number(found["version"]) ? (this.artifactBlocked.get(String(found["id"])) ?? []) : [], published_by: { subject: "ada@example.test" }, goes_at: (found["version_goes_at"] as Record<string, string> | undefined)?.[String(n)] ?? null }));
           const owner = found["mine"] === true;
           switch (method) {
             // A version's text file, from the files the test gave the artifact.
@@ -2209,7 +2256,11 @@ evoked where nothing is set and there was a sign-in. */
           ? Object.assign(existing, { version: Number(existing["version"]) + 1 })
           : { id: `art-fake${mine.length + 1}`, title: params["title"], kind: params["kind"], visibility: params["visibility"], version: 1, mine: true, owner_team: this.ownerTeamOf(params) };
         if (!existing) mine.push(published);
-        return reply(ws, id, { ...published, url: `https://artifacts.example.test/a/${String(published["id"])}/`, plane_url: "https://plane.example.test" });
+        const sent = ((params["files"] as Array<{ path: string; bytes: string }> | undefined) ?? []).map((f) => ({ path: f.path, content: Buffer.from(f.bytes, "base64").toString("utf8") }));
+        const blocked = fakeBlocked(sent);
+        this.artifactBlocked.set(String(published["id"]), blocked);
+        published["blocked_count"] = blocked.length;
+        return reply(ws, id, { ...published, blocked, url: `https://artifacts.example.test/a/${String(published["id"])}/`, plane_url: "https://plane.example.test" });
       }
 
       // What a session's next prompt is read from (troupe #55): what a test set, or the
@@ -3185,7 +3236,7 @@ evoked where nothing is set and there was a sign-in. */
       cost: 0.25,
       created_at: s.createdAt,
       last_active_at: s.lastActiveAt,
-      pinned: false,
+      pinned: Boolean(s.pinned),
       archived: Boolean(s.archived),
       title: s.title ?? null,
       kind: s.kind ?? "local",

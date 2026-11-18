@@ -5,29 +5,14 @@ date: 2026-10-06
 status: accepted
 issue: 441
 paths:
-  - ARCHITECTURE.md
-  - PROTOCOL.md
   - apps/troupe_gateway/lib/troupe/gateway/private.ex
-  - apps/troupe_gateway/test/support/fake_plane.ex
-  - apps/troupe_gateway/test/troupe/gateway/private_test.exs
   - apps/troupe_plane/lib/troupe/plane/harness.ex
-  - apps/troupe_plane/test/troupe/plane/private_sessions_test.exs
   - apps/troupe_protocol/lib/troupe/sessions/sealer.ex
 symbols:
   - Troupe.Gateway.Private.store/3
   - Troupe.Sessions.Sealer
 gist: A sealing daemon names its epoch on every presigned write and the plane refuses a stale one, so a sealer that lost the session stops before writing.
 ---
-
-Issue #441, found while fixing #433 (789). A seal uploads its segment, writes
-`manifest.json` and then reports to the plane, and the report was the only place the
-plane fenced a device that had lost a private session. So a sealer whose session another
-device had claimed wrote one more segment and overwrote the manifest at its old epoch
-before its report was refused, and a restore read that manifest, the loser's history,
-until the holder sealed again. 789 named it under "Not in this". On the tip, with the
-claim made in the middle of a seal through the plane stand-in, the old sealer wrote a
-third version of `manifest.json` after the claim, or a segment at epoch 1 and the
-manifest, after the holder had sealed its own.
 
 - **The choice: the presign names the epoch.** A daemon holds no object-storage
   credential, so it cannot write a byte under a session's prefix without asking the plane
@@ -64,12 +49,12 @@ manifest, after the holder had sealed its own.
 - **The sealer.** A write `Storage` answers `{:error, :stale_version}`, the segment, the
   manifest or a snapshot, is the plane's fence, as a refused report is (789): it writes
   and reports nothing more, not even on its way down, stops with `{:shutdown,
-  :stale_version}`, is not started again (`restart: :transient`), and `seal_now/2`
-  answers `{:error, :stale_version}`. A seal whose manifest was refused makes no report,
-  which the plane would refuse too. The report stays a fence, for a plane from before
-  this, which signs whatever epoch it is named: there the loser still writes a segment
-  and the manifest before it learns, as 789 left it. A pod's store and its cast reports
-  answer neither, so a worker's sealer is unchanged.
+  :stale_version}`, is not started again (`restart: :transient`), and `seal_now/2` answers
+  `{:error, :stale_version}`. A seal whose manifest was refused makes no report, which the
+  plane would refuse too. The report stays a fence, for a plane from before this, which
+  signs whatever epoch it is named: there the loser still writes a segment and the
+  manifest before it learns, as 789 left it. A pod's store and its cast reports answer
+  neither, so a worker's sealer is unchanged.
 - **What is left.** A write signed before the claim and sent after it: the plane cannot
   take back a URL. The daemon signs each object just before it puts it, so the window is
   one upload in flight when the claim lands. If that is the segment, it is at the old
@@ -78,30 +63,3 @@ manifest, after the holder had sealed its own.
   holder's next seal writes it back, as 789 said of every such overwrite, now narrowed
   from a seal to one PUT. A crash costs nothing new: nothing is reported earlier than
   before.
-- **Proof:** the gateway's `private_test`, against the development MinIO and OpenBao with
-  the plane stand-in, which now fences a presign as the plane does and can hold a request
-  open (`FakePlane.before/3`). A laptop sealing its second event, with the desktop
-  claiming the session and sealing its own second event while the plane is asked to sign
-  the laptop's manifest, writes nothing more under the prefix (every version of every
-  object the same as when the desktop had sealed), reports nothing more, stops with
-  `{:shutdown, :stale_version}`, is not started again and is listed `elsewhere`; a restore
-  reads the desktop's manifest (epoch 2, `last_seq` 2, its segment latest) and the
-  desktop's history. The same with the claim made while the plane is asked to sign the
-  laptop's second segment: no segment and no manifest. Both failed on the tip of
-  `development-2026-10-06`, with a third version of the manifest, and with a segment at
-  epoch 1 and the manifest. #433's test runs against a stand-in that signs any epoch, as a
-  plane from before this does, and its report is still the fence. The plane's
-  `private_sessions_test`: after a claim a `put` or a `get` naming the old epoch is
-  refused `stale_version` for the manifest and a segment, the holder's epoch and a
-  restore naming none are signed, and a non-integer epoch is `invalid_params`; it failed
-  against the tip's `harness.ex`, which signed them. And the installed daemon, with
-  scratch homes and the fake provider, through the client library, against a stand-in on
-  loopback that fences a presign as the plane does, signs real assertions through the
-  development OpenBao and real MinIO URLs: two private sessions sealed through their
-  eleventh event; in the first, another device claimed the session as the daemon asked
-  to sign the manifest of its second turn's seal, after the segment (events 12 to 20) was
-  up, and wrote its own manifest at epoch 2; in the second, as the daemon asked to sign
-  that seal's segment. Each request was refused `stale_version`, the daemon logged that
-  it had stopped sealing, a third turn asked nothing, every version under each prefix was
-  the same after as at the claim, the manifest read epoch 2, and both were listed
-  `elsewhere`.

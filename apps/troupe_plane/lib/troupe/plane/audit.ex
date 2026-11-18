@@ -225,16 +225,14 @@ defmodule Troupe.Plane.Audit do
   # form's string ones gets a diff rather than a list of everything.
   defp stringify(map), do: Map.new(map, fn {key, value} -> {to_string(key), value} end)
 
-  @doc """
-  Replace anything that looks like a secret value with a marker.
-
-  The plane does not hold secret values, but names do look like them: an ordinary
-  profile's diff carries `secretRef.key`, an identity's `tokenUrl` and `transitKey`, and
-  each is redacted on every save. So it is said at `debug`, where somebody looking for
-  what was caught finds it, and not as an error on work that is going as it should.
-  """
+  # Replace anything that looks like a secret value with a marker.
+  #
+  # The plane does not hold secret values, but names do look like them: an ordinary
+  # profile's diff carries `secretRef.key`, an identity's `tokenUrl` and `transitKey`, and
+  # each is redacted on every save. So it is said at `debug`, where somebody looking for
+  # what was caught finds it, and not as an error on work that is going as it should.
   @spec redact(term()) :: term()
-  def redact(%{} = map) when not is_struct(map) do
+  defp redact(%{} = map) when not is_struct(map) do
     Map.new(map, fn {key, value} ->
       if suspicious?(key) and is_binary(value) and value != "" do
         Logger.debug("troupe plane: an audit detail carried #{inspect(key)}, which was redacted")
@@ -245,8 +243,8 @@ defmodule Troupe.Plane.Audit do
     end)
   end
 
-  def redact(list) when is_list(list), do: Enum.map(list, &redact/1)
-  def redact(value), do: value
+  defp redact(list) when is_list(list), do: Enum.map(list, &redact/1)
+  defp redact(value), do: value
 
   defp suspicious?(key) do
     name = key |> to_string() |> String.downcase()

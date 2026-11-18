@@ -3,12 +3,10 @@
 // and `admin.integrations.list`, with the plane's two roles.
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { App } from "../src/App";
-import { PEOPLE, button, field, freshBrowser, render, says, sees, signedInAs, startFake, type, visit, waitFor } from "./support";
+import { PEOPLE, button, field, freshBrowser, opener, says, sees, startFake, type, waitFor } from "./support";
 import type { FakeDeployment } from "./support";
 
 let fake: FakeDeployment;
-let unmount: (() => void) | null = null;
 
 beforeEach(async () => {
   freshBrowser();
@@ -16,23 +14,18 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
-  unmount?.();
-  unmount = null;
+  close();
   await fake.stop();
 });
 
-async function open(who: { subject: string; name: string } = PEOPLE.alice): Promise<void> {
-  await signedInAs(fake, who);
-  visit("#/integrations");
-  unmount = render(<App />).unmount;
-}
+const { open, close } = opener(() => fake);
 
 const card = (): HTMLElement => document.querySelector<HTMLElement>('[aria-label="The GitHub App"]')!;
 const PEM = "-----BEGIN RSA PRIVATE KEY-----\nMIIEpAIBAAKCAQEAexampleexampleexample\n-----END RSA PRIVATE KEY-----\n";
 
 describe("the GitHub App", () => {
   it("reads what is set, the key by its fingerprint and never the key", async () => {
-    await open();
+    await open("#/integrations");
     await waitFor(() => says("The GitHub App") && says("configured"), "the App");
     await sees("4242", card());
     await sees("example-org (77001)", card());
@@ -42,7 +35,7 @@ describe("the GitHub App", () => {
   });
 
   it("is tested against GitHub, writing nothing, and says which check failed", async () => {
-    await open();
+    await open("#/integrations");
     (await waitFor(() => button("Test it"), "the App")).click();
     await waitFor(() => says("GitHub knows the App as troupe-example, and every installation set here."), "GitHub's answer");
     await sees("Installations");
@@ -58,7 +51,7 @@ describe("the GitHub App", () => {
   // #653: the App tested for a chosen repository: what an installation token there can do,
   // minted and revoked by the plane, with no token anywhere on the page.
   it("is tested for a chosen repository, showing what a token there can do and never the token", async () => {
-    await open();
+    await open("#/integrations");
     type(await waitFor(() => field("Repository"), "the repository field"), "example-org/widgets");
     button("Test it")!.click();
     await waitFor(() => says("A token for example-org/widgets was minted and revoked."), "the repository's check");
@@ -84,7 +77,7 @@ describe("the GitHub App", () => {
   });
 
   it("is changed behind a preview, the key pasted once and kept nowhere, and shown as the audit recorded it", async () => {
-    await open();
+    await open("#/integrations");
     (await waitFor(() => button("Change the App"), "the App")).click();
     const installations = await waitFor(() => field("Installations"), "the form");
     expect(installations.value).toBe("example-org 77001");
@@ -106,7 +99,7 @@ describe("the GitHub App", () => {
   });
 
   it("takes a webhook secret once, never shows it back, and lists what GitHub has sent", async () => {
-    await open();
+    await open("#/integrations");
     await waitFor(() => says("signed with a secret at version 1"), "the webhook");
     await waitFor(() => says("pull_request_review.submitted") && says("s-7f3a9c24"), "the deliveries");
     await sees("Nothing done: push is not an event this plane acts on.");
@@ -122,7 +115,7 @@ describe("the GitHub App", () => {
   });
 
   it("shows the plane's refusal where the change was asked for", async () => {
-    await open();
+    await open("#/integrations");
     (await waitFor(() => button("Change the App"), "the App")).click();
     type(await waitFor(() => field("Installations"), "the form"), "-bad- 1");
     button("Preview")!.click();
@@ -132,7 +125,7 @@ describe("the GitHub App", () => {
   });
 
   it("is removed only once its App ID is typed", async () => {
-    await open();
+    await open("#/integrations");
     (await waitFor(() => button("Remove the App"), "the App")).click();
     await waitFor(() => says("Type 4242 to confirm"), "the typed confirmation");
     await sees("A session that names a repository is refused from now on");
@@ -151,7 +144,7 @@ describe("the GitHub App", () => {
   it("is shown locked on a gitops plane, where only its key and webhook secret are set here", async () => {
     fake.admin.mode = "gitops";
     fake.admin.gitopsSource = "https://git.example.com/platform/troupe.git";
-    await open();
+    await open("#/integrations");
     await waitFor(() => says("Held in a repository", card()) && says("GitHubApp/github", card()), "the locked App");
     await sees("https://git.example.com/platform/troupe.git", card());
     await sees("read at generation 1", card());
@@ -171,7 +164,7 @@ describe("the GitHub App", () => {
   });
 
   it("is read by a team admin, who is offered nothing to change or test", async () => {
-    await open(PEOPLE.bob);
+    await open("#/integrations", PEOPLE.bob);
     await waitFor(() => says("The GitHub App") && says("4242"), "the App");
     expect(button("Test it")).toBeNull();
     expect(button("Change the App")).toBeNull();
@@ -185,7 +178,7 @@ describe("the plane's signing key (#657)", () => {
   const signing = (): HTMLElement => document.querySelector<HTMLElement>('[aria-label="The plane\'s signing key"]')!;
 
   it("shows its fingerprint, when it was made and its public half, and is rotated only once that fingerprint is typed", async () => {
-    await open();
+    await open("#/integrations");
     await waitFor(() => says("SHA256:fake-plane-key-1"), "the key");
     await sees("ed25519", signing());
     await sees("not the release key", signing());
@@ -203,7 +196,7 @@ describe("the plane's signing key (#657)", () => {
   });
 
   it("is read by a team admin, who cannot rotate it", async () => {
-    await open(PEOPLE.bob);
+    await open("#/integrations", PEOPLE.bob);
     await waitFor(() => says("SHA256:fake-plane-key-1"), "the key");
     expect(button("Rotate the key")).toBeNull();
     await sees("Only a platform admin rotates the key");
@@ -217,7 +210,7 @@ describe("the releases kept on this plane (#657)", () => {
   it("lists what is mirrored, and a platform admin mirrors a release by its version, audited", async () => {
     fake.admin.releases = [{ version: "0.23.0-beta", state: "mirrored", files: 14 }];
     fake.admin.releaseUrl = "https://plane.example.test/downloads";
-    await open();
+    await open("#/integrations");
     await waitFor(() => row("0.23.0-beta"), "the mirrored release");
     await sees("Mirrored", () => row("0.23.0-beta"));
     await sees("https://github.com/it-minds/troupe/releases/download", releases());
@@ -233,7 +226,7 @@ describe("the releases kept on this plane (#657)", () => {
 
   it("says the plane's sentence for a manifest the release keys did not sign, and mirrors nothing", async () => {
     fake.admin.unsignedReleases.add("0.24.0-beta");
-    await open();
+    await open("#/integrations");
     await waitFor(() => field("Release to mirror"), "the form");
     type(field("Release to mirror")!, "0.24.0-beta");
     button("Mirror the release", releases())!.click();
@@ -243,7 +236,7 @@ describe("the releases kept on this plane (#657)", () => {
   });
 
   it("is read by a team admin, who cannot mirror one", async () => {
-    await open(PEOPLE.bob);
+    await open("#/integrations", PEOPLE.bob);
     await waitFor(() => says("No release is in this plane's object store yet."), "the releases");
     expect(field("Release to mirror")).toBeNull();
     await sees("Only a platform admin mirrors a release");
@@ -253,7 +246,7 @@ describe("the releases kept on this plane (#657)", () => {
 describe("what the plane dials", () => {
   it("lists the servers, every host against the policy with where it was declared, and each outcome's target", async () => {
     fake.admin.profiles.find((p) => p.name === "ux")!.spec!["egress"] = { fqdns: ["mcp.example.com", "elsewhere.example.org"] };
-    await open();
+    await open("#/integrations");
     await waitFor(() => says("Every host anything here dials"), "the hosts");
     const hostRow = (host: string) => [...document.querySelectorAll("tr")].find((r) => r.cells[0]?.textContent === host) ?? null;
     await sees("allowed", () => hostRow("llm-gw.example.com"));

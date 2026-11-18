@@ -8,18 +8,6 @@ paths:
   - apps/troupe_plane/lib/troupe/plane/gitops/trigger_copies.ex
   - apps/troupe_plane/lib/troupe/plane/gitops.ex
   - apps/troupe_plane/lib/troupe/plane/gitops/triggers.ex
-  - apps/troupe_plane/lib/troupe/plane/admin.ex
-  - apps/troupe_plane/lib/troupe/plane/admin/api.ex
-  - apps/troupe_plane/lib/troupe/plane/triggers.ex
-  - apps/troupe_plane/lib/troupe/plane/triggers/trigger.ex
-  - apps/troupe_plane/priv/repo/migrations/20261029000971_trigger_copies.exs
-  - apps/troupe_plane/test/troupe/plane/trigger_copies_test.exs
-  - charts/troupe/templates/plane-rbac.yaml
-  - clients/gui/apps/console/src/views/Triggers.tsx
-  - clients/gui/apps/console/test/trigger-copies.test.tsx
-  - clients/gui/packages/client/src/admin.ts
-  - docs/admin/gitops.md
-  - docs/admin/bundles-and-triggers.md
 symbols:
   - Troupe.Plane.Gitops.TriggerCopies
   - Troupe.Plane.Admin.triggers_repository/2
@@ -77,11 +65,3 @@ when the two diverge. *A `recopy` method of its own*: a copy of a resource that 
 is that row's re-copy, so one method with one argument does both, and the answer's `made`
 says which it was. *Removing a copied row when its resource goes*: a removal is a decision,
 and here the plane makes none.
-
-Proof: `trigger_copies_test.exs` (listing with pass and fail reasons, a cluster that does
-not answer, a copy with its generation and a key shown once, a refused copy, a team
-admin's reach, a changed resource's diff and a re-copy keeping URL, key, runs and
-revisions, a console edit that differs, a removed resource whose row keeps running, a
-typed row taken over, a gitops plane refusing both and its pass unchanged, a switch that
-changes nothing, the MCP tools, the chart's Role) and the console's
-`trigger-copies.test.tsx`.

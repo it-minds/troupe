@@ -27,7 +27,7 @@ defmodule Troupe.Agent.Server do
   on the last start its Node allows writes why before it goes (`turn_ended` with
   `agent_failed`, Decision 727), and crashes all the same.
 
-  See `ARCHITECTURE.md` for the transition table and the failure matrix.
+  See `docs/developer/architecture.md` for the transition table and the failure matrix.
   """
 
   @behaviour :gen_statem
@@ -74,8 +74,10 @@ defmodule Troupe.Agent.Server do
     Usage
   }
 
+  alias Troupe.Protocol.Digest
   alias Troupe.Protocol.Event
   alias Troupe.Protocol.Principal
+  alias Troupe.Protocol.Words
   alias Troupe.Session.{Approvals, Blobs, Log, Memory, Organisation, Questions, Shell}
   alias Troupe.Session.MCP, as: SessionMCP
   alias Troupe.Sessions.Index
@@ -329,6 +331,7 @@ defmodule Troupe.Agent.Server do
       # The wall clock is not running: it counts working time, from a turn's start. A
       # restarted agent's starts again from nothing; the time worked before is forgiven.
       budget: Keyword.get(opts, :budget, Config.budget(config)),
+      turn: %Spend{},
       fake: Keyword.get(opts, :fake),
       restart_limit: limit
     }
@@ -706,7 +709,7 @@ defmodule Troupe.Agent.Server do
   # that waits.
   #
   # `resume_on_restart: true` opts back into the old behaviour: incomplete tool calls
-  # are re-run (at-least-once, documented in ARCHITECTURE.md) and a turn the model owes
+  # are re-run (at-least-once, documented in docs/developer/architecture.md) and a turn the model owes
   # is taken.
   #
   # A turn that was cancelled is owed nothing, whichever kind of start this is: the
@@ -1557,7 +1560,7 @@ defmodule Troupe.Agent.Server do
             "message_count" => length(request.messages),
             "tools" => Enum.map(request.tools, & &1.name),
             "profile" => definition.name,
-            # What the prompt was made of, in bytes (Decision 769): which part is the large
+            # What the prompt was made of, in bytes: which part is the large
             # one is the question a long turn's bill raises.
             "prompt_bytes" => prompt_bytes(state, request)
           }
@@ -1567,16 +1570,16 @@ defmodule Troupe.Agent.Server do
           |> put_behind(state)
         )
 
-        :telemetry.execute(
-          [:troupe, :llm, :start],
-          %{system_time: System.system_time()},
-          %{session_id: state.session_id, agent_path: state.agent_path, model: request.model}
-        )
-
         state =
           state
           |> send_request(request)
-          |> Map.merge(%{llm_summariser: false, llm_text: "", llm_tool_names: %{}, prefix: prefix})
+          |> Map.merge(%{
+            llm_summariser: false,
+            llm_text: "",
+            llm_tool_names: %{},
+            prefix: prefix,
+            output_cap: request.max_tokens
+          })
 
         info(state, "#{call_label(state)} asking #{request.model} at #{state.llm_host}")
         publish_state(state, :thinking)
@@ -1705,7 +1708,7 @@ defmodule Troupe.Agent.Server do
   end
 
   # The tools are offered knowing whether the model they go to binds its thinking to them:
-  # one that does is offered the same on every call (Decisions 867 and 871).
+  # one that does is offered the same on every call.
   defp build_request(state, definition) do
     ctx = base_ctx(state, "")
     tools = Tools.specs(definition, ctx)
@@ -1717,12 +1720,17 @@ defmodule Troupe.Agent.Server do
       system_tail: if(stable?(state), do: nil, else: todo_section(state.prompt_todos)),
       cache: true,
       tools: tools,
-      max_tokens: state.config.max_tokens,
+      max_tokens: own_cap(state.config.max_tokens, definition.max_tokens),
       attribution: attribution(state),
       extra: request_extra(state)
     }
     |> aim(state, definition.model)
   end
+
+  # An agent's own `max_tokens` lowers the session's (a profile's on a pod, the setting on a
+  # machine) and never raises it: what an administrator or a person allowed holds.
+  defp own_cap(session, nil), do: session
+  defp own_cap(session, agent), do: min(session, agent)
 
   # The conversation, but for a large tool result behind the boundary, the last
   # compaction's or a refused prompt's: that goes as a stub naming the `read_output` call
@@ -1934,7 +1942,7 @@ defmodule Troupe.Agent.Server do
   # and the digest of each section it carried) and folded back on replay (`put_context/2`),
   # so an agent restarted, or a session resumed, sends the prefix it sent before (Decision
   # 863).
-  @nothing_sent "sha256:" <> Base.encode16(:crypto.hash(:sha256, ""), case: :lower)
+  @nothing_sent Digest.tagged("")
 
   defp attach_turn_context(%State{} = state) do
     if stable?(state),
@@ -1976,7 +1984,7 @@ defmodule Troupe.Agent.Server do
   end
 
   defp section_digest(text),
-    do: "sha256:" <> Base.encode16(:crypto.hash(:sha256, text), case: :lower)
+    do: Digest.tagged(text)
 
   defp turn_sections(state) do
     [
@@ -2297,27 +2305,16 @@ defmodule Troupe.Agent.Server do
 
   defp announce_context(state), do: state
 
-  # A model call, wherever spend is added up: the listing, telemetry, the budget, which is
-  # charged what was billed (Decision 657), and the turn's spend (Decision 769). The
-  # summariser's call is counted here too, since it is billed like any other.
-  defp count_call(state, %Usage{} = usage, gateway, meta \\ %{}) do
+  # A model call, wherever spend is added up: the listing, the budget, which is charged
+  # what was billed, and the turn's spend. The summariser's call is counted here too,
+  # since it is billed like any other.
+  defp count_call(state, %Usage{} = usage, gateway) do
     cost = gateway && gateway["cost_micros"]
 
     # The same numbers the log just took, added to what a listing reports. The index has
     # carried `tokens` and `cost` from the start and only `pin_session/2` ever wrote to
     # it, so every session showed 0 tokens and $0.00 for as long as it ran.
     Index.observe(state.session_id, usage.input_tokens + usage.output_tokens, cost)
-
-    :telemetry.execute(
-      [:troupe, :llm, :stop],
-      %{
-        input_tokens: usage.input_tokens,
-        output_tokens: usage.output_tokens,
-        cache_read: usage.cache_read,
-        cache_write: usage.cache_write
-      },
-      Map.merge(%{session_id: state.session_id, agent_path: state.agent_path}, meta)
-    )
 
     %{
       state
@@ -2459,12 +2456,22 @@ defmodule Troupe.Agent.Server do
     end
   end
 
-  @truncated_note "Your previous reply was cut off because it reached the output token cap. " <>
-                    "Answer again in smaller steps: make one tool call at a time, and keep text short."
+  # Both name the cap the call asked for, so the next attempt can be sized to fit it.
+  defp truncated_note(state),
+    do:
+      "Your previous reply was cut off because it reached #{cap_words(state)}. " <>
+        "Answer again in smaller steps: make one tool call at a time, and keep text short."
 
-  @truncated_call "This tool call was cut off mid-argument because the reply reached the output " <>
-                    "token cap, so its input could not be parsed and it was not run. Re-issue it on " <>
-                    "its own, with a shorter argument."
+  defp truncated_call(state),
+    do:
+      "This tool call was cut off mid-argument because the reply reached #{cap_words(state)}, " <>
+        "so its input could not be parsed and it was not run. Re-issue it on its own, with a " <>
+        "shorter argument."
+
+  defp cap_words(%State{output_cap: cap}) when is_integer(cap),
+    do: "the output cap of #{thousands(cap)} tokens"
+
+  defp cap_words(_state), do: "the output token cap"
 
   # A document too long for one reply is not shorter when it is asked again: it goes in
   # parts, the start shown and the rest added with `patch`, each part a reply of its own.
@@ -2494,8 +2501,9 @@ defmodule Troupe.Agent.Server do
         finish_short(state, :output_truncated, truncation_summary(text))
 
       [] ->
-        log(state, :truncated, %{"reason" => "max_tokens", "note" => @truncated_note})
-        nudge(state, @truncated_note)
+        note = truncated_note(state)
+        log(state, :truncated, %{"reason" => "max_tokens", "note" => note})
+        nudge(state, note)
 
       tool_uses ->
         log(state, :truncated, %{"reason" => "max_tokens", "calls" => length(tool_uses)})
@@ -2761,20 +2769,20 @@ defmodule Troupe.Agent.Server do
     |> Map.put("principal", Principal.to_json(principal))
   end
 
-  defp cut_call(name) do
+  defp cut_call(name, state) do
     if name in [Show.name(), Patch.name()],
-      do: @truncated_call <> @truncated_document,
-      else: @truncated_call
+      do: truncated_call(state) <> @truncated_document,
+      else: truncated_call(state)
   end
 
-  # Arguments the reply's output cap cut mid-JSON (Decision 659). Running a tool on a
+  # Arguments the reply's output cap cut mid-JSON. Running a tool on a
   # fragment is worse than saying so, and every `tool_use` still owes a `tool_result` or
   # the next request is refused outright — so the call is answered, not run.
   defp dispatch_tool(%ToolUse{input: %{"__malformed_arguments__" => _raw}} = tool_use, state) do
     call = %Call{id: tool_use.id, name: tool_use.name, args: %{}}
     state = %{state | pending: Map.put(state.pending, call.id, call)}
     log(state, :tool_call_started, %{"call_id" => call.id, "name" => call.name, "args" => %{}})
-    send(self(), {:tool_result, call.id, Result.error(call.id, call.name, cut_call(call.name))})
+    send(self(), {:tool_result, call.id, Result.error(call.id, call.name, cut_call(call.name, state))})
     state
   end
 
@@ -2920,17 +2928,6 @@ defmodule Troupe.Agent.Server do
         "ok" => result.ok?,
         "content" => store_payload(state, result.content)
       })
-    )
-
-    :telemetry.execute(
-      [:troupe, :tool, :stop],
-      %{system_time: System.system_time()},
-      %{
-        session_id: state.session_id,
-        agent_path: state.agent_path,
-        tool: call.name,
-        ok?: result.ok?
-      }
     )
 
     updated = %{call | result: result, timer: nil, monitor: nil}
@@ -3663,7 +3660,7 @@ defmodule Troupe.Agent.Server do
 
   defp answered_note(asked, agent, edited) do
     switched = if agent != asked, do: ["sent it to #{agent} rather than #{asked}"], else: []
-    parts = if edited != [], do: ["edited its #{Finish.and_list(edited)}"], else: []
+    parts = if edited != [], do: ["edited its #{Words.and_list(edited)}"], else: []
     "[The person #{Enum.join(switched ++ parts, " and ")} before it ran.]"
   end
 
@@ -4158,7 +4155,7 @@ defmodule Troupe.Agent.Server do
 
     log(state, :compacted, data, actor)
 
-    state = count_call(state, response.usage, gateway, %{summariser: true})
+    state = count_call(state, response.usage, gateway)
 
     # The call that wrote the task list may be in the summary now, and the conversation
     # behind the system prompt is new anyway, so the prompt shows the list as it is, and
@@ -4180,7 +4177,7 @@ defmodule Troupe.Agent.Server do
   # thinking block in it is bound to a conversation no later request has: on a model that
   # binds its thinking, an account the check is enforced for would refuse every call after
   # the compaction once, until a later one summarised the blocks away. Kept without them,
-  # as the API asks of a compaction's tail (D92, Decision 867). On any other model a block
+  # as the API asks of a compaction's tail. On any other model a block
   # still holds, and an Anthropic model thinking with an effort set may need its last one.
   # Its config's `binds_thinking` before its name (Decision 871).
   defp binds_thinking?(state), do: Config.binds_thinking?(state.config, state.definition.model)
@@ -4312,9 +4309,8 @@ defmodule Troupe.Agent.Server do
     kill_llm(state)
     usage = reported_usage(ref, state.llm_usage)
     stopped = stopped_json(state, usage)
-    meta = if state.llm_summariser, do: %{stopped: true, summariser: true}, else: %{stopped: true}
 
-    state = count_call(clear_llm(state), usage || %Usage{}, stopped["gateway"], meta)
+    state = count_call(clear_llm(state), usage || %Usage{}, stopped["gateway"])
     {state, stopped}
   end
 
@@ -4657,12 +4653,6 @@ defmodule Troupe.Agent.Server do
   end
 
   defp publish_state(state, state_name) do
-    :telemetry.execute(
-      [:troupe, :agent, :transition],
-      %{system_time: System.system_time()},
-      %{session_id: state.session_id, agent_path: state.agent_path, state: state_name}
-    )
-
     publish(state, %{type: :agent_state, data: summary(state, state_name)})
   end
 

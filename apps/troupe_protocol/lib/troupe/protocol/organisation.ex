@@ -25,7 +25,7 @@ defmodule Troupe.Protocol.Organisation do
   reads it.
   """
 
-  alias Troupe.Protocol.PermissionRule
+  alias Troupe.Protocol.{PermissionRule, Words}
 
   @type kind :: :ceiling | :fixed | :rules | {:order, [term()]}
 
@@ -73,10 +73,8 @@ defmodule Troupe.Protocol.Organisation do
   @doc "The sentence a key that cannot be enforced is refused with."
   @spec refusal(String.t()) :: String.t()
   def refusal(key) do
-    {rest, [last]} = Enum.split(keys(), -1)
-
     "#{key} is not a key an organisation may enforce; the ones it may are " <>
-      Enum.join(rest, ", ") <> " and " <> last
+      Words.and_list(keys())
   end
 
   @doc """

@@ -21,7 +21,7 @@
 
 import { useEffect, useState } from "react";
 import type { JSX } from "react";
-import { AuthSession, PlaneUnreachableError, planeAddress } from "@troupe/client";
+import { AuthSession, PlaneUnreachableError, errorText, hostOf, planeAddress, unregisteredRedirect } from "@troupe/client";
 import type { DeviceAuthorization, Discovery } from "@troupe/client";
 import { copyText } from "../clipboard";
 import { throughTheGate } from "../mode";
@@ -125,7 +125,7 @@ export function SignIn({
       })
       .catch((e: unknown) => {
         if (!live) return;
-        setError(describe(e));
+        setError(errorText(e));
         setUnreachable(e instanceof PlaneUnreachableError);
         setRestoring(false);
       });
@@ -144,14 +144,14 @@ export function SignIn({
     const open = shell()?.openExternal;
     if (!open) return;
     setLink(null);
-    open(deviceLink(code)).catch((e: unknown) => setLink(`Your browser could not be opened for it: ${describe(e)} Copy the link and open it yourself.`));
+    open(deviceLink(code)).catch((e: unknown) => setLink(`Your browser could not be opened for it: ${errorText(e)} Copy the link and open it yourself.`));
   };
   const copyDevice = async (code: DeviceAuthorization): Promise<void> => {
     try {
       await copyText(deviceLink(code));
       setLink("Link copied.");
     } catch (e) {
-      setLink(`Not copied: ${describe(e)}`);
+      setLink(`Not copied: ${errorText(e)}`);
     }
   };
 
@@ -188,7 +188,7 @@ export function SignIn({
       });
       onSignedIn(auth);
     } catch (e) {
-      setError(describe(e));
+      setError(errorText(e));
       setUnreachable(e instanceof PlaneUnreachableError);
       setDevice(null);
     } finally {
@@ -321,10 +321,10 @@ export function SignIn({
  */
 function SignInError({ message, onRetry }: { message: string; onRetry: (() => void) | null }): JSX.Element {
   const origin = redirectUri() || "this address";
-  const unregistered = /redirect_uri|AADSTS50011|invalid_client|unauthorized_client/i.test(message);
+  const unregistered = unregisteredRedirect(message);
 
   return (
-    <section className="banner error copy">
+    <section className="banner error copy" role="alert">
       <p>{message}</p>
       {/* A plane that did not answer may answer the next time; asking again is the whole retry. */}
       {onRetry && (
@@ -345,19 +345,6 @@ function SignInError({ message, onRetry }: { message: string; onRetry: (() => vo
   );
 }
 
-function describe(e: unknown): string {
-  if (e instanceof PlaneUnreachableError) return e.message;
-  return e instanceof Error ? e.message : String(e);
-}
-
 function samePlane(a: string, b: string): boolean {
   return (planeAddress(a) ?? a) === (planeAddress(b) ?? b);
-}
-
-function hostOf(url: string): string {
-  try {
-    return new URL(url).host;
-  } catch {
-    return url;
-  }
 }

@@ -8,20 +8,7 @@ supersedes: []
 paths:
   - apps/troupe_plane/lib/troupe/plane/names.ex
   - apps/troupe_plane/lib/troupe/plane/harness.ex
-  - apps/troupe_plane/lib/troupe/plane/admin.ex
-  - apps/troupe_gateway/lib/troupe/gateway/dispatch.ex
-  - apps/troupe_core/lib/troupe.ex
-  - apps/troupe_protocol/lib/troupe/protocol/schema.ex
-  - PROTOCOL.md
   - clients/gui/packages/client/src/people.ts
-  - clients/gui/packages/client/src/transcript.ts
-  - clients/gui/packages/client/src/fleet.ts
-  - clients/gui/apps/desktop/src/views/Session.tsx
-  - clients/gui/apps/console/src/views/Sessions.tsx
-  - clients/gui/apps/console/src/views/Audit.tsx
-  - clients/gui/apps/console/src/views/Remote.tsx
-  - clients/tui/lib/troupe/remote/translate.ex
-  - clients/tui/lib/troupe/ui/tui/model.ex
 symbols:
   - Troupe.Plane.Names.of/1
   - Troupe.Plane.Names.decorate/2

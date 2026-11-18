@@ -35,7 +35,7 @@ defmodule Troupe.Client.Daemon do
 
   @behaviour Troupe.Client
 
-  alias Troupe.Client.Archive
+  alias Troupe.Client.{Archive, Marks}
   alias Troupe.Client.Daemon.{Link, Start}
   alias Troupe.Client.Events
   alias Troupe.Config
@@ -555,7 +555,7 @@ defmodule Troupe.Client.Daemon do
     end
   end
 
-  # What the daemon says (`watch.get`, D106), so a watch another client turned on shows
+  # What the daemon says (`watch.get`), so a watch another client turned on shows
   # here and the next `/watch` turns it off; a daemon from before it is answered with
   # what this client last set.
   @impl true
@@ -976,6 +976,33 @@ defmodule Troupe.Client.Daemon do
     case Link.call_with_data(Archive.method(archived?), params) do
       {:ok, _answer} -> {:ok, Archive.said(archived?)}
       {:error, %{code: "forbidden", data: data}} -> {:error, Archive.forbidden(data, archived?)}
+      {:error, %{message: said}} when is_binary(said) -> {:error, said}
+      {:error, reason} -> {:error, refusal(reason)}
+    end
+  end
+
+  # A name and a place at the top are the owner's as archiving is, and kept beside the log.
+  @impl true
+  def rename(sid, title) do
+    params = %{session_id: sid, title: title, command_id: Troupe.Remote.RPC.command_id()}
+
+    case Link.call_with_data("session.title.set", params) do
+      {:ok, %{"title" => named}} -> {:ok, Marks.renamed(named)}
+      {:ok, _answer} -> {:ok, Marks.renamed(nil)}
+      {:error, %{code: "forbidden", data: data}} -> {:error, Marks.forbidden(data, :rename)}
+      {:error, %{data: %{"reason" => said}}} when is_binary(said) -> {:error, said}
+      {:error, %{message: said}} when is_binary(said) -> {:error, said}
+      {:error, reason} -> {:error, refusal(reason)}
+    end
+  end
+
+  @impl true
+  def keep(sid, kept?) do
+    params = %{session_id: sid, command_id: Troupe.Remote.RPC.command_id()}
+
+    case Link.call_with_data(Marks.keep_method(kept?), params) do
+      {:ok, _answer} -> {:ok, Marks.kept(kept?)}
+      {:error, %{code: "forbidden", data: data}} -> {:error, Marks.forbidden(data, :keep)}
       {:error, %{message: said}} when is_binary(said) -> {:error, said}
       {:error, reason} -> {:error, refusal(reason)}
     end
@@ -1419,7 +1446,7 @@ defmodule Troupe.Client.Daemon do
   @doc """
   This session's branches whose windows were dismissed, by window and session id, with the
   first thing each was asked: each is still a session in the daemon, which the picker lists
-  (the row of `/dismiss`), titled by that rather than the worktree it worked in (D113). One
+  (the row of `/dismiss`), titled by that rather than the worktree it worked in. One
   merged, discarded or cancelled is not: it was ended, not let go.
   """
   @spec dismissed_branches(String.t()) :: [
@@ -1558,7 +1585,7 @@ defmodule Troupe.Client.Daemon do
 
   # An approval asked by a branch was registered under this session and its call id by
   # the branch's worker, as it went by or, for a worker started again since, as that one
-  # started (D113); anything else is this session's own.
+  # started; anything else is this session's own.
   defp call_target(sid, call_id) do
     case Registry.lookup(Troupe.Client.Registry, {:call, sid, call_id}) do
       [{_pid, child}] -> child

@@ -8,24 +8,6 @@ paths:
   - apps/troupe_plane/lib/troupe/plane/artifacts.ex
   - apps/troupe_plane/lib/troupe/plane/artifacts/*.ex
   - apps/troupe_plane/lib/troupe/plane/web/artifacts.ex
-  - apps/troupe_plane/lib/troupe/plane/harness.ex
-  - apps/troupe_plane/lib/troupe/plane/settings.ex
-  - apps/troupe_plane/priv/repo/migrations/20261025000950_artifact_versions_and_links.exs
-  - apps/troupe_plane/test/troupe/plane/artifact_versions_test.exs
-  - apps/troupe_plane/test/troupe/plane/artifact_shares_test.exs
-  - apps/troupe_plane/test/troupe/plane/artifact_links_host_test.exs
-  - apps/troupe_core/lib/troupe/tools/publish_artifact.ex
-  - apps/troupe_gateway/lib/troupe/gateway/artifacts.ex
-  - clients/gui/apps/console/src/views/Artifacts.tsx
-  - clients/gui/apps/console/src/views/ArtifactEditor.tsx
-  - clients/gui/apps/console/src/views/ArtifactLinks.tsx
-  - clients/gui/apps/console/src/console.ts
-  - clients/gui/apps/desktop/src/views/Publish.tsx
-  - clients/gui/packages/client/src/artifacts.ts
-  - clients/gui/docker/headers.conf
-  - PROTOCOL.md
-  - docs/user/artifacts.md
-  - docs/admin/console.md
 symbols:
   - Troupe.Plane.Artifacts.Shares
   - Troupe.Plane.Artifacts.Uploads
@@ -99,10 +81,6 @@ for no link at all. It is one artifact's: an edit link is a put and a rollback, 
 owner does. Revoking a person revokes them from every link to that artifact, since "Bob no
 longer holds this" means all of them.
 
-Considered: a link that is itself a bearer, opening the artifact for whoever has it. That is
-the public link below, and the maintainer ruled it out unless switched on. A link for picked
-people chosen by name is the teams/people picker #62 still owes; a link covers that case now.
-
 ## Public links
 
 `artifacts_public_links` (a boolean, off) under *Policy and settings*. On, the owner may make
@@ -125,38 +103,3 @@ sentence naming the setting.
 - **Leftover objects.** A version the store refuses midway takes back the objects it put
   before the refusal, and one whose rows fail after its objects were put takes them back
   before the error goes on: a refused version leaves nothing under `artifacts/<id>/<n>/`.
-- **Open at the click.** The console opens a blank tab in the click itself, cuts its `opener`,
-  and points it at the ticket when the plane answers (or closes it on a refusal), so a popup
-  blocker that refuses a tab opened after an `await` lets it through.
-- **"Publish…" in the desktop app** is the palette's `/publish`: files from this computer, a
-  new artifact or "Publish a new version of…" one of the person's own (the daemon's new
-  `artifact.list`), with a note, and a link to the console's gallery.
-
-Left: a path capability for the artifacts host's own cookie where a browser withholds it (the
-preview and public links already need none); the pod's upload handle; teams and picked people;
-comments.
-
-## Proof
-
-- `artifact_versions_test.exs`: a put is n+1 with note, who and when; on a base it carries
-  files without copying them; a stale base is `conflict`; owner or edit link only; audited
-  with the note; publish with an id is the same put, by an editor too, who may not move it; a
-  rollback is n+1 audited as one; a pin holds over a later put and only the owner sets it; the
-  editor's read; a preview served over its base, for whoever may put; an upload handle into
-  MinIO, spent once, its objects gone, another's refused, a wrong size refused; a refused
-  version leaves no object (a store refusal midway, and a quota).
-- `artifact_shares_test.exs`: a link is the owner's, its token not kept; it gives its role to
-  whoever spends it and nobody else; view cannot put and edit can, and nothing more; expired
-  and revoked links refused and their roles gone; listed with its users, revoked by person,
-  audited without the token; public refused while the setting is off, with a sentence naming
-  it; on, expiry mandatory, view only, marked, stopped by the owner's switch and the setting.
-- `artifact_links_host_test.exs`, over a socket: signed out, to the console with the link;
-  signed in here, the role and the artifact; revoked, nothing; a public link served with no
-  cookie under the policy while both switches are on; a preview rendered and under the policy.
-- `publish_artifact_test.exs` (the tool sends `note`), `gateway/artifacts_test.exs` (a large
-  version by an upload handle into MinIO; `artifact.list` through the daemon), the console's
-  `artifact-versions.test.tsx`, the desktop app's `publish.test.tsx` and
-  `content-security-policy.test.tsx`.
-
-All of the plane's failed on the chunk's tip (`07415ab3`): there was no put, rollback, pin,
-read, preview, upload handle, link or public link.

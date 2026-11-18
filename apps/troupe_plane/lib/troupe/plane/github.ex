@@ -58,6 +58,7 @@ defmodule Troupe.Plane.GitHub do
   alias Troupe.Plane.GitHub.{App, Key, Policy, WebhookSecret}
   alias Troupe.Plane.Identity.Team
   alias Troupe.Plane.Sessions.Session
+  alias Troupe.Protocol.Words
 
   require Logger
 
@@ -1566,7 +1567,7 @@ defmodule Troupe.Plane.GitHub do
 
         stopped = %{
           "at" => now,
-          "reason" => "its cap of #{cap} #{plural(cap, "push", "pushes")}",
+          "reason" => "its cap of #{Words.count(cap, "push", "pushes")}",
           "cap" => "pushes"
         }
 
@@ -1579,9 +1580,6 @@ defmodule Troupe.Plane.GitHub do
 
   defp change_record(key, _value, _record, _session, _now),
     do: {:error, "#{key} is not one this takes in that shape"}
-
-  defp plural(1, one, _many), do: one
-  defp plural(_n, _one, many), do: many
 
   # The checks that failed, by name: what a person reading the run sees first. Bounded,
   # since the names are the repository's CI's to choose.
@@ -1601,16 +1599,14 @@ defmodule Troupe.Plane.GitHub do
 
   defp object?(name), do: is_binary(name) and Regex.match?(@object, name)
 
-  @doc """
-  Whether `branch` is one a session may push: under `troupe/`, and a name git takes as a
-  branch, with nothing that could be read as an option or climb out of `refs/heads/`.
-  """
+  # Whether `branch` is one a session may push: under `troupe/`, and a name git takes as a
+  # branch, with nothing that could be read as an option or climb out of `refs/heads/`.
   @spec troupe_branch?(term()) :: boolean()
-  def troupe_branch?("troupe/" <> rest = branch) when rest != "" do
+  defp troupe_branch?("troupe/" <> rest = branch) when rest != "" do
     match?({:ok, _}, ref(branch)) and not String.contains?(branch, "@{")
   end
 
-  def troupe_branch?(_branch), do: false
+  defp troupe_branch?(_branch), do: false
 
   defp audit({step, data}, session, actor) do
     {:ok, _} =

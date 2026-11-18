@@ -8,7 +8,6 @@ paths:
   - scripts/decision-citations.exs
   - .github/workflows/ci.yml
   - .github/workflows/dev-check.yml
-  - docs/developer/conventions.md
 gist: A change adds no `Decision N` to code (counted per file against the merge base); existing ones go when their file is touched; docs may cite
 ---
 
@@ -48,10 +47,3 @@ way round: a document may name a symbol or a path, and a symbol names no documen
   gone. A committed count that may only fall: every pull request that removes a citation
   would edit it, and two such pull requests would conflict there, as the decision logs
   did (Decision 790). A check of the diff's added lines: it fails a rewrap.
-
-Proof: `apps/troupe_protocol/test/mix/tasks/troupe.decisions_test.exs` (a citation added
-to a file fails, naming the file, the number and the line; the invariant written instead
-passes; a citation rewrapped across comment lines and committed keeps its count and
-passes; one moved to another file, untracked, fails for each number of its list; a
-document citing anything passes), and the script run against the chunk's tip, shown in
-the pull request.

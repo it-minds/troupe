@@ -6,29 +6,11 @@ status: accepted
 issue: 58
 paths:
   - apps/troupe_protocol/lib/troupe/protocol/relay.ex
-  - apps/troupe_protocol/lib/troupe/protocol/endpoint.ex
-  - apps/troupe_protocol/lib/troupe/protocol/event.ex
-  - apps/troupe_protocol/lib/troupe/protocol/client.ex
   - apps/troupe_gateway/lib/troupe/gateway/remote.ex
   - apps/troupe_gateway/lib/troupe/gateway/remote/viewer.ex
-  - apps/troupe_gateway/lib/troupe/gateway/connection.ex
-  - apps/troupe_gateway/lib/troupe/gateway/dispatch.ex
   - apps/troupe_gateway/lib/troupe/gateway/plane.ex
   - apps/troupe_plane/lib/troupe/plane/remote.ex
   - apps/troupe_plane/lib/troupe/plane/remote/*.ex
-  - apps/troupe_plane/lib/troupe/plane/harness.ex
-  - apps/troupe_plane/lib/troupe/plane/web/router.ex
-  - apps/troupe_plane/priv/repo/migrations/20261018000921_remote_sessions.exs
-  - apps/troupe_core/lib/troupe/commands.ex
-  - apps/troupe_core/lib/troupe/agent/server.ex
-  - clients/tui/lib/troupe/client/steering.ex
-  - clients/tui/lib/troupe/ui/tui/server.ex
-  - clients/gui/packages/client/src/remote.ts
-  - clients/gui/packages/client/src/fleet.ts
-  - clients/gui/apps/desktop/src/views/Remote.tsx
-  - clients/gui/apps/desktop/src/hooks.ts
-  - clients/gui/apps/console/src/views/Remote.tsx
-  - PROTOCOL.md
 symbols:
   - Troupe.Protocol.Relay
   - Troupe.Gateway.Remote
@@ -39,8 +21,7 @@ gist: "Laptop dials /v1/relay, nothing listens; share made at offer time, laptop
 #58, slice 1. The maintainer decided on 2026-10-18 that the first slice is full steering: a
 laptop's daemon offers a session to the plane, and its owner and the people they share it
 with can, from another device (the desktop app or the console), follow it, answer its
-approvals and questions, send prompts, cancel a turn and switch its agent. This records how,
-and what is left.
+approvals and questions, send prompts, cancel a turn and switch its agent.
 
 ## One connection, dialled by the laptop
 
@@ -154,56 +135,3 @@ for one session, at one role, with the relay's own audience (`troupe-relay`), so
 pod and no `/rpc`; at most fifteen minutes, renewed with `remote.open` again and `auth.refresh`
 on the open socket, which the plane answers itself. The plane takes `auth` out of a viewer's
 `initialize` before relaying it.
-
-## The clients
-
-- **The terminal**: `/steer` says whether the session is offered and who is steering;
-  `/steer on [person[:observe] ...]` offers it, an email to steer and `:observe` to follow;
-  `/steer off` withdraws it (`Troupe.Client.Steering`).
-- **The desktop app**: a local session's head has *Steer from elsewhere*, then *Offered ·
-  Online* with the people steering, *Share* and *Withdraw*. Its list has laptops' sessions
-  as a `remote` kind, *Remote*, from the plane's `remote.list`, with *Offline since …* for an
-  away laptop; this computer's own offered session stays its own row. Opening one attaches
-  through `remote.open` exactly as a pod session attaches through `session.open`, and the
-  head says *On Ada's laptop · Online*. Its approvals offer *Allow* and *Deny* and not the
-  session-wide allow. A person's input sent from another device is drawn with *from another
-  device*.
-- **The console**: Sessions lists *Offered to you from laptops* apart from the
-  administrative table, steered as the person and never as an administrator; opening one
-  follows the transcript and answers its approvals (once) and questions, sends a prompt,
-  stops a turn and switches its agent.
-- **The laptop shows who is steering**: the session's listing carries `remote.steering`,
-  the people attached through the plane now, and presence names them as anybody attached is.
-
-## Limits, and later slices
-
-- The daemon's plane token is a client's (Decision 764): with no client signed in on the
-  laptop to renew it, the connection ends at the token's expiry and the session is offline
-  until one links again. A daemon that renews its own sign-in is a later slice.
-- The console is an administrator's app; a person with no administrative role steers from
-  the desktop app. A person's console of their own is later.
-- Admins forbidding remote steering per team (#58's open question) is not in this slice.
-- No VS Code half: a TUI feature stays the TUI's.
-
-## Proof
-
-- `apps/troupe_protocol/test/troupe/protocol/relay_test.exs`: steering at `control`,
-  reading at `observe`, the laptop's methods and another session refused, `allow_session`
-  refused, the narrower role.
-- `apps/troupe_gateway/test/troupe/gateway/remote_test.exs`, against `FakeRelay`: offered
-  over one connection the daemon dials, the listing says so; a private session refused;
-  nothing offered without a token; an unknown person refused and nothing recorded; the owner
-  steering remotely, the transcript writing their input `via: "plane"`, a cancel; a shared
-  person answering an approval once, `allow_session` refused; the daemon holding a person
-  to its own record whatever the plane relays, and closing one it never shared with; only
-  the session and nothing of the laptop; the listing naming who steers; a withdrawal ending
-  every view at once; a drop ending the views, the daemon dialling again and offering only
-  what it still does; a fresh token renewing the connection where it stands.
-- `apps/troupe_plane/test/troupe/plane/remote_test.exs`, a laptop over a real socket: the
-  owner and the shared find it, nobody else; an unknown person refused by name; another
-  person's session refused; a page refused at `/v1/relay`; a shared person's messages
-  relayed checked, a token never reaching the laptop, a renewal answered by the plane; an
-  observer held to it on the plane; a plane token refused at the viewer's door; a withdrawal
-  ending every view; an away laptop offline since then with nothing queued, and back again.
-- `clients/tui/test/troupe/steer_command_test.exs`; `clients/gui/packages/client/test/remote.test.ts`;
-  `clients/gui/apps/desktop/test/remote-sessions.test.tsx`; `clients/gui/apps/console/test/remote.test.tsx`.

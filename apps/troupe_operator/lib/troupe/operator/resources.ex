@@ -1035,6 +1035,7 @@ defmodule Troupe.Operator.Resources do
       ] ++
         model_env("TROUPE_MODEL", profile.llm_model) ++
         model_env("TROUPE_SMALL_MODEL", profile.llm_small_model) ++
+        max_tokens_env(profile) ++
         prices_env(profile)
 
     key =
@@ -1059,6 +1060,13 @@ defmodule Troupe.Operator.Resources do
 
   defp model_env(_name, nil), do: []
   defp model_env(name, value), do: [%{"name" => name, "value" => value}]
+
+  # The profile's output cap, which a session on the pod asks no model call past; absent,
+  # the pods ask for the harness's default.
+  defp max_tokens_env(%Profile{llm_max_tokens: tokens}) when is_integer(tokens),
+    do: [%{"name" => "TROUPE_MAX_TOKENS", "value" => Integer.to_string(tokens)}]
+
+  defp max_tokens_env(_profile), do: []
 
   # The profile's prices, as the `models.prices` a pod's config reads from
   # `TROUPE_MODEL_PRICES` (Decision 689): a gateway streaming a response says nothing of

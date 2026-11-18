@@ -6,24 +6,11 @@ status: accepted
 issue: 248
 supersedes: [649, 696]
 paths:
-  - apps/troupe_core/lib/troupe/memory.ex
   - apps/troupe_core/lib/troupe/memory/facts.ex
   - apps/troupe_core/lib/troupe/memory/facts/store.ex
   - apps/troupe_core/lib/troupe/session/memory.ex
   - apps/troupe_core/lib/troupe/tools/recall.ex
-  - apps/troupe_core/lib/troupe/instructions.ex
-  - apps/troupe_core/lib/troupe/agent/server.ex
-  - apps/troupe_core/lib/troupe/application.ex
-  - apps/troupe_core/lib/troupe/onboard/notice.ex
-  - apps/troupe_core/lib/troupe/bench/memory.ex
-  - apps/troupe_core/priv/agents/explore.md
-  - apps/troupe_core/priv/agents/plan.md
-  - apps/troupe_core/priv/agents/reviewer.md
-  - apps/troupe_core/priv/agents/orchestrate.md
-  - apps/troupe_core/test/troupe/memory/facts_test.exs
-  - apps/troupe_core/test/troupe/tools/recall_test.exs
-  - apps/troupe_core/test/troupe/memory_test.exs
-  - apps/troupe_core/test/troupe/tools/remember_test.exs
+  - apps/troupe_core/lib/troupe/memory.ex
 symbols:
   - Troupe.Memory.Facts
   - Troupe.Memory.Facts.Store
@@ -34,13 +21,6 @@ symbols:
   - Troupe.Tools.Recall
 gist: "Facts in .troupe/memory/facts.jsonl, hashes Troupe's, status on read; prompt = commands+conventions+recall line; memory.md generated, edits read back"
 ---
-
-Issue #248, Options 1 and 2, as the maintainer chose them for 0.10.0. The brief was prose
-a model wrote, prepended to every prompt with "treat it as correct", and stale only by age
-or when the tracked-file count moved by a tenth: on the chunk's tip a brief whose command
-rested on `mix.exs`'s `check` alias stayed `fresh` after the alias changed, and the next
-prompt gave the old command with nothing said (the reproduction, kept in the slot's
-scratch). Now:
 
 - **A fact is a record** (`Troupe.Memory.Facts`): `id`, `kind` (`command`, `convention`,
   `overview`, `layout`, `note`, `negative`), `claim`, `scope` (a glob or null), `anchors`
@@ -146,25 +126,3 @@ scratch). Now:
   maps above plus `"status"` when read. `core/1`'s facts also carry `changed`, `gone` and
   `changed_at` for the prompt. U26 writes facts from `remember` and the librarian, raises
   the survey to 2, and adds `facts` and `generated` to `memory.get`.
-- **Proof.** `Troupe.Memory.FactsTest`: #248's slice-1 done-definition (a `command` fact
-  anchored on `mix.exs`, its `check` alias edited within the second it was hashed, the next
-  prompt and a real session's system prompt saying "may no longer be true" and the brief
-  `stale`), which failed on the chunk's tip; the hashes, head, evidence, id, times and the
-  line's field order; every refused anchor, and anchors in the file pointing out of the
-  repository read as `missing` with nothing read; the four statuses; the cache by size and
-  mtime; 25 concurrent writes landing, one process per repository, and a killed store
-  restarted with the facts; a torn line and another writer's line; the view and its
-  deletion with the last fact; a person's edit read back (changed, added and taken-out
-  items, an unknown heading, a multi-line item kept with its id); today's five-section
-  brief migrated with every line of text in the view; an unstamped brief beside facts; the
-  prompt's core, marks, recall line and cap; recall by words, kind, path and scope, and its
-  order; due with no facts, a moved command, by age, and not for a moved layout fact, fifty
-  new files, or a move the last check already saw; a view's claims of many lines, lists
-  and fences reading back as themselves. `Troupe.Tools.RecallTest` (the tool's answer, and
-  the line named to `build` and `plan` and not to a workspace agent without the tool),
-  `Troupe.MemoryTest`, `Troupe.Tools.RememberTest` (a note is the next session's to recall;
-  the stamp and the hold as before, a hold not past a change after the build; outside a
-  git repository neither `refresh_due?/2` nor `brief.due` asks for a librarian, an absent
-  or a stale brief alike, and both do once the directory is one), `Troupe.Gateway.MemoryTest`
-  (`refresh_due` false over the wire outside a repository), and the offline bench's
-  `memory_stale_anchor` scenario.

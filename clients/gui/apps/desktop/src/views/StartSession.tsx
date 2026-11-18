@@ -25,12 +25,14 @@ import type { JSX, KeyboardEvent as ReactKeyboardEvent, ReactNode } from "react"
 import {
   LOCAL_DOWN_SENTENCE,
   TroupeRpcError,
+  ago,
   andList,
   autoPickProfile,
   ceilingSentence,
   chosenTeam,
   cleanMessage,
   defaultProfileAgent,
+  errorText,
   firstLine,
   fullHouseSentence,
   pickLine,
@@ -43,11 +45,10 @@ import {
   tokensSentence,
   whoCanOpen,
 } from "@troupe/client";
-import type { AgentRow, AuthSession, DaemonClient, FleetRow, NewSessionWhere, ProfileOffering, SessionKind } from "@troupe/client";
+import type { AgentRow, Attachment, AuthSession, DaemonClient, FleetRow, NewSessionWhere, ProfileOffering, SessionKind } from "@troupe/client";
 import { useProfiles } from "../hooks";
 import { prefs } from "../shell";
 import { useChooseFolder } from "./ChooseFolder";
-import { relative } from "./bits";
 import { Mask } from "./brand";
 
 type DaemonStatus = "unsupported" | "searching" | "absent" | "connected" | "error";
@@ -451,7 +452,7 @@ export function StartSession({
 
           {shownPicker === "folder" && local && daemon && (
             <PickerPanel title="WHICH FOLDER" hint="RECENT">
-              <LocalControls
+              <FolderOptions
                 daemon={daemon}
                 linked={linked}
                 folder={folder}
@@ -679,7 +680,7 @@ function Option({
  * A session on this computer: the folder (recent ones, Choose…, a typed path), whether it
  * gets its own checkout, watch mode, and private where the daemon can seal one.
  */
-function LocalControls({
+function FolderOptions({
   daemon,
   linked,
   folder,
@@ -797,7 +798,7 @@ function recentSessions(rows: FleetRow[], me: string | null): Recent[] {
         folder,
         profile: local ? null : r.profile,
         agent: local ? r.profile : typeof raw.agent === "string" ? raw.agent : null,
-        when: Number.isNaN(at) ? "" : relative(at),
+        when: Number.isNaN(at) ? "" : ago(at),
       };
     });
 }
@@ -826,13 +827,6 @@ type SetCasting = (patch: Partial<Casting>) => void;
 
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
 
-interface PlaneCreate {
-  session_id: string;
-  state?: string;
-  retry_after_ms?: number;
-  token?: string;
-}
-
 /**
  * A start on the platform: the create, and while the plane says the session waits for a
  * place, `token.mint` again each `retry_after_ms` until it is placed. The wait is shown,
@@ -847,18 +841,20 @@ async function castOnPlatform(
   onCeiling: (reason: string) => void,
   onChooseTeam: (teams: string[]) => void,
 ): Promise<void> {
-  let answer: PlaneCreate;
+  let answer: Attachment;
   try {
-    answer = await auth.rpc<PlaneCreate>("session.create", {
-      profile: prof.name,
-      // The sentence says everyone on the profile's team can open it, so it is a team's.
-      visibility: "team",
-      // Named only where the person chose: with one team of theirs the plane takes it.
-      ...(ask.team ? { team: ask.team } : {}),
-      ...(ask.agent ? { agent: ask.agent } : {}),
-      ...(ask.title ? { title: ask.title } : {}),
-      ...(ask.prompt ? { prompt: ask.prompt } : {}),
-    });
+    answer = await auth.withToken((plane, token) =>
+      plane.createSession(token, {
+        profile: prof.name,
+        // The sentence says everyone on the profile's team can open it, so it is a team's.
+        visibility: "team",
+        // Named only where the person chose: with one team of theirs the plane takes it.
+        ...(ask.team ? { team: ask.team } : {}),
+        ...(ask.agent ? { agent: ask.agent } : {}),
+        ...(ask.title ? { title: ask.title } : {}),
+        ...(ask.prompt ? { prompt: ask.prompt } : {}),
+      }),
+    );
   } catch (e) {
     const teams = teamsToChoose(e);
     if (teams) {
@@ -877,7 +873,7 @@ async function castOnPlatform(
     await sleep(Math.max(castingTiming.retryFloorMs, answer.retry_after_ms ?? 2000));
     if (!alive()) return;
     try {
-      answer = await auth.rpc<PlaneCreate>("token.mint", { session_id: id });
+      answer = await auth.withToken((plane, token) => plane.mintToken(token, id));
     } catch (e) {
       set({ failed: refusal(e), waiting: false });
       return;
@@ -910,13 +906,10 @@ async function castHere(
   }
 }
 
-/** A refusal in one line: the plane's or the daemon's own sentence where it gave one. */
+/** A refusal in one line, starting as a sentence does: the plane's or the daemon's own where it gave one. */
 function refusal(e: unknown): string {
-  if (e instanceof TroupeRpcError) {
-    const reason = e.data?.["reason"];
-    if (typeof reason === "string" && reason) return reason.charAt(0).toUpperCase() + reason.slice(1);
-  }
-  return e instanceof Error ? e.message : String(e);
+  const said = errorText(e);
+  return said.charAt(0).toUpperCase() + said.slice(1);
 }
 
 /**
@@ -1047,7 +1040,7 @@ function useWorkspaceAgents(daemon: DaemonClient | null, workspace: string): { r
       void daemon
         .listAgents(workspace)
         .then((r) => live && setRows(r.agents))
-        .catch((e: unknown) => live && setError(e instanceof Error ? e.message : String(e)));
+        .catch((e: unknown) => live && setError(errorText(e)));
     }, 250);
     return () => {
       live = false;

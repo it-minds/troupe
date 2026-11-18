@@ -152,7 +152,7 @@ describe("the gallery", () => {
     expect(img.alt).toBe("Weekly figures");
     expect(card("Weekly figures").firstElementChild!.firstElementChild).toBe(img);
     // The kind and size stay on it, and nothing else of the artifact is in the app.
-    expect(card("Weekly figures").textContent).toContain("html · 1.2 KB");
+    expect(card("Weekly figures").textContent).toContain("html · 1.2 KiB");
     expect(gallery().querySelector("iframe")).toBeNull();
     expect(externalResources().filter((u) => u.includes("artifacts.example.test"))).toEqual([picture]);
 
@@ -221,6 +221,33 @@ describe("the gallery", () => {
     await waitFor(() => (aside()?.querySelectorAll(".versions li").length ?? 0) === 1, "its version");
     expect(aside()!.textContent).not.toContain("It goes on");
     expect(aside()!.textContent).not.toContain("Versions older than");
+  });
+
+  it("says on its page what the artifacts host blocks in the version it serves, with the list on request", async () => {
+    Object.assign(daemon.artifacts![0]!, { blocked_count: 2 });
+    daemon.artifactBlocked.set("art-weekly", [
+      { file: "index.html", kind: "stylesheet", reference: "https://cdn.example.test/lib.css", line: 3 },
+      { file: "index.html", kind: "inline_script", reference: "<script> go()", line: 9 },
+    ]);
+    await signedIn();
+    await openGallery();
+    const card = (title: string) => waitFor(() => [...gallery().querySelectorAll<HTMLButtonElement>(".card")].find((c) => c.textContent?.includes(title)), title);
+
+    (await card("Weekly figures")).click();
+    const details = await waitFor(aside, "the aside");
+    await sees("This version references 2 things the artifacts host blocks, so it may look or work broken. An artifact may load only its own files.");
+    const list = await waitFor(() => details.querySelector<HTMLDetailsElement>(".note.blocked details"), "the list on request");
+    expect(list.open).toBe(false);
+    expect(list.querySelector("summary")?.textContent).toBe("What is blocked");
+    expect([...list.querySelectorAll("li")].map((li) => li.textContent)).toEqual([
+      "index.html:3 https://cdn.example.test/lib.css (a stylesheet from another site)",
+      "index.html:9 <script> go() (an inline script)",
+    ]);
+
+    // One the host blocks nothing of says nothing of it.
+    (await card("Core runbook")).click();
+    await waitFor(() => aside()?.textContent?.includes("Core runbook") ?? false, "its aside");
+    expect(aside()!.querySelector(".note.blocked")).toBeNull();
   });
 
   it("gives its owner a view link, a version, a pin, a rollback and a revoke", async () => {

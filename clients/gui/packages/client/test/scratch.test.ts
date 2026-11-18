@@ -6,7 +6,7 @@
 
 import assert from "node:assert/strict";
 import { after, afterEach, before, beforeEach, describe, it } from "node:test";
-import { DaemonClient, emptyTranscript, fold, scratchLine, scratchSize } from "../src/index.js";
+import { DaemonClient, bytes, emptyTranscript, fold, scratchVersion } from "../src/index.js";
 import type { DurableEvent, Entry, TranscriptState, TroupeEvent } from "../src/index.js";
 import { FakeDaemon } from "./support/daemon.js";
 import { startHarness, type Harness } from "./support/harness.js";
@@ -19,6 +19,14 @@ function durable(type: string, data: Record<string, unknown> = {}, agent = ["roo
 }
 const foldAll = (events: TroupeEvent[], from: TranscriptState = emptyTranscript) => events.reduce((s, e) => fold(s, e), from);
 const cards = (state: TranscriptState) => state.entries.filter((e): e is Extract<Entry, { kind: "scratch" }> => e.kind === "scratch");
+
+/** A card in one line, its title, name, size and which write it is, each once it is known. */
+function scratchLine(card: { title: string; name: string; size: number | undefined; version: number | undefined }): string {
+  const size = card.size === undefined ? undefined : bytes(card.size);
+  return [card.title || card.name || "a document", card.name && card.name !== card.title ? card.name : undefined, size, scratchVersion(card.version)]
+    .filter((part): part is string => Boolean(part))
+    .join(" · ");
+}
 
 const PLAN = "# Migration plan\n\n" + "- move the ledger table\n".repeat(97);
 const PLAN_SIZE = Buffer.byteLength(PLAN);
@@ -44,20 +52,20 @@ describe("the scratchpad in the fold (issue #472)", () => {
     const early = cards(running)[0]!;
     assert.equal(early.version, undefined);
     assert.equal(early.size, PLAN_SIZE);
-    assert.equal(scratchLine(early), `Migration plan · plan.md · ${scratchSize(PLAN_SIZE)}`);
+    assert.equal(scratchLine(early), `Migration plan · plan.md · ${bytes(PLAN_SIZE)}`);
 
     const state = foldAll([updated!, completed!], running);
     assert.deepEqual(state.entries.map((e) => e.kind), ["scratch"], "one card, and no tool call beside it");
     const card = cards(state)[0]!;
     assert.equal(card.ok, true);
     assert.equal(card.version, 1);
-    assert.equal(scratchLine(card), "Migration plan · plan.md · 2.3 KB · new");
+    assert.equal(scratchLine(card), "Migration plan · plan.md · 2.3 KiB · new");
     assert.ok(!JSON.stringify(state.entries).includes("move the ledger table"), "the document's text is in no entry");
 
     // Written again under the same name: the next card says which write it was.
     const again = foldAll(show("c2", { name: "plan.md", title: "Migration plan, revised", content: "# Migration plan\n\nDone.\n" }, 2), state);
     assert.equal(scratchLine(cards(again)[1]!), "Migration plan, revised · plan.md · 24 bytes · updated 2 times");
-    assert.equal(scratchLine(cards(again)[0]!), "Migration plan · plan.md · 2.3 KB · new", "the first card still says the first write");
+    assert.equal(scratchLine(cards(again)[0]!), "Migration plan · plan.md · 2.3 KiB · new", "the first card still says the first write");
   });
 
   it("keeps the documents in the order each name was first written, at the latest version", () => {
@@ -116,10 +124,10 @@ describe("the scratchpad in the fold (issue #472)", () => {
   });
 
   it("says a size the way a person reads one", () => {
-    assert.equal(scratchSize(1), "1 byte");
-    assert.equal(scratchSize(512), "512 bytes");
-    assert.equal(scratchSize(2_355), "2.3 KB");
-    assert.equal(scratchSize(1_468_006), "1.4 MB");
+    assert.equal(bytes(1), "1 byte");
+    assert.equal(bytes(512), "512 bytes");
+    assert.equal(bytes(2_355), "2.3 KiB");
+    assert.equal(bytes(1_468_006), "1.4 MiB");
   });
 });
 

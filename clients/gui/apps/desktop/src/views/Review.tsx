@@ -14,7 +14,7 @@
 
 import { useCallback, useMemo, useState } from "react";
 import type { JSX } from "react";
-import { rowFromPlane } from "@troupe/client";
+import { errorText, rowFromPlane } from "@troupe/client";
 import type { AdminApi, AuthSession, DaemonClient, FleetRow, SessionRow, TriggerRun } from "@troupe/client";
 import { useAdminQuery } from "../hooks";
 import { InlineApprovals } from "./Approvals";
@@ -68,10 +68,12 @@ export function Review({
     useCallback(async () => {
       // `needs_review: true` is the plane's own filter, so an already-reviewed run is
       // not fetched and then hidden — it is never sent.
-      const r = await auth.rpc<{ sessions: SessionRow[] }>("sessions.list", {
-        origin,
-        ...(showReviewed ? {} : { needs_review: true }),
-      });
+      const r = await auth.withToken((plane, token) =>
+        plane.listSessions(token, {
+          origin,
+          ...(showReviewed ? {} : { needs_review: true }),
+        }),
+      );
       return r.sessions;
     }, [auth, origin, showReviewed]),
     [auth, origin, showReviewed],
@@ -111,10 +113,10 @@ export function Review({
     setBusy(row.id);
     setError(null);
     try {
-      const updated = await auth.rpc<SessionRow>("session.review", { session_id: row.id });
+      const updated = await auth.withToken((plane, token) => plane.reviewSession(token, row.id));
       setReviewed((r) => ({ ...r, [row.id]: updated.reviewed_by ?? auth.me?.subject ?? "you" }));
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errorText(e));
     } finally {
       setBusy(null);
     }

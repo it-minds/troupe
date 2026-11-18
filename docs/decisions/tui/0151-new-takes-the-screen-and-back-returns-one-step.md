@@ -8,9 +8,6 @@ paths:
   - clients/tui/lib/troupe/ui/tui/server.ex
   - clients/tui/lib/troupe/client/daemon.ex
   - clients/tui/lib/troupe/client/remote.ex
-  - clients/tui/test/troupe/new_session_test.exs
-  - clients/tui/test/troupe/command_palette_test.exs
-  - clients/tui/test/support/fake_remote.ex
 symbols:
   - Troupe.Client.fork_session/1
   - Troupe.Client.get_session/2

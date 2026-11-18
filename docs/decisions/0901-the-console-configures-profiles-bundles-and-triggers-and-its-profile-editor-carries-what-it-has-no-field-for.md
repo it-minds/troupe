@@ -11,26 +11,16 @@ paths:
   - clients/gui/apps/console/src/views/bits.tsx
   - clients/gui/apps/console/src/nav.ts
   - clients/gui/apps/console/src/route.ts
-  - clients/gui/apps/console/src/owed.ts
-  - clients/gui/apps/console/test/profiles.test.tsx
-  - clients/gui/apps/console/test/bundles.test.tsx
-  - clients/gui/apps/console/test/triggers.test.tsx
   - clients/gui/packages/client/src/admin.ts
-  - clients/gui/packages/client/test/support/admin.ts
   - clients/gui/scripts/fake-console.ts
-  - docs/admin/console.md
 gist: "Console profile editor sends only its paths over the loaded spec, never plane-written ones; team admins see what the plane answers; trigger put sends what moved"
 ---
 
 #56 slice 3, on Decisions 886 and 892: the console's **Configure** area. Worker profiles,
 configuration bundles and triggers are drawn, and the map no longer marks them as being in
-the previous console. Integrations (the GitHub App), Identity, Policy and settings, and
-Provisioners are slice 4's and later.
+the previous console.
 
 ## Worker profiles
-
-A list (each profile's state from its pods, its pods against what it asked for, its image,
-size, channel and the teams granted it), a profile's page and an editor.
 
 **The page reads every field.** The sections read the paths they know (the model, egress,
 storage class, MCP servers with every setting a row has, the identities at MCP servers, the
@@ -64,23 +54,7 @@ of `provider`, `model`, `smallModel`, `secretRef` or `prices` without `llm.endpo
 the field invalid with the plane's meaning and disables Preview. Prices count although the
 form has no field for them: they are carried from the loaded spec.
 
-Creating is the same editor with a name that is not a profile's already. Deleting is typed by
-the profile's name, after the warning that every team granted it loses it and its sessions turn
-read-only. Each write shows the audit's diff (`profile.put` answers it; `profile.delete` is
-read back, as Decision 892 does).
-
-The provider is a text field and the size class offers standard and heavy: the admin API has
-no method that lists the plane's provider types or size classes, which the LiveView editor
-reads from `Admin` directly. A method for each is a follow-up, so the console can offer the
-protocol's one list as Decision 894 asks.
-
 ## Configuration bundles
-
-The channels are the profiles' channels and stable, each with its current version, what it
-carries and who follows it; another channel opens by name. A channel lists its versions
-newest first; a version reads its agents, skills (with their files), MCP servers (with the
-Secret each credential needs), which profiles use it with the pods that report it and those
-behind, and the plane's diff from the version before (`admin.bundle.preview` with `from`).
 
 Publishing takes the document as the plane does, as JSON, prefilled with the current
 version: validated (`admin.bundle.validate`, whose sentences are shown), then previewed with
@@ -89,19 +63,12 @@ something from a team is typed by the channel's name; otherwise a plain confirm,
 history is append-only. A rollback is publishing an older version's content again, offered
 on that version's page. Retiring is a plain confirm that says what the channel's current
 version becomes. The structured editor the brief asks for (one per agent, skill and server,
-with an edit-source escape hatch) is #594's console half and not this slice.
 
 ## Triggers
 
-A list per team (a platform admin picks the team, a team admin sees theirs), a trigger's page
-with every field the plane keeps and every revision with the document it froze, and a form
-for making and changing one. **A change sends only the fields that moved**: the plane keeps
-what a put on an existing trigger does not send, so the terms and the collaborators, which
-the form does not show, are untouched. Pausing and resuming are plain confirms; deleting is
-typed by its name. The form offers the team's working service principals from
-`admin.principals.list`, which moves out of Identity's owed methods. Running a trigger by hand
-and minting its key stay owed, for slice 4, and a trigger's page links to the previous
-console for both.
+ **A change sends only the fields that moved**: the plane keeps what a put on an existing
+ trigger does not send, so the terms and the collaborators, which the form does not show,
+ are untouched. The form offers the team's working service principals from
 
 ## Gitops
 
@@ -124,16 +91,3 @@ allows them.
 #56 left open whether a slice may remove a LiveView page once the console covers it. It may
 not: every page stays until the last slice and the break-glass decision, so the way in on the
 day the console cannot be used still reaches everything.
-
-## Proof
-
-On the chunk's tip the map marked all three areas as in the previous console and the shell
-test held Worker profiles to the "Not in this console yet" page. `apps/console/test`:
-`profiles.test.tsx` (the editor keeps `mcpIdentities`, `github`, `llm.prices`, a server's
-`secretRef` and `credentialMode` and a field the console does not know, and drops
-`sessionsPerPod`; the `llm` rule at the field with no call made; create and typed delete;
-gitops locked and the missing row's delete), `bundles.test.tsx` and `triggers.test.tsx`
-against the fake plane, whose administrative half now follows `Troupe.Plane.Admin` for
-these methods, their refusals, the gitops lock and the audit. `coverage.test.ts` holds the
-shorter `owed.ts`. In a browser against `pnpm console:fake` (`GITOPS=1` for the lock), as a
-platform admin and a team admin, light and dark, and at 320 px with no sideways scroll.

@@ -8,14 +8,8 @@ supersedes: [827]
 paths:
   - apps/troupe_core/lib/troupe/onboard/notice.ex
   - apps/troupe_core/lib/troupe/onboard/start.ex
-  - apps/troupe_core/priv/agents/librarian.md
   - apps/troupe_gateway/lib/troupe/gateway/dispatch.ex
   - apps/troupe_protocol/lib/troupe/protocol/schema.ex
-  - PROTOCOL.md
-  - apps/troupe_core/test/troupe/onboard/notice_test.exs
-  - apps/troupe_core/test/troupe/onboard/librarian_test.exs
-  - apps/troupe_core/test/troupe/tools/onboard_write_test.exs
-  - apps/troupe_gateway/test/troupe/gateway/onboard_test.exs
   - clients/tui/lib/troupe/client/daemon/start.ex
   - clients/gui/packages/client/src/onboard.ts
   - clients/gui/apps/desktop/src/views/Onboard.tsx
@@ -32,10 +26,7 @@ Issue #516, the chunk's third wave, as the maintainer decided it: at a session's
 first onboarding, then the librarian. Amends Decision 827 in three places (its
 `supersedes` is that part): the librarian no longer onboards, the notice is said at every
 start while something is due rather than once per version, and a start now asks rather
-than only telling the person to run `troupe onboard`. On the chunk's tip a first session
-over a `CLAUDE.md` with no brief started the librarian at once and asked nothing, the
-librarian's first step was an onboarding pass through `onboard_write`, and `onboard.plan`
-was `method_not_found`.
+than only telling the person to run `troupe onboard`.
 
 - **What is due, decided in one place.** `Troupe.Onboard.Notice.onboarding/2`: `first`
   when the workspace has other tools' files, nothing is onboarded and nothing declined
@@ -130,22 +121,3 @@ was `method_not_found`.
   answered, on the same conditions as the terminal UI's (memory on, a git repository, a
   model, `memory_auto_refresh` for the automatic start); the outdated brief's Re-run sits
   behind the same conditions.
-- **Not here.** Onboarding by itself without asking; `onboard.apply` and
-  `onboard.decline` refusing outside a repository (a client calls them only on a plan's
-  items, and `troupe onboard` still runs anywhere it is asked to); the bench (slice 8).
-- **Proof.** `Troupe.Gateway.OnboardTest` (the plan's `first`, items with ids, the same
-  ids again, the brief `first`, nothing written; apply with `all` writing the rule and not
-  the new `AGENTS.md`, then due `none`, then the `AGENTS.md` by its id and the version
-  recorded; an unknown id refused; a changed source refused by id; decline with `all`
-  remembered; `outdated` until declined and then recorded; `memory.decline`; a worker's
-  machine refusing; the scopes, a `control` connection refused the plan): all eight failed
-  on the chunk's tip with `method_not_found`. `Troupe.Onboard.NoticeTest` (`due`,
-  `brief_due`, `counts` in the event; the event again at the next start until declined,
-  first and outdated and the brief alike, where 827's test asserted the second start was
-  quiet; nothing written in the state directory; `onboarding/2` and `brief/2` with their
-  declines; a directory in no repository with a `.claude/` in it due nothing, traced
-  handing no path under `.claude` to `:file`, and due once it is one),
-  `Troupe.Onboard.LibrarianTest` (no `onboard_write`, no onboarding pass) and
-  `Troupe.Tools.OnboardWriteTest` (the tool through a profile that names it; the
-  librarian and `build` neither offered it nor let call it). The terminal UI's half is
-  TUI Decision 154's proof.

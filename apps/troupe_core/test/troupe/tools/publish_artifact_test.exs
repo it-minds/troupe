@@ -345,6 +345,38 @@ defmodule Troupe.Tools.PublishArtifactTest do
     assert PublishArtifact.description() =~ "`owner`"
   end
 
+  test "says what the artifacts host will block, naming each file and reference, and how to fix it",
+       context do
+    blocked = [
+      %{"file" => "index.html", "kind" => "stylesheet", "reference" => "https://cdn.example.test/lib.css", "line" => 3},
+      %{"file" => "index.html", "kind" => "inline_script", "reference" => "<script> go()", "line" => 9},
+      %{"file" => "app.js", "kind" => "connect", "reference" => "https://api.example.test/items", "line" => 1}
+    ]
+
+    Troupe.Artifacts.install(fn params, _ctx -> {:ok, Map.put(published(params), "blocked", blocked)} end)
+    File.write!(Path.join(context.workspace, "index.html"), "<h1>Weekly</h1>")
+    %{session: session} = start_session(context, steps: [])
+    args = %{"title" => "Weekly", "kind" => "html", "visibility" => "private", "files" => ["index.html"]}
+
+    assert {:ok, said, _} = PublishArtifact.run(args, ctx(session, context))
+
+    assert said =~ "version 1"
+    assert said =~ "The artifacts host will block 3 references:"
+    assert said =~ "index.html: https://cdn.example.test/lib.css (a stylesheet from another site, line 3)"
+    assert said =~ "index.html: <script> go() (an inline script, line 9)"
+    assert said =~ "app.js: https://api.example.test/items (a connection to another site, line 1)"
+    assert said =~ "An artifact may load only its own files; publish a corrected version with id art-abcdefghijklmnop"
+
+    # A page the host blocks nothing of says nothing of it.
+    Troupe.Artifacts.install(fn params, _ctx -> {:ok, Map.put(published(params), "blocked", [])} end)
+    assert {:ok, clean, _} = PublishArtifact.run(args, ctx(session, context))
+    refute clean =~ "will block"
+
+    # And the description says so before the first publish.
+    assert PublishArtifact.description() =~
+             "An artifact may load only its own files: no stylesheet, script, font or image from another site, and no inline script or onclick"
+  end
+
   describe "whom it is for is the person's to say" do
     defp publishing(context, args, opts \\ []) do
       test = self()

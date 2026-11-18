@@ -253,7 +253,7 @@ defmodule Troupe.Plane.PrivateErasureTest do
       assert done["deleting"] == false
     end
 
-    # D71: one `DELETE` a version, inside the call. A thousand took seconds, so twenty
+    # One `DELETE` a version, inside the call. A thousand took seconds, so twenty
     # thousand outlasted the fifteen seconds a daemon waits for its answer
     # (`Troupe.Gateway.Plane`), which then said the plane had not been told.
     @tag timeout: 600_000
@@ -274,11 +274,11 @@ defmodule Troupe.Plane.PrivateErasureTest do
       assert took < @daemon_waits_ms, "answered after #{took} ms"
 
       # Gone, and the device recorded, whether within the call or after it.
-      eventually(fn -> versions(id) == [] and acknowledged?(id, "ada-laptop") end)
+      eventually(fn -> versions(id) == [] and acknowledged?(id, "ada-laptop") end, 30_000, 100)
       assert {:ok, %{"erasures" => []}} = erasures(ada, "ada-laptop")
     end
 
-    # D71: each version's answer was dropped, so a version the store refused was counted
+    # Each version's answer was dropped, so a version the store refused was counted
     # as deleted, the device recorded, and nothing ever tried again.
     test "keeps telling its daemon while the store refuses a version, until it is gone",
          %{ada: ada, root: root} do
@@ -338,7 +338,7 @@ defmodule Troupe.Plane.PrivateErasureTest do
       refute Map.has_key?(answer, "objects_deleted")
 
       # The task's deletion is refused one version, so the device is told again.
-      eventually(fn -> Task.Supervisor.children(Erasure.Tasks) == [] end)
+      eventually(fn -> Task.Supervisor.children(Erasure.Tasks) == [] end, 30_000, 100)
 
       assert {:ok, [%{version_id: version}]} =
                ObjectStore.list_versions(locked, "sessions/#{id}/")
@@ -349,7 +349,7 @@ defmodule Troupe.Plane.PrivateErasureTest do
 
       :ok = hold(locked, held, false)
       assert {:ok, %{"deleting" => true}} = erased(ada, id, "ada-laptop")
-      eventually(fn -> acknowledged?(id, "ada-laptop") end)
+      eventually(fn -> acknowledged?(id, "ada-laptop") end, 30_000, 100)
       assert {:ok, []} = ObjectStore.list_versions(locked, "sessions/#{id}/")
       assert {:ok, %{"erasures" => []}} = erasures(ada, "ada-laptop")
     end
@@ -709,14 +709,6 @@ defmodule Troupe.Plane.PrivateErasureTest do
   end
 
   defp acknowledged?(id, device), do: device in Erasure.tombstone_for(id).applied_by
-
-  defp eventually(check, tries \\ 300) do
-    cond do
-      check.() -> :ok
-      tries == 0 -> flunk("never happened")
-      true -> Process.sleep(100) && eventually(check, tries - 1)
-    end
-  end
 
   # -- the key manager, as an operator and a daemon reach it ------------------
 

@@ -598,7 +598,7 @@ defmodule Troupe.SetupTest do
       assert reason =~ "set a provider up instead"
     end
 
-    # D102: on the chunk's tip `detect/0` read opencode's `auth.json`, which holds keys, and
+    # On the chunk's tip `detect/0` read opencode's `auth.json`, which holds keys, and
     # every `{file:}` a provider's options name, only to list the providers by name.
     test "opencode's providers are named without reading auth.json or a key's file", ctx do
       key_file = Path.join(ctx.base, "portal.key")

@@ -14,7 +14,7 @@
 
 import { useEffect, useState } from "react";
 import type { JSX } from "react";
-import { instructionLayers } from "@troupe/client";
+import { errorText, instructionLayers } from "@troupe/client";
 import type { DaemonClient, InstructionRow, SessionView } from "@troupe/client";
 import { Loading, Table } from "./bits";
 
@@ -45,7 +45,7 @@ export function Instructions({
           setError(null);
           setRows(instructionLayers(c));
         })
-        .catch((e: unknown) => live && setError(e instanceof Error ? e.message : String(e)));
+        .catch((e: unknown) => live && setError(errorText(e)));
     };
     read();
     const stopEvents = view.listen((e) => {

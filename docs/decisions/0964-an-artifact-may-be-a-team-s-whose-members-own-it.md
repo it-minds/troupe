@@ -10,9 +10,6 @@ paths:
   - apps/troupe_plane/lib/troupe/plane/artifacts/artifact.ex
   - apps/troupe_plane/priv/repo/migrations/20261028000964_artifact_owner_team.exs
   - apps/troupe_plane/lib/troupe/plane/harness.ex
-  - apps/troupe_plane/test/troupe/plane/artifact_ownership_test.exs
-  - PROTOCOL.md
-  - docs/user/artifacts.md
 symbols:
   - Troupe.Plane.Artifacts.transfer/4
   - Troupe.Plane.Artifacts.role/2
@@ -92,18 +89,3 @@ administrator's has their teams' own in it.
 - **The quota moving with ownership.** The bytes stay with the team the artifact is for,
   as 953 has it; a team that owns a private artifact counts it against whatever team the
   publish counted it against.
-
-## Proof
-
-`apps/troupe_plane/test/troupe/plane/artifact_ownership_test.exs`: a publish to a team is
-the team's by default and `owner: me` keeps it the person's, `owner: team` with no team to be
-for refused, a team the publisher is not in refused in a publish's words; a member publishes
-a version, retitles, rolls back, pins, moves, shares, unshares, switches public links and
-deletes as an owner (`by: owner`), and the team's administrator too; a private one is seen by
-the team alone, a leaver loses it and the artifact is unchanged; `mine: true` has the team's
-and `shared: true` never does; `owner_team` and `may_transfer` on every row; a transfer by
-the person, by a platform administrator (any to any, back), a take-back by the team's
-administrator and refusals for a member, for a non-owner, for a team the person is not in
-and for `me` on a person's own, each audited; a deleted team hands it back; and the artifacts
-host serves a team's artifact to a member. `artifact_teams_test.exs`'s rules for a person's
-own team artifact, now with `owner: me`.

@@ -20,6 +20,7 @@ defmodule Troupe.LLM.Provider do
 
   alias Troupe.Config
   alias Troupe.LLM.{ProviderType, Request}
+  alias Troupe.Protocol.Words
 
   @callback stream(Request.t(), reply_to :: pid(), ref :: reference()) :: :ok
 
@@ -84,6 +85,20 @@ defmodule Troupe.LLM.Provider do
           {:ok, term()} | {:error, term()}
   def with_retries(fun, max_retries) do
     do_retry(fun, 0, max_retries)
+  end
+
+  @doc """
+  An HTTP adapter's `stream/3`: `attempt` run under `with_retries/2`, and `reply_to` told
+  how it ended, `{:llm_done, ref, response}` or `{:llm_error, ref, reason}`.
+  """
+  @spec reply(pid(), reference(), non_neg_integer(), (-> term())) :: :ok
+  def reply(reply_to, ref, max_retries, attempt) do
+    case with_retries(attempt, max_retries) do
+      {:ok, response} -> send(reply_to, {:llm_done, ref, response})
+      {:error, reason} -> send(reply_to, {:llm_error, ref, reason})
+    end
+
+    :ok
   end
 
   # How long a single wait may be: longer than a provider's own rate-limit window would
@@ -285,7 +300,7 @@ defmodule Troupe.LLM.Provider do
   # Nothing came, not a byte: the host, not the model, is the usual reason, and `troupe
   # doctor` tries the same host with the smallest request it takes.
   defp sentence({:first_byte, host, ms}) do
-    "the model at #{host} sent nothing for #{wait(ms)}: the address, the key or a proxy " <>
+    "the model at #{host} sent nothing for #{Words.duration(ms)}: the address, the key or a proxy " <>
       "between here and there is the usual reason; `troupe doctor` tries a small request"
   end
 
@@ -294,10 +309,6 @@ defmodule Troupe.LLM.Provider do
 
   defp transport(reason) when is_atom(reason), do: Atom.to_string(reason)
   defp transport(reason), do: inspect(reason)
-
-  defp wait(1_000), do: "1 second"
-  defp wait(ms) when rem(ms, 1_000) == 0, do: "#{div(ms, 1_000)} seconds"
-  defp wait(ms), do: "#{ms} ms"
 
   defp text(detail) when is_binary(detail), do: detail
   defp text(detail), do: inspect(detail)

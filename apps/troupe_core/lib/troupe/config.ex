@@ -57,6 +57,7 @@ defmodule Troupe.Config do
   alias Troupe.LLM.Catalog.Store
   alias Troupe.LLM.{Endpoint, ProviderType}
   alias Troupe.MCP.{OAuth, Server}
+  alias Troupe.Protocol.Words
 
   require Logger
 
@@ -424,8 +425,8 @@ defmodule Troupe.Config do
   @doc """
   Set one top-level key in a config file and answer the path written: the key's old
   spellings dropped, and the file as it was kept beside it as `.previous`, all through
-  `write_file/2`, the writer every settings screen uses. A file that is not YAML is left
-  alone and the reason answered; a missing one is made.
+  `Troupe.Config.Migrate.write/2`, the writer every settings screen uses. A file that is
+  not YAML is left alone and the reason answered; a missing one is made.
 
   The file is edited, not rewritten: the key's own line changes, or is added after the
   last key, and every other line, comments included, stays as it was.
@@ -446,10 +447,6 @@ defmodule Troupe.Config do
       {:error, issue} -> {:error, Issue.format(issue)}
     end
   end
-
-  @doc "Whether a project's file may set the key at `path` only in a trusted workspace."
-  @spec gated?([String.t()]) :: boolean()
-  def gated?(path), do: match?(%{scope: :trusted}, Schema.at(path))
 
   @doc """
   Whether a workspace is on the user file's `trusted_workspaces`, so its own files may
@@ -591,9 +588,12 @@ defmodule Troupe.Config do
   defp string(_value), do: nil
 
   # The schema has already said the value is one of these.
-  @enum_atoms Enum.map(ProviderType.all(), & &1.name) ++ [:api_key, :bearer, :wait, :deny]
   defp enum_atom(value) when is_atom(value), do: value
-  defp enum_atom(value), do: Enum.find(@enum_atoms, &(Atom.to_string(&1) == value))
+  defp enum_atom(value), do: Enum.find(enum_atoms(), &(Atom.to_string(&1) == value))
+
+  # Read when a value is, not while this module compiles, so that the config does not
+  # recompile with the provider types and everything they reach.
+  defp enum_atoms, do: Enum.map(ProviderType.all(), & &1.name) ++ [:api_key, :bearer, :wait, :deny]
 
   # -- the command line -----------------------------------------------------------
 
@@ -885,9 +885,9 @@ defmodule Troupe.Config do
     end
   end
 
-  @doc "What a named provider declares about one addressable model, or `nil`."
+  # What a named provider declares about one addressable model, or `nil`.
   @spec model_spec(t(), String.t()) :: model() | nil
-  def model_spec(%__MODULE__{} = config, id) when is_binary(id) do
+  defp model_spec(%__MODULE__{} = config, id) when is_binary(id) do
     case split_model(config, id) do
       {%{models: models}, bare} -> Map.get(models, bare)
       {nil, _bare} -> nil
@@ -1322,17 +1322,7 @@ defmodule Troupe.Config do
 
   defp ago(nil), do: "never"
 
-  defp ago(%DateTime{} = at) do
-    case DateTime.diff(DateTime.utc_now(), at) do
-      s when s < 60 -> "just now"
-      s when s < 3_600 -> plural(div(s, 60), "minute") <> " ago"
-      s when s < 86_400 -> plural(div(s, 3_600), "hour") <> " ago"
-      s -> plural(div(s, 86_400), "day") <> " ago"
-    end
-  end
-
-  defp plural(1, word), do: "1 " <> word
-  defp plural(n, word), do: "#{n} #{word}s"
+  defp ago(%DateTime{} = at), do: Words.ago(at)
 
   defp describe_choices(config, sources, answered) do
     case models(config) do
@@ -1504,12 +1494,10 @@ defmodule Troupe.Config do
   def interpolate(list) when is_list(list), do: Enum.map(list, &interpolate/1)
   def interpolate(other), do: other
 
-  @doc """
-  One provider's `models:` block as model specs. Public because
-  `Troupe.Config.OpenCode` maps opencode's own shape onto the same specs.
-  """
+  # One provider's `models:` block as model specs. Public because
+  # `Troupe.Config.OpenCode` maps opencode's own shape onto the same specs.
   @spec parse_models(term()) :: %{optional(String.t()) => model()}
-  def parse_models(map) when is_map(map) do
+  defp parse_models(map) when is_map(map) do
     Map.new(map, fn {name, m} ->
       m = if is_map(m), do: m, else: %{}
       name = to_string(name)
@@ -1525,7 +1513,7 @@ defmodule Troupe.Config do
     end)
   end
 
-  def parse_models(_other), do: %{}
+  defp parse_models(_other), do: %{}
 
   # Only where the file says it (Decision 871), so every other entry is what it was.
   defp put_flag(map, key, value) when is_boolean(value), do: Map.put(map, key, value)

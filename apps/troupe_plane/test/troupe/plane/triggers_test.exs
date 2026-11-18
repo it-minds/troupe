@@ -739,14 +739,6 @@ defmodule Troupe.Plane.TriggersTest do
     :ok = :gen_tcp.send(pod.socket, [Jason.encode!(notification), ?\n])
   end
 
-  defp eventually(fun, tries \\ 100) do
-    cond do
-      fun.() -> :ok
-      tries == 0 -> flunk("the condition never held")
-      true -> Process.sleep(50) && eventually(fun, tries - 1)
-    end
-  end
-
   # A trigger's target on an address of this machine's that is not loopback, which the
   # plane will not post to.
   defp receiver do

@@ -9,23 +9,10 @@ paths:
   - apps/troupe_plane/lib/troupe/plane/github/policy.ex
   - apps/troupe_plane/lib/troupe/plane/github.ex
   - apps/troupe_plane/lib/troupe/plane/identity/team.ex
-  - apps/troupe_plane/lib/troupe/plane/admin.ex
-  - apps/troupe_plane/lib/troupe/plane/admin/api.ex
-  - apps/troupe_plane/lib/troupe/plane/harness.ex
-  - apps/troupe_plane/lib/troupe/plane/triggers.ex
-  - apps/troupe_plane/lib/troupe/plane/fleet/extends.ex
-  - apps/troupe_plane/priv/repo/migrations/20261016000911_team_github.exs
-  - apps/troupe_plane/test/support/fake_github.ex
-  - apps/troupe_plane/test/troupe/plane/github_policy_test.exs
   - apps/troupe_worker/lib/troupe/worker/github.ex
   - apps/troupe_worker/lib/troupe/worker/github/api.ex
   - apps/troupe_worker/lib/troupe/worker/github/secrets.ex
   - apps/troupe_worker/lib/troupe/worker/git_credentials.ex
-  - apps/troupe_worker/test/troupe/worker/github_fix_loop_test.exs
-  - charts/troupe/crds/workerprofile.yaml
-  - clients/gui/apps/console/src/views/Profiles.tsx
-  - clients/gui/apps/console/src/views/Team.tsx
-  - docs/admin/github.md
 symbols:
   - Troupe.PushPaths.denied/2
   - Troupe.Plane.GitHub.Policy.listed/3
@@ -39,13 +26,8 @@ gist: "Team lists a session's repos; public refused unless profile allows; defau
 ---
 
 Issue #147, slice 4, as the maintainer decided it on 2026-10-16: private by default, a
-path denylist on the profile checked on every push, per-team repository lists (#653), caps,
-and installation tokens revoked at dormancy. Slices 1 to 3 (Decisions 885, 891 and 905)
-gave a session a repository, a fix loop ending in a draft pull request, and runs started
-from GitHub; nothing bounded where a run could push or what it carried. On the chunk tip a
-session pushed `.env` to a public repository like any other file, every team named any
-repository the App's installations covered, a run's pushes had no limit but three red
-rounds, and a dormant session's tokens kept working until their hour ran out.
+path denylist on the profile checked on every push, per-team repository lists (#653),
+caps, and installation tokens revoked at dormancy.
 
 - **Two owners, the stricter holds.** The worker profile's `spec.github` (a platform
   admin's) takes `allowPublic`, `denyPaths`, `maxPushes` and `maxRuns` beside
@@ -127,39 +109,6 @@ rounds, and a dormant session's tokens kept working until their hour ran out.
   Rejected: the plane revoking them, which would need it to keep every token it minted.
 - **Inheritance.** Under `extends` (Decision 908) a parent's `allowPublic: false` holds,
   `denyPaths` are added, and `maxPushes` and `maxRuns` only narrow.
-- **The console.** A profile's page reads the policy and its editor writes the four keys,
-  carrying `permissions` through as loaded (Decision 900); a team's page has a **GitHub**
-  tab where its own administrators list repositories and set the caps behind a preview.
+
 - **The CRD.** `spec.github` names the four keys, so the cluster's admission checks them
   as the plane does.
-- **Out of this decision.** The App configured from GitOps (#653, #634): a plane-level
-  resource or chart values, the console's Integrations page read-only in `gitops` mode, is
-  not small and is a follow-up. A schedule that sweeps issues, the console's "fix this", and
-  a conversation comment resuming a run (#147's remaining asks).
-- **Proof.** `github_policy_test.exs` in the plane, against the development OpenBao and the
-  fake GitHub: every malformed profile key refused by name; the credential's `policy` with
-  the defaults, the profile's paths and the lower cap; inheritance; a team admin's list,
-  read key by key, refused by name, audited and shown, another team's admin refused; a token
-  refused for a repository taken off the list, for a team that lists none and for a session
-  with no team, and the App bounding a team's `acme/*`; a push past the cap refused, `stop`
-  refused before the cap and taken at it, once, and the token at the cap read-only.
-  `github_test.exs`: creation refused for a repository the team does not list and for a
-  team that lists none. `github_webhook_test.exs`: a trigger put on an unlisted repository
-  refused; a second run across the team's triggers skipped over the team's cap of one, and
-  over the profile's, and started when the cap allows. In the worker,
-  `github_fix_loop_test.exs`, end to end with the sandbox on: a push and a pull request
-  refused once the repository is made public, nothing written, and both allowed when the
-  profile allows public ones; a push with the default and the profile's denied paths
-  refused naming each, `src/.envrc` and `docs/notes.json` not caught, nothing written, and
-  the same tree pushed once `.gitignore` leaves them out; a copy of and a link to a mounted
-  secret refused without the secret in the answer; the team's cap of two below the
-  profile's five, the third push stopping the run with the bot's comment, the old token
-  revoked and the next read-only; tokens revoked at dormancy and when the session stops, and
-  a revoked token reading nothing; and a hostile issue asking for `.env` pushed to a public
-  fork refused for both reasons with nothing written and no other repository asked about.
-  The console's `profiles.test.tsx` and `teams.test.tsx`: the editor's mapping onto
-  `spec.github`, the policy read and edited through the preview, a team's list and caps read,
-  and changed by its own admin with the plane's refusal shown. The reproduction on the chunk
-  tip: seven of the worker tests and nine of the plane's failing at the assertions above
-  (`github takes permissions, not denyPaths`, a push to a public repository taken, no
-  revocation).

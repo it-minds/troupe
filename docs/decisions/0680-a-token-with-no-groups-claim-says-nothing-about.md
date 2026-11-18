@@ -4,7 +4,8 @@ title: A token with no groups claim says nothing about groups
 date: 2026-09-22
 status: accepted
 paths:
-  - apps/troupe_plane/test/troupe/plane/mcp_auth_test.exs
+  - apps/troupe_plane/lib/troupe/plane/login.ex
+  - apps/troupe_plane/lib/troupe/plane/web/router.ex
 gist: A token with no groups claim says nothing about groups
 ---
 

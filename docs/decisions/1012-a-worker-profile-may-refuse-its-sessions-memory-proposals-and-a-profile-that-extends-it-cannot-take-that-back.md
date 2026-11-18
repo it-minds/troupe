@@ -7,16 +7,8 @@ issue: 965
 supersedes: [1004]
 paths:
   - apps/troupe_plane/lib/troupe/plane/memory/proposals.ex
-  - apps/troupe_plane/lib/troupe/plane/control/connection.ex
   - apps/troupe_plane/lib/troupe/plane/fleet/extends.ex
   - apps/troupe_plane/lib/troupe/plane/fleet/profile.ex
-  - apps/troupe_plane/lib/troupe/plane/admin.ex
-  - apps/troupe_plane/lib/troupe/plane/admin/api.ex
-  - charts/troupe/crds/workerprofile.yaml
-  - clients/gui/apps/console/src/views/Profiles.tsx
-  - clients/gui/packages/client/src/admin.ts
-  - clients/gui/packages/client/test/support/extends.ts
-  - docs/admin/profile-options.md
 symbols:
   - Troupe.Plane.Memory.Proposals.propose/5
   - Troupe.Plane.Memory.Proposals.off_reason/1
@@ -73,14 +65,6 @@ profile cannot undo a restriction of the profile it extends", in the effective v
 previews (the console lists them among what will happen). Neither refuses the write: the
 child's value is a harmless no-op, and refusing it would stop a child from saving anything
 while it still carried a value it had before its parent restricted the field.
-
-## Where it is seen
-
-The console's profile page says *Agents may propose memory*, "as the platform setting says"
-or "refused for its sessions", with "as <parent> says" where the refusal is a parent's; its
-editor has the switch, with the parent's as the first choice for a profile that extends one.
-The fake plane resolves it as the plane does.
-
 ## Not chosen
 
 - **A per-team or per-grant switch.** A grant only narrows what a profile offers, and nobody
@@ -89,16 +73,3 @@ The fake plane resolves it as the plane does.
 - **Hiding the levels from the `remember` tool on such a profile.** The pod would need the
   field in its activation and the tool's description would change mid-session when the
   profile does; a refusal in words reaches the agent the same way the setting's does.
-
-## Proof
-
-`memory_proposals_test.exs`: a pod's session on a profile with `memoryProposals: false` is
-refused in the setting's sentence naming the profile, and on a child that says `true` the
-preview says the parent's `false` holds, the row has `false` in effect, and the session is
-refused too; nothing is kept. `extends_test.exs` resolves the field restrict-only and reports
-a child's overridden value. `admin_test.exs` holds the field to a boolean and the resource to
-an optional boolean with no default. `resources_test.exs` shows the operator renders nothing
-from it. The console's `profiles.test.tsx` switches it off on a profile through the preview,
-and shows a child's inherited refusal and the preview's sentence. Each failed on the
-development branch's tip before the change, the operator's excepted, which holds what was
-already so.

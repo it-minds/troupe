@@ -9,30 +9,8 @@ paths:
   - apps/troupe_plane/lib/troupe/plane/bundles.ex
   - apps/troupe_plane/lib/troupe/plane/fleet/extends.ex
   - apps/troupe_plane/lib/troupe/plane/fleet/profile.ex
-  - apps/troupe_plane/lib/troupe/plane/reach.ex
-  - apps/troupe_plane/lib/troupe/plane/admin.ex
-  - apps/troupe_plane/lib/troupe/plane/admin/api.ex
   - apps/troupe_plane/lib/troupe/plane/budget.ex
   - apps/troupe_plane/lib/troupe/plane/profile_budget.ex
-  - apps/troupe_plane/lib/troupe/plane/ledger.ex
-  - apps/troupe_plane/lib/troupe/plane/harness.ex
-  - apps/troupe_plane/lib/troupe/plane/drain.ex
-  - apps/troupe_plane/lib/troupe/plane/control/connection.ex
-  - apps/troupe_plane/priv/repo/migrations/20261016000910_profile_budget.exs
-  - apps/troupe_plane/test/troupe/plane/effective_bundle_test.exs
-  - apps/troupe_plane/test/troupe/plane/profile_budget_test.exs
-  - apps/troupe_plane/test/troupe/plane/channel_servers_test.exs
-  - apps/troupe_protocol/lib/troupe/protocol/bundle.ex
-  - apps/troupe_worker/test/troupe/worker/bundles_test.exs
-  - clients/gui/apps/console/src/views/Profiles.tsx
-  - clients/gui/apps/console/test/profiles.test.tsx
-  - clients/gui/packages/client/src/admin.ts
-  - clients/gui/packages/client/src/index.ts
-  - clients/gui/packages/client/test/support/admin.ts
-  - clients/gui/packages/client/test/support/extends.ts
-  - docs/admin/profiles-and-policy.md
-  - docs/admin/bundles-and-triggers.md
-  - docs/admin/profile-options.md
 symbols:
   - Troupe.Plane.Bundles.Effective
   - Troupe.Plane.Bundles.publish_effective/2
@@ -44,8 +22,7 @@ symbols:
 gist: "child's bundle = chain's channels composed, override in the document; one hash on profile:<name>; profile budget monthly, child only lowers"
 ---
 
-#655 slices 2 and 3, on top of Decision 908 (slice 1). Extends in a repository's manifest
-(slice 4) is not here.
+#655 slices 2 and 3, on top of Decision 908 (slice 1).
 
 ## Slice 2: one bundle in effect
 
@@ -175,29 +152,3 @@ the sessions on the profile spend, whoever starts them and in whichever team.
   with `scope: profile`, `profile` and a reason naming the profile, at create, at a
   reactivation, and when a slice is trimmed to nothing at create. `admin.profile.get`
   answers `budget`.
-- Not in a repository's manifest yet: the resource has no field for it, and this slot
-  changes no CRD (#655 slice 4).
-
-## Proof
-
-On the chunk tip the new `effective_bundle_test.exs` failed five of six (a child on its own
-channel had its own channel's bundle only, no clash was reported, nothing reached a child's
-pods from its parent's channel, an `"override": "yes"` was published) and every one of
-`profile_budget_test.exs`'s six failed (no field, no rung, no refusal). Now: a child's
-composed document validates, hashes to its row's hash, carries both channels' agents,
-skills and servers and is what the resource's `mcpServers` names; a clash keeps the parent's
-until the child's channel says override, which survives that channel's next publish; a
-publish to the parent's channel pushes the parent's bundle to its pods and the composed one
-to the child's, and one to the child's channel pushes only to the child's; a republish that
-changes nothing makes no version. A root profile's own server stays beside its channel's
-through two publishes, its pods' bundle names both, a resent resource list does not make the
-channel's servers its own, and its own `jira` replaces the channel's only with
-`override: true`; Decision 912's `channel_servers_test.exs` passes as it was. The profile's rung refuses naming the profile with the
-team under its ceiling, unwinds the team's slice, is released, counts the month's charges
-through sessions, is absent at zero, refuses `session.create` with `scope: profile`, and is
-named by `admin.budget.explain`; a child's budget is the parent's or its own lower one, a
-parent lowered below it wins, and a higher one is refused. The worker loads a composed
-document as any other; the protocol refuses a non-boolean `override`. The console's
-`profiles.test.tsx` reads the composed bundle with each entry's profile and the clash, sets
-dev's budget through preview and audit and sees it reach data-team, and shows data-team's
-higher budget refused.

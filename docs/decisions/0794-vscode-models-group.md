@@ -14,10 +14,6 @@ symbols:
 gist: Models rows are troupe models --json's; a served:false model's context is no window; --refresh only from the group's button; no key, even in errors.
 ---
 
-Issue #387's last item: the first two (`troupe models --json`, its line in `troupe --help`)
-shipped in Decision 783, and the Settings view (Decision 765) said the models to choose
-from waited on it.
-
 - **Troupe's answer, not the extension's reading.** The group is the rows `models.ts` makes
   of what `troupe models --json --workspace <folder>` prints, run where the terminal runs
   as `config --explain --json` is (765). The extension reads neither the config nor the
@@ -61,27 +57,3 @@ from waited on it.
   after anything a key could be is taken out (the value after `api_key`, `token`, `secret`
   or `password`, a bearer token, an `sk-…`); the settings' own failure line goes through
   the same, as one helper makes both.
-- **Not in this:** choosing a model from the list, which writes the person's file (765
-  left changing a setting from the view out); D70's change in troupe_core; cache prices
-  and `max_output`, which the JSON does not carry; the `errors` that `config --explain
-  --json` prints on standard output when a config does not load, which the settings'
-  failure line does not read yet.
-- **Proof:** the unit test of the view's groups (the Model group, then Models, then the
-  rest) failed on the chunk's tip, where there was no Models group. `models.test.ts`: each
-  model's window, price and where they came from; the roles; a model not served, priced and
-  not, with no window and what is served; no key and no answer; each provider's list,
-  fetched and failed; long lists folded; output that is not models; a failure as one line
-  with no key though the reason quotes three. 47 unit tests (2 skipped: sh and fish on
-  Windows), and on Linux in WSL 43 with 4 skipped. The suite inside VS Code 1.140 on
-  Windows, 19 of 19, against the fake `troupe` now answering `models --json`: the group
-  beside the model, its rows, no `--refresh` in any call from the view; the button's call
-  with `--refresh`; a failing `troupe models` as one line with the settings still there; a
-  config that does not load; a missing `troupe` as the sentence. The fake's POSIX script
-  under sh, dash and bash in WSL. And the `.vsix` in a scratch VS Code profile, against the
-  installed `troupe.exe` 0.8.3 with scratch homes and the core suite's stand-in gateway on
-  a loopback port: six models, the default and cheap starred, the expensive one and a
-  priced `house-model` not served and without a window (the text prints `200k ctx` for
-  `house-model`);
-  the button refreshed the cache (its `fetched_at` moved, the group said "listed just
-  now"), the view's own asks had not; a project file of broken YAML gave the group the
-  reason `troupe models` printed.

@@ -2,11 +2,12 @@ defmodule Mix.Tasks.Troupe.Decisions do
   @shortdoc "List the decisions that govern a path, or check every decision file"
 
   @moduledoc """
-  The decisions, a file each under `docs/decisions/` (Decision 790).
+  The decisions, a file each under `docs/decisions/`.
 
       mix troupe.decisions --for apps/troupe_gateway/lib/troupe/gateway/private.ex
       mix troupe.decisions --for clients/tui --for PROTOCOL.md
       mix troupe.decisions --check
+      mix troupe.decisions --report
 
   The repository's decisions are in `docs/decisions/`, the TUI's in `docs/decisions/tui/`
   and the daemon's in `docs/decisions/daemon/`, each log numbered on its own, so a number
@@ -25,8 +26,8 @@ defmodule Mix.Tasks.Troupe.Decisions do
       gist: What someone changing those paths must not undo, in about 150 characters
       ---
 
-  `paths` are globs, from the repository root, of the files and directories the decision
-  governs. `status` is `accepted` or `superseded` (`superseded by 791` reads too);
+  `paths` are globs, from the repository root, of the code where the decision would be
+  undone. `status` is `accepted` or `superseded` (`superseded by 791` reads too);
   `supersedes:` (numbers), `symbols:` (modules and functions), `issue:` and `pr:` are
   optional.
 
@@ -45,6 +46,24 @@ defmodule Mix.Tasks.Troupe.Decisions do
   log, a body, and every `paths` glob matching something in the checkout. A glob that
   matches nothing is a decision whose files moved or went, which is the moment someone
   should look at it, not a year later.
+
+  A decision dated 2026-11-18 or later is held to its shape too: a body of at most
+  40 lines that are not blank, at most eight `paths`, and none of them a test (`test/`,
+  `__tests__/`, `_test.exs`, `.test.ts`). A test is never where a decision is undone, and
+  a decision that lists twenty paths comes up for every change, so `--for` stops telling a
+  reader which to read. The ones before that day are left as they were written; `--report`
+  lists them.
+
+  Each log's README holds `<!-- next: N -->`, the first number in that log not yet
+  reserved, and `--check` fails unless N is above every number in the log. A decision that
+  is deleted leaves no file behind, and the marker is what keeps its number from being
+  taken again; a chunk's coordinator moves it past the block reserved for the chunk.
+
+  ## --report
+
+  Every decision, of any date, over the cap, with more than eight paths, with a test
+  among them, or superseded, and how many of each. It fails nothing: it is the list the
+  log is trimmed from.
 
   ## Why it needs nothing but Elixir
 
@@ -70,13 +89,23 @@ defmodule Mix.Tasks.Troupe.Decisions do
   @required ~w(number title date status paths gist)
   @name ~r/^(\d{4,})-[a-z0-9][a-z0-9-]*\.md$/
 
+  # The shape a decision is held to from the day the rule landed; the ones before it are
+  # listed by `--report` and trimmed by hand.
+  @shaped_from "2026-11-18"
+  @max_lines 40
+  @max_paths 8
+  @test_path ~r{(^|/)(test|__tests__)(/|$)|_test\.exs$|\.test\.[a-z]+$}
+  @marker ~r/<!--\s*next:\s*(\d+)\s*-->/
+
   # What YAML reads, unquoted, as something other than text.
   @not_text ~r/^(?:~|null|true|false|yes|no|on|off|[-+]?(?:\d[\d_]*)?\.?\d+(?:[eE][-+]?\d+)?)$/i
 
   @impl Mix.Task
   def run(argv) do
     {opts, rest, invalid} =
-      OptionParser.parse(argv, strict: [for: :keep, check: :boolean, root: :string])
+      OptionParser.parse(argv,
+        strict: [for: :keep, check: :boolean, report: :boolean, root: :string]
+      )
 
     root = opts[:root] || root(File.cwd!())
     paths = Keyword.get_values(opts, :for)
@@ -84,13 +113,15 @@ defmodule Mix.Tasks.Troupe.Decisions do
     cond do
       invalid != [] or rest != [] -> Mix.raise(usage())
       opts[:check] -> check!(root)
+      opts[:report] -> report(root)
       paths != [] -> Enum.each(paths, &list(root, &1))
       true -> Mix.raise(usage())
     end
   end
 
   defp usage do
-    "usage: mix troupe.decisions --for <path> [--for <path> ...] | mix troupe.decisions --check"
+    "usage: mix troupe.decisions --for <path> [--for <path> ...] | " <>
+      "mix troupe.decisions --check | mix troupe.decisions --report"
   end
 
   # The nearest directory above `dir` that has `docs/decisions`, so the task runs from the
@@ -130,7 +161,7 @@ defmodule Mix.Tasks.Troupe.Decisions do
 
   defp mark(decision, decisions) do
     by = decisions |> superseders(decision) |> Enum.map_join(", ", & &1.id)
-    superseded? = String.starts_with?(decision.status, "superseded")
+    superseded? = superseded?(decision)
 
     cond do
       superseded? and by == "" -> "[superseded] "
@@ -195,8 +226,9 @@ defmodule Mix.Tasks.Troupe.Decisions do
         logs = decisions |> Enum.map(& &1.log) |> Enum.uniq() |> length()
 
         IO.puts(
-          "decisions: #{length(decisions)} in #{logs} logs; numbers unique, fields present, " <>
-            "every path matches"
+          "decisions: #{length(decisions)} in #{logs} logs; numbers unique and below each " <>
+            "log's next, fields present, every path matches, those from #{@shaped_from} " <>
+            "in shape"
         )
 
       problems ->
@@ -224,8 +256,99 @@ defmodule Mix.Tasks.Troupe.Decisions do
         {decision.file, "paths: #{glob} matches nothing"}
       end
 
-    Enum.sort(problems ++ duplicates ++ unmatched)
+    shape =
+      for decision <- decisions, decision.date >= @shaped_from, flaw <- flaws(decision) do
+        {decision.file, flaw}
+      end
+
+    Enum.sort(problems ++ duplicates ++ unmatched ++ shape ++ markers(root, decisions))
   end
+
+  # What is wrong with a decision's shape, whatever its date.
+  defp flaws(decision) do
+    paths = length(decision.paths)
+
+    Enum.reject(
+      [
+        decision.lines > @max_lines &&
+          "the body is #{decision.lines} lines that are not blank; at most #{@max_lines}",
+        paths > @max_paths && "paths: #{paths} entries; at most #{@max_paths}"
+        | for(glob <- decision.paths, Regex.match?(@test_path, glob), do: test_flaw(glob))
+      ],
+      &(&1 == false)
+    )
+  end
+
+  defp test_flaw(glob), do: "paths: #{glob} is a test, and a test is not where it is undone"
+
+  # Each log's README says the number its next decision takes, above every number in it,
+  # so a number stays taken after its file is deleted.
+  defp markers(root, decisions) do
+    decisions
+    |> Enum.group_by(& &1.log)
+    |> Map.put_new("", [])
+    |> Enum.flat_map(fn {log, in_log} ->
+      readme = Path.join([@dir, log, "README.md"])
+      highest = in_log |> Enum.map(& &1.number) |> Enum.max(fn -> 0 end)
+
+      case marker(Path.join(root, readme)) do
+        nil ->
+          [
+            {readme,
+             "no `<!-- next: N -->` line saying the number this log's next decision takes"}
+          ]
+
+        next when next > highest ->
+          []
+
+        next ->
+          [{readme, "next is #{next}, and #{highest} is taken; next is above every number"}]
+      end
+    end)
+  end
+
+  defp marker(readme) do
+    with {:ok, text} <- File.read(readme),
+         [digits] <- Regex.run(@marker, text, capture: :all_but_first) do
+      String.to_integer(digits)
+    else
+      _missing -> nil
+    end
+  end
+
+  # -- --report -------------------------------------------------------------------
+
+  defp report(root) do
+    {decisions, _problems} = load(root)
+
+    flagged =
+      for decision <- decisions,
+          flaws = report_flaws(decision),
+          flaws != [],
+          do: {decision, flaws}
+
+    Enum.each(flagged, fn {decision, flaws} ->
+      IO.puts("#{decision.file}: #{Enum.join(flaws, "; ")}")
+    end)
+
+    count = fn pred -> Enum.count(decisions, pred) end
+
+    IO.puts("""
+
+    decisions: #{length(decisions)}; #{length(flagged)} to look at
+      over #{@max_lines} lines:     #{count.(&(&1.lines > @max_lines))}
+      over #{@max_paths} paths:      #{count.(&(length(&1.paths) > @max_paths))}
+      a test in paths:   #{count.(fn d -> Enum.any?(d.paths, &Regex.match?(@test_path, &1)) end)}
+      superseded:        #{count.(&superseded?/1)}\
+    """)
+  end
+
+  defp report_flaws(decision) do
+    flaws = flaws(decision)
+    if superseded?(decision), do: flaws ++ ["superseded"], else: flaws
+  end
+
+  defp superseded?(decision), do: String.starts_with?(decision.status, "superseded")
 
   @doc """
   The decision files under `root`: `{decisions, problems}`, where a file with a problem
@@ -269,11 +392,18 @@ defmodule Mix.Tasks.Troupe.Decisions do
     missing = for key <- @required, Map.get(fields, key) in [nil, {:plain, ""}], do: key
 
     cond do
-      missing != [] -> {:error, "missing #{Enum.join(missing, ", ")}"}
-      String.trim(body) == "" -> {:error, "no body: the reasoning goes under the front matter"}
-      true -> fields(fields, number)
+      missing != [] ->
+        {:error, "missing #{Enum.join(missing, ", ")}"}
+
+      String.trim(body) == "" ->
+        {:error, "no body: the reasoning goes under the front matter"}
+
+      true ->
+        with {:ok, map} <- fields(fields, number), do: {:ok, Map.put(map, :lines, lines(body))}
     end
   end
+
+  defp lines(body), do: body |> String.split("\n") |> Enum.count(&(String.trim(&1) != ""))
 
   defp fields(fields, number) do
     with {:ok, n} <- number(fields["number"], number),

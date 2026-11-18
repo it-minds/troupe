@@ -7,14 +7,9 @@ issue: 123
 supersedes: [706]
 paths:
   - apps/troupe_core/lib/troupe/instructions.ex
-  - apps/troupe_core/lib/troupe/agent/server.ex
   - apps/troupe_core/lib/troupe/agent/state.ex
   - apps/troupe_gateway/lib/troupe/gateway/dispatch.ex
   - apps/troupe_core/lib/troupe/session/memory.ex
-  - apps/troupe_core/test/troupe/instructions_test.exs
-  - apps/troupe_core/test/troupe/instructions_prompt_test.exs
-  - apps/troupe_core/test/troupe/tools/remember_test.exs
-  - apps/troupe_gateway/test/troupe/gateway/context_test.exs
 symbols:
   - Troupe.Instructions.focus/1
   - Troupe.Instructions.load/3
@@ -102,27 +97,3 @@ and `context.get` were already there and stay as 706 made them.
   the agent; a session that is asleep has none to ask and is answered for its
   workspace alone, since reading it wakes nothing. The TUI's `/context` prints the new
   entries as it prints any file, with their scope and size; it is not changed.
-- **Not in this slice.** `.cursor/rules` globs, the wider opencode and Claude Code
-  imports, the linter, `troupe init`, the organisation layer, and a nested file reaching
-  the turn in which its directory is first opened.
-- **Proof:** `Troupe.InstructionsTest` (a file the conversation worked on brings the
-  files on its way and not others, the focus is the three calls' paths, imports in
-  order and from their directory, outside a code span or fence, each once; five deep,
-  a cycle, outside the repository, missing; a file and its imports one scope in the
-  budget; a root and a nested `AGENTS.md` linked to a file outside are `outside` and
-  not read, one linked inside is read), `Troupe.InstructionsPromptTest` (a repository with only a `CLAUDE.md`, a
-  `GEMINI.md` or a copilot file needs no setup and an edit reaches the next turn; a
-  nested file on the way to a file the turn read is in the next turn's prompt, and the
-  system prompt is the same on every call of a turn in which the agent rewrote
-  `AGENTS.md`; an import reaches the prompt and the budget's cut is in the event; the
-  person's own file imports from `<config>`; the repository's and the person's own
-  `AGENTS.md` linked outside reach no prompt and are `outside` in the event) and
-  `Troupe.Gateway.ContextTest` (the nested file and the import, with scope and size,
-  in `context.get`; a linked-out `AGENTS.md` listed as `outside`). All but the aliases
-  fail on the chunk's tip; the three on linked-out files failed on this branch before
-  the edge was added, the file's contents in the prompt. The brief: the loader's and
-  the session's tests above carry a `.troupe/memory.md` linked out too, listed as
-  `outside` and not in the prompt, and `Troupe.Tools.RememberTest` has a brief linked
-  out, and a `.troupe` linked out, neither read, nor written by a note or a section,
-  nor deleted by `forget`, the file pointed at unchanged. Those three failed on this
-  branch before the brief's edge, the linked file's contents in the prompt.

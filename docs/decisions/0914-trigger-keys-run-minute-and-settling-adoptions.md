@@ -12,13 +12,7 @@ paths:
   - apps/troupe_plane/lib/troupe/plane/identity.ex
   - apps/troupe_plane/lib/troupe/plane/login.ex
   - apps/troupe_plane/lib/troupe/plane/scim.ex
-  - apps/troupe_plane/test/troupe/plane/identity_gaps_test.exs
-  - apps/troupe_plane/test/troupe/plane/trigger_ingress_test.exs
-  - apps/troupe_plane/test/troupe/plane/trigger_sources_test.exs
   - clients/gui/apps/console/src/views/Identity.tsx
-  - clients/gui/apps/console/test/identity.test.tsx
-  - docs/admin/bundles-and-triggers.md
-  - docs/admin/routine-tasks.md
 symbols:
   - Troupe.Plane.Triggers.keyed?/1
   - Troupe.Plane.Admin.trigger_run/3
@@ -30,12 +24,10 @@ symbols:
 gist: "A key is a plain webhook's alone; a manual run keys on the caller and the minute; a refused pair is settled by admin.identity.adopt or a later agreeing sign-in, SCIM's row kept"
 ---
 
-Chunk 37's slot E37, a sweep of what `defects.md` D129 and the chunk 36 and 37 fixers left
-in triggers and identity. Each item below had a test that failed on the chunk's tip. This
-replaces, of Decision 906, "a token that carries neither value ... makes a row of its own.
-That is the cost of not guessing" and the push answered `400` for the unique index; of
-Decision 899, its "Not done" about `mix troupe.index.rebuild`; and of Decision 903, "with
-no row, a session whose manifest was last written no later than a removal under that
+This replaces, of Decision 906, "a token that carries neither value ... makes a row of its
+own. That is the cost of not guessing" and the push answered `400` for the unique index;
+of Decision 899, its "Not done" about `mix troupe.index.rebuild`; and of Decision 903,
+"with no row, a session whose manifest was last written no later than a removal under that
 subject is that tombstone's", which is now wider. The rest of all three stands.
 
 ## A trigger key is a plain webhook's
@@ -113,27 +105,3 @@ whom an old trigger revision's `notify` lets in, and the same reading holds ther
 person moved under the subject by a re-key (Decision 751) arrived when their row was made,
 not when they moved, so a manifest written between the removal and the move would be read
 as theirs; that needs a removal, a re-key onto the removed subject and a lost index together.
-
-## Not done
-
-- An editor for rules under the organisation's `defaults:` on a plane. The plane keeps no
-  such rules (its `client_defaults` are the provider and the models), so an editor needs a
-  new setting and a new key in `me.client_defaults`, and the rules it would carry hold
-  exactly as the enforced set's do (Decision 907: no rule is a default a person replaces).
-  Whether a plane should offer a second place to say the same is the maintainer's choice.
-- `DoctorCLITest`'s race with other tests' leftover writers, and the plane suite's fake pod
-  displaced by another checkout's worker link on a reused port, are test changes and decide
-  nothing.
-
-## Proof
-
-On the chunk's tip, nine tests failed: `TriggerIngressTest` (a schedule's, a manual one's
-and a repository's rotation refused, and a key kept from before a source change opening
-nothing), `GitopsTriggersTest` (a schedule's rotation refused), `TriggerSourcesTest` (two
-runs by hand a second apart are one run), and in `IdentityGapsTest` a bare token then an
-agreeing one folding, a push onto a refused sign-in's row answering `409` naming both, an
-administrator settling a sign-in's pair and a refused push, refusing a row SCIM named by
-another `externalId`, and a rebuilt index keeping the tombstone for a manifest written after
-the removal while a session of the person who arrived later is theirs. All pass, beside the
-plane's admin, parity, coverage, SCIM, login, one-row-per-person and trigger suites. The
-console's `identity.test.tsx` settles a pair behind the typed preview and finds it gone.

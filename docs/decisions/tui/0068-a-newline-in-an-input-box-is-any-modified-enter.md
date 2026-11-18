@@ -4,7 +4,8 @@ title: A newline in an input box is any modified Enter or Ctrl-J, not Shift-Ente
 date: 2026-09-15
 status: accepted
 paths:
-  - clients/tui/test/troupe/tui_selection_test.exs
+  - clients/tui/lib/troupe/ui/tui/input.ex
+  - clients/tui/lib/troupe/clipboard.ex
 gist: A newline in an input box is any modified Enter or Ctrl-J, not Shift-Enter alone; copying out is `Ctrl-Y`/`/copy` to the platform clipboard command
 ---
 

@@ -7,7 +7,6 @@ issue: 419
 paths:
   - clients/tui/lib/troupe/cli/runner.ex
   - clients/tui/lib/troupe/client/daemon/link.ex
-  - clients/tui/test/troupe/cli_test.exs
 gist: "A headless run tells the daemon it is one: the link connects as `troupe-headless`, and the terminal UI as `troupe`"
 ---
 

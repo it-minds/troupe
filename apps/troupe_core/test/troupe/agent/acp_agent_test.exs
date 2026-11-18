@@ -350,7 +350,7 @@ defmodule Troupe.Agent.ACPAgentTest do
   describe "a subprocess that exits" do
     # A delegate runs its task once. Under the DynamicSupervisor a parent starts it in, one
     # whose program exits mid-task must not be started again and run its task a second
-    # time, with nobody left waiting for its answer (defects D25).
+    # time, with nobody left waiting for its answer.
     test "is reported as partial and not started again", context do
       starts = Path.join(context.base, "starts.log")
       sup = start_supervised!({DynamicSupervisor, strategy: :one_for_one})

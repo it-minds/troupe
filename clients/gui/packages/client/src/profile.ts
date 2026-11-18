@@ -8,6 +8,8 @@
 // second reading of the rules, and the first one to drift would show a person a profile
 // that is not the one their session gets. The words here are the ones both apps say.
 
+import { moneyWords } from "./words.js";
+
 /** An agent a session on the profile may run. */
 export interface ProfileViewAgent {
   name: string;
@@ -127,14 +129,6 @@ export function accessWords(access: string): string {
     default:
       return access;
   }
-}
-
-/** Micros as money: nothing reported is "—", which is not the same as free. */
-export function moneyWords(micros: number | null | undefined): string {
-  if (micros === null || micros === undefined) return "—";
-  if (micros === 0) return "$0.00";
-  const dollars = micros / 1_000_000;
-  return `$${dollars < 0.01 ? dollars.toFixed(4) : dollars.toFixed(2)}`;
 }
 
 /** A budget: none is no cap of that kind, which is not a cap of nothing. */

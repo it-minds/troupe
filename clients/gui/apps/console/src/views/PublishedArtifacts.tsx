@@ -10,12 +10,11 @@
 
 import { useState } from "react";
 import type { JSX } from "react";
-import { goesDate, visibilityWords } from "@troupe/client";
+import { bytes, goesDate, visibilityWords } from "@troupe/client";
 import type { AdminArtifact } from "@troupe/client";
 import { useConsole, useLoad } from "../console";
-import { AuditNote, Empty, Loaded, Preview, bytes, useChange, when } from "./bits";
-
-const KIND: Record<string, string> = { html: "HTML page", markdown: "Markdown", file: "File" };
+import { kindWords } from "./Artifacts";
+import { AuditNote, Empty, Loaded, Preview, useChange, when } from "./bits";
 
 /** Whose it is: the team that owns it, with who first published it, or the person. */
 function ownerWords(a: AdminArtifact): string {
@@ -63,7 +62,7 @@ export function PublishedArtifacts(): JSX.Element {
                       <td>
                         {a.title} <span className="mono muted">{a.id}</span>
                       </td>
-                      <td>{KIND[a.kind] ?? a.kind}</td>
+                      <td>{kindWords(a.kind)}</td>
                       <td>{a.visibility === "private" ? "its owner alone" : visibilityWords(a.visibility)}</td>
                       <td>{ownerWords(a)}</td>
                       <td>{a.team ?? "—"}</td>

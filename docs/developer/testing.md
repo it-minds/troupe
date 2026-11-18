@@ -12,8 +12,9 @@ Tests live in `apps/<app>/test/troupe/**/*_test.exs`, with case templates and st
 `test/support/`. The test environment registers four misbehaving tools (raising, exiting,
 asking, counting) through the same extension point an MCP adapter uses, and gives the
 plane's sandboxed repo a pool of 30 because a placement test makes fifty creates at once.
-Run the protocol suite from the root: its `policy_test.exs` imports the operator's test
-fixtures without declaring the dependency.
+A test waits for something another process does with `eventually/1,2,3`: the umbrella's
+in `apps/troupe_protocol/test/support/eventually.ex`, which every app's test run compiles,
+the TUI's in `Troupe.TestHelpers`. A suite writes no poller of its own.
 
 CI runs each app's suite as its own job; the nightly and a release run every suite nine
 more times, because the suite is concurrent and a race that shows one time in five is a
@@ -35,7 +36,7 @@ dependency up, never silence.
 | a kubeconfig with the CRDs | the operator's `:cluster` tests, the plane's enrolment test | excluded; `--include cluster` runs them |
 | a second BEAM node | the plane's cluster test | skipped, flunks |
 | `bubblewrap` | the sandbox tests | skipped, flunks |
-| `python3` | the conformance test | skipped, passes |
+| `python3` | the conformance test | skipped by a tag, saying so |
 | `inotifywait` / `mac_listener` | the native half of the watcher tests; two gateway `FilesTest` tests (an event inside a second, a deletion) | watcher: passes without asserting, polling is always tested; `FilesTest`: skipped, saying so, except under `CI=true`, where they fail |
 | `zig` | anything that runs `shell` | `:reaper_missing` |
 
@@ -132,7 +133,7 @@ Decision 915 is the long form.
   line it types, put through every shell the machine has, the Settings view's rows, its
   Models group and the manifest), and `pnpm test:vscode`, its suite inside a real VS Code
   against a fake `troupe`, with its own user data and extensions directories
-  ([vscode.md](../user/vscode.md#how-it-is-built-and-tested)).
+  ([its README](../../clients/vscode/README.md#testing-it)).
 - `scripts/verify-local.ps1` checks an install made by `scripts/install-local.ps1` on this
   Windows machine.
 - `scripts/check-installers` (`install.sh` under `sh` and `bash`, or the shells named) and

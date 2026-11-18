@@ -4,7 +4,8 @@
 //
 // Egress hosts, MCP servers and each list of permission rules are added (a server with a
 // parent's name replaces it only with `override: true`; a rule the parent has is the
-// parent's, so a child cannot drop one); `max_sessions` and `budget_micros` narrow; a parent's `personalTools: forbid` and
+// parent's, so a child cannot drop one); `max_sessions`, `budget_micros` and `llm.maxTokens` narrow (a child that
+// says more of the last is told so in `problems`); a parent's `personalTools: forbid` and
 // `repositoryOverridesBundle: false` and `memoryProposals: false` hold, and a child that says
 // otherwise is told so in `problems`; `llm.secretRef`, `mcpIdentities` and
 // `warm_workers` are never inherited; everything else is the child's where it sets it.
@@ -38,7 +39,7 @@ const TOP: Array<[string, Rule]> = [
 ];
 
 const EACH: Record<string, Record<string, Rule>> = {
-  llm: { secretRef: "own" },
+  llm: { secretRef: "own", maxTokens: "narrow" },
   egress: { fqdns: "added", gitHosts: "added" },
   permissions: { deny: "added", ask: "added", allow: "added" },
   storage: { size: "dropped" },
@@ -113,9 +114,14 @@ export function merge(parent: Resolved, written: Plain, name: string): Resolved 
       const o = (ownSpec[key] ?? {}) as Plain;
       const inner: Plain = {};
       for (const sub of [...new Set([...Object.keys(p), ...Object.keys(o)])]) {
-        const [value, source] = field(EACH[key][sub] ?? "replaced", p[sub], parent.from[`${path}.${sub}`], o[sub], name);
+        const rule = EACH[key][sub] ?? "replaced";
+        const [value, source] = field(rule, p[sub], parent.from[`${path}.${sub}`], o[sub], name);
         if (value !== undefined && value !== null) inner[sub] = value;
         put(`${path}.${sub}`, value, source);
+        // A child's number above its parent's limit does nothing, and is said.
+        if (rule === "narrow" && typeof p[sub] === "number" && typeof o[sub] === "number" && o[sub] > p[sub]) {
+          problems.push(`${name} sets ${key}.${sub} to ${o[sub]}, and ${String(source)}'s ${p[sub]} holds: a profile cannot raise a limit of the profile it extends`);
+        }
       }
       if (isSet(inner)) spec[key] = inner;
     } else {

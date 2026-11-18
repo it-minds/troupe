@@ -11,6 +11,8 @@ defmodule Troupe.Protocol.Canonical do
   anything but code point.
   """
 
+  alias Troupe.Protocol.Digest
+
   @doc """
   Encode a term to canonical JSON.
 
@@ -59,6 +61,6 @@ defmodule Troupe.Protocol.Canonical do
   @doc "The `sha256:` digest of a term's canonical form."
   @spec hash(term()) :: String.t()
   def hash(term) do
-    "sha256:" <> (:sha256 |> :crypto.hash(encode(term)) |> Base.encode16(case: :lower))
+    Digest.tagged(encode(term))
   end
 end

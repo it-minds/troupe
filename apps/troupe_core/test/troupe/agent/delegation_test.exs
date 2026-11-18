@@ -601,17 +601,6 @@ defmodule Troupe.Agent.DelegationTest do
     assert done.seq < taken.seq
   end
 
-  defp eventually(fun, timeout \\ 5_000),
-    do: poll(fun, System.monotonic_time(:millisecond) + timeout)
-
-  defp poll(fun, deadline) do
-    cond do
-      fun.() -> true
-      System.monotonic_time(:millisecond) > deadline -> false
-      true -> Process.sleep(10) && poll(fun, deadline)
-    end
-  end
-
   # The root is idle only once every delegation has come back, so filtering by
   # agent_path is what makes this different from `await_state`.
   defp await_root_idle(session_id, timeout \\ 10_000) do

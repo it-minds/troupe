@@ -142,7 +142,7 @@ defmodule Troupe.Session.SummaryTest do
     request = await_event(session.id, :approval_requested, 10_000)
     call_id = request.data["call_id"]
 
-    await(fn -> Summary.snapshot(session.id)["approvals"] == [call_id] end)
+    eventually(fn -> Summary.snapshot(session.id)["approvals"] == [call_id] end)
 
     Troupe.approve(session.id, call_id, :allow)
     await_state(session.id, [:idle, :done], 10_000)
@@ -285,14 +285,6 @@ defmodule Troupe.Session.SummaryTest do
         collect_diffs(acc)
     after
       400 -> Enum.reverse(acc)
-    end
-  end
-
-  defp await(predicate, attempts \\ 200) do
-    cond do
-      predicate.() -> :ok
-      attempts > 0 -> Process.sleep(25) && await(predicate, attempts - 1)
-      true -> flunk("condition never held")
     end
   end
 end

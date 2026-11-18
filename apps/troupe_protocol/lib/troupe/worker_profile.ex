@@ -12,6 +12,8 @@ defmodule Troupe.WorkerProfile do
   which volumes to bind into the namespace.
   """
 
+  alias Troupe.Protocol.Digest
+
   defmodule Team do
     @moduledoc "One team's volume, as a profile sees it."
 
@@ -279,6 +281,8 @@ defmodule Troupe.WorkerProfile do
     :llm_provider,
     :llm_model,
     :llm_small_model,
+    # The most output one model call asks for, a pod's `max_tokens`; `nil` is the default.
+    :llm_max_tokens,
     :llm_secret_name,
     :llm_secret_key,
     # Each pod's own disk. `nil` for either means the operator's default: 20Gi, on the
@@ -325,6 +329,7 @@ defmodule Troupe.WorkerProfile do
       llm_provider: get_in(spec, ["llm", "provider"]) || "openai",
       llm_model: get_in(spec, ["llm", "model"]),
       llm_small_model: get_in(spec, ["llm", "smallModel"]),
+      llm_max_tokens: get_in(spec, ["llm", "maxTokens"]),
       llm_prices: get_in(spec, ["llm", "prices"]) || %{},
       llm_secret_name: get_in(spec, ["llm", "secretRef", "name"]),
       llm_secret_key: get_in(spec, ["llm", "secretRef", "key"]) || "api-key",
@@ -502,9 +507,9 @@ defmodule Troupe.WorkerProfile do
   @doc "The revision of a profile in effect: a hash of its spec, the same for the same spec."
   @spec revision_of(map()) :: String.t()
   def revision_of(spec) do
-    :sha256
-    |> :crypto.hash(:erlang.term_to_binary(spec, [:deterministic]))
-    |> Base.encode16(case: :lower)
+    spec
+    |> :erlang.term_to_binary([:deterministic])
+    |> Digest.sha256()
     |> binary_part(0, 16)
   end
 

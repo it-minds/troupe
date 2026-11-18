@@ -8,7 +8,6 @@ paths:
   - apps/troupe_plane/lib/troupe/plane/harness.ex
   - apps/troupe_plane/lib/troupe/plane/identity.ex
   - apps/troupe_plane/lib/troupe/plane/sessions.ex
-  - apps/troupe_plane/test/troupe/plane/grant_enforcement_test.exs
 gist: "A team's grant on a profile holds wherever one of its sessions could run or start: on the pod running it, in what that pod reports afterwards, when…"
 ---
 
@@ -45,12 +44,3 @@ are the places that went on without looking at the row or the grant.
   putting its tree back is waited for. The local daemon's endpoint has no such
   option and restores as before, and `session.create` on a pod, open only to a token
   with no session (PROTOCOL.md §7), is unchanged.
-- **Proof:** `Troupe.Plane.GrantEnforcementTest`: a revoke pushes `session.dormant`
-  to the pod and parks a waiting session with its slice back; a wake is refused with
-  the grant gone and with the team gone; admission parks instead of placing in both
-  cases, and the scaler places the next session. `Troupe.Plane.ControlTest`: a pod's
-  dormancy report leaves a revoked session read-only and an erased one erased.
-  `Troupe.Worker.PlaneLinkTest`: a revoke stops the session on a real pod, and the
-  pod's report leaves the row read-only. `Troupe.Worker.HarnessWebSocketTest`:
-  activating commands for a session the pod has only on disk answer `not_found` and
-  start nothing. All ten fail on the chunk's tip.

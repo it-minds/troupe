@@ -4,12 +4,10 @@
 // by the session's own id.
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { App } from "../src/App";
-import { PEOPLE, button, field, freshBrowser, render, says, sees, seesButton, signedInAs, startFake, type, visit, waitFor } from "./support";
+import { PEOPLE, button, field, freshBrowser, opener, says, sees, seesButton, startFake, type, waitFor } from "./support";
 import type { FakeDeployment } from "./support";
 
 let fake: FakeDeployment;
-let unmount: (() => void) | null = null;
 
 beforeEach(async () => {
   freshBrowser();
@@ -17,29 +15,24 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
-  unmount?.();
-  unmount = null;
+  close();
   await fake.stop();
 });
 
 const rows = (): HTMLTableRowElement[] => [...document.querySelectorAll<HTMLTableRowElement>("table.sessions tbody tr")];
 const row = (id: string): HTMLTableRowElement | null => rows().find((r) => says(id, r)) ?? null;
 
-async function open(as: { subject: string; name: string } = PEOPLE.alice): Promise<void> {
-  await signedInAs(fake, as);
-  visit("#/sessions");
-  unmount = render(<App />).unmount;
-}
+const { open, close } = opener(() => fake);
 
 describe("sessions", () => {
   it("lists every session a platform admin may see, newest first, with owner, profile, state, size and pin", async () => {
-    await open();
+    await open("#/sessions");
     await waitFor(() => row("s-7f3a9c21"), "the sessions");
     expect(rows()).toHaveLength(10);
     await sees("s-7f3a9c21", rows()[0]!);
     const pinned = row("s-7f3a9c22")!;
     await sees("dan@example.com", pinned);
-    await sees("asleep", pinned);
+    await sees("Asleep", pinned);
     await sees("pinned by dan@example.com", pinned);
     // The owner by name, as the plane's identity record has it, the subject on hover.
     expect(pinned.querySelector("td[title='dan@example.com']")?.textContent).toBe("Dan");
@@ -50,14 +43,14 @@ describe("sessions", () => {
   // A running pod session whose last turn read an older version of its memory
   // than the one in force is marked; one that read the version in force is not.
   it("marks a running session whose last turn read memory older than the version in force", async () => {
-    await open();
+    await open("#/sessions");
     await waitFor(() => row("s-7f3a9c21"), "the sessions");
     await sees("memory: behind", row("s-7f3a9c21")!);
     expect(says("memory: behind", row("s-7f3a9c23")!)).toBe(false);
   });
 
   it("searches, filters by state and profile at the plane, and says what to do when nothing matches", async () => {
-    await open();
+    await open("#/sessions");
     await waitFor(() => row("s-7f3a9c21"), "the sessions");
     type(field("State")!, "dormant");
     await waitFor(() => rows().length === 5, "the dormant sessions");
@@ -70,7 +63,7 @@ describe("sessions", () => {
   });
 
   it("shows what a session did on GitHub: its draft pull request as a link, or its branch, and that it stopped", async () => {
-    await open();
+    await open("#/sessions");
     await waitFor(() => row("s-7f3a9c24"), "the sessions");
     const fixed = row("s-7f3a9c24")!;
     const link = fixed.querySelector<HTMLAnchorElement>("a[href]")!;
@@ -86,14 +79,14 @@ describe("sessions", () => {
   });
 
   it("shows a team admin their own team's sessions and none of another's", async () => {
-    await open(PEOPLE.bob);
+    await open("#/sessions", PEOPLE.bob);
     await waitFor(() => row("s-4b81d003"), "the design team's sessions");
     expect(rows()).toHaveLength(3);
     expect(row("s-7f3a9c21")).toBeNull();
   });
 
   it("erases a session behind what it holds and the forks that survive it, confirmed by its id", async () => {
-    await open();
+    await open("#/sessions");
     await waitFor(() => row("s-7f3a9c22"), "the sessions");
     button("Erase", row("s-7f3a9c22")!)!.click();
     await waitFor(() => says("What will happen") && says("s-7f3a9c25"), "the preview, with the fork that survives");
@@ -119,7 +112,7 @@ describe("sessions", () => {
     for (let i = 0; i < 30; i++) {
       fake.admin.sessions.push({ ...fake.admin.sessions[0]!, id: `s-extra-${String(i).padStart(2, "0")}`, last_active_at: `2026-10-01T00:${String(i).padStart(2, "0")}:00Z` });
     }
-    await open();
+    await open("#/sessions");
     await waitFor(() => row("s-7f3a9c21"), "the sessions");
     expect(rows()).toHaveLength(25);
     await sees("1–25 of 40");

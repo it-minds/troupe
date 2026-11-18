@@ -6,29 +6,9 @@ status: accepted
 issue: 594
 paths:
   - apps/troupe_plane/lib/troupe/plane/admin.ex
-  - apps/troupe_plane/lib/troupe/plane/admin/api.ex
-  - apps/troupe_plane/lib/troupe/plane/admin/console.ex
-  - apps/troupe_plane/lib/troupe/plane/bundles.ex
   - apps/troupe_plane/lib/troupe/plane/ledger.ex
   - apps/troupe_plane/lib/troupe/plane/github.ex
-  - apps/troupe_plane/lib/troupe/plane/control/connection.ex
   - apps/troupe_worker/lib/troupe/worker/github.ex
-  - apps/troupe_plane/test/support/fake_github.ex
-  - apps/troupe_plane/test/troupe/plane/admin_test.exs
-  - apps/troupe_plane/test/troupe/plane/github_test.exs
-  - apps/troupe_plane/test/troupe/plane/github_requested_by_test.exs
-  - apps/troupe_worker/test/troupe/worker/github_fix_loop_test.exs
-  - clients/gui/packages/client/src/admin.ts
-  - clients/gui/apps/console/src/views/Bundles.tsx
-  - clients/gui/apps/console/src/views/ProfileAgents.tsx
-  - clients/gui/apps/console/src/views/Profiles.tsx
-  - clients/gui/apps/console/src/views/Integrations.tsx
-  - clients/gui/apps/desktop/src/views/Agents.tsx
-  - clients/gui/apps/desktop/src/views/AgentPicker.tsx
-  - PROTOCOL.md
-  - docs/admin/github.md
-  - docs/admin/bundles-and-triggers.md
-  - docs/admin/github-runs.md
 symbols:
   - Troupe.Plane.Admin.profile_agents/2
   - Troupe.Plane.Admin.profile_choices/2
@@ -38,16 +18,6 @@ symbols:
   - Troupe.Plane.Ledger.models_run/2
 gist: "admin.profile.agents feeds the builder; models are ones the plane knows; App test mints+revokes for a repo; Requested-By is the plane's, agent's stripped"
 ---
-
-Issues #594 (the rest of the agent picker and builder) and #653 (the rest of the GitHub
-App), as slot E40 of chunk 40 took them, on root Decision 920's one list and Decisions 885,
-891, 911 and 917's App. On the chunk's tip the console's builder lived inside a channel's
-bundle editor with no way in from a profile, edited a name, mode, description, model typed
-as text, tools and instruction, and kept `permissions`, `skills` and the rest as written;
-`admin.profile.choices` named no model; `admin.github.check` tested the App and its
-installations but no repository, so slice 1's "a test token minted and revoked for a
-chosen repository" was not there; a fix loop's commit named its session and not the person
-it was for; and the desktop app's agent manager drew a list of its own beside the picker.
 
 - **The builder starts from the profile.** `admin.profile.agents {name}` answers the
   profile's agents as its bundle in effect has them (Decision 910's composition through
@@ -106,18 +76,3 @@ it was for; and the desktop app's agent manager drew a list of its own beside th
   groups and actions (the four origin words, the badges, Start, Switch, Edit), with the
   manager's density (mode, what it stands in for, the windows running it) and its own Copy,
   New from this and Delete; a new agent saved offers to start a session on it.
-
-Proof: `Troupe.Plane.AdminTest` ("a profile's agents are its bundle's in effect…": the
-fields, `delegate`, `may` per team with an allow-list that leaves one team out, the
-built-ins; "a model is picked from the ones the plane knows…": each source and its why);
-`Troupe.Plane.GitHubTest` (a repository's token minted with no permissions named, read
-with, revoked, never in the answer or the audit; a repository of no installation, or after
-a failed check, says why and mints nothing), against `FakeGitHub`, which now gives all an
-installation's permissions where none are named, as GitHub does;
-`Troupe.Plane.GitHubRequestedByTest` (a person, a label's login, a sweep's trigger and team,
-the owner, and a display name with a line break made one line); and
-`Troupe.Worker.GitHubFixLoopTest`, where the pushed commit carries `Requested-By: Ada
-Lovelace <ada@example.test>` and not the agent's forged `requested-by: Mallory`. On the tip
-`admin.profile.agents` was `method_not_found`, `admin.github.check` took no repository, and
-the commit had no `Requested-By:`. The console's `bundles.test.tsx`, `integrations.test.tsx`
-and the desktop app's `agents-manager.test.tsx` drive the views against the fakes.

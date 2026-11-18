@@ -15,7 +15,7 @@
 import { useState } from "react";
 import type { JSX } from "react";
 import { appLink } from "@troupe/client";
-import type { OwnMemory, OwnMemoryPreview, OwnMemorySaved, SessionRow } from "@troupe/client";
+import type { OwnClient, OwnMemory, OwnMemoryPreview, PlaneDocument } from "@troupe/client";
 import { OpenInApp } from "./AppBanner";
 import { describeError, show, useConsole, useLoad } from "../console";
 import { href } from "../route";
@@ -24,28 +24,9 @@ import type { StatusKind } from "./bits";
 import { InvitedToYou } from "./Invited";
 import { RemoteSessions, useOffered } from "./Remote";
 
-/** One of the person's clients, as the plane last saw it. */
-interface ClientSeen {
-  component: string;
-  version: string;
-  platform?: string | null;
-  seen_at?: string | null;
-  standing: string;
-  recommended?: string | null;
-}
-
-/** A memory document a person's machine reads, as `me.memory` answers it. */
-interface MemoryDocument {
-  scope: string;
-  name?: string | null;
-  version: number;
-  updated_at?: string | null;
-  text: string;
-}
-
 const COMPONENT: Record<string, string> = { tui: "terminal", daemon: "daemon", desktop: "desktop app" };
 
-const STANDING: Record<string, { kind: StatusKind; glyph: string; word: string; why: (c: ClientSeen) => string | null }> = {
+const STANDING: Record<string, { kind: StatusKind; glyph: string; word: string; why: (c: OwnClient) => string | null }> = {
   current: { kind: "running", glyph: "●", word: "current", why: () => null },
   behind: { kind: "waiting", glyph: "◐", word: "behind", why: (c) => (c.recommended ? `the plane recommends ${c.recommended}` : "the plane recommends a newer one") },
   refused: { kind: "denied", glyph: "✕", word: "refused", why: () => "at its next start: update it" },
@@ -78,7 +59,7 @@ export function Mine(): JSX.Element {
 function YourSessions(): JSX.Element {
   const { auth, admin, me, role, plane } = useConsole();
   const [load, reload] = useLoad(async () => {
-    const mine =await auth.rpc<{ sessions: SessionRow[] }>("sessions.list", {}).then((r) => r.sessions.filter((s) => s.owner === me.subject));
+    const mine = await auth.withToken((plane, token) => plane.listSessions(token)).then((r) => r.sessions.filter((s) => s.owner === me.subject));
     const seen = role === "member" || mine.length === 0 ? [] : await admin.sessions().catch(() => []);
     return { rows: mine, onSessions: new Set(seen.map((s) => s.id)) };
   }, [auth, admin, me.subject, role]);
@@ -139,7 +120,7 @@ function YourClients(): JSX.Element {
   const [load, reload] = useLoad(
     () =>
       auth
-        .rpc<{ clients: ClientSeen[] }>("me.clients", {})
+        .withToken((plane, token) => plane.clientsSeen(token))
         .then((r) => r.clients)
         .catch((e: unknown) => {
           // A plane from before it says nothing of a person's clients.
@@ -187,10 +168,10 @@ function YourMemory(): JSX.Element {
   const [load, reload] = useLoad(
     () =>
       auth
-        .rpc<{ documents: MemoryDocument[]; user?: OwnMemory }>("me.memory", {})
+        .withToken((plane, token) => plane.ownMemory(token))
         .then((r) => ({ documents: (r.documents ?? []).filter((d) => d.scope !== "user"), own: r.user ?? null }))
         .catch((e: unknown) => {
-          if ((e as { code?: unknown }).code === -32601) return { documents: [] as MemoryDocument[], own: null };
+          if ((e as { code?: unknown }).code === -32601) return { documents: [] as PlaneDocument[], own: null };
           throw e;
         }),
     [auth],
@@ -260,7 +241,7 @@ function YourOwn({ own, onSaved }: { own: OwnMemory; onSaved: () => void }): JSX
           onSubmit={(e) => {
             e.preventDefault();
             setError(null);
-            auth.rpc<OwnMemoryPreview>("me.memory.preview", { text: draft }).then(setPreview, setError);
+            auth.withToken((plane, token) => plane.previewOwnMemory(token, draft)).then(setPreview, setError);
           }}
         >
           <Field label="Your own memory" hint={`${size} of ${own.limit} bytes`} error={size > own.limit ? `At most ${own.limit} bytes.` : null}>
@@ -290,7 +271,7 @@ function YourOwn({ own, onSaved }: { own: OwnMemory; onSaved: () => void }): JSX
           effects={[preview.effect, `${preview.bytes} of ${preview.limit} bytes.`]}
           verb="Save"
           onConfirm={async () => {
-            const saved = await auth.rpc<OwnMemorySaved>("me.memory.put", { text: draft, version: own.version });
+            const saved = await auth.withToken((plane, token) => plane.putOwnMemory(token, draft, own.version));
             notify(saved.changed ? `Your memory is saved as version ${saved.user.version}; your sessions read it from their next turn.` : "Your memory is as it was.");
             setPreview(null);
             setDraft(null);

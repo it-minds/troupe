@@ -1,6 +1,6 @@
 defmodule Troupe.BranchProfileTest do
   @moduledoc """
-  A branch command whose agents the daemon did not list (D124): `/build` is checked
+  A branch command whose agents the daemon did not list: `/build` is checked
   against the workspace's primary agents, and when `agents.list` gets no answer the line
   says that, not "unknown command /build; available: /worktree", which reads as though the
   agent were not there.

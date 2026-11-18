@@ -6,19 +6,12 @@ status: accepted
 supersedes: [901]
 paths:
   - apps/troupe_plane/lib/troupe/plane/admin.ex
-  - apps/troupe_plane/lib/troupe/plane/admin/api.ex
   - apps/troupe_plane/lib/troupe/plane/provision.ex
   - apps/troupe_plane/lib/troupe/plane/login.ex
   - apps/troupe_plane/lib/troupe/plane/index.ex
   - apps/troupe_plane/lib/troupe/plane/identity.ex
-  - apps/troupe_plane/lib/troupe/plane/web/router.ex
   - apps/troupe_worker/lib/troupe/worker/github.ex
-  - apps/troupe_worker/lib/troupe/worker/github/tree.ex
-  - clients/gui/apps/console/src/views/Profiles.tsx
   - clients/gui/apps/desktop/src-tauri/src/daemon.rs
-  - clients/gui/packages/client/test/support/daemon.ts
-  - apps/troupe_core/lib/mix/tasks/troupe.config.schema.ex
-  - clients/gui/packages/client/test/support/provider-types.ts
 symbols:
   - Troupe.Plane.Admin.preview/2
   - Troupe.Plane.Admin.team_enable/4
@@ -27,11 +20,9 @@ symbols:
 gist: "Preview diffs stored vs stored+write; team.enable on its own group refuses changed settings without link; removed:/svc: never sign in; rebuild keeps markers; lost pushes recorded"
 ---
 
-A sweep of small defects the chunk 34 fixers recorded in `docs/developer/defects.md` (D127)
-and the chunk 35 fixers noticed, fixed in chunk 35. Most are bugs against a rule already
-written down; these are the ones where a rule had to be chosen. It replaces the bullet of
-Decision 901 that has the console drop the preview's lines the write does not send; the rest
-of 901 stands. It also does two things Decision 899 lists as not done there.
+It replaces the bullet of Decision 901 that has the console drop the preview's lines the
+write does not send; the rest of 901 stands. It also does two things Decision 899 lists as
+not done there.
 
 - **A profile preview compares like with like.** `admin.profile.preview` diffed the stored
   row, every column of it, against the write as sent, so every preview said the name, the
@@ -89,16 +80,3 @@ of 901 stands. It also does two things Decision 899 lists as not done there.
   fake rather than a file under `protocol/schema` it reads: the GUI's tests also run in an
   image built from `clients/gui` alone, which the cluster job found when a first try read the
   file from the repository root.
-
-**Proof:** each was a failing test on the chunk tip first, apart from the TUI race and the
-cluster test's comment. Over `/rpc`, `admin.profile.get` of a refused profile answered 500
-with the tuple in the log; the preview listed `replicas` and the name; the LiveView save
-kept `max_sessions` at 6; the team kept no `budget_micros` when enabled again with none; a
-`PUT` after a `DELETE` answered 200; `Login.from_claims/1` signed in a `removed:` subject;
-the rebuild named the removed person's subject; the push after a lost record was refused as
-"commits this session did not push", and one with no base as having nothing to build on;
-the audit logged `[error]` three times for one profile's identities; `cargo test` found the
-daemon's command on the test's own console; and a label changed in the fake's generated
-list fails `mix troupe.config.schema --check`. The tests are in `admin_api_test.exs`,
-`panel_test.exs`, `one_row_per_person_test.exs`, `admin_test.exs`, the worker's
-`index_rebuild_test.exs` and `github_fix_loop_test.exs`, and `daemon.rs`.

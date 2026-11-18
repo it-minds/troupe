@@ -6,19 +6,15 @@ status: accepted
 issue: 159
 paths:
   - clients/tui/lib/mix/tasks/troupe.palette.ex
-  - docs/developer/architecture.md
-  - docs/developer/build.md
 gist: The desktop app's icons are generated from the mask, in one fixed cut, and CI fails when the committed set is not what the design file says
 ---
 
-Issue #159. Every
-file in `clients/gui/apps/desktop/src-tauri/icons/` was an older three-dot mark, so
-the app wore the brand inside its window and something else on the dock, the
-taskbar, the Start menu, in Alt-Tab and in the installer. `pnpm icons`
-(`clients/gui/scripts/icons.ts`) now draws the whole set from `mark.ts`, the
-constant `views/brand.tsx` draws the mask from, which `pnpm tokens` generates out of
-the design file, and from the design file's colours; `pnpm icons:check` runs in CI
-after `tokens:check`.
+Every file in `clients/gui/apps/desktop/src-tauri/icons/` was an older three-dot mark, so
+the app wore the brand inside its window and something else on the dock, the taskbar, the
+Start menu, in Alt-Tab and in the installer. `pnpm icons` (`clients/gui/scripts/icons.ts`)
+now draws the whole set from `mark.ts`, the constant `views/brand.tsx` draws the mask
+from, which `pnpm tokens` generates out of the design file, and from the design file's
+colours; `pnpm icons:check` runs in CI after `tokens:check`.
 - **One cut, dark.** In the app the mask follows the theme; an icon is one image.
   It bakes Signal in dark, as `public/favicon.svg` does: the tile is `bg.sunken`
   `#0B0D10`, the edge and the open eye `text.primary` `#ECEFF3`, the lit half
@@ -48,8 +44,3 @@ after `tokens:check`.
   every machine; the check decodes what is committed and compares pixels rather
   than bytes, because two zlibs compress one image differently and the icon is the
   pixels.
-- **Not done.** `troupe.exe`, the TUI Burrito wraps, has no resource section at all:
-  Windows shows the generic executable icon. Burrito's `build.zig` builds the
-  wrapper with `addExecutable` and takes no Win32 resource file, so an icon needs
-  Burrito to accept one (`addWin32ResourceFile`, upstream or in a fork) or a
-  post-build edit of the executable's resources before it is signed. A follow-up.

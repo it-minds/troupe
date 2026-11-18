@@ -5,8 +5,7 @@
 // people's teams are named per person here.
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { App } from "../src/App";
-import { PEOPLE, button, field, freshBrowser, render, sees, seesButton, signedInAs, startFake, type, visit, waitFor } from "./support";
+import { PEOPLE, button, field, freshBrowser, opener, sees, seesButton, startFake, type, visit, waitFor } from "./support";
 import type { FakeDeployment } from "./support";
 import { exampleAdmin } from "../../../packages/client/test/support/admin.js";
 import { artifact } from "../../../packages/client/test/support/plane.js";
@@ -15,7 +14,6 @@ const ada = { subject: "ada@example.com", display_name: "Ada" };
 const dan = { subject: "dan@example.com", name: "Dan" };
 
 let fake: FakeDeployment;
-let unmount: (() => void) | null = null;
 
 beforeEach(async () => {
   freshBrowser();
@@ -31,16 +29,11 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
-  unmount?.();
-  unmount = null;
+  close();
   await fake.stop();
 });
 
-async function open(hash: string, who: { subject: string; name: string }): Promise<void> {
-  await signedInAs(fake, who);
-  visit(hash);
-  unmount = render(<App openTab={() => undefined} />).unmount;
-}
+const { open, close } = opener(() => fake, { openTab: () => undefined });
 
 const cards = (): HTMLElement | null => document.querySelector<HTMLElement>('ul[aria-label="Artifacts"]');
 const whose = (): HTMLElement | null => document.querySelector<HTMLElement>('[aria-label="Whose it is"]');

@@ -68,7 +68,7 @@ defmodule Troupe.Worker.PersonCredentialsTest do
     )
 
     start_supervised!({PodConnections, install: false})
-    eventually(fn -> Link.connected?() end)
+    eventually(fn -> Link.connected?() end, 10_000)
 
     context
   end

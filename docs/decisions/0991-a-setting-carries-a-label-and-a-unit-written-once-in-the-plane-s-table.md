@@ -8,16 +8,10 @@ paths:
   - apps/troupe_plane/lib/troupe/plane/settings.ex
   - apps/troupe_plane/lib/troupe/plane/settings/setting.ex
   - apps/troupe_plane/lib/troupe/plane/settings/ladder.ex
-  - apps/troupe_plane/test/troupe/plane/settings_test.exs
   - clients/gui/packages/client/src/admin.ts
-  - clients/gui/packages/client/test/support/admin.ts
   - clients/gui/apps/console/src/views/settingUnits.tsx
   - clients/gui/apps/console/src/views/Policy.tsx
   - clients/gui/apps/console/src/views/Organisation.tsx
-  - clients/gui/apps/console/test/policy.test.tsx
-  - clients/gui/apps/console/test/organisation.test.tsx
-  - docs/admin/console.md
-  - PROTOCOL.md
 symbols:
   - Troupe.Plane.Settings.naming/1
   - Troupe.Plane.Settings.Setting.units/0

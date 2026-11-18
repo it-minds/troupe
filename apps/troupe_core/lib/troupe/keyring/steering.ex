@@ -15,6 +15,7 @@ defmodule Troupe.Keyring.Steering do
   """
 
   alias Troupe.Keyring
+  alias Troupe.Protocol.Digest
 
   @type t :: %{url: String.t(), subject: String.t(), grant: String.t()}
 
@@ -22,8 +23,7 @@ defmodule Troupe.Keyring.Steering do
   @spec name(Path.t()) :: String.t()
   def name(state_dir \\ Troupe.Paths.state_dir()) do
     hash =
-      :crypto.hash(:sha256, Path.expand(state_dir))
-      |> Base.encode16(case: :lower)
+      Digest.sha256(Path.expand(state_dir))
       |> binary_part(0, 12)
 
     "steering-" <> hash

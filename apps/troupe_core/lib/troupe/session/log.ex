@@ -187,14 +187,6 @@ defmodule Troupe.Session.Log do
   end
 
   @doc """
-  Verify a log's hash chain, naming the first bad sequence number.
-
-  Returns `:ok` or `{:error, seq, reason}`.
-  """
-  @spec verify_file(Path.t()) :: :ok | {:error, pos_integer(), atom()}
-  def verify_file(path), do: path |> read_file() |> Event.verify()
-
-  @doc """
   Write a log that does not exist yet, whole: a fork's history, sealed already, which the
   session's own `Log` then continues (root Decision 812). Never over a log that is there:
   a session's history is appended to, and only by its own process.

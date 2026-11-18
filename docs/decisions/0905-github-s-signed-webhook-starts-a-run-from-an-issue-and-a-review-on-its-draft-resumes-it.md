@@ -10,22 +10,8 @@ paths:
   - apps/troupe_plane/lib/troupe/plane/github/issue.ex
   - apps/troupe_plane/lib/troupe/plane/github/review.ex
   - apps/troupe_plane/lib/troupe/plane/github/delivery.ex
-  - apps/troupe_plane/lib/troupe/plane/web/raw_body.ex
-  - apps/troupe_plane/lib/troupe/plane/web/router.ex
-  - apps/troupe_plane/lib/troupe/plane/web/endpoint.ex
-  - apps/troupe_plane/lib/troupe/plane/triggers.ex
   - apps/troupe_plane/lib/troupe/plane/triggers/trigger.ex
-  - apps/troupe_plane/lib/troupe/plane/triggers/notify.ex
-  - apps/troupe_plane/lib/troupe/plane/admin.ex
-  - apps/troupe_plane/priv/repo/migrations/20261016000905_github_webhook.exs
-  - apps/troupe_plane/test/troupe/plane/github_webhook_test.exs
-  - apps/troupe_worker/lib/troupe/worker/plane/commands.ex
-  - apps/troupe_worker/test/troupe/worker/github_fix_loop_test.exs
   - apps/troupe_protocol/lib/troupe/kms/policy.ex
-  - clients/gui/apps/console/src/views/Runs.tsx
-  - clients/gui/apps/console/src/views/Triggers.tsx
-  - docs/admin/github.md
-  - docs/admin/github-runs.md
 symbols:
   - Troupe.Plane.GitHub.Webhook.take/2
   - Troupe.Plane.GitHub.WebhookSecret.check/3
@@ -36,36 +22,26 @@ symbols:
 gist: "Webhook HMAC via transit, constant-time, deduped, 202 first; label or member command fires; GitHub text only fenced; review resumes a run's draft; key at create"
 ---
 
-Issue #147, slice 3, and the maintainer's decision of 2026-10-16: a new webhook trigger gets
-its key when it is created. Slices 1 and 2 (Decisions 885 and 891) gave a session a
-repository, a clone and a fix loop that ends in a draft pull request; nothing could start
-one from GitHub, and a review on the draft reached nobody. On the chunk tip
-`POST /webhook/github` answered 404, a trigger could not name a repository, a webhook trigger
-had no key until somebody found the button on its row, and a run's notification carried no
-link.
-
-- **One door, signed, for the App.** `POST /webhook/github`, the URL an administrator gives
-  the App on GitHub. Its credential is `X-Hub-Signature-256`, GitHub's HMAC-SHA256 of the
-  body under the App's webhook secret, over the bytes as they arrived (`Web.RawBody` keeps
-  them, for that route alone, in both the endpoint's and the router's parsers). The secret
+- **One door, signed, for the App.** `POST /webhook/github`, the URL an administrator
+  gives the App on GitHub. Its credential is `X-Hub-Signature-256`, GitHub's HMAC-SHA256
+  of the body under the App's webhook secret, over the bytes as they arrived. The secret
   is kept as the App's key is (Decision 885): `admin.github.put` takes `webhook_secret`
-  (32 characters at least) and imports it into transit as an HMAC key, `troupe-github-webhook`,
-  not exportable; the row keeps its version. The plane asks transit for the HMAC of each body
-  and compares it with the one presented with `:crypto.hash_equals`. Rejected: the secret as
-  a row or a setting, which a database backup would hand to anybody who could then start
-  runs; and transit's own `verify`, whose comparison is OpenBao's and not one this code can
-  show is constant-time. An unsigned, malformed or wrong signature is `401` before anything
-  else is read, and logged with the delivery id and event (headers cut to the characters an
-  id has), never the body; a plane with no secret, or whose transit cannot answer, refuses
-  with `503` and says why. `Troupe.KMS.Policy.github_app/3` adds the key's read, import,
-  import-version and HMAC paths.
+  (32 characters at least) and imports it into transit as an HMAC key,
+  `troupe-github-webhook`, not exportable; the row keeps its version. The plane asks
+  transit for the HMAC of each body and compares it with the one presented with
+  `:crypto.hash_equals`. Rejected: the secret as a row or a setting, which a database
+  backup would hand to anybody who could then start runs; and transit's own `verify`,
+  whose comparison is OpenBao's and not one this code can show is constant-time. An
+  unsigned, malformed or wrong signature is `401` before anything else is read, and logged
+  with the delivery id and event (headers cut to the characters an id has), never the
+  body; a plane with no secret, or whose transit cannot answer, refuses with `503` and
+  says why.
 - **Once, and answered first.** A delivery's id (`X-GitHub-Delivery`) is a row,
-  `github_deliveries`, inserted with `ON CONFLICT DO NOTHING` before any work, so a retry or
-  a Redeliver is answered `200` and does nothing, on any replica; rows go after thirty days.
-  The answer, `202`, comes as soon as the delivery is recorded; the work runs after it under
-  `Troupe.Plane.GitHub.Deliveries`, since GitHub gives a delivery ten seconds and a session
-  can take longer to start. What the work did (the runs it fired, the session it resumed, or
-  why neither) is the row's `outcome`.
+  `github_deliveries`, inserted with `ON CONFLICT DO NOTHING` before any work, so a retry
+  or a Redeliver is answered `200` and does nothing, on any replica; rows go after thirty
+  days. The answer, `202`, comes as soon as the delivery is recorded; the work runs after
+  it under `Troupe.Plane.GitHub.Deliveries`, since GitHub gives a delivery ten seconds and
+  a session can take longer to start.
 - **A trigger names a repository.** `source: {kind: webhook, provider: github, repository:
   owner/name, label?, command?, ref?}`. Kept as a webhook with a provider rather than a new
   kind, because that is what the `Trigger` resource's schema already says a webhook is (a
@@ -121,56 +97,12 @@ link.
   plane.
 - **A webhook trigger is made with its key.** `admin.trigger.put` that creates a webhook
   trigger with no repository mints its key (`Triggers.rotate_key/2`) and answers `key` and
-  `url` once; the audit row says a key was minted and never holds it. The console shows them
-  once with a button that copies the key and says it will not be shown again, until the
-  person says they have it; `/admin` does the same with a panel and a copy button (its copy
-  listener is the one line `mix troupe.admin.assets` adds), until its editor goes. A trigger
-  on a repository is made with none: the App's deliveries fire it. A change to an existing
+  `url` once; the audit row says a key was minted and never holds it. A trigger on a
+  repository is made with none: the App's deliveries fire it. A change to an existing
   trigger mints nothing, and rotation stays as it was. Triggers made from a `Trigger`
   resource get none either: the key is the plane's and a repository never holds one
   (Decision 737); an administrator rotates one.
-- **The console's Runs screen.** `views/Runs.tsx`: every run of the teams the person
-  administers (`admin.runs.list`, which now names each run's team, its `repository` and the
-  `issue` GitHub started it from), with trigger, repository, issue, state, the draft pull
-  request with its CI rounds, spend and who has read it, filtered by team and by state; a
-  run's page with its record (`sessions.github`), a link to the session on the Sessions screen
-  and "Mark it read" (`admin.run.review`). Both roles, as the plane answers each. Overview's
-  "waiting for a person" now links here.
+
 - **The notification carries the pull request.** A trigger's `notify_url` is posted
   `pull_request`, the link to the draft its run opened, or `null`: metadata, as the rest of
   the body is.
-- **Out of this decision.** Slice 4: autonomy policy (a draft only, caps on open pull
-  requests and attempts per issue), per-team repositories, revoking tokens at dormancy, the
-  App configured from GitOps; and anything that merges. A schedule that sweeps issues, a
-  conversation comment on the pull request resuming its session, and the console's own page
-  for the App (`Integrations`, A36's slot).
-- **Proof.** `github_webhook_test.exs` in the plane, against the development OpenBao and
-  `FakeGitHub`, which now signs deliveries (`deliver/5`) and serves a review's comments: no
-  signature, another secret's, not `sha256`, not hex and altered bytes are each `401`, logged
-  without the body or the secret, and record nothing; a signed delivery fires; a redelivery
-  is `200` and fires once; the answer arrives while the pod still holds the session's
-  activation; no secret, or transit without the key, is `503` with the reason; the secret is
-  in no row, answer or audit entry. A labelled issue starts a session on the trigger's
-  profile with the repository, the issue inside the fence and the run listing its repository
-  and issue; a command starts one from a member and nothing from `NONE` or `CONTRIBUTOR`, a
-  second line, a near miss, a bot, a pull request or a closed issue; another label,
-  repository, installation or a paused trigger start nothing; a repository trigger is checked
-  at put and made with no key. A hostile issue whose title and body try template
-  placeholders, a fence close and instructions to merge, push to `main`, print the token and
-  change approvals reaches the prompt only inside one fence, renders empty in the template,
-  and leaves profile, owner and terms the trigger's. A review requesting changes resumes the
-  session with one fenced input carrying its body and line comments, read with a
-  `pull_requests: read` token, audited, once; an approval, a stranger's, a bot's, a non-draft,
-  another number or link, an empty one, a foreign installation, line-comment deliveries, a
-  stopped session and a person's own session resume nothing; a hostile review stays in one
-  fence. `trigger_ingress_test.exs`: a webhook trigger's key comes with its create, in no
-  listing or audit row, fires it, and an update or a schedule mints none.
-  `trigger_notify_test.exs`: the notification carries the pull request's link, or `null`.
-  `panel_test.exs`: `/admin` shows the minted key once with a copy button. In the worker,
-  `github_fix_loop_test.exs`: the plane's own prompt for a hostile issue and its own input for
-  a hostile review, pushed as `session.input`, to a model that obeys them, get refusals for
-  `main`, `refs/heads/main`, `pr_merge` and `pr_approve`, no token in the shell, `main`
-  unmoved and nothing merged; the review is the session's `user_input` with the delivery's id
-  and actor; a stale epoch and a session not up are refused. The console's `runs.test.tsx`
-  and `triggers.test.tsx`: the Runs screen for both roles, a run's page, its session link and
-  marking it read; the key shown once and copied; a trigger on a repository made with no key.

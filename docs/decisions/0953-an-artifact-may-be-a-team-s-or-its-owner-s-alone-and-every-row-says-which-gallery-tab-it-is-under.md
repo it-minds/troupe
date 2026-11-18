@@ -7,25 +7,7 @@ issue: 62
 paths:
   - apps/troupe_plane/lib/troupe/plane/artifacts.ex
   - apps/troupe_plane/lib/troupe/plane/admin.ex
-  - apps/troupe_plane/lib/troupe/plane/admin/api.ex
-  - apps/troupe_plane/lib/troupe/plane/admin/console.ex
-  - apps/troupe_plane/lib/troupe/plane/harness.ex
-  - apps/troupe_plane/lib/troupe/plane/settings.ex
-  - apps/troupe_plane/test/troupe/plane/artifact_teams_test.exs
-  - apps/troupe_core/lib/troupe/tools/publish_artifact.ex
-  - apps/troupe_core/lib/troupe/commands.ex
   - apps/troupe_gateway/lib/troupe/gateway/artifacts.ex
-  - apps/troupe_protocol/lib/troupe/protocol/schema.ex
-  - clients/tui/lib/troupe/ui/tui/server.ex
-  - clients/gui/apps/desktop/src/views/Publish.tsx
-  - clients/gui/apps/console/src/views/Artifacts.tsx
-  - clients/gui/apps/console/src/views/PublishedArtifacts.tsx
-  - clients/gui/apps/console/src/nav.ts
-  - clients/gui/packages/client/src/artifacts.ts
-  - clients/gui/packages/client/src/admin.ts
-  - PROTOCOL.md
-  - docs/user/artifacts.md
-  - docs/admin/console.md
 symbols:
   - Troupe.Plane.Artifacts.visible/3
   - Troupe.Plane.Artifacts.admin_list/1
@@ -81,17 +63,6 @@ way to remove a page that breaks the organisation's rules or fills its storage; 
 administrator who reads it, which is what "not even your team admin" rules out for anybody who
 is not its owner.
 
-## Which tab a row is under
-
-Every row of `artifact.list` (and `artifact.get`) carries `scope`: `mine` for the caller's own,
-`private` for their own private ones, the visibility for one that is for somebody the caller is
-(`organisation`, `team:<name>`, `profile:<name>`), `shared` where only a link reached it, and the
-visibility again for one an administrator sees by their role. A gallery tabs by it and works out
-no membership itself. The answer also carries `teams`, the caller's, beside `profiles`, for the
-publish surfaces to offer; `teams: true` narrows the list to the teams' own (of the teams the
-caller is in or administers, every team's for a platform administrator), which is the console's
-**Teams** tab: one list, each card naming its team.
-
 ## The administrators' table
 
 The console is the administrators' panel (the maintainer, on #765), so a person's own gallery is
@@ -101,38 +72,3 @@ teams' own; `admin.artifact.takedown` is the takedown from it, destructive and c
 id over MCP. Both are placed on a new Operate area, **Published artifacts**, a plain table with
 **Take down** typed by the id. Reading the table is not audited; the takedown is. Nothing there
 opens an artifact.
-
-## Where a visibility is chosen
-
-The `publish_artifact` tool's description and schema name `private` (the default), `organisation`,
-`team:<name>` and `profile:<name>`, and `visibility` is no longer required; the line grew by about
-a hundred bytes, inside the offline bench's budgets. `/publish <path> [private | organisation |
-team:<name> | profile:<name>]` takes a path alone. The desktop dialog offers **Only you** first,
-then the organisation, each of the person's teams and each profile. The console's
-`artifacts_publish_organisation` setting points a refused person at a team or a profile.
-
-## Proof
-
-- `apps/troupe_plane/test/troupe/plane/artifact_teams_test.exs`: a member publishes to their
-  team and a platform administrator to any; another team refused with the person's teams named,
-  one that is not there refused as not theirs, a malformed name invalid; the named team's quota
-  and a move taking every byte there; members list, get, open and fetch it on the host and
-  nobody else does, a leaver at once; `scope` on every row (mine, a team, the organisation, a
-  profile, shared) and `teams: true`; a team administrator who is not a member takes one down,
-  another team's administrator does not see it, and neither takes down an organisation's or a
-  profile's; a private one is what a publish naming nobody makes, `scope: private`, seen by
-  nobody else (a teammate, the team's administrator, a platform administrator) on either host,
-  shared by a link, kept private by a republish naming nobody; a platform administrator's
-  takedown of one, audited; `admin.artifacts.list` for each role and `admin.artifact.takedown`.
-- `artifacts_test.exs`'s refused visibilities; `admin_parity_test.exs` and
-  `console_coverage_test.exs` (both new methods have an MCP tool and a console area).
-- `apps/troupe_core/test/troupe/tools/publish_artifact_test.exs` (private when nothing is said,
-  nothing sent for a new version, a team's words, the schema); `clients/tui/test/troupe/
-  publish_command_test.exs` (a path alone, the usage naming `team:<name>`).
-- The console's `artifact-teams.test.tsx` (the Teams tab, a private one under its owner's Mine,
-  Published artifacts for a platform and a team administrator, a takedown typed by its id),
-  `artifacts.test.tsx`'s tabs and `coverage.test.ts`; the desktop app's `publish.test.tsx`
-  (**Only you** first and sent as `private`, the person's teams offered).
-
-All of the plane's failed on the chunk's tip (`e544a82f`): there was no team or private
-visibility, no `scope`, and no administrators' table.

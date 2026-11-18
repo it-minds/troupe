@@ -9,6 +9,8 @@ defmodule Troupe.Gateway.DaemonTest do
 
   use ExUnit.Case, async: false
 
+  import Troupe.Eventually
+
   alias Troupe.Gateway.{Daemon, Session}
   alias Troupe.Protocol.{Client, Endpoint, Error, Event}
   alias Troupe.Session.Log
@@ -245,7 +247,7 @@ defmodule Troupe.Gateway.DaemonTest do
       assert detail =~ "Protocol.UndefinedError"
     end
 
-    # D48: woken by input, the root fails its very first start, inside the session's own
+    # Woken by input, the root fails its very first start, inside the session's own
     # start. Its Node never gets to start it again, so that start is its last.
     @tag :capture_log
     test "input.send to a session whose root cannot start again answers why, as its log does",
@@ -971,20 +973,6 @@ defmodule Troupe.Gateway.DaemonTest do
 
     Troupe.stop_session(session.id)
     session
-  end
-
-  defp eventually(fun, attempts \\ 200) do
-    case fun.() do
-      falsy when falsy in [nil, false] and attempts > 0 ->
-        Process.sleep(25)
-        eventually(fun, attempts - 1)
-
-      falsy when falsy in [nil, false] ->
-        flunk("never happened")
-
-      found ->
-        found
-    end
   end
 
   defp await_idle(session_id, attempts \\ 200) do

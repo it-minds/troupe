@@ -214,10 +214,14 @@ defmodule Troupe.MCP.Tool do
     })
   end
 
-  # MCP returns content blocks. Text is what a model can read; anything else is named
-  # rather than dumped, because a base64 image in a tool result is a wasted context
-  # window.
-  defp render(%{"content" => blocks}) when is_list(blocks) do
+  @doc """
+  A `tools/call` result as the text a model reads, from a remote server or a local one.
+  MCP returns content blocks. Text is what a model can read; anything else is named
+  rather than dumped, because a base64 image in a tool result is a wasted context
+  window.
+  """
+  @spec render(term()) :: String.t()
+  def render(%{"content" => blocks}) when is_list(blocks) do
     blocks
     |> Enum.map_join("\n", fn
       %{"type" => "text", "text" => text} -> text
@@ -231,7 +235,7 @@ defmodule Troupe.MCP.Tool do
     end
   end
 
-  defp render(result), do: Jason.encode!(result)
+  def render(result), do: Jason.encode!(result)
 
   defp describe({:mcp_error, %{"message" => message}}), do: "the MCP server refused: #{message}"
 

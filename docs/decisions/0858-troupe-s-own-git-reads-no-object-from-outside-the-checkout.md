@@ -7,7 +7,6 @@ issue: 538
 supersedes: [833]
 paths:
   - apps/troupe_core/lib/troupe/git.ex
-  - apps/troupe_core/test/troupe/git_test.exs
 symbols:
   - Troupe.Git.run/3
 gist: "Troupe.Git refuses a repository whose alternates (followed in turn) or links in .git/objects really lead outside the checkout"
@@ -59,17 +58,3 @@ few hundred calls at most, on every `Troupe.Git.run/3`.
   itself and cannot be told from one; making one needs the target to be reachable already.
 - Links elsewhere in `.git` (`refs/`, `packed-refs`, `shallow`) can show another
   repository's ref names and hashes, but not its objects.
-- A link changed between the check and the command: the same window 833 accepts for the
-  `.git` it pins.
-
-**Proof.** `Troupe.GitTest`, "objects reached through alternates or a link out of the
-checkout are not read": for an absolute, a relative and a quoted alternates entry, an
-alternate inside the checkout whose own alternates lead out, the object directory as a
-link, a fan-out directory as a link and a pack and its index as links, plain `git
-cat-file` in the workspace shows the other checkout's commit, and `git_read`'s `show` and
-`log` of that commit are refused with the sentence and do not show it. On the chunk's tip
-`git_read` read the other checkout's commit through each of them probed, all but the quoted
-entry, which was added after (through the fan-out link, `log` did; `show` failed for want of
-the commit's tree). On Windows the installed build refuses an alternates entry, the object
-directory as a junction and a fan-out directory as a junction, which the build before it read. An alternate inside
-the checkout is still read.

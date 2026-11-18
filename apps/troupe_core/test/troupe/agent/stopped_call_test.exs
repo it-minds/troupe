@@ -1,7 +1,7 @@
 defmodule Troupe.Agent.StoppedCallTest do
   @moduledoc """
-  A model call the agent gives up on is stopped, and what it reported is counted (D69,
-  Decision 788). Req's `receive_timeout` limits only the gap between packets, so a reply
+  A model call the agent gives up on is stopped, and what it reported is counted.
+  Req's `receive_timeout` limits only the gap between packets, so a reply
   that keeps coming went on past `llm_timeout_ms`, generated and billed up to
   `max_tokens`, after the agent had moved on, and none of it was counted.
   """
@@ -20,7 +20,7 @@ defmodule Troupe.Agent.StoppedCallTest do
       ended = await_event(sid, :turn_ended, 10_000)
 
       assert error.data["reason"] =~ "did not answer in time"
-      assert eventually(fn -> streams(sid) == [] end), "the stream is still running"
+      assert eventually(fn -> streams(sid) == [] end, 2_000), "the stream is still running"
 
       # What the stand-in reported before it was stopped, as `llm_response` says it.
       assert %{"model" => "fake-model", "usage" => usage} = error.data["stopped"]
@@ -44,7 +44,7 @@ defmodule Troupe.Agent.StoppedCallTest do
       await_state(sid, [:compacting], 10_000)
       ended = await_event(sid, :turn_ended, 10_000)
 
-      assert eventually(fn -> streams(sid) == [] end), "the summariser's stream is still running"
+      assert eventually(fn -> streams(sid) == [] end, 2_000), "the summariser's stream is still running"
       assert events_of_type(sid, :compacted) == []
 
       # Five replies and the summary that was stopped, which had reported its prompt.
@@ -61,7 +61,7 @@ defmodule Troupe.Agent.StoppedCallTest do
       error = await_event(sid, :llm_error, 10_000)
       ended = await_event(sid, :turn_ended, 10_000)
 
-      assert eventually(fn -> streams(sid) == [] end), "the stream is still running"
+      assert eventually(fn -> streams(sid) == [] end, 2_000), "the stream is still running"
       assert error.data["stopped"] == %{"model" => "fake-model"}
 
       assert ended.data["turn"] == %{
@@ -100,7 +100,7 @@ defmodule Troupe.Agent.StoppedCallTest do
     Troupe.cancel(sid)
     cancelled = await_event(sid, :cancelled, 10_000)
 
-    assert eventually(fn -> streams(sid) == [] end), "the stream is still running"
+    assert eventually(fn -> streams(sid) == [] end, 2_000), "the stream is still running"
 
     assert %{"model" => "fake-model", "usage" => %{"input_tokens" => 100}} =
              cancelled.data["stopped"]
@@ -202,22 +202,5 @@ defmodule Troupe.Agent.StoppedCallTest do
   defp budget(sid) do
     {_name, state} = :sys.get_state(Registry.agent_pid(sid, ["root"]))
     state.budget
-  end
-
-  defp eventually(fun, timeout \\ 2_000),
-    do: poll(fun, System.monotonic_time(:millisecond) + timeout)
-
-  defp poll(fun, deadline) do
-    cond do
-      fun.() ->
-        true
-
-      System.monotonic_time(:millisecond) > deadline ->
-        false
-
-      true ->
-        Process.sleep(50)
-        poll(fun, deadline)
-    end
   end
 end

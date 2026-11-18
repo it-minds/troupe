@@ -13,7 +13,6 @@ paths:
   - clients/tui/lib/troupe/ui/tui/server.ex
   - clients/tui/lib/troupe/ui/tui/view.ex
   - clients/tui/lib/troupe/cli/onboard.ex
-  - clients/tui/test/troupe/start_onboarding_test.exs
 symbols:
   - Troupe.Client.Daemon.Start
   - Troupe.Client.answer_local/3
@@ -26,8 +25,7 @@ gist: "Start questions are :local_question events in the root window; y/n/r and 
 Root Decision 835, issue #516's third wave. Amends 127 and 131 only in when the librarian
 starts: after onboarding is answered, and an outdated brief asked first; their rules (the
 daemon's `refresh_due`, saying why none starts) are unchanged and moved with the code into
-`Troupe.Client.Daemon.Start`. On the chunk's tip a first session over a `CLAUDE.md` with no
-brief started the librarian at once and asked nothing.
+`Troupe.Client.Daemon.Start`.
 
 - **The questions.** At a new session's start (`create_session`, unless the caller passes
   `refresh_brief: false`, as a headless run does), in a git repository, the client asks
@@ -72,18 +70,3 @@ brief started the librarian at once and asked nothing.
   librarian starts in one only (105): `troupe` opened in a home directory asks nothing.
   The brief's question follows 127's gates (memory on, `memory_auto_refresh`, a
   repository, a model to ask). A daemon from before `onboard.plan` starts the librarian as
-  before. Headless prints the daemon's `onboarding_suggested` line and asks nothing.
-- **Proof.** `test/troupe/start_onboarding_test.exs`: a first session over a `CLAUDE.md`
-  and a Cursor rule asks the one question with the two files listed and no librarian; `y`
-  writes the rule and asks for the new `AGENTS.md` on its own, still no librarian; its `y`
-  writes it and the librarian starts on the missing brief; the next session asks nothing
-  (failed on the chunk's tip: no question came, and the librarian started at once). `r`
-  driven through the terminal UI's keys: the `AGENTS.md`'s diff on screen with `[y/N]`,
-  Enter leaving it, then the rule's question and `y` writing it, and `y` typed into the
-  box once nothing is asked. `n` leaving every file and the next session asking nothing; an
-  outdated onboarding asked with `[Y/n]` and Enter re-running it; an outdated brief asked,
-  `n` remembered and the next session asking nothing; its `y` starting the librarian on
-  the refresh prompt; headless asking nothing. `memory_client_test.exs` unchanged and
-  passing (127 and 131). `mix check` in `clients/tui`, and the installed TUI driven
-  headlessly against the installed daemon on a scratch repository (the pull request has
-  it).

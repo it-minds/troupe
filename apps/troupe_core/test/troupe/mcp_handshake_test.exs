@@ -57,7 +57,7 @@ defmodule Troupe.MCPHandshakeTest do
       sid = session.id
 
       assert %{state: :ready, tools: ["search"], error: nil} =
-               wait_for_state(sid, "notes", [:ready])
+               await_mcp(sid, "notes", [:ready])
 
       :ok = Troupe.subscribe(sid)
       Troupe.send_input(sid, "find trains")
@@ -86,7 +86,7 @@ defmodule Troupe.MCPHandshakeTest do
     test "a session the server has forgotten is opened again once, and the call goes through",
          context do
       %{session: session} = with_server(context)
-      wait_for_state(session.id, "notes", [:ready])
+      await_mcp(session.id, "notes", [:ready])
       search = tool(session.id)
       _handshake_and_listing = requests()
 
@@ -112,7 +112,7 @@ defmodule Troupe.MCPHandshakeTest do
     @tag fake: [forgotten: 400]
     test "a session the server answers 400 for is opened again once, as a 404 is", context do
       %{session: session} = with_server(context)
-      wait_for_state(session.id, "notes", [:ready])
+      await_mcp(session.id, "notes", [:ready])
       search = tool(session.id)
       _handshake_and_listing = requests()
 
@@ -205,7 +205,7 @@ defmodule Troupe.MCPHandshakeTest do
 
     test "the session ends at the server when the local session stops", context do
       %{session: session} = with_server(context)
-      wait_for_state(session.id, "notes", [:ready])
+      await_mcp(session.id, "notes", [:ready])
       assert Map.keys(FakeMCP.sessions(context.fake)) == ["session-1"]
 
       :ok = Troupe.stop_session(session.id)
@@ -217,11 +217,11 @@ defmodule Troupe.MCPHandshakeTest do
       assert FakeMCP.sessions(context.fake) == %{}
     end
 
-    # D59: reloading after a server left `mcp.json` stopped it and left its session open at
+    # Reloading after a server left `mcp.json` stopped it and left its session open at
     # the server until the local session stopped.
     test "the session ends at the server when a reload finds it gone from the file", context do
       %{session: session} = with_server(context)
-      wait_for_state(session.id, "notes", [:ready])
+      await_mcp(session.id, "notes", [:ready])
       assert Map.keys(FakeMCP.sessions(context.fake)) == ["session-1"]
 
       write_file(context, ".troupe/mcp.json", Jason.encode!(%{"mcpServers" => %{}}))
@@ -234,7 +234,7 @@ defmodule Troupe.MCPHandshakeTest do
     @tag fake: [delete: :not_allowed]
     test "a server that will not end a session is let be", context do
       %{session: session} = with_server(context)
-      wait_for_state(session.id, "notes", [:ready])
+      await_mcp(session.id, "notes", [:ready])
 
       assert :ok = Troupe.stop_session(session.id)
       assert_receive {:fake_mcp, %{method: "DELETE", session: "session-1", status: 405}}, 5_000
@@ -299,7 +299,7 @@ defmodule Troupe.MCPHandshakeTest do
 
     test "is called without a session once the handshake is done", context do
       %{session: session} = with_server(context)
-      wait_for_state(session.id, "notes", [:ready])
+      await_mcp(session.id, "notes", [:ready])
 
       assert {:ok, "three notes on kites"} =
                Tool.invoke(tool(session.id), %{"topic" => "kites"}, ctx(session, context))
@@ -341,7 +341,7 @@ defmodule Troupe.MCPHandshakeTest do
     test "go out on every request, the handshake's and the session's end too, read from the environment",
          context do
       %{session: session} = start_session(context, [])
-      wait_for_state(session.id, "notes", [:ready])
+      await_mcp(session.id, "notes", [:ready])
 
       assert {:ok, "three notes on maps"} =
                Tool.invoke(tool(session.id), %{"topic" => "maps"}, ctx(session, context))
@@ -392,16 +392,6 @@ defmodule Troupe.MCPHandshakeTest do
 
       questions ->
         questions
-    end
-  end
-
-  defp wait_for_state(session_id, name, states, waited \\ 0) do
-    entry = Enum.find(MCP.status(session_id), &(&1.name == name))
-
-    cond do
-      entry && entry.state in states -> entry
-      waited > 10_000 -> flunk("#{name} never reached #{inspect(states)}: #{inspect(entry)}")
-      true -> Process.sleep(50) && wait_for_state(session_id, name, states, waited + 50)
     end
   end
 

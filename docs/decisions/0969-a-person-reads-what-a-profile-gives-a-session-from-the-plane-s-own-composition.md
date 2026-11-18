@@ -7,8 +7,6 @@ paths:
   - apps/troupe_plane/lib/troupe/plane/harness.ex
   - apps/troupe_plane/lib/troupe/plane/profile_view.ex
   - apps/troupe_gateway/lib/troupe/gateway/dispatch.ex
-  - PROTOCOL.md
-  - docs/user/profiles.md
 symbols:
   - Troupe.Plane.ProfileView.get/3
   - Troupe.Plane.ProfileView.offering/2
@@ -78,14 +76,3 @@ built for the console.
   left out, answers "is it here" and never "why not"; the person then asks an
   administrator, who reads the grant and the rule to tell them. Showing it with the reason
   is the same composition and saves that trip.
-
-## Proof
-
-`apps/troupe_plane/test/troupe/plane/profile_view_test.exs`: a member sees the offered
-agents and the excluded ones with why, each MCP server's access by credential mode and one
-the grant withholds, the profile's rules, the model, the reach composed and sorted, the
-limits and three budgets, and the team picked as a create picks it; a non-member is
-`not_found`; a platform admin sees the profile's own view. The primaries agree with
-`profiles.list`. `apps/troupe_gateway/test/troupe/gateway/profile_get_test.exs`: the daemon
-forwards it as its person with only its arguments, keeps the plane's refusal, says signed
-out in a sentence and refuses it to a client in Local only.

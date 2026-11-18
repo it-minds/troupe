@@ -10,6 +10,7 @@
 
 import { TroupeRpcError } from "./connection.js";
 import { when } from "./remote.js";
+import { errorText } from "./words.js";
 
 /** What an invitation lets a person do: follow the session, or steer it as well. */
 export type InviteRole = "observe" | "control";
@@ -121,5 +122,5 @@ export function inviteRefusal(e: unknown): string {
     if (typeof reason === "string") return reason.charAt(0).toUpperCase() + reason.slice(1);
     if (e.message === "not_found") return "Nobody of that name has signed in to this plane yet.";
   }
-  return e instanceof Error ? e.message : String(e);
+  return errorText(e);
 }

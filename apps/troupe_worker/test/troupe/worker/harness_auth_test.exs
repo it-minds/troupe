@@ -335,7 +335,6 @@ defmodule Troupe.Worker.HarnessAuthTest do
       mine = context.session_id
 
       assert {:ok, %{"sessions" => [%{"id" => ^mine}]}} = Client.call(client, "session.list", %{})
-      assert {:ok, %{"sessions" => [%{"id" => ^mine}]}} = Client.call(client, "fleet.get", %{})
 
       # The pod does hold both, as a token with no session in it can see.
       {:ok, unscoped} = connect(context, token(context, role: "owner"))
@@ -516,7 +515,7 @@ defmodule Troupe.Worker.HarnessAuthTest do
       expired = token(context, lifetime: 1, now: now - 3_600)
       assert {:error, _} = Client.call(client, "auth.refresh", %{"auth" => %{"token" => expired}})
 
-      assert eventually(fn -> not Process.alive?(client) end)
+      assert eventually(fn -> not Process.alive?(client) end, 10_000)
     end
   end
 

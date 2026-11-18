@@ -5,7 +5,6 @@ date: 2026-09-11
 status: accepted
 paths:
   - clients/tui/lib/troupe/ui/tui/model.ex
-  - clients/tui/test/troupe/window_attention_test.exs
 gist: Cancellation puts the agent in `:done` with reason `:cancelled` (window `:done_unread`)
 ---
 

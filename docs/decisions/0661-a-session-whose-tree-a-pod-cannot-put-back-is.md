@@ -4,16 +4,12 @@ title: A session whose tree a pod cannot put back is parked read-only, once, rat
 date: 2026-09-20
 status: accepted
 paths:
-  - PROTOCOL.md
   - apps/troupe_plane/lib/troupe/plane/control/connection.ex
   - apps/troupe_plane/lib/troupe/plane/harness.ex
   - apps/troupe_plane/lib/troupe/plane/sessions.ex
   - apps/troupe_worker/lib/troupe/worker/plane/commands.ex
   - apps/troupe_worker/lib/troupe/worker/session/manager.ex
   - apps/troupe_worker/lib/troupe/worker/session/restore.ex
-  - apps/troupe_worker/test/troupe/worker/kms_unreachable_test.exs
-  - apps/troupe_worker/test/troupe/worker/object_store_unreachable_test.exs
-  - apps/troupe_worker/test/troupe/worker/unrestorable_test.exs
 gist: A session whose tree a pod cannot put back is parked read-only, once, rather than left `active` for every client that opens it to fail on
 ---
 

@@ -6,24 +6,10 @@ status: accepted
 issue: 920
 supersedes: [986]
 paths:
-  - apps/troupe_gateway/lib/troupe/gateway/dispatch.ex
   - apps/troupe_gateway/lib/troupe/gateway/artifacts.ex
-  - apps/troupe_gateway/lib/troupe/gateway/connection.ex
   - apps/troupe_core/lib/troupe/artifacts.ex
   - apps/troupe_worker/lib/troupe/worker/artifacts.ex
   - apps/troupe_plane/lib/troupe/plane/artifacts.ex
-  - apps/troupe_plane/lib/troupe/plane/harness.ex
-  - apps/troupe_plane/lib/troupe/plane/control/connection.ex
-  - apps/troupe_protocol/lib/troupe/protocol/schema.ex
-  - apps/troupe_gateway/test/troupe/gateway/attach_artifact_test.exs
-  - apps/troupe_plane/test/troupe/plane/control_test.exs
-  - apps/troupe_plane/test/troupe/plane/artifact_versions_test.exs
-  - PROTOCOL.md
-  - clients/gui/apps/desktop/src/views/Session.tsx
-  - clients/gui/packages/client/src/session.ts
-  - clients/gui/packages/client/test/support/daemon.ts
-  - clients/gui/packages/client/test/support/worker.ts
-  - clients/gui/packages/client/test/support/plane.ts
 symbols:
   - Troupe.Artifacts.files/1
   - Troupe.Plane.Artifacts.files/4
@@ -76,18 +62,3 @@ file read and uploaded. This replaces Decision 986's "Not yet on the platform".
 
 **What an older client sees.** A capability it does not know; `fs.upload` with `content`
 as before.
-
-## Proof
-
-`attach_artifact_test.exs` (the daemon's dispatch with a stand-in host): every file of the
-version under the folder named, binary included, each an `fs_changed` of the person's, the
-host asked as them; the root and one `file`; a path outside the workspace writing nothing;
-the plane's `not_found` kept and signed out saying how to sign in. `control_test.exs`: a
-pod handed a version's files for the session's owner, one file by `path`, the audit row,
-and refusals for someone who does not steer the session, someone who is nobody, an artifact
-nobody may see and a session another pod holds. `artifact_versions_test.exs`: `artifact.files`
-for whoever may see it, not for someone who may not, nor for a missing file or version.
-`harness_auth_test.exs`: a pod with no link says so. All failed on the chunk's tip, where
-`fs.upload` required `content` and neither method existed. Desktop: `session-chat.test.tsx`,
-an artifact attached on a platform session and fetched by the pod, one on this computer
-fetched by the daemon, and the old path against an older daemon.

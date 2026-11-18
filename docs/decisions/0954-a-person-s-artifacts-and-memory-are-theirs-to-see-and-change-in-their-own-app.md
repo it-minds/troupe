@@ -7,27 +7,9 @@ issue: 62
 paths:
   - clients/gui/apps/desktop/src/views/Artifacts.tsx
   - clients/gui/apps/desktop/src/views/OwnMemory.tsx
-  - clients/gui/apps/desktop/src/views/Instructions.tsx
-  - clients/gui/apps/desktop/src/views/Publish.tsx
-  - clients/gui/apps/desktop/src/App.tsx
-  - clients/gui/apps/desktop/src/shell.ts
-  - clients/gui/apps/desktop/src/shell-tauri.ts
   - clients/gui/apps/desktop/src-tauri/src/artifact_window.rs
-  - clients/gui/apps/desktop/src-tauri/src/lib.rs
-  - clients/gui/apps/desktop/src-tauri/capabilities/default.json
-  - clients/gui/apps/desktop/src-tauri/tauri.conf.json
-  - clients/gui/packages/client/src/entries.ts
-  - clients/gui/packages/client/src/artifacts.ts
-  - clients/gui/packages/client/src/daemon.ts
   - apps/troupe_gateway/lib/troupe/gateway/artifacts.ex
   - apps/troupe_gateway/lib/troupe/gateway/memory.ex
-  - apps/troupe_gateway/lib/troupe/gateway/dispatch.ex
-  - apps/troupe_plane/lib/troupe/plane/harness.ex
-  - apps/troupe_plane/lib/troupe/plane/memory.ex
-  - apps/troupe_protocol/lib/troupe/protocol/schema.ex
-  - PROTOCOL.md
-  - docs/user/artifacts.md
-  - docs/user/memory.md
 symbols:
   - Troupe.Gateway.Artifacts.forward/2
   - Troupe.Gateway.Memory.history/1
@@ -35,14 +17,9 @@ symbols:
 gist: "Desktop Artifacts + Memory via the daemon's forwarded artifact.*/me.memory.*, refused under Local only; artifact shown only in a child window granted nothing; memory as ## Topic entries"
 ---
 
-Issue #62 and #55, as the maintainer decided them on #765 on 2026-10-26: "The console is the
-administrators' panel. What is a person's own — their artifacts, what is shared with them,
-their memory — is seen and edited in the desktop app and the terminal." Decisions 948 and 950
-gave the plane artifacts and the console a gallery; 943, 947 and 951 gave each person a memory
-document, its history in the console's editor and its blame. The desktop app had "Publish…"
-and the person's memory edited in place in a session's Instructions pane, and nothing else of
-either. This records how the app shows and changes them, built to the maintainer's two
-designs (the Afterglow mocks of the gallery and of the memory view).
+Issue #62 and #55, as the maintainer decided them on #765 on 2026-10-26: "The console is
+the administrators' panel. What is a person's own — their artifacts, what is shared with
+them, their memory — is seen and edited in the desktop app and the terminal."
 
 ## Through the daemon, as the person
 
@@ -90,73 +67,6 @@ was), and the host's cookie is first-party in its own window, which a browser th
 third-party cookies would withhold from a frame. A browser build of the app opens the address
 in a tab of its own instead.
 
-## The gallery
-
-To the maintainer's design: "// THE REPERTOIRE", a search, audience chips with a dot per how
-far each reaches and a count (All, Everyone, Your teams, Shared with you, Only you), cards in
-a grid grouped Today, This week and Earlier, each a striped placeholder with its kind and
-size, *NEW TO YOU*, the title, who and when, an audience pill and the kind; and an aside for
-the chosen one: kind, version and size, Open and Copy link, who can see it, where it came from
-(by, the session, opened in the app, the profile), its versions (each opened, and for its
-owner or an edit link's holder rolled back to, and for its owner pinned), the owner's live
-links with a revoke, and "Publish a new version" (the existing "Publish…" with that artifact
-chosen). A card is the title and the kind, never the page. *Copy link* is a view link made now
-for the owner (`artifact.share`) and the address for anybody else. *Change who can see it*
-opens the console's page for it, since moving visibility is not forwarded.
-
-Everyone is `organisation`; Your teams is `team:<name>` (Decision 953) and `profile:<name>`;
-Shared with you is `scope: "shared"`, a link's; Only you is `private`. Until a plane answers
-`scope` per row the app reads it off the row (`scopeOf`) and asks `artifact.list {shared:
-true}` for the links' ids; that shim goes once every plane says it. *NEW TO YOU* is a version
-this device has not opened, kept in its storage alone: no new plane state.
-
-## Memory as entries
-
-To the maintainer's design and decision of 2026-10-26: a level's document is entries, one per
-`## Topic` section (any text before the first heading is an entry with no topic); on a topic
-the closest level's entry replaces the lower ones, the person's own over a team's over the
-organisation's. *In effect for you*, for one of the person's teams, lists the winner on each
-topic with what it REPLACES struck through. Each level has a tab (◉ ◎ ○, a count, *· READ* on
-those the person may not change here, "LOWEST ‹ CLOSEST"); the person's own has *Add a memory*,
-Edit and Forget (confirmed inline), the clash warnings (a topic already there; a lower level's
-it will replace) and the SAVES TO line, and saves the whole document over the version read
-(`me.memory.put`); a `conflict` shows the other version's text and offers to reload it. Its
-*Versions* drawer has every version, any two side by side, a rollback, who wrote each line
-(`me.memory {blame}`), `me.memory.status`'s current or behind and what each session running
-here read. A `config.changed` for memory (a save elsewhere, an agent's `remember`) reads it
-again. The entries are parsed and the in-effect list computed in the client
-(`packages/client/src/entries.ts`) until the plane answers entries itself; then that shim goes.
-
-The organisation's and the teams' levels are *READ* here for everybody for now: changing them
-is `admin.memory.*`, which the daemon does not forward. (It does since Decision 957: the view
-now offers *Add a memory*, *Edit* and *Forget* on the organisation's level to a platform admin
-and on a team's to its admins, as `me.memory`'s `roles` say, saved through `admin.memory.put`
-after `admin.memory.preview` says how many running sessions it reaches; everybody else keeps
-*READ* with who can change it.) The Instructions pane no longer edits
-the person's memory in place; it lists it as a layer and opens *Memory* (this narrows Decision
-943's "the desktop app's Instructions pane, edited in place" to the Memory view).
-
-## Proof
-
-- `apps/troupe_plane/test/troupe/plane/own_memory_history_test.exs`: every version, any two
-  side by side, `not_found`; a rollback as the next version audited with `rolled_back_to` and
-  its note and no text, an agent's entry's lines keeping their session and agent, `conflict`
-  over a replaced version; a service principal refused. Failed on the chunk's tip
-  (`e544a82f`): `method_not_found`.
-- `apps/troupe_gateway/test/troupe/gateway/artifacts_test.exs`: the six forwarded, signed out
-  `unavailable` with nothing sent, signed in each reaching the plane with exactly its
-  arguments, refusals keeping `not_found` and `forbidden`. `plane_memory_test.exs`:
-  `me.memory`'s `documents`; history and rollback through the daemon, the copy asked again,
-  `conflict` kept. `local_only_test.exs`: all eight refused under Local only. Failed on the tip
-  with `method_not_found`.
-- `clients/gui/apps/desktop/test/artifacts-gallery.test.tsx`: the chips' counts, the filters
-  and the search; no frame, picture or request of the artifacts host in the app; Open handing
-  the ticket to the shell's window with the artifact's id; *NEW TO YOU* until opened; the
-  owner's view link, version, pin, rollback and revoke; Local only asking nothing.
-  `own-memory.test.tsx`: in effect with REPLACES; READ marks; add, edit and forget saving the
-  whole text over the version; a conflict with the other version and a reload; the drawer's
-  side by side, rollback, blame and standing; an agent's entry read again; Local only asking
-  nothing. `instructions-view.test.tsx`: the pane opening *Memory*.
-- `clients/gui/apps/desktop/src-tauri/src/artifact_window.rs`'s tests: the addresses refused
-  and accepted, the window kept on its origin, the command registered and the capability naming
-  the main window alone.
+The Instructions pane no longer edits the person's memory in place; it lists it as a layer
+and opens *Memory* (this narrows Decision 943's "the desktop app's Instructions pane,
+edited in place" to the Memory view).

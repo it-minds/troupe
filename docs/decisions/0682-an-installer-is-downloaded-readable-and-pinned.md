@@ -41,16 +41,3 @@ session.
   - Burrito reads `TROUPE_INSTALL_DIR` as where to unpack the TUI, so the bin
     directory's override is now `TROUPE_BIN_DIR`. `install.sh` still reads the old
     name and unsets it.
-- **Proof.** The installers pinned to `v0.3.3-pre.1`, on Linux x86_64 in a scratch
-  home and on Windows 11 in scratch directories:
-  - fresh, update and clean installs;
-  - a running daemon stopped, and `.previous` kept on update, gone after a clean
-    install;
-  - the questions answered through a pseudo-terminal (Linux) and stdin (Windows),
-    including "no" at "Go ahead?";
-  - refusals without a terminal or with a stray `--purge`;
-  - `--uninstall --purge` leaving no file, and the user PATH untouched with
-    `-NoModifyPath`;
-  - `troupe --version` passing, the old variable name included.
-- **Not tested:** the macOS branch, and `-Gui` on Windows (the desktop app's setup
-  and uninstaller run per user, against the real machine).

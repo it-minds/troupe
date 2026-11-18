@@ -11,16 +11,11 @@ paths:
   - clients/tui/lib/troupe/ui/tui/server.ex
   - clients/tui/lib/troupe/ui/tui/model.ex
   - clients/tui/lib/troupe/ui/tui/view.ex
-  - clients/tui/test/troupe/command_seams_test.exs
 symbols:
   - Troupe.Client.Daemon.dismissed_branches/1
   - Troupe.Client.dismissed_branches/1
 gist: "A restarted branch worker re-registers its open asks from its journal; /new --branch never forks command mode's empty log; focus leaves a window that went"
 ---
-
-D113 in `docs/developer/defects.md`, with what D105 and D107 left in command mode (#502).
-Command mode (TUI Decision 155) and the branch commands over the daemon (root Decision
-843) left these seams; each choice below is the one the slot did not settle.
 
 - **An approval asked before a branch's worker restarted.** The parent's screen answers a
   branch's approval through `Client.Daemon.call_target/2`, which finds the branch by a
@@ -66,18 +61,3 @@ Command mode (TUI Decision 155) and the branch commands over the daemon (root De
   observer (`explore#1 (explore)`, not the window's `build`): `agent_named`, which a
   subagent's `agent_started` brings, names that agent; the window's own agent's name
   follows it too, as its header already did.
-- **`read_branch`'s input** is drawn in words: `the branches`, the branch's id, `subagent
-  <path>`, and `, with its diff`, rather than its JSON.
-
-Proof: `clients/tui/test/troupe/command_seams_test.exs`, each failing on the chunk's tip
-(f74b3c6) first: the approval answered after the branch's worker was killed and started
-again reaches the branch and its file is written (on the tip the answer went to the
-parent and `approval_answered` never came); a branch's budget question answered from the
-parent's screen (on the tip, never answered); `/new --branch` on the command line says
-there is nothing to fork, then names `1 build-1`, and from `build-1`'s box forks the
-branch, whose reply is in the fork's log (on the tip it forked the empty session at once);
-the conflicted merge's notice and line; the focus after the palette's `/merge`,
-`/discard` and `/dismiss`; `quick-1`'s row naming `fake-small` and `build-1`'s
-`fake-model`; the two dismissed rows titled by prompt and by first input (on the tip, the
-worktree's path); and the side panel's `explore#1 (explore)` with `read_branch`'s `s-7,
-with its diff` and `the branches` (on the tip `explore#1 (build)` and the JSON).

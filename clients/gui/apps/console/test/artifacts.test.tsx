@@ -7,9 +7,8 @@
 // is one any client of the person's makes, never `admin.*`.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { App } from "../src/App";
 import { openInNewTab } from "../src/console";
-import { PEOPLE, button, freshBrowser, link, recordCalls, render, says, sees, seesButton, seesField, seesLink, signedInAs, startFake, type, visit, waitFor } from "./support";
+import { PEOPLE, button, freshBrowser, link, opener, recordCalls, says, sees, seesButton, seesField, seesLink, startFake, type, visit, waitFor } from "./support";
 import type { FakeDeployment } from "./support";
 import { exampleAdmin } from "../../../packages/client/test/support/admin.js";
 import { TINY_PNG, artifact } from "../../../packages/client/test/support/plane.js";
@@ -62,7 +61,6 @@ function artifacts(): FakeArtifact[] {
 }
 
 let fake: FakeDeployment;
-let unmount: (() => void) | null = null;
 let restore: (() => void) | null = null;
 let opened: string[] = [];
 
@@ -70,11 +68,7 @@ async function start(options: Partial<PlaneOptions> = {}): Promise<void> {
   fake = await startFake(exampleAdmin(), { artifacts: artifacts(), ...options });
 }
 
-async function open(hash: string, who: { subject: string; name: string }): Promise<void> {
-  await signedInAs(fake, who);
-  visit(hash);
-  unmount = render(<App openTab={(url) => opened.push(url)} />).unmount;
-}
+const { open, close } = opener(() => fake, { openTab: (url) => void opened.push(url) });
 
 const rail = (): HTMLElement => document.querySelector<HTMLElement>("nav.rail")!;
 const cards = (): HTMLElement | null => document.querySelector<HTMLElement>('ul[aria-label="Artifacts"]');
@@ -88,8 +82,7 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
-  unmount?.();
-  unmount = null;
+  close();
   restore?.();
   restore = null;
   await fake.stop();
@@ -169,8 +162,7 @@ describe("artifacts", () => {
     await sees("Somebody shares an artifact with you by name, and it shows here at once; or by sending its link, and it shows here once you have opened it.");
     expect(document.body.textContent).not.toContain("publish_artifact");
     expect(document.body.textContent).not.toContain("Nobody has given you a link");
-    unmount!();
-    unmount = null;
+    close();
     await fake.stop();
 
     await start({ artifactsEnabled: false });
@@ -221,6 +213,23 @@ describe("artifacts", () => {
     expect(methods.filter((m) => m.startsWith("admin.") && m !== "admin.teams.list")).toEqual([]);
   });
 
+  it("says on its page what the artifacts host blocks in the version it serves, with the list on request", async () => {
+    await open("#/artifacts/art-carol-weekly", PEOPLE.carol);
+    await sees("This version references 1 thing the artifacts host blocks, so it may look or work broken. An artifact may load only its own files.");
+    const list = await waitFor(() => document.querySelector<HTMLDetailsElement>(".note.blocked details"), "the list on request");
+    expect(list.open).toBe(false);
+    expect(list.querySelector("summary")?.textContent).toBe("What is blocked");
+    expect([...list.querySelectorAll("li")].map((li) => li.textContent)).toEqual(["index.html:1 <script> window.reached = true (an inline script)"]);
+    // The page's own text is still never drawn: the reference is the plane's words for it.
+    expect(document.body.innerHTML).not.toContain("Week forty-three in full");
+
+    // One the host blocks nothing of says nothing of it.
+    close();
+    await open("#/artifacts/art-alice-notes", PEOPLE.carol);
+    await sees("Release notes");
+    expect(document.querySelector(".note.blocked")).toBeNull();
+  });
+
   it("says on each card and on its page when one goes, only where an administrator set a retention period", async () => {
     // Both periods off: no card and no page says anything of going.
     await open("#/artifacts/organisation", PEOPLE.carol);
@@ -229,8 +238,7 @@ describe("artifacts", () => {
     visit("#/artifacts/art-carol-weekly");
     await sees("Version 1", () => document.querySelector<HTMLElement>('section[aria-label="Versions"]'));
     expect(document.body.textContent).not.toMatch(/goes on|goes \d|Versions older than/i);
-    unmount!();
-    unmount = null;
+    close();
     await fake.stop();
 
     await start({ retention: { versions_days: 90, unopened_days: 60 } });
@@ -313,20 +321,20 @@ describe("artifacts' storage", () => {
     await open("#/budgets", PEOPLE.alice);
     const table = () => document.querySelector('section[aria-label="Every team"]');
     await sees("Artifacts' storage", table);
-    await sees("12.0 MiB of 100.0 MiB", table);
-    await sees("0 B · no quota", table);
+    await sees("12 MiB of 100 MiB", table);
+    await sees("0 bytes · no quota", table);
   });
 
   it("changes a team's quota on its Limits tab, sent as artifact_quota_bytes", async () => {
     await open("#/teams/core/limits", PEOPLE.alice);
     await sees("Artifacts' storage quota");
-    await sees("100.0 MiB");
+    await sees("100 MiB");
     (await seesButton("Change core's limits")).click();
     const quota = await seesField("Artifacts' storage quota");
     expect(quota.value).toBe("100");
     type(quota, "250");
     (await seesButton("Preview")).click();
-    await sees("core's artifacts may hold 250.0 MiB in all");
+    await sees("core's artifacts may hold 250 MiB in all");
     (await waitFor(() => confirm("Apply"), "the confirm")).click();
     await sees("Recorded in the audit as team.update on core");
     await sees("artifact_quota_bytes");

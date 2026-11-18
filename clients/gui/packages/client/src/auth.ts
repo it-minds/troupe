@@ -19,6 +19,7 @@ import { PlaneClient, PlaneHttpError } from "./plane.js";
 import type { BreakGlassAnswer, DeviceAuthorization, Discovery, IdpTokens, PlaneCredential } from "./plane.js";
 import { beginRedirect, completeRedirect, hasRedirectAnswer, scrubRedirect } from "./pkce.js";
 import type { BeginRedirectOptions } from "./pkce.js";
+import { errorText } from "./words.js";
 
 /** Where the refresh token lives. The default keeps it in memory and nowhere else. */
 export interface TokenStore {
@@ -158,6 +159,14 @@ export class PlaneUnreachableError extends Error {
     }
     return `${check} If the address is right, the plane may be down: ask your administrator.`;
   }
+}
+
+/**
+ * Whether a failed sign-in is the provider not knowing the address it is sent back to: a
+ * registration problem no retry fixes, which both apps explain instead of only printing.
+ */
+export function unregisteredRedirect(message: string): boolean {
+  return /redirect_uri|AADSTS50011|invalid_client|unauthorized_client/i.test(message);
 }
 
 function originOf(url: string): string | null {
@@ -589,7 +598,7 @@ export class AuthSession {
       await this.store.write(this.key, refresh);
       this.unkept = null;
     } catch (e) {
-      this.unkept = `This sign-in could not be kept in the credential store, so the next launch will ask you to sign in again: ${e instanceof Error ? e.message : String(e)}`;
+      this.unkept = `This sign-in could not be kept in the credential store, so the next launch will ask you to sign in again: ${errorText(e)}`;
       console.warn(`troupe: ${this.unkept}`);
     }
   }
@@ -619,9 +628,18 @@ export class AuthSession {
     }
   }
 
-  /** One authenticated plane call, with the token renewed first if it is due. */
-  async rpc<T = unknown>(method: string, params: unknown = {}): Promise<T> {
+  /**
+   * One authenticated plane call made by a `PlaneClient` method, with the token renewed first
+   * if it is due: `auth.withToken((plane, token) => plane.reviewSession(token, id))`. A view
+   * asks the plane this way, so every call has its typed wrapper and its unreachable sentence.
+   */
+  async withToken<T>(call: (plane: PlaneClient, token: string) => Promise<T>): Promise<T> {
     const token = await this.token();
-    return this.reachable(() => this.plane.rpc<T>(token, method, params));
+    return this.reachable(() => call(this.plane, token));
+  }
+
+  /** One authenticated plane call by method name, for a client of its own (`AdminApi`, `PlaneOwn`) that types its methods. */
+  rpc<T = unknown>(method: string, params: unknown = {}): Promise<T> {
+    return this.withToken((plane, token) => plane.rpc<T>(token, method, params));
   }
 }

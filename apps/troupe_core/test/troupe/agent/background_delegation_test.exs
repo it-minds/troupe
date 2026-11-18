@@ -653,15 +653,4 @@ defmodule Troupe.Agent.BackgroundDelegationTest do
 
     Definitions.from_list(Definitions.all(base) ++ extra)
   end
-
-  defp eventually(fun, timeout),
-    do: poll(fun, System.monotonic_time(:millisecond) + timeout)
-
-  defp poll(fun, deadline) do
-    cond do
-      fun.() -> true
-      System.monotonic_time(:millisecond) > deadline -> false
-      true -> Process.sleep(10) && poll(fun, deadline)
-    end
-  end
 end

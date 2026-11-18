@@ -5,31 +5,12 @@ date: 2026-09-26
 status: accepted
 issue: 183
 paths:
-  - PROTOCOL.md
   - apps/troupe_core/lib/troupe/agent/budget_question.ex
-  - apps/troupe_core/lib/troupe/agent/server.ex
   - apps/troupe_core/lib/troupe/agent/state.ex
   - apps/troupe_core/lib/troupe/budget.ex
-  - apps/troupe_core/lib/troupe/config.ex
-  - apps/troupe_core/test/troupe/agent/budget_answer_test.exs
-  - apps/troupe_core/test/troupe/agent/budget_question_test.exs
-  - apps/troupe_core/test/troupe/budget_test.exs
-  - apps/troupe_core/test/troupe/config/write_key_test.exs
-  - apps/troupe_protocol/lib/troupe/protocol/schema.ex
-  - apps/troupe_worker/lib/troupe/worker/session/restore.ex
-  - apps/troupe_worker/test/troupe/worker/unattended_session_test.exs
-  - clients/gui/apps/desktop/src/views/Question.tsx
-  - clients/gui/apps/desktop/test/question.test.tsx
-  - clients/gui/packages/client/src/transcript.ts
-  - clients/gui/packages/client/test/transcript.test.ts
 gist: "The budget question is answered with how much more and for how long: a typed amount raises the limit that asked, for this run, this session or this…"
 ---
 
-Issue
-#183. Answering `50` to the budget question stopped the session: `budget_decision/1`
-knew `allow`, `always` and `deny` and read everything else as a refusal, the only
-sizes were "the same slice again" and "no limit at all", and nothing could make a
-limit stick for a repository.
 - **Every amount is an increment on the limit that asked**, whatever the spelling —
   `50`, `+50`, `50 turns`, `+50k tokens`, `+15 min` — because "raise it to 50" reads
   two ways when 40 is used and "50 more" reads one. The steps offered are increments
@@ -69,13 +50,3 @@ limit stick for a repository.
 - **`/loop`.** "This run" means this iteration, and the question says so; a loop
   still stops at the question (Decision 679). A cap of the loop's own that the same
   question could raise is not designed here.
-- **Not done:** a comment-preserving scalar edit (`Yaml.edit_list/4` covers lists
-  only), and a "this machine" scope.
-- **Proof:** `Troupe.Agent.BudgetAnswerTest` — the parser in every spelling and
-  unit, the steps, the options and their round trip, the pod's ceiling, the words;
-  `Troupe.Agent.BudgetQuestionTest` — `50`, `+50`, `50 turns`, `+50k tokens` and
-  `+15 min` continue a session, nonsense is asked back, a run's raise is given back
-  and a session's kept, the raise survives a restart, the workspace file is written
-  and the next session there starts with it, a pod's terms cap and refuse;
-  `Troupe.BudgetTest` — extend and reclaim; `Troupe.Config.WriteKeyTest`. The
-  clients: TUI Decision 120, and the GUI's transcript test.

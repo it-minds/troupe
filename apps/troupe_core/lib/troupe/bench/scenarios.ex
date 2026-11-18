@@ -358,7 +358,7 @@ defmodule Troupe.Bench.Scenarios do
 
   @reads 12
 
-  # D92: a model that binds its thinking to the prompt it was made under, as Anthropic's
+  # A model that binds its thinking to the prompt it was made under, as Anthropic's
   # newest do for an enforced account, refuses a block sent back after the tools changed,
   # and the call goes again without its thinking. The fake model is not one that binds, so
   # the task list's tools come at a turn's eleventh call, as they do on any such model:

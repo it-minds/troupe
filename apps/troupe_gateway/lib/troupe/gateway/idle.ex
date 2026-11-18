@@ -11,7 +11,7 @@ defmodule Troupe.Gateway.Idle do
   `Troupe.Sessions.Index` puts it to sleep, minutes after the last client has gone, since
   an unanswered approval or question is as durable as the rest of its log. This is the
   last rung of the ladder from a running turn to the daemon's exit, every clock of which
-  is set in one place: [troupe-daemon](../../../../troupe_daemon/README.md#how-long-it-stays-up).
+  is set in one place: [the daemon](../../../../../docs/user/daemon.md#how-long-it-stays-up).
 
   It is also what stops the daemon when `troupe update` asks it to, between turns, so its
   release can be replaced (`daemon.stop`, Decision 865): the same stop, on request.

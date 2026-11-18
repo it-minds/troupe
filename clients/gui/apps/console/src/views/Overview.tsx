@@ -19,9 +19,10 @@ import type { JSX, ReactNode } from "react";
 import type { AdminPod, AdminProfile, ClientVersions, FleetOverview, OpenBaoCheck, TeamSpend } from "@troupe/client";
 import { href } from "../route";
 import { useConsole, useLoad } from "../console";
-import { Checks, Empty, Loaded, Region, Status, count, money } from "./bits";
+import { Checks, Empty, Loaded, Region, Status, count } from "./bits";
 import type { StatusKind } from "./bits";
 import { Spend } from "./Teams";
+import { moneyWords } from "@troupe/client";
 
 const REFRESH_MS = 10_000;
 
@@ -89,8 +90,8 @@ export function Overview(): JSX.Element {
                 <Metric label="Pods" value={`${healthy} / ${pods.length}`}>
                   healthy, across {count(overview.profiles.length, "profile")}
                 </Metric>
-                <Metric label="Spent" value={money(spent)}>
-                  against {money(committed)} committed across {count(overview.teams.length, "team")}
+                <Metric label="Spent" value={moneyWords(spent)}>
+                  against {moneyWords(committed)} committed across {count(overview.teams.length, "team")}
                 </Metric>
                 <Metric label="Needs attention" value={String(items.length)}>
                   {items.length === 0 ? "nothing is unhealthy" : "worst first, below"}
@@ -179,7 +180,7 @@ export function Overview(): JSX.Element {
                           <td>
                             <Spend team={t} />
                           </td>
-                          <td className="num">{money(t.reserved_micros)}</td>
+                          <td className="num">{moneyWords(t.reserved_micros)}</td>
                         </tr>
                       ))}
                     </tbody>

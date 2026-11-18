@@ -5,18 +5,7 @@ date: 2026-10-04
 status: accepted
 issue: 380
 paths:
-  - apps/troupe_a2a/mix.exs
-  - apps/troupe_core/mix.exs
-  - apps/troupe_daemon/mix.exs
-  - apps/troupe_gateway/mix.exs
-  - apps/troupe_operator/mix.exs
-  - apps/troupe_plane/mix.exs
   - apps/troupe_protocol/lib/mix/tasks/compile.troupe_version.ex
-  - apps/troupe_protocol/mix.exs
-  - apps/troupe_protocol/test/mix/tasks/compile.troupe_version_test.exs
-  - apps/troupe_worker/mix.exs
-  - clients/tui/mix.exs
-  - docs/developer/build.md
 gist: "A build after `VERSION` changes writes the new version into every app's `.app`: each project that reads `VERSION` lists `troupe_protocol`'s…"
 ---
 

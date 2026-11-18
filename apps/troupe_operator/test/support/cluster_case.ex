@@ -16,6 +16,7 @@ defmodule Troupe.Operator.ClusterCase do
 
   using do
     quote do
+      import Troupe.Eventually
       import Troupe.Operator.ClusterCase
 
       alias Troupe.Operator.{Names, Reconcilers, Resources}
@@ -182,27 +183,6 @@ defmodule Troupe.Operator.ClusterCase do
   def delete(conn, api_version, kind, opts) do
     K8s.Client.run(conn, K8s.Client.delete(api_version, kind, opts))
     :ok
-  end
-
-  @doc "Wait for something to become true, or say what never happened."
-  @spec eventually((-> boolean()), String.t(), pos_integer()) :: :ok
-  def eventually(predicate, message, timeout_ms \\ 60_000) do
-    deadline = System.monotonic_time(:millisecond) + timeout_ms
-    do_eventually(predicate, message, deadline)
-  end
-
-  defp do_eventually(predicate, message, deadline) do
-    cond do
-      predicate.() ->
-        :ok
-
-      System.monotonic_time(:millisecond) < deadline ->
-        Process.sleep(250)
-        do_eventually(predicate, message, deadline)
-
-      true ->
-        ExUnit.Assertions.flunk(message)
-    end
   end
 
   @doc "A WorkerProfile that sits inside the chart's default policy."

@@ -70,7 +70,7 @@ defmodule Troupe.KMS.OpenBao do
   @doc """
   Put a key at a path, once: refused, and nothing written, where something is already
   there. How a private session's owner hands its key to a person invited into it, at a
-  path under the invitee's own subtree (`Troupe.KMS.invited_slot/4`), which the owner's
+  path under the invitee's own subtree (`Troupe.KMS.invited_slot/3`), which the owner's
   credential may create and may not read back (`Troupe.KMS.Policy.person/3`).
   """
   @impl Troupe.KMS

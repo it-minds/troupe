@@ -12,18 +12,8 @@ paths:
   - apps/troupe_core/lib/troupe/tools.ex
   - apps/troupe_core/lib/troupe/tools/ask_user.ex
   - apps/troupe_core/lib/troupe/config/schema.ex
-  - apps/troupe_core/test/troupe/budget_test.exs
-  - apps/troupe_core/test/troupe/agent/budget_question_test.exs
-  - apps/troupe_core/test/troupe/agent/headroom_test.exs
-  - PROTOCOL.md
 gist: wall_clock_ms is time worked, not time awake; rest and waits on a person stop the clock; a restart keeps only a question's used
 ---
-
-**What was wrong.** `Troupe.Budget` started its clock when the agent process started and
-`elapsed/1` was the monotonic time since, idle included. On a laptop the default 30 minutes
-roughly matched one sitting. On a pod the agent lives as long as the pod keeps the session
-awake, and a shared session people come back to is awake for hours, so the first message
-after minute 30 found the clock spent, though nobody had worked for most of it.
 
 **The rule.** The clock counts time the agent spends working.
 
@@ -62,11 +52,3 @@ work: an unattended run has no idle time and waits on nobody under `approvals: d
 meets the limit where it did. A subagent's slice of the clock is a share of what its parent
 has left of working time, as before. The words a client shows for a stop (#987) are the
 client's; `agent_done` and `budget_exhausted` are unchanged on the wire.
-
-**Proof.** `Troupe.BudgetTest` ("the wall clock"): idle past the limit is not exhausted,
-working past it is, stretches add and the time between them does not, starting a running
-clock and stopping a stopped one change nothing. `Troupe.Agent.BudgetQuestionTest`: resting
-between turns spends none of it; time waiting on the budget question does not count; an
-approval a subagent waits on counts for neither it nor the root; a restart keeps a
-question's `used` and asks again; the question names `working time`. `Troupe.Agent.HeadroomTest`:
-the gauge reads the time worked and the detail says `working time`.

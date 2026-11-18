@@ -40,7 +40,10 @@ defmodule Troupe.Plane.Artifacts do
   together at most its `artifact_quota_bytes`, every version counted (zero is no quota). What
   one call can carry is less than that: the door's own limit on a body. A version may come
   with a picture of itself for its gallery card (`thumbnail`, a PNG, JPEG or WebP of at most
-  256 KiB), kept beside its files and counted as one; the plane draws none itself.
+  256 KiB), kept beside its files and counted as one; the plane draws none itself. Each
+  HTML, CSS and JavaScript file is read at publish for what the artifacts host's policy will
+  block (`Blocked`): the publish still succeeds, and its answer, the version and the rows
+  say what was found.
 
   **How long it is kept.** Until an owner deletes it or an administrator takes it down,
   unless an administrator sets a retention period: then old versions, or artifacts nobody
@@ -55,10 +58,11 @@ defmodule Troupe.Plane.Artifacts do
 
   alias Troupe.ObjectStore
   alias Troupe.Plane.{Admin, Audit, Identity, Repo, Settings}
-  alias Troupe.Plane.Artifacts.{Artifact, Comments, People, Previews, Retention, Shares, Uploads, Version}
+  alias Troupe.Plane.Artifacts.{Artifact, Blocked, Comments, People, Previews, Retention, Shares, Uploads, Version}
   alias Troupe.Plane.Artifacts.Keeps
   alias Troupe.Plane.Identity.User
   alias Troupe.Plane.Sessions.Session
+  alias Troupe.Protocol.Digest
   alias Troupe.Protocol.Error
 
   @kinds ~w(html markdown file)
@@ -270,7 +274,12 @@ defmodule Troupe.Plane.Artifacts do
 
       artifact =
         artifact
-        |> Ecto.Changeset.change(pinned: n, bytes: serves.bytes, thumbnail: serves.thumbnail)
+        |> Ecto.Changeset.change(
+          pinned: n,
+          bytes: serves.bytes,
+          thumbnail: serves.thumbnail,
+          blocked: length(blocked(serves.files))
+        )
         |> Repo.update!()
 
       {:ok, _event} =
@@ -585,8 +594,18 @@ defmodule Troupe.Plane.Artifacts do
   defp files(_files),
     do: {:error, invalid("an artifact needs files: [{path, content_type, bytes}]")}
 
-  defp stored(path, body, type),
-    do: %{path: path, body: body, content_type: type, sha256: sha256(body), bytes: byte_size(body)}
+  # A file as a version keeps it, with what the artifacts host will block of what it loads,
+  # read now from its bytes: a later version that carries the file carries that too.
+  defp stored(path, body, type) do
+    %{
+      path: path,
+      body: body,
+      content_type: type,
+      sha256: Digest.sha256(body),
+      bytes: byte_size(body),
+      blocked: Blocked.scan(path, type, body)
+    }
+  end
 
   # One file that came by an upload handle, held to what a file sent inline is held to.
   defp checked_file(path, body, type) do
@@ -597,19 +616,17 @@ defmodule Troupe.Plane.Artifacts do
     end
   end
 
-  @doc """
-  A path as an artifact keeps it, or why it is refused: relative, `/`-separated, no empty,
-  `.` or `..` segment nor one past 255 bytes, and not starting with a segment the host's addresses take (`v<n>`).
-  """
+  # A path as an artifact keeps it, or why it is refused: relative, `/`-separated, no empty,
+  # `.` or `..` segment nor one past 255 bytes, and not starting with a segment the host's addresses take (`v<n>`).
   @spec normalise_path(term()) :: {:ok, String.t()} | {:error, String.t()}
-  def normalise_path(path) when is_binary(path) do
+  defp normalise_path(path) when is_binary(path) do
     case Enum.find(path_rules(), fn {refused?, _why} -> refused?.(path) end) do
       nil -> {:ok, path}
       {_refused?, why} -> {:error, why.(path)}
     end
   end
 
-  def normalise_path(other), do: {:error, "a path is a string, not #{inspect(other)}"}
+  defp normalise_path(other), do: {:error, "a path is a string, not #{inspect(other)}"}
 
   # Each a test that refuses a path and the sentence that says why, in the order they hold.
   defp path_rules do
@@ -669,8 +686,7 @@ defmodule Troupe.Plane.Artifacts do
     with {:ok, _size} <- within_file(path, %{size: byte_size(body)}), do: :ok
   end
 
-  @doc false
-  def within_version(total) when total > @max_version_bytes,
+  defp within_version(total) when total > @max_version_bytes,
     do:
       {:error,
        Error.new(:payload_too_large, %{
@@ -678,7 +694,7 @@ defmodule Troupe.Plane.Artifacts do
          reason: "a version is at most #{@max_version_bytes} bytes"
        })}
 
-  def within_version(_total), do: :ok
+  defp within_version(_total), do: :ok
 
   @doc false
   def content_type(%{"content_type" => type}, _path) when is_binary(type) and type != "" do
@@ -907,7 +923,8 @@ defmodule Troupe.Plane.Artifacts do
       content_type: file["content_type"],
       sha256: file["sha256"],
       bytes: file["bytes"],
-      stored_in: file["stored_in"] || n
+      stored_in: file["stored_in"] || n,
+      blocked: file["blocked"] || []
     }
   end
 
@@ -922,7 +939,7 @@ defmodule Troupe.Plane.Artifacts do
          {:ok, body} <- thumbnail_body(encoded),
          :ok <- thumbnail_size(body),
          :ok <- thumbnail_kind(type, body) do
-      {:ok, %{body: body, content_type: type, sha256: sha256(body), bytes: byte_size(body)}}
+      {:ok, %{body: body, content_type: type, sha256: Digest.sha256(body), bytes: byte_size(body)}}
     end
   end
 
@@ -1040,6 +1057,7 @@ defmodule Troupe.Plane.Artifacts do
     new_bytes = new_bytes(attrs.files, thumbnail)
     moved = moved_bytes(existing, attrs.team_id)
     hash = version_hash(attrs.files)
+    blocked = blocked(attrs.files)
     now = DateTime.utc_now()
 
     Repo.transaction(fn ->
@@ -1068,7 +1086,7 @@ defmodule Troupe.Plane.Artifacts do
           artifact =
             artifact
             |> Ecto.Changeset.change(
-              Map.merge(in_force(artifact, bytes, thumbnail), %{
+              Map.merge(in_force(artifact, bytes, thumbnail, blocked), %{
                 title: attrs.title,
                 visibility: attrs.visibility,
                 team_id: attrs.team_id,
@@ -1094,7 +1112,9 @@ defmodule Troupe.Plane.Artifacts do
       end
     end)
     |> case do
-      {:ok, artifact} -> {:ok, answer(artifact, user, attrs[:admin?] || false)}
+      # What the host will block in the version just written, for its publisher to correct,
+      # whichever version the address serves.
+      {:ok, artifact} -> {:ok, artifact |> answer(user, attrs[:admin?] || false) |> Map.put("blocked", blocked)}
       {:error, %Error{} = error} -> {:error, error}
     end
   end
@@ -1110,12 +1130,13 @@ defmodule Troupe.Plane.Artifacts do
     end
   end
 
-  # The size and picture the artifact's address serves: the new version's, unless the owner
-  # pinned another, which keeps serving.
-  defp in_force(%Artifact{pinned: pinned} = artifact, _bytes, _thumbnail) when is_integer(pinned),
-    do: %{bytes: artifact.bytes, thumbnail: artifact.thumbnail}
+  # The size, picture and blocked count the artifact's address serves: the new version's,
+  # unless the owner pinned another, which keeps serving.
+  defp in_force(%Artifact{pinned: pinned} = artifact, _bytes, _thumbnail, _blocked) when is_integer(pinned),
+    do: %{bytes: artifact.bytes, thumbnail: artifact.thumbnail, blocked: artifact.blocked}
 
-  defp in_force(_artifact, bytes, thumbnail), do: %{bytes: bytes, thumbnail: thumbnail_json(thumbnail)}
+  defp in_force(_artifact, bytes, thumbnail, blocked),
+    do: %{bytes: bytes, thumbnail: thumbnail_json(thumbnail), blocked: length(blocked)}
 
   # An artifact moved to another team takes what it already holds to that team's quota.
   defp moved_bytes(%Artifact{team_id: from, total_bytes: bytes}, to) when from != to, do: bytes
@@ -1289,14 +1310,16 @@ defmodule Troupe.Plane.Artifacts do
       "bytes" => file.bytes
     }
     |> then(&if(file[:stored_in], do: Map.put(&1, "stored_in", file.stored_in), else: &1))
+    |> then(&if(file[:blocked] in [nil, []], do: &1, else: Map.put(&1, "blocked", file.blocked)))
   end
+
+  # What the artifacts host blocks in a version, file by file, from what each file kept.
+  defp blocked(files), do: Enum.flat_map(files, &(&1[:blocked] || &1["blocked"] || []))
 
   defp version_hash(files) do
     lines = Enum.map_join(files, "", &"#{&1.path}\0#{&1.sha256}\n")
-    "sha256:" <> sha256(lines)
+    "sha256:" <> Digest.sha256(lines)
   end
-
-  defp sha256(body), do: :sha256 |> :crypto.hash(body) |> Base.encode16(case: :lower)
 
   defp new_id do
     "art-" <> (10 |> :crypto.strong_rand_bytes() |> Base.encode32(case: :lower, padding: false))
@@ -1582,9 +1605,6 @@ defmodule Troupe.Plane.Artifacts do
       _no -> :error
     end
   end
-
-  @doc false
-  def entry_path(artifact, version, path), do: file_path(artifact, version, path)
 
   @doc "The version an artifact's address serves: the one its owner pinned, else the newest."
   @spec current(Artifact.t()) :: pos_integer()
@@ -2386,9 +2406,12 @@ defmodule Troupe.Plane.Artifacts do
 
   # The plane's own secret, with salts of these two alone, so neither a ticket nor the
   # artifacts host's cookie is anything the plane's own cookies would take, or the other way.
+  # The endpoint's name is only the key its config is under, so it is made from a string:
+  # named as a module, it would tie this module to the endpoint, which compiles against the
+  # router, which reaches this module.
   defp secret do
     :troupe_plane
-    |> Application.get_env(Troupe.Plane.Web.Endpoint, [])
+    |> Application.get_env(Module.concat(["Troupe.Plane.Web.Endpoint"]), [])
     |> Keyword.fetch!(:secret_key_base)
   end
 
@@ -2424,6 +2447,9 @@ defmodule Troupe.Plane.Artifacts do
       # The picture its publisher sent of the version in force, on the artifacts host, for
       # the caller alone; null where none was sent.
       "thumbnail_url" => thumbnail_url(artifact, user),
+      # How many references the artifacts host blocks in the version in force, read from its
+      # files at publish; `artifact.get` lists them on each version.
+      "blocked_count" => artifact.blocked || 0,
       "created_at" => artifact.inserted_at,
       "published_at" => artifact.updated_at,
       "may_delete" => mine or admin? or meta.administers,
@@ -2469,7 +2495,9 @@ defmodule Troupe.Plane.Artifacts do
           "n" => version.n,
           "hash" => version.hash,
           "bytes" => version.bytes,
-          "files" => Enum.map(version.files, &Map.delete(&1, "stored_in")),
+          "files" => Enum.map(version.files, &Map.drop(&1, ["stored_in", "blocked"])),
+          # What the artifacts host blocks in it: `{file, kind, reference, line}`.
+          "blocked" => blocked(version.files),
           "published_by" =>
             Map.get(people, version.published_by, %{
               "subject" => version.published_by,

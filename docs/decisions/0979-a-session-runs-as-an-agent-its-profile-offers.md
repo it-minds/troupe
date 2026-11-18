@@ -6,18 +6,11 @@ status: accepted
 issue: 882
 paths:
   - apps/troupe_plane/lib/troupe/plane/harness.ex
-  - apps/troupe_plane/test/troupe/plane/session_agent_test.exs
   - apps/troupe_worker/lib/troupe/worker/plane/commands.ex
-  - apps/troupe_worker/test/troupe/worker/unrestorable_test.exs
   - clients/gui/packages/client/src/newSession.ts
-  - clients/gui/packages/client/test/new-session.test.ts
-  - clients/gui/packages/client/test/support/plane.ts
   - clients/gui/apps/desktop/src/views/StartSession.tsx
-  - clients/gui/apps/desktop/test/new-session.test.tsx
   - clients/tui/lib/troupe/ui/new_session.ex
   - clients/tui/lib/troupe/ui/tui/new_session_page.ex
-  - clients/tui/test/troupe/new_session_screen_test.exs
-  - PROTOCOL.md
 gist: "No agent is ever left to the pod's own default: create resolves build-if-offered-else-first onto the row, every activation sends it, agent_not_here parks the session; a profile with no pod is idle, not full"
 ---
 
@@ -27,11 +20,10 @@ session from the start screen, nor wake one (#882). The plane's offering was rig
 applied, then the grant (Decision 968), which is what the pod judges by. What went wrong
 is that nobody sent that agent. The start screens showed the profile's first agent and
 sent none unless one was named; the plane stored none and pushed none; and a pod given
-none runs its own `default_agent`, `build`, which the rule had taken away. The pod refused
-the activation, the plane put the waiting session back in the queue, and the scaler tried
-it again every fifteen seconds for good. A wake (`restore_on_pod`) never sent an agent at
-all, whatever the row held, so a session started with `#agent` was woken as `build`,
-refused, and left dormant with its epoch a step higher at every message.
+none runs its own `default_agent`, `build`, which the rule had taken away. A wake
+(`restore_on_pod`) never sent an agent at all, whatever the row held, so a session started
+with `#agent` was woken as `build`, refused, and left dormant with its epoch a step higher
+at every message.
 
 ## Decision
 
@@ -68,19 +60,3 @@ has capacity 0, which the screens read as a full house ("dev has 0 of 0 running"
 auto-pick passed it over. `profileRoom` / `NewSession.room/1` now say `idle` there, not
 `full`; the auto-pick counts it as having room, since a create starts a pod for it, and the
 profile picker tags it IDLE.
-
-Not done here: the console listing a pod retired weeks ago as draining. A scale-down
-leaves the pod's row (draining, retiring, then not retiring) on purpose, and which of the
-row's lifecycle or the console's reading of it should change is a question of its own
-(#883).
-
-## Proof
-
-`apps/troupe_plane/test/troupe/plane/session_agent_test.exs` (create with no agent runs as
-the profile's own or `build`; refusals naming the agent; a profile offering none; a wake
-sends the row's agent, or the default for a row with none; a refusal parks a wake, a
-waiting session and a create, and `token.mint` says why), the worker's
-`unrestorable_test.exs`, the shared rules in `packages/client/test/new-session.test.ts`,
-the desktop screen in `apps/desktop/test/new-session.test.tsx` against a fake plane whose
-profiles offer other agents, and the terminal's `new_session_screen_test.exs`. Each failed
-before the change.

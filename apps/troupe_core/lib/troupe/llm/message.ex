@@ -350,12 +350,6 @@ defmodule Troupe.LLM.Message do
     Enum.filter(blocks, &match?(%Reasoning{provider: ^provider}, &1))
   end
 
-  @doc "The message with its reasoning blocks removed."
-  @spec without_reasoning(t()) :: t()
-  def without_reasoning(%__MODULE__{content: content} = message) do
-    %{message | content: Enum.reject(content, &match?(%Reasoning{}, &1))}
-  end
-
   @doc "The message's text blocks joined, for summaries and transcripts."
   @spec text(t()) :: String.t()
   def text(%__MODULE__{content: content}) do

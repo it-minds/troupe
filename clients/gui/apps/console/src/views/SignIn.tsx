@@ -14,7 +14,7 @@
 
 import { useEffect, useState } from "react";
 import type { JSX } from "react";
-import { AuthSession, PlaneUnreachableError } from "@troupe/client";
+import { AuthSession, PlaneUnreachableError, errorText, hostOf, unregisteredRedirect } from "@troupe/client";
 import { likelyPlaneUrl, newSession, redirectUri, rememberPlace, rememberPlane, restorePlace } from "../plane";
 import { Wordmark } from "./brand";
 import { Field } from "./bits";
@@ -35,6 +35,8 @@ export function SignIn({
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState("");
   const [error, setError] = useState<string | null>(notice);
+  // A plane that did not answer may answer the next time; one that answered "no" wants another sign-in.
+  const [unreachable, setUnreachable] = useState(false);
   const [door, setDoor] = useState(false);
   const [glass, setGlass] = useState("");
   const [breaking, setBreaking] = useState(false);
@@ -67,7 +69,8 @@ export function SignIn({
       },
       (e: unknown) => {
         if (!live) return;
-        setError(describe(e));
+        setError(errorText(e));
+        setUnreachable(e instanceof PlaneUnreachableError);
         setRestoring(false);
       },
     );
@@ -105,6 +108,7 @@ export function SignIn({
   const signIn = async (): Promise<void> => {
     setBusy(true);
     setError(null);
+    setUnreachable(false);
     const url = planeUrl.trim();
     rememberPlane(url);
     try {
@@ -117,7 +121,8 @@ export function SignIn({
       rememberPlace(globalThis.location?.hash ?? "");
       navigate(there);
     } catch (e) {
-      setError(describe(e));
+      setError(errorText(e));
+      setUnreachable(e instanceof PlaneUnreachableError);
       setBusy(false);
       setStatus("");
     }
@@ -131,7 +136,8 @@ export function SignIn({
     try {
       onSignedIn(await AuthSession.breakGlass(url, glass));
     } catch (e) {
-      setError(describe(e));
+      setError(errorText(e));
+      setUnreachable(false);
       setBreaking(false);
     }
   };
@@ -167,7 +173,7 @@ export function SignIn({
           {busy ? status || "Signing in…" : "Sign in"}
         </button>
       </form>
-      {error && <SignInError message={error} />}
+      {error && <SignInError message={error} onRetry={unreachable && !busy && planeUrl.trim() ? () => void signIn() : null} />}
       {door && (
         <form
           className="breakglass"
@@ -197,12 +203,22 @@ export function SignIn({
   );
 }
 
-/** A provider that does not know this address says so in words a registration can act on. */
-function SignInError({ message }: { message: string }): JSX.Element {
-  const unregistered = /redirect_uri|AADSTS50011|invalid_client|unauthorized_client/i.test(message);
+/**
+ * A failed sign-in, as an alert: a plane that did not answer is asked again from here, and a
+ * provider that does not know this address says so in words a registration can act on.
+ */
+function SignInError({ message, onRetry }: { message: string; onRetry: (() => void) | null }): JSX.Element {
+  const unregistered = unregisteredRedirect(message);
   return (
     <section className="banner error" role="alert">
       <p>{message}</p>
+      {onRetry && (
+        <p className="actions">
+          <button type="button" onClick={onRetry}>
+            Try again
+          </button>
+        </p>
+      )}
       {unregistered && (
         <p>
           The identity provider does not know this address. Register <code>{redirectUri()}</code> as a single-page application redirect URI on the
@@ -211,17 +227,4 @@ function SignInError({ message }: { message: string }): JSX.Element {
       )}
     </section>
   );
-}
-
-function describe(e: unknown): string {
-  if (e instanceof PlaneUnreachableError) return e.message;
-  return e instanceof Error ? e.message : String(e);
-}
-
-function hostOf(url: string): string {
-  try {
-    return new URL(url).host;
-  } catch {
-    return url;
-  }
 }

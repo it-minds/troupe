@@ -5,7 +5,6 @@ date: 2026-10-12
 status: accepted
 paths:
   - clients/tui/lib/troupe/client/daemon.ex
-  - clients/tui/test/troupe/branch_client_test.exs
 gist: The daemon client reads a session's own events back no earlier than its window's `branch_spawned`, so a rebuilt screen never drops the first line
 ---
 

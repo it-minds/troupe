@@ -7,9 +7,8 @@
 // the click, before the plane answers.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { App } from "../src/App";
 import { reserveNewTab } from "../src/console";
-import { PEOPLE, button, freshBrowser, render, sees, seesButton, seesField, signedInAs, startFake, type, visit, waitFor } from "./support";
+import { PEOPLE, button, freshBrowser, opener, sees, seesButton, seesField, startFake, type, visit, waitFor } from "./support";
 import type { FakeDeployment } from "./support";
 import { exampleAdmin } from "../../../packages/client/test/support/admin.js";
 import { artifact } from "../../../packages/client/test/support/plane.js";
@@ -43,7 +42,6 @@ function artifacts(): FakeArtifact[] {
 }
 
 let fake: FakeDeployment;
-let unmount: (() => void) | null = null;
 let opened: string[] = [];
 let followed: string[] = [];
 
@@ -51,11 +49,7 @@ async function start(options: Partial<PlaneOptions> = {}): Promise<void> {
   fake = await startFake(exampleAdmin(), { artifacts: artifacts(), ...options });
 }
 
-async function open(hash: string, who: { subject: string; name: string }): Promise<void> {
-  await signedInAs(fake, who);
-  visit(hash);
-  unmount = render(<App openTab={(url) => opened.push(url)} navigate={(url) => followed.push(url)} />).unmount;
-}
+const { open, close } = opener(() => fake, { openTab: (url) => void opened.push(url), navigate: (url) => void followed.push(url) });
 
 const versions = () => document.querySelector<HTMLElement>('section[aria-label="Versions"]');
 const editor = () => document.querySelector<HTMLElement>('section[aria-label="Edit"]');
@@ -69,8 +63,7 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
-  unmount?.();
-  unmount = null;
+  close();
   await fake.stop();
 });
 

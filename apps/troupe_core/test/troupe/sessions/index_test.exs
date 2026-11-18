@@ -13,7 +13,7 @@ defmodule Troupe.Sessions.IndexTest do
 
   Not async: a held stop held `Troupe.Sessions` too, whose `terminate_child` ran the whole
   shutdown until Decision 855, and on a tree without that no other test's session should
-  wait on this one's. The rest of the index's life after D117 is Decision 855's: an agent
+  wait on this one's. The rest of the index's life is in the lifecycle tests: an agent
   slow to answer, the state directories it reads, and the rows it keeps between listings.
   """
 
@@ -325,16 +325,6 @@ defmodule Troupe.Sessions.IndexTest do
     {result, div(us, 1_000)}
   end
 
-  defp gone(sid, timeout) do
-    deadline = System.monotonic_time(:millisecond) + timeout
-    poll(fn -> is_nil(Registry.whereis({:session, sid})) end, deadline)
-  end
-
-  defp poll(fun, deadline) do
-    cond do
-      fun.() -> :ok
-      System.monotonic_time(:millisecond) > deadline -> flunk("the session never stopped")
-      true -> Process.sleep(50) && poll(fun, deadline)
-    end
-  end
+  defp gone(sid, timeout),
+    do: eventually(fn -> is_nil(Registry.whereis({:session, sid})) end, timeout)
 end

@@ -64,9 +64,9 @@ defmodule Troupe.Watch.Marker do
     end)
   end
 
-  @doc "Whether a line holds a marker, and of which kind. Public for tests."
+  # Whether a line holds a marker, and of which kind. Public for tests.
   @spec marker_in_line(String.t()) :: {kind(), String.t()} | nil
-  def marker_in_line(line) do
+  defp marker_in_line(line) do
     case comment_text(line) do
       {:ok, comment} -> classify(comment)
       :error -> nil

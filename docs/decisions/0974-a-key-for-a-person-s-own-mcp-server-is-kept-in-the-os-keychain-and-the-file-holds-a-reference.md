@@ -7,20 +7,7 @@ supersedes: [820]
 paths:
   - apps/troupe_core/lib/troupe/mcp/secrets.ex
   - apps/troupe_core/lib/troupe/mcp/local.ex
-  - apps/troupe_core/lib/troupe/mcp/tool.ex
-  - apps/troupe_core/lib/troupe/mcp/stdio.ex
-  - apps/troupe_core/lib/troupe/session/mcp.ex
-  - apps/troupe_core/lib/troupe/skills/local.ex
   - apps/troupe_gateway/lib/troupe/gateway/local_sources.ex
-  - apps/troupe_gateway/lib/troupe/gateway/dispatch.ex
-  - apps/troupe_protocol/lib/troupe/protocol/schema.ex
-  - PROTOCOL.md
-  - clients/tui/lib/troupe/ui/tui/server.ex
-  - clients/tui/lib/troupe/ui/tui/view.ex
-  - clients/tui/lib/troupe/client/daemon.ex
-  - clients/gui/packages/client/src/servers.ts
-  - clients/gui/apps/desktop/src/views/ConnectScreen.tsx
-  - docs/user/mcp.md
 symbols:
   - Troupe.MCP.Secrets.ref/3
   - Troupe.MCP.Tool.said/1
@@ -67,7 +54,3 @@ form a person pastes a key into must have somewhere safe to put it.
   offer bringing it in with `skills.add`. It reads and writes nothing else. Finding other
   tools' files of servers is not part of this: a server is still brought in from a file
   named.
-- **Both clients do all of it.** The desktop app asks for a missing secret in the server's
-  row and takes secrets in its drawer; the TUI's `/mcp` page asks with `p` or `/mcp secret`,
-  drawing what is typed as dots, since a command line is drawn as typed. Both show the
-  tools' titles and marks and the folders of skills to bring in.

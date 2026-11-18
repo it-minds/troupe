@@ -297,7 +297,7 @@ defmodule Troupe.InstructionsTest do
     assert path == Path.join(repo, ".github/instructions")
   end
 
-  # D84 and D99: a file that is there and cannot be read is listed with why, not only
+  # A file that is there and cannot be read is listed with why, not only
   # logged, so `context.get` shows it was left out.
   test "an AGENTS.md or an .agents/AGENTS.md that cannot be read is listed, saying why", %{
     repo: repo

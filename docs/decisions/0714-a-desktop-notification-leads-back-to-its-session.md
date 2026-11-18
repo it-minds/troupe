@@ -9,7 +9,6 @@ paths:
 gist: A desktop notification leads back to its session, the launcher marks what was missed, and a first run's plane is signed in to without being asked…
 ---
 
-Issues #119 and #76, following 708, 705 and 709, with D26's GUI half.
 - **The click where it is reported, the window coming back where it is not.** A
   browser's `Notification` reports a click: it brings the window forward and opens
   the session. `tauri-plugin-notification` does not on a desktop, in 2.4 or 2.5: it
@@ -48,10 +47,3 @@ Issues #119 and #76, following 708, 705 and 709, with D26's GUI half.
   answer, before `open` resolves; a screen that listened once it had the view saw
   no history in Node, and in a browser only because each message is a task of its
   own.
-- **Proof:** the desktop app's `notify` (a click, the window back soon after, and
-  too late), `launcher` (the marker, and gone once read), `signin` (a first run's
-  plane signed in to with nothing pressed, a kept address that waits, and sign-out
-  and back to the launcher or the list) and `history` (a seeded session's replay)
-  tests; the client's fold, `move` and `stage2` tests; the command palette's with
-  `/loop` in the fakes' table; and the renamed desktop build installed from its
-  setup, on the pull request.

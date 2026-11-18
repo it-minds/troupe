@@ -11,10 +11,10 @@
 
 import { useState } from "react";
 import type { JSX } from "react";
-import { nameOrSubject } from "@troupe/client";
+import { bytes, nameOrSubject } from "@troupe/client";
 import type { AdminSessionRow, SessionErasePreview, SessionErased, SessionGitHub } from "@troupe/client";
 import { recorded, useConsole, useLoad } from "../console";
-import { AuditNote, Empty, Field, Loaded, Preview, Status, bytes, count, sessionState, when } from "./bits";
+import { AuditNote, Empty, Field, Loaded, Preview, Status, count, sessionState, when } from "./bits";
 
 const PAGE = 25;
 

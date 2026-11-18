@@ -14,7 +14,7 @@
 import { TroupeConnection, TroupeRpcError } from "./connection.js";
 import { SessionView } from "./session.js";
 import type { CallOptions, ConnectOptions, ConnectionHooks } from "./connection.js";
-import type { Artifact, ArtifactComment, ArtifactDetail, ArtifactFilter, ArtifactKind, ArtifactList, ArtifactNewLink, ArtifactOwner, ArtifactPersonShare, ArtifactShareRole, ArtifactText, ArtifactThread, ArtifactThumbnail, ArtifactTicket, ArtifactTransferTo, ArtifactUpload } from "./artifacts.js";
+import type { Artifact, ArtifactBlocked, ArtifactComment, ArtifactDetail, ArtifactFilter, ArtifactKind, ArtifactList, ArtifactNewLink, ArtifactOwner, ArtifactPersonShare, ArtifactShareRole, ArtifactText, ArtifactThread, ArtifactThumbnail, ArtifactTicket, ArtifactTransferTo, ArtifactUpload } from "./artifacts.js";
 import type { AgentBroken, AgentCheck, AgentDefinition, AgentDeleted, AgentRow, AgentScope, AgentSkippedFile, AgentsChanged, AgentWritten } from "./agents.js";
 import type { ConfigScope, ConfigSetParams, ModelConfig, ModelDiscovery, ModelsParams } from "./config.js";
 import { remoteOffer, syncState } from "./fleet.js";
@@ -31,6 +31,7 @@ import type { ProfileView } from "./profile.js";
 import type { SetupAnswer, SetupFlow, SetupStepName } from "./setup.js";
 import type { ConfigChanged, EventEnvelope, Principal, SessionCreateResult, ToolInvoke, TroupeEvent } from "./types.js";
 import { ErrorCodes } from "./types.js";
+import { errorText } from "./words.js";
 
 /** `watch.get`: whether a workspace is watched, how, and by which session (troupe Decision 844). */
 export interface WatchState {
@@ -810,12 +811,13 @@ export class DaemonClient implements OwnPlane {
     return this.command("session.title.set", { session_id: sessionId, title });
   }
 
-  recentWorkspaces(): Promise<{ workspaces: RecentWorkspace[] }> {
-    return this.call("workspace.recent");
+  /** Keep a session at the top of the session list (`session.pin`), or let it go; the mark outlives the session's sleep. */
+  pinSession(sessionId: string, pinned: boolean): Promise<{ session_id: string; pinned: boolean }> {
+    return this.command(pinned ? "session.pin" : "session.unpin", { session_id: sessionId });
   }
 
-  searchWorkspaces(query: string, limit = 20): Promise<{ workspaces: Array<{ path: string; score: number }> }> {
-    return this.call("workspace.search", { query, limit });
+  recentWorkspaces(): Promise<{ workspaces: RecentWorkspace[] }> {
+    return this.call("workspace.recent");
   }
 
   /**
@@ -1226,10 +1228,11 @@ export class DaemonClient implements OwnPlane {
    * one, or with `id` the next version of one of theirs. `owner` says whose a new one is:
    * left out, one for a team is that team's and any other the person's. The daemon sends a
    * version too large for one call by an upload handle. Refused with a sentence where it is
-   * signed in to no plane.
+   * signed in to no plane. The answer names what the artifacts host will block in the
+   * version (`blocked`); it is published all the same.
    */
-  publishArtifact(params: { title: string; kind: ArtifactKind; visibility: string; files: ArtifactUpload[]; owner?: ArtifactOwner; id?: string; note?: string; session_id?: string; thumbnail?: ArtifactThumbnail }): Promise<Artifact & { plane_url?: string }> {
-    return this.command<Artifact & { plane_url?: string }>("artifact.publish", params);
+  publishArtifact(params: { title: string; kind: ArtifactKind; visibility: string; files: ArtifactUpload[]; owner?: ArtifactOwner; id?: string; note?: string; session_id?: string; thumbnail?: ArtifactThumbnail }): Promise<Artifact & { plane_url?: string; blocked?: ArtifactBlocked[] }> {
+    return this.command<Artifact & { plane_url?: string; blocked?: ArtifactBlocked[] }>("artifact.publish", params);
   }
 
   /** The person's own artifacts on the plane, and where the console's gallery is. */
@@ -1400,7 +1403,7 @@ export function claimRefusal(e: unknown): string {
     if (reason === "not_registered") return "It is not registered yet; it is once this computer is signed in";
     if (reason === "unlinked") return "Sign in on this computer to claim it";
   }
-  return e instanceof Error ? e.message : String(e);
+  return errorText(e);
 }
 
 export function rowFromDaemon(row: DaemonSessionRow, source = "daemon"): FleetRow {

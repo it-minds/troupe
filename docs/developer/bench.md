@@ -200,8 +200,8 @@ the scripted model's requests, and their budgets are the script's.
 | `follow_up` | two turns: write step 1 of `docs/plan.txt`, then step 2 under `docs/` | `docs/next.txt` holds step 2 under `AGENTS.md`'s and `docs/AGENTS.md`'s rules | `out/first.txt` keeps the root's rule; both turns were taken |
 | `task_list` | three turns on `plan`: write a three-item list, one with a number worked out without a tool, then read a file and mark items done, twice | | all three turns were taken; the list ends with its three items completed; the last reply names `b.txt` and 440 |
 
-Six more run only when named, each for a measurement [prompt-prefix.md](prompt-prefix.md)
-describes: `long_turn` (one turn of thirteen calls, Decision 867), `loop_turn` (a `/loop`
+Six more run only when named, each for a measurement of what changes in front of a prompt
+([architecture.md §1.3](architecture.md#13-tools)): `long_turn` (one turn of thirteen calls, Decision 867), `loop_turn` (a `/loop`
 turn and then a person's, Decision 871), and `scratchpad`, `scratchpad_without`,
 `scratchpad_session` and `scratchpad_session_without` (a migration plan, and a session of
 eight turns, with the scratchpad and without it, Decisions 870 and 895; see "The
@@ -219,8 +219,8 @@ share of the root's. Run each beside its pair:
 
 The first four are the `smoke` suite, the default; the next six with them are `standard`
 (Decision 775). `follow_up` and `task_list` are in neither and run when named. Both are
-issue #465's ([prompt-prefix.md](prompt-prefix.md) says how each is run with that issue's
-settings): `follow_up`'s second turn begins with an instruction file the first brought in
+issue #465's, each run with that issue's settings as the report's `experiment` records
+them: `follow_up`'s second turn begins with an instruction file the first brought in
 (Decision 815); `task_list`, on the `plan` agent, which always has the list's tools, has
 each turn after the first begin with the task list the turn before left (Decision 792; in
 the system prompt with `system_prompt: per_turn`, with the turn by default, Decision 863).
@@ -283,7 +283,7 @@ Schema 1, with `"mode": "live"`, and these added:
 | the report | `model`, `repeat`, `cap_micros`, `started_at`, `skipped[]` | what ran against what, how often, under what cap; the scenarios left out, `{name, why}` |
 | the report | `live_suite`, `kept_in` | `smoke`, `standard`, or `only` for scenarios named; where `--keep` left the runs, else `null` (Decision 775) |
 | the report, a history line | `experiment` | issue #465's two settings the runs had, `thinking_binding` and `system_prompt`, from the person's configuration or `TROUPE_THINKING_BINDING` and `TROUPE_SYSTEM_PROMPT` (Decisions 815 and 863) |
-| a run, the `summary` | `prefix` | `Troupe.Bench.Prefix.count/1` of the run's log, added up in the summary: `model_calls`, `system_changes`, `tools_changes`, `inferred`, `thinking_resent`, `thinking_dropped`, `calls_dropping`, `turn_contexts` ([prompt-prefix.md](prompt-prefix.md)) |
+| a run, the `summary` | `prefix` | `Troupe.Bench.Prefix.count/1` of the run's log, added up in the summary: `model_calls`, `system_changes`, `tools_changes`, `inferred`, `thinking_resent`, `thinking_dropped`, `calls_dropping`, `turn_contexts` |
 | the report | `summary` | every run together: `scenarios`, `runs`, `succeeded`, `success_rate`, `success_low`, `success_high` (the 95% Wilson interval), `cost_micros`, `cost_per_run_micros`, `cost_per_success_micros`, `model_calls`, `input_tokens`, `cached_tokens`, `output_tokens`, `tokens_per_success`, `wall_ms`, `median_wall_ms` |
 | a scenario | `metrics[]` | taken over its runs, with no budget: `success_rate` with `success_low` and `success_high`, `median_cost`, `worst_cost` and `cost_per_success` (in dollars), and the medians `median_wall_ms`, `median_call_ms`, `median_first_token_ms`, `median_model_calls`, `median_input_tokens`, `median_cached_tokens`, `median_output_tokens`, `median_largest_tool_result` (bytes) |
 | a scenario | `outcome.held` | how many runs it held in; `passed` is every one |

@@ -9,14 +9,9 @@ paths:
   - apps/troupe_plane/lib/troupe/plane/scim.ex
   - apps/troupe_plane/lib/troupe/plane/web/router.ex
   - apps/troupe_plane/priv/repo/migrations/20261002000754_scim_user_name.exs
-  - docs/admin/integrations.md
 gist: The plane's SCIM endpoints answer a filter and take PATCH the way Microsoft Entra ID sends them, keep a user's `userName` beside the subject, and…
 ---
 
-Issue #340, which #267 needs: with 751 the plane keys a person as Entra's
-sign-in does, and Entra's provisioning client still could not find or change them.
-`GET /scim/v2/Users` ignored `filter` and answered with everybody, a `PATCH` was read
-as a whole user and answered `500`, and `GET /Users/:id` looked the id up as a subject.
 - **One filter, and nothing half-read.** `<attribute> eq "<value>"`, on `userName` or
   `externalId` for users and `displayName` or `externalId` for groups: what a provider
   matches on before it creates. Attribute names and `eq` in any case; a `userName` or
@@ -50,16 +45,3 @@ as a whole user and answered `500`, and `GET /Users/:id` looked the id up as a s
 - **Addressed by the plane's `id`**, `GET /Users/:id` and `/Groups/:id`, and
   `excludedAttributes=members` leaves a group's members out, as Entra asks for groups.
   `DELETE` on a group empties it, which the docs said and the route did not do.
-- Unchanged: `POST` and `PUT`, which upsert on the subject and answer `200`; no
-  pagination, bulk, ETags or `/Schemas`. (759 revises this: a `POST` answers `201`.)
-- **Proof:** the plane's `scim_entra_test.exs`, Microsoft's documented provisioning
-  requests with `example.test` names, sent to the router as Entra sends them: a filter
-  finding one user and nobody, a group by name without its members, and refusals as
-  `invalidFilter`; a user and a group by id; a user's whole sequence (filter, `POST`,
-  `Replace` with paths, a new `userName`, `Add`, `Remove`, attributes not kept,
-  Disable User) leaving one row with those attributes; the value-object form and
-  `"False"`; `active: false` stopping a sponsored principal and refusing sign-in; a
-  group's members added and removed by value and by path filter, then renamed, one
-  row; `DELETE` emptying it, `PUT` still replacing; and refused PATCHes changing
-  nothing. All 13 failed on the tip of #339's branch: the filter answered with
-  everybody, an unread filter with `200`, and every PATCH raised.

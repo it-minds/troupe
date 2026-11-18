@@ -149,19 +149,12 @@ defmodule Troupe.Sessions.UnseenTest do
 
   # Stopped, and the registry has let go of its names, so the same id can start again.
   defp asleep(sid, timeout \\ 5_000) do
-    deadline = System.monotonic_time(:millisecond) + timeout
-
-    poll(deadline, fn ->
-      Troupe.snapshot(sid) == {:error, :no_agent} and
-        is_nil(Registry.whereis({:session, sid})) and is_nil(Registry.whereis({:log, sid}))
-    end)
-  end
-
-  defp poll(deadline, fun) do
-    cond do
-      fun.() -> :ok
-      System.monotonic_time(:millisecond) > deadline -> flunk("condition never held")
-      true -> Process.sleep(20) && poll(deadline, fun)
-    end
+    eventually(
+      fn ->
+        Troupe.snapshot(sid) == {:error, :no_agent} and
+          is_nil(Registry.whereis({:session, sid})) and is_nil(Registry.whereis({:log, sid}))
+      end,
+      timeout
+    )
   end
 end

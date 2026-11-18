@@ -15,6 +15,7 @@ defmodule Troupe.Plane.Fleet.Hosts do
 
   alias Troupe.Plane.Fleet.Host
   alias Troupe.Plane.Repo
+  alias Troupe.Protocol.Digest
 
   @doc """
   Register a machine, and hand back its secret once.
@@ -191,7 +192,7 @@ defmodule Troupe.Plane.Fleet.Hosts do
   end
 
   defp hash(salt, secret),
-    do: :sha256 |> :crypto.hash(salt <> secret) |> Base.encode16(case: :lower)
+    do: Digest.sha256(salt <> secret)
 
   defp matches?(%Host{secret_hash: stored, secret_salt: salt}, secret) do
     presented = hash(salt, secret)

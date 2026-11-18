@@ -9,14 +9,15 @@ import {
   daemonUrl,
   dropPending,
   emptyTranscript,
+  errorText,
   fold,
   DaemonClient,
   DaemonSource,
   FleetStore,
   isDurable,
   onThisComputer,
-  openRemote,
   PlaneSource,
+  planeOpener,
   RemoteSource,
   ServerOffer,
   SessionAttachment,
@@ -169,6 +170,60 @@ export function useArchived(store: FleetStore, auth: AuthSession | null, daemon:
   return { rows, loading, error, load, set };
 }
 
+/** A session's name and its place at the top of the list, as `useMarks` changes them. */
+export interface Marks {
+  /** Name it, where it runs; an empty name takes the name off. Rejects with the server's refusal. */
+  rename: (row: FleetRow, title: string) => Promise<void>;
+  /** Keep it at the top of the list (`on`) or let it go, where it runs (`session.pin`). */
+  keep: (row: FleetRow, on: boolean) => Promise<void>;
+}
+
+/**
+ * Renaming a session and keeping it at the top: a session on this computer through its
+ * daemon, a team one through the plane. Neither pushes the change, so the answer is put on
+ * the row at once, and the head and the list show it before the list is asked again.
+ */
+export function useMarks(store: FleetStore, auth: AuthSession | null, daemon: DaemonClient | null): Marks {
+  const where = useCallback(
+    async <T,>(row: FleetRow, local: (d: DaemonClient) => Promise<T>, plane: (a: AuthSession, token: string) => Promise<T>): Promise<T> => {
+      if (onThisComputer(row.kind)) {
+        if (!daemon) throw new Error("This computer's daemon is not running");
+        return local(daemon);
+      }
+      if (row.kind === "team" && auth) return plane(auth, await auth.token());
+      throw new Error("Only a session on the platform or on this computer has a name and a place in the list to change");
+    },
+    [auth, daemon],
+  );
+  const rename = useCallback(
+    async (row: FleetRow, title: string) => {
+      const named = await where(
+        row,
+        async (d) => (await d.setSessionTitle(row.id, title)).title,
+        async (a, token) => (await a.plane.setSessionTitle(token, row.id, title)).title ?? null,
+      );
+      // A session on this computer with no name is listed by where it works.
+      const workspace = (row.raw as { workspace?: string } | null)?.workspace ?? null;
+      store.patch(row.id, { title: named ?? (onThisComputer(row.kind) ? workspace : null) });
+      await store.refreshAfterChange();
+    },
+    [store, where],
+  );
+  const keep = useCallback(
+    async (row: FleetRow, on: boolean) => {
+      await where<unknown>(
+        row,
+        (d) => d.pinSession(row.id, on),
+        (a, token) => a.plane.pinSession(token, row.id, on),
+      );
+      store.patch(row.id, { pinned: on });
+      await store.refreshAfterChange();
+    },
+    [store, where],
+  );
+  return useMemo(() => ({ rename, keep }), [rename, keep]);
+}
+
 /** Who sessions on this computer are recorded as, and what to call them. */
 export interface MachineUser {
   subject: string;
@@ -315,7 +370,7 @@ export function useDaemon(auth: AuthSession | null = null): {
       .catch((e: unknown) => {
         if (!live) return;
         setStatus("error");
-        setError(e instanceof Error ? e.message : String(e));
+        setError(errorText(e));
       });
     return () => {
       live = false;
@@ -395,7 +450,7 @@ export function useDaemon(auth: AuthSession | null = null): {
       .catch((e: unknown) => {
         if (!live) return;
         setStatus("error");
-        setError(locate ? (e instanceof Error ? e.message : String(e)) : unreachable(endpoint, e));
+        setError(locate ? (errorText(e)) : unreachable(endpoint, e));
       });
 
     return () => {
@@ -514,9 +569,9 @@ export function useProfiles(auth: AuthSession | null): { profiles: ProfileOfferi
     if (!auth) return;
     let live = true;
     auth
-      .rpc<{ profiles: ProfileOffering[] }>("profiles.list", {})
+      .withToken((plane, token) => plane.listProfiles(token))
       .then((r) => live && setProfiles(r.profiles))
-      .catch((e: unknown) => live && setError(e instanceof Error ? e.message : String(e)));
+      .catch((e: unknown) => live && setError(errorText(e)));
     return () => {
       live = false;
     };
@@ -684,14 +739,7 @@ export function useSessionView(
           mode,
           // A relayed session is opened, and its token renewed, with `remote.open`; the
           // socket and everything on it are a pod's.
-          open: (m) =>
-            relayed
-              ? openRemote((method, params) => auth!.rpc(method, params), auth!.planeUrl, sessionId)
-              : auth!.rpc("session.open", { session_id: sessionId, mode: m }),
-          mint: () =>
-            relayed
-              ? openRemote((method, params) => auth!.rpc(method, params), auth!.planeUrl, sessionId)
-              : auth!.rpc("token.mint", { session_id: sessionId }),
+          ...planeOpener(auth!, sessionId, relayed),
           hooks: {
             onEvent: (e) => {
               if (!live) return;
@@ -719,7 +767,7 @@ export function useSessionView(
         });
 
     void opened.catch((e: unknown) => {
-      const why = e instanceof Error ? e.message : String(e);
+      const why = errorText(e);
       settle(null, why);
       if (live) setError(why);
     });
@@ -960,7 +1008,7 @@ export function useAdminQuery<T>(run: (() => Promise<T>) | null, deps: unknown[]
         setData(d);
         setError(null);
       })
-      .catch((e: unknown) => live && setError(e instanceof Error ? e.message : String(e)))
+      .catch((e: unknown) => live && setError(errorText(e)))
       .finally(() => live && setLoading(false));
     return () => {
       live = false;

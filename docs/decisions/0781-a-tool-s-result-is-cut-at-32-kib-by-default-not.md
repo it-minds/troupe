@@ -6,17 +6,9 @@ status: accepted
 issue: 407
 paths:
   - apps/troupe_core/lib/troupe/config.ex
-  - apps/troupe_core/test/troupe/config_test.exs
 gist: "A tool's result is cut at 32 KiB by default, not 60,000 bytes: what is cut is one `read_output` call away, and what is sent goes out again with…"
 ---
 
-Issue #407, the other half of #389's slice 3, whose number Decision 771 left for a
-measurement. The first live bench against a real model (`qwen3-235b`, three runs of
-each task) had one `fix_test` run cost $0.103 where the other two cost $0.041 and
-$0.018: a `shell` call returned more than 60 kB, it was cut at the limit, and the four
-calls after it, which carried it again, were 100,574 of the run's 133,073 input
-tokens. That gateway caches nothing, so each call paid for it in full, and 771's stub
-applies only behind a compaction, which no run came near.
 - **Why 32 KiB (32,768 bytes).** The maintainer's choice between the old 60,000 and
   the issue's candidate, 16 KiB, the blob inline limit where 771's stub floor sits.
   32 KiB still sends whole what an agent ordinarily asks for: a `grep` of 200
@@ -37,20 +29,3 @@ applies only behind a compaction, which no run came near.
   a copy of 60,000 for a context with no config; they read `%Config{}`'s now, so the
   next move is one line. The key table says `read_output` pages the rest back, where
   it said the rest is kept as a blob.
-- **The bench.** Offline, `cut_output`'s cut result is 32,869 bytes (59,892 before),
-  and its budget 36,000 (61,000), a tenth over (772); every other measure is as it
-  was. The live scenarios still test what they say, so none changed: `large_log`'s
-  480 kB log is more than a read returns at either limit, `precise_edit`'s file still
-  arrives whole in one read, and the other tasks' files are under 1 kB each. The live
-  bench's `fix_test` worst cost and median input, before and after, are on the pull
-  request.
-- **Not here:** D66's markers naming `read_output` to the profiles that do not offer
-  it (`explore`, `answer`, `ask`, `librarian`), which a lower limit makes those agents
-  meet more often; the stub floor of 771. A `tool_output_limit` a person has set
-  holds as before.
-- **Proof:** `ConfigTest`: the default is 32,768 in the struct and in the key table,
-  and a tool with no config cuts a 60 kB read at it, both failing on the chunk's tip
-  (60,000, and 59,966 bytes); `BenchLiveTest`'s read cut at the new limit in a run's
-  `tool_calls`; `ExplainTest` against the regenerated reference; the offline bench
-  within its budgets; and the installed `troupe bench` and `troupe config --explain
-  tool_output_limit`, on the pull request.

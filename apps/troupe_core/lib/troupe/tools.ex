@@ -349,7 +349,7 @@ defmodule Troupe.Tools do
 
   defp rule(_name, _args, _ctx), do: nil
 
-  # An MCP server the session's team is not entitled to (ARCHITECTURE.md section 9): its
+  # An MCP server the session's team is not entitled to (docs/developer/architecture-remote.md section 4): its
   # tools were never offered to this session, so a call to one is unknown, as a
   # session-scoped tool the profile does not qualify for is. `available/2` narrows the list
   # the provider is sent the same way; this is the check that holds when a model names

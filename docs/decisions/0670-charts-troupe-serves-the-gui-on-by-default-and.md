@@ -7,7 +7,6 @@ paths:
   - apps/troupe_plane/lib/troupe/plane/web/index.ex
   - charts/troupe/templates/gui-deployment.yaml
   - charts/troupe/values.yaml
-  - clients/gui/README.md
 gist: "`charts/troupe` serves the GUI, on by default, and `plane.appUrl` follows it"
 ---
 

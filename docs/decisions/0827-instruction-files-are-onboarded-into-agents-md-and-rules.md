@@ -10,17 +10,7 @@ paths:
   - apps/troupe_core/lib/troupe/onboard/notice.ex
   - apps/troupe_core/lib/troupe/onboard/source.ex
   - apps/troupe_core/lib/troupe/tools/onboard_write.ex
-  - apps/troupe_core/lib/troupe/memory.ex
   - apps/troupe_core/lib/troupe/instructions/front_matter.ex
-  - apps/troupe_core/lib/troupe.ex
-  - apps/troupe_core/priv/agents/librarian.md
-  - apps/troupe_core/test/troupe/onboard/instructions_test.exs
-  - apps/troupe_core/test/troupe/onboard/notice_test.exs
-  - apps/troupe_core/test/troupe/onboard/librarian_test.exs
-  - apps/troupe_core/test/troupe/memory_test.exs
-  - clients/tui/lib/troupe/cli/onboard.ex
-  - clients/tui/lib/troupe/remote/translate.ex
-  - clients/tui/test/troupe/onboard_cli_test.exs
 symbols:
   - Troupe.Onboard.Instructions
   - Troupe.Onboard.Notice.due/2
@@ -34,12 +24,9 @@ gist: "CLAUDE.md etc. add only unsaid units to the AGENTS.md beside them; rules 
 Issue #516, slice 2, and the maintainer's decisions for this chunk's second wave: other
 tools' instruction files stop being read at run time (Decision 828 removes the readers)
 and are onboarded once instead; Cursor's rules are onboarded too, not read; onboarding
-proposes by itself and never writes by itself; creating an `AGENTS.md` that does not
-exist is asked as its own question; and what onboarding writes, and the librarian's
-brief, record the version of the rules that wrote them. Before this, `troupe onboard` had
-one source (agents and commands, Decision 824): a repository with only a `CLAUDE.md` got
-no proposal at all, a session's start said nothing about onboarding, and the librarian's
-prompt said `CLAUDE.md`, `GEMINI.md` and Copilot's file were already in every prompt.
+proposes by itself and never writes by itself; creating an `AGENTS.md` that does not exist
+is asked as its own question; and what onboarding writes, and the librarian's brief,
+record the version of the rules that wrote them.
 
 - **A source for instruction files.** `Troupe.Onboard.Instructions` is registered first in
   `@sources`. `CLAUDE.md` and `GEMINI.md` (at the root and in any directory), and
@@ -96,27 +83,28 @@ prompt said `CLAUDE.md`, `GEMINI.md` and Copilot's file were already in every pr
   its own business, as the check says. An added unit keeps the heading it was under,
   written once before it (a file's title only when nothing is there yet). A line that only
   imports the `AGENTS.md` being written (`@AGENTS.md`, Claude Code's way of pointing at
-  it) is left out with a note, and a first heading naming the other tool's file (`# CLAUDE.md`)
-  is written `# AGENTS.md` in a new file and left out of an addition to one. When nothing is left to add, nothing is proposed: the file is
-  skipped, "everything it says is in AGENTS.md already", which is also what a second run
-  says once its proposal was written. Not chosen: a section-level merge (a matching
-  heading would hide new text under it), or a model's paraphrase (#516: the onboarding
-  step must be reviewable and the same files must give the same proposals).
+  it) is left out with a note, and a first heading naming the other tool's file
+  (`# CLAUDE.md`) is written `# AGENTS.md` in a new file and left out of an addition to
+  one. When nothing is left to add, nothing is proposed: the file is skipped, "everything
+  it says is in AGENTS.md already", which is also what a second run says once its proposal
+  was written. Not chosen: a section-level merge (a matching heading would hide new text
+  under it), or a model's paraphrase (#516: the onboarding step must be reviewable and the
+  same files must give the same proposals).
 - **Rules keep Decision 809's meaning.** A rule is Markdown with `description`, `globs` (a
   YAML list of quoted strings, which 809's line reader and YAML both read) and
   `alwaysApply: true`, then the body; only the keys that say something are written, and
   any other key is left out with a note. The front matter is read as 809 read `.mdc` files
   (a line per key; `globs` a comma-separated string, a list, or `-` lines), by
   `Troupe.Instructions.FrontMatter`, the one reader the loader reads `.troupe/rules/` with
-  (Decision 828), so a rule onboarding read one way is never read another once written. A directory's
-  rule is read from the root once in `.troupe/rules/`, so its globs are rewritten from the
-  root as 809 matched them from its directory (`src/**` under `web/` is `web/src/**`, a
-  glob without a `/` is `web/**/<glob>`), and its `alwaysApply` becomes `globs:
-  ["web/**"]`, which is when Cursor and 809 applied it; a description-only one is listed
-  everywhere now, which its note says. Copilot's `applyTo` is its globs; `**`, `**/*` or
-  `*` is `alwaysApply: true`. A rule with nothing that says when it applies is still
-  proposed, with a note that no session joins it by itself. Names are made lowercase with
-  dashes (`Docs Guide.mdc` is `docs-guide`); a directory's rule is named after the
+  (Decision 828), so a rule onboarding read one way is never read another once written. A
+  directory's rule is read from the root once in `.troupe/rules/`, so its globs are
+  rewritten from the root as 809 matched them from its directory (`src/**` under `web/` is
+  `web/src/**`, a glob without a `/` is `web/**/<glob>`), and its `alwaysApply` becomes
+  `globs: ["web/**"]`, which is when Cursor and 809 applied it; a description-only one is
+  listed everywhere now, which its note says. Copilot's `applyTo` is its globs; `**`,
+  `**/*` or `*` is `alwaysApply: true`. A rule with nothing that says when it applies is
+  still proposed, with a note that no session joins it by itself. Names are made lowercase
+  with dashes (`Docs Guide.mdc` is `docs-guide`); a directory's rule is named after the
   directory first (`web-style`); two that come out the same are told apart by a number,
   the root's Cursor rules first, then `.cursorrules`, then Copilot's, then the directories'.
   G26 reads them (Decision 828).
@@ -195,25 +183,25 @@ prompt said `CLAUDE.md`, `GEMINI.md` and Copilot's file were already in every pr
   until onboarded (noise in every session of a repository the person has decided to leave
   as it is), or remembering it in `.troupe/` (a write into the repository nobody asked for).
 - **Versions.** `Troupe.Onboard.version/0` (2; 1 until opencode's `instructions` were
-  onboarded) is the version of the onboarding rules,
-  raised in the pull request that changes what any source writes for the same files. Every
-  file written records it as `imported_version` (last in a frontmatter, so the lines a
-  drift finding names stay where they were; in a manifest entry). The manifest records,
-  as `onboarding`, the version the workspace was onboarded under as a whole: set when the
-  manifest is first written (every write now writes it, so it is the one place that says
-  a workspace was onboarded) and raised only by `stamp/1`, which `troupe onboard` calls
-  after a run that left nothing unanswered (`--json` without `--yes`, nobody to ask, or a
-  new `AGENTS.md` `--yes` left, stamp nothing), never by one file's write, so the librarian
-  bringing one file in under newer rules does not mark the rest current. A manifest from
-  before versions is version 0. A file recorded under older rules from unchanged sources is
-  left alone when the new rules would write the same content, and otherwise offered once
-  as a diff, so a change of rules is shown and the person's own edits are not taken back
-  unasked. A workspace onboarded under older rules is told, at a session's start, to run
-  `troupe onboard` again, once per version, and `troupe instructions check` reports it as
-  a finding of its own kind, `outdated`, on the manifest's `onboarding` line: it comes from
+  onboarded) is the version of the onboarding rules, raised in the pull request that
+  changes what any source writes for the same files. Every file written records it as
+  `imported_version` (last in a frontmatter, so the lines a drift finding names stay where
+  they were; in a manifest entry). The manifest records, as `onboarding`, the version the
+  workspace was onboarded under as a whole: set when the manifest is first written (every
+  write now writes it, so it is the one place that says a workspace was onboarded) and
+  raised only by `stamp/1`, which `troupe onboard` calls after a run that left nothing
+  unanswered (`--json` without `--yes`, nobody to ask, or a new `AGENTS.md` `--yes` left,
+  stamp nothing), never by one file's write, so the librarian bringing one file in under
+  newer rules does not mark the rest current. A manifest from before versions is version
+  0. A file recorded under older rules from unchanged sources is left alone when the new
+  rules would write the same content, and otherwise offered once as a diff, so a change of
+  rules is shown and the person's own edits are not taken back unasked. A workspace
+  onboarded under older rules is told, at a session's start, to run `troupe onboard`
+  again, once per version, and `troupe instructions check` reports it as a finding of its
+  own kind, `outdated`, on the manifest's `onboarding` line: it comes from
   `Troupe.Onboard.drift/2`, which the check already prints; the check's `@type kind` and
-  its documentation name it beside `drift`. The brief has
-  its own: `Troupe.Memory.survey_version/0` (1), written as `survey` in `.troupe/memory.md`'s
+  its documentation name it beside `drift`. The brief has its own:
+  `Troupe.Memory.survey_version/0` (1), written as `survey` in `.troupe/memory.md`'s
   frontmatter whenever a brief is stamped as built or checked (`Memory.stamp/3`). Beside it
   the brief's `head` is written quoted (`head: "4572e29"`): YAML reads a bare short hash of
   digits and one `e` as a float and one of digits with a leading zero as a number without
@@ -232,46 +220,3 @@ prompt said `CLAUDE.md`, `GEMINI.md` and Copilot's file were already in every pr
   a rule with 809's front matter), and never creates an `AGENTS.md` but by a call of its
   own. The brief still never copies what `AGENTS.md` says (Decision 649), nor what the
   person did not let it onboard.
-- **Not in this slice.** Reading `.troupe/rules/` and removing the run-time readers
-  (Decision 828); rules in folders under `.cursor/rules`; a
-  notice for a repository whose only other-tool file is nested; the desktop app showing
-  the notice; the person's own opencode `instructions`; the bench's opencode fixture
-  carrying its rule in `instructions` (Decision 834's stays in an agent).
-- **Proof:** `Troupe.Onboard.InstructionsTest` (the fixture with every kind of file: two
-  `AGENTS.md` proposals and eight rules, their content, notes, `also_from` and hashes; the
-  same files giving the same proposals; an existing `AGENTS.md`'s units, reworded with case
-  and code marks, not proposed again and a new one added under its heading, as an
-  ordinary write; a file all said already, a linked alias and a link out skipped with
-  why; the files no tool reads there skipped; two rules of one name; Windows line endings
-  kept; every proposal written with its provenance and version, the manifest's
-  `workspace` section, and a second run proposing nothing; a change to `GEMINI.md`
-  drifting on `AGENTS.md` and proposing only its new item; a declined new `AGENTS.md`
-  leaving nothing; `.claude/CLAUDE.md` added after `CLAUDE.md` with its notes;
-  `CLAUDE.local.md` skipped, root and nested; the config directory's `CLAUDE.md` and
-  `GEMINI.md` and `~/.claude/CLAUDE.md` merged into `<config>/AGENTS.md`, written there with
-  its record and proposing nothing again; a config directory outside the home directory
-  skipped and `~/.claude/CLAUDE.md` still proposed; the writer's `AGENTS.md` refusals, a linked `.troupe` among them; older
-  rules left alone on the same content and offered on another; `outdated` in the check
-  until `stamp/1`, and one write not raising it), `Troupe.Onboard.NoticeTest` (in real
-  sessions: one notice with the counts and nothing written, the person's own files not
-  counted, quiet at the next start and
-  remembered in the state directory; nothing in a workspace without such files or on a
-  pod; nothing once declined or onboarded; an older onboarding told once; an older brief
-  in the same notice, and a brief built now carrying `survey`),
-  `Troupe.Onboard.LibrarianTest`, `Troupe.Tools.OnboardWriteTest` (an `AGENTS.md` asked
-  about with `auto_approve` on, then written with its record), and the TUI's
-  `Troupe.OnboardCLITest` (the separate question and an addition's ordinary one, a second
-  run's skipped lines; `--json`'s `question`, `--yes` leaving a new `AGENTS.md` and
-  exiting 0; the version recorded only once every question is answered) and
-  `Troupe.OnboardingNoticeTest` (the event as a line). On the chunk's tip a `CLAUDE.md`
-  gave no proposal and a session over one emitted no notice. The second wave's leftovers
-  (#516): `Troupe.Onboard.InstructionsTest`'s opencode `instructions` (each file named added
-  to the root's `AGENTS.md` without its front matter, one scoped by its own globs a rule,
-  a URL, `~/`, `..`, a glob matching nothing, a non-path, an `AGENTS.md` and a `CLAUDE.md`
-  skipped with why; an `opencode.jsonc` alone found, written once and drifting when its
-  file changes; version 2), `Troupe.Onboard.NoticeTest` (the first notice, traced, hands
-  nothing under the person's home or config directory to `:file`, and `troupe onboard`
-  still offers their files), `Troupe.MemoryTest` (`head` quoted, and `4572e29`, `0012345`
-  and `1e10` written bare read back as written) and `Troupe.Instructions.CheckTest` (the
-  kind type and the documentation name `outdated`); each failed on the chunk's tip, the
-  notice's with eight paths under the scratch home.

@@ -35,7 +35,7 @@ Credo's line-ending check and `dash` both break on CRLF.
 
 ## 2. Boundaries
 
-The rules are in [architecture.md §2](architecture.md#2-boundaries). When a client needs a
+The rules are in [ARCHITECTURE.md §3](../../ARCHITECTURE.md#3-boundaries). When a client needs a
 server module, the protocol is missing a method: add it to `PROTOCOL.md` and the apps in
 the same pull request as the client change that needs it.
 
@@ -60,13 +60,19 @@ the same pull request as the client change that needs it.
 - **[`docs/decisions/`](../decisions/README.md)** records the judgment calls that still
   hold and that a reader could have made differently, one file per decision
   (`0790-one-file-per-decision.md`): front matter with `number`, `title` (the one-sentence
-  decision), `date`, `status`, `paths` (globs of what it governs) and `gist` (what someone
-  changing those paths must not undo), then the reasoning. One that is superseded, or
-  whose reasoning the code's comments now carry, is deleted or marked `superseded`, and its
-  number is never reused. `docs/decisions/tui/` and `docs/decisions/daemon/` hold those two
-  projects' own, numbered on their own. `mix troupe.decisions --for <path>` lists the
-  decisions that govern a path; `--check`, which CI runs, fails on a duplicate number, a
-  missing field or a `paths` glob that matches nothing (Decision 790).
+  decision), `date`, `status`, `paths` and `gist` (what someone changing those paths must
+  not undo), then a body of at most 40 lines that are not blank: the decision, what was not
+  chosen, what breaks if it is undone. No list of tests, no history of the issue, no
+  restatement of the code. `paths` are where it would be undone: at most eight globs of
+  code, never a test. One that is superseded, or whose reasoning the code's comments now
+  carry, is deleted or marked `superseded`, and its number is never reused: each log's
+  README says `<!-- next: N -->`, the first number not yet reserved, which the coordinator
+  moves past a chunk's block on the chunk's branch and a fixer never edits.
+  `docs/decisions/tui/` and `docs/decisions/daemon/` hold those two projects' own,
+  numbered on their own. `mix troupe.decisions --for <path>` lists the decisions that
+  govern a path; `--check`, which CI runs, fails on a duplicate number, a number at or
+  above its log's `next`, a missing field or a `paths` glob that matches nothing, and on a
+  decision dated 2026-11-18 or later over 40 lines, over eight paths or naming a test.
 - **Code cites no decision by number** (Decision 882). A document may name code; code
   names no document. Where a comment would have said "Decision 800", it states the
   invariant where it applies, what holds and what breaks if the line changes: "the write
@@ -105,7 +111,7 @@ the same pull request as the client change that needs it.
 `Troupe.Plane.Admin.API` with a summary ending in a full stop, typed and described
 `%Argument{}`s, a `risk`, and `confirm` when destructive; its place on an area of the console's
 map in `Troupe.Plane.Admin.Console`; and in the console (`clients/gui/apps/console`), the
-client's call and a screen that makes it, or an entry in `src/owed.ts`. The MCP tool appears by
+client's call and a screen that makes it. The MCP tool appears by
 itself. Run `admin_parity_test.exs`, `console_coverage_test.exs` and the console's
 `test/coverage.test.ts`.
 

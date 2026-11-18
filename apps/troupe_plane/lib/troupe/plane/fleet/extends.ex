@@ -18,10 +18,10 @@ defmodule Troupe.Plane.Fleet.Extends do
   | `max_sessions`, `budget_micros` | **narrow only**: the lower of the two, where either sets one; a child's budget above its parent's is refused where it is written |
   | `personalTools`, `repositoryOverridesBundle`, `memoryProposals`, `github.allowPublic` | **restrict only**: a parent's `forbid` or `false` holds whatever the child says, and a child that says otherwise is told so in `problems`; otherwise the child's, or the parent's |
   | `github.denyPaths` | **added**, as the egress lists are |
-  | `github.maxPushes`, `github.maxRuns`, `github.maxAttempts` | **narrow only**, as `max_sessions` is |
+  | `github.maxPushes`, `github.maxRuns`, `github.maxAttempts`, `llm.maxTokens` | **narrow only**, as `max_sessions` is, and a child that says more is told so in `problems` |
   | `permissions.deny`, `permissions.ask`, `permissions.allow` | **added**: a child adds rules and drops none of its parent's; each profile's are its own scope on the pods (`rules/1`), so the strictest holds and no child loosens a parent's `deny` or `ask` |
   | `agents.allow`, `agents.deny` | **narrow only**: the child's `allow` is cut to the parent's where the parent has one (an empty cut stands), its `deny` is added, and a denied name leaves the `allow`, so a child never offers an agent its parent said is not there |
-  | `image`, `size_class`, `provisioner`, every `llm` field but `secretRef`, `storage.storageClassName`, `configBundleChannel`, and any other spec field | **replaced** where the child sets it, the parent's where it does not |
+  | `image`, `size_class`, `provisioner`, every `llm` field but `secretRef` and `maxTokens`, `storage.storageClassName`, `configBundleChannel`, and any other spec field | **replaced** where the child sets it, the parent's where it does not |
   | `llm.secretRef`, `mcpIdentities` | **never inherited**: credentials are each profile's own, in its own namespace |
   | `warm_workers` | **never inherited**: how many of the child's own workers stay up |
 
@@ -63,7 +63,8 @@ defmodule Troupe.Plane.Fleet.Extends do
   ]
 
   @spec_rules %{
-    "llm" => {:each, %{"secretRef" => :own}},
+    # A parent's output cap holds below it: a child may ask its calls for less, not more.
+    "llm" => {:each, %{"secretRef" => :own, "maxTokens" => :narrow}},
     "egress" => {:each, %{"fqdns" => :added, "gitHosts" => :added}},
     # The size is the class's, written by the plane; only the storage class is anybody's.
     "storage" => {:each, %{"size" => :dropped}},
@@ -621,6 +622,14 @@ defmodule Troupe.Plane.Fleet.Extends do
       ],
       else: []
   end
+
+  # And a child's number above a parent's limit, which the parent's lower one replaces.
+  defp held(:narrow, path, parent, own, source, name)
+       when is_integer(parent) and is_integer(own) and own > parent,
+       do: [
+         "#{name} sets #{String.replace_prefix(path, "spec.", "")} to #{own}, and #{source}'s " <>
+           "#{parent} holds: a profile cannot raise a limit of the profile it extends"
+       ]
 
   defp held(_rule, _path, _parent, _own, _source, _name), do: []
 

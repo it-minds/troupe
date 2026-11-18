@@ -22,7 +22,7 @@ defmodule Troupe.Config.Explain do
 
   alias Troupe.Config
   alias Troupe.Config.{Issue, Layers, Migrate, Permissions, Schema}
-  alias Troupe.Protocol.Organisation
+  alias Troupe.Protocol.{Organisation, Words}
 
   @typedoc "One key as `--explain` shows it."
   @type row :: %{
@@ -549,7 +549,7 @@ defmodule Troupe.Config.Explain do
       Enum.any?(issues, &String.contains?(&1.message, "old spelling"))
 
     {Enum.map_join(issues, "\n", &Issue.format/1) <>
-       "\n\n#{count} #{if count == 1, do: "problem", else: "problems"}." <>
+       "\n\n#{Words.count(count, "problem")}." <>
        if(migrate?, do: " `troupe config migrate` rewrites the old spellings.", else: "") <> "\n", 1}
   end
 

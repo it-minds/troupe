@@ -5,12 +5,10 @@
 // links a group.
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { App } from "../src/App";
-import { PEOPLE, button, field, freshBrowser, recordCalls, render, says, sees, signedInAs, startFake, type, visit, waitFor } from "./support";
+import { PEOPLE, button, field, freshBrowser, opener, recordCalls, says, sees, startFake, type, waitFor } from "./support";
 import type { FakeDeployment } from "./support";
 
 let fake: FakeDeployment;
-let unmount: (() => void) | null = null;
 
 beforeEach(async () => {
   freshBrowser();
@@ -18,23 +16,18 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
-  unmount?.();
-  unmount = null;
+  close();
   await fake.stop();
 });
 
-async function open(hash = "#/identity", who: { subject: string; name: string } = PEOPLE.alice): Promise<void> {
-  await signedInAs(fake, who);
-  visit(hash);
-  unmount = render(<App />).unmount;
-}
+const { open, close } = opener(() => fake);
 
 const section = (label: string): HTMLElement | null => document.querySelector<HTMLElement>(`section[aria-label="${label}"]`);
 const row = (subject: string): HTMLTableRowElement | null => [...document.querySelectorAll<HTMLTableRowElement>("tr")].find((r) => (r.cells[0]?.textContent ?? "").startsWith(subject)) ?? null;
 
 describe("who administers the platform", () => {
   it("checks the group in the field, not the one stored, and says whether you are one of them", async () => {
-    await open();
+    await open("#/identity");
     await waitFor(() => section("Who administers this platform") && says("including you.", section("Who administers this platform")!), "the check of the group set now");
     type(field("Group")!, "nobody-carries-this");
     button("Run the check")!.click();
@@ -44,7 +37,7 @@ describe("who administers the platform", () => {
 
 describe("what looks held twice", () => {
   it("lists the people with each key and where each came from, and the mismatch at the provider", async () => {
-    await open();
+    await open("#/identity");
     const twice = await waitFor(() => section("People and groups that look held twice"), "the section");
     await waitFor(() => says("2 people share an email: dan@example.com", twice), "Dan, twice");
     await sees("sign-in", twice);
@@ -61,7 +54,7 @@ describe("what looks held twice", () => {
       people: [{ id: "u-gus", subject: "gus@example.com", external_id: "4d3c2b1a", user_name: "gus@example.com", email: "gus@example.com", display_name: "Gus", origin: "scim" }],
       likely: "SCIM pushed externalId 4d3c2b1a, which this row holds, but neither the email nor the userName it sent agrees with the row's",
     });
-    await open();
+    await open("#/identity");
     const twice = await waitFor(() => section("People and groups that look held twice"), "the section");
     await waitFor(() => says("Not merged on externalId 4d3c2b1a", twice), "the refused adoption");
     await sees("neither the email nor the userName it sent agrees", twice);
@@ -78,7 +71,7 @@ describe("what looks held twice", () => {
       ],
       likely: "a sign-in under 4d3c2b1a found this row by its SCIM externalId, but neither the email nor the userName its token carried agrees with the row's",
     });
-    await open();
+    await open("#/identity");
     const twice = await waitFor(() => section("People and groups that look held twice"), "the section");
     await waitFor(() => says("Not merged on externalId 4d3c2b1a", twice), "the refused adoption");
     // Dan's set shares an email and is nothing to settle here.
@@ -103,7 +96,7 @@ describe("what looks held twice", () => {
     fake.admin.groups.push({ external_id: "Platform owners", display_name: "Platform owners", looks_duplicated: { others: ["grp-platform"], likely } });
     fake.admin.groups.find((g) => g.external_id === "grp-platform")!.looks_duplicated = { others: ["Platform owners"], likely };
     fake.admin.peopleAlike[0]!["reason"] = "the sign-in was not adopted: its email does not agree";
-    await open();
+    await open("#/identity");
     const groups = await waitFor(() => section("Groups this plane has seen"), "the groups");
     await waitFor(() => says("looks held twice", groups), "the flag");
     await sees("Platform owners looks held twice: grp-platform has the same name.", groups);
@@ -129,7 +122,7 @@ describe("what looks held twice", () => {
 
 describe("a team's service principals", () => {
   it("are made behind a preview, the secret shown once and recorded nowhere", async () => {
-    await open();
+    await open("#/identity");
     (await waitFor(() => button("Make a principal for core"), "core's principals")).click();
     type(await waitFor(() => field("Name"), "the form"), "weekly-audit");
     (await waitFor(() => document.querySelector<HTMLInputElement>('fieldset input[type="checkbox"]'), "the profiles")).click();
@@ -146,7 +139,7 @@ describe("a team's service principals", () => {
   });
 
   it("are rotated and disabled, each typed by the subject", async () => {
-    await open();
+    await open("#/identity");
     await waitFor(() => row("svc:core/nightly"), "core's principal");
     button("Rotate", row("svc:core/nightly")!)!.click();
     await waitFor(() => says("Type svc:core/nightly to confirm"), "the typed confirmation");
@@ -181,7 +174,7 @@ describe("a team's service principals", () => {
       disabled_reason: null,
       last_used_at: null,
     });
-    await open();
+    await open("#/identity");
     await waitFor(() => row("svc:core/orphan"), "the orphan");
     await sees("needs a sponsor", () => row("svc:core/orphan"));
     // Still enabled, since nobody disabled it: one Disable, beside Rotate, never two.
@@ -204,7 +197,7 @@ describe("a team's service principals", () => {
       disabled_reason: "sponsor_left",
       last_used_at: null,
     });
-    await open();
+    await open("#/identity");
     await waitFor(() => row("svc:core/left"), "the principal");
     const buttons = [...row("svc:core/left")!.querySelectorAll("button")].map((b) => b.textContent);
     expect(buttons).toEqual(["Disable"]);

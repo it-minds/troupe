@@ -41,6 +41,7 @@ import {
   callEvidence,
   callHeadline,
   callScopedLabel,
+  decisionWords,
   emptyTranscript,
   fold,
   invitationsFrom,
@@ -48,20 +49,21 @@ import {
   needsYou,
   openApprovals,
   openQuestions,
-  openRemote,
   personName,
+  planeOpener,
   remoteRefusal,
   remoteWhen,
   roleWords,
   ruleScope,
   SessionAttachment,
+  sessionStateWords,
   toolGlyph,
   toolOutcome,
   toolTarget,
   TroupeRpcError,
   watchRemote,
 } from "@troupe/client";
-import type { AgentRow, Attachment, AttachStatus, Entry, Invitation, Invitee, TranscriptState } from "@troupe/client";
+import type { AgentRow, AttachStatus, Entry, Invitation, Invitee, TranscriptState } from "@troupe/client";
 import { describeError, useConsole } from "../console";
 import type { Load } from "../console";
 import { href } from "../route";
@@ -103,8 +105,8 @@ export function useOffered(): [Load<RemoteRow[]>, () => void, Load<Invitation[]>
     let live = true;
     const ask = (): void => {
       void auth
-        .rpc<{ sessions: RemoteRow[] }>("remote.list", {})
-        .then((r) => live && setLoad({ state: "ready", data: r.sessions }))
+        .withToken((plane, token) => plane.remoteSessions(token))
+        .then((r) => live && setLoad({ state: "ready", data: r.sessions as unknown as RemoteRow[] }))
         .catch((e: unknown) => {
           if (!live) return;
           // A plane from before #58 relays nothing.
@@ -112,7 +114,7 @@ export function useOffered(): [Load<RemoteRow[]>, () => void, Load<Invitation[]>
           else setLoad((now) => (now.state === "ready" ? now : { state: "error", error: e }));
         });
       void auth
-        .rpc<{ invites: unknown }>("invites.list", {})
+        .withToken((plane, token) => plane.listInvites(token))
         .then((r) => live && setInvites({ state: "ready", data: invitationsFrom(r.invites) }))
         .catch((e: unknown) => {
           if (!live) return;
@@ -263,8 +265,8 @@ export function statusWords(status: AttachStatus, detail: string | null, state: 
     case "closed":
       return "Closed";
     default:
-      if (needsYou(state)) return opts.steer ? "Waiting for you" : "Waiting for an answer";
-      return isBusy(state) ? "Working" : "Idle";
+      if (needsYou(state)) return opts.steer ? sessionStateWords("waiting") : "Waiting for an answer";
+      return sessionStateWords(isBusy(state) ? "working" : "idle");
   }
 }
 
@@ -292,7 +294,7 @@ type QuestionEntry = Extract<Entry, { kind: "question" }>;
 
 /** An answered approval as its line in the transcript: who answered it, and what it was. */
 function decisionLine(a: ApprovalEntry, nameOf: (subject: string | undefined) => string): string {
-  const verb = a.decision === "deny" ? "Denied" : a.decision === "allow_session" ? "Allowed for this session" : a.decision === "allow_always" ? "Always allowed" : "Allowed";
+  const verb = decisionWords(a.decision);
   const what = callHeadline(a.tool).replace(/\?$/, "").toLowerCase();
   const target = toolTarget(a.tool, a.args);
   return `${verb} by ${nameOf(a.resolvedBy ?? a.decidedBy)}: ${what}${target ? ` · ${target}` : ""}${a.decision === "deny" ? ". Nothing was changed." : ""}`;
@@ -397,7 +399,7 @@ export function RemoteSession({ id, pod }: { id: string; pod?: { mode: "read" | 
     if (!pod) return;
     let live = true;
     auth
-      .rpc<{ invites: Invitee[] }>("session.invites", { session_id: id })
+      .withToken((plane, token) => plane.sessionInvites(token, id))
       .then((r) => live && setShared(r.invites))
       .catch(() => undefined);
     return () => {
@@ -409,8 +411,8 @@ export function RemoteSession({ id, pod }: { id: string; pod?: { mode: "read" | 
     if (pod) return;
     let live = true;
     auth
-      .rpc<{ sessions: RemoteRow[] }>("remote.list", {})
-      .then((r) => live && setRow(r.sessions.find((s) => s.id === id) ?? null))
+      .withToken((plane, token) => plane.remoteSessions(token))
+      .then((r) => live && setRow((r.sessions as unknown as RemoteRow[]).find((s) => s.id === id) ?? null))
       .catch(() => undefined);
     return () => {
       live = false;
@@ -422,16 +424,10 @@ export function RemoteSession({ id, pod }: { id: string; pod?: { mode: "read" | 
     setState(emptyTranscript);
     setError(null);
     setSteer(null);
-    const open = pod
-      ? () => auth.rpc<Attachment>("session.open", { session_id: id, mode: pod.mode })
-      : () => openRemote((method, params) => auth.rpc(method, params), auth.planeUrl, id);
-    const mint = pod ? () => auth.rpc<Attachment>("token.mint", { session_id: id }) : open;
-
     SessionAttachment.open({
       sessionId: id,
       mode: pod?.mode ?? "activate",
-      open,
-      mint,
+      ...planeOpener(auth, id, !pod),
       clientInfo: { name: "troupe-console", version: __TROUPE_VERSION__ },
       hooks: { onEvent: (e) => live && setState((s) => fold(s, e, { now: Date.now() })) },
       onStatus: (s, said) => {

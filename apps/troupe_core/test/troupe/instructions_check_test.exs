@@ -138,7 +138,7 @@ defmodule Troupe.Instructions.CheckTest do
              ] = for(f <- findings(repo), do: {Path.relative_to(f.path, repo), f.line, f.message})
     end
 
-    # D99: a nested `.agents/AGENTS.md`, or a rule in a nested `.troupe/rules`, is about its
+    # A nested `.agents/AGENTS.md`, or a rule in a nested `.troupe/rules`, is about its
     # directory, as its scope is, so a path it names is looked for from there too.
     test "a path in web/.agents/AGENTS.md or web/.troupe/rules is resolved from web/", %{
       repo: repo

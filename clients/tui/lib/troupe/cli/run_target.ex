@@ -21,6 +21,7 @@ defmodule Troupe.CLI.RunTarget do
   alias Troupe.CLI
   alias Troupe.Client
   alias Troupe.Client.{Profiles, Remote}
+  alias Troupe.Protocol.Words
   alias Troupe.UI.NewSession
 
   @doc "The origin to create on and the params to create with, or why not."
@@ -83,7 +84,7 @@ defmodule Troupe.CLI.RunTarget do
 
     IO.puts(
       io,
-      "troupe: waiting for a free place in #{profile}; asking again in #{div(ms + 999, 1000)} s"
+      "troupe: waiting for a free place in #{profile}; asking again in #{Words.duration(ms)}"
     )
 
     :go_on

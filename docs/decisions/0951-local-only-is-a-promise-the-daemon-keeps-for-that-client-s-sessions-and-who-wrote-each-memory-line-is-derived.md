@@ -6,37 +6,12 @@ status: accepted
 issue: 55
 paths:
   - apps/troupe_gateway/lib/troupe/gateway/local_only.ex
-  - apps/troupe_gateway/lib/troupe/gateway/connection.ex
-  - apps/troupe_gateway/lib/troupe/gateway/dispatch.ex
   - apps/troupe_gateway/lib/troupe/gateway/memory.ex
-  - apps/troupe_gateway/lib/troupe/gateway/policy.ex
   - apps/troupe_gateway/lib/troupe/gateway/plane.ex
   - apps/troupe_gateway/lib/troupe/gateway/daemon.ex
-  - apps/troupe_gateway/lib/troupe/gateway/artifacts.ex
   - apps/troupe_core/lib/troupe/local_only.ex
-  - apps/troupe_core/lib/troupe/agent/server.ex
-  - apps/troupe_core/lib/troupe/config/schema.ex
-  - apps/troupe_core/lib/troupe/doctor.ex
-  - apps/troupe_protocol/lib/troupe/protocol/schema.ex
   - apps/troupe_plane/lib/troupe/plane/memory.ex
-  - apps/troupe_plane/lib/troupe/plane/harness.ex
-  - apps/troupe_plane/lib/troupe/plane/admin.ex
-  - apps/troupe_plane/lib/troupe/plane/control/connection.ex
-  - apps/troupe_worker/lib/troupe/worker/user_memory.ex
-  - clients/gui/packages/client/src/daemon.ts
-  - clients/gui/apps/desktop/src/hooks.ts
-  - clients/gui/apps/desktop/src/App.tsx
-  - clients/gui/apps/console/src/views/Memory.tsx
   - clients/tui/lib/troupe/cli/local_only.ex
-  - clients/tui/lib/troupe/cli/runner.ex
-  - clients/tui/lib/troupe/cli/doctor.ex
-  - clients/tui/lib/troupe/cli/memory.ex
-  - clients/tui/lib/troupe/client/daemon/link.ex
-  - clients/tui/lib/troupe/remote/worker.ex
-  - PROTOCOL.md
-  - docs/user/README.md
-  - docs/user/configuration-settings.md
-  - docs/user/memory.md
 symbols:
   - Troupe.Gateway.LocalOnly
   - Troupe.LocalOnly
@@ -45,14 +20,13 @@ symbols:
 gist: "A Local-only client's sessions get no plane call from the daemon (remember me, offer, memory report); polls wait while all are; blame is derived, not stored"
 ---
 
-#765, as the maintainer decided it on 2026-10-25: "Local only reaches the daemon." Decision
-926 made the desktop app's own requests go through one gate that Local only shuts. The
-daemon had no notion of it: a session the desktop app started while Local only was on could
-still `remember` with `level: "me"` through the daemon's plane token (D136), the daemon kept
-offering and polling, and the memory poll told the plane what that session's turns read.
-The promise "nothing of what I do here reaches a plane" was the window's, not the
-machine's. This records how the daemon keeps it, and, in the same slice, how #55's
-provenance per line is answered.
+#765, as the maintainer decided it on 2026-10-25: "Local only reaches the daemon."
+Decision 926 made the desktop app's own requests go through one gate that Local only
+shuts. The daemon had no notion of it: a session the desktop app started while Local only
+was on could still `remember` with `level: "me"` through the daemon's plane token (D136),
+the daemon kept offering and polling, and the memory poll told the plane what that
+session's turns read. The promise "nothing of what I do here reaches a plane" was the
+window's, not the machine's.
 
 ## How a client says it
 
@@ -138,56 +112,12 @@ only` line and asks no plane for its discovery document.
 ## Who wrote each line (#55's provenance)
 
 `Troupe.Plane.Memory.blame/2` walks a document's versions in order, each version's lines
-against the attributed lines before it by the plane's own line diff: a line that stays keeps
-who wrote it, a line that comes is that version's, `by` who saved it. An agent's entry adds
-the `session` and `agent` it came from, read off the version's `memory.put` audit row, which
-now records the agent beside the session (the daemon's `me.memory.put {append}` names both;
-the pod's `session.memory.put` names the agent, the plane the session). A rollback's lines
-keep who wrote them in the version rolled back to. **No new storage:** the versions and the
-audit hold everything, and a diff-walk of at most a document's versions of 8192 bytes is
-cheap. Blame, not history: the versions list is the history. Answered by `admin.memory.get`
-for the version shown (`lines`), by `me.memory` with `blame: true` for the person's own (the
-poll does not ask it), printed by `troupe memory --blame`, and in the console under *Who wrote
-each line*, a column beside each line.
-
-## Also in this slice
-
-The offline bench's tool-definition budget moves from 14800 to 16300 bytes, about a tenth
-over the 14787 measured, as `docs/developer/bench.md` sets a budget; at 14800 any change to
-one tool's description failed the bench. `budgets.json` says why in a top-level `$comment`,
-which the bench does not read as a scenario.
-
-## Left
-
-A private session made elsewhere and later given work by a Local-only client goes on being
-sealed. The desktop app's switch and the terminal's `local_only` are two settings, not one
-shared one. Of #55: a change to a profile's `extends` reaching its sessions at their next
-turn; soft delete of a document's lines; teams writing their own memory, or agents proposing
-changes to it.
-
-## Proof
-
-- `apps/troupe_gateway/test/troupe/gateway/local_only_test.exs`: two clients on one daemon,
-  one in Local only; that client's session refuses `remember` with `level: "me"` naming Local
-  only and the repository, the other's writes with its session and agent, nothing of the
-  first reaches the plane, and its `instructions_loaded` says so once; the poll's report
-  leaving it out, an offer of it `forbidden`, the client's `me.memory` refused and
-  `me.memory.status` saying the plane was not asked; the polls asking nothing while every
-  client attached is in Local only and again after `client.mode` off; `client.mode` putting
-  open sessions under it and taking them out; a session staying under it after its client
-  went and leaving it when another gives it work; a private session refused.
-- `apps/troupe_plane/test/troupe/plane/memory_blame_test.exs`: each line of the
-  organisation's naming its version and who saved it, a version shown as it stood, a
-  rollback's lines keeping their writer; `me.memory` with `blame` naming an agent's entry's
-  session and agent, and no `lines` without it. `control_test.exs`: a pod's entry audited
-  with its agent and blamed to its session.
-- `clients/tui/test/troupe/local_only_cli_test.exs`, `memory_cli_test.exs`: the key telling
-  the daemon, the plane commands refused, the doctor's line; `--blame` printed.
-- `clients/gui/apps/desktop/test/local-mode.test.tsx`: every `initialize` in Local only
-  carrying `local_only`, and the switch sending `client.mode` on and off.
-  `apps/console/test/memory.test.tsx`: *Who wrote each line* beside each line.
-
-The gateway test's first case failed on the chunk's tip (`bfb8eacc`): the Local-only client's
-session answered "remembered in the person's own memory on the plane, version 1". The plane,
-TUI and console tests failed there for want of `blame/2`, `--blame`, `local_only` and the
-column.
+against the attributed lines before it by the plane's own line diff: a line that stays
+keeps who wrote it, a line that comes is that version's, `by` who saved it. An agent's
+entry adds the `session` and `agent` it came from, read off the version's `memory.put`
+audit row, which now records the agent beside the session (the daemon's `me.memory.put
+{append}` names both; the pod's `session.memory.put` names the agent, the plane the
+session). A rollback's lines keep who wrote them in the version rolled back to. **No new
+storage:** the versions and the audit hold everything, and a diff-walk of at most a
+document's versions of 8192 bytes is cheap. Blame, not history: the versions list is the
+history.

@@ -39,6 +39,7 @@ defmodule Troupe.MCP.Local do
   alias Troupe.Config.{Layers, Migrate, Trust}
   alias Troupe.Instructions
   alias Troupe.MCP.{Import, OAuth, Secrets, Server}
+  alias Troupe.Protocol.Digest
   alias Troupe.Workspace
 
   @type layer :: :config | :user | :workspace
@@ -624,7 +625,7 @@ defmodule Troupe.MCP.Local do
          sign_in ++ headers)
       |> Jason.encode!()
 
-    :sha256 |> :crypto.hash(canonical) |> Base.encode16(case: :lower) |> binary_part(0, 16)
+    Digest.sha256(canonical) |> binary_part(0, 16)
   end
 
   # -- writing -----------------------------------------------------------------------

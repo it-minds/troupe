@@ -7,33 +7,8 @@ issue: 765
 paths:
   - apps/troupe_operator/lib/troupe/operator/worker_secrets.ex
   - apps/troupe_operator/lib/troupe/operator/ingress_check.ex
-  - apps/troupe_operator/lib/troupe/operator/reconciler.ex
-  - apps/troupe_operator/lib/troupe/operator/settings.ex
-  - apps/troupe_operator/test/troupe/operator/worker_secrets_test.exs
-  - apps/troupe_operator/test/troupe/operator/ingress_check_test.exs
-  - apps/troupe_operator/test/e2e/no_hand_steps_test.exs
-  - apps/troupe_operator/test/e2e/credentials_test.exs
   - apps/troupe_protocol/lib/mix/tasks/troupe.openbao.policy.ex
-  - charts/troupe/crds/workerprofile.yaml
-  - charts/troupe/templates/operator-rbac.yaml
-  - charts/troupe/templates/operator-deployment.yaml
-  - charts/troupe/values.yaml
-  - charts/troupe/values.example.yaml
-  - charts/troupe/values.small.yaml
-  - config/runtime.exs
-  - dev/kind/values.yaml
-  - dev/kind/dependencies.yaml
   - dev/kind/openbao-plane.yaml
-  - scripts/kind-up
-  - scripts/remote-up
-  - clients/gui/apps/console/src/views/Overview.tsx
-  - docs/admin/configuration.md
-  - docs/admin/installing.md
-  - docs/admin/README.md
-  - docs/admin/monitoring.md
-  - docs/admin/security.md
-  - docs/admin/routine-tasks.md
-  - docs/developer/conventions.md
 symbols:
   - Troupe.Operator.WorkerSecrets
   - Troupe.Operator.IngressCheck
@@ -48,12 +23,6 @@ namespace needs, copied in by a person for each new profile, and the
 `troupe.dev/ingress=true` label on the ingress controller's namespace. #765's second gate is
 a live plane with no hand step the chart, the operator or a checked precondition does not
 own, so this decides who owns these two. It extends Decision 934 and undoes nothing of it.
-
-Reproduced on the kind cluster before the change: the operator's role had no verb on
-Secrets, so a profile whose `llm-credentials` and `troupe-object-store` were in its
-namespace reported `SecretMissing=True` naming both (the condition looked and was refused);
-`scripts/remote-up` and the cluster suite (`World.secrets!/1`) copied both into every new
-worker namespace by hand; and remote-up labelled `ingress-nginx` itself.
 
 ## The Secrets: copied by the operator, by name
 
@@ -145,34 +114,3 @@ test that keeps the page current keeps that file current too. The root token sta
 Job's and the cluster suite's. `Troupe.E2E.NoHandStepsTest` takes the erasure policy away,
 restarts nothing, sees `admin.overview` name it with the `bao policy write` and role lines,
 gives it back and sees it held.
-
-## Git Bash
-
-`scripts/kind-up` and `scripts/remote-up` turn MSYS path conversion off for themselves on
-Windows (`MSYS_NO_PATHCONV=1`, `MSYS2_ARG_CONV_EXCL='*'`), as `scripts/kind-upgrade-check`
-already did: `docker exec <node> chmod 0755 /kind` was run as `chmod C:/Program Files/Git/kind`.
-
-## Releases before this one
-
-`scripts/remote-up` labels the ingress namespace and copies the dev profile's Secrets by
-hand only when it installs a published chart, which is what `scripts/kind-upgrade-check`
-installs as the release before this one; on this tree's chart it does neither, so the fresh
-install proves the operator does both.
-
-## Proof
-
-- `Troupe.Operator.WorkerSecretsTest`: each Secret copied and marked; only what is named;
-  a profile's name refused without the label, with the line; the installation's copied
-  without it; the annotation narrowing to profiles; one already in the worker namespace kept
-  untouched; one in neither said; a rotation reaching the copy; a copy no longer named, or
-  whose source lost the label, deleted, and nothing of anybody else's.
-- `Troupe.Operator.IngressCheckTest`: unlabelled, labelled with and without a running pod,
-  a named namespace labelled, left alone with labelling off, and not made when it is missing.
-- `Troupe.KMS.PolicyTest`: `dev/kind/openbao-plane.yaml` is current and its role carries
-  exactly the listed policies.
-- The console's overview tests: a missing Secret per profile, the ingress line once.
-- On kind (`Troupe.E2E.NoHandStepsTest`, `Troupe.E2E.CredentialsTest`): the dev profile's
-  Secrets are the operator's copies, the ingress label is the operator's field, the plane's
-  role carries the documented policies and every grant is held, one taken away is named with
-  its lines and held again once given back, and an MCP token kept beside the plane and
-  labelled reaches the pod; the capacity, extends and upgrade tests no longer copy a Secret.

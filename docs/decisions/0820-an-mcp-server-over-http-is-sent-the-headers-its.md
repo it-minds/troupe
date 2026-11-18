@@ -6,24 +6,14 @@ status: accepted
 issue: 60
 supersedes: [700]
 paths:
-  - PROTOCOL.md
   - apps/troupe_core/lib/troupe/config.ex
   - apps/troupe_core/lib/troupe/config/schema.ex
   - apps/troupe_core/lib/troupe/mcp/import.ex
   - apps/troupe_core/lib/troupe/mcp/local.ex
   - apps/troupe_core/lib/troupe/session/mcp.ex
-  - apps/troupe_core/test/support/fake_mcp.exs
-  - apps/troupe_core/test/troupe/config/layers_test.exs
-  - apps/troupe_core/test/troupe/mcp/import_test.exs
-  - apps/troupe_core/test/troupe/mcp/local_test.exs
-  - apps/troupe_core/test/troupe/mcp_handshake_test.exs
   - apps/troupe_gateway/lib/troupe/gateway/local_sources.ex
-  - apps/troupe_gateway/test/troupe/gateway/local_sources_test.exs
   - apps/troupe_protocol/lib/troupe/mcp/client.ex
   - apps/troupe_protocol/lib/troupe/mcp/server.ex
-  - apps/troupe_protocol/test/troupe/mcp/client_headers_test.exs
-  - docs/user/configuration.md
-  - docs/user/mcp.md
 symbols:
   - Troupe.MCP.Server.headers/1
   - Troupe.MCP.Server.header_problem/1
@@ -31,12 +21,6 @@ symbols:
   - Troupe.Session.MCP.format_status/1
 gist: "MCP headers: literal or {env:VAR}, read at start, shown by name only; the credential wins a same-named one; a copy writes values as {env:VAR}; no keychain"
 ---
-
-Issue #60, its last slice. What was there: an import dropped a server's `headers` with a
-warning (700), and the HTTP client sent one header, the server's credential
-(`Troupe.MCP.Server.headers/1`), so a server keyed with a static header (an `X-Api-Key`,
-a token issued once) could not be used from a local session at all, imported or written
-by hand.
 
 - **What the person writes.** `headers` on a `url` entry, in `mcp.json` and in
   `config.yaml`'s `mcp:`: a map of name to string, each value as it is or with
@@ -104,21 +88,3 @@ by hand.
   what the other tools' files already say (`${VAR}`), so an import needs no second
   place to put one. If the daemon gains a keychain for its own model key, headers and
   tokens move with it.
-- **Not this slice.** A bundle's servers on a pod carry their one credential and no
-  `headers` (`Bundle.mcp_server_configs/1` sends none). The TUI's `/mcp` page and the
-  desktop app's panel draw a server's URL or command and no other field, so they show no
-  headers either; `mcp.list` carries the names for when they do.
-- **Proof:** `Troupe.MCP.ClientHeadersTest` (troupe_protocol, against
-  `test/support/fake_mcp.exs`, which now reports every header of every request: the
-  headers on `initialize`, `notifications/initialized`, the listing, a call and the
-  `DELETE`, failed on the tip; the credential winning an `Authorization`; nothing in
-  `inspect`), `Troupe.MCP.ImportTest` (Claude Code's headers kept, failed on the tip;
-  Cursor's, VS Code's, opencode's block, `headersHelper`, `{file:…}`, and a copy's
-  `{env:…}` and warnings with no value in them), `Troupe.MCP.LocalTest` (read from the
-  environment, unset refused, never written back, the fingerprint; the refused names and
-  values; an import copying and a link reading as written), `Troupe.Config.LayersTest`
-  (`config.yaml`'s headers read and refused, `--explain` masking them in text and JSON),
-  `Troupe.MCPHandshakeTest` (a local session sends them on every request and the
-  `DELETE`, its status holds no value, and a workspace's question names them) and
-  `Troupe.Gateway.LocalSourcesTest` (`mcp.add` and `mcp.list` over the daemon's socket,
-  names only).

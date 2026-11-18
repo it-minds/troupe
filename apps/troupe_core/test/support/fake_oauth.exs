@@ -19,8 +19,13 @@
 # metadata document, which it fetches, as one at that URL serves (issue #585). Every request
 # is sent to the test process as `{:fake_oauth, request}`, so a test can read what crossed
 # the wire.
+unless Code.ensure_loaded?(Troupe.Test.LoopbackHTTP),
+  do: Code.require_file("loopback_http.ex", __DIR__)
+
 unless Code.ensure_loaded?(Troupe.Test.FakeOAuth) do
   defmodule Troupe.Test.FakeOAuth do
+    import Troupe.Test.LoopbackHTTP, only: [headers: 1, read_request: 1, respond: 4]
+
     @client_id "troupe-test-client"
     @account "ada@example.test"
 
@@ -140,7 +145,7 @@ unless Code.ensure_loaded?(Troupe.Test.FakeOAuth) do
     end
 
     defp handle(socket, agent) do
-      with {:ok, raw} <- read_request(socket, ""),
+      with {:ok, raw} <- read_request(socket),
            [head, body] <- String.split(raw, "\r\n\r\n", parts: 2),
            [request_line | _] <- String.split(head, "\r\n"),
            [method, target, _version] <- String.split(request_line, " ") do
@@ -579,58 +584,5 @@ unless Code.ensure_loaded?(Troupe.Test.FakeOAuth) do
       do: respond(status, "application/json", Jason.encode!(payload), [])
 
     defp text(status, message), do: respond(status, "text/plain", message, [])
-
-    defp respond(status, type, body, headers) do
-      [
-        "HTTP/1.1 #{status} X\r\n",
-        "content-type: #{type}\r\n",
-        Enum.map(headers, fn {name, value} -> "#{name}: #{value}\r\n" end),
-        "content-length: #{byte_size(body)}\r\n",
-        "connection: close\r\n\r\n",
-        body
-      ]
-    end
-
-    defp headers(head) do
-      head
-      |> String.split("\r\n")
-      |> Enum.drop(1)
-      |> Enum.flat_map(fn line ->
-        case String.split(line, ":", parts: 2) do
-          [name, value] -> [{String.downcase(name), String.trim(value)}]
-          _ -> []
-        end
-      end)
-      |> Map.new()
-    end
-
-    defp read_request(socket, acc) do
-      case :gen_tcp.recv(socket, 0, 5_000) do
-        {:ok, data} ->
-          acc = acc <> data
-          if complete?(acc), do: {:ok, acc}, else: read_request(socket, acc)
-
-        {:error, _reason} ->
-          :error
-      end
-    end
-
-    defp complete?(request) do
-      case String.split(request, "\r\n\r\n", parts: 2) do
-        [head, body] -> byte_size(body) >= content_length(head)
-        _ -> false
-      end
-    end
-
-    defp content_length(head) do
-      head
-      |> String.split("\r\n")
-      |> Enum.find_value(0, fn line ->
-        case String.split(String.downcase(line), ":", parts: 2) do
-          ["content-length", value] -> String.to_integer(String.trim(value))
-          _ -> nil
-        end
-      end)
-    end
   end
 end

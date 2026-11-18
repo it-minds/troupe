@@ -7,9 +7,6 @@ issue: 57
 paths:
   - clients/tui/lib/troupe/client.ex
   - clients/tui/lib/troupe/settings.ex
-  - clients/tui/test/troupe/daemon_client_test.exs
-  - clients/tui/test/troupe/phase3_client_test.exs
-  - clients/tui/test/troupe/shared_settings_test.exs
 gist: "The settings page shows what the daemon serves and writes the scope it names: the file the value on screen came from, else the user's own, and `s`…"
 ---
 

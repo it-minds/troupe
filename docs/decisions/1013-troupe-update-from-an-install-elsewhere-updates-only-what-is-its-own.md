@@ -6,7 +6,6 @@ status: accepted
 issue: 969
 paths:
   - apps/troupe_core/lib/troupe/update.ex
-  - apps/troupe_core/test/troupe/update_test.exs
 gist: Elsewhere (troupe not in the default place), update leaves a desktop app outside its two dirs and a menu entry not naming its AppImage
 ---
 

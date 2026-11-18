@@ -5,37 +5,13 @@ date: 2026-10-02
 status: accepted
 issue: 341
 paths:
-  - ARCHITECTURE.md
-  - PROTOCOL.md
-  - apps/troupe_gateway/lib/troupe/gateway/private.ex
-  - apps/troupe_gateway/test/troupe/gateway/private_test.exs
   - apps/troupe_plane/lib/troupe/plane/connections.ex
-  - apps/troupe_plane/lib/troupe/plane/control/connection.ex
-  - apps/troupe_plane/lib/troupe/plane/erasure.ex
-  - apps/troupe_plane/lib/troupe/plane/harness.ex
-  - apps/troupe_plane/lib/troupe/plane/identity.ex
   - apps/troupe_plane/lib/troupe/plane/identity/user.ex
-  - apps/troupe_plane/lib/troupe/plane/tokens.ex
-  - apps/troupe_plane/priv/repo/migrations/20261002000755_person_kms_name.exs
-  - apps/troupe_plane/test/troupe/plane/control_test.exs
-  - apps/troupe_plane/test/troupe/plane/person_credentials_test.exs
-  - apps/troupe_plane/test/troupe/plane/private_erasure_test.exs
-  - apps/troupe_plane/test/troupe/plane/subject_claim_test.exs
   - apps/troupe_protocol/lib/troupe/kms.ex
   - apps/troupe_protocol/lib/troupe/kms/policy.ex
-  - apps/troupe_protocol/lib/troupe/protocol/bundle.ex
-  - apps/troupe_worker/lib/troupe/worker/connections.ex
-  - apps/troupe_worker/test/troupe/worker/person_credentials_test.exs
-  - docs/admin/configuration.md
-  - docs/developer/architecture.md
 gist: A person's name at the key manager is a column of its own, fixed when the plane first knows them and left alone by a re-key, and whatever reaches…
 ---
 
-Issue #341. What a person keeps there, their
-credentials for person-mode MCP servers and their private sessions' data keys, was
-under `troupe/people/<subject>/`, and the plane cannot move that subtree (375, 377), so
-a person moved to another claim (751) connected their servers again and could not
-restore a private session on another device.
 - **The name.** `users.kms_name`, unique. The migration fills it with each person's
   subject, so nothing in the key manager moves and an installation that never switches
   its claim sees no difference. Somebody first known afterwards is named by their
@@ -70,16 +46,3 @@ restore a private session on another device.
   this, against a plane with it, reads under the subject; for a moved person it is
   refused, and their private sessions stay local on that machine until it is upgraded.
   Nobody else sees a difference.
-- **Proof:** the plane's `person_credentials_test.exs`, against the development OpenBao
-  and its JWT auth: a credential connected through the grant and a private session's
-  key written where `session.assertion` says, before a switch to `oid`; after her next
-  sign-in moves her, she is listed as connected, the grant and `session.assertion`
-  answer her old name and path, and the tokens they exchange for read both back. The
-  worker's `person_credentials_test.exs`: a pod, with a real plane over its link, finds
-  the credential before the move and after it, with the session's owner as either
-  subject. The gateway's `private_test.exs`: a second device, linked under the new
-  subject, gets the key the first sealed with and reads its segment. These three
-  failed on the tip of #339's branch. Also the plane's `subject_claim_test.exs` (the
-  name kept by a move and by a fold, a newcomer named by their subject or, where a
-  moved person has it, their id, a row without one keeping its subject) and
-  `control_test.exs` (`kms.assertion` for a moved owner names their old name).

@@ -7,21 +7,8 @@ issue: 516
 paths:
   - apps/troupe_core/lib/troupe/agent/definitions.ex
   - apps/troupe_core/lib/troupe/skills.ex
-  - apps/troupe_core/lib/troupe/worktree.ex
   - apps/troupe_core/lib/troupe/onboard/pod.ex
-  - apps/troupe_core/lib/troupe/session.ex
-  - apps/troupe_core/lib/troupe.ex
-  - apps/troupe_core/test/troupe/pod_layers_test.exs
-  - apps/troupe_core/test/troupe/onboard/pod_test.exs
   - apps/troupe_worker/lib/troupe/worker/plane/commands.ex
-  - apps/troupe_worker/test/troupe/worker/bundle_wins_test.exs
-  - apps/troupe_plane/lib/troupe/plane/harness.ex
-  - apps/troupe_plane/lib/troupe/plane/fleet/profile.ex
-  - clients/gui/apps/console/src/views/Profiles.tsx
-  - apps/troupe_protocol/lib/troupe/protocol/schema.ex
-  - charts/troupe/crds/workerprofile.yaml
-  - docs/admin/profiles-and-policy.md
-  - docs/admin/profile-options.md
 symbols:
   - Troupe.Agent.Definitions.bundle_wins?/1
   - Troupe.Agent.Definitions.load/2
@@ -37,14 +24,6 @@ wins, with a profile setting to let the repository's files win instead. The main
 then settled the question this slice left open: Troupe's built-in agents (and built-in
 skills, were there any) win on a pod as the bundle's do, and the same setting lets the
 repository's win over both.
-
-What was there: `Troupe.Agent.Definitions.load/2` merged built-ins, then the bundle, then
-the config directory's `agents/`, then the working copy's `.troupe/agents/`, and
-`Troupe.Skills.available/3` put the person's and the workspace's skills after the
-bundle's, the nearer layer winning. On a pod the working copy is a clone, so a
-repository's `.troupe/agents/build.md` replaced the `build` the channel's bundle publishes,
-in every session of every team that opened that repository; the only defence was a
-moduledoc saying those directories were empty on a worker, which nothing made true.
 
 - **The rule, in one place.** `Definitions.bundle_wins?/1`: wherever a session is pinned
   to a bundle, which only a pod is, the bundle's agents and skills and Troupe's built-in
@@ -132,23 +111,3 @@ moduledoc saying those directories were empty on a worker, which nothing made tr
 - **Not decided here, as the chunk said:** Cursor rules at runtime or onboarded, automatic
   onboarding, the deprecation, and a repository without `AGENTS.md` (#516's decisions 1,
   4, 5 and 7). The precedence ladder is Decision 822's; this decision is its pod line.
-- **Proof:** `Troupe.PodLayersTest` — a pod session whose working copy has
-  `.troupe/agents/build.md` ran the repository's `build` on the chunk's tip (the first
-  test failed there with `:project`); now the bundle's runs and the model is sent its
-  prompt, a name the bundle lacks is the repository's, the repository's skills of the
-  bundle's names are neither offered nor stand in, `skipped` lists them with the reason,
-  `files_skipped` is written once across a dormancy and again, empty, when the files go,
-  `repository_overrides` puts the order back, and a laptop is unchanged; on a pod whose
-  bundle publishes no `build`, the built-in `build` runs over the repository's, which is
-  listed as an agent Troupe ships, and with the setting on the repository's runs; a pin
-  with nothing pinned does the same; a worktree made
-  before onboarding reads the main checkout's committed agent and skill, its own first,
-  lists the uncommitted ones and reads them once committed, and the checkout reads its own
-  as they are. `Troupe.Onboard.PodTest`: a team session and a worker's machine refused with
-  the sentence, a local session and a laptop allowed. `Troupe.Worker.BundleWinsTest`, a
-  `session.activate` with a bundle the pod's registry fetches: the bundle's `build` and the
-  repository's in `files_skipped`; with `repository_overrides_bundle: true` the
-  repository's; with `"true"` the bundle's; with nothing published, the built-in `build`,
-  and after a wake under the setting, the repository's. The plane's `AdminTest` (a boolean kept, a
-  string or a number refused), `BundlesTest` (the push says `false`, then `true` once the
-  profile does) and `PanelTest` (the toggle, kept on a save, cleared when unticked).

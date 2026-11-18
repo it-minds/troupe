@@ -5,35 +5,13 @@ date: 2026-10-05
 status: accepted
 issue: 419
 paths:
-  - PROTOCOL.md
-  - apps/troupe_core/lib/troupe.ex
-  - apps/troupe_core/lib/troupe/agent/server.ex
-  - apps/troupe_core/lib/troupe/config.ex
-  - apps/troupe_core/lib/troupe/doctor.ex
   - apps/troupe_core/lib/troupe/llm/identify.ex
   - apps/troupe_core/lib/troupe/llm/providers/anthropic.ex
   - apps/troupe_core/lib/troupe/llm/providers/openai.ex
   - apps/troupe_core/lib/troupe/llm/request.ex
-  - apps/troupe_core/test/support/fake_openai.exs
-  - apps/troupe_core/test/troupe/agent/identify_test.exs
-  - apps/troupe_core/test/troupe/doctor_test.exs
-  - apps/troupe_core/test/troupe/llm/attribution_test.exs
-  - apps/troupe_core/test/troupe/llm/identify_test.exs
-  - apps/troupe_gateway/lib/troupe/gateway/dispatch.ex
-  - apps/troupe_gateway/test/troupe/gateway/identify_test.exs
-  - apps/troupe_worker/lib/troupe/worker/session/restore.ex
-  - apps/troupe_worker/test/troupe/worker/identify_test.exs
-  - clients/tui/lib/troupe/cli/runner.ex
-  - clients/tui/lib/troupe/client/daemon/link.ex
-  - clients/tui/test/troupe/cli_test.exs
 gist: "Every model call names Troupe to the provider: a User-Agent with the version, the client and the platform everywhere, LiteLLM's tags and spend-log…"
 ---
 
-Issue #419; TUI Decision 147. A
-gateway recorded our calls under `req/0.7.4`, the HTTP client's default, with nothing
-else in the headers, and a local session's body carried its id and its agent's name
-in `metadata` and nothing that said Troupe. So a LiteLLM dashboard labelled the other
-coding agents and not us, and nobody could split our spend by client or version.
 - **What goes out**, built in one place (`Troupe.LLM.Identify`) for both adapters:
   - `User-Agent: troupe/<version> (<client>; <os>/<arch>)` on every call to every
     endpoint, product first so a prefix match on `troupe/` holds. The version is the
@@ -97,20 +75,3 @@ coding agents and not us, and nobody could split our spend by client or version.
   `/model_group/info`) still go with the HTTP client's User-Agent; a `WorkerProfile`
   field that turns `identify` off for a profile's pods; a documented set of our own
   `x-troupe-*` headers for LiteLLM's `extra_spend_tag_headers`.
-- **Proof:** `Troupe.LLM.IdentifyTest`, against a stand-in gateway on a loopback port
-  that records each request's headers and body (on the chunk's tip it saw
-  `user-agent: req/0.7.4`, no tags, and `metadata` of the session's id and its agent
-  only): the User-Agent, the tags and the spend-log metadata of a local session and a
-  pod's through the OpenAI-compatible adapter, the same through the Anthropic one with
-  no end user, a client not on the list sent as `other`, nothing of a person, a
-  repository's agent, the host or the user in a local session's call, `identify:
-  false` for both, and a vendor's own API and OpenRouter told apart through a
-  recording transport; `Troupe.Agent.IdentifyTest`, the session's client and switch
-  on every request and the key on the ladder, a project's file only where trusted;
-  `Troupe.Gateway.IdentifyTest`, a session the desktop app creates naming `desktop`, a
-  headless run's `headless`, and the terminal UI that wakes it `tui`;
-  `Troupe.Worker.IdentifyTest`, a pod session's call naming the worker with its
-  owner, team and profile; `Troupe.DoctorTest`, the line for a gateway through both
-  programs, `off` and the fake; TUI `cli_test.exs`, what a headless run calls itself.
-  And the installed `troupe run --headless` and `troupe doctor` against a stand-in,
-  on the pull request.

@@ -4,12 +4,10 @@
 // Against the fake plane's `admin.runs.list` and `admin.run.review`, as both roles.
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { App } from "../src/App";
-import { PEOPLE, button, field, freshBrowser, link, render, says, sees, signedInAs, startFake, type, visit, waitFor } from "./support";
+import { PEOPLE, button, field, freshBrowser, link, opener, says, sees, startFake, type, visit, waitFor } from "./support";
 import type { FakeDeployment } from "./support";
 
 let fake: FakeDeployment;
-let unmount: (() => void) | null = null;
 
 beforeEach(async () => {
   freshBrowser();
@@ -17,8 +15,7 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
-  unmount?.();
-  unmount = null;
+  close();
   await fake.stop();
 });
 
@@ -27,11 +24,7 @@ const rows = (): HTMLTableRowElement[] => [...document.querySelectorAll<HTMLTabl
 const row = (trigger: string, fired: string): HTMLTableRowElement | null =>
   rows().find((r) => (r.cells[1]?.textContent ?? "").startsWith(trigger) && (r.cells[0]?.textContent ?? "").startsWith(fired)) ?? null;
 
-async function open(hash: string, who: { subject: string; name: string } = PEOPLE.alice): Promise<void> {
-  await signedInAs(fake, who);
-  visit(hash);
-  unmount = render(<App />).unmount;
-}
+const { open, close } = opener(() => fake);
 
 describe("the runs", () => {
   it("lists every team's runs for a platform admin, with the repository, issue, pull request and spend", async () => {

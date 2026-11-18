@@ -6,8 +6,6 @@ status: accepted
 issue: 389
 paths:
   - apps/troupe_core/lib/troupe/agent/headroom.ex
-  - clients/gui/apps/desktop/test/turn-cost.test.tsx
-  - clients/gui/packages/client/test/turn-cost.test.ts
 gist: The desktop app and a headless run say what a turn cost, in the terminal UI's line, and `@troupe/client` writes the line
 ---
 
