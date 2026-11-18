@@ -79,6 +79,7 @@ export function StartSession({
   onClose,
   onCreated,
   onProfile,
+  profile,
 }: {
   /** Null in local mode: there is no platform to start one on, so the question is not asked. */
   auth: AuthSession | null;
@@ -97,6 +98,8 @@ export function StartSession({
   onCreated: (id: string, kind: SessionKind, workspace?: string) => void;
   /** Open the page saying what a profile gives a session. */
   onProfile?: ((name: string) => void) | undefined;
+  /** A profile chosen before the screen opened, from its page: on the platform, as a pick of the chip is. */
+  profile?: string | undefined;
 }): JSX.Element {
   const [seed] = useState(() => String(Date.now()));
   const quip = firstLine("start_screen", seed);
@@ -107,8 +110,8 @@ export function StartSession({
   const [text, setText] = useState("");
   const [title, setTitle] = useState("");
   const [titleTouched, setTitleTouched] = useState(false);
-  const [whereChip, setWhereChip] = useState<NewSessionWhere | null>(null);
-  const [profileChip, setProfileChip] = useState<string | null>(null);
+  const [whereChip, setWhereChip] = useState<NewSessionWhere | null>(profile && auth ? "platform" : null);
+  const [profileChip, setProfileChip] = useState<string | null>(profile ?? null);
   const [agentChip, setAgentChip] = useState<string | null>(null);
   const [folder, setFolder] = useState("");
   const [worktree, setWorktree] = useState<"auto" | "never" | "always">("auto");

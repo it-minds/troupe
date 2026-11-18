@@ -168,6 +168,44 @@ export function capacityWords(limits: Pick<ProfileViewLimits, "capacity" | "acti
   return free > 0 ? `room for ${free} of ${limits.capacity}` : `full: ${limits.capacity} of ${limits.capacity} running`;
 }
 
+const plural = (n: number, one: string, many: string): string => `${n} ${n === 1 ? one : many}`;
+
+/**
+ * Room on the profile now and its ceiling, in two sentences: "3 of 4 places free. Up to 8
+ * sessions at once." A profile with no place up and nothing running starts one for a new
+ * session; one with every place taken has a new session wait for one.
+ */
+export function roomWords(limits: Pick<ProfileViewLimits, "capacity" | "active_sessions" | "max_sessions">): string {
+  const active = limits.active_sessions ?? 0;
+  const now =
+    limits.capacity === null
+      ? "Room not said."
+      : limits.capacity <= 0 && active <= 0
+        ? "No place is up; a new session starts one."
+        : limits.capacity - active > 0
+          ? `${limits.capacity - active} of ${plural(limits.capacity, "place", "places")} free.`
+          : "Every place is taken: a new session waits for one.";
+  const most = limits.max_sessions === null ? "No cap on sessions at once." : `Up to ${plural(limits.max_sessions, "session", "sessions")} at once.`;
+  return `${now} ${most}`;
+}
+
+/** Whose credential a server is called with, as the rail's "acts as" says it. */
+function actorWords(access: string): string {
+  return access === "yours" ? "you, once you connect it" : access === "profile" ? "the profile" : access === "system" ? "the profile's own identity" : access;
+}
+
+/** Whose credentials the offered servers are called with, each said once in the order first met. */
+export function actsAsWords(servers: readonly Pick<ProfileViewServer, "access" | "offered">[]): string {
+  const seen = [...new Set(servers.filter((s) => s.offered).map((s) => s.access))];
+  if (seen.length === 0) return "No server to call.";
+  return seen.map(actorWords).join("; ");
+}
+
+/** A tool rule as it is written: `bash(git push *)`, or the bare tool. */
+export function ruleText(rule: Pick<ProfileViewRule, "tool" | "pattern">): string {
+  return rule.pattern === null ? rule.tool : `${rule.tool}(${rule.pattern})`;
+}
+
 /** The hosts, two named and the rest counted. */
 function hostsWords(hosts: string[]): string {
   if (hosts.length === 0) return "reaches no host";

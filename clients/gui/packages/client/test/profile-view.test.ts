@@ -3,7 +3,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { DaemonClient, TroupeRpcError, accessWords, budgetWords, capacityWords, missingWords, moneyWords, profileSummary, ruleAccessWords } from "../src/index.js";
+import { DaemonClient, TroupeRpcError, accessWords, actsAsWords, budgetWords, capacityWords, missingWords, moneyWords, profileSummary, roomWords, ruleAccessWords, ruleText } from "../src/index.js";
 import type { ProfileView } from "../src/index.js";
 import { FakeDaemon } from "./support/daemon.js";
 import { startHarness } from "./support/harness.js";
@@ -75,4 +75,22 @@ test("the words: whose access, money, budgets, rules, why not, room and the one-
   assert.equal(capacityWords({ capacity: 2, active_sessions: 2 }), "full: 2 of 2 running");
   const view = composeProfile(exampleProfiles()[0]!, { teams: ["core"] }, { capacity: 8, active_sessions: 0 }) as ProfileView;
   assert.equal(profileSummary(view), "4 agents · github, jira · reads api.githubcopilot.com, github.com and 3 more");
+});
+
+test("the profile page's rail words: room and ceiling, whose credentials, a rule as written", () => {
+  assert.equal(roomWords({ capacity: 4, active_sessions: 1, max_sessions: 8 }), "3 of 4 places free. Up to 8 sessions at once.");
+  assert.equal(roomWords({ capacity: 1, active_sessions: 0, max_sessions: 1 }), "1 of 1 place free. Up to 1 session at once.");
+  assert.equal(roomWords({ capacity: 2, active_sessions: 2, max_sessions: null }), "Every place is taken: a new session waits for one. No cap on sessions at once.");
+  assert.equal(roomWords({ capacity: 0, active_sessions: 0, max_sessions: null }), "No place is up; a new session starts one. No cap on sessions at once.");
+  assert.equal(roomWords({ capacity: null, active_sessions: null, max_sessions: 3 }), "Room not said. Up to 3 sessions at once.");
+  const servers = [
+    { access: "yours", offered: true },
+    { access: "system", offered: false },
+    { access: "profile", offered: true },
+    { access: "yours", offered: true },
+  ];
+  assert.equal(actsAsWords(servers), "you, once you connect it; the profile");
+  assert.equal(actsAsWords([{ access: "system", offered: false }]), "No server to call.");
+  assert.equal(ruleText({ tool: "bash", pattern: "git push *" }), "bash(git push *)");
+  assert.equal(ruleText({ tool: "webfetch", pattern: null }), "webfetch");
 });

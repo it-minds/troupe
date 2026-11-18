@@ -8,13 +8,33 @@
 // and works none of it out, so what it says is what a session gets. A plane is the only
 // thing that knows, so the screen is offered only while signed in to one.
 //
-// Seven plain sections in reading order, tables where there are columns to compare; a table
-// scrolls inside itself on a narrow window rather than the page sideways.
+// The page answers "can this profile do my job?" first: a head with the primary agent's
+// sentence, a rail with the room, the model, the budgets, whose credentials and what asks
+// first, and Start; then what it can do, what it can't, how it behaves (guidance, not
+// limits), and the configuration's own tables folded away under the hood. On a narrow
+// window the rail comes first; a table scrolls inside itself rather than the page sideways.
 
 import { useEffect, useState } from "react";
 import type { JSX } from "react";
-import { FUNCTIONS_HEADING, TroupeRpcError, accessWords, askWords, budgetWords, capacityWords, errorText, keyWords, missingWords, profileSummary, ruleAccessWords, whoseWords } from "@troupe/client";
-import type { AuthSession, ProfileView, ProfileViewSkill } from "@troupe/client";
+import {
+  FUNCTIONS_HEADING,
+  TroupeRpcError,
+  accessWords,
+  actsAsWords,
+  andList,
+  askWords,
+  budgetWords,
+  capacityWords,
+  errorText,
+  keyWords,
+  missingWords,
+  profileSummary,
+  roomWords,
+  ruleAccessWords,
+  ruleText,
+  whoseWords,
+} from "@troupe/client";
+import type { AuthSession, ProfileView, ProfileViewAgent, ProfileViewSkill } from "@troupe/client";
 import { useProfiles } from "../hooks";
 import { Loading, Table } from "./bits";
 import { ProseFrame } from "./Frames";
@@ -82,9 +102,27 @@ function Summary({ auth, name }: { auth: AuthSession; name: string }): JSX.Eleme
   return <span className="micro muted">{line}</span>;
 }
 
-/** One profile, in seven sections: agents, skills, tools, model, reach, limits and who. */
-export function ProfilePage({ auth, name, onBack }: { auth: AuthSession; name: string; onBack: () => void }): JSX.Element {
+/** The agents a session may run as or call: primaries first, then the rest by mode. */
+function byMode(agents: readonly ProfileViewAgent[]): ProfileViewAgent[] {
+  const rank = (a: ProfileViewAgent): number => (a.mode === "primary" ? 0 : 1);
+  return [...agents].sort((a, b) => rank(a) - rank(b) || a.mode.localeCompare(b.mode));
+}
+
+/** One profile: a head, the rail, what it can and can't do, how it behaves, and under the hood. */
+export function ProfilePage({
+  auth,
+  name,
+  onBack,
+  onStart,
+}: {
+  auth: AuthSession;
+  name: string;
+  onBack: () => void;
+  /** Open the new-session screen with this profile chosen. */
+  onStart?: ((name: string) => void) | undefined;
+}): JSX.Element {
   const read = useProfileView(auth, name);
+  const primary = read && "view" in read ? read.view.agents.find((a) => a.mode === "primary") : undefined;
   return (
     <>
       <header className="screen-head">
@@ -94,7 +132,7 @@ export function ProfilePage({ auth, name, onBack }: { auth: AuthSession; name: s
           </button>
         </span>
         <h1 className="mono">{name}</h1>
-        {read && "view" in read && <p>{profileSummary(read.view)}</p>}
+        {primary?.description && <p className="profile-sentence">{primary.description}</p>}
       </header>
       <div className="listing profile-view">
         {!read ? (
@@ -106,10 +144,166 @@ export function ProfilePage({ auth, name, onBack }: { auth: AuthSession; name: s
             <p>Could not read what {name} gives a session: {read.error}</p>
           </div>
         ) : (
-          <ProfileSections view={read.view} />
+          <div className="profile-layout">
+            <Rail view={read.view} onStart={onStart} />
+            <div className="profile-main">
+              <CanDo view={read.view} />
+              <CannotDo view={read.view} />
+              <Behaves view={read.view} />
+              <UnderTheHood view={read.view} />
+            </div>
+          </div>
         )}
       </div>
     </>
+  );
+}
+
+/** Who may use it: the person's teams on it, and what Start does where there are several. */
+function whoWords(view: ProfileView): string {
+  if (view.teams.length === 0) return "No team of yours: an administrator's view.";
+  if (view.teams.length === 1) return view.teams[0]!;
+  return `${andList(view.teams)}. A session is for one of them, said when you start it.`;
+}
+
+/** What a session asks before doing: a server whose calls ask, and every `ask` rule. */
+function asksFirst(view: ProfileView): string[] {
+  const servers = view.tools.mcp.filter((s) => s.offered && s.permission === "ask").map((s) => `${s.name}'s tools`);
+  const rules = view.tools.rules.filter((r) => r.access === "ask").map(ruleText);
+  return [...servers, ...rules];
+}
+
+function Rail({ view, onStart }: { view: ProfileView; onStart?: ((name: string) => void) | undefined }): JSX.Element {
+  const asks = asksFirst(view);
+  return (
+    <aside className="profile-rail" aria-label="At a glance">
+      <dl className="facts wide">
+        <dt>Room</dt>
+        <dd>{roomWords(view.limits)}</dd>
+        <dt>Model</dt>
+        <dd className={view.model.model ? "mono" : undefined}>{view.model.model ?? "the plane's default model"}</dd>
+        <dt>Profile's budget</dt>
+        <dd>{budgetWords(view.limits.budgets.profile)}</dd>
+        <dt>Team's budget</dt>
+        <dd>{budgetWords(view.limits.budgets.team)}</dd>
+        <dt>Your budget</dt>
+        <dd>{budgetWords(view.limits.budgets.you)}</dd>
+        <dt>Acts as</dt>
+        <dd>{actsAsWords(view.tools.mcp)}</dd>
+        <dt>Asks first</dt>
+        <dd>{asks.length === 0 ? "only what Troupe asks by default" : andList(asks)}</dd>
+        <dt>Who can use it</dt>
+        <dd>{whoWords(view)}</dd>
+      </dl>
+      {view.agents.length === 0 ? (
+        <p className="note">No agent: a session cannot start on it.</p>
+      ) : (
+        onStart && (
+          <button type="button" className="primary" onClick={() => onStart(view.name)}>
+            Start a session on {view.name}
+          </button>
+        )
+      )}
+    </aside>
+  );
+}
+
+function CanDo({ view }: { view: ProfileView }): JSX.Element {
+  const offered = view.tools.mcp.filter((s) => s.offered);
+  // Whole-tool refusals are what the answer says of the harness's own tools; #1121 brings their full list.
+  const off = view.tools.rules.filter((r) => r.access === "deny" && r.pattern === null);
+  return (
+    <section className="group can-do">
+      <h3>What it can do</h3>
+      <ul className="profile-cards">
+        {offered.map((s) => (
+          <li key={s.name} className="profile-card">
+            <h4 className="mono">{s.name}</h4>
+            <dl className="facts wide">
+              <dt>Host</dt>
+              <dd className="mono">{s.host ?? "not said"}</dd>
+              <dt>Called</dt>
+              <dd>{accessWords(s.access)}</dd>
+              <dt>Each call</dt>
+              <dd>{askWords(s.permission)}</dd>
+              <dt>Its tools</dt>
+              <dd className={s.tools === "all" ? undefined : "mono"}>{s.tools === "all" ? "every tool it has" : s.tools.join(", ")}</dd>
+            </dl>
+          </li>
+        ))}
+        <li className="profile-card troupe">
+          <h4>Troupe</h4>
+          {off.length > 0 && (
+            <>
+              <p className="micro">Turned off here</p>
+              <ul className="struck">
+                {off.map((r, i) => (
+                  <li key={`${r.tool}-${i}`}>
+                    <s className="mono">{r.tool}</s>
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
+          <p className="note">{off.length > 0 ? "The harness's other tools are on." : "The harness's own tools are on."}</p>
+        </li>
+      </ul>
+    </section>
+  );
+}
+
+function CannotDo({ view }: { view: ProfileView }): JSX.Element {
+  const refused = view.tools.rules.filter((r) => r.access === "deny");
+  const withheld = view.tools.mcp.filter((s) => !s.offered);
+  return (
+    <section className="group cannot-do">
+      <h3>What it can't do</h3>
+      <div className="banner">
+        <p>The tools below, and nothing outside the hosts listed.</p>
+      </div>
+      {refused.length > 0 && (
+        <div className="part">
+          <h4>Refused</h4>
+          <ul className="plain">
+            {refused.map((r, i) => (
+              <li key={`${ruleText(r)}-${i}`}>
+                <span className="mono">{ruleText(r)}</span>
+                <span className="muted"> · refused by {whoseWords(r.from)}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {withheld.length > 0 && (
+        <div className="part">
+          <h4>Withheld</h4>
+          <ul className="plain">
+            {withheld.map((s) => (
+              <li key={s.name}>
+                <span className="mono">{s.name}</span>
+                <span className="muted"> · not offered: {missingWords(s.why)}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+      <div className="part">
+        {view.reach.length === 0 ? (
+          <p>Reaches no host outside the plane.</p>
+        ) : (
+          <>
+            <h4>Reaches only these hosts</h4>
+            <ul className="chips">
+              {view.reach.map((h) => (
+                <li key={h} className="chip mono">
+                  {h}
+                </li>
+              ))}
+            </ul>
+          </>
+        )}
+      </div>
+    </section>
   );
 }
 
@@ -120,8 +314,8 @@ export function ProfilePage({ auth, name, onBack }: { auth: AuthSession; name: s
 function Skills({ view }: { view: ProfileView }): JSX.Element {
   const details: ProfileViewSkill[] = view.skill_details ?? view.skills.map((name) => ({ name, description: null, body: null, truncated: false }));
   return (
-    <section className="group skills">
-      <h3>Skills</h3>
+    <div className="part skills">
+      <h4>Skills</h4>
       {details.length === 0 ? (
         <p className="note">No skill.</p>
       ) : (
@@ -147,20 +341,62 @@ function Skills({ view }: { view: ProfileView }): JSX.Element {
           ))}
         </ul>
       )}
+    </div>
+  );
+}
+
+function Behaves({ view }: { view: ProfileView }): JSX.Element {
+  const functions = view.functions ?? [];
+  return (
+    <section className="group behaves">
+      <h3>How it behaves</h3>
+      <p className="copy">Guidance, not limits: an agent follows these; the sections above are what it is allowed.</p>
+      <div className="part agents">
+        <h4>Agents</h4>
+        {view.agents.length === 0 ? (
+          <p className="note">No agent: a session cannot start on it.</p>
+        ) : (
+          <ul className="plain">
+            {byMode(view.agents).map((a) => (
+              <li key={a.name}>
+                <span className="mono">{a.name}</span>
+                <span className="muted"> · {a.mode === "primary" ? "a session runs as it" : "an agent calls it"}</span>
+                {a.description && <span> · {a.description}</span>}
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+      {functions.length > 0 && (
+        <div className="part functions">
+          <h4>{FUNCTIONS_HEADING}</h4>
+          <ul className="plain">
+            {functions.map((a) => (
+              <li key={a.name}>
+                <span className="mono">{a.name}</span>
+                {a.description && <span> · {a.description}</span>}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+      <Skills view={view} />
     </section>
   );
 }
 
-function ProfileSections({ view }: { view: ProfileView }): JSX.Element {
+/** The configuration's own tables, for whoever is checking a bundle: folded away. */
+function UnderTheHood({ view }: { view: ProfileView }): JSX.Element {
   const { model, limits } = view;
   const offered = view.tools.mcp.filter((s) => s.offered);
   const withheld = view.tools.mcp.filter((s) => !s.offered);
   return (
-    <>
-      <section className="group">
-        <h3>Agents</h3>
+    <details className="group under-hood">
+      <summary>Under the hood</summary>
+      <div className="part">
+        <h4>Agents</h4>
         {view.agents.length === 0 ? (
-          <p className="note">No agent: a session cannot start on it.</p>
+          <p className="note">No agent.</p>
         ) : (
           <Table head={["Agent", "Mode", "What it does", "From"]}>
             {view.agents.map((a) => (
@@ -173,26 +409,10 @@ function ProfileSections({ view }: { view: ProfileView }): JSX.Element {
             ))}
           </Table>
         )}
-        {(view.functions ?? []).length > 0 && (
-          <>
-            <p className="note">{FUNCTIONS_HEADING}</p>
-            <Table head={["Agent", "What it does", "From"]}>
-              {(view.functions ?? []).map((a) => (
-                <tr key={a.name}>
-                  <td className="mono">{a.name}</td>
-                  <td>{a.description ?? ""}</td>
-                  <td>{whoseWords(a.from)}</td>
-                </tr>
-              ))}
-            </Table>
-          </>
-        )}
-      </section>
+      </div>
 
-      <Skills view={view} />
-
-      <section className="group">
-        <h3>Tools</h3>
+      <div className="part">
+        <h4>Tools</h4>
         {view.tools.rules.length === 0 ? (
           <p className="note">No rule of the profile's or the organisation's: every tool asks as Troupe's own defaults say.</p>
         ) : (
@@ -225,10 +445,10 @@ function ProfileSections({ view }: { view: ProfileView }): JSX.Element {
             ))}
           </Table>
         )}
-      </section>
+      </div>
 
-      <section className="group">
-        <h3>Model</h3>
+      <div className="part">
+        <h4>Model</h4>
         <dl className="facts wide">
           <dt>Model</dt>
           <dd className="mono">{model.model ?? "not set by the profile"}</dd>
@@ -239,25 +459,10 @@ function ProfileSections({ view }: { view: ProfileView }): JSX.Element {
           <dt>Key</dt>
           <dd>{keyWords(model.key)}</dd>
         </dl>
-      </section>
+      </div>
 
-      <section className="group">
-        <h3>Reach</h3>
-        {view.reach.length === 0 ? (
-          <p className="note">No host outside the platform.</p>
-        ) : (
-          <ul className="chips">
-            {view.reach.map((h) => (
-              <li key={h} className="chip mono">
-                {h}
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
-
-      <section className="group">
-        <h3>Limits</h3>
+      <div className="part">
+        <h4>Limits</h4>
         <dl className="facts wide">
           <dt>Sharing a machine</dt>
           <dd>{limits.sessions_per_pod === null ? "not said" : `up to ${limits.sessions_per_pod} sessions`}</dd>
@@ -265,23 +470,17 @@ function ProfileSections({ view }: { view: ProfileView }): JSX.Element {
           <dd>{limits.max_sessions === null ? "no cap" : `${limits.max_sessions} sessions`}</dd>
           <dt>Now</dt>
           <dd>{capacityWords(limits)}</dd>
-          <dt>Profile's budget</dt>
-          <dd>{budgetWords(limits.budgets.profile)}</dd>
-          <dt>Team's budget</dt>
-          <dd>{budgetWords(limits.budgets.team)}</dd>
-          <dt>Your budget</dt>
-          <dd>{budgetWords(limits.budgets.you)}</dd>
         </dl>
-      </section>
+      </div>
 
-      <section className="group">
-        <h3>Who</h3>
+      <div className="part">
+        <h4>Who</h4>
         <p className="note">
           {view.team === null
-            ? "No team of yours: an administrator's view."
+            ? whoWords(view)
             : `A session you start runs under ${view.team}${view.teams.length > 1 ? `; ${view.teams.filter((t) => t !== view.team).join(", ")} may use it too` : ""}.`}
         </p>
-      </section>
-    </>
+      </div>
+    </details>
   );
 }
