@@ -120,18 +120,19 @@ describe("states, counts and outcomes", () => {
 });
 
 describe("an address the role may not open", () => {
-  it("opens Mine for a member, says the page is for administrators, and rewrites the address", async () => {
-    await open("#/sessions", PEOPLE.carol);
-    await waitFor(() => heading() === "Mine", "Mine");
+  it("opens a member's sessions, says the page is for administrators, and rewrites the address", async () => {
+    await open("#/overview", PEOPLE.carol);
+    await waitFor(() => heading() === "Sessions", "their sessions");
     await sees("That page is for administrators.");
-    expect(globalThis.location.hash).toBe("#/mine");
+    expect(globalThis.location.hash).toBe("#/sessions");
     button("Dismiss", document.querySelector<HTMLElement>('[aria-label="Not for your role"]')!)!.click();
     await waitFor(() => !says("That page is for administrators."), "the line dismissed");
   });
 
-  it("says nothing on an address the role may open", async () => {
+  it("says nothing on an address the role may open, a bookmarked Mine among them, and gives that one its new address", async () => {
     await open("#/mine", PEOPLE.carol);
-    await waitFor(() => heading() === "Mine", "Mine");
+    await waitFor(() => heading() === "Sessions", "their sessions");
+    await waitFor(() => globalThis.location.hash === "#/sessions/mine", "Mine's new address");
     expect(says("That page is for")).toBe(false);
   });
 

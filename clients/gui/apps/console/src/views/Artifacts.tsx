@@ -1,10 +1,17 @@
-// Artifacts: the pages and files a person, their organisation, their teams and their
-// profiles' people have published, for everybody who signs in, administrators too. A tab
-// for their own (the private ones among them), one for those a link gave them, one for the
-// organisation's, one for their teams' (one list, the team named on each card) and one for
-// each profile they are covered by; a card for each, and a page for one with its versions,
-// newest first. Which tab a row is under is the plane's to say (`scope`), not this
-// console's to work out.
+// Artifacts: for an administrator, every artifact the plane holds that their role answers
+// for (`admin.artifacts.list`: every one for a platform admin, a person's private ones too,
+// their teams' for a team admin), first, with a takedown on each row; then, as for
+// everybody who signs in, the pages and files a person, their organisation, their teams and
+// their profiles' people have published, as tabs: Mine (the private ones among them), one for
+// those a link gave them, one for the organisation's, one for their teams' (one list, the
+// team named on each card) and one for each profile they are covered by; a card for each,
+// and a page for one with its versions, newest first. Which tab a row is under is the
+// plane's to say (`scope`), not this console's to work out.
+//
+// An administrator who opens an artifact that is not theirs reads its page as its
+// administrator (`admin.artifact.get`): its links, who it is shared with and its comments
+// too, a private one's as well, and the audit records each read. What its files hold stays
+// its owner's and their links' holders': the page says so where it cannot be opened.
 //
 // An artifact is never drawn here. Its card is its title and its kind, with the picture its
 // publisher sent where there is one (an image from the artifacts host), and its page says
@@ -15,8 +22,8 @@
 // opened later lets this one through. An edit's preview is the host's too, framed and
 // sandboxed (`ArtifactEditor`).
 //
-// Nothing here is an administrative call: `artifact.*` are what any client of the person's
-// asks the plane as that person. Deleting is the owner's, or a takedown of somebody else's
+// Beyond those two, nothing here is an administrative call: `artifact.*` are what any
+// client of the person's asks the plane as that person. Deleting is the owner's, or a takedown of somebody else's
 // by a platform admin or the admin of the team it is for, which the confirm says it is. A new version (an edit, a rollback) is the
 // owner's or an edit link's holder's; pinning the version its address serves, and the links
 // (`ArtifactLinks`), are the owner's. An artifact a team owns is every member's: the plane
@@ -29,7 +36,7 @@ import { useEffect, useState } from "react";
 import type { JSX } from "react";
 import { ArtifactApi, TroupeRpcError, appLink, blockedKindWords, blockedWords, bytes, ownerWords, teamOwned, visibilityWords as audienceWords } from "@troupe/client";
 import { OpenInApp } from "./AppBanner";
-import type { Artifact, ArtifactDetail, ArtifactFilter, ArtifactList, ArtifactPerson } from "@troupe/client";
+import type { AdminArtifactPage, Artifact, ArtifactDetail, ArtifactFilter, ArtifactList, ArtifactPerson } from "@troupe/client";
 import { goesLine, goesSentence, versionGoes, versionsSentence } from "@troupe/client";
 import { describeError, useConsole, useLoad } from "../console";
 import { go, href } from "../route";
@@ -37,20 +44,24 @@ import type { Route } from "../route";
 import { ArtifactEditor, editableFiles } from "./ArtifactEditor";
 import { ArtifactComments, ArtifactPeople } from "./ArtifactComments";
 import { ArtifactLinks } from "./ArtifactLinks";
+import { AuditedPeople, AuditedThread } from "./ArtifactAudit";
+import { PublishedArtifacts } from "./PublishedArtifacts";
 import { Empty, Fields, Loaded, Preview, Region, Status, count, when } from "./bits";
 
-/** Which artifacts a tab lists. */
-export type ArtifactTab = { kind: "mine" } | { kind: "shared" } | { kind: "organisation" } | { kind: "teams" } | { kind: "profile"; name: string };
+/** Which artifacts a tab lists: `every` is every one an administrator answers for, which a member's console shows as their own. */
+export type ArtifactTab = { kind: "every" } | { kind: "mine" } | { kind: "shared" } | { kind: "organisation" } | { kind: "teams" } | { kind: "profile"; name: string };
 
 /**
- * What an address under `#/artifacts` names: a tab (`mine`, `shared`, `organisation`,
- * `profile/<name>`), a link somebody followed (`link/<token>`), an artifact to go straight
- * on to once signed in (`open/<id>[/v<n>]`, where the artifacts host sends a signed-out
- * viewer of it), or one artifact by its id, which the plane never makes one of those words.
+ * What an address under `#/artifacts` names: a tab (none for every artifact, `mine`,
+ * `shared`, `organisation`, `profile/<name>`), a link somebody followed (`link/<token>`), an
+ * artifact to go straight on to once signed in (`open/<id>[/v<n>]`, where the artifacts host
+ * sends a signed-out viewer of it), or one artifact by its id, which the plane never makes
+ * one of those words.
  */
 export function artifactPlace(path: string[]): { tab: ArtifactTab } | { id: string } | { link: string } | { open: { id: string; version?: number } } {
   const [first, second, third] = path;
-  if (!first || first === "mine") return { tab: { kind: "mine" } };
+  if (!first) return { tab: { kind: "every" } };
+  if (first === "mine") return { tab: { kind: "mine" } };
   if (first === "shared") return { tab: { kind: "shared" } };
   if (first === "organisation") return { tab: { kind: "organisation" } };
   if (first === "teams") return { tab: { kind: "teams" } };
@@ -64,7 +75,8 @@ export function artifactPlace(path: string[]): { tab: ArtifactTab } | { id: stri
 }
 
 function routeOf(tab: ArtifactTab): Route {
-  if (tab.kind === "mine") return { page: "artifacts" };
+  if (tab.kind === "every") return { page: "artifacts" };
+  if (tab.kind === "mine") return { page: "artifacts", path: ["mine"] };
   if (tab.kind === "shared") return { page: "artifacts", path: ["shared"] };
   if (tab.kind === "organisation") return { page: "artifacts", path: ["organisation"] };
   if (tab.kind === "teams") return { page: "artifacts", path: ["teams"] };
@@ -72,7 +84,9 @@ function routeOf(tab: ArtifactTab): Route {
 }
 
 function filterOf(tab: ArtifactTab): ArtifactFilter {
-  if (tab.kind === "mine") return { mine: true };
+  // Every artifact is the administrators' table; the person's own list is still asked, for
+  // the tabs it names (their profiles) and whether artifacts are on.
+  if (tab.kind === "mine" || tab.kind === "every") return { mine: true };
   if (tab.kind === "shared") return { shared: true };
   if (tab.kind === "organisation") return { visibility: "organisation" };
   if (tab.kind === "teams") return { teams: true };
@@ -122,13 +136,21 @@ function SwitchedOff(): JSX.Element {
   );
 }
 
-export function Artifacts({ tab }: { tab: ArtifactTab }): JSX.Element {
-  const { auth } = useConsole();
+export function Artifacts({ tab: asked }: { tab: ArtifactTab }): JSX.Element {
+  const { auth, role } = useConsole();
+  // A member answers for nobody's artifacts but their own, so their first tab is Mine.
+  const tab: ArtifactTab = asked.kind === "every" && role === "member" ? { kind: "mine" } : asked;
   const key = tab.kind === "profile" ? `profile:${tab.name}` : tab.kind;
   const [load, reload] = useLoad(() => new ArtifactApi((m, p) => auth.rpc(m, p)).list(filterOf(tab)), [auth, key]);
   return (
     <div className="page artifacts">
-      <p className="lead">The pages and files published on this plane that you may open: your own, your organisation's, your teams', and those of each profile you work in.</p>
+      <p className="lead">
+        {role === "member"
+          ? "The pages and files published on this plane that you may open: your own, your organisation's, your teams', and those of each profile you work in."
+          : role === "platform_admin"
+            ? "Every page and file published on this plane, people's private ones included, with a takedown for each; then, in the tabs, those you may open as anybody may: your own, your organisation's, your teams', and those of each profile you work in."
+            : "Every page and file published for the teams you administer, with a takedown for each; then, in the tabs, those you may open as anybody may: your own, your organisation's, your teams', and those of each profile you work in."}
+      </p>
       <Loaded load={load} what="the artifacts" retry={reload}>
         {(list) => (list.enabled ? <Gallery tab={tab} list={list} /> : <SwitchedOff />)}
       </Loaded>
@@ -137,7 +159,9 @@ export function Artifacts({ tab }: { tab: ArtifactTab }): JSX.Element {
 }
 
 function Gallery({ tab, list }: { tab: ArtifactTab; list: ArtifactList }): JSX.Element {
+  const { role } = useConsole();
   const tabs: Array<{ tab: ArtifactTab; label: string }> = [
+    ...(role === "member" ? [] : [{ tab: { kind: "every" } as ArtifactTab, label: "Every artifact" }]),
     { tab: { kind: "mine" }, label: "Mine" },
     { tab: { kind: "shared" }, label: "Shared with you" },
     { tab: { kind: "organisation" }, label: "Organisation" },
@@ -153,7 +177,9 @@ function Gallery({ tab, list }: { tab: ArtifactTab; list: ArtifactList }): JSX.E
           </a>
         ))}
       </nav>
-      {list.artifacts.length === 0 ? (
+      {tab.kind === "every" ? (
+        <PublishedArtifacts />
+      ) : list.artifacts.length === 0 ? (
         <Empty title={tab.kind === "mine" ? "You have published nothing yet" : tab.kind === "shared" ? "Nothing is shared with you yet" : tab.kind === "teams" ? "Nothing published for a team of yours yet" : "Nothing published here yet"}>
           {tab.kind === "mine" && (
             <p>
@@ -214,26 +240,31 @@ const NOT_FOUND = -32005;
 
 /** One artifact: what it is, where it came from, its versions, and the way to open it. */
 export function ArtifactPage({ id }: { id: string }): JSX.Element {
-  const { auth } = useConsole();
-  const [load, reload] = useLoad(
-    () =>
-      new ArtifactApi((m, p) => auth.rpc(m, p)).get(id).catch((e: unknown) => {
-        // One that does not exist and one this person may not see are the same answer.
-        if (e instanceof TroupeRpcError && e.code === NOT_FOUND) return null;
-        throw e;
-      }),
-    [auth, id],
-  );
+  const { auth, admin, role } = useConsole();
+  const [load, reload] = useLoad(async (): Promise<{ artifact: ArtifactDetail; audit: AdminArtifactPage | null } | null> => {
+    // One that does not exist and one this person may not see are the same answer.
+    const missing = (e: unknown): null => {
+      if (e instanceof TroupeRpcError && e.code === NOT_FOUND) return null;
+      throw e;
+    };
+    const own = await new ArtifactApi((m, p) => auth.rpc(m, p)).get(id).catch(missing);
+    if (own?.mine || role === "member") return own && { artifact: own, audit: null };
+    // Somebody else's, to an administrator: its page as its administrator reads it, which
+    // the audit records, or as anybody reads it where their role does not answer for it.
+    const audit = await admin.artifactPage(id).catch(missing);
+    if (audit) return { artifact: audit, audit };
+    return own && { artifact: own, audit: null };
+  }, [auth, admin, role, id]);
   return (
     <div className="page artifact">
       <Loaded load={load} what="the artifact" retry={reload}>
-        {(a) =>
-          a === null ? (
+        {(found) =>
+          found === null ? (
             <Empty title="No such artifact">
-              It does not exist, it was deleted, or it is not one you may open. <a href={href({ page: "artifacts" })}>Your artifacts</a>
+              It does not exist, it was deleted, or it is not one you may open. <a href={href({ page: "artifacts", path: ["mine"] })}>Your artifacts</a>
             </Empty>
           ) : (
-            <Detail artifact={a} reload={reload} />
+            <Detail artifact={found.artifact} audit={found.audit} reload={reload} />
           )
         }
       </Loaded>
@@ -272,8 +303,14 @@ function Blocked({ artifact: a, current }: { artifact: ArtifactDetail; current: 
   );
 }
 
-function Detail({ artifact: a, reload }: { artifact: ArtifactDetail; reload: () => void }): JSX.Element {
+/**
+ * `audit` is the page as its administrator reads it, for somebody else's: then its links and
+ * who it is shared with are listed to read, and where its administrator may not open it as
+ * anybody may (another person's private one), nothing on the page asks the plane as them.
+ */
+function Detail({ artifact: a, audit, reload }: { artifact: ArtifactDetail; audit: AdminArtifactPage | null; reload: () => void }): JSX.Element {
   const { me, notify, reserveTab, plane } = useConsole();
+  const reach = audit === null || audit.may_open;
   const api = useArtifacts();
   const [opening, setOpening] = useState<string | null>(null);
   const [error, setError] = useState<unknown>(null);
@@ -288,11 +325,11 @@ function Detail({ artifact: a, reload }: { artifact: ArtifactDetail; reload: () 
   const takedown = !a.mine;
   const ofTeam = teamOwned(a);
   // The owning person gives it to a team of theirs; an admin of the owning team takes it back.
-  const mayGive = !ofTeam && a.may_transfer === true && myTeams.length > 0;
-  const mayTakeBack = ofTeam && a.may_transfer === true;
+  const mayGive = reach && !ofTeam && a.may_transfer === true && myTeams.length > 0;
+  const mayTakeBack = reach && ofTeam && a.may_transfer === true;
   const versions = [...a.versions].sort((x, y) => y.n - x.n);
   const current = a.current ?? a.version;
-  const editable = a.may_edit === true && (a.kind === "html" || a.kind === "markdown") && editableFiles(versions[0]?.files ?? []).length > 0;
+  const editable = reach && a.may_edit === true && (a.kind === "html" || a.kind === "markdown") && editableFiles(versions[0]?.files ?? []).length > 0;
 
   // The link is asked for at the click, since it is good once and for a minute; the tab is
   // opened in the click itself, so a popup blocker lets it through, and pointed at the link
@@ -346,7 +383,20 @@ function Detail({ artifact: a, reload }: { artifact: ArtifactDetail; reload: () 
           ["Owner", ofTeam ? `${ownerWords(a)}; ${personWords(a.owner)} first published it` : a.mine ? `you, ${personWords(a.owner)}` : personWords(a.owner)],
           ["Team", a.team ?? "—"],
           ["Version", a.pinned ? `${current}, pinned by its owner; the newest is ${a.version}` : `${a.version} of ${count(versions.length, "version")}`],
-          ["You", a.mine ? (ofTeam ? `an owner, as every member of ${a.owner_team} is` : "its owner") : a.role === "edit" ? "may comment and publish new versions, shared with you" : a.role === "comment" ? "may open it and comment on it, shared with you" : "may open it"],
+          [
+            "You",
+            audit && !audit.may_open
+              ? "read its page as an administrator who may take it down; only its owner and those they gave it to open it"
+              : a.mine
+                ? ofTeam
+                  ? `an owner, as every member of ${a.owner_team} is`
+                  : "its owner"
+                : a.role === "edit"
+                  ? "may comment and publish new versions, shared with you"
+                  : a.role === "comment"
+                    ? "may open it and comment on it, shared with you"
+                    : "may open it",
+          ],
           ["Size", bytes(a.bytes)],
           ["Published", when(a.published_at)],
           ["First published", when(a.created_at)],
@@ -356,23 +406,33 @@ function Detail({ artifact: a, reload }: { artifact: ArtifactDetail; reload: () 
       <Blocked artifact={a} current={current} />
       <Region>Where it came from</Region>
       <Origin artifact={a} />
+      {audit && (
+        <p className="note" role="note">
+          You read this page as an administrator, and the audit records it as <code>artifact.read</code>, each time it is opened.
+          {!audit.may_open && " What its files hold is for its owner and those they gave it to, so it does not open here; you may take it down."}
+        </p>
+      )}
       <div className="actions">
-        <button type="button" className="primary" disabled={opening !== null} onClick={() => open()}>
-          {opening === "latest" ? "Opening…" : "Open"}
-        </button>
-        <select aria-label="Version to open" value={switched} onChange={(e) => setSwitched(e.target.value)}>
-          <option value="current">The current version ({current})</option>
-          {versions.map((v) => (
-            <option key={v.n} value={String(v.n)}>
-              Version {v.n}
-              {v.note ? `: ${v.note}` : ""}
-            </option>
-          ))}
-        </select>
-        <button type="button" disabled={opening !== null} onClick={() => open(switched === "current" ? undefined : Number(switched))}>
-          Open that version
-        </button>
-        <OpenInApp link={appLink({ kind: "artifact", id: a.id, plane: plane.url })} />
+        {reach && (
+          <>
+            <button type="button" className="primary" disabled={opening !== null} onClick={() => open()}>
+              {opening === "latest" ? "Opening…" : "Open"}
+            </button>
+            <select aria-label="Version to open" value={switched} onChange={(e) => setSwitched(e.target.value)}>
+              <option value="current">The current version ({current})</option>
+              {versions.map((v) => (
+                <option key={v.n} value={String(v.n)}>
+                  Version {v.n}
+                  {v.note ? `: ${v.note}` : ""}
+                </option>
+              ))}
+            </select>
+            <button type="button" disabled={opening !== null} onClick={() => open(switched === "current" ? undefined : Number(switched))}>
+              Open that version
+            </button>
+            <OpenInApp link={appLink({ kind: "artifact", id: a.id, plane: plane.url })} />
+          </>
+        )}
         {editable && !editing && (
           <button type="button" onClick={() => setEditing(true)}>
             Edit
@@ -383,7 +443,7 @@ function Detail({ artifact: a, reload }: { artifact: ArtifactDetail; reload: () 
             {takedown ? "Take down" : "Delete"}
           </button>
         )}
-        <span className="hint">It opens in a tab of its own, on the artifacts host.</span>
+        {reach && <span className="hint">It opens in a tab of its own, on the artifacts host.</span>}
       </div>
       {(mayGive || mayTakeBack) && (
         <div className="actions" aria-label="Whose it is">
@@ -464,10 +524,12 @@ function Detail({ artifact: a, reload }: { artifact: ArtifactDetail; reload: () 
                   {v.goes_at && ` · ${versionGoes(v)}`}
                 </span>
                 <span className="version-actions">
-                  <button type="button" disabled={opening !== null} onClick={() => open(v.n)}>
-                    {opening === `v${v.n}` ? "Opening…" : `Open version ${v.n}`}
-                  </button>
-                  {a.may_edit && v.n !== a.version && (
+                  {reach && (
+                    <button type="button" disabled={opening !== null} onClick={() => open(v.n)}>
+                      {opening === `v${v.n}` ? "Opening…" : `Open version ${v.n}`}
+                    </button>
+                  )}
+                  {reach && a.may_edit && v.n !== a.version && (
                     <button type="button" disabled={acting} onClick={() => act(api.rollback(a.id, v.n), `Version ${v.n}'s files are version ${a.version + 1} now.`)}>
                       Roll back to version {v.n}
                     </button>
@@ -514,9 +576,10 @@ function Detail({ artifact: a, reload }: { artifact: ArtifactDetail; reload: () 
           ))}
         </ol>
       </section>
-      <ArtifactComments artifact={a} api={api} />
+      {reach ? <ArtifactComments artifact={a} api={api} /> : <AuditedThread comments={audit?.thread ?? []} />}
       {a.mine && <ArtifactPeople artifact={a} api={api} reload={reload} />}
       {a.mine && <ArtifactLinks artifact={a} api={api} reload={reload} />}
+      {!a.mine && audit && <AuditedPeople artifact={audit} />}
     </>
   );
 }
@@ -549,7 +612,7 @@ export function ArtifactLink({ token }: { token: string }): JSX.Element {
         </p>
       ) : (
         <Empty title="This link opens nothing">
-          It has expired, its owner revoked it, or it is not a link to an artifact: {describeError(error)} <a href={href({ page: "artifacts" })}>Your artifacts</a>
+          It has expired, its owner revoked it, or it is not a link to an artifact: {describeError(error)} <a href={href({ page: "artifacts", path: ["mine"] })}>Your artifacts</a>
         </Empty>
       )}
     </div>
@@ -597,7 +660,7 @@ const WHERE: Record<string, string> = { pod: "the platform", laptop: "a laptop",
 /**
  * Where it was published from, and the session that published it. The console has no page of
  * one session: an administrator finds it by its id on Sessions, and a member finds their own
- * among Your sessions in Mine, which is where a laptop's sessions offered to them are too.
+ * among Your sessions under Mine on Sessions, which is where a laptop's sessions offered to them are too.
  */
 function Origin({ artifact: a }: { artifact: ArtifactDetail }): JSX.Element {
   const { role } = useConsole();
@@ -616,7 +679,7 @@ function Origin({ artifact: a }: { artifact: ArtifactDetail }): JSX.Element {
       )}
       {session && (role === "member" || o.where === "laptop") && a.mine && (
         <p>
-          <a href={href({ page: "mine" })}>View source session</a> in Mine: it is <span className="mono">{session}</span>, among {o.where === "laptop" ? "the sessions offered to you" : "Your sessions"}.
+          <a href={href({ page: "sessions", path: ["mine"] })}>View source session</a> on Sessions, under Mine: it is <span className="mono">{session}</span>, among {o.where === "laptop" ? "the sessions offered to you" : "Your sessions"}.
         </p>
       )}
       {session && (role === "member" || o.where === "laptop") && !a.mine && (

@@ -1,4 +1,4 @@
-// Sessions somebody invited you into by name, on Mine (troupe #765). The invitations ride
+// Sessions somebody invited you into by name, under Mine on Sessions (troupe #765). The invitations ride
 // the person's watch beside the laptops' offers, so one made shows within a second, from the
 // plane's push and not a poll, and one taken back goes as fast. A pod session opens from
 // here as yourself, to follow it as the invitation says; it closes with a sentence once the
@@ -36,7 +36,7 @@ describe("Invited to you", () => {
   it("shows an invitation as it is made, opens the pod session as yourself, and closes it with a sentence when it is taken back", async () => {
     const row = fake.plane.seed("ada@example.com", { id: "s-pod-7", title: "incident review" });
     await signedInAs(fake, PEOPLE.carol);
-    visit("#/mine");
+    visit("#/sessions/mine");
     unmount = render(<App />).unmount;
     await sees("Nobody has invited you into a session");
     await waitFor(() => fake.plane.watches.size === 1, "the console's watch, its initialize answered");
@@ -63,7 +63,7 @@ describe("Invited to you", () => {
   it("says of a private session one may steer whether its owner offers it now, and links to steering it while it is", async () => {
     fake.plane.invite("s-priv-4", PEOPLE.carol.subject, "control", "ada@example.com", { kind: "private", title: "ada's diary", ownerName: "Ada" });
     await signedInAs(fake, PEOPLE.carol);
-    visit("#/mine");
+    visit("#/sessions/mine");
     unmount = render(<App />).unmount;
 
     const listed = await waitFor(() => invitedRow("ada's diary"), "the private invitation");
@@ -84,7 +84,7 @@ describe("Invited to you", () => {
     const row = fake.plane.seed("ada@example.com", { id: "s-pod-9", title: "release prep" });
     fake.plane.invite(row.id, PEOPLE.carol.subject, "control", "ada@example.com", { ownerName: "Ada" });
     await signedInAs(fake, PEOPLE.carol);
-    visit(`#/mine/invited/${row.id}`);
+    visit(`#/sessions/invited/${row.id}`);
     unmount = render(<App />).unmount;
     await waitFor(() => document.querySelector('[role="status"]')?.textContent?.startsWith("Idle"), "the session attached");
 
@@ -112,7 +112,7 @@ describe("Invited to you", () => {
   it("lists a private session and says it is read on your own computer", async () => {
     fake.plane.invite("s-priv-3", PEOPLE.carol.subject, "observe", "ada@example.com", { kind: "private", title: "ada's notes", ownerName: "Ada" });
     await signedInAs(fake, PEOPLE.carol);
-    visit("#/mine");
+    visit("#/sessions/mine");
     unmount = render(<App />).unmount;
 
     const listed = await waitFor(() => invitedRow("ada's notes"), "the private invitation");

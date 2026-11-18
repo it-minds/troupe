@@ -33,9 +33,11 @@ You choose when you publish:
 
 Someone who leaves a team, or a profile's team, stops seeing its artifacts at their next
 click. You always see your own. Anybody else sees it only through who it is for, or through a
-[link](#links) you gave them: not a guess at an address. A platform administrator can take
-any artifact down, a private one too; that is the one thing anybody but you may do to a
-private one, and it is in the audit trail.
+[link](#links) you gave them: not a guess at an address. A platform administrator can read
+any artifact's page in the console, a private one too: its versions and their files' names,
+who you shared it with, its links and its comments, never what its files hold, and each read
+is in the audit trail. They can take any artifact down, a private one too, also in the trail;
+a team's administrator can do both for their team's artifacts.
 
 ## A team's artifact
 
@@ -194,9 +196,10 @@ an agent on its own. The gallery's cards say how many comments an artifact has.
 
 ## Reading
 
-The console's **Artifacts** has a tab for your own (your private ones among them), one for
-those shared with you, one for the organisation's, one for your teams' (each card names its
-team) and one for each profile you are granted. Which tab an artifact is under is the plane's
+The console's **Artifacts** has a tab for your own, **Mine** (your private ones among them),
+one for those shared with you, one for the organisation's, one for your teams' (each card
+names its team) and one for each profile you are granted; an administrator's opens on
+**Every artifact** before them. Which tab an artifact is under is the plane's
 to say, so every client tabs them alike. A card shows the title and the kind, never the page
 itself, and the picture its publisher sent with that version, if they sent one.
 Open one and it shows who published which version and when, the

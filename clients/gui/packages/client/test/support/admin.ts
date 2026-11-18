@@ -1162,6 +1162,12 @@ export class FakeAdmin {
     ],
   };
 
+  /**
+   * Each person's own memory, every version, by subject: what a fake plane sharing this
+   * admin keeps as `me.memory.put` saves it, and `admin.memory.person` reads.
+   */
+  readonly personal = new Map<string, Array<{ version: number; text: string; changed_by: string; changed_at: string }>>();
+
   constructor(
     opts: {
       platformAdmins?: string[];
@@ -1985,6 +1991,49 @@ export class FakeAdmin {
             lines: shown ? memoryBlame(versions, shown.version) : [],
             // Its `## Topic` sections, as the plane reads them, with who saved the version shown.
             entries: shown ? parseEntries(shown.text).map((e) => ({ ...e, version: shown.version, by: shown.changed_by, at: shown.changed_at, used: 0 })) : [],
+          },
+        };
+      }
+
+      // A person's own memory, for a platform admin: who keeps one, and one read, each read
+      // a row in the audit naming whose and which version, as the plane records it.
+      case "admin.memory.people": {
+        if (role !== "platform_admin") return notPlatform;
+        const people = [...this.personal.entries()]
+          .filter(([, versions]) => versions.length > 0)
+          .sort(([a], [b]) => a.localeCompare(b))
+          .map(([person, versions]) => ({ subject: person, name: this.names[person] ?? null, document: `user/${person}`, current: memorySummary(versions.at(-1)!) }));
+        return { result: { limit: MEMORY_LIMIT, people } };
+      }
+
+      case "admin.memory.person": {
+        if (role !== "platform_admin") return notPlatform;
+        const person = String(params["person"] ?? "");
+        const versions = this.personal.get(person) ?? [];
+        if (versions.length === 0) return refuse(NOT_FOUND, "not_found", { person });
+        const asked = typeof params["version"] === "number" ? params["version"] : null;
+        const shown = asked === null ? versions.at(-1)! : versions.find((v) => v.version === asked) ?? null;
+        if (!shown) return refuse(NOT_FOUND, "not_found", { version: asked });
+        const against = typeof params["against"] === "number" ? params["against"] : null;
+        const before = against !== null ? versions.find((v) => v.version === against) ?? null : versions.find((v) => v.version === shown.version - 1) ?? null;
+        this.record(subject, "memory.read", `user/${person}`, { person, version: shown.version });
+        return {
+          result: {
+            scope: "person",
+            name: person,
+            person: { subject: person, name: this.names[person] ?? null },
+            subject: `user/${person}`,
+            limit: MEMORY_LIMIT,
+            editable: false,
+            version: shown.version,
+            text: shown.text,
+            shown: memorySummary(shown),
+            against: before?.version ?? null,
+            against_text: before?.text ?? null,
+            diff: lineDiff(before?.text ?? "", shown.text),
+            versions: [...versions].reverse().map(memorySummary),
+            lines: memoryBlame(versions, shown.version),
+            entries: parseEntries(shown.text).map((e) => ({ ...e, version: shown.version, by: shown.changed_by, at: shown.changed_at, used: 0 })),
           },
         };
       }
@@ -3968,7 +4017,8 @@ export class FakeAdmin {
     return [person, ...profileRung, ...teamRung, platform];
   }
 
-  private record(actor: string, action: string, subject: string, detail: Record<string, unknown>): void {
+  /** A row in the audit, as the plane writes one: what a fake plane sharing this admin records too. */
+  record(actor: string, action: string, subject: string, detail: Record<string, unknown>): void {
     this.audit.push({ actor, action, subject_kind: action.split(".")[0] ?? null, subject_id: subject, detail, occurred_at: new Date().toISOString() });
   }
 }
