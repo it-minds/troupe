@@ -25,6 +25,26 @@ defmodule Troupe.Plane.NamespacesTest do
     end)
   end
 
+  test "the TroupePolicy's prefix wins over the chart's where the plane can read it" do
+    # The operator puts a profile's pods under the policy's prefix, so a policy installed
+    # with another one than the chart was given still has its pods enrol.
+    config = read(%{"TROUPE_NAMESPACE_PREFIX" => "acme-w-"})
+    policy = %{"kind" => "TroupePolicy", "spec" => %{"namespacePrefix" => "team-w-"}}
+
+    with_plane_env(config, fn ->
+      Application.put_env(:troupe_plane, :policy, policy)
+
+      try do
+        assert Enrolment.namespace_prefix() == "team-w-"
+      after
+        Application.delete_env(:troupe_plane, :policy)
+      end
+
+      # None to read, and the chart's is the one there is.
+      assert Enrolment.namespace_prefix() == "acme-w-"
+    end)
+  end
+
   test "and the defaults where the chart says nothing" do
     config = read(%{"TROUPE_PLANE_NAMESPACE" => nil, "TROUPE_NAMESPACE_PREFIX" => nil})
 

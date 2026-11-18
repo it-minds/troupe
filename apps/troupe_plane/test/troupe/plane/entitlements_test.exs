@@ -17,7 +17,7 @@ defmodule Troupe.Plane.EntitlementsTest do
 
   alias Troupe.Plane.{Admin, Bundles, FakePod, Fleet, Harness, Identity, Sessions}
   alias Troupe.Plane.Control.{Connections, Listener}
-  alias Troupe.Plane.Identity.Entitlement
+  alias Troupe.Plane.Identity.{Entitlement, Grant}
 
   @moduletag timeout: 60_000
 
@@ -242,6 +242,52 @@ defmodule Troupe.Plane.EntitlementsTest do
       assert_receive {:pushed, "session.activate", pushed}, 5_000
       assert pushed["entitlements"]["skills"] == ["handbook"]
     end
+
+    test "the listing is each team's resolved set together, so a team with no rows narrows nothing",
+         context do
+      _pod = FakePod.enrol(context.port, "dev-token", "troupe-w-dev-0")
+
+      _other = team_with_grant("platform", "dev", name: "platform", budget_micros: 0)
+      bo = person("bo@example.test", ["engineering", "platform"])
+
+      # Engineering denies `plan`; platform's grant has no rows, so a session of platform's
+      # has `plan`, and the listing a member of both reads must say so.
+      entitle(context.team, [%{"kind" => "agent", "name" => "plan", "mode" => "deny"}])
+
+      assert {:ok, %{"profiles" => [profile]}} = Harness.call("profiles.list", %{}, as(bo))
+      assert "plan" in profile["agents"]
+
+      assert {:ok, several} = Harness.call("profile.get", %{"name" => "dev"}, as(bo))
+      assert "plan" in primaries(several)
+
+      # Named for one team, the view is that team's, and so is its session.
+      for {team, plan?} <- [{"engineering", false}, {"platform", true}] do
+        assert {:ok, view} =
+                 Harness.call("profile.get", %{"name" => "dev", "team" => team}, as(bo))
+
+        assert "plan" in primaries(view) == plan?
+
+        params = %{"profile" => "dev", "team" => team}
+        assert {:ok, %{"session_id" => id}} = Harness.call("session.create", params, as(bo))
+        assert_receive {:pushed, "session.activate", %{"session_id" => ^id} = pushed}, 5_000
+        assert Enum.sort(pushed["entitlements"]["agents"]) == Enum.sort(primaries(view))
+      end
+    end
+
+    test "an allow list in one team and a deny in another are both in the listing", context do
+      other = team_with_grant("platform", "dev", name: "platform", budget_micros: 0)
+      bo = person("bo@example.test", ["engineering", "platform"])
+
+      # Engineering's set is `review` alone; platform's is everything but `review`.
+      entitle(context.team, [%{"kind" => "skill", "name" => "review", "mode" => "allow"}])
+      entitle(other, [%{"kind" => "skill", "name" => "review", "mode" => "deny"}])
+
+      assert {:ok, %{"profiles" => [profile]}} = Harness.call("profiles.list", %{}, as(bo))
+      assert Enum.sort(Enum.map(profile["skills"], & &1["name"])) == ["handbook", "review"]
+
+      assert {:ok, view} = Harness.call("profile.get", %{"name" => "dev"}, as(bo))
+      assert Enum.sort(view["skills"]) == ["handbook", "review"]
+    end
   end
 
   describe "the admin surface" do
@@ -269,6 +315,15 @@ defmodule Troupe.Plane.EntitlementsTest do
                "mcp_server" => %{"from" => nil, "to" => ["deny:pager"]},
                "skill" => %{"from" => nil, "to" => ["allow:review"]}
              }
+    end
+
+    test "a grant records who made it, and the team's detail says so", context do
+      root = platform_admin()
+
+      assert {:ok, detail} = Admin.team_grant(root, "engineering", "dev", %{})
+      assert Repo.get_by!(Grant, team_id: context.team.id, profile: "dev").granted_by == root.subject
+      assert [%{profile: "dev", granted_by: by}] = detail.grants
+      assert by == root.subject
     end
 
     test "a row naming something the current bundle lacks is kept, not refused",
@@ -315,6 +370,10 @@ defmodule Troupe.Plane.EntitlementsTest do
   end
 
   defp row(name, mode), do: %{kind: "skill", name: name, mode: mode}
+
+  # The agents a session may start as, from a `profile.get` answer, in its order.
+  defp primaries(view),
+    do: for(%{"mode" => "primary", "name" => name} <- view["agents"], do: name)
 
   defp entitle(team, rows) do
     {:ok, _} = Identity.grant(team, "dev", %{"entitlements" => rows})

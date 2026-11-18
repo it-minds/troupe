@@ -32,7 +32,7 @@ defmodule Troupe.Plane.ProfileView do
 
   alias Troupe.Plane.{Bundles, Fleet, Identity, Ledger}
   alias Troupe.Plane.Fleet.Extends
-  alias Troupe.Plane.Identity.{Team, User}
+  alias Troupe.Plane.Identity.{Entitlement, Team, User}
   alias Troupe.Policy
   alias Troupe.Protocol.{AgentDefinition, AgentRule, Error, PermissionRule, Text}
   alias Troupe.WorkerProfile
@@ -80,26 +80,38 @@ defmodule Troupe.Plane.ProfileView do
   may use it, because a person in two teams may use what either gives them and a listing
   that showed an intersection would hide something they can have. A session is narrower on
   purpose: it belongs to one team and gets that team's set.
+
+  The union is of what each team's grant resolves to, not of the grants' rows: a team with
+  no rows gives everything, though it names nothing, and one team's allow list and
+  another's deny each give their own names. It comes back as rows, `offering/2`'s input:
+  the deny rows that leave exactly those names of what the profile offers.
   """
   @spec listing_entitlements(User.t(), String.t()) :: [map()]
   def listing_entitlements(user, profile) do
-    user
-    |> teams_using(profile)
-    |> Enum.flat_map(&Identity.entitlements_for(&1, profile))
-    |> union_of_sets()
+    case teams_using(user, profile) do
+      [] -> []
+      [team] -> Identity.entitlements_for(team, profile)
+      teams -> union_of_sets(profile, teams)
+    end
   end
 
-  # Union across teams, with "deny wins" applied last: a name denied everywhere stays
-  # denied, and a name allowed anywhere is allowed. Rows are compared by kind and name, so
-  # two teams allowing the same skill is one row.
-  defp union_of_sets(rows) do
-    rows
-    |> Enum.group_by(&{&1.kind, &1.name})
-    |> Enum.map(fn {{kind, name}, group} ->
-      mode = if Enum.all?(group, &(&1.mode == "deny")), do: "deny", else: "allow"
-      %{kind: kind, name: name, mode: mode}
+  defp union_of_sets(profile, teams) do
+    whole = offering(profile, [])
+    sets = Enum.map(teams, &offering(profile, Identity.entitlements_for(&1, profile)))
+
+    Enum.flat_map(Entitlement.kinds(), fn kind ->
+      kept = sets |> Enum.flat_map(&names(&1, kind)) |> MapSet.new()
+
+      for name <- names(whole, kind),
+          not MapSet.member?(kept, name),
+          do: %{kind: kind, name: name, mode: "deny"}
     end)
   end
+
+  defp names(offering, "agent"), do: offering.agents
+  defp names(offering, "skill"), do: Enum.map(offering.skills, & &1.name)
+  defp names(offering, "mcp_server"), do: offering.mcp_servers
+  defp names(offering, "acp_agent"), do: Map.get(offering, :acp_agents, [])
 
   @doc """
   The caller's teams that may use `profile`, by name and sorted: who a session there would
