@@ -224,7 +224,7 @@ describe("artifacts", () => {
     expect(document.body.innerHTML).not.toContain("Week forty-three in full");
 
     // One the host blocks nothing of says nothing of it.
-    unmount?.();
+    close();
     await open("#/artifacts/art-alice-notes", PEOPLE.carol);
     await sees("Release notes");
     expect(document.querySelector(".note.blocked")).toBeNull();
