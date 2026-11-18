@@ -68,6 +68,7 @@ import { describeError, useConsole } from "../console";
 import type { Load } from "../console";
 import { href } from "../route";
 import { Empty, Loaded } from "./bits";
+import { CopySessionLink } from "./SessionLink";
 
 interface RemoteRow {
   id: string;
@@ -498,7 +499,7 @@ export function RemoteSession({ id, pod }: { id: string; pod?: { mode: "read" | 
   return (
     <div className="page remote-session">
       <p className="meta where">
-        <span className="mono">{id}</span> · {whereWords(pod, row)}
+        <span className="mono">{id}</span> · {whereWords(pod, row)} · <CopySessionLink id={id} privateSession={row?.private === true} />
       </p>
       {shared.length > 0 && (
         <p className="meta shared">Shared with {shared.map((i) => `${personName(i)} (${roleWords(i.role)})`).join(", ")}</p>

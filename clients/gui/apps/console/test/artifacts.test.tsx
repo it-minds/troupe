@@ -7,8 +7,9 @@
 // is one any client of the person's makes, never `admin.*`.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { App } from "../src/App";
 import { openInNewTab } from "../src/console";
-import { PEOPLE, button, freshBrowser, link, opener, recordCalls, says, sees, seesButton, seesField, seesLink, startFake, type, visit, waitFor } from "./support";
+import { PEOPLE, button, field, freshBrowser, link, opener, recordCalls, render, says, sees, seesButton, seesField, seesLink, startFake, type, visit, waitFor } from "./support";
 import type { FakeDeployment } from "./support";
 import { exampleAdmin } from "../../../packages/client/test/support/admin.js";
 import { TINY_PNG, artifact } from "../../../packages/client/test/support/plane.js";
@@ -365,5 +366,109 @@ describe("artifacts' storage", () => {
     // A member's first tab is their own: there is no Every artifact for them.
     await waitFor(() => tabs()[0] === "Mine", "Mine first");
     expect(tabs()).not.toContain("Every artifact");
+  });
+});
+
+describe("an artifact's address followed signed out", () => {
+  let unmount: (() => void) | null = null;
+  afterEach(() => {
+    unmount?.();
+    unmount = null;
+  });
+
+  /** The console opened at `hash` with nobody signed in, signed in through the provider as Carol: where it went on to. */
+  async function signInAt(hash: string): Promise<string[]> {
+    fake.idp.redirectSubject = { subject: carol.subject, displayName: carol.display_name };
+    visit(hash);
+    let leftFor: string | null = null;
+    unmount = render(<App navigate={(url) => (leftFor = url)} />).unmount;
+    type(await waitFor(() => field("The plane's address"), "the sign-in screen"), fake.plane.baseUrl);
+    (await seesButton("Sign in")).click();
+    const there = await waitFor(() => leftFor, "the way to the provider");
+
+    // The provider sends the browser back to the console's own address, with no fragment.
+    const back = await fetch(there, { redirect: "manual" });
+    const returned = new URL(back.headers.get("location")!);
+    unmount();
+    history.replaceState(null, "", `/${returned.search}`);
+    const gone: string[] = [];
+    unmount = render(<App navigate={(url) => void gone.push(url)} />).unmount;
+    await waitFor(() => gone.length > 0 || null, "gone on to the artifact");
+    return gone;
+  }
+
+  /**
+   * The console opened at `hash` with nobody signed in, on a plane it knows, as the
+   * artifacts host sends a lapsed viewer: to the provider and back with no click, and
+   * where it went on to.
+   */
+  async function followedSignedOut(hash: string): Promise<string[]> {
+    fake.idp.redirectSubject = { subject: carol.subject, displayName: carol.display_name };
+    localStorage.setItem("troupe.console.planeUrl", fake.plane.baseUrl);
+    visit(hash);
+    let leftFor: string | null = null;
+    unmount = render(<App navigate={(url) => (leftFor = url)} />).unmount;
+    const there = await waitFor(() => leftFor, "the way to the provider, with no click");
+    expect(button("Sign in")).toBeNull();
+
+    const back = await fetch(there, { redirect: "manual" });
+    const returned = new URL(back.headers.get("location")!);
+    unmount();
+    history.replaceState(null, "", `/${returned.search}`);
+    const gone: string[] = [];
+    unmount = render(<App navigate={(url) => void gone.push(url)} />).unmount;
+    await waitFor(() => gone.length > 0 || null, "gone on to the artifact");
+    expect(button("Sign in")).toBeNull();
+    return gone;
+  }
+
+  it("goes through the provider to the artifact with no page to click, when the provider answers by itself", async () => {
+    const gone = await followedSignedOut("#/artifacts/open/art-carol-weekly/v1");
+    expect(fake.plane.opened).toHaveLength(1);
+    expect(fake.plane.opened[0]).toMatchObject({ subject: carol.subject, id: "art-carol-weekly", version: 1 });
+    expect(gone).toEqual([fake.plane.opened[0]!.url]);
+  });
+
+  it("spends a shared link through the provider with no page to click, and goes on to the artifact", async () => {
+    fake.plane.shares.set("share-z", {
+      id: "share-z",
+      artifact: "art-carol-weekly",
+      token: "token-no-click-abcdefghijklmnopq",
+      role: "view",
+      public: false,
+      expires_at: null,
+      revoked_at: null,
+      created_by: carol.subject,
+      created_at: "2026-10-25T12:00:00Z",
+      uses: [],
+    });
+    const gone = await followedSignedOut("#/artifacts/link/token-no-click-abcdefghijklmnopq");
+    expect(gone[0]).toMatch(/^https:\/\/artifacts\.example\.test\/enter\?ticket=/);
+    expect(fake.plane.shares.get("share-z")!.uses.map((u) => u.subject)).toEqual([carol.subject]);
+  });
+
+  it("lands on the artifact after one sign-in, not on the console's first screen", async () => {
+    const gone = await signInAt("#/artifacts/open/art-carol-weekly/v1");
+    expect(fake.plane.opened).toHaveLength(1);
+    expect(fake.plane.opened[0]).toMatchObject({ subject: carol.subject, id: "art-carol-weekly", version: 1 });
+    expect(gone).toEqual([fake.plane.opened[0]!.url]);
+  });
+
+  it("spends a shared link after one sign-in and goes on to the artifact", async () => {
+    fake.plane.shares.set("share-y", {
+      id: "share-y",
+      artifact: "art-carol-weekly",
+      token: "token-signed-out-abcdefghijklmnop",
+      role: "view",
+      public: false,
+      expires_at: null,
+      revoked_at: null,
+      created_by: carol.subject,
+      created_at: "2026-10-25T12:00:00Z",
+      uses: [],
+    });
+    const gone = await signInAt("#/artifacts/link/token-signed-out-abcdefghijklmnop");
+    expect(gone[0]).toMatch(/^https:\/\/artifacts\.example\.test\/enter\?ticket=/);
+    expect(fake.plane.shares.get("share-y")!.uses.map((u) => u.subject)).toEqual([carol.subject]);
   });
 });

@@ -340,6 +340,12 @@ export const KEPT = (method: string): boolean => method.startsWith("me.memory") 
 export class FakePlane {
   readonly server: Server;
   readonly rows = new Map<string, Row>();
+  /**
+   * Sessions that exist but are not shared with the person asking: left out of
+   * `sessions.list`, and `not_found` from `session.get` and `session.open`, as the plane
+   * answers a session a person may not see without saying whether it exists.
+   */
+  readonly unseen = new Set<string>();
   readonly relayed = new Map<string, Relayed>();
   /** The invitations by name, by session and then by person (troupe #765). */
   readonly invitations = new Map<string, Map<string, Invited>>();
@@ -1395,6 +1401,7 @@ export class FakePlane {
 
       case "sessions.list": {
         const rows = [...this.rows.values()]
+          .filter((r) => !this.unseen.has(r.id))
           .filter((r) => !params["profile"] || r.profile === params["profile"])
           .filter((r) => !params["state"] || r.state === params["state"])
           .filter((r) => !params["status"] || r.status === params["status"])
@@ -1408,7 +1415,7 @@ export class FakePlane {
 
       case "session.get": {
         const row = this.rows.get(String(params["session_id"] ?? ""));
-        if (!row) return { error: { code: -32005, message: "not_found" } };
+        if (!row || this.unseen.has(row.id)) return { error: { code: -32005, message: "not_found" } };
         return { result: this.sessionJson(row, subject) };
       }
 
@@ -1453,7 +1460,7 @@ export class FakePlane {
 
       case "session.open": {
         const row = this.rows.get(String(params["session_id"] ?? ""));
-        if (!row) return { error: { code: -32005, message: "not_found" } };
+        if (!row || this.unseen.has(row.id)) return { error: { code: -32005, message: "not_found" } };
         const mode = params["mode"] === "activate" ? "activate" : "read";
         const role = row.owner === subject ? "owner" : "collaborator";
         return { result: this.attachment(row, subject, name, role, mode) };
