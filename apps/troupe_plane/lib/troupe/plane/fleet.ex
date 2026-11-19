@@ -142,6 +142,15 @@ defmodule Troupe.Plane.Fleet do
   @spec get_worker(Ecto.UUID.t()) :: Worker.t() | nil
   def get_worker(id), do: Repo.get(Worker, id)
 
+  @doc "The pod names of these worker ids, by id; an id with no row, or `nil`, is left out."
+  @spec pod_names([Ecto.UUID.t() | nil]) :: %{Ecto.UUID.t() => String.t()}
+  def pod_names(ids) do
+    case ids |> Enum.reject(&is_nil/1) |> Enum.uniq() do
+      [] -> %{}
+      ids -> Map.new(Repo.all(from w in Worker, where: w.id in ^ids, select: {w.id, w.pod_name}))
+    end
+  end
+
   @doc "Every pod of a profile, whatever its state."
   @spec list_workers(String.t()) :: [Worker.t()]
   def list_workers(profile) do

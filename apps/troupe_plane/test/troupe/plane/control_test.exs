@@ -553,6 +553,91 @@ defmodule Troupe.Plane.ControlTest do
     end
   end
 
+  # Issue #1141: a pod that stayed up, or came back under its own name, was asked what it
+  # holds once, at enrolment, and a session it no longer held stayed `active` on it for
+  # good, counted by the scaler, reached by no rescue.
+  describe "a healthy pod asked again what it holds" do
+    setup do
+      every = Application.get_env(:troupe_plane, :index_every_ms)
+      grace = Application.get_env(:troupe_plane, :index_grace_ms)
+      Application.put_env(:troupe_plane, :index_every_ms, 150)
+      Application.put_env(:troupe_plane, :index_grace_ms, 0)
+
+      on_exit(fn ->
+        restore_env(:index_every_ms, every)
+        restore_env(:index_grace_ms, grace)
+      end)
+    end
+
+    test "gives up a session its next answer does not name", %{port: port} do
+      worker = enrolled(port, "dev-token", "troupe-w-dev-0")
+      answer_index(worker, [])
+
+      [pod] = Fleet.list_workers("dev")
+      {:ok, _} = Sessions.create(%{id: "s-gone", owner_subject: "idp|alice", profile: "dev"})
+      {:ok, _} = Sessions.place("s-gone", pod)
+
+      # The pod is healthy and heartbeating; its idle timer put the session to sleep and
+      # the report of it never landed. Only the pod's own answer can say so. Answered more
+      # than once, since the first question to arrive may have been asked before the row.
+      for _ask <- 1..3, do: answer_index(worker, [])
+
+      assert eventually(fn -> Sessions.get("s-gone").state == "dormant" end, 2_000),
+             "the session stayed active on a healthy pod that does not hold it"
+
+      assert is_nil(Sessions.get("s-gone").worker_id)
+    end
+
+    test "keeps a session the answer names", %{port: port} do
+      worker = enrolled(port, "dev-token", "troupe-w-dev-0")
+      answer_index(worker, [])
+
+      [pod] = Fleet.list_workers("dev")
+      {:ok, _} = Sessions.create(%{id: "s-held", owner_subject: "idp|alice", profile: "dev"})
+      {:ok, _} = Sessions.place("s-held", pod)
+
+      answer_index(worker, [%{"id" => "s-held"}])
+      answer_index(worker, [%{"id" => "s-held"}])
+
+      assert Sessions.get("s-held").state == "active"
+      assert Sessions.get("s-held").worker_id == pod.id
+    end
+
+    test "leaves the row alone when the pod does not answer", %{port: port} do
+      worker = enrolled(port, "dev-token", "troupe-w-dev-0")
+      answer_index(worker, [])
+
+      [pod] = Fleet.list_workers("dev")
+      {:ok, _} = Sessions.create(%{id: "s-quiet", owner_subject: "idp|alice", profile: "dev"})
+      {:ok, _} = Sessions.place("s-quiet", pod)
+
+      # Asked, and asked again, and never answered: silence says nothing about what the
+      # pod holds, so nothing is rescued on it.
+      assert %{"method" => "session.index"} = push(worker, "session.index")
+      assert %{"method" => "session.index"} = push(worker, "session.index")
+
+      assert Sessions.get("s-quiet").state == "active"
+      assert Sessions.get("s-quiet").worker_id == pod.id
+    end
+
+    test "does not judge a session placed after the question was asked", %{port: port} do
+      Application.put_env(:troupe_plane, :index_grace_ms, 60_000)
+      worker = enrolled(port, "dev-token", "troupe-w-dev-0")
+      answer_index(worker, [])
+
+      [pod] = Fleet.list_workers("dev")
+      {:ok, _} = Sessions.create(%{id: "s-new", owner_subject: "idp|alice", profile: "dev"})
+      {:ok, _} = Sessions.place("s-new", pod)
+
+      # Its activation may still be on its way to the pod, so an answer that does not name
+      # it yet is not news about it.
+      answer_index(worker, [])
+      answer_index(worker, [])
+
+      assert Sessions.get("s-new").state == "active"
+    end
+  end
+
   describe "the session index" do
     test "a sealed segment is anchored, and the index moves with it", %{port: port} do
       worker = enrolled(port, "dev-token", "troupe-w-dev-0")
@@ -1018,6 +1103,9 @@ defmodule Troupe.Plane.ControlTest do
     {:ok, line} = :gen_tcp.recv(worker.socket, 0, timeout)
     line |> String.split("\n", trim: true) |> hd() |> Jason.decode!()
   end
+
+  defp restore_env(key, nil), do: Application.delete_env(:troupe_plane, key)
+  defp restore_env(key, value), do: Application.put_env(:troupe_plane, key, value)
 
   defp closed?(worker) do
     case :gen_tcp.recv(worker.socket, 0, 2_000) do
