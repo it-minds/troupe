@@ -86,8 +86,8 @@ describe("profiles", () => {
       return t.length === 3 && t;
     }, "the three sections");
     expect(titles).toEqual(["What it can do", "What it can't do", "How it behaves"]);
-    // The head's sentence is the primary agent's own: dev's first primary is the built-in build.
-    expect(document.querySelector(".screen-head p.profile-sentence")?.textContent).toBe("Does the work: reads, edits and runs");
+    // The head's sentence is the one dev's bundle says it is for, not its first primary's (build's).
+    expect(document.querySelector(".screen-head p.profile-sentence")?.textContent).toBe("Builds and reviews the team's services, from the issue to the pull request.");
 
     // The rail: room, model, the three budgets, whose credentials, what asks first, who, and Start.
     const rail = document.querySelector<HTMLElement>(".profile-rail")!;
@@ -127,7 +127,14 @@ describe("profiles", () => {
     expect(cards[0]!.textContent).toContain("every tool it has");
     expect(cards[1]!.textContent).toContain("as the profile");
     expect(cards[1]!.textContent).toContain("automatic");
-    expect(cards[1]!.textContent).toContain("search_issues, get_issue");
+    // jira's subtitle under its name, and its tools each with the bundle's line, the name in a
+    // small tail and on hover; one the author wrote no line for is its name, as before.
+    expect(cards[0]!.querySelector(".profile-subtitle")).toBeNull();
+    expect(cards[1]!.querySelector(".profile-subtitle")?.textContent).toBe("The team's issue tracker");
+    const jiraTools = [...cards[1]!.querySelectorAll(".tool-lines li")];
+    expect(jiraTools.map((li) => li.textContent)).toEqual(["Finds issues by their words search_issues", "get_issue"]);
+    expect(jiraTools[0]!.getAttribute("title")).toBe("search_issues");
+    expect(jiraTools[0]!.querySelector(".tool-name")?.textContent).toBe("search_issues");
     // Troupe's card lists the harness's own tools; dev's only refusal has a pattern, so none is struck.
     const own = [...cards[2]!.querySelectorAll(".tool-list li")].map((li) => li.textContent);
     expect(own).toContain("shell");
@@ -230,6 +237,26 @@ describe("profiles", () => {
     expect(document.querySelector(".screen-head p")).toBeNull();
     (await seesButton("Start a session on lean")).click();
     expect(started).toBe("lean");
+  });
+
+  it("leads with the bundle's sentence where it has no primary, and lists the lines for a server with every tool", async () => {
+    const spec = leanSpec();
+    spec.bundle.about = { summary: "Checks a change before it is merged." };
+    spec.bundle.mcp_servers = [
+      { name: "docs", url: "https://docs.example.com/mcp", credential_mode: "profile", permission: "auto", tools: "all", about: { tools: { read_page: "Reads one page", search: "Finds pages" } } },
+      { name: "plain", url: "https://plain.example.com/mcp", credential_mode: "profile", permission: "auto", tools: ["a", "b"] },
+    ];
+    pageOn(composeProfile(spec, { teams: ["core"] }, { capacity: 4, active_sessions: 0 })!);
+    await waitFor(() => document.querySelector(".screen-head p.profile-sentence")?.textContent === "Checks a change before it is merged.", "the bundle's sentence");
+    const can = await section("What it can do");
+    const [docs, plain] = [...can.querySelectorAll<HTMLElement>(".profile-card")];
+    // A server that says no subtitle has none; one with every tool lists those it has a line for.
+    expect(docs!.querySelector(".profile-subtitle")).toBeNull();
+    expect(docs!.textContent).toContain("Every tool it has, among them:");
+    expect([...docs!.querySelectorAll(".tool-lines li")].map((li) => li.getAttribute("title"))).toEqual(["read_page", "search"]);
+    // A server whose author wrote nothing reads as it did: its names, joined.
+    expect(plain!.querySelector(".tool-lines")).toBeNull();
+    expect(plain!.textContent).toContain("a, b");
   });
 
   it("says the list is whole only where no tool of the person's, no shell and no web fetch can reach past it", async () => {

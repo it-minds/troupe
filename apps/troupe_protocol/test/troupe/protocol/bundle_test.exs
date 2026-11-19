@@ -289,6 +289,106 @@ defmodule Troupe.Protocol.BundleTest do
     end
   end
 
+  defp about_server(about, tools \\ ["search_issues", "get_issue"]) do
+    %{
+      "name" => "jira",
+      "url" => "https://mcp.jira.example/mcp",
+      "tools" => tools,
+      "about" => about
+    }
+  end
+
+  describe "about, the author's words for a reader" do
+    test "a profile's sentence and a server's subtitle and tool lines are kept as written" do
+      doc =
+        document(%{
+          "about" => %{"summary" => "  Reviews pull requests against the house checklist. "},
+          "mcp_servers" => [
+            about_server(%{
+              "summary" => "The team's issue tracker",
+              "tools" => %{"search_issues" => "Finds issues by their words"}
+            })
+          ]
+        })
+
+      assert {:ok, bundle} = Bundle.validate(doc)
+      assert bundle.about == %{summary: "Reviews pull requests against the house checklist."}
+
+      assert [%{about: %{summary: "The team's issue tracker", tools: tools}}] = bundle.mcp_servers
+      assert tools == %{"search_issues" => "Finds issues by their words"}
+
+      # The preview compares a server's about field by field, as it does its other settings.
+      assert Bundle.definitions(bundle)["mcp_servers"]["jira"]["about"].summary ==
+               "The team's issue tracker"
+
+      # A worker is handed no word of it.
+      refute Map.has_key?(hd(Bundle.mcp_server_configs(bundle)), "about")
+    end
+
+    test "a document without it reads as before" do
+      assert {:ok, %{about: nil, mcp_servers: [%{about: nil}]}} = Bundle.validate(document())
+    end
+
+    test "too long is refused with its length and the most it may be" do
+      long = String.duplicate("a", 201)
+      assert {:error, [m]} = Bundle.validate(document(%{"about" => %{"summary" => long}}))
+      assert m == "about: summary is 201 characters; the most it may be is 200"
+
+      line = String.duplicate("b", 121)
+
+      servers = fn about -> document(%{"mcp_servers" => [about_server(about)]}) end
+
+      assert {:error, [m1]} = Bundle.validate(servers.(%{"summary" => line}))
+      assert m1 == "mcp server jira: about.summary is 121 characters; the most it may be is 120"
+
+      # Every tool's line is checked, so one publish names each that is too long.
+      too_long = %{"get_issue" => line, "search_issues" => line}
+      assert {:error, [m2, m3]} = Bundle.validate(servers.(%{"tools" => too_long}))
+
+      assert m2 ==
+               "mcp server jira: about.tools.get_issue is 121 characters; the most it may be is 120"
+
+      assert m3 =~ "about.tools.search_issues is 121 characters"
+
+      assert {:ok, _} =
+               Bundle.validate(
+                 document(%{
+                   "mcp_servers" => [about_server(%{"summary" => String.duplicate("é", 120)})]
+                 })
+               )
+    end
+
+    test "a tool its allowlist does not carry is refused by name; a server with all takes any" do
+      about = %{"tools" => %{"get_issue" => "Reads one issue", "delete_issue" => "Deletes one"}}
+
+      assert {:error, [m]} = Bundle.validate(document(%{"mcp_servers" => [about_server(about)]}))
+      assert m == "mcp server jira: about.tools names delete_issue, which its tools do not carry"
+
+      assert {:ok, %{mcp_servers: [%{about: %{summary: nil, tools: tools}}]}} =
+               Bundle.validate(document(%{"mcp_servers" => [about_server(about, "all")]}))
+
+      assert map_size(tools) == 2
+    end
+
+    test "unknown keys, a missing sentence and a value that is not text are refused" do
+      for {doc, message} <- [
+            {%{"about" => %{"summary" => "Fine.", "title" => "x"}}, "about: unknown keys: title"},
+            {%{"about" => %{}},
+             "about: summary is the sentence under the profile's name; say one"},
+            {%{"about" => "Reviews."}, "about is an object with a summary, not \"Reviews.\""},
+            {%{"about" => %{"summary" => " "}}, "about: summary cannot be empty"},
+            {%{"mcp_servers" => [about_server(%{"icon" => "x"})]},
+             "mcp server jira: about: unknown keys: icon"},
+            {%{"mcp_servers" => [about_server(%{"tools" => ["get_issue"]})]},
+             "mcp server jira: about.tools is an object of a line per tool name, not [\"get_issue\"]"},
+            {%{"mcp_servers" => [about_server(%{"summary" => 3})]},
+             "mcp server jira: about.summary is text, not 3"}
+          ] do
+        assert {:error, [^message]} = Bundle.validate(document(doc))
+      end
+    end
+  end
+
   describe "schema 0" do
     test "a legacy document is its mcp_servers and nothing else" do
       legacy = %{

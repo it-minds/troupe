@@ -81,6 +81,12 @@ defmodule Troupe.Gateway.ProfileGetTest do
 
     assert %{"max_turns" => 40} = Enum.find(view["agents"], &(&1["name"] == "implementer"))
 
+    # The bundle author's words come through as the plane gives them.
+    assert view["about"] == %{"summary" => "Builds and reviews the team's services."}
+
+    assert [%{"about" => %{"tools" => %{"search" => "Finds issues by their words"}}}] =
+             view["tools"]["mcp"]
+
     # Only the arguments the plane takes go on.
     assert {"profile.get", %{"name" => "dev", "team" => "engineering"} = sent} =
              Enum.find(FakePlane.calls(ctx.plane.state), &match?({"profile.get", _}, &1))

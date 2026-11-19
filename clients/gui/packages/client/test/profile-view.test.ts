@@ -3,7 +3,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { DaemonClient, TroupeRpcError, accessWords, actsAsWords, budgetWords, capacityWords, limitSentences, missingWords, moneyWords, profileSummary, roomWords, ruleAccessWords, ruleText, teamBudgetWords, toolsAreWhole } from "../src/index.js";
+import { DaemonClient, TroupeRpcError, accessWords, actsAsWords, budgetWords, capacityWords, limitSentences, missingWords, moneyWords, profileSentence, profileSummary, roomWords, ruleAccessWords, ruleText, teamBudgetWords, toolLines, toolsAreWhole } from "../src/index.js";
 import type { ProfileView } from "../src/index.js";
 import { FakeDaemon } from "./support/daemon.js";
 import { startHarness } from "./support/harness.js";
@@ -129,4 +129,33 @@ test("the rail's limits are a sentence each, said only where the plane states th
   assert.equal(toolsAreWhole({ harness_tools: tools(["shell", "web_fetch"]), personal_tools: "allow", github: null }), false, "a person's own tools");
   assert.equal(toolsAreWhole({ harness_tools: tools(["shell", "web_fetch"]), personal_tools: "forbid", github }), false, "GitHub's tools");
   assert.equal(toolsAreWhole({ personal_tools: "forbid", github: null }), false, "a plane that does not say");
+});
+
+test("the sentence under a profile's name is its bundle's about, else its first primary's line, and a server's tools carry their lines", () => {
+  const agents = [
+    { name: "helper", mode: "subagent", description: "Helps", from: "bundle" },
+    { name: "build", mode: "primary", description: "Does the work", from: "builtin" },
+  ];
+  assert.equal(profileSentence({ about: { summary: "Reviews code." }, agents }), "Reviews code.");
+  assert.equal(profileSentence({ about: null, agents }), "Does the work");
+  assert.equal(profileSentence({ agents }), "Does the work", "a plane before about");
+  assert.equal(profileSentence({ agents: [agents[0]!] }), null, "no primary, and nothing said");
+
+  const about = { summary: null, tools: { get: "Reads one", other: "Not on the list" } };
+  assert.deepEqual(toolLines({ tools: ["search", "get"], about }), [
+    { name: "search", line: null },
+    { name: "get", line: "Reads one" },
+  ]);
+  assert.deepEqual(
+    toolLines({ tools: "all", about }).map((t) => t.name),
+    ["get", "other"],
+  );
+  assert.deepEqual(toolLines({ tools: "all", about: null }), []);
+  assert.deepEqual(toolLines({ tools: ["a"] }), [{ name: "a", line: null }]);
+
+  // The example plane's dev says what it is for, and jira what it is and what search_issues does.
+  const dev = composeProfile(exampleProfiles()[0]!, { teams: ["core"] }, { capacity: 4, active_sessions: 0 })!;
+  assert.equal(dev.about?.summary, "Builds and reviews the team's services, from the issue to the pull request.");
+  assert.deepEqual(dev.tools.mcp.find((s) => s.name === "jira")!.about, { summary: "The team's issue tracker", tools: { search_issues: "Finds issues by their words" } });
+  assert.equal(dev.tools.mcp.find((s) => s.name === "github")!.about, null);
 });

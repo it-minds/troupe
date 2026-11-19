@@ -696,6 +696,25 @@ defmodule Troupe.Gateway.FakePlane do
        "name" => "dev",
        "team" => params["team"] || "engineering",
        "teams" => ["engineering"],
+       "about" => %{"summary" => "Builds and reviews the team's services."},
+       "tools" => %{
+         "rules" => [],
+         "mcp" => [
+           %{
+             "name" => "tracker",
+             "host" => "tracker.example.test",
+             "access" => "profile",
+             "permission" => "auto",
+             "tools" => ["search"],
+             "offered" => true,
+             "why" => nil,
+             "about" => %{
+               "summary" => "The team's issue tracker",
+               "tools" => %{"search" => "Finds issues by their words"}
+             }
+           }
+         ]
+       },
        "agents" => [
          %{"name" => "build", "mode" => "primary", "description" => nil, "from" => "builtin"},
          %{

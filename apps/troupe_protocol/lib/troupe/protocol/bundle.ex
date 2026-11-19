@@ -10,6 +10,7 @@ defmodule Troupe.Protocol.Bundle do
   ## Schema 1
 
       {"schema": 1,
+       "about":       {"summary": "Reviews pull requests against the house checklist."},
        "agents":      [{"name": "pr-reviewer", "definition": "---\\nmode: primary\\n---\\nYou review…"}],
        "skills":      [{"name": "review-checklist", "description": "How we review…",
                         "agents": ["build", "pr-reviewer"],
@@ -17,7 +18,9 @@ defmodule Troupe.Protocol.Bundle do
        "mcp_servers": [{"name": "jira", "url": "https://mcp.jira.example/mcp",
                         "credential_ref": "JIRA_MCP_TOKEN", "header": "authorization",
                         "timeout_ms": 30000, "permission": "ask",
-                        "tools": ["search_issues", "get_issue"]}],
+                        "tools": ["search_issues", "get_issue"],
+                        "about": {"summary": "The team's issue tracker",
+                                  "tools": {"search_issues": "Finds issues by their words"}}}],
        "acp_agents":  [{"name": "gemini", "command": "gemini-cli",
                         "args": ["--acp"], "hash": "sha256:…"}]}
 
@@ -42,6 +45,17 @@ defmodule Troupe.Protocol.Bundle do
   The egress check — is this host one the cluster policy lets a pod reach — is the
   caller's, because only the plane can read the policy. `validate/2` takes it as a
   function so the rule lives once.
+
+  ## `about`, the author's words for a reader
+
+  A document may say what its profile is for, `about: {summary}` (one sentence, the lede of
+  the profile's page, at most 200 characters), and a server what it is and what each of its
+  tools does, `about: {summary, tools: {name: line}}` (each at most 120). People choosing a
+  profile read it; nothing that runs does, and a session is told none of it. A tool that
+  `about.tools` names must be one the server's `tools` carries, or any where it says
+  `"all"`, since a line for a tool a session never has describes something absent. It is
+  optional and additive, so schema 1 holds it; a worker from before it refuses a document
+  whose top level carries one, so a bundle says it once its pods run a Troupe that reads it.
 
   ## An ACP agent is an entitlement, like an agent or a skill
 
@@ -99,6 +113,9 @@ defmodule Troupe.Protocol.Bundle do
   # narrower than a secret name: lowercase, and nothing that could be a path segment
   # separator or a wildcard.
   @slot_name ~r/\A[a-z][a-z0-9-]{0,63}\z/
+  # In characters: the profile's sentence leads a page, a server's lines sit in a card.
+  @max_profile_summary 200
+  @max_server_line 120
 
   @type agent :: %{name: String.t(), definition: String.t(), parsed: AgentDefinition.t()}
   @typedoc """
@@ -144,8 +161,11 @@ defmodule Troupe.Protocol.Bundle do
           permission: :ask | :auto,
           tools: :all | [String.t()],
           stores: :files | nil,
-          files: :all | [String.t()]
+          files: :all | [String.t()],
+          about: server_about() | nil
         }
+  @typedoc "What a server is, and a line per tool, in its author's words for a reader."
+  @type server_about :: %{summary: String.t() | nil, tools: %{String.t() => String.t()}}
   @typedoc """
   One third-party ACP agent a profile's sessions may delegate to.
 
@@ -161,12 +181,14 @@ defmodule Troupe.Protocol.Bundle do
           description: String.t() | nil
         }
 
+  @typedoc "A document as checked. `about` is the profile's sentence where it says one."
   @type t :: %{
-          schema: 0 | 1,
-          agents: [agent()],
-          skills: [skill()],
-          mcp_servers: [mcp_server()],
-          acp_agents: [acp_agent()]
+          optional(:acp_agents) => [acp_agent()],
+          optional(:about) => %{summary: String.t()} | nil,
+          required(:schema) => 0 | 1,
+          required(:agents) => [agent()],
+          required(:skills) => [skill()],
+          required(:mcp_servers) => [mcp_server()]
         }
 
   @type option ::
@@ -577,6 +599,7 @@ defmodule Troupe.Protocol.Bundle do
          {:ok, servers} <-
            collect(Map.get(content, "mcp_servers", []), &server(&1, egress_allowed?)),
          {:ok, acp_agents} <- collect(Map.get(content, "acp_agents", []), &acp_agent/1),
+         {:ok, about} <- profile_about(Map.get(content, "about")),
          :ok <- unique(:agents, agents),
          :ok <- unique(:skills, skills),
          :ok <- unique(:mcp_servers, servers),
@@ -589,10 +612,99 @@ defmodule Troupe.Protocol.Bundle do
          agents: agents,
          skills: skills,
          mcp_servers: servers,
-         acp_agents: acp_agents
+         acp_agents: acp_agents,
+         about: about
        }}
     end
   end
+
+  # The profile's sentence: one, and short enough to lead its page.
+  defp profile_about(nil), do: {:ok, nil}
+
+  defp profile_about(%{} = about) do
+    with :ok <- about_keys("about", about, ~w(summary)),
+         {:ok, summary} when is_binary(summary) <-
+           line("about: summary", about["summary"], @max_profile_summary) do
+      {:ok, %{summary: summary}}
+    else
+      {:ok, nil} -> {:error, ["about: summary is the sentence under the profile's name; say one"]}
+      {:error, messages} -> {:error, messages}
+    end
+  end
+
+  defp profile_about(other),
+    do: {:error, ["about is an object with a summary, not #{inspect(other)}"]}
+
+  # A server's subtitle and a line per tool it carries: a line for a tool its allowlist
+  # leaves out would describe something a session never has.
+  defp server_about(_name, nil, _tools), do: {:ok, nil}
+
+  defp server_about(name, %{} = about, allowed) do
+    where = "mcp server #{name}: about"
+
+    with :ok <- about_keys(where, about, ~w(summary tools)),
+         {:ok, summary} <- line("#{where}.summary", about["summary"], @max_server_line),
+         {:ok, lines} <- tool_lines(where, Map.get(about, "tools") || %{}, allowed) do
+      {:ok, %{summary: summary, tools: lines}}
+    end
+  end
+
+  defp server_about(name, other, _tools),
+    do:
+      {:error,
+       ["mcp server #{name}: about is an object with a summary and tools, not #{inspect(other)}"]}
+
+  defp tool_lines(where, %{} = lines, allowed) do
+    unknown =
+      if allowed == :all, do: [], else: lines |> Map.keys() |> Enum.reject(&(&1 in allowed))
+
+    if unknown == [] do
+      checked_lines(where, lines)
+    else
+      {:error,
+       [
+         "#{where}.tools names #{Enum.join(Enum.sort(unknown), ", ")}, which its tools do not carry"
+       ]}
+    end
+  end
+
+  defp tool_lines(where, other, _allowed),
+    do: {:error, ["#{where}.tools is an object of a line per tool name, not #{inspect(other)}"]}
+
+  # Every line checked, so one publish names each that is wrong.
+  defp checked_lines(where, lines) do
+    checked =
+      for {tool, text} <- Enum.sort(lines),
+          do: {tool, line("#{where}.tools.#{tool}", text, @max_server_line)}
+
+    case for({_tool, {:error, messages}} <- checked, do: messages) do
+      [] -> {:ok, for({tool, {:ok, text}} <- checked, text != nil, into: %{}, do: {tool, text})}
+      messages -> {:error, List.flatten(messages)}
+    end
+  end
+
+  defp about_keys(where, about, known) do
+    case Map.keys(about) -- known do
+      [] -> :ok
+      unknown -> {:error, ["#{where}: unknown keys: #{Enum.join(Enum.sort(unknown), ", ")}"]}
+    end
+  end
+
+  # A line a person reads: text, not blank, and within its length in characters.
+  defp line(_where, nil, _max), do: {:ok, nil}
+
+  defp line(where, text, max) when is_binary(text) do
+    trimmed = String.trim(text)
+    length = String.length(trimmed)
+
+    cond do
+      trimmed == "" -> {:error, ["#{where} cannot be empty"]}
+      length > max -> {:error, ["#{where} is #{length} characters; the most it may be is #{max}"]}
+      true -> {:ok, trimmed}
+    end
+  end
+
+  defp line(where, other, _max), do: {:error, ["#{where} is text, not #{inspect(other)}"]}
 
   defp acp_agent(%{"name" => name, "command" => command} = entry)
        when is_binary(name) and is_binary(command) do
@@ -694,7 +806,7 @@ defmodule Troupe.Protocol.Bundle do
       else: :ok
   end
 
-  @known ~w(schema agents skills mcp_servers acp_agents)
+  @known ~w(schema about agents skills mcp_servers acp_agents)
   defp only_known_keys(content) do
     case Map.keys(content) -- @known do
       [] -> :ok
@@ -805,8 +917,7 @@ defmodule Troupe.Protocol.Bundle do
         {:ok, agents}
 
       :error ->
-        {:error,
-         "skill #{name}: agents is \"all\" or a list of agent names, not #{inspect(raw)}"}
+        {:error, "skill #{name}: agents is \"all\" or a list of agent names, not #{inspect(raw)}"}
     end
   end
 
@@ -888,7 +999,8 @@ defmodule Troupe.Protocol.Bundle do
          {:ok, permission} <- permission(name, raw["permission"]),
          {:ok, tools} <- tools(name, raw["tools"]),
          {:ok, stores} <- stores(name, raw["stores"]),
-         {:ok, files} <- file_tools(name, stores, raw["files"]) do
+         {:ok, files} <- file_tools(name, stores, raw["files"]),
+         {:ok, about} <- server_about(name, raw["about"], tools) do
       {:ok,
        %{
          name: name,
@@ -900,7 +1012,8 @@ defmodule Troupe.Protocol.Bundle do
          permission: permission,
          tools: tools,
          stores: stores,
-         files: files
+         files: files,
+         about: about
        }}
     end
   end
