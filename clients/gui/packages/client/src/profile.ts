@@ -105,6 +105,15 @@ export interface ProfileViewLimits {
   idle_seconds?: number | null;
   /** In micros; null where there is none. `team_period` is what the team's runs over, null with no team. */
   budgets: { profile: number | null; team: number | null; you: number | null; team_period?: "monthly" | "never" | string | null };
+  /** The calls of this month nobody priced, which every budget counts as free; null for none, absent from a plane before it. */
+  unpriced?: UnpricedCalls | null;
+}
+
+/** Calls nobody said the cost of, and their tokens, since the start of the period. */
+export interface UnpricedCalls {
+  calls: number;
+  tokens: number;
+  since: string;
 }
 
 /** What a session may do on GitHub through the plane's App, where the profile gives it any. */
@@ -314,6 +323,18 @@ export function limitSentences(view: Pick<ProfileView, "limits" | "github">): st
   const pushes = view.github?.max_pushes;
   if (pushes !== undefined && pushes !== null) said.push(`Pushes at most ${countWords(pushes, "time")}, then stops and says so on its pull request.`);
   return said;
+}
+
+/** What the desktop's rail says where the plane says some of a profile's calls had no price. */
+export const UNPRICED_SENTENCE = "Some calls have had no price this period; the budgets count them as free.";
+
+/**
+ * What an administrator is told where a profile's calls had no price this period, and the
+ * two ways to give them one; null where every call was priced or the plane does not say.
+ */
+export function unpricedWords(unpriced: UnpricedCalls | null | undefined): string | null {
+  if (!unpriced) return null;
+  return `${countWords(unpriced.calls, "call")} and ${countWords(unpriced.tokens, "token")} of this period had no price: set llm.prices on the profile, or let the gateway report the cost.`;
 }
 
 /** A team's budget with the period it runs over: `$500.00 a month`, `$500.00 in all`. */

@@ -84,6 +84,19 @@ describe("the overview", () => {
     await sees("Nothing is unhealthy, at its ceiling or waiting on a person.");
   });
 
+  // #1137: a team whose calls had no price this period has spent nothing only on paper.
+  it("says which team had calls with no price this period, beside its spend", async () => {
+    fake.admin.teams.get("core")!.unpriced_calls = 14;
+    await signedInAs(fake, PEOPLE.alice);
+    unmount = render(<App />).unmount;
+    await waitFor(() => items().length > 0, "what needs attention");
+    const said = items().find((i) => (i.textContent ?? "").includes("had no price"));
+    expect(said?.textContent).toContain("14 calls of core's this period had no price, and its budget counts them as free: set llm.prices on the profile, or let the gateway report the cost.");
+    expect(link("Profiles", said)?.getAttribute("href")).toBe("#/profiles");
+    await sees("14 calls unpriced");
+    expect(items().filter((i) => (i.textContent ?? "").includes("had no price"))).toHaveLength(1);
+  });
+
   // #657: the clients the plane last saw behind the recommended version, as one line, and
   // none where there are none.
   it("says how many clients are behind the recommended version, and where to look", async () => {

@@ -11,6 +11,7 @@ import { FakeDaemon, exampleFacts, exampleOnboarding } from "../packages/client/
 import { FakeIdp } from "../packages/client/test/support/idp.js";
 import { keptBy } from "../packages/client/test/support/kept.js";
 import { FakePlane, GATEWAY_DEFAULTS, SAMPLE_PICTURE } from "../packages/client/test/support/plane.js";
+import { exampleProfiles } from "../packages/client/test/support/profiles.js";
 import { FakeWorker } from "../packages/client/test/support/worker.js";
 
 const origins = process.env["ORIGINS"]?.split(",") ?? ["http://localhost:5173", "http://127.0.0.1:5173"];
@@ -43,6 +44,8 @@ const plane = await FakePlane.start({
   // LISTS_ONE_TEAM=1 has the listing name only the first, so the plane's refusal asks instead.
   ...(process.env["TEAMS"] ? { teams: process.env["TEAMS"].split(",") } : {}),
   ...(process.env["LISTS_ONE_TEAM"] ? { listsOneTeam: true } : {}),
+  // UNPRICED=dev: some of the dev profile's calls this month had no price, which its page says.
+  ...(process.env["UNPRICED"] ? { profileSpecs: exampleProfiles().map((p) => (p.name === process.env["UNPRICED"] ? { ...p, unpriced: { calls: 14, tokens: 182_400 } } : p)) } : {}),
   // The person's memory and artifacts are the ones the daemon below keeps, so the app shows
   // the same signed in, when it asks the plane, and offline, when it asks the daemon.
   keeper: (method, params) => keptBy(daemon)(method, params),

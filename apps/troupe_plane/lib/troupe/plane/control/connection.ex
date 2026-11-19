@@ -565,6 +565,7 @@ defmodule Troupe.Plane.Control.Connection do
       input_tokens: params["input_tokens"] || 0,
       output_tokens: params["output_tokens"] || 0,
       cost_micros: params["cost_micros"] || 0,
+      priced: priced?(params),
       gateway_request_id: params["gateway_request_id"]
     }
 
@@ -1141,6 +1142,7 @@ defmodule Troupe.Plane.Control.Connection do
                 input_tokens: non_negative(record["input_tokens"]),
                 output_tokens: non_negative(record["output_tokens"]),
                 cost_micros: non_negative(record["cost_micros"]),
+                priced: priced?(record),
                 gateway_request_id: id,
                 occurred_at: occurred_at(record["occurred_at"])
               }
@@ -1154,6 +1156,11 @@ defmodule Troupe.Plane.Control.Connection do
   end
 
   defp usage_records(_session, _records), do: {:error, "records is a list"}
+
+  # Whether anybody said what a call cost. A pod says so in `priced`; one from before the
+  # flag said it by sending a number as the cost, or none.
+  defp priced?(%{"priced" => priced}) when is_boolean(priced), do: priced
+  defp priced?(record), do: is_integer(record["cost_micros"])
 
   defp non_negative(n) when is_integer(n) and n >= 0, do: n
   defp non_negative(_other), do: 0

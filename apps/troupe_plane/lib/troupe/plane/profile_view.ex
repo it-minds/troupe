@@ -509,8 +509,25 @@ defmodule Troupe.Plane.ProfileView do
         "team" => ceiling(team && Ledger.budget_micros(team.id)),
         "you" => ceiling(is_binary(user.subject) && Ledger.person_budget_micros(user.subject)),
         "team_period" => resolved && resolved.budget_period
-      }
+      },
+      # The calls of this profile's sessions this month that nobody priced, which every
+      # budget above counts as free; `nil` where there were none.
+      "unpriced" => unpriced(name)
     }
+  end
+
+  defp unpriced(name) do
+    case Ledger.unpriced({:profile, name}) do
+      nil ->
+        nil
+
+      totals ->
+        %{
+          "calls" => totals.calls,
+          "tokens" => totals.tokens,
+          "since" => DateTime.to_iso8601(totals.since)
+        }
+    end
   end
 
   # The output cap a pod's every model call asks no more than: the profile's `llm.maxTokens`,

@@ -7,7 +7,7 @@
 // fixed: a pod that is broken, has never reported or is draining; a profile with fewer
 // pods than it asked for, or a Secret its pods mount missing from its namespace; no
 // namespace the ingress controller may reach the workers from; a team at or near its
-// ceiling; runs started with nobody watching
+// ceiling, or with calls nobody priced this period; runs started with nobody watching
 // that nobody has looked at since; entries agents proposed for a memory the person may
 // change, waiting on Memory. An empty list says so in a sentence, because an empty
 // region and one that has not loaded look the same. Clients behind the recommended version
@@ -29,7 +29,7 @@ const REFRESH_MS = 10_000;
 /** Where a team stops being comfortable and starts being worth mentioning. */
 const NEAR_BUDGET = 0.8;
 
-type State = "broken" | "unknown" | "degraded" | "draining" | "over" | "near" | "waiting" | "behind" | "healthy";
+type State = "broken" | "unknown" | "degraded" | "draining" | "over" | "near" | "unpriced" | "waiting" | "behind" | "healthy";
 
 export const STATES: Record<State, { kind: StatusKind; glyph: string; word: string; rank: number }> = {
   broken: { kind: "denied", glyph: "✕", word: "broken", rank: 0 },
@@ -38,6 +38,7 @@ export const STATES: Record<State, { kind: StatusKind; glyph: string; word: stri
   unknown: { kind: "muted", glyph: "○", word: "unknown", rank: 2 },
   degraded: { kind: "local", glyph: "◐", word: "degraded", rank: 3 },
   near: { kind: "local", glyph: "◐", word: "near ceiling", rank: 3 },
+  unpriced: { kind: "local", glyph: "◐", word: "unpriced", rank: 3 },
   draining: { kind: "dormant", glyph: "◑", word: "draining", rank: 4 },
   behind: { kind: "local", glyph: "◐", word: "behind", rank: 5 },
   healthy: { kind: "running", glyph: "●", word: "healthy", rank: 9 },
@@ -179,6 +180,7 @@ export function Overview(): JSX.Element {
                           </td>
                           <td>
                             <Spend team={t} />
+                            {t.unpriced_calls ? <span className="hint"> · {count(t.unpriced_calls, "call")} unpriced</span> : null}
                           </td>
                           <td className="num">{moneyWords(t.reserved_micros)}</td>
                         </tr>
@@ -301,6 +303,18 @@ function attention(overview: FleetOverview, unread: number, platform: boolean, c
     const state = budgetState(team);
     if (state === "healthy") continue;
     items.push({ state, what: budgetWords(state, team), where: href({ page: "teams", team: team.name, tab: "limits" }), action: `${team.name}'s limits` });
+  }
+  // A call nobody priced is counted as free against every budget, so a team whose model has
+  // no price looks as if it spent nothing; the price is set on a profile.
+  for (const team of overview.teams) {
+    const calls = team.unpriced_calls ?? 0;
+    if (calls === 0) continue;
+    items.push({
+      state: "unpriced",
+      what: `${count(calls, "call")} of ${team.name}'s this period had no price, and its budget counts ${calls === 1 ? "it" : "them"} as free: set llm.prices on the profile, or let the gateway report the cost.`,
+      where: href({ page: "profiles" }),
+      action: "Profiles",
+    });
   }
   // A grant the plane's OpenBao role lacks breaks what it is for until an administrator adds it.
   if (overview.openbao?.error) {

@@ -49,6 +49,14 @@ idp.redirectSubject = as;
 const worker = await FakeWorker.start();
 const admin = exampleAdmin();
 admin.holdMs = Number(process.env["HOLD_MS"] ?? 250);
+// UNPRICED=dev: this month 14 of the dev profile's calls had no price, counted against the
+// teams granted it, so its page and Overview say so.
+const unpricedProfile = process.env["UNPRICED"];
+if (unpricedProfile) {
+  const profile = admin.profiles.find((p) => p.name === unpricedProfile);
+  if (profile) profile.unpriced = { calls: 14, tokens: 182_400 };
+  for (const team of admin.teams.values()) if (team.grants.some((g) => g.profile === unpricedProfile)) team.unpriced_calls = 14;
+}
 if (process.env["GITOPS"]) {
   admin.mode = "gitops";
   admin.gitopsSource = "https://git.example.com/platform/troupe.git";

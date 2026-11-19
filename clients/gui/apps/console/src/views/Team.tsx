@@ -241,7 +241,10 @@ function Members({ team, onApplied }: { team: AdminTeam; onApplied: () => void }
                 <tr key={m.subject}>
                   <td>{m.display_name ?? m.subject}</td>
                   <td className="mono">{m.subject}</td>
-                  <td className="num">{moneyWords(m.spent_micros ?? 0)}</td>
+                  <td className="num">
+                    {moneyWords(m.spent_micros ?? 0)}
+                    {m.unpriced_calls ? <span className="hint"> · {count(m.unpriced_calls, "call")} unpriced</span> : null}
+                  </td>
                   <td className="num">{m.budget_micros ? moneyWords(m.budget_micros) : <span className="muted">none</span>}</td>
                 </tr>
               ))}

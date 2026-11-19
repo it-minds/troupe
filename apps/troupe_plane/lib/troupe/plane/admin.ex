@@ -4870,7 +4870,9 @@ defmodule Troupe.Plane.Admin do
       budget_micros: user.budget_micros,
       spent_micros: Ledger.spent_micros_for(user.subject),
       reserved_micros:
-        user.subject |> Ledger.open_reservations_for() |> Map.values() |> Enum.sum()
+        user.subject |> Ledger.open_reservations_for() |> Map.values() |> Enum.sum(),
+      # The month's calls of theirs nobody priced, which `spent_micros` counts as free.
+      unpriced_calls: unpriced_calls({:person, user.subject})
     }
   end
 
@@ -5527,8 +5529,18 @@ defmodule Troupe.Plane.Admin do
       set_by: ProfileBudget.set_by(profile.name),
       spent_micros: Ledger.profile_spent_micros(profile.name),
       reserved_micros:
-        profile.name |> Ledger.open_reservations_for_profile() |> Map.values() |> Enum.sum()
+        profile.name |> Ledger.open_reservations_for_profile() |> Map.values() |> Enum.sum(),
+      # The month's calls nobody priced, and their tokens, which `spent_micros` counts as
+      # free; `nil` where every call was priced.
+      unpriced: unpriced_totals(profile.name)
     }
+  end
+
+  defp unpriced_totals(profile) do
+    case Ledger.unpriced({:profile, profile}) do
+      nil -> nil
+      totals -> %{totals | since: DateTime.to_iso8601(totals.since)}
+    end
   end
 
   defp bundle_state(profile) do
@@ -5630,8 +5642,19 @@ defmodule Troupe.Plane.Admin do
       # tuple and raises `BadMapError`. Harmless while a team had nothing reserved —
       # `Enum.map` over an empty map is `[]` — and a 500 on the overview page the moment
       # one session was running. `team_detail/1` above takes `Map.values/1`; so does this.
-      reserved_micros: team.id |> Ledger.open_reservations() |> Map.values() |> Enum.sum()
+      reserved_micros: team.id |> Ledger.open_reservations() |> Map.values() |> Enum.sum(),
+      # The calls of the period nobody priced, which the figure above counts as free: a
+      # spend of nothing from a team whose model has no price is not a team that spent
+      # nothing. Zero where every call was priced.
+      unpriced_calls: unpriced_calls({:team, team})
     }
+  end
+
+  defp unpriced_calls(scope) do
+    case Ledger.unpriced(scope) do
+      nil -> 0
+      totals -> totals.calls
+    end
   end
 
   defp session_summary(session) do

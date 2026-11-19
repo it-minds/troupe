@@ -100,6 +100,19 @@ describe("a profile", () => {
     expect(keptOf({ agents: { deny: ["build"] }, orgMount: true })).toEqual({ agents: { deny: ["build"] } });
   });
 
+  // #1137: calls nobody priced count as free against every budget, and the page says so.
+  it("says when calls of this month had no price, and how to give them one", async () => {
+    fake.admin.profiles.find((p) => p.name === "ux")!.unpriced = { calls: 14, tokens: 182_400 };
+    await open("#/profiles/ux");
+    await waitFor(() => heading() === "ux" && says("What runs"), "ux");
+    await sees("14 calls and 182,400 tokens of this period had no price: set llm.prices on the profile, or let the gateway report the cost.");
+    close();
+
+    await open("#/profiles/dev");
+    await waitFor(() => heading() === "dev" && says("What runs"), "dev");
+    expect(says("had no price")).toBe(false);
+  });
+
   it("says what the cluster says of it, a CA its namespace does not have yet included", async () => {
     await open("#/profiles/ux");
     await waitFor(() => heading() === "ux" && says("What the cluster says"), "ux");

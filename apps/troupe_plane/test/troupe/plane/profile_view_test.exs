@@ -14,7 +14,7 @@ defmodule Troupe.Plane.ProfileViewTest do
 
   use Troupe.Plane.DataCase, async: false
 
-  alias Troupe.Plane.{Admin, Bundles, Fleet, Harness, Identity}
+  alias Troupe.Plane.{Admin, Bundles, Fleet, Harness, Identity, Ledger, Sessions}
   alias Troupe.Plane.Fleet.Worker
   alias Troupe.Protocol.{AgentCheck, AgentDefinition}
 
@@ -280,7 +280,8 @@ defmodule Troupe.Plane.ProfileViewTest do
                  "team" => 50_000_000,
                  "you" => 20_000_000,
                  "team_period" => "never"
-               }
+               },
+               "unpriced" => nil
              }
 
       bundle = Bundles.current("stable")
@@ -288,6 +289,45 @@ defmodule Troupe.Plane.ProfileViewTest do
       assert %{"name" => "dev", "channel" => "stable", "terms" => nil} = view
       assert view["bundle_version"] == bundle.version
       assert view["bundle_hash"] == bundle.hash
+    end
+
+    test "sees the calls of the month nobody priced, from the ledger's rows", ctx do
+      {:ok, _} =
+        Sessions.create(%{
+          id: "s-unpriced",
+          owner_subject: ctx.ada.subject,
+          profile: "dev",
+          team_id: ctx.team.id
+        })
+
+      charge = fn id, priced, at ->
+        {:ok, _} =
+          Ledger.record(%{
+            session_id: "s-unpriced",
+            team_id: ctx.team.id,
+            owner_subject: ctx.ada.subject,
+            model: "qwen3-235b",
+            input_tokens: 1_000,
+            output_tokens: 200,
+            cost_micros: 0,
+            priced: priced,
+            gateway_request_id: id,
+            occurred_at: at
+          })
+      end
+
+      now = DateTime.utc_now()
+      charge.("gw-a", false, now)
+      charge.("gw-b", false, now)
+      charge.("gw-c", true, now)
+      # Last month's is not this period's.
+      charge.("gw-d", false, DateTime.add(Ledger.month_start(), -1, :day))
+
+      assert view!(ctx.ada)["limits"]["unpriced"] == %{
+               "calls" => 2,
+               "tokens" => 2_400,
+               "since" => DateTime.to_iso8601(Ledger.month_start())
+             }
     end
 
     # The profile's page and the profiles screen count the same pods: a draining pod is no

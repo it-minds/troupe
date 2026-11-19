@@ -98,6 +98,59 @@ defmodule Troupe.Plane.UsageTest do
       assert TeamBudget.inspect_state(team).spent_micros == 1_000
     end
 
+    test "a call nobody priced lands as unpriced and is summed apart, a free one is not",
+         %{port: port, team: team} do
+      worker = enrolled(port)
+
+      assert {:ok, %{"recorded" => 3}} =
+               call(worker, "usage.batch", %{
+                 "session_id" => "s-1",
+                 "records" => [
+                   Map.put(usage(1, 0), "priced", false),
+                   Map.put(usage(2, 0), "priced", true),
+                   Map.put(usage(3, 0), "priced", false)
+                 ]
+               })
+
+      assert Repo.get_by!(UsageRecord, gateway_request_id: "gw_1").priced == false
+      assert Repo.get_by!(UsageRecord, gateway_request_id: "gw_2").priced == true
+      # Still counted as free against every budget: the flag says so, it does not charge.
+      assert Ledger.spent_micros(team.id) == 0
+
+      since = Ledger.period_start(team)
+      assert Ledger.unpriced({:team, team}) == %{calls: 2, tokens: 240, since: since}
+
+      assert %{calls: 2, tokens: 240} = Ledger.unpriced({:profile, "dev"})
+      assert %{calls: 2, tokens: 240} = Ledger.unpriced({:person, "idp|alice"})
+      assert Ledger.unpriced({:profile, "other"}) == nil
+    end
+
+    test "a record from a pod before the flag is priced where it names a cost, unpriced where none",
+         %{port: port, team: team} do
+      worker = enrolled(port)
+
+      {:ok, _} =
+        call(worker, "usage.batch", %{
+          "session_id" => "s-1",
+          "records" => [usage(1, 0), usage(2, 1_000), usage(3, nil)]
+        })
+
+      assert Repo.get_by!(UsageRecord, gateway_request_id: "gw_1").priced == true
+      assert Repo.get_by!(UsageRecord, gateway_request_id: "gw_2").priced == true
+      assert Repo.get_by!(UsageRecord, gateway_request_id: "gw_3").priced == false
+      assert %{calls: 1, tokens: 120} = Ledger.unpriced({:team, team})
+    end
+
+    test "every call priced is no unpriced sum", %{port: port, team: team} do
+      worker = enrolled(port)
+
+      {:ok, _} =
+        call(worker, "usage.batch", %{"session_id" => "s-1", "records" => [usage(1, 500)]})
+
+      assert Ledger.unpriced({:team, team}) == nil
+      assert Ledger.unpriced({:profile, "dev"}) == nil
+    end
+
     test "a late batch cannot walk the watermark backwards", %{port: port} do
       worker = enrolled(port)
 

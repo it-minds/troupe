@@ -260,7 +260,9 @@ gateway prices a call where it can, and a reconciliation compares the ledger wit
 request id. A gateway that names no cost leaves the harness to price the call itself, from
 the provider's catalog or else from `models.prices` (a profile's `llm.prices`), and mark it
 `priced_locally` (Decision 689). A call nobody priced
-is recorded at zero cost and said once a session in the log; one with no request id gets a
+is recorded at zero cost and said once a session in the log; its usage record says
+`priced: false`, and the plane counts such calls apart and says them on the profile and
+team (Decision 1073). One with no request id gets a
 synthetic id `seq:<session>:<n>` that the reconciliation counts as unmetered.
 
 On a pod, `Session.Log` hands each event to a usage fold that writes an ETS row from the

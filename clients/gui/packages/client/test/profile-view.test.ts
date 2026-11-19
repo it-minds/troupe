@@ -3,7 +3,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { DaemonClient, TroupeRpcError, accessWords, actsAsWords, budgetWords, capacityWords, limitSentences, missingWords, moneyWords, profileSentence, profileSummary, roomWords, ruleAccessWords, ruleText, teamBudgetWords, toolLines, toolsAreWhole } from "../src/index.js";
+import { DaemonClient, TroupeRpcError, accessWords, actsAsWords, budgetWords, capacityWords, limitSentences, missingWords, moneyWords, profileSentence, profileSummary, roomWords, ruleAccessWords, ruleText, teamBudgetWords, toolLines, toolsAreWhole, unpricedWords } from "../src/index.js";
 import type { ProfileView } from "../src/index.js";
 import { FakeDaemon } from "./support/daemon.js";
 import { startHarness } from "./support/harness.js";
@@ -122,6 +122,12 @@ test("the rail's limits are a sentence each, said only where the plane states th
   assert.equal(teamBudgetWords({ profile: null, team: 500_000_000, you: null, team_period: "monthly" }), "$500.00 a month");
   assert.equal(teamBudgetWords({ profile: null, team: 500_000_000, you: null, team_period: "never" }), "$500.00 in all");
   assert.equal(teamBudgetWords({ profile: null, team: null, you: null, team_period: "monthly" }), "no cap");
+
+  // Calls nobody priced this period, in the words the console says them; none, nothing said.
+  assert.equal(unpricedWords({ calls: 14, tokens: 182_400, since: "2026-11-01T00:00:00Z" }), "14 calls and 182,400 tokens of this period had no price: set llm.prices on the profile, or let the gateway report the cost.");
+  assert.equal(unpricedWords({ calls: 1, tokens: 1, since: "2026-11-01T00:00:00Z" })?.startsWith("1 call and 1 token of this period"), true);
+  assert.equal(unpricedWords(null), null);
+  assert.equal(unpricedWords(undefined), null);
 
   const tools = (refused: string[]) => ["read_file", "shell", "web_fetch"].map((name) => ({ name, refused: refused.includes(name) }));
   assert.equal(toolsAreWhole({ harness_tools: tools(["shell", "web_fetch"]), personal_tools: "forbid", github: null }), true);
