@@ -375,6 +375,10 @@ defmodule Troupe.Tools.PublishArtifactTest do
     # And the description says so before the first publish.
     assert PublishArtifact.description() =~
              "An artifact may load only its own files: no stylesheet, script, font or image from another site, and no inline script or onclick"
+
+    # A document's image from another site too, and what the reader sees in its place.
+    assert PublishArtifact.description() =~
+             "In a document, an image from another site (`![](https://...)`) is shown as a sentence naming that site"
   end
 
   describe "whom it is for is the person's to say" do

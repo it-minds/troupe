@@ -21,7 +21,8 @@ defmodule Troupe.Tools.PublishArtifact do
   arguments (`as_answered/2`), its answer saying so. What it published is on the call's own
   event, as `artifact` (`id`, `version`, `url`, and `owner_team` for a team's), and in the
   plane's audit trail with the session. What the artifacts host will block in it (a
-  stylesheet from another site, an inline script), as the plane read it from the files, is
+  stylesheet from another site, an inline script, a document's image from another site), as
+  the plane read it from the files, is
   in the answer by file and reference, so the agent can publish a corrected version.
 
   Offered only where the host installed somewhere for it to go (`Troupe.Artifacts`). There,
@@ -47,7 +48,7 @@ defmodule Troupe.Tools.PublishArtifact do
     """
     Publish a report or page from the workspace for people to read in their organisation's gallery: `html` (a page and its CSS, JS and images), `markdown` (a document, rendered with code highlighting and Mermaid flowcharts), or `file` (one file, as a PDF or an image).
 
-    `files`: workspace paths; they keep their paths below the directory they share, so relative links still work. A page opens `index.html`; a document `index.md` or `README.md`. An artifact may load only its own files: no stylesheet, script, font or image from another site, and no inline script or onclick; put the CSS and JS in files of their own and publish them with the page. Nothing outside the artifact can be fetched. The answer names anything the artifacts host will block. Keep it to a few megabytes.
+    `files`: workspace paths; they keep their paths below the directory they share, so relative links still work. A page opens `index.html`; a document `index.md` or `README.md`. An artifact may load only its own files: no stylesheet, script, font or image from another site, and no inline script or onclick; put the CSS and JS in files of their own and publish them with the page. In a document, an image from another site (`![](https://...)`) is shown as a sentence naming that site; publish the image beside the document and link it relatively. Nothing outside the artifact can be fetched. The answer names anything the artifacts host will block. Keep it to a few megabytes.
 
     `thumbnail`: optional, a workspace PNG, JPEG or WebP of at most 256 KiB shown on the gallery card; send one only if you already have a screenshot of the page. Never required.
 

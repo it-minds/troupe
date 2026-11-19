@@ -14,9 +14,17 @@ defmodule Troupe.Plane.Artifacts.Markdown do
   and a link or an image goes only to the web, to mail, or within the artifact: a
   `javascript:` or `data:` address is shown as text. The page is served under the artifacts
   host's sandbox besides, which is what holds if this ever lets something through.
+
+  **An image from another site is a sentence, not a broken picture.** The host's policy
+  loads a page's own images alone, so where the policy would block an image the page says
+  so in its place, naming the site and never the whole address; `images/1` gives the same
+  images to the check at publish, so the publisher is told what the reader will see.
   """
 
-  alias Troupe.Plane.Artifacts.{Highlight, Mermaid}
+  alias Troupe.Plane.Artifacts.{Blocked, Highlight, Mermaid}
+
+  # An image, `![alt](address "title")`, as the renderer and the check at publish read it.
+  @image ~r/!\[([^\]]*)\]\(\s*([^)\s]+)(?:\s+"([^"]*)")?\s*\)/
 
   @doc "The whole page for `text`, titled `title`."
   @spec page(String.t(), String.t()) :: String.t()
@@ -315,8 +323,7 @@ defmodule Troupe.Plane.Artifacts.Markdown do
   defp hold(text, held) do
     patterns = [
       {~r/(`+)(.+?)\1/s, fn [_, _, code] -> "<code>#{escape(String.trim(code))}</code>" end},
-      {~r/!\[([^\]]*)\]\(\s*([^)\s]+)(?:\s+"([^"]*)")?\s*\)/,
-       fn [_, alt, src | title] -> image(alt, src, List.first(title)) end},
+      {@image, fn [_, alt, src | title] -> image(alt, src, List.first(title)) end},
       {~r/\[([^\]]+)\]\(\s*([^)\s]+)(?:\s+"([^"]*)")?\s*\)/,
        fn [_, label, href | title] -> link(label, href, List.first(title)) end},
       {~r/<((?:https?:\/\/|mailto:)[^>\s]+)>/, fn [_, href] -> link(href, href, nil) end}
@@ -366,14 +373,88 @@ defmodule Troupe.Plane.Artifacts.Markdown do
 
   defp image(alt, src, title) do
     case safe_href(src) do
-      {:ok, src} ->
-        title = if title, do: " title=\"#{escape(title)}\"", else: ""
-        "<img src=\"#{escape(src)}\" alt=\"#{escape(alt)}\"#{title}>"
-
-      :error ->
-        escape("![#{alt}](#{src})")
+      {:ok, src} -> if Blocked.blocks?("image", src), do: not_shown(alt, src), else: img(alt, src, title)
+      :error -> escape("![#{alt}](#{src})")
     end
   end
+
+  defp img(alt, src, title) do
+    title = if title, do: " title=\"#{escape(title)}\"", else: ""
+    "<img src=\"#{escape(src)}\" alt=\"#{escape(alt)}\"#{title}>"
+  end
+
+  # Where an image the host blocks would be: which site it is from, its alt text on hover.
+  defp not_shown(alt, src) do
+    site =
+      case URI.parse(src) do
+        %URI{host: host} when is_binary(host) and host != "" -> host
+        _other -> "another site"
+      end
+
+    title = if alt != "", do: " title=\"#{escape(alt)}\"", else: ""
+
+    "<span class=\"not-shown\"#{title}>An image from #{escape(site)} is not shown: " <>
+      "this page shows only its own files</span>"
+  end
+
+  @doc """
+  Every image the page for `text` asks for, as `{offset, address}` with the offset in `text`:
+  each `![...](...)` the renderer makes an `<img>` of, so none in fenced code or a code span
+  and none whose address it shows as text. Raw HTML is text here, so an `<img>` tag loads
+  nothing.
+  """
+  @spec images(String.t()) :: [{non_neg_integer(), String.t()}]
+  def images(text) when is_binary(text) do
+    text = text |> without_fences() |> without_code_spans()
+
+    @image
+    |> Regex.scan(text, return: :index, capture: [0, 2])
+    |> Enum.flat_map(fn [{at, _}, {src_at, src_length}] ->
+      case safe_href(binary_part(text, src_at, src_length)) do
+        {:ok, src} -> [{at, src}]
+        :error -> []
+      end
+    end)
+  end
+
+  @doc "Whether `path` is a Markdown document, which a Markdown artifact serves rendered."
+  @spec document?(String.t()) :: boolean()
+  def document?(path), do: String.downcase(Path.extname(path)) in [".md", ".markdown"]
+
+  # The text with each fenced block's lines blanked, offsets and line ends kept. A fence is
+  # read as the renderer reads one, in a quote too.
+  defp without_fences(text) do
+    text
+    |> String.split("\n")
+    |> Enum.map_reduce(nil, &fenced_line/2)
+    |> elem(0)
+    |> Enum.join("\n")
+  end
+
+  # One line, and the fence open after it: a fence's own lines and those inside it blanked.
+  defp fenced_line(line, open) do
+    bare =
+      line |> String.replace("\t", "    ") |> then(&Regex.replace(~r/\A(?: {0,3}> ?)+/, &1, ""))
+
+    cond do
+      open != nil -> {blank(line), if(closes?(bare, open), do: nil, else: open)}
+      opened = fence(bare) -> {blank(line), opened}
+      true -> {line, nil}
+    end
+  end
+
+  defp closes?(line, fence) do
+    trimmed = String.trim(line)
+
+    String.starts_with?(trimmed, fence.marks) and
+      String.trim(trimmed, String.at(fence.marks, 0)) == ""
+  end
+
+  # The text with each code span blanked, as the renderer holds one: never across a blank line.
+  defp without_code_spans(text),
+    do: Regex.replace(~r/(`+)(?:(?!\n[ \t]*\n).)+?\1/s, text, fn span, _marks -> blank(span) end)
+
+  defp blank(text), do: for(<<byte <- text>>, into: "", do: if(byte == ?\n, do: "\n", else: " "))
 
   # An address a link or an image may have: the web's, mail's, or one within the artifact (a
   # path or a fragment). Anything else, `javascript:` and `data:` among them, is refused.
