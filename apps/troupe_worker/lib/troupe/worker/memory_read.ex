@@ -11,7 +11,10 @@ defmodule Troupe.Worker.MemoryRead do
   Installed as `Troupe.Session.PlaneMemory`'s check when the pod starts, beside
   `Troupe.Worker.UserMemory`. A link that is down, or a plane that does not answer within two
   seconds, leaves the session as it is: the turn runs on what it holds, and a pod's next
-  activation carries the documents anyway.
+  activation carries the documents anyway. The two seconds are the budget everywhere a pod
+  runs; a test driving a real plane on a loaded machine lengthens it through the application
+  environment (`:troupe_worker, :memory_read_timeout`, milliseconds) so a slow answer is not
+  read as a lost one.
   """
 
   alias Troupe.Session.PlaneMemory
@@ -42,9 +45,11 @@ defmodule Troupe.Worker.MemoryRead do
   defp request(params) do
     case Process.whereis(Link) do
       nil -> {:error, :no_link}
-      link -> Link.request(link, "session.memory.read", params, @timeout)
+      link -> Link.request(link, "session.memory.read", params, timeout())
     end
   catch
     :exit, _gone -> {:error, :no_link}
   end
+
+  defp timeout, do: Application.get_env(:troupe_worker, :memory_read_timeout, @timeout)
 end

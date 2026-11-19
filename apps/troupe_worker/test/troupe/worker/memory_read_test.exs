@@ -49,9 +49,15 @@ defmodule Troupe.Worker.MemoryReadTest do
     eventually(fn -> Link.connected?() end, 10_000)
     :ok = MemoryRead.install()
 
+    # The pod's two-second budget for the plane's answer is the product's; here a real plane
+    # answers on a machine running the whole suite, and a late answer is still the answer
+    # this test is about, not a lost one.
+    Application.put_env(:troupe_worker, :memory_read_timeout, 30_000)
+
     on_exit(fn ->
       Application.delete_env(:troupe_core, :plane_memory_check)
       Application.delete_env(:troupe_worker, :session_defaults)
+      Application.delete_env(:troupe_worker, :memory_read_timeout)
       quieten(context.session_id)
     end)
 
