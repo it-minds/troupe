@@ -7,7 +7,12 @@ defmodule Troupe.UI.ProfileView do
   The words are said once, here, so the terminal's frame and the plain lines of the
   command line and headless mode cannot drift apart: each line is `{kind, text}`, and only
   how a kind is drawn differs (`:group` a heading, `:sub` a heading inside one, `:line`
-  plain, `:muted` quieter, `:dimmed` what a session will not have).
+  plain, `:muted` quieter, `:dimmed` what a session will not have). A tool the bundle's
+  author wrote a line for is `{:tool, line, name}`: the line, then the tool's name drawn
+  quieter after it, the line cut so the name is always on the row.
+
+  Where the author wrote them (`about`), the page leads with the profile's sentence and a
+  server's subtitle is under its name; a profile without them reads as before.
 
   Everything comes from the plane's answer as it is. A field the plane left null is
   unknown, and is said to be (`not said`), never filled in from a default or a guess: a
@@ -21,9 +26,11 @@ defmodule Troupe.UI.ProfileView do
   alias Troupe.UI.TUI.Model
 
   @type kind :: :group | :sub | :line | :muted | :dimmed
-  @type line :: {kind(), String.t()}
+  @type line :: {kind(), String.t()} | {:tool, String.t(), String.t()}
 
   @unsaid "not said"
+  # Between a tool's line and its name.
+  @gap "  "
 
   ## The list
 
@@ -87,14 +94,22 @@ defmodule Troupe.UI.ProfileView do
   ## The page
 
   @doc """
-  The page, `width` columns wide (the tools of a server wrap under it): the six groups in
-  reading order, each a heading and its lines.
+  The page, `width` columns wide (the tools of a server wrap under it): the profile's
+  sentence where its author wrote one, then the six groups in reading order, each a
+  heading and its lines.
   """
   @spec lines(map(), pos_integer()) :: [line()]
   def lines(page, width \\ 80) do
     width = max(width, 40)
 
+    lead =
+      case about(page) do
+        nil -> []
+        sentence -> [{:line, sentence}, {:line, ""}]
+      end
+
     Enum.concat([
+      lead,
       group("Agents", agents(page)),
       group("Tools", tools(page, width)),
       group("Model", model(page["model"])),
@@ -105,9 +120,34 @@ defmodule Troupe.UI.ProfileView do
     |> Enum.drop(-1)
   end
 
+  @doc "The sentence the bundle's author wrote for the profile, on one line, or nil."
+  @spec about(map()) :: String.t() | nil
+  def about(page), do: said(page["about"], "summary")
+
   @doc "Lines as plain text, one string each, headings and all."
   @spec plain([line()]) :: [String.t()]
-  def plain(lines), do: Enum.map(lines, fn {_kind, text} -> text end)
+  def plain(lines), do: Enum.map(lines, &text/1)
+
+  @doc "A line's text, a tool's name after its line."
+  @spec text(line()) :: String.t()
+  def text({:tool, line, name}), do: line <> @gap <> name
+  def text({_kind, text}), do: text
+
+  # An author's words at `key` of an `about`, on one line; nil where unsaid or blank.
+  defp said(%{} = about, key) do
+    case about[key] do
+      text when is_binary(text) ->
+        case Model.one_line(text) do
+          "" -> nil
+          line -> line
+        end
+
+      _unsaid ->
+        nil
+    end
+  end
+
+  defp said(_unsaid, _key), do: nil
 
   defp group(title, lines), do: [{:group, title} | lines] ++ [{:line, ""}]
 
@@ -256,7 +296,53 @@ defmodule Troupe.UI.ProfileView do
           " · "
         )
 
-    [{:line, head} | wrap("tools: ", server_tools(server["tools"]), "      ", width)]
+    subtitle =
+      case said(server["about"], "summary") do
+        nil -> []
+        line -> [{:line, "      " <> line}]
+      end
+
+    [{:line, head} | subtitle] ++ server_tool_lines(server, width)
+  end
+
+  # A row per tool once the author has written a line for any of them, the line first and
+  # the name after it; the names wrapped in a row, as they were, where none has a line.
+  defp server_tool_lines(server, width) do
+    lines =
+      case server["about"] do
+        %{"tools" => %{} = tools} ->
+          for {name, _line} <- tools, line = said(tools, name), into: %{}, do: {name, line}
+
+        _unsaid ->
+          %{}
+      end
+
+    case server["tools"] do
+      tools when map_size(lines) > 0 and is_list(tools) ->
+        Enum.map(tools, &tool_line(to_string(&1), lines, width))
+
+      "all" when map_size(lines) > 0 ->
+        Enum.map(Enum.sort(Map.keys(lines)), &tool_line(&1, lines, width)) ++
+          [{:muted, "      and all of its other tools"}]
+
+      tools ->
+        wrap("tools: ", server_tools(tools), "      ", width)
+    end
+  end
+
+  defp tool_line(name, lines, width) do
+    case lines[name] do
+      nil ->
+        {:muted, "      " <> name}
+
+      line ->
+        room = max(width - 6 - String.length(@gap) - String.length(name), 8)
+        {:tool, "      " <> cut(line, room), name}
+    end
+  end
+
+  defp cut(text, room) do
+    if String.length(text) <= room, do: text, else: String.slice(text, 0, room - 1) <> "…"
   end
 
   defp not_offered(server) do

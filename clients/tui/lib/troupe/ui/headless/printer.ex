@@ -72,15 +72,17 @@ defmodule Troupe.UI.Headless.Printer do
   def profiles_lines(pages), do: pages |> ProfileView.list_lines() |> ProfileView.plain()
 
   @doc """
-  One profile's page as plain lines, `troupe profiles <name>`'s: its name, then the six
-  groups the terminal's frame shows, in the same words.
+  One profile's page as plain lines, `troupe profiles <name>`'s: its name, the sentence
+  its bundle's author wrote right under it where there is one, then the six groups the
+  terminal's frame shows, in the same words.
   """
   @spec profile_lines(map(), pos_integer()) :: [String.t()]
-  def profile_lines(page, width \\ 80),
-    do: [
-      "profile " <> ProfileView.name(page),
-      "" | ProfileView.plain(ProfileView.lines(page, width))
-    ]
+  def profile_lines(page, width \\ 80) do
+    gap = if ProfileView.about(page), do: [], else: [""]
+
+    ["profile " <> ProfileView.name(page)] ++
+      gap ++ ProfileView.plain(ProfileView.lines(page, width))
+  end
 
   @impl true
   def init(opts) do
