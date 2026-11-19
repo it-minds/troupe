@@ -16,6 +16,9 @@ defmodule Troupe.Test.ErrorStandIn do
   nothing in it but its signature, as the newest models stream one when no summary was
   asked for, and `{:stream_error, error}`, an `error` event inside a stream that began
   with a 200 (#427, Decision 805).
+
+  On the OpenAI-compatible path `{:priced, answer, cost}` is `answer` with `cost`, in
+  dollars, in the stream's usage, as a LiteLLM gateway writes it.
   """
 
   import Troupe.Test.LoopbackHTTP, only: [event: 2]
@@ -171,6 +174,11 @@ defmodule Troupe.Test.ErrorStandIn do
 
   defp stream("/v1/messages" = path, n, answer),
     do: ModelStream.events(path, n, answer, %{"input_tokens" => 100})
+
+  # A gateway that writes what the call cost into the stream's usage, as LiteLLM does
+  # when asked: `cost` in dollars beside the tokens.
+  defp stream("/v1/chat/completions" = path, n, {:priced, answer, cost}),
+    do: ModelStream.events(path, n, answer, %{"prompt_tokens" => 100, "cost" => cost})
 
   defp stream("/v1/chat/completions" = path, n, answer),
     do: ModelStream.events(path, n, answer, %{"prompt_tokens" => 100})

@@ -252,12 +252,14 @@ own token. It holds no database and no credential of its own ([docs/a2a.md](../a
 ## 3. What a session cost
 
 **Cost is a fold over the log, not a second thing to write down.** Every `llm_response`
-carries the model and, behind a gateway, its request id and cost, read from response
-headers (`x-litellm-call-id`, `x-litellm-response-cost`). **Troupe keeps no price table
-of its own**: the gateway prices a call where it can, and a reconciliation compares the
-ledger with it by request id. A streamed response carries no cost header, so the harness
-prices such a call itself, from the provider's catalog or else from `models.prices` (a
-profile's `llm.prices`), and marks it `priced_locally` (Decision 689). A call nobody priced
+carries the model and, behind a gateway, its request id and cost: the id from a response
+header (`x-litellm-call-id`), the cost from the `usage.cost` LiteLLM writes into the stream
+when asked, which the OpenAI adapter does on every call to a gateway, or else from
+`x-litellm-response-cost` (Decision 1065). **Troupe keeps no price table of its own**: the
+gateway prices a call where it can, and a reconciliation compares the ledger with it by
+request id. A gateway that names no cost leaves the harness to price the call itself, from
+the provider's catalog or else from `models.prices` (a profile's `llm.prices`), and mark it
+`priced_locally` (Decision 689). A call nobody priced
 is recorded at zero cost and said once a session in the log; one with no request id gets a
 synthetic id `seq:<session>:<n>` that the reconciliation counts as unmetered.
 
