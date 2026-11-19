@@ -109,8 +109,12 @@ describe("the line in the browser build", () => {
     await sees("Rewrite the placement loop");
     const line = await waitFor(banner, "the line");
     await sees("Troupe is better in the app.", line);
-    const openIt = link("Open in the app", line)!;
-    expect(openIt.getAttribute("href")).toBe(`troupe://session/${id}?plane=${enc()}`);
+    // The place on show reaches the line a render after the session's content does, so the
+    // link is waited for rather than read at once.
+    const openIt = await waitFor(() => {
+      const a = link("Open in the app", banner()!);
+      return a?.getAttribute("href") === `troupe://session/${id}?plane=${enc()}` ? a : null;
+    }, "the link at the session");
 
     openIt.click();
     await waitFor(() => followed.length > 0 || null, "the link followed");
