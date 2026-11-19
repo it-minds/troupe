@@ -201,7 +201,9 @@ defmodule Troupe.UI.TUI.ProfilesPage do
   defp block(title), do: %Block{title: title, borders: [:all], border_type: :double}
 
   # A line wider than the frame, folded at a space, its rows under the first indented as
-  # the first is.
+  # the first is. A tool's row is already cut to the width, its name kept.
+  defp fold({:tool, _line, _name} = tool, _width), do: [tool]
+
   defp fold({kind, text}, width) do
     if String.length(text) <= width do
       [{kind, text}]
@@ -223,6 +225,9 @@ defmodule Troupe.UI.TUI.ProfilesPage do
       |> Enum.map(&{kind, &1})
     end
   end
+
+  defp line({:tool, text, name}),
+    do: Line.new([Span.new(text <> "  "), Span.new(name, style: Theme.style(:muted, [:dim]))])
 
   defp line({:group, text}), do: Line.new([Span.new(text, style: Theme.style(:accent, [:bold]))])
   defp line({:sub, text}), do: Line.new([Span.new(text, style: Theme.style(nil, [:bold]))])

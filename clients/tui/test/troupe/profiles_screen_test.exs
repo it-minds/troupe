@@ -72,6 +72,9 @@ defmodule Troupe.ProfilesScreenTest do
 
     assert Enum.all?(groups, &is_integer/1), text
     assert groups == Enum.sort(groups)
+    # No sentence from the bundle's author: the page opens on its first group, as it did.
+    title = Enum.find_index(rows, &(&1 =~ "profile — code — what a session here is given"))
+    assert Enum.at(rows, title + 1) =~ ~r/║Agents\s*║/
 
     assert text =~ ~r/build\s+primary\s+Edits in the checkout/
     assert text =~ ~r/plan\s+primary\s+Reads and plans \(built in\)/
@@ -120,6 +123,96 @@ defmodule Troupe.ProfilesScreenTest do
     assert text =~ ~r/key\s+not said/
     assert text =~ ~r/Reach\s*║\s*\n║\s+not said/
     assert text =~ ~r/budgets\s+the profile not said · your team not said · you not said/
+  end
+
+  # `code` with what its bundle's author wrote: the sentence, severa's subtitle and a line
+  # for two of its three tools, and a line for one of the tools of sursen, which has all.
+  defp with_about(size) do
+    [code | rest] = FakeRemote.profile_fixtures()
+
+    servers =
+      Enum.map(code["mcp_servers"], fn
+        %{"name" => "severa"} = server ->
+          Map.put(server, "about", %{
+            "summary" => "Hours and projects, as the time sheet keeps them",
+            "tools" => %{
+              "list_projects" => "Lists the projects you are on",
+              "log_hours" => "Logs your hours against a project and a day of the week"
+            }
+          })
+
+        %{"name" => "sursen"} = server ->
+          Map.put(server, "about", %{"summary" => nil, "tools" => %{"search" => "Finds a page"}})
+
+        server ->
+          server
+      end)
+
+    code =
+      Map.merge(code, %{
+        "about" => %{"summary" => "Writes the team's code and logs the hours it takes."},
+        "mcp_servers" => servers
+      })
+
+    {remote, url} = start_remote!(transport: :http, profiles: [code | rest])
+    login!(remote, url)
+    {sid, _, _} = start_session!(script: [])
+    start_tui(sid, size)
+  end
+
+  test "the page leads with the author's sentence, a server's subtitle and a line per tool with its name after it" do
+    {pid, session} = with_about(height: 80)
+    command(pid, "/profile code")
+
+    rows = screen(pid, session)
+    text = Enum.join(rows, "\n")
+
+    title = Enum.find_index(rows, &(&1 =~ "profile — code — what a session here is given"))
+    assert Enum.at(rows, title + 1) =~ ~r/║Writes the team's code and logs the hours it takes\.\s*║/
+    assert Enum.at(rows, title + 3) =~ ~r/║Agents\s*║/
+
+    assert text =~ "severa · severa.example.com · as you, once you connect it · asked first"
+    assert text =~ ~r/║      Hours and projects, as the time sheet keeps them\s*║/
+    assert text =~ ~r/║      Lists the projects you are on  list_projects\s*║/
+
+    assert text =~
+             ~r/║      Logs your hours against a project and a day of the week  log_hours\s*║/
+
+    # The one without a line is its bare name; the names are no longer one wrapped row.
+    assert text =~ ~r/║      find_customer\s*║/
+    refute text =~ "tools: list_projects"
+    # An open allowlist keeps saying so after the tools it describes.
+    assert text =~ ~r/║      Finds a page  search\s*║/
+    assert text =~ ~r/║      and all of its other tools\s*║/
+
+    # The name is drawn in the row's dim face, the line in the plain one.
+    y = Enum.find_index(rows, &(&1 =~ "list_projects"))
+    column = fn word -> rows |> Enum.at(y) |> String.split(word) |> hd() |> String.length() end
+    x = column.("list_projects")
+
+    cells =
+      pid
+      |> screen_cells(session)
+      |> Enum.filter(fn {row, _col, _symbol, _mods} -> row == y end)
+      |> Map.new(fn {_row, col, symbol, mods} -> {col, {symbol, mods}} end)
+
+    assert {"l", mods} = Map.fetch!(cells, x)
+    assert :dim in mods
+    assert {"L", mods} = Map.fetch!(cells, column.("Lists"))
+    refute :dim in mods
+  end
+
+  test "at a narrow width a tool's line is cut and its name stays on the row" do
+    {pid, session} = with_about(width: 50, height: 80)
+    command(pid, "/profile code")
+
+    rows = screen(pid, session)
+    row = Enum.find(rows, &(&1 =~ "log_hours"))
+    assert row =~ ~r/║      Logs your hours against a proj…  log_hours\s*║/
+    assert String.length(row) == 50
+    # The sentence folds rather than being cut.
+    assert Enum.join(rows, "\n") =~
+             ~r/║Writes the team's code and logs the hours it\s*║\n║takes\.\s*║/
   end
 
   test "the page scrolls with the keys and the wheel, never above its top" do

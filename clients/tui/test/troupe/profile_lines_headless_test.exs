@@ -79,4 +79,44 @@ defmodule Troupe.ProfileLinesHeadlessTest do
     assert "  no host: a session here reaches nothing outside its pod" in lines
     assert "  your teams   none of your teams: those of yours that may use it" in lines
   end
+
+  test "the author's sentence is under the name, a subtitle under its server and a line per tool" do
+    page = %{
+      "name" => "p",
+      "about" => %{"summary" => "Keeps the\nbooks."},
+      "tools" => %{
+        "rules" => [],
+        "mcp" => [
+          %{
+            "name" => "a",
+            "host" => "a.example",
+            "access" => "yours",
+            "permission" => "auto",
+            "tools" => ["read", "write"],
+            "offered" => true,
+            "about" => %{"summary" => "The ledger", "tools" => %{"read" => "Reads an entry"}}
+          }
+        ]
+      }
+    }
+
+    lines = Printer.profile_lines(page, 80)
+    assert Enum.take(lines, 4) == ["profile p", "Keeps the books.", "", "Agents"]
+
+    at =
+      Enum.find_index(lines, &(&1 == "    a · a.example · as you, once you connect it · automatic"))
+
+    assert Enum.slice(lines, (at + 1)..(at + 3)) == [
+             "      The ledger",
+             "      Reads an entry  read",
+             "      write"
+           ]
+
+    # Without `about` the page opens as it did: the name, a blank, the first group.
+    assert Enum.take(Printer.profile_lines(Map.delete(page, "about")), 3) == [
+             "profile p",
+             "",
+             "Agents"
+           ]
+  end
 end
