@@ -187,6 +187,95 @@ describe("the command palette", () => {
     await waitFor(() => says("goal set: make the suite green"), "the palette's notice");
   });
 
+  // Enter runs what the line says when it is pressed (troupe #1129): a keystroke and the
+  // Enter after it in the same task, before the palette has drawn the keystroke, run the
+  // command typed, once, and not the row the cursor stood on a render before.
+  it("runs the command typed when Enter comes in the same tick as the typing", async () => {
+    const composer = await openSession();
+    key(composer, "/");
+    const dialog = await waitFor(palette, "the palette");
+    await waitFor(() => rowNames().length === SHOWN, "the list");
+    const input = dialog.querySelector<HTMLInputElement>("input")!;
+
+    // The cursor a few rows down the whole list, drawn there, so the row it stood on a
+    // render before is not the one the line names.
+    for (let i = 0; i < 4; i++) {
+      key(input, "ArrowDown");
+      await waitFor(() => selected() === rowNames()[i + 1], "the cursor a row further down");
+    }
+    type(input, "goal ship it");
+    key(input, "Enter");
+    await waitFor(() => says("goal set: ship it"), "the goal's notice");
+    const sets = daemon.calls.filter((c) => c.method === "session.goal.set");
+    expect(sets.map((c) => c.params["text"])).toEqual(["ship it"]);
+
+    // Letter by letter, the Enter straight after the last.
+    type(input, "");
+    for (const end of [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]) type(input, "detail tools".slice(0, end));
+    key(input, "Enter");
+    await waitFor(() => palette() === null, "the palette to close");
+    await waitFor(() => says("Now tools: each turn's tool steps are open, its thinking shut"), "the level the line named");
+  });
+
+  // The palette reads the commands each time it opens, and a command typed straight away
+  // can be in before they are: its Enter waits for the list and then runs the line it was
+  // pressed on, once, rather than finding no row and doing nothing.
+  it("runs a command whose Enter came before the list did, once the list comes", async () => {
+    const composer = await openSession();
+    await waitFor(() => says("session created"), "the session attached");
+    daemon.delayMs["commands.list"] = 400;
+    key(composer, "/");
+    const dialog = await waitFor(palette, "the palette");
+    expect(dialog.querySelector(".note")?.textContent).toBe("Reading the commands…");
+    const input = dialog.querySelector<HTMLInputElement>("input")!;
+
+    type(input, "detail tools");
+    key(input, "Enter");
+    expect(rowNames()).toEqual([]);
+    await waitFor(() => palette() === null, "the palette to close once the list came");
+    await waitFor(() => says("Now tools: each turn's tool steps are open, its thinking shut"), "the level the line named");
+
+    // A second Enter on the same line, before the list, still runs it once.
+    key(composer, "/");
+    const again = await waitFor(palette, "the palette again");
+    const field = again.querySelector<HTMLInputElement>("input")!;
+    type(field, "goal ship it");
+    key(field, "Enter");
+    key(field, "Enter");
+    await waitFor(() => says("goal set: ship it"), "the goal's notice");
+    expect(daemon.calls.filter((c) => c.method === "session.goal.set")).toHaveLength(1);
+  });
+
+  // ↑↓ move the cursor within what the line names, and Enter runs the row under it, even in
+  // the tick the cursor moved.
+  it("runs the row under the cursor after a prefix that matches several and a move down", async () => {
+    const composer = await openSession();
+    key(composer, "/");
+    const dialog = await waitFor(palette, "the palette");
+    await waitFor(() => rowNames().length === SHOWN, "the list");
+    const input = dialog.querySelector<HTMLInputElement>("input")!;
+
+    type(input, "goal");
+    await waitFor(() => selected() === "/goal", "the cursor on the exact match");
+    const names = rowNames();
+    expect(names.length).toBeGreaterThan(1);
+    const next = names[names.indexOf("/goal") + 1];
+    expect(next).toBe("/loop");
+    key(input, "ArrowDown");
+    key(input, "Enter");
+    await waitFor(() => daemon.calls.some((c) => c.method === "session.loop.start"), "the loop asked for");
+    expect(daemon.calls.some((c) => c.method === "session.goal.get")).toBe(false);
+    await waitFor(() => selected() === "/loop", "the cursor drawn on /loop");
+
+    // After a pause it runs as it always did: the typed exact match lands on its row.
+    type(input, "");
+    await waitFor(() => rowNames().length === SHOWN, "the whole list");
+    type(input, "goal");
+    await waitFor(() => selected() === "/goal", "back on /goal");
+    key(input, "Enter");
+    await waitFor(() => says("no goal set; /goal <text> sets one"), "the goal shown");
+  });
+
   // A command the repository's `.troupe/commands/review.md` defines (Decision 763): a row
   // of its own section with its file's description, which runs through the client's
   // `commands.run`, and whose prompt comes back as the session's input.

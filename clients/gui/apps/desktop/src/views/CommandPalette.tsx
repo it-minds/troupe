@@ -28,7 +28,7 @@
 // it can run, and the person may change the session; what is typed after its name is then
 // sent as the next message.
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { JSX } from "react";
 import type { AgentLayer, AgentRow, CommandEntry } from "@troupe/client";
 import { ErrorCodes, TroupeRpcError, errorText } from "@troupe/client";
@@ -402,6 +402,22 @@ function matches(entry: CommandEntry, word: string): boolean {
   return entry.name.includes(q) || entry.aliases.some((a) => a.includes(q)) || entry.summary.toLowerCase().includes(q);
 }
 
+/** Where ↑↓ or the mouse put the cursor, and for which first word; another word has not been moved in. */
+type Cursor = { word: string | null; at: number };
+
+const UNMOVED: Cursor = { word: null, at: 0 };
+
+/**
+ * The row the cursor stands on in the list a word filters: where it was moved for that
+ * word, else the row the word names exactly (so "resume" is /sessions), else the first.
+ */
+function standing(rows: Row[], word: string, cursor: Cursor): number {
+  if (rows.length === 0) return 0;
+  if (cursor.word === word) return Math.min(Math.max(cursor.at, 0), rows.length - 1);
+  const exact = rows.findIndex((r) => r.entry.name === word || r.entry.aliases.includes(word));
+  return exact >= 0 ? exact : 0;
+}
+
 export function CommandPalette({
   view,
   local,
@@ -437,7 +453,9 @@ export function CommandPalette({
   const [agents, setAgents] = useState<Map<string, AgentRow>>(new Map());
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
-  const [cursor, setCursor] = useState(0);
+  const [cursor, setCursor] = useState<Cursor>(UNMOVED);
+  // The cursor as the keys last left it, for a key read before the palette has drawn it.
+  const moved = useRef<Cursor>(UNMOVED);
   const [notice, setNotice] = useState<string | null>(null);
   const input = useRef<HTMLInputElement>(null);
   const list = useRef<HTMLDivElement>(null);
@@ -498,29 +516,46 @@ export function CommandPalette({
     [switchAgent, listed],
   );
 
-  const { word, args } = split(query);
+  const { word } = split(query);
 
-  const rows = useMemo<Row[]>(
-    () =>
+  // One filter gives both the list drawn and the list a key acts on, so they cannot disagree.
+  const listFor = useCallback(
+    (w: string): Row[] =>
       (commands ?? [])
-        .filter((c) => matches(c, word))
+        .filter((c) => matches(c, w))
         .map((entry) => ({ entry, reason: reasonFor(entry, local, entry.source === "agent" ? agents.get(entry.name) : undefined, linked, switching) })),
-    [commands, word, local, agents, linked, switching],
+    [commands, local, agents, linked, switching],
   );
+  const rows = useMemo<Row[]>(() => listFor(word), [listFor, word]);
+  const at = standing(rows, word, cursor);
+  const selected = rows[at];
 
-  // A new filter starts on the row that matches it exactly, so "resume" + Enter is /sessions.
-  useEffect(() => {
-    const exact = rows.findIndex((r) => r.entry.name === word || r.entry.aliases.includes(word));
-    setCursor(exact >= 0 ? exact : 0);
-  }, [word, rows]);
+  const place = (next: Cursor): void => {
+    moved.current = next;
+    setCursor(next);
+  };
+
+  /** A line's command and argument, its rows and the row the cursor stands on. */
+  const lineOf = (line: string): { word: string; args: string; rows: Row[]; at: number } => {
+    const text = split(line);
+    const r = text.word === word ? rows : listFor(text.word);
+    return { ...text, rows: r, at: standing(r, text.word, moved.current) };
+  };
+
+  /**
+   * What the line says at the moment a key lands, read from the field itself: a key
+   * pressed in the same tick as the last keystroke comes before the palette has drawn it.
+   */
+  const now = (): ReturnType<typeof lineOf> => lineOf(input.current?.value ?? query);
+
+  // An Enter pressed before the list has come runs the line it was pressed on once it comes.
+  const waiting = useRef<string | null>(null);
 
   useEffect(() => {
     list.current?.querySelector<HTMLElement>('[aria-selected="true"]')?.scrollIntoView({ block: "nearest" });
-  }, [cursor]);
+  }, [at, word]);
 
-  const selected = rows[Math.min(cursor, Math.max(rows.length - 1, 0))];
-
-  const run = async (row: Row | undefined): Promise<void> => {
+  const run = async (row: Row | undefined, args: string): Promise<void> => {
     if (!row) return;
     if (row.reason) {
       setNotice(row.reason);
@@ -559,9 +594,22 @@ export function CommandPalette({
     }
   };
 
-  const onKey = (e: React.KeyboardEvent): void => {
-    const last = Math.max(rows.length - 1, 0);
-    const move = (to: number): void => setCursor(Math.min(Math.max(to, 0), last));
+  useEffect(() => {
+    const pressed = waiting.current;
+    if (commands === null || pressed === null) return;
+    waiting.current = null;
+    const line = lineOf(pressed);
+    void run(line.rows[line.at], line.args);
+    // Only the list's coming runs it; the line and the cursor are read as they are then.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [commands]);
+
+  const onKey =(e: React.KeyboardEvent): void => {
+    const line = now();
+    const last = Math.max(line.rows.length - 1, 0);
+    const here = line.at;
+    const move = (to: number): void => place({ word: line.word, at: Math.min(Math.max(to, 0), last) });
+    const empty = (input.current?.value ?? query) === "";
     switch (e.key) {
       case "Escape":
         e.preventDefault();
@@ -569,35 +617,36 @@ export function CommandPalette({
         return;
       case "ArrowDown":
         e.preventDefault();
-        move(cursor + 1);
+        move(here + 1);
         return;
       case "ArrowUp":
         e.preventDefault();
-        move(cursor - 1);
+        move(here - 1);
         return;
       case "PageDown":
         e.preventDefault();
-        move(cursor + 10);
+        move(here + 10);
         return;
       case "PageUp":
         e.preventDefault();
-        move(cursor - 10);
+        move(here - 10);
         return;
       case "Home":
-        if (query === "") {
+        if (empty) {
           e.preventDefault();
           move(0);
         }
         return;
       case "End":
-        if (query === "") {
+        if (empty) {
           e.preventDefault();
           move(last);
         }
         return;
       case "Enter":
         e.preventDefault();
-        void run(selected);
+        if (commands === null && error === null) waiting.current = input.current?.value ?? query;
+        else void run(line.rows[line.at], line.args);
         return;
       default:
         return;
@@ -623,6 +672,8 @@ export function CommandPalette({
           ref={input}
           value={query}
           onChange={(e) => {
+            // A new first word starts unmoved, on its exact match; an argument typed after it keeps the cursor.
+            if (split(e.target.value).word !== moved.current.word) place(UNMOVED);
             setQuery(e.target.value);
             setNotice(null);
           }}
@@ -647,11 +698,11 @@ export function CommandPalette({
                   <div
                     key={row.entry.name}
                     role="option"
-                    aria-selected={index === cursor}
+                    aria-selected={index === at}
                     aria-disabled={row.reason !== null || undefined}
                     className={`row kind-${kind} ${row.reason ? "unavailable" : ""}`}
-                    onMouseMove={() => setCursor(index)}
-                    onClick={() => void run(row)}
+                    onMouseMove={() => place({ word, at: index })}
+                    onClick={() => void run(row, now().args)}
                   >
                     <span className="name">/{row.entry.name}</span>
                     <span className="summary">
