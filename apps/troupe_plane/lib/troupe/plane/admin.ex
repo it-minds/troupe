@@ -3987,7 +3987,11 @@ defmodule Troupe.Plane.Admin do
         {section, Map.take(entries, Map.keys(Map.get(now, section, %{})))}
       end
 
-    Audit.diff(was, kept)
+    # The profile's sentence is the document's own, not an entry's, so it is compared whole.
+    Map.merge(
+      Audit.diff(was, kept),
+      Audit.diff(%{"about" => Map.get(before, :about)}, %{"about" => Map.get(parsed, :about)})
+    )
   end
 
   # The version this is measured against: one named, or the channel's current. A channel

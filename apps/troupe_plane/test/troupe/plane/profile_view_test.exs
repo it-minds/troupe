@@ -148,7 +148,8 @@ defmodule Troupe.Plane.ProfileViewTest do
                  "permission" => "ask",
                  "tools" => "all",
                  "offered" => true,
-                 "why" => nil
+                 "why" => nil,
+                 "about" => nil
                },
                %{
                  "name" => "tracker",
@@ -157,7 +158,8 @@ defmodule Troupe.Plane.ProfileViewTest do
                  "permission" => "auto",
                  "tools" => ["search", "get"],
                  "offered" => true,
-                 "why" => nil
+                 "why" => nil,
+                 "about" => nil
                },
                %{
                  "name" => "warehouse",
@@ -166,9 +168,43 @@ defmodule Troupe.Plane.ProfileViewTest do
                  "permission" => "ask",
                  "tools" => "all",
                  "offered" => false,
-                 "why" => "grant"
+                 "why" => "grant",
+                 "about" => nil
                }
              ]
+    end
+
+    test "reads the bundle author's about: the profile's sentence, a server's subtitle and lines",
+         ctx do
+      assert view!(ctx.ada)["about"] == nil
+
+      [jira, tracker, warehouse] = bundle_content()["mcp_servers"]
+
+      tracker =
+        Map.put(tracker, "about", %{
+          "summary" => "The support desk's tickets",
+          "tools" => %{"search" => "Finds tickets by their words"}
+        })
+
+      content =
+        bundle_content()
+        |> Map.put("about", %{"summary" => "Reviews pull requests and files what it finds."})
+        |> Map.put("mcp_servers", [jira, tracker, warehouse])
+
+      {:ok, _bundle} = Bundles.publish("stable", content, announce: false)
+      view = view!(ctx.ada)
+
+      assert view["about"] == %{"summary" => "Reviews pull requests and files what it finds."}
+      servers = Map.new(view["tools"]["mcp"], &{&1["name"], &1["about"]})
+
+      assert servers == %{
+               "jira" => nil,
+               "tracker" => %{
+                 "summary" => "The support desk's tickets",
+                 "tools" => %{"search" => "Finds tickets by their words"}
+               },
+               "warehouse" => nil
+             }
     end
 
     test "sees the profile's rules as tool, pattern and access, and the skills the grant leaves",

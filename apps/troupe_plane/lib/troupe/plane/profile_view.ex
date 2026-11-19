@@ -2,7 +2,9 @@ defmodule Troupe.Plane.ProfileView do
   @moduledoc """
   What a profile gives a session, for the person about to start one: which agents, which
   skills, which MCP servers with whose access, the per-tool rules, the model, the hosts its
-  pods may reach, the limits and the team the session would belong to (`profile.get`).
+  pods may reach, the limits and the team the session would belong to (`profile.get`); and,
+  where the bundle's author wrote them, its `about` lines: what the profile is for, what
+  each server is and what each of its tools does.
 
   Composed here from the same pieces the plane hands a pod, and not from anything a client
   could compose for itself: the profile row in effect (its chain resolved), the channel's
@@ -198,6 +200,7 @@ defmodule Troupe.Plane.ProfileView do
       "bundle_hash" => offered.bundle_hash,
       "team" => team_name(team),
       "teams" => Enum.map(teams, & &1.name),
+      "about" => profile_about(parsed),
       "model" => model(row),
       "agents" => Enum.map(here, &own_limits(&1, definitions, cap)),
       "functions" => functions,
@@ -410,10 +413,21 @@ defmodule Troupe.Plane.ProfileView do
         "permission" => Atom.to_string(server.permission),
         "tools" => if(server.tools == :all, do: "all", else: server.tools),
         "offered" => offered?,
-        "why" => if(offered?, do: nil, else: "grant")
+        "why" => if(offered?, do: nil, else: "grant"),
+        "about" => server_about(Map.get(server, :about))
       }
     end
   end
+
+  # The bundle author's words for a reader, as the bundle carries them: the profile's
+  # sentence, and a server's subtitle and its line per tool.
+  defp profile_about(%{about: %{summary: summary}}), do: %{"summary" => summary}
+  defp profile_about(_parsed), do: nil
+
+  defp server_about(%{summary: summary, tools: tools}),
+    do: %{"summary" => summary, "tools" => tools}
+
+  defp server_about(_none), do: nil
 
   defp servers_of(nil), do: []
   defp servers_of(%{mcp_servers: servers}), do: servers

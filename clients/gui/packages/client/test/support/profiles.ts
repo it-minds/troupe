@@ -17,6 +17,8 @@ export interface FakeBundleServer {
   credential_mode: "person" | "profile" | "client_credentials";
   permission: "auto" | "ask";
   tools: string[] | "all";
+  /** The bundle author's subtitle and a line per tool, as a server's `about` carries them. */
+  about?: { summary?: string; tools?: Record<string, string> };
 }
 
 export interface FakeProfileSpec {
@@ -25,6 +27,8 @@ export interface FakeProfileSpec {
   bundle_version: string;
   bundle_hash: string;
   bundle: {
+    /** The bundle's `about`: what the profile is for, in its author's words. */
+    about?: { summary: string };
     /** `max_turns` and `max_tokens` as the definition's front matter sets them. */
     agents: Array<{ name: string; mode: "primary" | "subagent" | "function"; description: string; max_turns?: number; max_tokens?: number }>;
     skills: string[];
@@ -102,12 +106,20 @@ export function exampleProfiles(): FakeProfileSpec[] {
       bundle_version: "3",
       bundle_hash: "sha256:abc",
       bundle: {
+        about: { summary: "Builds and reviews the team's services, from the issue to the pull request." },
         agents: [{ name: "reviewer", mode: "subagent", description: "Reads a diff and comments on it", max_turns: 20 }],
         skills: ["review"],
         skill_files: { review: { description: "read a diff and comment", body: "## Reviewing\n\nRead the **whole** diff before the first comment." } },
         mcp_servers: [
           { name: "github", url: "https://api.githubcopilot.com/mcp/", credential_mode: "person", permission: "ask", tools: "all" },
-          { name: "jira", url: "https://mcp.example.com/jira", credential_mode: "profile", permission: "auto", tools: ["search_issues", "get_issue"] },
+          {
+            name: "jira",
+            url: "https://mcp.example.com/jira",
+            credential_mode: "profile",
+            permission: "auto",
+            tools: ["search_issues", "get_issue"],
+            about: { summary: "The team's issue tracker", tools: { search_issues: "Finds issues by their words" } },
+          },
           { name: "wiki", url: "https://wiki.example.com/mcp", credential_mode: "client_credentials", permission: "ask", tools: ["read_page"] },
         ],
       },
@@ -190,6 +202,7 @@ export function composeProfile(
     bundle_hash: spec.bundle_hash,
     team,
     teams,
+    about: spec.bundle.about ?? null,
     model: {
       model: spec.llm?.model ?? null,
       small_model: spec.llm?.smallModel ?? null,
@@ -231,7 +244,8 @@ export function composeProfile(
       rules: rules("profile", spec.permissions ?? {}),
       mcp: spec.bundle.mcp_servers.map((s) => {
         const out = (grant.servers_out ?? []).includes(s.name);
-        return { name: s.name, host: hostOf(s.url), access: ACCESS[s.credential_mode], permission: s.permission, tools: s.tools, offered: !out, why: out ? "grant" : null };
+        const about = s.about ? { summary: s.about.summary ?? null, tools: s.about.tools ?? {} } : null;
+        return { name: s.name, host: hostOf(s.url), access: ACCESS[s.credential_mode], permission: s.permission, tools: s.tools, offered: !out, why: out ? "grant" : null, about };
       }),
     },
     // What the operator derives: the egress list, the model's host and each server's host.

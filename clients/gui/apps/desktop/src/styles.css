@@ -5950,7 +5950,7 @@ pre.instruction {
 .profile-link {
   margin-left: var(--space-2);
 }
-/* The page's head sentence: the primary agent's own words. */
+/* The page's head sentence: the bundle author's words for it, or the primary agent's. */
 .screen-head p.profile-sentence {
   max-width: var(--measure-reading);
 }
@@ -6047,6 +6047,25 @@ pre.instruction {
   gap: var(--space-1) var(--space-3);
 }
 .profile-card ul.tool-list s {
+  color: var(--text-secondary);
+}
+/* A server's subtitle under its name, and a line per tool with the tool's name after it,
+   small and in the code face. */
+.profile-card > p.profile-subtitle {
+  margin: 0 0 var(--space-2);
+  font: var(--t-ui-small);
+  color: var(--text-body);
+}
+.profile-card ul.tool-lines {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+.profile-card ul.tool-lines > li + li {
+  margin-top: var(--space-1);
+}
+.profile-card ul.tool-lines .tool-name {
+  font: var(--t-micro);
   color: var(--text-secondary);
 }
 /* The rail's limits: a sentence each, under a small heading. */

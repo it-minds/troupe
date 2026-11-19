@@ -1035,6 +1035,61 @@ defmodule Troupe.Plane.AdminTest do
       refute Enum.any?(Map.keys(moved.changes), &String.starts_with?(&1, "agents."))
     end
 
+    test "about is checked as publishing checks it, and a preview says what it changes",
+         context do
+      server = fn about ->
+        %{
+          "name" => "jira",
+          "url" => "https://mcp.jira.example/mcp",
+          "tools" => ["search_issues"],
+          "about" => about
+        }
+      end
+
+      document = fn summary, about ->
+        %{"schema" => 1, "about" => %{"summary" => summary}, "mcp_servers" => [server.(about)]}
+      end
+
+      typo = document.("Files issues.", %{"tools" => %{"serch_issues" => "Finds issues"}})
+      assert {:error, error} = Admin.bundle_validate(context.root, typo)
+      assert error.data.reason == "invalid bundle"
+
+      assert error.data.errors == [
+               "mcp server jira: about.tools names serch_issues, which its tools do not carry"
+             ]
+
+      assert {:error, ^error} = Admin.bundle_publish(context.root, "stable", typo)
+
+      published = document.("Files issues.", %{"summary" => "The issue tracker"})
+      assert {:ok, _} = Admin.bundle_publish(context.root, "stable", published)
+
+      draft =
+        document.("Files and triages issues.", %{
+          "summary" => "The team's issue tracker",
+          "tools" => %{"search_issues" => "Finds issues by their words"}
+        })
+
+      assert {:ok, preview} = Admin.bundle_preview(context.root, "stable", draft)
+
+      assert preview.changes == %{
+               "about.summary" => %{"from" => "Files issues.", "to" => "Files and triages issues."},
+               "mcp_servers.jira.about.summary" => %{
+                 "from" => "The issue tracker",
+                 "to" => "The team's issue tracker"
+               },
+               "mcp_servers.jira.about.tools.search_issues" => %{
+                 "from" => nil,
+                 "to" => "Finds issues by their words"
+               }
+             }
+
+      # A sentence taken away is a change too, said as the whole of what it was.
+      assert {:ok, gone} =
+               Admin.bundle_preview(context.root, "stable", Map.delete(draft, "about"))
+
+      assert gone.changes["about"] == %{"from" => %{summary: "Files issues."}, "to" => nil}
+    end
+
     test "an MCP host is checked against the same policy publishing uses", context do
       Application.put_env(:troupe_plane, :egress_allowed, fn host ->
         host == "mcp.jira.example"

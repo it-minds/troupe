@@ -29,7 +29,8 @@ defmodule Troupe.Plane.Bundles.Effective do
   replace a built-in); otherwise the one above is kept and the clash is reported. For a
   channel the flag is in its document, so a publish of that channel carries it again with
   the entry; for a profile's own server it is on the server in the spec. A layer cannot take
-  an entry away: if a team should have less, the standard is too wide.
+  an entry away: if a team should have less, the standard is too wide. The document's own
+  `about`, the profile's sentence, is the nearest layer's that says one.
 
   ## What is published
 
@@ -151,6 +152,7 @@ defmodule Troupe.Plane.Bundles.Effective do
           lists
           |> Map.new(fn {kind, entries} -> {kind, Enum.map(entries, &strip/1)} end)
           |> Map.put("schema", Document.schema())
+          |> put_about(documents)
 
         sources = for kind <- @kinds, entry <- content[kind], do: from[{kind, entry["name"]}]
 
@@ -163,6 +165,15 @@ defmodule Troupe.Plane.Bundles.Effective do
           entries: Enum.map(sources, &Map.drop(&1, [:spec])),
           problems: problems ++ invalid(content)
         }
+    end
+  end
+
+  # The profile's sentence is the nearest layer's that says one: a child's channel says
+  # what the child is for, and one that says nothing keeps what its parent's says.
+  defp put_about(content, documents) do
+    case for({_layer, %{"about" => about}} <- documents, not is_nil(about), do: about) do
+      [] -> content
+      abouts -> Map.put(content, "about", List.last(abouts))
     end
   end
 

@@ -8,8 +8,8 @@
 // and works none of it out, so what it says is what a session gets. A plane is the only
 // thing that knows, so the screen is offered only while signed in to one.
 //
-// The page answers "can this profile do my job?" first: a head with the primary agent's
-// sentence, a rail with the room, the model, the budgets, whose credentials and what asks
+// The page answers "can this profile do my job?" first: a head with the sentence the
+// bundle's author wrote for it, or else the primary agent's, a rail with the room, the model, the budgets, whose credentials and what asks
 // first, the limits a session is held to in sentences, and Start; then what it can do, what it can't, how it behaves (guidance, not
 // limits), and the configuration's own tables folded away under the hood. On a narrow
 // window the rail comes first; a table scrolls inside itself rather than the page sideways.
@@ -31,15 +31,17 @@ import {
   keyWords,
   limitSentences,
   missingWords,
+  profileSentence,
   profileSummary,
   roomWords,
   ruleAccessWords,
   ruleText,
   teamBudgetWords,
+  toolLines,
   toolsAreWhole,
   whoseWords,
 } from "@troupe/client";
-import type { AuthSession, ProfileView, ProfileViewAgent, ProfileViewSkill } from "@troupe/client";
+import type { AuthSession, ProfileView, ProfileViewAgent, ProfileViewServer, ProfileViewSkill } from "@troupe/client";
 import { useProfiles } from "../hooks";
 import { Loading, Table } from "./bits";
 import { ProseFrame } from "./Frames";
@@ -127,7 +129,7 @@ export function ProfilePage({
   onStart?: ((name: string) => void) | undefined;
 }): JSX.Element {
   const read = useProfileView(auth, name);
-  const primary = read && "view" in read ? read.view.agents.find((a) => a.mode === "primary") : undefined;
+  const sentence = read && "view" in read ? profileSentence(read.view) : null;
   return (
     <>
       <header className="screen-head">
@@ -137,7 +139,7 @@ export function ProfilePage({
           </button>
         </span>
         <h1 className="mono">{name}</h1>
-        {primary?.description && <p className="profile-sentence">{primary.description}</p>}
+        {sentence && <p className="profile-sentence">{sentence}</p>}
       </header>
       <div className="listing profile-view">
         {!read ? (
@@ -234,6 +236,7 @@ function CanDo({ view }: { view: ProfileView }): JSX.Element {
         {offered.map((s) => (
           <li key={s.name} className="profile-card">
             <h4 className="mono">{s.name}</h4>
+            {s.about?.summary && <p className="profile-subtitle">{s.about.summary}</p>}
             <dl className="facts wide">
               <dt>Host</dt>
               <dd className="mono">{s.host ?? "not said"}</dd>
@@ -242,13 +245,42 @@ function CanDo({ view }: { view: ProfileView }): JSX.Element {
               <dt>Each call</dt>
               <dd>{askWords(s.permission)}</dd>
               <dt>Its tools</dt>
-              <dd className={s.tools === "all" ? undefined : "mono"}>{s.tools === "all" ? "every tool it has" : s.tools.join(", ")}</dd>
+              <ServerTools server={s} />
             </dl>
           </li>
         ))}
         <TroupeCard view={view} />
       </ul>
     </section>
+  );
+}
+
+/**
+ * A server's tools on its card: the names, as the allowlist gives them, until the bundle's
+ * author writes a line for one, which then says what it does, its name in a small tail.
+ */
+function ServerTools({ server }: { server: ProfileViewServer }): JSX.Element {
+  const tools = toolLines(server);
+  if (!tools.some((t) => t.line !== null)) {
+    return <dd className={server.tools === "all" ? undefined : "mono"}>{server.tools === "all" ? "every tool it has" : tools.map((t) => t.name).join(", ")}</dd>;
+  }
+  return (
+    <dd>
+      {server.tools === "all" && <p className="micro">Every tool it has, among them:</p>}
+      <ul className="tool-lines">
+        {tools.map((t) =>
+          t.line === null ? (
+            <li key={t.name} className="mono">
+              {t.name}
+            </li>
+          ) : (
+            <li key={t.name} title={t.name}>
+              {t.line} <span className="tool-name">{t.name}</span>
+            </li>
+          ),
+        )}
+      </ul>
+    </dd>
   );
 }
 

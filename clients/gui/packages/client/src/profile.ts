@@ -63,6 +63,15 @@ export interface ProfileViewServer {
   tools: string[] | "all";
   offered: boolean;
   why: null | "grant" | string;
+  /** Its subtitle and a line per tool, in the bundle author's words; absent or null where unsaid. */
+  about?: ProfileViewServerAbout | null;
+}
+
+/** What a server is, and what each of its tools does, as the bundle's author wrote it. */
+export interface ProfileViewServerAbout {
+  summary: string | null;
+  /** A line per tool, by the tool's name. */
+  tools: Record<string, string>;
 }
 
 export interface ProfileViewModel {
@@ -126,6 +135,8 @@ export interface ProfileView {
   team: string | null;
   /** Every team of the caller's that may use it. */
   teams: string[];
+  /** What the profile is for, in the bundle author's words; absent or null where unsaid. */
+  about?: { summary: string } | null;
   model: ProfileViewModel;
   agents: ProfileViewAgent[];
   /** The function agents the harness may run there; absent from a plane before them. */
@@ -256,6 +267,25 @@ function hostsWords(hosts: string[]): string {
   if (hosts.length === 0) return "reaches no host";
   const named = hosts.slice(0, 2).join(", ");
   return hosts.length > 2 ? `reads ${named} and ${hosts.length - 2} more` : `reads ${named}`;
+}
+
+/**
+ * The sentence under a profile's name: what its bundle's author says it is for, else what
+ * its first primary agent says it does; null where neither says anything.
+ */
+export function profileSentence(view: Pick<ProfileView, "about" | "agents">): string | null {
+  return view.about?.summary ?? view.agents.find((a) => a.mode === "primary")?.description ?? null;
+}
+
+/**
+ * A server's tools as its card lists them: each with the author's line for it where there is
+ * one. The allowlist's order, or, for a server with every tool, the tools the author wrote a
+ * line for; empty for such a server with none.
+ */
+export function toolLines(server: Pick<ProfileViewServer, "tools" | "about">): { name: string; line: string | null }[] {
+  const lines = server.about?.tools ?? {};
+  const names = server.tools === "all" ? Object.keys(lines).sort() : server.tools;
+  return names.map((name) => ({ name, line: lines[name] ?? null }));
 }
 
 /** One line for a list of profiles: its agents, the servers it is offered, the hosts it reads. */

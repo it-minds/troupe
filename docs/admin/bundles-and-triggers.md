@@ -13,6 +13,7 @@ console check the same thing.
 
 ```json
 {"schema": 1,
+ "about":       {"summary": "Reviews pull requests against the house checklist."},
  "agents":      [{"name": "pr-reviewer", "definition": "---\nmode: primary\n---\nYou review…"}],
  "skills":      [{"name": "review-checklist", "description": "How we review…",
                   "agents": ["build", "pr-reviewer"], "files": {"SKILL.md": "…"}}],
@@ -26,9 +27,13 @@ console check the same thing.
 
 An `acp_agents` entry is another vendor's coding agent the worker runs as a subprocess and
 speaks ACP to, through the session's mounts; a team's grant narrows it as it does an agent.
-
 A document with no `schema` key is schema 0, of which only `mcp_servers` is read; it is
 accepted for planes upgraded under one and never written again.
+
+`about` is what the apps' page on the profile says, never a session: at the top `{summary}`,
+the sentence under its name (≤ 200 characters, else the primary agent's description); on a
+server `{summary, tools}`, a subtitle and a line per tool it carries, any where `tools` is
+`all` (each ≤ 120). A worker from before `about` refuses a top-level one: upgrade it first.
 
 On a pod the bundle's agents and skills, and Troupe's built-in agents, beat a working
 copy's of the same name unless the profile says otherwise
@@ -38,7 +43,7 @@ a skill opens itself with `agents`: `"all"`, or a list of names, Troupe's built-
 them, so `build` loads a bundle's skill without a copy of `build` in the bundle. A team's
 grant narrows after both; `admin.profile.agents` says what each agent `loads` (Decision 980).
 
-**Validation.** At most 4 MiB; only those five keys; names `^[a-z0-9][a-z0-9-]{0,63}$`,
+**Validation.** At most 4 MiB; only those six keys; names `^[a-z0-9][a-z0-9-]{0,63}$`,
 unique per kind. An agent's definition must parse as frontmatter plus prompt, may list only
 skills the bundle has, and replaces an agent Troupe ships (`build`, `plan`, `general`,
 `explore`, `quick`, `answer`, `ask`, `reviewer`, `implementer`, `librarian`,
@@ -71,8 +76,7 @@ the policy's egress check. Publishing to a channel a pod profile follows also re
 (`true` or `false`, nothing else). It matters where a profile on this channel extends one on
 another and the plane composes the two channels' bundles: an entry named like one in the
 parent's bundle replaces it only with the flag
-([profile-options.md](profile-options.md#a-profile-that-extends-another),
-Decision 910).
+([profile-options.md](profile-options.md#a-profile-that-extends-another), Decision 910).
 
 **MCP entries.**
 
@@ -88,6 +92,7 @@ Decision 910).
 | `tools` | allowlist applied at discovery: an unlisted tool is absent, not denied | `all` |
 | `stores` | `files`: where the organisation keeps files, which an agent asked for a file uses first ([profile options](profile-options.md#where-the-organisation-keeps-files)) | unset |
 | `files` | with `stores: files`, the tools that save a file | all of them |
+| `about` | `{summary, tools}`: a subtitle and a line per tool for the profile's page (above) | unset |
 
 On publish the plane projects each server onto the profile's resource. A `profile`-mode
 server with a `credential_ref` gets `secretRef: {name: "troupe-mcp-<server>", key: "token"}`,
@@ -108,18 +113,17 @@ OpenBao transit and signs without leaving it; there is no Secret to create. Sett
 client, the certificate and the key, and rotating them, is in
 [profiles and policy](profile-options.md#calling-an-mcp-server-as-the-profile) (Decision 747).
 
-**Publish, adopt, retire.** `admin.bundle.publish {channel, content}` validates, assigns
-the channel's next version, stores the document under `sha256:<canonical JSON>`, pushes
+**Publish, adopt, retire.** `admin.bundle.publish {channel, content}` validates, assigns the
+channel's next version, stores the document under `sha256:<canonical JSON>`, pushes
 `config.updated` to every pod on the channel and rewrites `mcpServers` on those profiles:
 the channel's servers composed again with the ones each profile wrote itself, which a
 publish keeps (Decision 910). A profile created on a channel, or moved onto one, gets the
-channel's current servers with that write, not at its next publish. History is
-append-only; a rollback is a new version with the old content. Pods fetch the version over
-the control channel, verify the hash and materialise
-`bundles/<hash>/{agents, skills, bundle.json}`; one that missed the push catches up at its
-next heartbeat. `admin.bundle.get` shows per profile which pods are `current`, `ahead` or
-`stale`. `admin.bundle.validate`, `admin.bundle.preview` and `admin.mcp.check` run the
-checks without publishing.
+channel's current servers with that write, not at its next publish. History is append-only;
+a rollback is a new version with the old content. Pods fetch the version over the control
+channel, verify the hash and materialise `bundles/<hash>/{agents, skills, bundle.json}`; one
+that missed the push catches up at its next heartbeat. `admin.bundle.get` shows per profile
+which pods are `current`, `ahead` or `stale`. `admin.bundle.validate`,
+`admin.bundle.preview` and `admin.mcp.check` run the checks without publishing.
 
 A new version applies to **new sessions only**; a running session keeps the version
 recorded when it was created until `admin.bundle.retire` retires that version, after which
@@ -173,15 +177,14 @@ fires once, not once per missed minute; a trigger that has never fired fires onl
 minute is within the last 120 s.
 
 **Firing by hand or from outside.** `trigger.fire {trigger, idempotency_key, event}` on
-`/rpc`, by the trigger's principal or an admin of its team, writes the run row first, so
-two callers racing on one key get the same run: skipped stays skipped, failed is retried
-under the caps as a new firing is, a
-run with a session is handed it and a fresh token, and one still making its session is waited
-for, up to five seconds, after which the answer is `409` naming the run. `event` is capped at
-16 KiB.
-`admin.trigger.run` fires one by hand, as the console's **Run** on a trigger's page does (its confirmation, **Run** *the trigger's name* **now**);
-a second click or a retry by the same person less than a minute after the first is the run
-the first one made, whatever minute the clock has turned to between them.
+`/rpc`, by the trigger's principal or an admin of its team, writes the run row first, so two
+callers racing on one key get the same run: skipped stays skipped, failed is retried under
+the caps as a new firing is, a run with a session is handed it and a fresh token, and one
+still making its session is waited for, up to five seconds, after which the answer is `409`
+naming the run. `event` is capped at 16 KiB. `admin.trigger.run` fires one by hand, as the
+console's **Run** on a trigger's page does (its confirmation, **Run** *the trigger's name*
+**now**); a second click or a retry by the same person less than a minute after the first is
+the run the first one made, whatever minute the clock has turned to between them.
 
 **A trigger's own URL.** A trigger with a key is fired by `POST /trigger/<id>` with
 `Authorization: Bearer <key>` and a JSON object as the body, which becomes the run's
@@ -282,12 +285,11 @@ and a profile the plane has. Profiles are read first in the same pass, so a trig
 profile can arrive in one commit. A spec field a `Trigger` has not got is refused too: the
 CRD keeps unknown fields so that a misspelt `promptTemplate` reaches the plane rather than
 making a trigger that asks for nothing. One that fails is **refused**: a new one gets no
-trigger, and a changed one leaves the trigger as the last version that passed, still
-firing. The reasons are in the log once, in `admin.triggers.list` (each trigger carries
-`gitops`: the resource, the generation it was read at, and a `problem` of `refused` or
-`missing` with `reasons`; a refused resource with no trigger is listed by name, to a
-platform admin with `team` null where it names no team the plane has), and on the
-console's Triggers page.
+trigger, and a changed one leaves the trigger as the last version that passed, still firing.
+The reasons are in the log once, in `admin.triggers.list` (each trigger carries `gitops`:
+the resource, the generation it was read at, and a `problem` of `refused` or `missing` with
+`reasons`; a refused resource with no trigger is listed by name, to a platform admin with
+`team` null where it names no team the plane has), and on the console's Triggers page.
 
 **Locked.** The Triggers page is marked **Held in a repository**, with no form, no switch and
 no delete, and `admin.trigger.put` (switching one on or off included) and
@@ -309,14 +311,12 @@ URL and no key.
 
 **Teams, principals and grants** stay in the plane's database, and a trigger names them.
 Enable the team and make the principal before the manifest merges, or the resource is
-reported until they exist. Disabling a team deletes its triggers as it always has; their
-resources are then reported as naming a team the plane does not have, until they leave the
-repository.
+reported until they exist. Disabling a team deletes its triggers; their resources are then
+reported as naming a team the plane does not have, until they leave the repository.
 
 **On a direct plane** the same resources are listed and never followed: an administrator
 copies one into a row (`admin.trigger.copy`) and copies it again when it changes, and the
-console says which rows have drifted
-([gitops.md](gitops.md#triggers-from-a-repository-on-a-direct-plane)).
+console says which rows have drifted ([gitops.md](gitops.md#triggers-from-a-repository-on-a-direct-plane)).
 
 **From a running plane.** `admin.profiles.export` gives every trigger as
 `triggers/<team>/<trigger>.yaml`, beside the profiles and the policy, with its document and
