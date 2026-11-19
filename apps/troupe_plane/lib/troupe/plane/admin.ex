@@ -56,7 +56,7 @@ defmodule Troupe.Plane.Admin do
   }
 
   alias Troupe.Plane.Control.TLS
-  alias Troupe.Plane.Fleet.{Bundle, Extends, Provisioner, Scaler, SizeClass, Worker}
+  alias Troupe.Plane.Fleet.{Bundle, Extends, Provisioner, Scaler, SizeClass, Sweeper, Worker}
   alias Troupe.Plane.GitHub.Issue, as: GitHubIssue
   alias Troupe.Plane.GitHub.Issues, as: GitHubIssues
   alias Troupe.Plane.GitHub.Policy, as: GitHubPolicy
@@ -2068,10 +2068,17 @@ defmodule Troupe.Plane.Admin do
       sessions = Sessions.for_admin(actor, team_ids(actor), opts)
       # Whether each running pod session's last turn read the memory in force for it now.
       standing = Memory.standing(sessions)
+      pods = Fleet.pod_names(Enum.map(sessions, & &1.worker_id))
 
       {:ok,
        sessions
-       |> Enum.map(&Map.put(session_summary(&1), :memory, standing[&1.id]))
+       |> Enum.map(
+         &(session_summary(&1)
+           |> Map.put(:memory, standing[&1.id])
+           # The pod an active session is on, by name, and `nil` for none: an `active` row
+           # on no pod is one the scaler counts and no pod runs.
+           |> Map.put(:pod, pods[&1.worker_id]))
+       )
        |> Names.decorate(owner: :owner_name)}
     end
   end
@@ -5480,6 +5487,29 @@ defmodule Troupe.Plane.Admin do
       capacity: Enum.sum(Enum.map(workers, & &1.capacity)),
       active_sessions: Enum.sum(Enum.map(workers, & &1.active_sessions))
     }
+    |> Map.merge(adrift(profile.name))
+  end
+
+  # Sessions the scaler counts as running that no pod holds, past the moment a create or a
+  # wake takes to place one: what keeps a profile nobody uses at a pod, said in the
+  # sweep's words. `nil` for none.
+  defp adrift(name) do
+    after_ms = Sweeper.adrift_after_ms()
+
+    case Sessions.adrift_count(name, after_ms) do
+      0 ->
+        %{sessions_without_pod: 0, sessions_without_pod_note: nil}
+
+      n ->
+        %{
+          sessions_without_pod: n,
+          sessions_without_pod_note:
+            "#{Words.count(n, "session")} counted as running #{if n == 1, do: "has", else: "have"} " <>
+              "been on no pod for more than #{Words.duration(after_ms)}; the sweep marks " <>
+              "#{if n == 1, do: "it", else: "them"} dormant, and the profile's demand counts " <>
+              "#{if n == 1, do: "it", else: "them"} until then"
+        }
+    end
   end
 
   # A missing guarantee and the weaker one given in its place, by name:

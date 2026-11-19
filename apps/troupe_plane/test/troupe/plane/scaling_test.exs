@@ -17,9 +17,9 @@ defmodule Troupe.Plane.ScalingTest do
 
   use Troupe.Plane.DataCase, async: false
 
+  alias Troupe.Plane.{Admin, Drain, FakeCluster, FakePod, Fleet, Harness, Placement, Provision, Sessions}
   alias Troupe.Plane.Control.{Connections, Listener}
-  alias Troupe.Plane.{Drain, FakeCluster, FakePod, Fleet, Harness, Placement, Provision, Sessions}
-  alias Troupe.Plane.Fleet.{Scaler, SizeClass, Worker}
+  alias Troupe.Plane.Fleet.{Scaler, SizeClass, Sweeper, Worker}
 
   @moduletag timeout: 60_000
 
@@ -290,6 +290,143 @@ defmodule Troupe.Plane.ScalingTest do
       writes = FakeCluster.writes()
       assert [%{want: 2, changed: false}] = Scaler.tick(later(30))
       assert FakeCluster.writes() == writes
+    end
+  end
+
+  # Issue #1141: a profile nobody used stayed at a pod, because a session `active` on no pod
+  # was counted every tick and reached by no rescue, each of which starts from a pod.
+  describe "a session counted as running on no pod" do
+    test "is dormant after a sweep, and the profile then asks only for its warm worker",
+         context do
+      {:ok, _} = Fleet.put_profile(%{name: "dev", size_class: "standard", warm_workers: 1})
+      adrift = adrift(context, "s-adrift", Sweeper.adrift_after_ms() + 1_000)
+
+      assert %{active: 1, asks_for: 2, want: 2} = plan(context)
+
+      :ok = Sweeper.run()
+
+      assert %{state: "dormant", worker_id: nil} = Sessions.get(adrift.id)
+      assert %{active: 0, asks_for: 1, want: 1} = plan(context)
+    end
+
+    test "is left alone in the moment between its row and its placement", context do
+      fresh = adrift(context, "s-fresh", 0)
+
+      :ok = Sweeper.run()
+
+      assert Sessions.get(fresh.id).state == "active"
+    end
+
+    test "is said on the profile, in the sweep's words, until the sweep has marked it",
+         context do
+      adrift(context, "s-adrift", Sweeper.adrift_after_ms() + 1_000)
+      admin = %{subject: "root", role: :platform_admin, teams: []}
+
+      assert {:ok, [summary]} = Admin.profiles_list(admin)
+      assert summary.sessions_without_pod == 1
+
+      assert summary.sessions_without_pod_note ==
+               "1 session counted as running has been on no pod for more than 1 min; the sweep " <>
+                 "marks it dormant, and the profile's demand counts it until then"
+
+      :ok = Sweeper.run()
+
+      assert {:ok, [after_sweep]} = Admin.profiles_list(admin)
+      assert after_sweep.sessions_without_pod == 0
+      assert after_sweep.sessions_without_pod_note == nil
+    end
+
+    test "is listed to an administrator with no pod, beside one that has its pod", context do
+      {:ok, _} = Fleet.put_profile(%{name: "dev", size_class: "standard"})
+      _pod = FakePod.enrol(Listener.port(), "dev-token", "troupe-w-dev-0", capacity: 4)
+      assert {:ok, %{"session_id" => placed}} = create(context)
+      assert_receive {:pushed, "session.activate", _}, 5_000
+      adrift(context, "s-adrift", 0)
+      admin = %{subject: "root", role: :platform_admin, teams: []}
+
+      assert {:ok, rows} = Admin.sessions_list(admin, state: "active")
+      pods = Map.new(rows, &{&1.id, &1.pod})
+
+      assert pods == %{placed => "troupe-w-dev-0", "s-adrift" => nil}
+    end
+
+    test "a wake with no pod to put it on asks for one, and the sweep puts it back to sleep",
+         context do
+      {:ok, _} =
+        Sessions.create(%{
+          id: "s-asleep",
+          owner_subject: context.ada.subject,
+          owner_id: context.ada.id,
+          team_id: context.team.id,
+          profile: "dev",
+          state: "dormant"
+        })
+
+      assert {:error, %{message: "unavailable"}} =
+               Harness.call(
+                 "session.open",
+                 %{"session_id" => "s-asleep", "mode" => "activate"},
+                 context.caller
+               )
+
+      # Left `active` on no pod, so the scaler brings a pod up for it, which is how a wake on
+      # a profile at no pods gets one; and once it has been so past the sweep's minute, it
+      # is asleep again and the next open wakes it onto that pod.
+      assert %{state: "active", worker_id: nil} = Sessions.get("s-asleep")
+      assert %{active: 1, want: 1} = plan(context)
+
+      written_ago("s-asleep", Sweeper.adrift_after_ms() + 1_000)
+
+      :ok = Sweeper.run()
+
+      assert %{state: "dormant", worker_id: nil} = Sessions.get("s-asleep")
+      assert %{active: 0, want: 0} = plan(context)
+    end
+  end
+
+  describe "a rescue" do
+    test "marks the row before it gives the slot back, so stopping between leaves no row on no pod",
+         context do
+      {:ok, _} = Fleet.put_profile(%{name: "dev", size_class: "standard"})
+      _pod = FakePod.enrol(Listener.port(), "dev-token", "troupe-w-dev-0", capacity: 4)
+      assert {:ok, %{"session_id" => id}} = create(context)
+      assert_receive {:pushed, "session.activate", _}, 5_000
+      worker = Fleet.get_worker(Sessions.get(id).worker_id)
+
+      # The placement actor is held, so a rescue that reaches it waits there; the rescue
+      # is then stopped where it waits, which is between its two writes.
+      _ = Placement.inspect_state("dev")
+      actor = :global.whereis_name({Placement, "dev"})
+      :ok = :sys.suspend(actor)
+
+      rescuer = spawn(fn -> Drain.strand(worker, id) end)
+
+      try do
+        assert eventually(fn -> Sessions.get(id).state == "dormant" end, 2_000),
+               "the rescue gave the slot back before it marked the row"
+
+        Process.exit(rescuer, :kill)
+      after
+        :sys.resume(actor)
+      end
+
+      assert %{state: "dormant", worker_id: nil} = Sessions.get(id)
+    end
+
+    test "read before a session moved leaves it where it went", context do
+      {:ok, _} = Fleet.put_profile(%{name: "dev", size_class: "standard"})
+      _pod = FakePod.enrol(Listener.port(), "dev-token", "troupe-w-dev-0", capacity: 4)
+      _other = FakePod.enrol(Listener.port(), "dev-token", "troupe-w-dev-1", capacity: 4)
+      assert {:ok, %{"session_id" => id}} = create(context)
+      assert_receive {:pushed, "session.activate", _}, 5_000
+
+      on = Fleet.get_worker(Sessions.get(id).worker_id)
+      [elsewhere] = Enum.reject(Fleet.list_workers("dev"), &(&1.id == on.id))
+
+      # A rescue of `elsewhere` that read the session as on it, before it moved to `on`.
+      assert {:error, :moved} = Drain.strand(elsewhere, id)
+      assert %{state: "active", worker_id: worker_id} = Sessions.get(id)
+      assert worker_id == on.id
     end
   end
 
@@ -607,6 +744,26 @@ defmodule Troupe.Plane.ScalingTest do
         5_000 -> flunk("a drain the scaler started did not finish")
       end
     end
+  end
+
+  # A session `active` on no pod, last written `ago_ms` ago.
+  defp adrift(context, id, ago_ms) do
+    {:ok, session} =
+      Sessions.create(%{
+        id: id,
+        owner_subject: context.ada.subject,
+        team_id: context.team.id,
+        profile: "dev",
+        state: "active"
+      })
+
+    %{session | updated_at: written_ago(id, ago_ms)}
+  end
+
+  defp written_ago(id, ago_ms) do
+    at = DateTime.add(DateTime.utc_now(), -ago_ms, :millisecond)
+    Repo.update_all(from(s in Sessions.Session, where: s.id == ^id), set: [updated_at: at])
+    at
   end
 
   # Every worker of the profile, last heard from a minute ago. The lease is fifteen

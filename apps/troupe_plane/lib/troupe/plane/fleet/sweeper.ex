@@ -20,7 +20,11 @@ defmodule Troupe.Plane.Fleet.Sweeper do
   The sweep runs on every replica, and stranding is idempotent: a session that is already
   dormant is not on a worker, so the next sweep has nothing to find.
 
-  A third pass forgets a pod its substrate no longer runs, once it has been quiet past a
+  Every rescue above starts from a pod, so a session `active` on no pod at all is reached
+  by none of them, and the scaler counts it for good. A pass of its own marks such a
+  session dormant once it has been so for a minute (`Sessions.adrift/1`).
+
+  A last pass forgets a pod its substrate no longer runs, once it has been quiet past a
   drain's deadline and holds nothing (`Fleet.forget_gone/0`): a scale-down's pods were
   otherwise listed for ever as draining. Idempotent too, since a row deleted is not found
   again.
@@ -28,7 +32,7 @@ defmodule Troupe.Plane.Fleet.Sweeper do
 
   use GenServer
 
-  alias Troupe.Plane.{Drain, Fleet}
+  alias Troupe.Plane.{Drain, Fleet, Sessions}
 
   require Logger
 
@@ -51,6 +55,16 @@ defmodule Troupe.Plane.Fleet.Sweeper do
 
   @impl GenServer
   def handle_info(:sweep, state) do
+    :ok = run()
+    schedule(state.interval_ms)
+    {:noreply, state}
+  end
+
+  def handle_info(_message, state), do: {:noreply, state}
+
+  @doc "One whole pass, as the timer runs it: pods marked, what they held rescued, rows forgotten."
+  @spec run() :: :ok
+  def run do
     # Two passes because they are two questions. Marking a pod unhealthy stops placement;
     # rescuing what it was holding is about sessions, and a pod marked unhealthy an hour
     # ago still holds whatever it held.
@@ -68,6 +82,17 @@ defmodule Troupe.Plane.Fleet.Sweeper do
       )
     end
 
+    # A session counted as running that names no pod is reached by nothing above, since
+    # every rescue starts from a pod, and the scaler keeps a pod of its profile up for it.
+    # One whose pod is healthy and does not hold it is put to sleep when the pod answers
+    # what it holds, which the pod's connection asks on its own schedule.
+    for session <- Sessions.adrift(adrift_after_ms()), {:ok, _} <- [Drain.rest(session)] do
+      Logger.warning(
+        "troupe plane: #{session.id} of #{session.profile} was counted as running on no pod " <>
+          "since #{DateTime.to_iso8601(session.updated_at)}; it is dormant and wakes as usual"
+      )
+    end
+
     # After the rescue, so a pod whose sessions were just marked dormant holds none, and
     # its row goes once it has been quiet past a drain's deadline and is no longer run.
     for worker <- Fleet.forget_gone() do
@@ -77,11 +102,17 @@ defmodule Troupe.Plane.Fleet.Sweeper do
       )
     end
 
-    schedule(state.interval_ms)
-    {:noreply, state}
+    :ok
   end
 
-  def handle_info(_message, state), do: {:noreply, state}
-
   defp schedule(interval), do: Process.send_after(self(), :sweep, interval)
+
+  # How long a session may be `active` with no pod before the sweep calls it adrift: well
+  # past the moment between a create's or a wake's row and its placement, which is one
+  # placement call, and past the thirty seconds a pod is given to take a session.
+  @adrift_after_ms 60_000
+
+  @doc "How long a session counted as running may name no pod before the sweep marks it dormant."
+  @spec adrift_after_ms() :: non_neg_integer()
+  def adrift_after_ms, do: Application.get_env(:troupe_plane, :adrift_after_ms, @adrift_after_ms)
 end

@@ -107,6 +107,63 @@ defmodule Troupe.Plane.Sessions do
     )
   end
 
+  @doc """
+  The sessions a pod is holding that were placed on it, or woken, before `placed_before`.
+
+  What a pod's answer to `session.index` is held against. A session placed after the
+  question was asked, or a moment before it while its activation was still on its way to
+  the pod, is not one the answer could have named, so it is not judged by it.
+  """
+  @spec on_worker(Ecto.UUID.t(), DateTime.t()) :: [String.t()]
+  def on_worker(worker_id, placed_before) do
+    Repo.all(
+      from(s in Session,
+        where:
+          s.worker_id == type(^worker_id, :binary_id) and s.state == "active" and
+            s.last_active_at < ^placed_before,
+        select: s.id,
+        order_by: s.id
+      )
+    )
+  end
+
+  @doc """
+  Sessions counted as running that name no pod, and that nothing has written for
+  `quiet_ms`.
+
+  A session is `active` with no pod only for the moment between its row and its placement,
+  at a create or a wake. One still so after that was left there by a rescue or a wake that
+  stopped half way, or a pod row deleted under it, and nothing reaches it through a pod:
+  the scaler counts it and keeps a pod of its profile up for it. A session waiting for room
+  (`pending`) has no pod by design and is not one of these.
+  """
+  @spec adrift(non_neg_integer()) :: [Session.t()]
+  def adrift(quiet_ms) do
+    cutoff = DateTime.add(DateTime.utc_now(), -quiet_ms, :millisecond)
+
+    Repo.all(
+      from(s in Session,
+        where: s.state == "active" and is_nil(s.worker_id) and s.updated_at < ^cutoff,
+        order_by: s.id
+      )
+    )
+  end
+
+  @doc "How many of a profile's sessions `adrift/1` would answer."
+  @spec adrift_count(String.t(), non_neg_integer()) :: non_neg_integer()
+  def adrift_count(profile, quiet_ms) do
+    cutoff = DateTime.add(DateTime.utc_now(), -quiet_ms, :millisecond)
+
+    Repo.one(
+      from(s in Session,
+        where:
+          s.profile == ^profile and s.state == "active" and is_nil(s.worker_id) and
+            s.updated_at < ^cutoff,
+        select: count(s.id)
+      )
+    )
+  end
+
   @doc "How many active sessions each pod of a profile is holding, from the database."
   @spec active_counts_by_worker(String.t()) :: %{Ecto.UUID.t() => non_neg_integer()}
   def active_counts_by_worker(profile) do
@@ -246,6 +303,25 @@ defmodule Troupe.Plane.Sessions do
   def dormant(session_id, attrs \\ %{}) do
     unless_parked(session_id, fn ->
       put_fields(session_id, Map.merge(attrs, %{state: "dormant"}), clear: [:worker_id])
+    end)
+  end
+
+  @doc """
+  `dormant/2` for a session the plane puts to sleep itself, only while it is still
+  `active` where the plane found it: on the pod `worker_id` names, or on none for `nil`.
+
+  A rescue reads which sessions to mark and then marks them, and a session placed, woken
+  or moved in between is no longer the one it read: marking it would put to sleep a
+  session a pod has just taken. `{:error, :moved}` says so and changes nothing.
+  """
+  @spec dormant_on(String.t(), Ecto.UUID.t() | nil) ::
+          {:ok, Session.t()} | {:error, :parked | :moved | :not_found | term()}
+  def dormant_on(session_id, worker_id) do
+    unless_parked(session_id, fn ->
+      case Repo.one(from(s in Session, where: s.id == ^session_id, select: {s.state, s.worker_id})) do
+        {"active", ^worker_id} -> put_fields(session_id, %{state: "dormant"}, clear: [:worker_id])
+        _moved -> {:error, :moved}
+      end
     end)
   end
 
