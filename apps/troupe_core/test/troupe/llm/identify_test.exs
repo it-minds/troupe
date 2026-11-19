@@ -154,7 +154,16 @@ defmodule Troupe.LLM.IdentifyTest do
       {headers, body} = assert_request()
 
       assert headers["user-agent"] =~ ~r{^req/}
-      refute Enum.any?(Map.keys(headers), &String.starts_with?(&1, "x-litellm"))
+
+      # Asking the gateway for the call's cost in the stream says nothing about who calls,
+      # and goes whether or not the request identifies (#1133).
+      assert headers["x-litellm-include-cost-in-streaming-usage"] == "true"
+
+      refute headers
+             |> Map.delete("x-litellm-include-cost-in-streaming-usage")
+             |> Map.keys()
+             |> Enum.any?(&String.starts_with?(&1, "x-litellm"))
+
       refute Map.has_key?(body, "metadata")
       refute Map.has_key?(body, "user")
 

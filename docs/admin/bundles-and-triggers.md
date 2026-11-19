@@ -393,8 +393,8 @@ review queue (`needs_review` on `sessions.list` and `admin.sessions.list`);
   spent this month in every team, the platform's what everybody did.
 - One budget actor per team, registered cluster-wide, which is why plane replicas must be
   clustered.
-- A call's cost is the gateway's `x-litellm-response-cost` header where it sends one (a
-  streamed call never carries it), else the model catalog's price or `models.prices`,
-  which on a pod is the profile's `llm.prices`; a model priced nowhere counts as free. A
-  call with no gateway request id is recorded as `seq:<session>:<n>`, which the reconcile
-  counts as unmetered ([integrations.md §5](integrations.md#5-llm-gateway)).
+- A call's cost is the gateway's (LiteLLM's in a streamed call's usage, or its cost
+  header), else the catalog's price or `models.prices`, on a pod the profile's
+  `llm.prices`; a model priced nowhere counts as free. A call with no gateway request id
+  is recorded as `seq:<session>:<n>`, which the reconcile counts as unmetered
+  ([integrations.md §5](integrations.md#5-llm-gateway)).
