@@ -246,7 +246,10 @@ the publish says what the host will block, file by file, so an agent can publish
 version straight away; it is published all the same. The artifact's page in the console and
 the desktop app then says how many references its version has that are blocked, with the list
 on request, and the terminal's `/artifacts` says the count on its row. A page that relies on
-one needs it moved into a file of its own, published beside it.
+one needs it moved into a file of its own, published beside it. A Markdown document is read
+the same way: an image from another site (`![chart](https://...)`) is named at publish, and
+the rendered page shows, in its place, "An image from" that site "is not shown: this page
+shows only its own files". Publish the image with the document and point to it relatively.
 
 Opening one signs you in to that host through the plane, until an hour after the last page
 or file you read there. If you open an artifact's address, or follow a link to one, while signed out, you are sent to the console to

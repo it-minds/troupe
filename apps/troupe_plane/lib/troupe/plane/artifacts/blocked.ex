@@ -16,8 +16,13 @@ defmodule Troupe.Plane.Artifacts.Blocked do
   content type. It finds what a page says literally, never what a script builds at run time,
   and it says each finding's file, kind, reference and line. At most 25 findings a file
   are kept, the first ones in it.
+
+  A Markdown document a Markdown artifact serves is the page the host renders from it, so
+  it is read for what that page loads (`markdown/2`): an image from another site, which the
+  page shows as a sentence in the image's place.
   """
 
+  alias Troupe.Plane.Artifacts.Markdown
   alias Troupe.Plane.Web.Artifacts.CSP
 
   @max_per_file 25
@@ -64,6 +69,34 @@ defmodule Troupe.Plane.Artifacts.Blocked do
       :script -> script(text, 0)
       :none -> []
     end
+    |> findings(path, text)
+  end
+
+  def scan(_path, _content_type, _body), do: []
+
+  @doc """
+  What the host will block of the Markdown document at `path` that a Markdown artifact
+  serves rendered: each image from another site the page would show, found as the renderer
+  finds them (`Markdown.images/1`), in the same shape as `scan/3`'s.
+  """
+  @spec markdown(String.t(), binary()) :: [map()]
+  def markdown(path, body) when is_binary(body) do
+    text = binary_part(body, 0, min(byte_size(body), @max_scanned))
+
+    text
+    |> Markdown.images()
+    |> Enum.flat_map(fn {offset, address} -> reference({"image", address}, offset) end)
+    |> findings(path, text)
+  end
+
+  def markdown(_path, _body), do: []
+
+  @doc "Whether the host's policy blocks a page loading `address` as `kind`."
+  @spec blocks?(String.t(), String.t()) :: boolean()
+  def blocks?(kind, address), do: reference({kind, address}, 0) != []
+
+  defp findings(found, path, text) do
+    found
     |> Enum.sort_by(&elem(&1, 0))
     |> Enum.take(@max_per_file)
     |> Enum.map(fn {offset, kind, reference} ->
@@ -75,8 +108,6 @@ defmodule Troupe.Plane.Artifacts.Blocked do
       }
     end)
   end
-
-  def scan(_path, _content_type, _body), do: []
 
   defp read_as(type) when is_binary(type) do
     case type |> String.split(";") |> hd() |> String.trim() |> String.downcase() do

@@ -237,7 +237,7 @@ defmodule Troupe.Plane.Web.Artifacts do
         do: register_before_send(conn, &put_resp_header(&1, "cache-control", "no-store")),
         else: conn
 
-    if artifact.kind == "markdown" and markdown?(file["path"]) do
+    if artifact.kind == "markdown" and Markdown.document?(file["path"]) do
       conn
       |> put_resp_content_type("text/html")
       |> private()
@@ -253,8 +253,6 @@ defmodule Troupe.Plane.Web.Artifacts do
     |> private()
     |> send_resp(200, body)
   end
-
-  defp markdown?(path), do: String.downcase(Path.extname(path)) in [".md", ".markdown"]
 
   # What a viewer reads is theirs to read now, and not a cache's.
   defp private(conn), do: put_resp_header(conn, "cache-control", "private, no-cache")
@@ -350,6 +348,7 @@ defmodule Troupe.Plane.Web.Artifacts do
   table { border-collapse: collapse; margin: 1em 0; display: block; overflow-x: auto; }
   th, td { border: 1px solid var(--line); padding: 0.35em 0.7em; }
   img { max-width: 100%; }
+  .not-shown { display: inline-block; color: var(--muted); font-size: 0.9em; border: 1px dashed var(--line); border-radius: 4px; padding: 0.2em 0.6em; }
   hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
   .k { color: var(--k); } .s { color: var(--s); } .c { color: var(--c); font-style: italic; } .n { color: var(--n); }
   figure.diagram { margin: 1.5em 0; overflow-x: auto; }
