@@ -84,7 +84,7 @@ import { SessionServers } from "./SessionServers";
 import { onboardingNote, StartLine, StartPanel } from "./Onboard";
 import { inviteLine, RemoteLine, RemoteOfferControl } from "./Remote";
 import { InviteControl } from "./Invites";
-import { Cost, Dialog, initials, Loading, personColour, Pill, Sync, When, Where } from "./bits";
+import { archiveItem, Cost, Dialog, initials, Loading, personColour, Pill, Sync, When, Where } from "./bits";
 import { Mask } from "./brand";
 import { RenameField } from "./Rename";
 import { Tasks } from "./Tasks";
@@ -406,6 +406,8 @@ export function Session({
           <SessionMenu
             sessionId={sessionId}
             row={row}
+            detail={detail.level}
+            onFold={detail.fold}
             backstage={backstage}
             onToggleBackstage={() => showBackstage(!backstage)}
             scratchpad={
@@ -687,13 +689,13 @@ function choices(daemon: DaemonClient | null): Map<string, Detail> {
  * has it for the session's workspace, which the daemon answers from every layer, read when
  * the daemon is reached and again when a `transcript` key changes, and quiet with no daemon
  * to ask; and `/detail`'s choice for this session over it.
- * `command` is the palette's `/detail`.
+ * `command` is the palette's `/detail`, `fold` the ⋯ menu's fold of every turn's working.
  */
 function useDetail(
   daemon: DaemonClient | null,
   workspace: string | undefined,
   sessionId: string,
-): { level: Detail; command: (args: string) => string | undefined } {
+): { level: Detail; command: (args: string) => string | undefined; fold: (folded: boolean) => void } {
   const [setting, setSetting] = useState<Detail>(DEFAULT_DETAIL);
   const [choice, setChoice] = useState<Detail | undefined>(() => choices(daemon).get(sessionId));
   useEffect(() => setChoice(choices(daemon).get(sessionId)), [daemon, sessionId]);
@@ -733,7 +735,19 @@ function useDetail(
     [choice, setting, daemon, sessionId],
   );
 
-  return { level: choice ?? setting, command };
+  // The ⋯ menu's fold is the same choice: folded is quiet, unfolded is everything, which is
+  // what a click on one turn's strip opens it to; the setting's own level may be quiet, and
+  // unfolding to it would open nothing.
+  const fold = useCallback(
+    (folded: boolean): void => {
+      const level: Detail = folded ? "quiet" : "everything";
+      choices(daemon).set(sessionId, level);
+      setChoice(level);
+    },
+    [daemon, sessionId],
+  );
+
+  return { level: choice ?? setting, command, fold };
 }
 
 /** What was said, for `/copy`: the people's and the agent's words, not the tool traffic. */
@@ -862,8 +876,16 @@ function Header({
   );
 }
 
+/** What every turn shows at the level in force, under the fold in the ⋯ menu. */
+const WORKING_NOW: Record<Detail, string> = {
+  quiet: "Now quiet: each turn's thinking and tool steps are in its strip",
+  tools: "Now tools: each turn's tool steps are open, its thinking shut",
+  everything: "Now everything: each turn's thinking and tool steps are open",
+};
+
 /**
- * The head's ⋯: the backstage and the scratchpad, shown and hidden; steering this session
+ * The head's ⋯: every turn's working folded and unfolded, at the level `/detail` sets; the
+ * backstage and the scratchpad, shown and hidden; steering this session
  * from another device; the agent in the agents manager; and the session's facts (its id,
  * your part in it, who invited you). It stays mounted while shut, so a dialog opened from
  * it outlives it.
@@ -871,6 +893,8 @@ function Header({
 function SessionMenu({
   sessionId,
   row,
+  detail,
+  onFold,
   backstage,
   onToggleBackstage,
   scratchpad,
@@ -882,6 +906,9 @@ function SessionMenu({
 }: {
   sessionId: string;
   row: FleetRow | undefined;
+  /** How much of each turn is open; and folding every turn's working (`true`) or unfolding it. */
+  detail: Detail;
+  onFold: (folded: boolean) => void;
   backstage: boolean;
   onToggleBackstage: () => void;
   /** Whether the scratchpad is open, and the switch; null while it has no document. */
@@ -926,6 +953,10 @@ function SessionMenu({
         ⋯
       </button>
       <div className="menu-pop" hidden={!open} aria-label="This session">
+        <button type="button" className="item" aria-pressed={detail !== "quiet"} onClick={then(() => onFold(detail !== "quiet"))}>
+          <span className="t">{detail === "quiet" ? "Unfold every turn's working" : "Fold every turn's working"}</span>
+          <span className="d">{WORKING_NOW[detail]}</span>
+        </button>
         <button type="button" className="item" aria-pressed={backstage} onClick={then(onToggleBackstage)}>
           <span className="t">{backstage ? "Hide backstage" : "Show backstage"}</span>
           <span className="d">Tasks, files, instructions{row && onThisComputer(row.kind) ? ", memory" : ""} and what this session costs</span>
@@ -954,18 +985,12 @@ function SessionMenu({
             <span className="d">{row?.pinned ? "Back among the rest, by when it was last active" : "Listed first, for everyone who sees it"}</span>
           </button>
         )}
-        {onArchive &&
-          (row?.archived ? (
-            <button type="button" className="item" onClick={then(() => onArchive(false))}>
-              <span className="t">Unarchive session</span>
-              <span className="d">Put it back in the session list</span>
-            </button>
-          ) : (
-            <button type="button" className="item" onClick={then(() => onArchive(true))}>
-              <span className="t">Archive session</span>
-              <span className="d">Hide it from the session list, for everyone who sees it</span>
-            </button>
-          ))}
+        {onArchive && (
+          <button type="button" className="item" onClick={then(() => onArchive(!row?.archived))}>
+            <span className="t">{archiveItem(Boolean(row?.archived)).title}</span>
+            <span className="d">{archiveItem(Boolean(row?.archived)).line}</span>
+          </button>
+        )}
         {remote && <div className="menu-remote">{remote}</div>}
         <dl className="menu-facts">
           <dt>Session</dt>

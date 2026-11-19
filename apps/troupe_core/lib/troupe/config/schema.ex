@@ -43,6 +43,7 @@ defmodule Troupe.Config.Schema do
 
   alias Troupe.LLM.Providers.Compatible
   alias Troupe.LLM.ProviderType
+  alias Troupe.Protocol.Allowance
 
   @version 1
   @id "https://troupe.dev/schema/config/v1.json"
@@ -263,7 +264,7 @@ defmodule Troupe.Config.Schema do
           "Which model each role uses."
         ),
         spec("max_tokens", {:integer, 1}, "The most output tokens one model call asks for.",
-          default: 8192,
+          default: Allowance.max_tokens(),
           field: :max_tokens,
           enforce: :ceiling
         ),
@@ -334,17 +335,17 @@ defmodule Troupe.Config.Schema do
           "max_turns",
           {:integer, 1},
           "Model calls an agent may make before its budget is spent: then it asks to go on, or stops (`budget_asks`).",
-          default: 40,
+          default: Allowance.max_turns(),
           field: :max_turns,
           label: "max turns",
           enforce: :ceiling
         ),
         spec("max_input_tokens", {:integer, 1}, "Input tokens an agent may spend.",
-          default: 2_000_000,
+          default: Allowance.max_input_tokens(),
           field: :max_input_tokens
         ),
         spec("max_output_tokens", {:integer, 1}, "Output tokens an agent may spend.",
-          default: 400_000,
+          default: Allowance.max_output_tokens(),
           field: :max_output_tokens
         ),
         spec(
@@ -352,12 +353,12 @@ defmodule Troupe.Config.Schema do
           {:integer, 1},
           "How long an agent may work, in working time: each turn from its start to its end, summed. " <>
             "Resting between turns and waiting on an approval or a question do not count.",
-          default: 1_800_000,
+          default: Allowance.wall_clock_ms(),
           field: :wall_clock_ms,
           enforce: :ceiling
         ),
         spec("max_depth", {:integer, 0}, "How deep agents may delegate; 1 means the root alone may.",
-          default: 3,
+          default: Allowance.max_depth(),
           field: :max_depth,
           label: "delegation depth",
           enforce: :ceiling

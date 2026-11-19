@@ -38,9 +38,12 @@ defmodule Troupe.LLM.Providers.OpenAI do
 
   @impl Troupe.LLM.Provider
   def stream(%Request{} = request, reply_to, ref),
-    do: Provider.reply(reply_to, ref, request.max_retries, fn -> attempt(request, reply_to, ref) end)
+    do:
+      Provider.reply(reply_to, ref, request.max_retries, fn -> attempt(request, reply_to, ref) end)
 
-  defp attempt(%Request{api_key: {:refused, _why} = refused}, _reply_to, _ref), do: {:error, refused}
+  defp attempt(%Request{api_key: {:refused, _why} = refused}, _reply_to, _ref),
+    do: {:error, refused}
+
   defp attempt(request, reply_to, ref), do: post(request, body(request), reply_to, ref, :first)
 
   defp post(request, body, reply_to, ref, pass) do
@@ -136,8 +139,22 @@ defmodule Troupe.LLM.Providers.OpenAI do
   # A local vLLM or Ollama often needs no key at all, so a missing one is not an error
   # here the way it is for a hosted API.
   defp headers(request) do
+    type = Compatible.type(request)
+
     Compatible.auth_headers(request, api_key(request)) ++
-      [{"accept", "text/event-stream"} | Identify.headers(request, Compatible.type(request))]
+      [{"accept", "text/event-stream"} | cost_headers(request, type)] ++
+      Identify.headers(request, type)
+  end
+
+  # A gateway's headers go out before the first token, so a streamed call's cost is not
+  # in them; LiteLLM puts it in the stream's usage when asked, per request, which spares
+  # its administrator a setting. Asked whether or not the request identifies: it says
+  # nothing about who calls. A gateway that is not LiteLLM ignores a header it does not
+  # know; a vendor's API and OpenRouter are not asked.
+  defp cost_headers(request, type) do
+    if Identify.gateway?(request, type),
+      do: [{"x-litellm-include-cost-in-streaming-usage", "true"}],
+      else: []
   end
 
   # Req hands `into` the body of every response, whatever its status. Only a 200's is the
@@ -159,8 +176,8 @@ defmodule Troupe.LLM.Providers.OpenAI do
     acc =
       Enum.reduce(events, state.acc, fn event, acc ->
         case SSE.decode(event) do
-          {:ok, decoded} -> apply_event(acc, decoded, sink)
-          :done -> acc
+          {:ok, decoded} -> acc |> Collector.seen() |> apply_event(decoded, sink)
+          :done -> Collector.seen(acc)
           :error -> acc
         end
       end)
@@ -173,14 +190,70 @@ defmodule Troupe.LLM.Providers.OpenAI do
       nil ->
         {:error, :no_stream_received}
 
-      %{acc: acc} ->
+      %{acc: acc, sse: sse} ->
         # The gateway's headers are read here rather than in the collector because they
         # belong to the HTTP response and not to the event stream: a gateway sends them
-        # once, before the first chunk, and the collector never sees them.
-        answer = Collector.to_response(acc)
-        {:ok, %{answer | gateway: Gateway.from_headers(response.headers)}}
+        # once, before the first chunk, and the collector never sees them. What the stream
+        # said the call cost goes beside them.
+        acc = whole_body(acc, sse)
+
+        gateway =
+          response.headers
+          |> Gateway.from_headers()
+          |> Gateway.with_reported_cost(acc.cost_micros)
+
+        {:ok, %{Collector.to_response(acc) | gateway: gateway}}
     end
   end
+
+  # A server that answered a streamed request with one JSON body, as a gateway in front
+  # of a model that does not stream may, leaves it unread in the event parser: no blank
+  # line ever ended an event. It is read as the completion it is, its usage and cost
+  # with it.
+  defp whole_body(%Collector{seen: false} = acc, %SSE{buffer: buffer}) do
+    case Jason.decode(buffer) do
+      {:ok, %{"choices" => choices} = body} when is_list(choices) ->
+        acc = Collector.add_reported(acc, body["usage"], usage(body["usage"]))
+
+        Enum.reduce(choices, acc, fn choice, acc ->
+          acc
+          |> apply_message(choice["message"])
+          |> apply_finish(choice["finish_reason"])
+        end)
+
+      _not_a_completion ->
+        acc
+    end
+  end
+
+  defp whole_body(acc, _sse), do: acc
+
+  # A whole message is the stream's deltas at once, its tool calls by their place in it.
+  defp apply_message(acc, %{} = message) do
+    calls =
+      (message["tool_calls"] || [])
+      |> Enum.with_index()
+      |> Enum.map(fn {call, index} -> Map.put_new(call, "index", index) end)
+
+    acc =
+      if is_binary(message["content"]),
+        do: Collector.append_text(acc, message["content"]),
+        else: acc
+
+    reasoning = message["reasoning_content"] || message["reasoning"]
+    acc = if is_binary(reasoning), do: Collector.append_reasoning(acc, reasoning), else: acc
+
+    Enum.reduce(calls, acc, fn call, acc ->
+      function = call["function"] || %{}
+
+      acc
+      |> Collector.open_tool(call["index"], call["id"], function["name"])
+      |> Collector.append_tool_arguments(call["index"], function["arguments"] || "")
+      |> Collector.put_tool_extra(call["index"], call["extra_content"])
+    end)
+  end
+
+  defp apply_message(acc, _none), do: acc
 
   # -- streaming events -------------------------------------------------------
 
@@ -200,8 +273,10 @@ defmodule Troupe.LLM.Providers.OpenAI do
   # What the provider has reported so far goes to the agent as it comes, so a call the
   # agent stops before it answers is counted for what it used (Decision 788). Most say it
   # only in the last chunk, so a call stopped before then has reported nothing.
+  # A gateway asked to (`cost_headers/2`) writes what the call cost beside the tokens, in
+  # the same chunk.
   defp add_usage(acc, reported, %{reply_to: reply_to, ref: ref}) do
-    added = Collector.add_usage(acc, usage(reported))
+    added = Collector.add_reported(acc, reported, usage(reported))
     if added.usage != acc.usage, do: send(reply_to, {:llm_usage, ref, added.usage})
     added
   end
@@ -469,13 +544,15 @@ defmodule Troupe.LLM.Providers.OpenAI.Collector do
   provider attached to a call are bound to.
   """
 
-  alias Troupe.LLM.{Reasoning, Response, Text, ToolUse, Usage}
+  alias Troupe.LLM.{Gateway, Reasoning, Response, Text, ToolUse, Usage}
 
   defstruct type: :openai,
             text: "",
             reasoning: "",
             tools: %{},
             usage: %Usage{},
+            cost_micros: nil,
+            seen: false,
             stop_reason: :end_turn
 
   @type t :: %__MODULE__{}
@@ -518,11 +595,33 @@ defmodule Troupe.LLM.Providers.OpenAI.Collector do
 
   def put_tool_extra(acc, _index, _none), do: acc
 
+  @doc "Note that the body was an event stream: at least one event in it was read."
+  @spec seen(t()) :: t()
+  def seen(acc), do: %{acc | seen: true}
+
   @spec add_usage(t(), Usage.t()) :: t()
   def add_usage(acc, %Usage{input_tokens: 0, output_tokens: 0, cache_read: 0, cache_write: 0}),
     do: acc
 
   def add_usage(acc, usage), do: %{acc | usage: usage}
+
+  @doc """
+  The usage a chunk or a body reported: its tokens, read as `usage`, and the `cost` a
+  gateway wrote beside them, in dollars, as micro-units. A chunk that names no cost keeps
+  the one an earlier chunk named.
+  """
+  @spec add_reported(t(), map() | nil, Usage.t()) :: t()
+  def add_reported(acc, reported, usage) do
+    acc = add_usage(acc, usage)
+
+    case is_map(reported) && Gateway.to_micros(cost(reported["cost"])) do
+      micros when is_integer(micros) -> %{acc | cost_micros: micros}
+      _none -> acc
+    end
+  end
+
+  defp cost(amount) when is_number(amount) or is_binary(amount), do: amount
+  defp cost(_other), do: nil
 
   @spec put_stop_reason(t(), atom()) :: t()
   def put_stop_reason(acc, reason), do: %{acc | stop_reason: reason}

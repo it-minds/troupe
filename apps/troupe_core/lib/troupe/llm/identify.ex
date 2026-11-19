@@ -11,7 +11,9 @@ defmodule Troupe.LLM.Identify do
       (`troupe`, `troupe-<client>`, `troupe-<version>`) and
       `x-litellm-spend-logs-metadata`: the session's id, and its team, worker profile and
       agent where the plane attributes the session. A server that is not LiteLLM ignores
-      both. An `ollama` server and an `azure_openai` resource are sent neither.
+      both. An `ollama` server and an `azure_openai` resource are sent neither. Which
+      endpoint is a gateway is `gateway?/2`, which the OpenAI adapter also asks before it
+      asks a gateway for the call's cost in the stream.
     * **To OpenRouter** (an `openrouter` provider, or any at openrouter.ai),
       `HTTP-Referer` (the project's page) and `X-Title: Troupe`, which name the app
       there, and nothing of LiteLLM's.
@@ -82,22 +84,32 @@ defmodule Troupe.LLM.Identify do
   # local server or a resource of the person's own (`ollama`, `azure_openai`) is no
   # gateway, and OpenRouter has headers of its own wherever it is reached from.
   defp endpoint_headers(%Request{base_url: url} = request, type) do
-    identify = ProviderType.fetch(type) |> then(&(&1 && &1.identify))
-
     cond do
-      identify == :openrouter or openrouter?(url) ->
+      openrouter?(type, url) ->
         [{"http-referer", @project_url}, {"x-title", "Troupe"}]
 
-      identify != :gateway ->
-        []
-
-      Endpoint.vendor_api?(type, url) ->
-        []
+      gateway?(request, type) ->
+        [{"x-litellm-tags", tags(request.client)} | spend_metadata(request)]
 
       true ->
-        [{"x-litellm-tags", tags(request.client)} | spend_metadata(request)]
+        []
     end
   end
+
+  @doc """
+  Whether a request of provider `type` goes to a gateway such as LiteLLM: an endpoint of
+  a type that may sit behind one, neither the vendor's own API nor OpenRouter. What is
+  said only to a gateway is said under this, whether or not the request identifies.
+  """
+  @spec gateway?(Request.t(), atom() | String.t()) :: boolean()
+  def gateway?(%Request{base_url: url}, type) do
+    identify(type) == :gateway and not openrouter?(type, url) and
+      not Endpoint.vendor_api?(type, url)
+  end
+
+  defp identify(type), do: ProviderType.fetch(type) |> then(&(&1 && &1.identify))
+
+  defp openrouter?(type, url), do: identify(type) == :openrouter or openrouter?(url)
 
   # The session's id always; what the plane knows of it only where the plane attributes it.
   defp spend_metadata(%Request{attribution: attribution}) do

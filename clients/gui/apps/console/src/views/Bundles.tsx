@@ -892,7 +892,7 @@ function BundleEditor({
       <Region>The rest of the bundle</Region>
       <Field
         label="Skills and MCP servers"
-        hint="As the plane takes them, in JSON: the document without its agents, which are the builder's above. It is checked as publishing checks it before anything is published."
+        hint="As the plane takes them, in JSON: the document without its agents, which are the builder's above, and an about where you say what the profile and each server are for. It is checked as publishing checks it before anything is published."
         error={problems ? problems.join(" ") : null}
       >
         {(p) => <textarea {...p} className="mono source" value={text} onChange={(e) => setText(e.target.value)} rows={14} spellCheck={false} />}

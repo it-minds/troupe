@@ -12,7 +12,7 @@
 
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { JSX } from "react";
-import { PlaneOwn, awaitingYou, onThisComputer, planeAddress } from "@troupe/client";
+import { PlaneOwn, appLink, awaitingYou, onThisComputer, planeAddress } from "@troupe/client";
 import type { AuthSession, FleetRow, OwnPlane, SessionKind } from "@troupe/client";
 import { useAdmin, useArchived, useDaemon, useFleet, useMarks } from "./hooks";
 import { useUpdates } from "./updates";
@@ -22,7 +22,8 @@ import { chooseLocalOnly, storedLocalOnly } from "./mode";
 import type { AppMode } from "./mode";
 import { useNotifications } from "./notify";
 import { capabilities, likelyPlaneUrl, prefs, shell } from "./shell";
-import { sessionNotOpen, signInSentence, stepFor } from "./links";
+import { SESSION_GONE, addressOf, holdAddressPlace, placeOfAddress, sessionNotOpen, signInSentence, stepFor, stepForAddress, takeAddressPlace, writeAddress } from "./links";
+import { AppBanner, usePlaneOffers } from "./views/AppBanner";
 import type { LinkPlace } from "./links";
 import { useSharedPrefs } from "./shared";
 import { firstRunLook, hasChosen, markChosen, useAppearance } from "./theme";
@@ -49,7 +50,7 @@ import { NavSheet } from "./sheet";
 type Where =
   | { screen: "launcher" }
   | { screen: "sessions" }
-  | { screen: "new" }
+  | { screen: "new"; profile?: string }
   | { screen: "approvals" }
   | { screen: "artifacts"; artifact?: string }
   | { screen: "memory" }
@@ -315,46 +316,105 @@ export function App(): JSX.Element {
     setLookPicked(false);
   }, [firstSignIn, lookPicked, auth, setLookPicked]);
   const planeUrl = prefs.get("planeUrl", likelyPlaneUrl());
+  const offers = usePlaneOffers(planeAuth);
 
   // The app's own `troupe://` links (links.ts). A link to a plane the app is not signed in
   // to waits here while the sign-in screen asks, filled in with its address; signed in to
   // another, the window asks before signing out of it; signed in there, it goes straight to
   // the place. Anything else is one line, and nothing happens.
-  const [linked, setLinked] = useState<{ plane: string; sentence: string; then: LinkPlace; switching: boolean } | null>(null);
-  const [linkNote, setLinkNote] = useState<string | null>(null);
+  //
+  // The browser build's own address names a place the same way (links.ts): read before the
+  // first draw, so the sign-in screen is already the one that asks, and again when it changes
+  // in an open tab. A place that waits for a sign-in is held for this tab, since a browser's
+  // sign-in leaves the page and comes back to the app's bare address.
+  const [arrived] = useState(() => {
+    const place = takeAddressPlace();
+    const step = place ? stepForAddress(place, prefs.get("planeUrl", likelyPlaneUrl()) || null, { signedIn: null, localOnly }) : null;
+    return step;
+  });
+  const [linked, setLinked] = useState<{ plane: string; sentence: string; then: LinkPlace; switching: boolean } | null>(() =>
+    arrived?.do === "sign-in" ? { plane: arrived.plane, sentence: arrived.sentence, then: arrived.then, switching: false } : null,
+  );
+  // An address's place waiting for whichever plane the person signs in to.
+  const [waitingPlace, setWaitingPlace] = useState<LinkPlace>(() => (arrived?.do === "wait" ? arrived.then : null));
+  const [linkNote, setLinkNote] = useState<string | null>(() => (arrived?.do === "say" ? arrived.sentence : null));
   const linkContext = useRef({ signedIn: null as string | null, localOnly });
   linkContext.current = { signedIn: planeAuth?.planeUrl ?? null, localOnly };
+  // A session is asked for once at the click, so a place that is gone or not shared says so
+  // in the line rather than opening on nothing.
+  const listedRef = useRef<(id: string) => boolean>(() => false);
+  listedRef.current = (id) => snapshot.rows.some((r) => r.id === id) || archived.rows.some((r) => r.id === id);
+  const authRef = useRef<AuthSession | null>(null);
+  authRef.current = planeAuth;
+  const goTo = useCallback((to: Exclude<LinkPlace, null>) => {
+    if (to.screen === "artifacts") return setWhere({ screen: "artifacts", artifact: to.artifact });
+    void sessionNotOpen(to.id, listedRef.current(to.id), authRef.current, SESSION_GONE).then((sentence) => {
+      if (sentence === null) setWhere({ screen: "session", id: to.id });
+      else setLinkNote(sentence);
+    });
+  }, []);
+  const follow = useCallback(
+    (step: ReturnType<typeof stepForAddress>) => {
+      if (step.do === "say") setLinkNote(step.sentence);
+      else if (step.do === "go") {
+        setLinked(null);
+        goTo(step.to);
+      } else if (step.do === "wait") setWaitingPlace(step.then);
+      else if (step.do === "sign-in" || step.do === "switch") {
+        setLinkNote(null);
+        setLinked({ plane: step.plane, sentence: step.sentence, then: step.then, switching: step.do === "switch" });
+        // Offline, the sign-in screen is behind the plane that does not answer; a link to a
+        // plane is a reason to show it again.
+        if (step.do === "sign-in") {
+          setOffline(false);
+          setExpired(false);
+        }
+      }
+    },
+    [goTo],
+  );
   useEffect(() => {
     const hear = shell()?.onLinks;
     if (!hear) return;
     return hear((links) => {
-      for (const text of links) {
-        const step = stepFor(text, linkContext.current);
-        if (step.do === "say") setLinkNote(step.sentence);
-        else if (step.do === "go") {
-          setLinked(null);
-          setWhere(step.to.screen === "session" ? { screen: "session", id: step.to.id } : { screen: "artifacts", artifact: step.to.artifact });
-        } else if (step.do === "sign-in" || step.do === "switch") {
-          setLinkNote(null);
-          setLinked({ plane: step.plane, sentence: step.sentence, then: step.then, switching: step.do === "switch" });
-          // Offline, the sign-in screen is behind the plane that does not answer; a link to a
-          // plane is a reason to show it again.
-          if (step.do === "sign-in") {
-            setOffline(false);
-            setExpired(false);
-          }
-        }
-      }
+      for (const text of links) follow(stepFor(text, linkContext.current));
     });
-  }, []);
-  // Signed in to the link's plane at last: on to the place it named.
+  }, [follow]);
   useEffect(() => {
-    if (!linked || linked.switching || !planeAuth) return;
+    const changed = (): void => {
+      const place = placeOfAddress(globalThis.location.hash);
+      if (!place) return;
+      const signedIn = linkContext.current.signedIn;
+      follow(stepForAddress(place, signedIn ?? (prefs.get("planeUrl", likelyPlaneUrl()) || null), linkContext.current));
+    };
+    globalThis.addEventListener("hashchange", changed);
+    return () => globalThis.removeEventListener("hashchange", changed);
+  }, [follow]);
+  // Held across a sign-in that leaves the page, and let go of once it is reached or refused.
+  const heldPlace = linked && !linked.switching ? linked.then : waitingPlace;
+  useEffect(() => holdAddressPlace(heldPlace), [addressOf(heldPlace)]);
+  // Signed in to the link's plane at last, or to any plane for an address that named none:
+  // on to the place it named.
+  useEffect(() => {
+    if (!planeAuth) return;
+    if (waitingPlace) {
+      setWaitingPlace(null);
+      goTo(waitingPlace);
+    }
+    if (!linked || linked.switching) return;
     if ((planeAddress(planeAuth.planeUrl) ?? planeAuth.planeUrl) !== linked.plane) return;
     const then = linked.then;
     setLinked(null);
-    if (then) setWhere(then.screen === "session" ? { screen: "session", id: then.id } : { screen: "artifacts", artifact: then.artifact });
-  }, [linked, planeAuth]);
+    if (then) goTo(then);
+  }, [linked, waitingPlace, planeAuth, goTo]);
+  // The address bar says where the person is, signed in to a plane, so copying it is a web
+  // link to the same place; nothing is written while an address's place still waits. An
+  // address that was not opened is said in the line and gives way to where the person still is.
+  const shownPlace: LinkPlace = where.screen === "session" ? { screen: "session", id: where.id } : where.screen === "artifacts" && where.artifact ? { screen: "artifacts", artifact: where.artifact } : null;
+  useEffect(() => {
+    if (heldPlace) return;
+    writeAddress(planeAuth ? addressOf(shownPlace) : "");
+  }, [addressOf(shownPlace), addressOf(heldPlace), planeAuth, linkNote]);
   useEffect(() => {
     if (!linkNote) return;
     const t = setTimeout(() => setLinkNote(null), 8000);
@@ -511,6 +571,18 @@ export function App(): JSX.Element {
   const caps = capabilities();
   const local = snapshot.rows.filter((r) => onThisComputer(r.kind)).length;
 
+  // In a browser, the app offered at the place on show (views/AppBanner.tsx), at the plane
+  // signed in to; before one is, `troupe://open` alone, which brings the app forward.
+  const signedPlane = planeAuth?.planeUrl ?? null;
+  const appHere = appLink(
+    signedPlane && shownPlace
+      ? shownPlace.screen === "session"
+        ? { kind: "session", id: shownPlace.id, plane: signedPlane }
+        : { kind: "artifact", id: shownPlace.artifact, plane: signedPlane }
+      : { kind: "open", plane: signedPlane },
+  );
+  const appBanner = <AppBanner link={appHere} downloads={offers.downloads} />;
+
   // A link that was not followed, and one for another plane than the one signed in to.
   const linkBanners = (
     <>
@@ -555,6 +627,7 @@ export function App(): JSX.Element {
         localOnly={localOnly}
         notice={
           <>
+            {appBanner}
             <UpdateBanner updates={updates} />
             <NotKept auth={planeAuth} />
             {linkBanners}
@@ -707,6 +780,7 @@ export function App(): JSX.Element {
       )}
 
       <main ref={main}>
+        {appBanner}
         <UpdateBanner updates={updates} />
         <NotKept auth={planeAuth} />
         {offline && (
@@ -756,6 +830,8 @@ export function App(): JSX.Element {
 
           {where.screen === "new" && (
             <StartSession
+              key={where.profile ?? ""}
+              profile={where.profile}
               auth={planeAuth}
               daemon={daemon.client}
               daemonStatus={daemon.status}
@@ -807,7 +883,13 @@ export function App(): JSX.Element {
           {where.screen === "profiles" &&
             planeAuth &&
             (where.profile ? (
-              <ProfilePage key={where.profile} auth={planeAuth} name={where.profile} onBack={() => setWhere({ screen: "profiles" })} />
+              <ProfilePage
+                key={where.profile}
+                auth={planeAuth}
+                name={where.profile}
+                onBack={() => setWhere({ screen: "profiles" })}
+                onStart={(profile) => setWhere({ screen: "new", profile })}
+              />
             ) : (
               <Profiles auth={planeAuth} onOpen={(profile) => setWhere({ screen: "profiles", profile })} />
             ))}
@@ -820,6 +902,7 @@ export function App(): JSX.Element {
               daemon={daemon.client}
               daemonState={daemon}
               localOnly={localOnly}
+              webApp={offers.app}
               onOpenSession={async (id) => {
                 const listed = snapshot.rows.some((r) => r.id === id) || archived.rows.some((r) => r.id === id);
                 const sentence = await sessionNotOpen(id, listed, planeAuth);

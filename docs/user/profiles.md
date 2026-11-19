@@ -86,7 +86,9 @@ goes out with:
 
 Each says whether its tools run without asking (`auto`) or ask (`ask`), and which of its
 tools the session has (`all`, or a list). A server your team's grant leaves out is listed
-too, marked not offered, with the grant as the reason.
+too, marked not offered, with the grant as the reason. Where the bundle's author wrote them,
+the desktop app gives a server's card its subtitle and each tool a line of what it does, the
+tool's own name beside it, and the page's sentence under the profile's name is theirs too.
 
 ## Model
 

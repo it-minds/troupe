@@ -1,8 +1,9 @@
 // Archiving a session (troupe #1005): its owner hides it from the session list, for
 // everyone who sees it, and it is kept whole. The list's Archived filter lists the archived
-// ones, from the plane and the daemon both, each with Unarchive for its owner; an archived
-// one still opens; and the session's ⋯ and the palette's /archive and /unarchive do it from
-// the session. The app rendered, the fakes on real sockets.
+// ones, from the plane and the daemon both, each with Unarchive session in its ⋯ for its
+// owner; an archived one still opens; a row's ⋯ archives it from the list (#1116); and the
+// session's ⋯ and the palette's /archive and /unarchive do it from the session. The app
+// rendered, the fakes on real sockets.
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { WebSocket as NodeWebSocket } from "ws";
@@ -47,6 +48,15 @@ async function menu(): Promise<HTMLElement> {
     const pop = document.querySelector<HTMLElement>(".menu-pop");
     return pop && !pop.hidden && pop;
   }, "the ⋯ menu");
+}
+
+/** The ⋯ beside the list's row for `text`, open. */
+async function rowMenu(text: string): Promise<HTMLElement> {
+  (await waitFor(() => entry(text)?.querySelector<HTMLButtonElement>(".row-menu button.ib"), `the ⋯ beside ${text}`)).click();
+  return waitFor(() => {
+    const pop = entry(text)?.querySelector<HTMLElement>(".row-menu .menu-pop");
+    return pop && !pop.hidden && pop;
+  }, `the ⋯ menu beside ${text}`);
 }
 
 /** Run a command from the palette, typed as a person types it. */
@@ -98,13 +108,32 @@ describe("archiving a session on this computer", () => {
 
     choose(await waitFor(archivedFilter, "the Archived filter"), "archived");
     await waitFor(() => titles().join(",") === "/home/ada/notes", "the archived session under Archived");
-    const unarchive = await seesButton("Unarchive", entry("/home/ada/notes")!);
-    unarchive.click();
+    const unarchive = await rowMenu("/home/ada/notes");
+    expect(unarchive.textContent).toContain("Put it back in the session list");
+    expect(button("Rename", unarchive)).toBeNull();
+    (await seesButton("Unarchive session", unarchive)).click();
 
     await waitFor(() => daemon.calls.some((c) => c.method === "session.unarchive" && c.params["session_id"] === notes.id), "the unarchive sent to the daemon");
     await sees("Nothing archived");
     choose(archivedFilter()!, "");
     await waitFor(() => titles().sort().join(",") === "/home/ada/notes,/home/ada/plans", "the session back in the list");
+  });
+
+  it("archives from a row's ⋯, with the session menu's words, and the row leaves the list it was in", async () => {
+    const notes = daemon.seed("/home/ada/notes");
+    daemon.seed("/home/ada/plans");
+
+    unmount = render(<App />).unmount;
+    const pop = await rowMenu("/home/ada/notes");
+    expect(pop.textContent).toContain("Hide it from the session list, for everyone who sees it");
+    (await seesButton("Archive session", pop)).click();
+
+    await waitFor(() => daemon.calls.some((c) => c.method === "session.archive" && c.params["session_id"] === notes.id), "the archive sent to the daemon");
+    await waitFor(() => titles().join(",") === "/home/ada/plans", "the list without the archived session");
+    expect(onTheList()).toBe(true); // at once: the list was redrawn, and the person is still on it
+
+    choose(await waitFor(archivedFilter, "the Archived filter"), "archived");
+    await waitFor(() => titles().join(",") === "/home/ada/notes", "the archived session under Archived");
   });
 
   it("opens an archived session from Archived, says so, and unarchives it from the ⋯", async () => {
@@ -191,7 +220,7 @@ describe("archiving a team session", () => {
 
     choose(await waitFor(archivedFilter, "the Archived filter"), "archived");
     await waitFor(() => titles().join(",") === "Weekly licence audit", "the archived session under Archived");
-    (await seesButton("Unarchive", entry("Weekly licence audit")!)).click();
+    (await seesButton("Unarchive session", await rowMenu("Weekly licence audit"))).click();
     await sees("Nothing archived");
     expect(audit.archived).toBe(false);
   });
@@ -199,6 +228,10 @@ describe("archiving a team session", () => {
   it("offers no archive to somebody who is not its owner, and says a refusal in words", async () => {
     harness.plane.seed("bob@example.com", { title: "Bob's migration" });
     await signIn();
+
+    // Nor beside its row: the ⋯ there is the owner's.
+    await waitFor(() => entry("Bob's migration"), "Bob's row");
+    expect(entry("Bob's migration")!.querySelector(".row-menu")).toBeNull();
 
     await open("Bob's migration");
     const pop = await menu();

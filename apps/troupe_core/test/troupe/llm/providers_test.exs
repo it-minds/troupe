@@ -11,7 +11,18 @@ defmodule Troupe.LLM.ProvidersTest do
 
   use ExUnit.Case, async: true
 
-  alias Troupe.LLM.{Message, Reasoning, Request, Response, SSE, Text, ToolResult, ToolUse, Usage}
+  alias Troupe.LLM.{
+    Gateway,
+    Message,
+    Reasoning,
+    Request,
+    Response,
+    SSE,
+    Text,
+    ToolResult,
+    ToolUse,
+    Usage
+  }
   alias Troupe.LLM.Providers.{Anthropic, OpenAI}
   alias Troupe.Test.FakeTransport
 
@@ -506,6 +517,105 @@ defmodule Troupe.LLM.ProvidersTest do
       assert to_string(sent.url) == "https://gateway.example/v1/chat/completions"
     end
 
+    test "what a gateway's stream says a call cost is the call's cost" do
+      # LiteLLM's last chunk, asked for the cost: `usage.cost` in dollars, beside the tokens.
+      chunk =
+        ~s(data: {"choices":[{"delta":{"content":"Hello."}}]}\n\ndata: {"id":"c1","choices":[],"usage":{"prompt_tokens":3,"completion_tokens":2,"cost":1.0500000000000001e-05}}\n\ndata: [DONE]\n\n)
+
+      assert {:ok, %Response{} = response} =
+               run(OpenAI, request(chunks: [chunk], headers: %{"x-litellm-call-id" => ["c1"]}))
+
+      assert response.gateway == %Gateway{request_id: "c1", cost_micros: 10}
+      assert response.usage == %Usage{input_tokens: 3, output_tokens: 2}
+    end
+
+    test "a cost written in the chunk that finishes the stream counts the same" do
+      chunk =
+        ~s(data: {"choices":[{"delta":{"content":"Hi."},"finish_reason":"stop"}],"usage":{"prompt_tokens":3,"completion_tokens":2,"cost":0.000123450000000001}}\n\ndata: [DONE]\n\n)
+
+      assert {:ok, %Response{gateway: %Gateway{cost_micros: 123}}} =
+               run(OpenAI, request(chunks: [chunk]))
+    end
+
+    test "a body that did not stream is read as the completion it is, its cost with it" do
+      body =
+        Jason.encode!(%{
+          "id" => "c2",
+          "choices" => [
+            %{
+              "index" => 0,
+              "message" => %{
+                "role" => "assistant",
+                "content" => "Reading.",
+                "tool_calls" => [
+                  %{
+                    "id" => "call_1",
+                    "type" => "function",
+                    "function" => %{"name" => "read_file", "arguments" => ~s({"path":"a"})}
+                  }
+                ]
+              },
+              "finish_reason" => "tool_calls"
+            }
+          ],
+          "usage" => %{"prompt_tokens" => 40, "completion_tokens" => 6, "cost" => 0.00042}
+        })
+
+      assert {:ok, %Response{} = response} = run(OpenAI, request(chunks: [body]))
+
+      assert [%Text{text: "Reading."}, %ToolUse{id: "call_1", input: %{"path" => "a"}}] =
+               response.content
+
+      assert response.stop_reason == :tool_use
+      assert response.usage == %Usage{input_tokens: 40, output_tokens: 6}
+      assert response.gateway.cost_micros == 420
+    end
+
+    test "the cost header counts as before where the stream names none" do
+      request =
+        request(
+          chunks: [openai_text_only()],
+          headers: %{"x-litellm-response-cost" => ["0.018400"]}
+        )
+
+      assert {:ok, %Response{gateway: %Gateway{cost_micros: 18_400}}} = run(OpenAI, request)
+    end
+
+    test "where the header and the stream both say, the stream's figure is counted" do
+      for {header, stream, counted} <- [{"0.0005", "0.0005", 500}, {"0.0005", "0.00052", 520}] do
+        chunk =
+          ~s(data: {"choices":[{"delta":{"content":"Hi."},"finish_reason":"stop"}],"usage":{"prompt_tokens":3,"completion_tokens":2,"cost":#{stream}}}\n\ndata: [DONE]\n\n)
+
+        request = request(chunks: [chunk], headers: %{"x-litellm-response-cost" => [header]})
+        assert {:ok, %Response{gateway: %Gateway{cost_micros: ^counted}}} = run(OpenAI, request)
+      end
+    end
+
+    test "a gateway is asked for the cost in the stream; a vendor's API and OpenRouter are not" do
+      for {base_url, asked} <- [
+            {"https://gateway.example/v1", ["true"]},
+            {nil, []},
+            {"https://api.openai.com/v1", []},
+            {"https://openrouter.ai/api/v1", []}
+          ] do
+        assert {:ok, _response} =
+                 run(OpenAI, request(chunks: [openai_text_only()], base_url: base_url))
+
+        [sent] = FakeTransport.drain_requests()
+
+        assert Req.Request.get_header(sent, "x-litellm-include-cost-in-streaming-usage") == asked,
+               inspect(base_url)
+      end
+
+      # Whether or not the request identifies: it says nothing about who calls.
+      gateway = request(chunks: [openai_text_only()], base_url: "https://gateway.example/v1")
+      assert {:ok, _response} = run(OpenAI, %{gateway | identify: false})
+
+      [sent] = FakeTransport.drain_requests()
+      assert Req.Request.get_header(sent, "x-litellm-include-cost-in-streaming-usage") == ["true"]
+      assert Req.Request.get_header(sent, "x-litellm-tags") == []
+    end
+
     test "turns tool results into role:tool messages and system into a message" do
       messages = [
         Message.user("read it"),
@@ -686,6 +796,7 @@ defmodule Troupe.LLM.ProvidersTest do
         fail_status: Keyword.get(opts, :fail_status, 429),
         fail_body: Keyword.get(opts, :fail_body, "slow down"),
         transport_error: Keyword.get(opts, :transport_error, 0),
+        headers: Keyword.get(opts, :headers, %{}),
         record: self()
       )
 

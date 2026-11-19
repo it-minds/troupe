@@ -2,7 +2,9 @@ defmodule Troupe.Plane.ProfileView do
   @moduledoc """
   What a profile gives a session, for the person about to start one: which agents, which
   skills, which MCP servers with whose access, the per-tool rules, the model, the hosts its
-  pods may reach, the limits and the team the session would belong to (`profile.get`).
+  pods may reach, the limits and the team the session would belong to (`profile.get`); and,
+  where the bundle's author wrote them, its `about` lines: what the profile is for, what
+  each server is and what each of its tools does.
 
   Composed here from the same pieces the plane hands a pod, and not from anything a client
   could compose for itself: the profile row in effect (its chain resolved), the channel's
@@ -32,9 +34,13 @@ defmodule Troupe.Plane.ProfileView do
 
   alias Troupe.Plane.{Bundles, Fleet, Identity, Ledger}
   alias Troupe.Plane.Fleet.Extends
+  alias Troupe.Plane.GitHub.Policy, as: GitHubPolicy
   alias Troupe.Plane.Identity.{Entitlement, Team, User}
+  alias Troupe.Plane.Memory.Proposals
+  alias Troupe.Plane.Settings.Ladder
   alias Troupe.Policy
-  alias Troupe.Protocol.{AgentDefinition, AgentRule, Error, PermissionRule, Text}
+  alias Troupe.Protocol.{AgentCheck, AgentDefinition, AgentRule, Allowance, Error}
+  alias Troupe.Protocol.{PermissionRule, Text}
   alias Troupe.WorkerProfile
   alias Troupe.WorkerProfile.Reach
 
@@ -182,7 +188,10 @@ defmodule Troupe.Plane.ProfileView do
     whole = offering(name, [])
     parsed = bundle_of(row)
     rule = agent_rule(row)
-    {here, functions, not_here} = agents(parsed, rule, offered, whole)
+    definitions = definitions(parsed)
+    {here, functions, not_here} = agents(definitions, rule, offered, whole)
+    cap = max_tokens(row)
+    rules = rules(row)
 
     %{
       "name" => name,
@@ -191,15 +200,20 @@ defmodule Troupe.Plane.ProfileView do
       "bundle_hash" => offered.bundle_hash,
       "team" => team_name(team),
       "teams" => Enum.map(teams, & &1.name),
+      "about" => profile_about(parsed),
       "model" => model(row),
-      "agents" => here,
+      "agents" => Enum.map(here, &own_limits(&1, definitions, cap)),
       "functions" => functions,
       "agents_not_here" => not_here,
       "skills" => Enum.map(offered.skills, & &1.name),
       "skill_details" => skill_details(parsed, offered.skills),
-      "tools" => %{"rules" => rules(row), "mcp" => servers(parsed, offered)},
+      "tools" => %{"rules" => rules, "mcp" => servers(parsed, offered)},
+      "harness_tools" => harness_tools(rules),
       "reach" => reach(name, row),
-      "limits" => limits(user, name, row, team),
+      "limits" => limits(user, name, row, team, cap),
+      "github" => github(name, row, team),
+      "personal_tools" => personal_tools(row),
+      "memory_proposals" => memory_proposals(row),
       # A profile carries no terms of its own: a session's are what its creator sends, and
       # a create that sends none is held to the default approvals alone.
       "terms" => nil
@@ -264,10 +278,10 @@ defmodule Troupe.Plane.ProfileView do
   # here for the grant when the offering without one does, and not here for the profile
   # when the rule takes it away; a function agent is the harness's to run unless the rule
   # takes it away.
-  defp agents(parsed, rule, offered, whole) do
+  defp agents(definitions, rule, offered, whole) do
     {here, functions, not_here} =
-      parsed
-      |> all_agents()
+      definitions
+      |> Enum.map(fn {name, definition, from} -> agent_json(name, definition, from) end)
       |> Enum.reduce({[], [], []}, fn agent, {here, functions, not_here} ->
         case judge(agent, rule, offered.agents, whole.agents) do
           :here -> {[agent | here], functions, not_here}
@@ -293,21 +307,37 @@ defmodule Troupe.Plane.ProfileView do
 
   defp sort_agents(agents), do: Enum.sort_by(agents, &{&1["mode"] != "primary", &1["name"]})
 
-  defp all_agents(parsed) do
+  # Each agent's name, its definition and where it is from: the bundle's, then the built-ins
+  # it does not replace.
+  defp definitions(parsed) do
     own =
       for %{name: name, parsed: definition} <- agents_of(parsed),
-          do: agent_json(name, definition, "bundle")
+          do: {name, definition, "bundle"}
 
-    names = MapSet.new(own, & &1["name"])
+    names = MapSet.new(own, &elem(&1, 0))
 
     builtins =
       for {name, text} <- Enum.sort(Bundles.builtin_definitions()),
           not MapSet.member?(names, name),
           {:ok, definition} <- [AgentDefinition.parse(name, text)],
-          do: agent_json(name, definition, "builtin")
+          do: {name, definition, "builtin"}
 
     own ++ builtins
   end
+
+  # An agent's own `max_turns` and `max_tokens`, where its definition sets them, as the pod
+  # holds it to them: each lowers the session's and never raises it, so a number above the
+  # session's is the session's.
+  defp own_limits(%{"name" => name} = agent, definitions, cap) do
+    {_name, definition, _from} = List.keyfind(definitions, name, 0)
+
+    agent
+    |> put_lower("max_turns", definition.max_turns, Allowance.max_turns())
+    |> put_lower("max_tokens", definition.max_tokens, cap)
+  end
+
+  defp put_lower(agent, _key, nil, _session), do: agent
+  defp put_lower(agent, key, own, session), do: Map.put(agent, key, min(own, session))
 
   defp agents_of(nil), do: []
   defp agents_of(%{agents: agents}), do: agents
@@ -344,6 +374,31 @@ defmodule Troupe.Plane.ProfileView do
         }
   end
 
+  # The harness's own tools, each with whether a rule above refuses it whole: a `deny` with
+  # no pattern takes the tool away from every call, where one with a pattern takes only the
+  # calls it matches, and the tool is still there.
+  defp harness_tools(rules) do
+    off =
+      for %{"access" => "deny", "pattern" => nil, "tool" => tool} <- rules,
+          into: MapSet.new(),
+          do: tool
+
+    for name <- AgentCheck.harness_tools(),
+        do: %{"name" => name, "refused" => MapSet.member?(off, name)}
+  end
+
+  # Whether a person may offer a session there their own signed-in tools, as the harness
+  # sends it at every activation: `forbid`, or the default `allow`.
+  defp personal_tools(%{spec: %{"personalTools" => "forbid"}}), do: "forbid"
+  defp personal_tools(_row), do: "allow"
+
+  # Whether a session's agents may propose to a team's or the organisation's memory: not
+  # while the plane's setting switches proposals off, nor where the profile in effect says
+  # `memoryProposals: false`, as a proposal is refused.
+  defp memory_proposals(row) do
+    Proposals.enabled?() and not match?(%{spec: %{"memoryProposals" => false}}, row)
+  end
+
   # The bundle's servers, as the pod loads them, each with whose credential a call goes
   # out with and whether this grant leaves it to the session: the pod gives a session the
   # tools of the servers its set names and no others.
@@ -358,10 +413,21 @@ defmodule Troupe.Plane.ProfileView do
         "permission" => Atom.to_string(server.permission),
         "tools" => if(server.tools == :all, do: "all", else: server.tools),
         "offered" => offered?,
-        "why" => if(offered?, do: nil, else: "grant")
+        "why" => if(offered?, do: nil, else: "grant"),
+        "about" => server_about(Map.get(server, :about))
       }
     end
   end
+
+  # The bundle author's words for a reader, as the bundle carries them: the profile's
+  # sentence, and a server's subtitle and its line per tool.
+  defp profile_about(%{about: %{summary: summary}}), do: %{"summary" => summary}
+  defp profile_about(_parsed), do: nil
+
+  defp server_about(%{summary: summary, tools: tools}),
+    do: %{"summary" => summary, "tools" => tools}
+
+  defp server_about(_none), do: nil
 
   defp servers_of(nil), do: []
   defp servers_of(%{mcp_servers: servers}), do: servers
@@ -411,25 +477,57 @@ defmodule Troupe.Plane.ProfileView do
 
   # -- limits ----------------------------------------------------------------------
 
-  # The room, as `profiles.list` counts it, and the three ceilings a session's budget is
-  # checked against below the platform's: the profile's, the team's and the person's.
-  # Zero or none is no ceiling, as the ledger reads it.
-  defp limits(user, name, row, team) do
-    workers = Fleet.list_workers(name)
-    placeable = Enum.reject(workers, & &1.draining)
+  # The room, counted by the same `Fleet.room/2` as `profiles.list`, and the three ceilings
+  # a session's budget is checked against below the platform's: the profile's, the team's
+  # and the person's. Zero or none is no ceiling, as the ledger reads it.
+  #
+  # Then what each agent of the session is held to: the output cap of one model call, the
+  # profile's in effect or Troupe's; and the harness's allowance, Troupe's own, since a pod
+  # reads no organisation layer and a profile sets none of it. And the team's: how long a
+  # session rests before it sleeps, and the period its budget runs over, as resolved under
+  # the platform's settings; neither without a team.
+  defp limits(user, name, row, team, cap) do
+    room = Fleet.room(name, row)
+    resolved = Ladder.resolve(team)
 
     %{
       "sessions_per_pod" => row && row.sessions_per_pod,
       "max_sessions" => row && row.max_sessions,
-      "capacity" => Enum.sum(Enum.map(placeable, & &1.capacity)),
-      "active_sessions" => Enum.sum(Enum.map(workers, & &1.active_sessions)),
+      "capacity" => room.capacity,
+      "active_sessions" => room.active_sessions,
+      "max_tokens" => cap,
+      "session" => %{
+        "max_turns" => Allowance.max_turns(),
+        "wall_clock_seconds" => div(Allowance.wall_clock_ms(), 1000),
+        "max_input_tokens" => Allowance.max_input_tokens(),
+        "max_output_tokens" => Allowance.max_output_tokens(),
+        "max_depth" => Allowance.max_depth()
+      },
+      "idle_seconds" => resolved && resolved.idle_timeout_seconds,
       "budgets" => %{
         "profile" => ceiling(row && row.budget_micros),
         "team" => ceiling(team && Ledger.budget_micros(team.id)),
-        "you" => ceiling(is_binary(user.subject) && Ledger.person_budget_micros(user.subject))
+        "you" => ceiling(is_binary(user.subject) && Ledger.person_budget_micros(user.subject)),
+        "team_period" => resolved && resolved.budget_period
       }
     }
   end
+
+  # The output cap a pod's every model call asks no more than: the profile's `llm.maxTokens`,
+  # its chain's lowest already, or Troupe's where it sets none.
+  defp max_tokens(%{spec: %{"llm" => %{"maxTokens" => cap}}}) when is_integer(cap) and cap > 0,
+    do: cap
+
+  defp max_tokens(_row), do: Allowance.max_tokens()
+
+  # What a session there may do on GitHub through the plane's App, where the profile gives
+  # it any: the permissions its token is narrowed to, and the fix loop's caps, the lower of
+  # the profile's and the team's (`nil` for none, attempts one where neither says).
+  defp github(name, %{spec: %{"github" => %{} = github}}, team) do
+    Map.put(GitHubPolicy.caps(name, team), "permissions", github["permissions"] || %{})
+  end
+
+  defp github(_name, _row, _team), do: nil
 
   defp ceiling(micros) when is_integer(micros) and micros > 0, do: micros
   defp ceiling(_none), do: nil

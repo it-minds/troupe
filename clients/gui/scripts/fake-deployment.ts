@@ -28,6 +28,16 @@ const plane = await FakePlane.start({
   worker,
   corsOrigins: origins,
   podTokenLifetime: 900,
+  // The web app is the dev server itself, so a copied link's web line and the browser
+  // build's "better in the app" line point somewhere real (#1118).
+  app: `${origins[0]}/`,
+  downloads: {
+    version: "0.43.0-beta",
+    page: "https://github.com/it-minds/troupe/releases/tag/v0.43.0-beta",
+    windows: "https://github.com/it-minds/troupe/releases/download/v0.43.0-beta/Troupe_0.43.0_x64-setup.exe",
+    macos: "https://github.com/it-minds/troupe/releases/download/v0.43.0-beta/Troupe_0.43.0_universal.dmg",
+    linux: "https://github.com/it-minds/troupe/releases/download/v0.43.0-beta/Troupe_0.43.0_amd64.AppImage",
+  },
   clientDefaults: process.env["NO_CLIENT_DEFAULTS"] ? { configured: false } : GATEWAY_DEFAULTS,
   // TEAMS=core,design puts everybody in both, so a new session asks which team it is for;
   // LISTS_ONE_TEAM=1 has the listing name only the first, so the plane's refusal asks instead.

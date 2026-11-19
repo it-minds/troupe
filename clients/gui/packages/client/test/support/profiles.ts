@@ -17,6 +17,8 @@ export interface FakeBundleServer {
   credential_mode: "person" | "profile" | "client_credentials";
   permission: "auto" | "ask";
   tools: string[] | "all";
+  /** The bundle author's subtitle and a line per tool, as a server's `about` carries them. */
+  about?: { summary?: string; tools?: Record<string, string> };
 }
 
 export interface FakeProfileSpec {
@@ -25,7 +27,10 @@ export interface FakeProfileSpec {
   bundle_version: string;
   bundle_hash: string;
   bundle: {
-    agents: Array<{ name: string; mode: "primary" | "subagent" | "function"; description: string }>;
+    /** The bundle's `about`: what the profile is for, in its author's words. */
+    about?: { summary: string };
+    /** `max_turns` and `max_tokens` as the definition's front matter sets them. */
+    agents: Array<{ name: string; mode: "primary" | "subagent" | "function"; description: string; max_turns?: number; max_tokens?: number }>;
     skills: string[];
     mcp_servers: FakeBundleServer[];
     /** What each skill does and its SKILL.md after the front matter, by name; one not here has neither. */
@@ -35,7 +40,13 @@ export interface FakeProfileSpec {
   agentRule?: { allow?: string[]; deny?: string[] };
   /** `spec.permissions`, the profile's own tool rules. */
   permissions?: { allow?: string[]; ask?: string[]; deny?: string[] };
-  llm?: { model?: string; smallModel?: string; provider?: string; endpoint?: string; secretRef?: unknown };
+  llm?: { model?: string; smallModel?: string; provider?: string; endpoint?: string; secretRef?: unknown; maxTokens?: number };
+  /** `spec.github`: the token's permissions and the fix loop's caps. Absent, no GitHub. */
+  github?: { permissions?: Record<string, string>; maxPushes?: number; maxRuns?: number; maxAttempts?: number };
+  /** `spec.personalTools`; absent is `allow`. */
+  personalTools?: "allow" | "forbid";
+  /** `spec.memoryProposals`; absent is on. */
+  memoryProposals?: boolean;
   egress?: string[];
   sessions_per_pod: number;
   max_sessions: number | null;
@@ -64,6 +75,23 @@ export const ORGANISATION_RULES = { ask: ["bash(curl *)"], deny: ["bash(sudo *)"
 export const TEAM_BUDGETS: Record<string, number | null> = { core: 500_000_000, design: 250_000_000 };
 export const PERSON_BUDGET: number | null = 150_000_000;
 
+/** How long each team's sessions rest before they sleep, in seconds, and its budget's period. */
+export const TEAM_IDLE: Record<string, number> = { core: 1800, design: 900 };
+export const TEAM_PERIOD: Record<string, string> = { core: "monthly", design: "never" };
+
+/** The harness's own tools, as the plane lists them from the agent check. */
+export const HARNESS_TOOLS = [
+  "read_file", "write_file", "edit_file", "list_files", "grep", "shell", "publish", "import", "todo_write", "todo_read", "delegate", "stop_child",
+  "finish", "read_branch", "remember", "recall", "read_output", "ask_user", "web_fetch", "git_read", "glob", "onboard_write", "show", "patch",
+] as const;
+
+/** Troupe's own allowance for each agent, which no profile sets, and its output cap. */
+export const ALLOWANCE = { max_turns: 40, wall_clock_seconds: 1800, max_input_tokens: 2_000_000, max_output_tokens: 400_000, max_depth: 3 } as const;
+export const MAX_TOKENS = 8192;
+
+// The names other tools give theirs, which a rule copied from one carries.
+const ELSEWHERE: Record<string, string> = { bash: "shell", webfetch: "web_fetch" };
+
 /**
  * Two profiles: `dev`, the full one, whose `core` grant leaves out the wiki server; and
  * `ux`, a lean one with a primary of its bundle's own, whose rule leaves out `build` and
@@ -78,17 +106,26 @@ export function exampleProfiles(): FakeProfileSpec[] {
       bundle_version: "3",
       bundle_hash: "sha256:abc",
       bundle: {
-        agents: [{ name: "reviewer", mode: "subagent", description: "Reads a diff and comments on it" }],
+        about: { summary: "Builds and reviews the team's services, from the issue to the pull request." },
+        agents: [{ name: "reviewer", mode: "subagent", description: "Reads a diff and comments on it", max_turns: 20 }],
         skills: ["review"],
         skill_files: { review: { description: "read a diff and comment", body: "## Reviewing\n\nRead the **whole** diff before the first comment." } },
         mcp_servers: [
           { name: "github", url: "https://api.githubcopilot.com/mcp/", credential_mode: "person", permission: "ask", tools: "all" },
-          { name: "jira", url: "https://mcp.example.com/jira", credential_mode: "profile", permission: "auto", tools: ["search_issues", "get_issue"] },
+          {
+            name: "jira",
+            url: "https://mcp.example.com/jira",
+            credential_mode: "profile",
+            permission: "auto",
+            tools: ["search_issues", "get_issue"],
+            about: { summary: "The team's issue tracker", tools: { search_issues: "Finds issues by their words" } },
+          },
           { name: "wiki", url: "https://wiki.example.com/mcp", credential_mode: "client_credentials", permission: "ask", tools: ["read_page"] },
         ],
       },
       permissions: { ask: ["bash(git push *)"], deny: ["bash(rm -rf *)"], allow: ["webfetch"] },
       llm: { model: "glm-5.2", smallModel: "qwen3.6-35b", provider: "openai", endpoint: "https://llm-gw.example.com/v1", secretRef: { name: "llm-gateway", key: "api-key" } },
+      github: { permissions: { contents: "write", pull_requests: "write" }, maxPushes: 20 },
       egress: ["github.com", "llm-gw.example.com", "mcp.example.com"],
       sessions_per_pod: 4,
       max_sessions: 12,
@@ -155,6 +192,9 @@ export function composeProfile(
   const byGrant = (name: string) => !(grant.agents_out ?? []).includes(name);
   const rules = (from: "profile" | "organisation", set: { allow?: readonly string[]; ask?: readonly string[]; deny?: readonly string[] }) =>
     (["deny", "ask", "allow"] as const).flatMap((access) => (set[access] ?? []).map((r) => ({ ...ruleParts(r), access, from })));
+  const cap = spec.llm?.maxTokens ?? MAX_TOKENS;
+  // A deny with no pattern refuses the tool whole; one with a pattern only the calls it matches.
+  const off = new Set((spec.permissions?.deny ?? []).map(ruleParts).filter((r) => r.pattern === null).map((r) => ELSEWHERE[r.tool] ?? r.tool));
   return {
     name: spec.name,
     channel: spec.channel,
@@ -162,6 +202,7 @@ export function composeProfile(
     bundle_hash: spec.bundle_hash,
     team,
     teams,
+    about: spec.bundle.about ?? null,
     model: {
       model: spec.llm?.model ?? null,
       small_model: spec.llm?.smallModel ?? null,
@@ -171,7 +212,20 @@ export function composeProfile(
       // gives a person's own key, so the plane never answers "yours".
       key: spec.llm?.endpoint && spec.llm.secretRef ? "profile" : null,
     },
-    agents: every.filter((a) => a.mode !== "function" && byRule(a.name) && byGrant(a.name)).map((a) => ({ name: a.name, mode: a.mode, description: a.description, from: a.from })),
+    // An agent's own numbers lower the session's and never raise them.
+    agents: every
+      .filter((a) => a.mode !== "function" && byRule(a.name) && byGrant(a.name))
+      .map((a) => {
+        const own = a as { max_turns?: number; max_tokens?: number };
+        return {
+          name: a.name,
+          mode: a.mode,
+          description: a.description,
+          from: a.from,
+          ...(own.max_turns !== undefined ? { max_turns: Math.min(own.max_turns, ALLOWANCE.max_turns) } : {}),
+          ...(own.max_tokens !== undefined ? { max_tokens: Math.min(own.max_tokens, cap) } : {}),
+        };
+      }),
     // The harness's own jobs: no grant names one, so only the profile's rule takes one away.
     functions: every
       .filter((a) => a.mode === "function" && byRule(a.name))
@@ -190,18 +244,29 @@ export function composeProfile(
       rules: rules("profile", spec.permissions ?? {}),
       mcp: spec.bundle.mcp_servers.map((s) => {
         const out = (grant.servers_out ?? []).includes(s.name);
-        return { name: s.name, host: hostOf(s.url), access: ACCESS[s.credential_mode], permission: s.permission, tools: s.tools, offered: !out, why: out ? "grant" : null };
+        const about = s.about ? { summary: s.about.summary ?? null, tools: s.about.tools ?? {} } : null;
+        return { name: s.name, host: hostOf(s.url), access: ACCESS[s.credential_mode], permission: s.permission, tools: s.tools, offered: !out, why: out ? "grant" : null, about };
       }),
     },
     // What the operator derives: the egress list, the model's host and each server's host.
     reach: [...new Set([...(spec.egress ?? []), hostOf(spec.llm?.endpoint), ...spec.bundle.mcp_servers.map((s) => hostOf(s.url))].filter((h): h is string => Boolean(h)))].sort(),
+    harness_tools: HARNESS_TOOLS.map((name) => ({ name, refused: off.has(name) })),
     limits: {
       sessions_per_pod: spec.sessions_per_pod,
       max_sessions: spec.max_sessions,
       capacity: live.capacity,
       active_sessions: live.active_sessions,
-      budgets: { profile: spec.budget_micros, team: team ? (TEAM_BUDGETS[team] ?? null) : null, you: PERSON_BUDGET },
+      max_tokens: cap,
+      session: { ...ALLOWANCE },
+      idle_seconds: team ? (TEAM_IDLE[team] ?? 1800) : null,
+      budgets: { profile: spec.budget_micros, team: team ? (TEAM_BUDGETS[team] ?? null) : null, you: PERSON_BUDGET, team_period: team ? (TEAM_PERIOD[team] ?? "monthly") : null },
     },
+    // The caps are the profile's here: no fake team sets one of its own.
+    github: spec.github
+      ? { permissions: spec.github.permissions ?? {}, max_pushes: spec.github.maxPushes ?? null, max_runs: spec.github.maxRuns ?? null, max_attempts: spec.github.maxAttempts ?? 1 }
+      : null,
+    personal_tools: spec.personalTools ?? "allow",
+    memory_proposals: spec.memoryProposals !== false,
     terms: null,
   };
 }
@@ -217,6 +282,9 @@ export function specOfAdminProfile(p: FakeProfile, granted: string[]): FakeProfi
     permissions?: FakeProfileSpec["permissions"];
     llm?: FakeProfileSpec["llm"];
     egress?: { fqdns?: string[] };
+    github?: FakeProfileSpec["github"];
+    personalTools?: FakeProfileSpec["personalTools"];
+    memoryProposals?: boolean;
   };
   return {
     name: p.name,
@@ -227,6 +295,9 @@ export function specOfAdminProfile(p: FakeProfile, granted: string[]): FakeProfi
     ...(spec.agents ? { agentRule: spec.agents } : {}),
     ...(spec.permissions ? { permissions: spec.permissions } : {}),
     ...(spec.llm ? { llm: spec.llm } : {}),
+    ...(spec.github ? { github: spec.github } : {}),
+    ...(spec.personalTools ? { personalTools: spec.personalTools } : {}),
+    ...(spec.memoryProposals !== undefined ? { memoryProposals: spec.memoryProposals } : {}),
     egress: spec.egress?.fqdns ?? [],
     sessions_per_pod: p.sessions_per_pod,
     max_sessions: p.max_sessions ?? null,

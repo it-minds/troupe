@@ -45,7 +45,8 @@ models:
 
 A gateway is the type of the API it speaks: a LiteLLM proxy, vLLM or a company gateway
 that serves OpenAI's Chat Completions is `openai` at its `base_url`. LiteLLM is the one
-that says what each model costs; for a gateway that does not, `models.prices` does.
+that says what each call costs, streamed calls included (Troupe asks it to); for a gateway
+that does not, `models.prices` does.
 
 <!-- recipe: gateway -->
 ```yaml title="config.yaml"

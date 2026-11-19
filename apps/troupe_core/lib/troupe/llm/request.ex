@@ -198,10 +198,10 @@ defmodule Troupe.LLM.Response do
   A provider's final answer for one request.
 
   `gateway` is what the gateway in front of the provider said about the call it just
-  billed: its own identifier for the request, and what it cost. Both come from response
-  headers rather than from the body, because that is where every OpenAI-compatible
-  gateway puts them and because a body shape differs per provider while a header does
-  not. Neither is invented here: a gateway that says nothing leaves an empty
+  billed: its own identifier for the request, and what it cost. The identifier comes from
+  a response header; the cost from a header too, or from the `usage` an OpenAI-compatible
+  gateway writes into the stream, which wins where both are (`Troupe.LLM.Gateway`).
+  Neither is invented here: a gateway that says nothing leaves an empty
   `Troupe.LLM.Gateway`, and the accounting records the tokens with no cost rather than a
   cost we made up, which would reconcile against itself.
   """

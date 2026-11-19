@@ -51,6 +51,11 @@ export function moneyWords(micros: number | null | undefined): string {
   return `${micros < 0 ? "−" : ""}$${dollars}.${String(cents % 100).padStart(2, "0")}`;
 }
 
+/** A count of something, its thousands grouped: `1 token`, `8,192 tokens`, `3 levels`. */
+export function countWords(n: number, one: string, many = `${one}s`): string {
+  return `${n.toLocaleString("en")} ${n === 1 ? one : many}`;
+}
+
 /**
  * A length of time in milliseconds, in words: `0 s`, `1.5 s`, `59 s`, `1 min`, `1 min 30 s`,
  * `1 h 1 min`. Under a minute the seconds keep one decimal place, left out when it is `0`;
@@ -58,11 +63,23 @@ export function moneyWords(micros: number | null | undefined): string {
  *
  * `adjective` is a limit's size before its noun, as the stop sentence says it ("its
  * 30-minute working limit"): `45-second`, `30-minute`, `2-hour`, hours only when whole.
+ * `long` is a limit said in a sentence ("works for at most 30 minutes"): `45 seconds`,
+ * `30 minutes`, `1 hour 30 minutes`, whole seconds, a part that is `0` left out.
  * Nothing reported is `—`.
  */
-export function durationWords(ms: number | null | undefined, style: "words" | "adjective" = "words"): string {
+export function durationWords(ms: number | null | undefined, style: "words" | "adjective" | "long" = "words"): string {
   if (ms === null || ms === undefined || !Number.isFinite(ms)) return "—";
   const t = Math.max(0, Math.trunc(ms));
+  if (style === "long") {
+    const seconds = Math.round(t / 1000);
+    const parts: Array<[number, string]> = [
+      [Math.floor(seconds / 3600), "hour"],
+      [Math.floor((seconds % 3600) / 60), "minute"],
+      [seconds % 60, "second"],
+    ];
+    const said = parts.filter(([n]) => n !== 0).map(([n, unit]) => countWords(n, unit));
+    return said.length === 0 ? "0 seconds" : said.join(" ");
+  }
   if (style === "adjective") {
     if (t >= 3_600_000 && t % 3_600_000 === 0) return `${t / 3_600_000}-hour`;
     if (t >= 60_000) return `${Math.round(t / 60_000)}-minute`;

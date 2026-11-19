@@ -13,8 +13,9 @@
 // plane it is not signed in to is the app's: it asks in words before any request is made.
 //
 // The banner half is plain functions over the page's own objects (navigator, document,
-// storage), so the console's React banner and the plain scripts on other pages can follow
-// the same rules, and a test can hold them without a browser.
+// storage), so the desktop app's browser build, the console's per-row "Open in the app" and
+// the plain scripts on other pages follow the same rules, and a test can hold them without
+// a browser.
 
 export type AppLink = { kind: "open"; plane: string | null } | { kind: "session"; id: string; plane: string } | { kind: "artifact"; id: string; plane: string };
 
@@ -60,15 +61,57 @@ export function appLink(link: AppLink): string {
 }
 
 /**
- * What "Copy link" on a session puts on the clipboard, in the desktop app and the console
- * alike: its `troupe://` link, and under it the console's page for it where there is a
- * console and the session has one there (a private session somebody was invited into).
- * Never a token: both are addresses that sign the reader in themselves, and the plane opens
- * the session only for somebody it is shared with.
+ * Where the desktop app's browser build is served for this plane, as its discovery document
+ * names it (`plane.app`); null where the plane names none.
  */
-export function sessionLinkText(id: string, plane: string, console: string | null, privateSession: boolean): string {
+export function webAppOf(discovery: { plane?: { [k: string]: unknown } } | null | undefined): string | null {
+  const app = discovery?.plane?.["app"];
+  return typeof app === "string" && /^https?:\/\//.test(app) ? app : null;
+}
+
+/**
+ * A place in the desktop app's browser build: its address under the app's base, which the
+ * app reads at load (`#/session/<id>`, `#/artifact/<id>`). A person without the app lands
+ * there, at the same place, and the web app offers the app.
+ */
+export function webAppLink(app: string, place: { kind: "session" | "artifact"; id: string }): string {
+  return `${app.replace(/\/+$/, "")}/#/${place.kind}/${encodeURIComponent(place.id)}`;
+}
+
+/** Where a session's copied link points besides the app: the web app, and the console's page for it. */
+export interface LinkElsewhere {
+  /** The plane's web app (`plane.app`), or null where it names none. */
+  app?: string | null;
+  /** The console's address, for a private session somebody was invited into. */
+  console?: string | null;
+  privateSession?: boolean;
+}
+
+/**
+ * What "Copy link" on a session puts on the clipboard, in the desktop app and the console
+ * alike: its `troupe://` link; under it the web app at that session where the plane names
+ * one, so a person without the app lands in a browser that offers it; and for a private
+ * session somebody was invited into, the console's page for it, which reads one in a
+ * browser where the web app, holding no keys of this computer, cannot. Never a token: each
+ * is an address that signs the reader in itself, and the plane opens the session only for
+ * somebody it is shared with.
+ */
+export function sessionLinkText(id: string, plane: string, elsewhere: LinkElsewhere = {}): string {
   const lines = [appLink({ kind: "session", id, plane })];
-  if (console && privateSession) lines.push(`${console.replace(/\/+$/, "")}/#/mine/invited/${encodeURIComponent(id)}`);
+  if (elsewhere.app) lines.push(webAppLink(elsewhere.app, { kind: "session", id }));
+  if (elsewhere.console && elsewhere.privateSession) lines.push(`${elsewhere.console.replace(/\/+$/, "")}/#/sessions/invited/${encodeURIComponent(id)}`);
+  return lines.join("\n");
+}
+
+/**
+ * What "Copy link" on an artifact puts on the clipboard: its link, which signs the reader in
+ * and gives its role; under it the app's own link to it, carrying nothing of the link's key;
+ * and the web app at it where the plane names one. Only the first where no plane is known.
+ */
+export function artifactLinkText(url: string, id: string, plane: string | null, app: string | null = null): string {
+  if (!plane) return url;
+  const lines = [url, appLink({ kind: "artifact", id, plane })];
+  if (app) lines.push(webAppLink(app, { kind: "artifact", id }));
   return lines.join("\n");
 }
 
@@ -111,6 +154,11 @@ export function parseAppLink(text: string): AppLink | RefusedLink {
     return { kind: place, id, plane };
   }
   return { refused: `${NOT_FOLLOWED} Troupe does not know that place.` };
+}
+
+/** Whether `text` is a session's or an artifact's id as links carry one: the plane's own shape, never a path. */
+export function isPlaceId(text: string): boolean {
+  return ID.test(text);
 }
 
 export function isRefused(link: AppLink | RefusedLink): link is RefusedLink {
@@ -175,6 +223,21 @@ export function downloadsOf(discovery: { plane?: { [k: string]: unknown } } | nu
 }
 
 export const PLATFORM_NAME: Record<"windows" | "macos" | "linux", string> = { windows: "Windows", macos: "macOS", linux: "Linux" };
+
+/** What an install offers on this platform: its own installer where there is one, and the other platforms' beside it. */
+export interface InstallOffer {
+  here: "windows" | "macos" | "linux" | null;
+  /** This platform's installer, or null: then the release page is the offer. */
+  file: string | null;
+  others: ("windows" | "macos" | "linux")[];
+}
+
+export function installOffer(platform: BannerPlatform, downloads: AppDownloads): InstallOffer {
+  const here = platform === "windows" || platform === "macos" || platform === "linux" ? platform : null;
+  const file = here ? downloads[here] : null;
+  const others = (["windows", "macos", "linux"] as const).filter((p) => p !== here && downloads[p]);
+  return { here, file, others: file ? others : [] };
+}
 
 /** The storage key a dismissal is kept under, and what it holds: the version it was dismissed at. */
 export const BANNER_DISMISSED = "troupe.appBanner.dismissed";

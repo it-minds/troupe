@@ -17,7 +17,7 @@ import { useState } from "react";
 import type { JSX } from "react";
 import { appLink } from "@troupe/client";
 import type { OwnClient, OwnMemory, OwnMemoryPreview, PlaneDocument } from "@troupe/client";
-import { OpenInApp } from "./AppBanner";
+import { OpenInApp } from "./OpenInApp";
 import { describeError, show, useConsole, useLoad } from "../console";
 import { href } from "../route";
 import { Empty, Field, Loaded, Preview, Region, SessionState, Status, TextDiff, count, when } from "./bits";

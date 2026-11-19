@@ -9,11 +9,12 @@ defmodule Troupe.Budget do
   """
 
   alias Troupe.LLM.Usage
+  alias Troupe.Protocol.Allowance
 
-  defstruct max_turns: 40,
-            max_input_tokens: 2_000_000,
-            max_output_tokens: 400_000,
-            wall_clock_ms: 30 * 60 * 1000,
+  defstruct max_turns: Allowance.max_turns(),
+            max_input_tokens: Allowance.max_input_tokens(),
+            max_output_tokens: Allowance.max_output_tokens(),
+            wall_clock_ms: Allowance.wall_clock_ms(),
             turns: 0,
             input_tokens: 0,
             output_tokens: 0,

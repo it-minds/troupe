@@ -200,10 +200,14 @@ function fieldsChanged(before: Record<string, unknown>, after: Record<string, un
   const both = (a: Record<string, Record<string, unknown>>, b: Record<string, Record<string, unknown>>): Record<string, Record<string, unknown>> =>
     Object.fromEntries(Object.entries(a).filter(([name]) => name in b));
   const sections = Object.keys(SECTIONS) as Section[];
-  return diff(
-    Object.fromEntries(sections.map((s) => [s, both(was[s], now[s])])),
-    Object.fromEntries(sections.map((s) => [s, both(now[s], was[s])])),
-  );
+  return {
+    ...diff(
+      Object.fromEntries(sections.map((s) => [s, both(was[s], now[s])])),
+      Object.fromEntries(sections.map((s) => [s, both(now[s], was[s])])),
+    ),
+    // The profile's sentence is the document's own, compared whole.
+    ...diff({ about: before["about"] ?? null }, { about: after["about"] ?? null }),
+  };
 }
 
 /** Everything a version carries but its files' text, as `Bundles.describe/1` reads it. */
@@ -275,6 +279,11 @@ function bundleProblems(content: unknown, egress: string[]): string[] {
     } else if (!(egress.includes(host) || /\.svc(\.cluster\.local)?$/.test(host))) {
       out.push(`mcp server ${String(m["name"])}: the cluster policy does not let a pod reach ${host}`);
     }
+    // A line for a tool the allowlist leaves out describes something a session never has.
+    const lines = (m["about"] as { tools?: Record<string, string> } | undefined)?.tools ?? {};
+    const allowed = Array.isArray(m["tools"]) ? (m["tools"] as string[]) : null;
+    const unknown = allowed ? Object.keys(lines).filter((t) => !allowed.includes(t)).sort() : [];
+    if (unknown.length) out.push(`mcp server ${String(m["name"])}: about.tools names ${unknown.join(", ")}, which its tools do not carry`);
   }
   return out;
 }

@@ -455,6 +455,22 @@ label code {
   color: var(--error-fg);
   background: var(--error-bg);
 }
+/* The desktop app, offered in the browser build: the page's own ink, not a state's colour,
+   since nothing is wrong; the link that opens the app is the line's one strong word. */
+.banner.app-banner {
+  color: var(--border-hairline);
+  background: var(--bg-raised);
+}
+.banner.app-banner p {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.banner.app-banner .also {
+  color: var(--text-secondary);
+}
+.banner.app-banner .open-app {
+  font-weight: 700;
+}
 /* The newest supported release beside the recommended one: the same link, quieter. */
 .banner.update button.link.secondary {
   font-weight: 400;
@@ -852,27 +868,23 @@ main {
 .row.is-dormant {
   border-left-color: var(--dormant-fg);
 }
-/* A private session another device holds, and an archived one its owner may unarchive:
-   Claim or Unarchive stands beside the row, at its edge, since the row itself opens the
-   session. */
+/* A private session another device holds: Claim stands beside the row, at its edge, since
+   the row itself opens the session. */
 .rows li.claimable,
-.rows li.unarchivable,
 .rows li.markable {
   display: flex;
   align-items: center;
 }
 .rows li.claimable .row,
-.rows li.unarchivable .row,
 .rows li.markable .row {
   flex: 1 1 auto;
   min-width: 0;
 }
-.rows li.claimable .claim,
-.rows li.unarchivable .claim {
+.rows li.claimable .claim {
   flex: none;
   margin-right: var(--space-6);
 }
-/* The owner's ⋯ beside a row (rename, keep at the top), its menu drawn as the head's is;
+/* The owner's ⋯ beside a row (rename, keep at the top, archive or unarchive), its menu drawn as the head's is;
    a row being renamed is its name as a field, in the row's place. */
 .rows .row-menu {
   flex: none;
@@ -5903,8 +5915,9 @@ pre.instruction {
 
 /* A profile's page: plain sections, one table after another inside each. A server's tools
    and an agent's description wrap in their cell; the table still scrolls inside itself. */
-.profile-view .group > .table-scroll + .table-scroll,
-.profile-view .group > .table-scroll + p.note {
+.profile-view .part > .table-scroll + .table-scroll,
+.profile-view .part > .table-scroll + p.note,
+.profile-view .part > p.note + .table-scroll {
   margin-top: var(--space-3);
 }
 .profile-view .table td.wrap {
@@ -5936,6 +5949,176 @@ pre.instruction {
 }
 .profile-link {
   margin-left: var(--space-2);
+}
+/* The page's head sentence: the bundle author's words for it, or the primary agent's. */
+.screen-head p.profile-sentence {
+  max-width: var(--measure-reading);
+}
+/* The sections and, beside them, the rail of what a person checks before starting; on a
+   narrow window the rail comes first, as it is in the page's order. */
+.profile-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(14rem, 20rem);
+  align-items: start;
+}
+.profile-rail {
+  grid-column: 2;
+  grid-row: 1;
+  position: sticky;
+  top: 0;
+  padding: var(--space-4) var(--space-6) var(--space-4) 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.profile-rail > button.primary {
+  margin-top: var(--space-2);
+  width: 100%;
+}
+.profile-main {
+  grid-column: 1;
+  grid-row: 1;
+  min-width: 0;
+}
+/* A part of a section: a small heading and what is under it, at the section's inset. */
+.profile-view .group > .part {
+  margin: 0 var(--space-6) var(--space-4);
+  overflow-wrap: anywhere;
+}
+.profile-view .part > h4,
+.profile-card > h4 {
+  margin: 0 0 var(--space-2);
+  font: var(--t-ui-small);
+  font-weight: 700;
+  color: var(--text-primary);
+}
+.profile-view .part > p {
+  margin: 0;
+}
+.profile-view ul.plain,
+.profile-card ul.struck {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+.profile-view ul.plain > li + li {
+  margin-top: var(--space-2);
+}
+.profile-view .group > .banner {
+  margin-bottom: var(--space-3);
+}
+/* A card per server the grant offers, and Troupe's own beside them. */
+.profile-cards {
+  list-style: none;
+  margin: 0 var(--space-6) var(--space-3);
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 15rem), 1fr));
+  gap: var(--space-3);
+}
+.profile-card {
+  border: var(--bw-hairline) solid var(--border-hairline);
+  background: var(--bg-raised);
+  padding: var(--space-3);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.profile-card .facts.wide {
+  grid-template-columns: minmax(5rem, auto) minmax(0, 1fr);
+  margin-bottom: 0;
+}
+.profile-card ul.struck s {
+  color: var(--text-secondary);
+}
+.profile-card > p.micro {
+  margin: 0 0 var(--space-1);
+  color: var(--text-label);
+  text-transform: uppercase;
+}
+.profile-card > p.note {
+  margin: var(--space-2) 0 0;
+}
+/* The harness's own tools on Troupe's card, a line of names that wraps. */
+.profile-card ul.tool-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-3);
+}
+.profile-card ul.tool-list s {
+  color: var(--text-secondary);
+}
+/* A server's subtitle under its name, and a line per tool with the tool's name after it,
+   small and in the code face. */
+.profile-card > p.profile-subtitle {
+  margin: 0 0 var(--space-2);
+  font: var(--t-ui-small);
+  color: var(--text-body);
+}
+.profile-card ul.tool-lines {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+.profile-card ul.tool-lines > li + li {
+  margin-top: var(--space-1);
+}
+.profile-card ul.tool-lines .tool-name {
+  font: var(--t-micro);
+  color: var(--text-secondary);
+}
+/* The rail's limits: a sentence each, under a small heading. */
+.profile-limits {
+  margin: 0 0 var(--space-3);
+  font: var(--t-ui-small);
+  color: var(--text-body);
+}
+.profile-limits > h4 {
+  margin: 0 0 var(--space-2);
+  font: var(--t-micro);
+  letter-spacing: var(--tracking-micro);
+  color: var(--text-muted);
+  text-transform: uppercase;
+}
+.profile-limits ul.plain > li + li {
+  margin-top: var(--space-1);
+}
+.profile-limits > p.note {
+  margin: var(--space-2) 0 0;
+}
+/* Under the hood: the configuration's tables, folded; its summary reads as a section label. */
+details.under-hood > summary {
+  padding: var(--space-4) var(--space-6) var(--space-3);
+  font: var(--t-screen);
+  letter-spacing: var(--tracking-screen);
+  text-transform: uppercase;
+  color: var(--running-fg);
+  cursor: pointer;
+}
+@media (max-width: 760px) {
+  .profile-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .profile-rail {
+    grid-column: 1;
+    grid-row: 1;
+    position: static;
+    padding: var(--space-3) var(--space-4);
+    border-bottom: var(--bw-hairline) solid var(--border-hairline);
+  }
+  .profile-main {
+    grid-row: 2;
+  }
+  .profile-view .group > .part,
+  .profile-cards {
+    margin-left: var(--space-4);
+    margin-right: var(--space-4);
+  }
+  details.under-hood > summary {
+    padding-left: var(--space-4);
+    padding-right: var(--space-4);
+  }
 }
 
 /* -- tools and skills ----------------------------------------------------------- */

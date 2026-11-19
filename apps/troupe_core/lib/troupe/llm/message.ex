@@ -144,8 +144,11 @@ defmodule Troupe.LLM.Gateway do
   @moduledoc """
   What the gateway in front of the provider said about the call it just billed.
 
-  Two facts, both from response headers: the gateway's own identifier for the request,
-  and the cost. The identifier is the only name both the gateway and this system have
+  Two facts: the gateway's own identifier for the request, from a response header, and
+  the cost, from a header or from the stream. LiteLLM sends its headers before the first
+  token, so a streamed call's cost is not in them; asked to, it puts the cost in the
+  `usage` of the stream's last chunk, as `cost` in dollars (`with_reported_cost/2`). The
+  identifier is the only name both the gateway and this system have
   for the same call, which is what makes `Troupe.Plane.Reconcile` able to join two
   ledgers kept by two systems for two different reasons; the cost is taken rather than
   computed, because the gateway has already priced the call and a price of our own
@@ -154,6 +157,8 @@ defmodule Troupe.LLM.Gateway do
   A gateway that says nothing leaves both `nil`. That is a recordable fact — tokens with
   no cost — and not an error: the reconciliation reports it, and nobody guesses.
   """
+
+  require Logger
 
   defstruct request_id: nil, cost_micros: nil
 
@@ -182,15 +187,43 @@ defmodule Troupe.LLM.Gateway do
   end
 
   @doc """
+  The gateway's word on a call with the cost its stream reported, in micro-units, beside
+  what the headers said.
+
+  The stream's figure wins: it is the one the gateway wrote to its own spend log for this
+  call, which is the ledger this one is reconciled against. A header that said otherwise
+  is said once, at debug level, and not counted. A stream that reported no cost leaves the
+  header's.
+  """
+  @spec with_reported_cost(t(), non_neg_integer() | nil) :: t()
+  def with_reported_cost(%__MODULE__{} = gateway, nil), do: gateway
+
+  def with_reported_cost(%__MODULE__{cost_micros: header} = gateway, reported) do
+    if header && header != reported do
+      Logger.debug(
+        "the gateway's cost header said #{header} micros and its stream #{reported} " <>
+          "for request #{gateway.request_id || "with no id"}; the stream's is counted"
+      )
+    end
+
+    %{gateway | cost_micros: reported}
+  end
+
+  @doc """
   Parse a decimal amount of currency into micro-units.
 
   Integer arithmetic on the digits rather than `String.to_float/1`, because a cost is
   money and a float that is one part in a billion out is a ledger that does not add up.
   More than six decimal places are truncated, which is what a micro-unit ledger can
   hold; a call that cost less than a micro-unit cost zero, and that is the truth.
+
+  A JSON number takes the same path: a float is written out as its shortest decimal, the
+  digits the gateway wrote it with, and read as the header's text is.
   """
-  @spec to_micros(String.t() | nil) :: non_neg_integer() | nil
+  @spec to_micros(String.t() | number() | nil) :: non_neg_integer() | nil
   def to_micros(nil), do: nil
+  def to_micros(amount) when is_integer(amount), do: max(amount * 1_000_000, 0)
+  def to_micros(amount) when is_float(amount), do: amount |> Float.to_string() |> to_micros()
 
   def to_micros(amount) when is_binary(amount) do
     case amount |> String.trim() |> expand() do

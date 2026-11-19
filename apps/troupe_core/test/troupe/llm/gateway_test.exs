@@ -43,6 +43,50 @@ defmodule Troupe.LLM.GatewayTest do
     end
   end
 
+  # What is said of a header and a stream that differ is `GatewayCostLogTest`'s, which
+  # lowers the VM's log level and so runs alone.
+  describe "with_reported_cost/2" do
+    test "the stream's cost is counted where the headers said none" do
+      gateway = %Gateway{request_id: "abc", cost_micros: nil}
+
+      assert %Gateway{request_id: "abc", cost_micros: 123} =
+               Gateway.with_reported_cost(gateway, 123)
+    end
+
+    test "a stream that said nothing leaves the header's" do
+      gateway = %Gateway{cost_micros: 18_400}
+      assert Gateway.with_reported_cost(gateway, nil) == gateway
+    end
+
+    test "the stream's figure wins over a header that said another" do
+      assert %Gateway{cost_micros: 520} =
+               Gateway.with_reported_cost(%Gateway{cost_micros: 500}, 520)
+    end
+  end
+
+  describe "to_micros/1 of a JSON number" do
+    test "a float is read through the digits it was written with" do
+      assert Gateway.to_micros(8.87) == 8_870_000
+      assert Gateway.to_micros(0.07) == 70_000
+      assert Gateway.to_micros(1.0500000000000001e-05) == 10
+      assert Gateway.to_micros(1.2345e-4) == 123
+      assert Gateway.to_micros(0.000123450000000001) == 123
+      assert Gateway.to_micros(150.0) == 150_000_000
+      assert Gateway.to_micros(0.0) == 0
+    end
+
+    test "a whole number of dollars, and nothing below zero" do
+      assert Gateway.to_micros(2) == 2_000_000
+      assert Gateway.to_micros(0) == 0
+      assert Gateway.to_micros(-1) == 0
+      assert Gateway.to_micros(-0.5) == 0
+    end
+
+    test "the decimal text with more digits than a float holds" do
+      assert Gateway.to_micros("0.000123450000000001") == 123
+    end
+  end
+
   describe "to_micros/1" do
     test "an amount a float would round wrongly is exact" do
       # 0.07 * 1_000_000 is 70000.00000000001 in binary floating point, and

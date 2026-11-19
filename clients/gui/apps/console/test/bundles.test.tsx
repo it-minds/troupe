@@ -176,6 +176,32 @@ describe("publishing", () => {
     expect(fake.admin.audit.some((a) => a.action === "bundle.publish")).toBe(false);
   });
 
+  it("takes the bundle author's about in the document, its refusal in the plane's words and its change in the preview", async () => {
+    await open("#/bundles/stable");
+    (await waitFor(() => button("Publish a new version"), "stable")).click();
+    const source = await waitFor(() => field("Skills and MCP servers"), "the document");
+    const rest = JSON.parse(source.value) as { mcp_servers: Array<Record<string, unknown>> };
+    const withAbout = (tools: Record<string, string>): string =>
+      JSON.stringify({
+        ...rest,
+        about: { summary: "Builds and reviews the team's services." },
+        mcp_servers: rest.mcp_servers.map((s) => (s["name"] === "jira" ? { ...s, about: { summary: "The team's issue tracker", tools } } : s)),
+      });
+
+    // A line for a tool jira's allowlist does not carry is refused, by the server and the name.
+    type(source, withAbout({ delete_issue: "Deletes one issue" }));
+    button("Check and preview")!.click();
+    await waitFor(() => says("mcp server jira: about.tools names delete_issue, which its tools do not carry"), "the plane's sentence");
+
+    type(source, withAbout({ get_issue: "Reads one issue" }));
+    button("Check and preview")!.click();
+    await waitFor(() => says("What will happen"), "the preview");
+    // A change to about is a line of the diff as any other field's is.
+    const diff = document.querySelector(".diff")!.textContent;
+    expect(diff).toContain(`+ about: {"summary":"Builds and reviews the team's services."}`);
+    expect(diff).toContain(`+ mcp_servers.jira.about: {"summary":"The team's issue tracker","tools":{"get_issue":"Reads one issue"}}`);
+  });
+
   it("opens a channel nothing follows yet, and publishes its first version", async () => {
     await open("#/bundles");
     type(await waitFor(() => field("Another channel"), "the channels"), "nightly");

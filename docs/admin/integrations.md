@@ -103,11 +103,15 @@ endpoint, and, for models that endpoint does not price, `llm.prices`.
 - `openai` posts to `<endpoint>/v1/chat/completions` with a bearer token and
   `stream_options.include_usage`; `anthropic` to `/v1/messages` with `x-api-key`. `/v1` is
   not doubled.
-- The request id comes from `x-litellm-call-id` or `x-request-id`, the cost from
-  `x-litellm-response-cost`. A streamed response carries no cost header, because the
-  headers go out before the first token, so the pod prices the call from the profile's
-  `llm.prices` and marks it `priced_locally`. Without either the cost is 0, the pod's log
-  says so once a session, and without an id the id is synthetic.
+- The request id comes from `x-litellm-call-id` or `x-request-id`. The cost comes from the
+  `cost` LiteLLM writes into a streamed call's last usage chunk, which `openai` asks for on
+  every call to a gateway (`x-litellm-include-cost-in-streaming-usage: true`, so the
+  gateway needs no setting), or from the `x-litellm-response-cost` header; where both
+  name one, the stream's counts, since it is what the gateway wrote to its own spend log.
+  A LiteLLM gateway therefore needs no `llm.prices` for the models it prices. A gateway
+  that names no cost either way is priced from the profile's `llm.prices`, marked
+  `priced_locally`. Without any the cost is 0, the pod's log says so once a session, and
+  without an id the id is synthetic.
 - `mix troupe.ledger.reconcile` compares a window of recorded usage with the gateway's
   `GET /spend/logs` by request id and exits non-zero over 1 000 000 micros of drift. It
   reads `:troupe_plane, :gateway` (`base_url` or `spend_url`, and `key`), which no

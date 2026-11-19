@@ -1,6 +1,6 @@
 // A session's link from the console (troupe #1099): "Copy link" on a session's view puts
-// what the desktop app's Copy link puts on the clipboard, its troupe:// link and, for a
-// private one, the console's page under it; a browser that will not copy is shown the link
+// what the desktop app's Copy link puts on the clipboard, its troupe:// link, the web app at
+// it where the plane names one and, for a private one, the console's page under it; a browser that will not copy is shown the link
 // to copy by hand. An artifact's page offers the link of the session that published it,
 // and the app to open it in, where the plane names one, and nothing where it names none.
 
@@ -67,7 +67,9 @@ describe("a session's view", () => {
     await seesButton("Link copied");
   });
 
-  it("puts the console's page under a private session's link", async () => {
+  it("puts the web app at it and the console's page under a private session's link", async () => {
+    await fake.stop();
+    fake = await startFake(exampleAdmin(), { app: "https://troupe.example.test/app/" });
     fake.plane.relay("ada@example.com", { id: "s-private-1", ownerName: "Ada", private: true, shares: [{ subject: PEOPLE.alice.subject, role: "control" }] });
     await signedInAs(fake, PEOPLE.alice);
     visit("#/mine/remote/s-private-1");
@@ -76,7 +78,7 @@ describe("a session's view", () => {
     await waitFor(() => where()?.textContent?.includes("Ada's laptop"), "the offer read");
     (await seesButton("Copy link", where()!)).click();
     await waitFor(() => copied.length === 1, "the copied link");
-    expect(copied[0]).toBe(`${linkOf("s-private-1")}\n${location.origin}${location.pathname}#/mine/invited/s-private-1`);
+    expect(copied[0]).toBe(`${linkOf("s-private-1")}\nhttps://troupe.example.test/app/#/session/s-private-1\n${location.origin}${location.pathname}#/sessions/invited/s-private-1`);
   });
 
   it("shows the link to copy by hand where the browser will not copy it", async () => {

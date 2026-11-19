@@ -183,6 +183,27 @@ defmodule Troupe.Plane.EffectiveBundleTest do
       assert Fleet.get_profile("data-team").config_bundle_channel == "standard-channel"
       assert Bundles.current("standard-channel").hash == published.hash
     end
+
+    test "says the nearest layer's about: the child's where it says one, else its parent's",
+         context do
+      parent = Map.put(standard_bundle(), "about", %{"summary" => "Reviews code."})
+      {:ok, _} = Bundles.publish("standard-channel", parent, announce: false)
+      {:ok, _} = Bundles.publish("data", data_bundle(), announce: false)
+      {:ok, _} = Admin.profile_put(context.actor, standard())
+      {:ok, _} = Admin.profile_put(context.actor, data_team())
+      channel = Fleet.get_profile("data-team").config_bundle_channel
+
+      assert Bundles.current(channel).content["about"] == %{"summary" => "Reviews code."}
+
+      child = Map.put(data_bundle(), "about", %{"summary" => "Answers questions from data."})
+      {:ok, _} = Bundles.publish("data", child, announce: false)
+
+      assert %{content: %{"about" => %{"summary" => "Answers questions from data."}} = content} =
+               Bundles.current(channel)
+
+      assert {:ok, %{about: %{summary: "Answers questions from data."}}} =
+               Document.validate(content)
+    end
   end
 
   describe "a profile's own servers" do
