@@ -339,6 +339,16 @@ describe("profiles", () => {
     expect(document.querySelector(".profile-meter")).toBeNull();
   });
 
+  it("says in the rail when calls this period had no price, and nothing when every one had", async () => {
+    pageOn(composeProfile({ ...leanSpec(), unpriced: { calls: 14, tokens: 182_400 } }, { teams: ["core"] }, { capacity: 4, active_sessions: 0 })!, () => {});
+    await waitFor(() => document.querySelector(".profile-rail .glance .note")?.textContent === "Some calls have had no price this period; the budgets count them as free.", "the unpriced sentence");
+    unmount?.();
+
+    pageOn(composeProfile(leanSpec(), { teams: ["core"] }, { capacity: 4, active_sessions: 0 })!, () => {});
+    await waitFor(() => document.querySelector(".profile-rail .glance dl"), "the glance panel");
+    expect(document.querySelector(".profile-rail .glance .note")).toBeNull();
+  });
+
   it("lays out at 380px with nothing wider than the window", () => {
     // jsdom lays nothing out, so the rules that make 380px work are read: the rail goes
     // above the sections in one column, a card's track may shrink to the window, and the

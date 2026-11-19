@@ -375,6 +375,46 @@ defmodule Troupe.Plane.AdminTest do
       assert [%{reserved_micros: 2_500_000}] = after_release.teams
     end
 
+    # A call nobody priced is charged zero, as a free one is; the overview and the profile's
+    # page say how many there were this period rather than let the spend read as nothing.
+    test "says the calls nobody priced, per team and on the profile", context do
+      assert {:ok, %{teams: [%{unpriced_calls: 0}]}} = Admin.overview(context.lead)
+      assert {:ok, %{budget: %{unpriced: nil}}} = Admin.profile_get(context.root, "dev")
+
+      {:ok, _} =
+        Sessions.create(%{
+          id: "s-unpriced",
+          owner_subject: "member@example.test",
+          profile: "dev",
+          team_id: context.engineering.id
+        })
+
+      for {id, priced} <- [{"gw-1", false}, {"gw-2", false}, {"gw-3", true}] do
+        {:ok, _} =
+          Ledger.record(%{
+            session_id: "s-unpriced",
+            team_id: context.engineering.id,
+            owner_subject: "member@example.test",
+            model: "qwen3-235b",
+            input_tokens: 300,
+            output_tokens: 50,
+            cost_micros: 0,
+            priced: priced,
+            gateway_request_id: id
+          })
+      end
+
+      assert {:ok, %{teams: [%{name: "engineering", unpriced_calls: 2, spent_micros: 0}]}} =
+               Admin.overview(context.lead)
+
+      assert {:ok, %{budget: %{unpriced: unpriced}}} = Admin.profile_get(context.root, "dev")
+      assert %{calls: 2, tokens: 700, since: since} = unpriced
+      assert since == DateTime.to_iso8601(Ledger.month_start())
+
+      assert {:ok, [%{members: members}]} = Admin.teams_list(context.lead)
+      assert %{unpriced_calls: 2} = Enum.find(members, &(&1.subject == "member@example.test"))
+    end
+
     test "only the profiles their team is granted", context do
       assert {:ok, profiles} = Admin.profiles_list(context.lead)
       assert Enum.map(profiles, & &1.name) == ["dev"]

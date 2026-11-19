@@ -343,6 +343,50 @@ defmodule Troupe.Plane.Ledger do
     ) || 0
   end
 
+  @doc """
+  The calls nobody priced in the current period, and their tokens, beside what was spent.
+
+  A call with no price is charged zero wherever spend is added up, as a free one is, and
+  every budget counts it so; this is what tells the two apart. For a team over its own
+  period (`period_start/1`), for a person and a profile over the calendar month in UTC, the
+  periods their spend is read over. `nil` where every call in the period was priced.
+  """
+  @spec unpriced({:team, Team.t()} | {:person, String.t()} | {:profile, String.t()}) ::
+          %{calls: pos_integer(), tokens: non_neg_integer(), since: DateTime.t() | nil} | nil
+  def unpriced({:team, %Team{id: team_id} = team}) do
+    since = period_start(team)
+    from(u in UsageRecord, where: u.team_id == ^team_id) |> unpriced_since(since)
+  end
+
+  def unpriced({:person, subject}) when is_binary(subject) do
+    from(u in UsageRecord, where: u.owner_subject == ^subject) |> unpriced_since(month_start())
+  end
+
+  def unpriced({:profile, profile}) when is_binary(profile) do
+    from(u in UsageRecord,
+      join: s in Troupe.Plane.Sessions.Session,
+      on: s.id == u.session_id,
+      where: s.profile == ^profile
+    )
+    |> unpriced_since(month_start())
+  end
+
+  defp unpriced_since(query, since) do
+    query = where(query, [u], u.priced == false)
+    query = if since, do: where(query, [u], u.occurred_at >= ^since), else: query
+
+    query
+    |> select([u], %{
+      calls: count(u.id),
+      tokens: type(coalesce(sum(u.input_tokens + u.output_tokens), 0), :integer)
+    })
+    |> Repo.one()
+    |> case do
+      %{calls: 0} -> nil
+      totals -> Map.put(totals, :since, since)
+    end
+  end
+
   @doc "Promises one profile's sessions have outstanding, by session."
   @spec open_reservations_for_profile(String.t()) :: %{String.t() => non_neg_integer()}
   def open_reservations_for_profile(profile) when is_binary(profile) do

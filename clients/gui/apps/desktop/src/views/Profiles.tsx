@@ -21,6 +21,7 @@ import type { JSX } from "react";
 import {
   FUNCTIONS_HEADING,
   TroupeRpcError,
+  UNPRICED_SENTENCE,
   accessWords,
   actsAsWords,
   andList,
@@ -243,6 +244,7 @@ function Rail({ view, onStart }: { view: ProfileView; onStart?: ((name: string) 
           <dt>Asks first</dt>
           <dd>{asks.length === 0 ? "only what Troupe asks by default" : andList(asks)}</dd>
         </dl>
+        {view.limits.unpriced && <p className="note">{UNPRICED_SENTENCE}</p>}
       </section>
       <section className="profile-panel who">
         <h4>Who can use it</h4>

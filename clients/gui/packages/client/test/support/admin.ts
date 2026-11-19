@@ -15,6 +15,7 @@ import { checkRuleSet } from "../../src/rules.js";
 import { BUILTIN_AGENTS, checkAgent } from "./agents.js";
 import { parse as parseEntries } from "./entries.js";
 import { older } from "./plane.js";
+import { monthStart } from "./profiles.js";
 import { PROVIDER_TYPES } from "./provider-types.js";
 import { MAX_DEPTH, WRITTEN_KEYS, composeBundle, empty as emptyResolved, fieldsOf, merge as mergeExtends, rowOf } from "./extends.js";
 import type { Resolved } from "./extends.js";
@@ -301,6 +302,8 @@ export interface FakeTeam {
   budget_period: string | null;
   spent_micros: number;
   reserved_micros: number;
+  /** Calls of the period nobody priced; absent is none. */
+  unpriced_calls?: number;
   members_may_control: boolean | null;
   idle_timeout_seconds: number | null;
   cache_eviction_days: number | null;
@@ -359,6 +362,8 @@ export interface FakeProfile {
   max_sessions?: number | null;
   /** What its sessions may spend in a calendar month, in effect; null is none. */
   budget_micros?: number | null;
+  /** The month's calls nobody priced, for the fake's budget answers; absent is none. */
+  unpriced?: { calls: number; tokens: number };
   /** What its sessions spent this month, for the fake's budget answers. */
   spent_micros?: number;
   warm_workers?: number;
@@ -1424,6 +1429,7 @@ export class FakeAdmin {
               budget_period: t.budget_period,
               spent_micros: t.spent_micros,
               reserved_micros: t.reserved_micros,
+              unpriced_calls: t.unpriced_calls ?? 0,
             })),
             sessions: { active: count("active"), dormant: count("dormant"), read_only: count("read_only") },
             // The key manager is the platform's: a team admin's overview says nothing of it.
@@ -2949,7 +2955,8 @@ export class FakeAdmin {
       const resolved = this.resolveProfile(p.name, {});
       if (typeof resolved !== "string") setBy = String(resolved.from["budget_micros"] ?? p.name);
     }
-    return { budget_micros: p.budget_micros ?? null, budget_period: "monthly", set_by: setBy, spent_micros: p.spent_micros ?? 0, reserved_micros: 0 };
+    const unpriced = p.unpriced ? { ...p.unpriced, since: monthStart() } : null;
+    return { budget_micros: p.budget_micros ?? null, budget_period: "monthly", set_by: setBy, spent_micros: p.spent_micros ?? 0, reserved_micros: 0, unpriced };
   }
 
   /** Whether `name` may extend `parent`, in the plane's sentences where it may not. */

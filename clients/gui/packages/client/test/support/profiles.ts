@@ -52,6 +52,8 @@ export interface FakeProfileSpec {
   max_sessions: number | null;
   /** `spec.budget`, monthly, in micros. */
   budget_micros: number | null;
+  /** The month's calls of its sessions nobody priced; absent is none. */
+  unpriced?: { calls: number; tokens: number };
   /** The teams granted it, and what each grant leaves out of it. */
   grants: Record<string, { agents_out?: string[]; servers_out?: string[] }>;
 }
@@ -150,6 +152,11 @@ export function exampleProfiles(): FakeProfileSpec[] {
       grants: { core: { agents_out: ["plan"] }, design: {} },
     },
   ];
+}
+
+/** The start of the calendar month in UTC, the period a profile's and a person's spend is read over. */
+export function monthStart(now = new Date()): string {
+  return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)).toISOString();
 }
 
 const hostOf = (url: string | undefined): string | null => {
@@ -260,6 +267,7 @@ export function composeProfile(
       session: { ...ALLOWANCE },
       idle_seconds: team ? (TEAM_IDLE[team] ?? 1800) : null,
       budgets: { profile: spec.budget_micros, team: team ? (TEAM_BUDGETS[team] ?? null) : null, you: PERSON_BUDGET, team_period: team ? (TEAM_PERIOD[team] ?? "monthly") : null },
+      unpriced: spec.unpriced ? { ...spec.unpriced, since: monthStart() } : null,
     },
     // The caps are the profile's here: no fake team sets one of its own.
     github: spec.github
@@ -302,6 +310,7 @@ export function specOfAdminProfile(p: FakeProfile, granted: string[]): FakeProfi
     sessions_per_pod: p.sessions_per_pod,
     max_sessions: p.max_sessions ?? null,
     budget_micros: p.budget_micros ?? null,
+    ...(p.unpriced ? { unpriced: p.unpriced } : {}),
     grants: Object.fromEntries(granted.map((t) => [t, {}])),
   };
 }

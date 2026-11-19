@@ -524,7 +524,7 @@ defmodule Troupe.Plane.Admin.API do
       name: "admin.overview",
       function: :overview,
       summary:
-        "Fleet health, active sessions and spend per team, scoped to what the caller administers. The first call to make. A platform admin's carries `openbao`: each grant the plane's OpenBao role needs, checked look-only, and for one it lacks a sentence and the `bao` lines an OpenBao administrator runs to grant it.",
+        "Fleet health, active sessions and spend per team, scoped to what the caller administers. The first call to make. A team's unpriced_calls is how many calls of its period nobody priced (no cost from the gateway, no catalog entry, no llm.prices), which its spend counts as free. A platform admin's carries `openbao`: each grant the plane's OpenBao role needs, checked look-only, and for one it lacks a sentence and the `bao` lines an OpenBao administrator runs to grant it.",
       risk: :read
     },
     %Method{

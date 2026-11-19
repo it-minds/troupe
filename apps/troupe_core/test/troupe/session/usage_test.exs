@@ -163,8 +163,36 @@ defmodule Troupe.Session.UsageTest do
              "input_tokens" => 100,
              "output_tokens" => 20,
              "cost_micros" => 500,
+             "priced" => true,
              "occurred_at" => "2026-09-13T10:00:03.000000Z"
            }
+  end
+
+  # A call nobody priced and a free one both cost 0; only `priced` tells the plane which.
+  test "a row says whether anybody priced the call: a free one was, one with no cost was not" do
+    unpriced =
+      event(8, %{
+        "usage" => %{"input_tokens" => 100, "output_tokens" => 20},
+        "gateway" => %{"request_id" => "gw_8"}
+      })
+
+    assert [
+             %{seq: 3, cost_micros: 0, priced: true},
+             %{seq: 5, cost_micros: 900, priced: true},
+             %{seq: 7, cost_micros: 0, priced: false},
+             %{seq: 8, cost_micros: 0, priced: false},
+             %{seq: 9, cost_micros: 0, priced: false}
+           ] =
+             Usage.records("s-1", [
+               metered(3, 0),
+               metered(5, 900),
+               event(7, %{"usage" => %{"input_tokens" => 1, "output_tokens" => 1}}),
+               unpriced,
+               metered(9, -5)
+             ])
+
+    assert %{"priced" => false, "cost_micros" => 0} =
+             Usage.to_json(hd(Usage.records("s-1", [unpriced])))
   end
 
   describe "observe/2" do

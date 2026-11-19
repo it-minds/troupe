@@ -195,6 +195,36 @@ defmodule Troupe.Worker.UsageTest do
     assert :ok = Usage.flush(pid, "s-1")
 
     assert_receive {:batch, "s-1",
-                    [%{"seq" => 5, "gateway_request_id" => "gw_5", "cost_micros" => 42}]}
+                    [
+                      %{
+                        "seq" => 5,
+                        "gateway_request_id" => "gw_5",
+                        "cost_micros" => 42,
+                        "priced" => true
+                      }
+                    ]}
+  end
+
+  # The gateway said nothing of what it cost, and nothing here priced it: the plane is told
+  # so beside the zero, which is how it tells this call from a free one.
+  test "a call nobody priced goes to the plane as unpriced" do
+    pid = collector()
+
+    event = %Event{
+      seq: 6,
+      type: "llm_response",
+      agent: ["root"],
+      ts: "2026-09-13T10:00:06.000000Z",
+      data: %{
+        "usage" => %{"input_tokens" => 7, "output_tokens" => 3},
+        "model" => "qwen3-235b",
+        "gateway" => %{"request_id" => "gw_6"}
+      }
+    }
+
+    :ok = Usage.put("s-2", Projection.record("s-2", event))
+    assert :ok = Usage.flush(pid, "s-2")
+
+    assert_receive {:batch, "s-2", [%{"seq" => 6, "cost_micros" => 0, "priced" => false}]}
   end
 end

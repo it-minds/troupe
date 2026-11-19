@@ -20,8 +20,8 @@ defmodule Troupe.Session.Usage do
   ## Sessions that ran before there was a gateway to ask
 
   An `llm_response` written by an earlier build has tokens and nothing else. Those are
-  still real tokens, so they are still recorded, with a cost of zero and a request id
-  synthesised from the session and the sequence — `seq:<session>:<n>`. That shape is
+  still real tokens, so they are still recorded, unpriced and at a cost of zero, with a
+  request id synthesised from the session and the sequence — `seq:<session>:<n>`. That shape is
   deliberately not one a gateway would ever mint, which is what lets
   `Troupe.Plane.Reconcile` count them as cost the gateway knows about and the ledger does
   not, rather than as a call the gateway never made.
@@ -54,6 +54,7 @@ defmodule Troupe.Session.Usage do
           input_tokens: non_neg_integer(),
           output_tokens: non_neg_integer(),
           cost_micros: non_neg_integer(),
+          priced: boolean(),
           occurred_at: DateTime.t() | nil
         }
 
@@ -93,6 +94,10 @@ defmodule Troupe.Session.Usage do
       input_tokens: count(usage["input_tokens"]),
       output_tokens: count(usage["output_tokens"]),
       cost_micros: count(gateway["cost_micros"]),
+      # Whether anybody said what the call cost: the gateway, the catalog or a configured
+      # price. A call nobody priced is still charged its zero, and the plane counts it
+      # apart from one that was free, which reads the same in `cost_micros` alone.
+      priced: priced?(gateway["cost_micros"]),
       occurred_at: occurred_at(event)
     }
   end
@@ -151,12 +156,15 @@ defmodule Troupe.Session.Usage do
       "input_tokens" => record.input_tokens,
       "output_tokens" => record.output_tokens,
       "cost_micros" => record.cost_micros,
+      "priced" => Map.get(record, :priced, true),
       "occurred_at" => record.occurred_at && DateTime.to_iso8601(record.occurred_at)
     }
   end
 
   defp count(n) when is_integer(n) and n >= 0, do: n
   defp count(_other), do: 0
+
+  defp priced?(cost), do: is_integer(cost) and cost >= 0
 
   # The event's own timestamp, which is when the call actually finished, rather than
   # when the plane happened to hear about it. A record folded out of a log an hour later

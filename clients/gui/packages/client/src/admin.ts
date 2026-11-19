@@ -17,6 +17,7 @@ import type { AgentCheck } from "./agents.js";
 import type { ArtifactComment, ArtifactDetail } from "./artifacts.js";
 import type { MemoryEntry } from "./entries.js";
 import type { MemoryProposal } from "./instructions.js";
+import type { UnpricedCalls } from "./profile.js";
 
 /**
  * A session as `admin.sessions.list` describes it: who owns it, where it runs, what state
@@ -240,6 +241,8 @@ export interface ProfileBudget {
   set_by: string | null;
   spent_micros: number;
   reserved_micros: number;
+  /** The month's calls nobody priced, which `spent_micros` counts as free; null for none, absent from a plane before it. */
+  unpriced?: UnpricedCalls | null;
 }
 
 /** One agent, skill, MCP server or ACP agent in the bundle a profile's pods load, with the profile whose channel gave it. */
@@ -367,6 +370,8 @@ export interface TeamSpend {
   budget_period: string | null;
   spent_micros: number;
   reserved_micros: number;
+  /** Calls of the period nobody priced, which `spent_micros` counts as free; absent from a plane before it. */
+  unpriced_calls?: number;
 }
 
 export interface FleetOverview {
@@ -430,6 +435,8 @@ export interface AdminTeamMember {
   budget_micros?: number | null;
   spent_micros?: number;
   reserved_micros?: number;
+  /** The month's calls of theirs nobody priced, which `spent_micros` counts as free. */
+  unpriced_calls?: number;
 }
 
 /** A team's GitHub policy, as `admin.teams.list` answers it and `admin.team.update` takes it. */
