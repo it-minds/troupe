@@ -8,11 +8,13 @@
 // and works none of it out, so what it says is what a session gets. A plane is the only
 // thing that knows, so the screen is offered only while signed in to one.
 //
-// The page answers "can this profile do my job?" first: a head with the sentence the
-// bundle's author wrote for it, or else the primary agent's, a rail with the room, the model, the budgets, whose credentials and what asks
-// first, the limits a session is held to in sentences, and Start; then what it can do, what it can't, how it behaves (guidance, not
-// limits), and the configuration's own tables folded away under the hood. On a narrow
-// window the rail comes first; a table scrolls inside itself rather than the page sideways.
+// The page answers "can this profile do my job?" first: a head, the name large over the
+// sentence the bundle's author wrote for it, or else the primary agent's; a rail with Start
+// first, then the room as a meter, the facts at a glance, who may use it and the limits; then
+// what it can do, a card per system with its work as lines, what it can't as one list under
+// its promise, how it behaves (guidance, not limits), and the configuration's own tables,
+// hosts and tool names among them, folded away under the hood. On a narrow window the rail
+// comes first; a table scrolls inside itself rather than the page sideways.
 
 import { useEffect, useState } from "react";
 import type { JSX } from "react";
@@ -44,6 +46,7 @@ import {
 import type { AuthSession, ProfileView, ProfileViewAgent, ProfileViewServer, ProfileViewSkill } from "@troupe/client";
 import { useProfiles } from "../hooks";
 import { Loading, Table } from "./bits";
+import { Eye } from "./brand";
 import { ProseFrame } from "./Frames";
 
 /** A profile's answer, or why there is none: one the person may not use is `not_found`. */
@@ -132,12 +135,13 @@ export function ProfilePage({
   const sentence = read && "view" in read ? profileSentence(read.view) : null;
   return (
     <>
-      <header className="screen-head">
+      <header className="screen-head profile-head">
         <span className="count">
           <button className="link" onClick={onBack}>
             All profiles
           </button>
         </span>
+        <span className="screen">Profile</span>
         <h1 className="mono">{name}</h1>
         {sentence && <p className="profile-sentence">{sentence}</p>}
       </header>
@@ -180,31 +184,72 @@ function asksFirst(view: ProfileView): string[] {
   return [...servers, ...rules];
 }
 
+/** The most places the meter draws a segment each; past it the sentence says the room alone. */
+const METER_MOST = 32;
+
+/**
+ * The places up now as a row of segments, one lit for each session running. Beside the
+ * sentence, which says the same, so it is drawn for the eye and hidden from a reader.
+ */
+function Meter({ limits }: { limits: ProfileView["limits"] }): JSX.Element | null {
+  const places = limits.capacity;
+  if (places === null || places <= 0 || places > METER_MOST) return null;
+  const lit = Math.min(places, Math.max(0, limits.active_sessions ?? 0));
+  return (
+    <div className="profile-meter" aria-hidden="true">
+      {Array.from({ length: places }, (_, i) => (
+        <span key={i} className={i < lit ? "on" : undefined} />
+      ))}
+    </div>
+  );
+}
+
+/**
+ * What a person checks before starting, Start first: the room now, the facts at a glance,
+ * who may use it, and the limits a session is held to.
+ */
 function Rail({ view, onStart }: { view: ProfileView; onStart?: ((name: string) => void) | undefined }): JSX.Element {
   const asks = asksFirst(view);
   const limits = limitSentences(view);
   return (
     <aside className="profile-rail" aria-label="At a glance">
-      <dl className="facts wide">
-        <dt>Room</dt>
-        <dd>{roomWords(view.limits)}</dd>
-        <dt>Model</dt>
-        <dd className={view.model.model ? "mono" : undefined}>{view.model.model ?? "the plane's default model"}</dd>
-        <dt>Profile's budget</dt>
-        <dd>{budgetWords(view.limits.budgets.profile)}</dd>
-        <dt>Team's budget</dt>
-        <dd>{teamBudgetWords(view.limits.budgets)}</dd>
-        <dt>Your budget</dt>
-        <dd>{budgetWords(view.limits.budgets.you)}</dd>
-        <dt>Acts as</dt>
-        <dd>{actsAsWords(view.tools.mcp)}</dd>
-        <dt>Asks first</dt>
-        <dd>{asks.length === 0 ? "only what Troupe asks by default" : andList(asks)}</dd>
-        <dt>Who can use it</dt>
-        <dd>{whoWords(view)}</dd>
-      </dl>
+      {view.agents.length === 0 ? (
+        <p className="note">No agent: a session cannot start on it.</p>
+      ) : (
+        onStart && (
+          <button type="button" className="primary profile-start" onClick={() => onStart(view.name)}>
+            Start a session on {view.name}
+          </button>
+        )
+      )}
+      <section className="profile-panel room">
+        <h4>Room right now</h4>
+        <Meter limits={view.limits} />
+        <p>{roomWords(view.limits)}</p>
+      </section>
+      <section className="profile-panel glance">
+        <h4>At a glance</h4>
+        <dl className="facts wide">
+          <dt>Model</dt>
+          <dd className={view.model.model ? "mono" : undefined}>{view.model.model ?? "the plane's default model"}</dd>
+          <dt>Profile's budget</dt>
+          <dd>{budgetWords(view.limits.budgets.profile)}</dd>
+          <dt>Team's budget</dt>
+          <dd>{teamBudgetWords(view.limits.budgets)}</dd>
+          <dt>Your budget</dt>
+          <dd>{budgetWords(view.limits.budgets.you)}</dd>
+          <dt>Acts as</dt>
+          <dd>{actsAsWords(view.tools.mcp)}</dd>
+          <dt>Asks first</dt>
+          <dd>{asks.length === 0 ? "only what Troupe asks by default" : andList(asks)}</dd>
+        </dl>
+      </section>
+      <section className="profile-panel who">
+        <h4>Who can use it</h4>
+        <p>{whoWords(view)}</p>
+      </section>
       {limits.length > 0 && (
-        <div className="profile-limits">
+        <section className="profile-panel profile-limits">
           <h4>Limits</h4>
           <ul className="plain">
             {limits.map((line) => (
@@ -212,16 +257,7 @@ function Rail({ view, onStart }: { view: ProfileView; onStart?: ((name: string) 
             ))}
           </ul>
           <p className="note">An agent may set fewer.</p>
-        </div>
-      )}
-      {view.agents.length === 0 ? (
-        <p className="note">No agent: a session cannot start on it.</p>
-      ) : (
-        onStart && (
-          <button type="button" className="primary" onClick={() => onStart(view.name)}>
-            Start a session on {view.name}
-          </button>
-        )
+        </section>
       )}
     </aside>
   );
@@ -237,16 +273,10 @@ function CanDo({ view }: { view: ProfileView }): JSX.Element {
           <li key={s.name} className="profile-card">
             <h4 className="mono">{s.name}</h4>
             {s.about?.summary && <p className="profile-subtitle">{s.about.summary}</p>}
-            <dl className="facts wide">
-              <dt>Host</dt>
-              <dd className="mono">{s.host ?? "not said"}</dd>
-              <dt>Called</dt>
-              <dd>{accessWords(s.access)}</dd>
-              <dt>Each call</dt>
-              <dd>{askWords(s.permission)}</dd>
-              <dt>Its tools</dt>
-              <ServerTools server={s} />
-            </dl>
+            <ServerTools server={s} />
+            <p className="profile-card-foot">
+              {accessWords(s.access)} · {s.permission === "ask" ? "asks first" : askWords(s.permission)}
+            </p>
           </li>
         ))}
         <TroupeCard view={view} />
@@ -256,81 +286,67 @@ function CanDo({ view }: { view: ProfileView }): JSX.Element {
 }
 
 /**
- * A server's tools on its card: the names, as the allowlist gives them, until the bundle's
- * author writes a line for one, which then says what it does, its name in a small tail.
+ * A server's tools, the card's body: a line each, the bundle author's where there is one,
+ * the tool's name otherwise. An author's line carries the name in a small tail, shown on
+ * hover or focus, and as its title; a server with every tool says so in one line, before
+ * the lines its author wrote. The host and the names together are under the hood.
  */
 function ServerTools({ server }: { server: ProfileViewServer }): JSX.Element {
   const tools = toolLines(server);
-  if (!tools.some((t) => t.line !== null)) {
-    return <dd className={server.tools === "all" ? undefined : "mono"}>{server.tools === "all" ? "every tool it has" : tools.map((t) => t.name).join(", ")}</dd>;
-  }
   return (
-    <dd>
-      {server.tools === "all" && <p className="micro">Every tool it has, among them:</p>}
-      <ul className="tool-lines">
-        {tools.map((t) =>
-          t.line === null ? (
-            <li key={t.name} className="mono">
-              {t.name}
-            </li>
-          ) : (
-            <li key={t.name} title={t.name}>
-              {t.line} <span className="tool-name">{t.name}</span>
-            </li>
-          ),
-        )}
-      </ul>
-    </dd>
+    <ul className="tool-lines">
+      {server.tools === "all" && <li className="every">{tools.length === 0 ? "Every tool it has" : "Every tool it has, among them:"}</li>}
+      {tools.map((t) =>
+        t.line === null ? (
+          <li key={t.name} className="mono" title={t.name}>
+            {t.name}
+          </li>
+        ) : (
+          <li key={t.name} className="authored" title={t.name} tabIndex={0}>
+            {t.line} <span className="tool-name">{t.name}</span>
+          </li>
+        ),
+      )}
+    </ul>
   );
 }
 
 /**
- * Troupe's own card: the harness's tools, each one a rule refuses whole struck through. A
- * plane before the list names only what the rules turn off, and says the others are on.
+ * Troupe's own card, the same shape: a line per harness tool, and the ones a rule refuses
+ * whole struck through under "Turned off here". A plane before the list names only what
+ * the rules turn off, and says the others are on.
  */
 function TroupeCard({ view }: { view: ProfileView }): JSX.Element {
   const tools = view.harness_tools;
-  if (!tools) {
-    const off = view.tools.rules.filter((r) => r.access === "deny" && r.pattern === null);
-    return (
-      <li className="profile-card troupe">
-        <h4>Troupe</h4>
-        {off.length > 0 && (
-          <>
-            <p className="micro">Turned off here</p>
-            <ul className="struck">
-              {off.map((r, i) => (
-                <li key={`${r.tool}-${i}`}>
-                  <s className="mono">{r.tool}</s>
-                </li>
-              ))}
-            </ul>
-          </>
-        )}
-        <p className="note">{off.length > 0 ? "The harness's other tools are on." : "The harness's own tools are on."}</p>
-      </li>
-    );
-  }
-  const refused = tools.some((t) => t.refused);
+  const off = tools ? tools.filter((t) => t.refused).map((t) => t.name) : view.tools.rules.filter((r) => r.access === "deny" && r.pattern === null).map((r) => r.tool);
   return (
     <li className="profile-card troupe">
       <h4>Troupe</h4>
-      <p className="micro">Its own tools</p>
-      <ul className="tool-list">
-        {tools.map((t) => (
-          <li key={t.name}>
-            {t.refused ? (
-              <>
-                <s className="mono">{t.name}</s>
+      {tools && (
+        <ul className="tool-lines">
+          {tools
+            .filter((t) => !t.refused)
+            .map((t) => (
+              <li key={t.name} className="mono">
+                {t.name}
+              </li>
+            ))}
+        </ul>
+      )}
+      {off.length > 0 && (
+        <>
+          <p className="micro">Turned off here</p>
+          <ul className="tool-lines struck">
+            {off.map((name, i) => (
+              <li key={`${name}-${i}`}>
+                <s className="mono">{name}</s>
                 <span className="visually-hidden"> (turned off here)</span>
-              </>
-            ) : (
-              <span className="mono">{t.name}</span>
-            )}
-          </li>
-        ))}
-      </ul>
-      <p className="note">{refused ? "Struck through: turned off here." : "Every one is on."}</p>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+      {!tools && <p className="note">{off.length > 0 ? "The harness's other tools are on." : "The harness's own tools are on."}</p>}
     </li>
   );
 }
@@ -341,51 +357,46 @@ function CannotDo({ view }: { view: ProfileView }): JSX.Element {
   return (
     <section className="group cannot-do">
       <h3>What it can't do</h3>
-      <div className="banner">
+      <div className="banner promise">
+        <Eye status="denied" />
         <p>{toolsAreWhole(view) ? "Nothing but the tools above: no tool of your own, no shell, no web fetch, and nothing outside the hosts listed." : "The tools below, and nothing outside the hosts listed."}</p>
       </div>
-      {refused.length > 0 && (
-        <div className="part">
-          <h4>Refused</h4>
-          <ul className="plain">
-            {refused.map((r, i) => (
-              <li key={`${ruleText(r)}-${i}`}>
-                <span className="mono">{ruleText(r)}</span>
-                <span className="muted"> · refused by {whoseWords(r.from)}</span>
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
-      {withheld.length > 0 && (
-        <div className="part">
-          <h4>Withheld</h4>
-          <ul className="plain">
-            {withheld.map((s) => (
-              <li key={s.name}>
-                <span className="mono">{s.name}</span>
-                <span className="muted"> · not offered: {missingWords(s.why)}</span>
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
-      <div className="part">
-        {view.reach.length === 0 ? (
-          <p>Reaches no host outside the plane.</p>
-        ) : (
-          <>
-            <h4>Reaches only these hosts</h4>
-            <ul className="chips">
-              {view.reach.map((h) => (
-                <li key={h} className="chip mono">
-                  {h}
-                </li>
+      <ul className="profile-cant">
+        {refused.map((r, i) => (
+          <li key={`rule-${ruleText(r)}-${i}`}>
+            <Eye status="denied" />
+            <span>
+              <span className="mono">{ruleText(r)}</span>
+              <span className="muted"> · refused by {whoseWords(r.from)}</span>
+            </span>
+          </li>
+        ))}
+        {withheld.map((s) => (
+          <li key={`server-${s.name}`}>
+            <Eye status="denied" />
+            <span>
+              <span className="mono">{s.name}</span>
+              <span className="muted"> · not offered: {missingWords(s.why)}</span>
+            </span>
+          </li>
+        ))}
+        <li className="reach">
+          <Eye status="denied" />
+          {view.reach.length === 0 ? (
+            <span>Reaches no host outside the plane.</span>
+          ) : (
+            <span>
+              Reaches only:{" "}
+              {view.reach.map((h, i) => (
+                <span key={h}>
+                  {i > 0 && ", "}
+                  <span className="mono">{h}</span>
+                </span>
               ))}
-            </ul>
-          </>
-        )}
-      </div>
+            </span>
+          )}
+        </li>
+      </ul>
     </section>
   );
 }
