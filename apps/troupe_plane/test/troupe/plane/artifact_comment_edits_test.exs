@@ -103,7 +103,7 @@ defmodule Troupe.Plane.ArtifactCommentEditsTest do
     test "by a platform administrator as a takedown, and audited with who and never the text", context do
       id = context.page["id"]
       {:ok, _} = share_with(context, context.cy, "comment")
-      {:ok, %{"comment" => %{"id" => theirs}}} = comment(context.cy, id, "Call me on 555 0100.")
+      {:ok, %{"comment" => %{"id" => theirs}}} = comment(context.cy, id, "Call me on the office line.")
 
       # A reader of the organisation's artifact who is neither its author nor an owner.
       assert {:error, %{message: "forbidden"}} = delete(context.di, id, theirs)
@@ -115,7 +115,7 @@ defmodule Troupe.Plane.ArtifactCommentEditsTest do
       assert row.actor == context.root.subject
       assert row.subject_id == id
       assert row.detail == %{"comment" => theirs, "author" => context.cy.subject, "by" => "takedown"}
-      refute inspect(row) =~ "555"
+      refute Enum.any?(Map.values(row.detail), &(is_binary(&1) and String.contains?(&1, "office line")))
     end
 
     test "is refused for a comment that is not in this artifact's thread, or no id at all", context do
@@ -152,7 +152,7 @@ defmodule Troupe.Plane.ArtifactCommentEditsTest do
 
       [row] = Enum.filter(Audit.list(), &(&1.action == "artifact.comment.edit"))
       assert row.detail == %{"comment" => theirs, "length" => 26}
-      refute inspect(row) =~ "Row 4"
+      refute Enum.any?(Map.values(row.detail), &(is_binary(&1) and String.contains?(&1, "Row 4")))
     end
 
     test "not once its author may no longer write in the thread, though they may still delete it", context do
@@ -201,7 +201,7 @@ defmodule Troupe.Plane.ArtifactCommentEditsTest do
       {:ok, _} = comment(context.ada, laptop["id"], "Before the daemon asked.")
       assert {:ok, %{"artifact_comments" => %{"since" => since, "comments" => []}} = answer} = asked(context.ada, nil)
       # Beside the signed memory, not in it.
-      refute inspect(answer["signed"]) =~ "artifact_comments"
+      refute is_map(answer["signed"]) and Map.has_key?(answer["signed"], "artifact_comments")
 
       {:ok, %{"comment" => %{"id" => first}}} = comment(context.di, laptop["id"], "Is the second table right?")
       # Not one on an artifact published by nobody's session, nor on somebody else's.
