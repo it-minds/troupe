@@ -1,7 +1,7 @@
-// An artifact a team owns, in the app's gallery: its card and its aside say the team is
+// An artifact a team owns, in the app's gallery: its card and its Info say the team is
 // whose it is, a member has the owner's controls, an admin of the team takes it back and
 // the owning person gives one of theirs to a team, each asked of the plane as
-// `artifact.transfer`; a refusal is said in the aside. The Publish dialog publishes one
+// `artifact.transfer`; a refusal is said in the Info dialog. The Publish dialog publishes one
 // for a team as the team's unless the person unticks it. Against a fake plane whose artifacts the fake daemon keeps; the dialog publishes through the daemon.
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -13,7 +13,7 @@ import { FakeDaemon } from "../../../packages/client/test/support/daemon.js";
 import { startHarness } from "../../../packages/client/test/support/harness.js";
 import { keptBy } from "../../../packages/client/test/support/kept.js";
 import type { Harness } from "../../../packages/client/test/support/harness.js";
-import { button, nav, recordNetwork, render, says, sees, seesButton, startOnTheList, type, waitFor } from "./support";
+import { artifactInfo, button, infoDialog, infoTab, nav, recordNetwork, render, says, sees, seesButton, startOnTheList, type, waitFor } from "./support";
 import type { Recorder } from "./support";
 
 Element.prototype.scrollIntoView = function scrollIntoView() {};
@@ -82,8 +82,8 @@ function choose(select: HTMLSelectElement, value: string): void {
   select.dispatchEvent(new Event("change", { bubbles: true }));
 }
 
-const aside = (): HTMLElement | null => document.querySelector<HTMLElement>('[aria-label="Artifact details"]');
-const card = (title: string): HTMLButtonElement | undefined => [...document.querySelectorAll<HTMLButtonElement>(".repertoire .card")].find((c) => c.querySelector(".title")?.textContent === title);
+const aside = infoDialog;
+const card = (title: string): HTMLElement | undefined => [...document.querySelectorAll<HTMLElement>(".repertoire .card")].find((c) => c.querySelector(".title")?.textContent === title);
 const transfers = () => daemon.artifactCalls.filter((c) => c.method === "artifact.transfer").map((c) => ({ id: c.params["id"], to: c.params["to"] }));
 
 async function openGallery(): Promise<void> {
@@ -99,27 +99,27 @@ async function openGallery(): Promise<void> {
 describe("a team's artifact in the gallery", () => {
   it("says the team is whose it is, gives a member the owner's controls, and its admin takes it back", async () => {
     await openGallery();
-    const teams = await waitFor(() => card("Core's figures"), "the team's card");
+    await waitFor(() => card("Core's figures"), "the team's card");
     await sees("Team core");
-    teams.click();
-    await waitFor(() => aside(), "the aside");
-    await sees("Team core (you are a member)");
-    await sees("Anyone on core can publish versions");
-    await seesButton("Publish a new version", aside()!);
-    await seesButton("Pin", aside()!);
+    const info = await artifactInfo("Core's figures");
+    const versions = await infoTab(info, "Versions");
+    await seesButton("Publish a new version", versions);
+    await seesButton("Pin", versions);
+    const access = await infoTab(info, "Access");
+    await sees("Team core (you are a member)", access);
+    await sees("Anyone on core can publish versions", access);
 
-    (await seesButton("Take back", aside()!)).click();
+    (await seesButton("Take back", access)).click();
     await sees("Taken back: Core's figures is yours now, not the core team's.");
     expect(transfers()).toEqual([{ id: "art-team", to: "me" }]);
     await sees("Only you have its owner's controls.");
     await waitFor(() => button("Take back", aside()!) === null, "no taking back one's own");
   });
 
-  it("is given to a team by its owner, and a refusal is said in the aside", async () => {
+  it("is given to a team by its owner, and a refusal is said in its Info", async () => {
     await openGallery();
-    (await waitFor(() => card("My notes"), "the person's own card")).click();
-    await waitFor(() => aside(), "the aside");
-    await sees("Only you have its owner's controls.");
+    await infoTab(await artifactInfo("My notes"), "Access");
+    await sees("Only you have its owner's controls.", aside);
     const to = await waitFor(() => aside()!.querySelector<HTMLSelectElement>('select[aria-label="Give to team"]'), "the team chooser");
     choose(to, "core");
 

@@ -22,6 +22,9 @@ defmodule Troupe.Plane.Ledger.UsageRecord do
     field :input_tokens, :integer, default: 0
     field :output_tokens, :integer, default: 0
     field :cost_micros, :integer, default: 0
+    # Whether anybody said what the call cost. An unpriced call is charged zero, as a free
+    # one is, and counted apart so the plane can say so.
+    field :priced, :boolean, default: true
     field :gateway_request_id, :string
     field :occurred_at, :utc_datetime_usec
 
@@ -41,6 +44,7 @@ defmodule Troupe.Plane.Ledger.UsageRecord do
       :input_tokens,
       :output_tokens,
       :cost_micros,
+      :priced,
       :gateway_request_id,
       :occurred_at
     ])

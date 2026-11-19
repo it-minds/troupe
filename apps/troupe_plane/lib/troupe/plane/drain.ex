@@ -286,32 +286,71 @@ defmodule Troupe.Plane.Drain do
 
   What a session on a pod that is not there needs: its log is sealed in object storage
   and the next open replays it somewhere else. What is lost is the process, which was
-  already lost when the pod went.
-
-  **Release first.** `Placement.release/2` finds the slot by the row's `worker_id`, and
-  `Sessions.dormant/1` clears it. Released after, the slot used to stay charged to a pod
-  the session had left, and a profile whose count only ever goes up is eventually full for
-  ever; now it comes back, but by counting the whole profile again (Decision 690). The
-  control connection's orphan path calls this rather than keep its own copy of the order,
-  which was right there and wrong in the same module's dormancy report.
+  already lost when the pod went. The sessions marked, by id; one the plane could not mark
+  is left out, and stays on the pod (`strand/2`).
   """
   @spec strand(Worker.t()) :: [String.t()]
   def strand(%Worker{} = worker) do
-    worker.id
-    |> Sessions.on_worker()
-    |> Enum.map(&strand(worker, &1))
+    for session_id <- Sessions.on_worker(worker.id),
+        {:ok, stranded} <- [strand(worker, session_id)],
+        do: stranded
   end
 
   @doc """
-  The same for one session a pod no longer holds, in the same order: a session archived
-  on a pod whose tree for it had already stopped.
+  The same for one session a pod no longer holds: a session archived on a pod whose tree
+  for it had already stopped, or one the pod's answer to `session.index` did not name.
+
+  **Dormant first, in one write.** `Sessions.dormant/1` sets the state and clears the pod
+  in one statement, so the row is never `active` with no pod between two writes. The slot
+  is given back after, by `Placement.release/2` counting the profile again, since the
+  column it finds a slot by is gone by then: a rescue is rare and a recount is one
+  group-by. Released first, as it was, a rescue that stopped between the two writes, or a
+  `dormant` that answered an error, left the row `active` naming no pod, which nothing
+  reaches through a pod and the scaler counts for good.
+
+  Only while the row is still `active` on this pod (`Sessions.dormant_on/2`): one asleep
+  already, or moved since, answers `{:error, :moved}`. A `dormant` that answers any other
+  error leaves the row as it was, on its pod and holding its slot, logs why, and answers
+  the error.
   """
-  @spec strand(Worker.t(), String.t()) :: String.t()
+  @spec strand(Worker.t(), String.t()) :: {:ok, String.t()} | {:error, term()}
   def strand(%Worker{} = worker, session_id) do
-    Placement.release(worker.profile, session_id)
-    Sessions.dormant(session_id)
-    release_budget(session_id)
-    session_id
+    case Sessions.dormant_on(session_id, worker.id) do
+      {:ok, _session} ->
+        Placement.release(worker.profile, session_id)
+        release_budget(session_id)
+        {:ok, session_id}
+
+      # Asleep already, or on another pod by now: nothing of this pod's to give back.
+      {:error, :moved} = moved ->
+        moved
+
+      {:error, reason} ->
+        Logger.warning(
+          "troupe plane: #{session_id} was not marked dormant (#{inspect(reason)}); " <>
+            "it stays on #{worker.pod_name}"
+        )
+
+        {:error, reason}
+    end
+  end
+
+  @doc """
+  Mark dormant a session counted as running that names no pod (`Sessions.adrift/1`), as
+  its pod's idle timer would have: the same write, the slot counted again and the budget
+  slice given back, so a client reads it as asleep and wakes it as usual.
+  """
+  @spec rest(Session.t()) :: {:ok, String.t()} | {:error, term()}
+  def rest(%Session{} = session) do
+    case Sessions.dormant_on(session.id, nil) do
+      {:ok, _session} ->
+        Placement.release(session.profile, session.id)
+        release_budget(session.id)
+        {:ok, session.id}
+
+      {:error, _reason} = refused ->
+        refused
+    end
   end
 
   @doc """

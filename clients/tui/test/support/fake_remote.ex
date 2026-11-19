@@ -2093,7 +2093,8 @@ defmodule Troupe.FakeRemote do
   # and those it or the team's grant leaves out, its rules (always the profile's: a pod
   # reads no organisation layer), each MCP server with the identity it runs as
   # (`credential_mode`), whether it asks (`permission`) and its tools, its limits and
-  # budgets. `reach` is the egress hosts, the model's host and each offered server's,
+  # budgets, and what the bundle's author wrote (`about`, on it and on a server, null where
+  # unsaid). `reach` is the egress hosts, the model's host and each offered server's,
   # sorted and once each. The team is the one named, else the caller's one team, else
   # null with several; `terms` is null. A field the profile does not have is null, as the
   # plane leaves what it cannot say.
@@ -2117,6 +2118,7 @@ defmodule Troupe.FakeRemote do
 
     %{
       "name" => profile["name"],
+      "about" => profile["about"],
       "channel" => profile["channel"] || "stable",
       "bundle_version" => profile["bundle_version"] || "1",
       "bundle_hash" => profile["bundle_hash"],
@@ -2145,7 +2147,8 @@ defmodule Troupe.FakeRemote do
               "permission" => server["permission"] || "auto",
               "tools" => server["tools"] || "all",
               "offered" => server["offered"] != false,
-              "why" => if(server["offered"] == false, do: server["why"] || "grant")
+              "why" => if(server["offered"] == false, do: server["why"] || "grant"),
+              "about" => server["about"]
             }
           end
       },

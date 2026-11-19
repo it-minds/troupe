@@ -363,6 +363,8 @@ defmodule Troupe.Plane.ArtifactsHostTest do
 
       Some **bold** text and a [link](https://example.test/x) and [a trap](javascript:alert(1)).
 
+      ![Logo](https://cdn.example.test/logo.png)
+
       <script>alert(1)</script>
 
       ```elixir
@@ -398,6 +400,8 @@ defmodule Troupe.Plane.ArtifactsHostTest do
       assert body =~ "<strong>bold</strong>"
       assert body =~ ~s(<a href="https://example.test/x">link</a>)
       refute body =~ ~s(href="javascript:)
+      assert body =~ "An image from cdn.example.test is not shown: this page shows only its own files"
+      refute body =~ "logo.png"
       refute body =~ "<script>"
       assert body =~ "&lt;script&gt;alert(1)&lt;/script&gt;"
       assert body =~ ~s(<span class="k">def</span>)

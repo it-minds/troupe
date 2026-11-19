@@ -41,9 +41,9 @@ defmodule Troupe.Plane.Artifacts do
   one call can carry is less than that: the door's own limit on a body. A version may come
   with a picture of itself for its gallery card (`thumbnail`, a PNG, JPEG or WebP of at most
   256 KiB), kept beside its files and counted as one; the plane draws none itself. Each
-  HTML, CSS and JavaScript file is read at publish for what the artifacts host's policy will
-  block (`Blocked`): the publish still succeeds, and its answer, the version and the rows
-  say what was found.
+  HTML, CSS and JavaScript file, and each Markdown document of a Markdown artifact, is read
+  at publish for what the artifacts host's policy will block (`Blocked`): the publish still
+  succeeds, and its answer, the version and the rows say what was found.
 
   **How long it is kept.** Until an owner deletes it or an administrator takes it down,
   unless an administrator sets a retention period: then old versions, or artifacts nobody
@@ -60,6 +60,7 @@ defmodule Troupe.Plane.Artifacts do
   alias Troupe.Plane.{Admin, Audit, Identity, Repo, Settings}
   alias Troupe.Plane.Artifacts.{Artifact, Blocked, Comments, People, Previews, Retention, Shares, Uploads, Version}
   alias Troupe.Plane.Artifacts.Keeps
+  alias Troupe.Plane.Artifacts.Markdown
   alias Troupe.Plane.Identity.User
   alias Troupe.Plane.Sessions.Session
   alias Troupe.Protocol.Digest
@@ -607,6 +608,15 @@ defmodule Troupe.Plane.Artifacts do
     }
   end
 
+  # A Markdown artifact's documents are served as the page the host renders from them, so
+  # what the host blocks there is read from the Markdown, whatever type the file was sent
+  # with. A carried file has no body here and keeps what was found in it.
+  defp rendered("markdown", %{body: body, path: path} = file) when is_binary(body) do
+    if Markdown.document?(path), do: %{file | blocked: Blocked.markdown(path, body)}, else: file
+  end
+
+  defp rendered(_kind, file), do: file
+
   # One file that came by an upload handle, held to what a file sent inline is held to.
   defp checked_file(path, body, type) do
     with {:ok, path} <- path(%{"path" => path}),
@@ -1052,6 +1062,7 @@ defmodule Troupe.Plane.Artifacts do
   # the audit. A version that is not written leaves no object behind: what was put before the
   # refusal or the failure is taken back.
   defp write(user, existing, attrs) do
+    attrs = %{attrs | files: Enum.map(attrs.files, &rendered(attrs.kind, &1))}
     bytes = attrs.files |> Enum.map(& &1.bytes) |> Enum.sum()
     thumbnail = attrs[:thumbnail]
     new_bytes = new_bytes(attrs.files, thumbnail)

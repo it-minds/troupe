@@ -5209,13 +5209,8 @@ pre.instruction {
   min-height: var(--touch-target);
 }
 
-.repertoire-body {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: flex-start;
-}
+/* The grid has the screen's width: nothing beside it, so choosing a card moves nothing. */
 .repertoire-main {
-  flex: 999 1 520px;
   min-width: 0;
   padding: var(--space-5) var(--space-6) var(--space-8);
 }
@@ -5223,7 +5218,7 @@ pre.instruction {
   margin-bottom: var(--space-7);
 }
 .repertoire .day h2,
-.repertoire-aside h2 {
+.artifact-info h2 {
   display: flex;
   align-items: baseline;
   gap: var(--space-3);
@@ -5244,20 +5239,73 @@ pre.instruction {
 .repertoire .card {
   display: flex;
   flex-direction: column;
-  padding: 0;
   text-align: left;
+  cursor: pointer;
   background: var(--bg-panel);
   border: var(--bw-hairline) solid var(--border-hairline);
 }
-.repertoire .card:hover:not(:disabled) {
-  filter: none;
+.repertoire .card:hover,
+.repertoire .card:focus-within {
   transform: translate(-2px, -2px);
   box-shadow: 6px 6px 0 var(--bg-shadow);
   border-color: var(--border-strong);
 }
-.repertoire .card[aria-current="true"] {
-  border-color: var(--focus);
-  box-shadow: 6px 6px 0 var(--bg-shadow);
+/* Over its picture, under the pointer or the keyboard's focus: Open, large, and Info. The
+   title and byline below stay as they are, so the card is still known by them. */
+.repertoire .placeholder-frame {
+  position: relative;
+  display: block;
+}
+.repertoire .card-actions {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-3);
+  background: var(--scrim);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--dur-fast, 0.12s) ease;
+}
+.repertoire .card:hover .card-actions,
+.repertoire .card:focus-within .card-actions {
+  opacity: 1;
+  pointer-events: auto;
+}
+.repertoire .card-actions .card-open {
+  min-height: 48px;
+  min-width: 140px;
+  font: var(--t-subheading);
+}
+.repertoire .card-actions .card-info {
+  min-height: 48px;
+  background: var(--bg-panel);
+}
+/* No pointer that hovers: a tap on the card opens it, and Info sits in its lower corner,
+   clear of "New to you" above it. */
+@media (hover: none) {
+  .repertoire .card-actions {
+    opacity: 1;
+    background: none;
+    pointer-events: none;
+    align-items: flex-end;
+    justify-content: flex-end;
+    padding: var(--space-2);
+  }
+  .repertoire .card-actions .card-open {
+    display: none;
+  }
+  .repertoire .card-actions .card-info {
+    pointer-events: auto;
+    min-height: var(--touch-target);
+    font: var(--t-micro);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .repertoire .card-actions {
+    transition: none;
+  }
 }
 .repertoire .placeholder {
   position: relative;
@@ -5358,90 +5406,119 @@ pre.instruction {
   margin: 0 0 var(--space-4);
 }
 
-/* The one chosen, beside the grid: what it is, then its sections under screen labels. */
-.repertoire-aside {
-  position: sticky;
+/* An artifact's Info: a native modal dialog standing on the hard shadow as every dialog
+   does; what it is and its four tabs at its head, the chosen tab's sections under screen
+   labels below. Inside 16px gutters on a narrow screen. */
+.artifact-info {
+  width: min(720px, calc(100vw - 2 * var(--space-4)));
+  max-width: none;
+  max-height: min(88vh, 860px);
+  margin: auto;
+  color: var(--text-body);
+  gap: var(--space-5);
+}
+.artifact-info::backdrop {
+  background: var(--scrim);
+}
+.artifact-info .info-head {
+  position: relative;
+}
+.artifact-info .what {
+  color: var(--text-muted);
+}
+.artifact-info h2 {
+  margin: 6px 0 0;
+  padding-right: 64px;
+  font: var(--t-heading);
+}
+.artifact-info .info-close {
+  position: absolute;
   top: 0;
-  flex: 1 1 320px;
-  max-width: 420px;
-  min-width: 0;
+  right: 0;
+  min-height: var(--touch-target);
+}
+.artifact-info .tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-top: var(--space-4);
+}
+.artifact-info .tabs .n {
+  opacity: 0.8;
+}
+.artifact-info .info-panel:not([hidden]) {
   display: flex;
   flex-direction: column;
   gap: var(--space-5);
-  padding: var(--space-5) var(--space-5) var(--space-7);
-  border-left: var(--bw-hairline) solid var(--border-hairline);
 }
-.repertoire-aside .what {
-  color: var(--text-muted);
+.artifact-info .summary {
+  margin: 0;
+  max-width: 62ch;
 }
-.repertoire-aside h2 {
-  margin: 6px 0 0;
-  font: var(--t-heading);
-}
-.repertoire-aside .actions {
+.artifact-info .info-panel > .actions {
   display: flex;
   flex-wrap: wrap;
   gap: var(--space-2);
 }
-.repertoire-aside .actions button {
+.artifact-info .info-panel > .actions button {
   flex: 1 1 120px;
   min-height: var(--touch-target);
 }
-.repertoire-aside section .screen {
+.artifact-info section .screen {
   padding-bottom: 5px;
   margin-bottom: var(--space-3);
   border-bottom: var(--bw-hairline) solid var(--border-hairline);
 }
-.repertoire-aside .audience-line {
+.artifact-info .audience-line {
   margin: 0 0 var(--space-3);
   font-weight: 700;
 }
-.repertoire-aside section > .muted {
+.artifact-info section > .muted {
   margin: 0 0 var(--space-3);
 }
-.repertoire-aside .owner-line {
+.artifact-info .owner-line {
   font-weight: 600;
 }
-.repertoire-aside .move-visibility {
+.artifact-info .move-visibility {
   display: flex;
   flex-wrap: wrap;
   align-items: end;
   gap: var(--space-2);
 }
-.repertoire-aside .move-visibility label {
+.artifact-info .move-visibility label {
   display: flex;
   flex-direction: column;
   gap: var(--space-1);
 }
-.repertoire-aside .origin {
+.artifact-info .origin {
   display: grid;
   grid-template-columns: auto 1fr;
   gap: var(--space-2) var(--space-4);
   margin: 0;
 }
-.repertoire-aside .origin dt {
+.artifact-info .origin dt {
   font: var(--t-micro);
   color: var(--text-muted);
 }
-.repertoire-aside .origin dd {
+.artifact-info .origin dd {
   margin: 0;
   min-width: 0;
   overflow-wrap: anywhere;
 }
-.repertoire-aside .origin .profile {
+.artifact-info .origin .profile {
   font: var(--t-code-small);
   color: var(--running-fg);
 }
-.repertoire-aside .versions,
-.repertoire-aside .links,
+.artifact-info .versions,
+.artifact-info .links,
 .versions-drawer .version-list,
 .versions-drawer .session-reads {
   list-style: none;
   margin: 0 0 var(--space-3);
   padding: 0;
 }
-.repertoire-aside .versions li,
-.repertoire-aside .links li,
+.artifact-info .versions li,
+.artifact-info .links li,
 .versions-drawer .version-list li {
   display: flex;
   flex-wrap: wrap;
@@ -5450,36 +5527,36 @@ pre.instruction {
   padding: 7px 0;
   border-bottom: var(--bw-hairline) solid var(--border-hairline);
 }
-.repertoire-aside .versions .n,
+.artifact-info .versions .n,
 .versions-drawer .version-list .n {
   flex: 0 0 28px;
   font: var(--t-micro);
   color: var(--text-muted);
 }
-.repertoire-aside .versions .newest .n {
+.artifact-info .versions .newest .n {
   color: var(--running-fg);
 }
-.repertoire-aside .versions .note-text {
+.artifact-info .versions .note-text {
   flex: 1 1 auto;
   min-width: 0;
 }
-.repertoire-aside .versions .micro {
+.artifact-info .versions .micro {
   color: var(--text-muted);
 }
-.repertoire-aside .version-actions {
+.artifact-info .version-actions {
   display: flex;
   gap: var(--space-3);
   flex: 1 1 100%;
 }
 /* Who its owner shared it with by name, and the picker that adds somebody. */
-.repertoire-aside .shared-with {
+.artifact-info .shared-with {
   margin-top: var(--space-4);
 }
-.repertoire-aside .shared-with h4 {
+.artifact-info .shared-with h4 {
   margin: 0 0 var(--space-2);
   color: var(--text-muted);
 }
-.repertoire-aside .shared-with .people {
+.artifact-info .shared-with .people {
   list-style: none;
   margin: 0;
   padding: 0;
@@ -5488,50 +5565,50 @@ pre.instruction {
   gap: var(--space-2);
   flex: 1 1 100%;
 }
-.repertoire-aside .shared-with input {
+.artifact-info .shared-with input {
   min-width: 0;
 }
 /* Its thread, oldest first: who and when above each comment. */
-.repertoire-aside .comments {
+.artifact-info .comments {
   list-style: none;
   margin: 0 0 var(--space-3);
   padding: 0;
 }
-.repertoire-aside .comments li {
+.artifact-info .comments li {
   padding: 7px 0;
   border-bottom: var(--bw-hairline) solid var(--border-hairline);
 }
-.repertoire-aside .comments .micro {
+.artifact-info .comments .micro {
   margin: 0 0 var(--space-1);
   color: var(--text-muted);
 }
-.repertoire-aside .comments .author {
+.artifact-info .comments .author {
   color: var(--text-primary);
   font-weight: 600;
 }
-.repertoire-aside .comment-body {
+.artifact-info .comment-body {
   margin: 0;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
-.repertoire-aside .comment-form {
+.artifact-info .comment-form {
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
 }
-.repertoire-aside .comment-form textarea {
+.artifact-info .comment-form textarea {
   width: 100%;
   box-sizing: border-box;
   resize: vertical;
 }
-.repertoire-aside .comment-form button {
+.artifact-info .comment-form button {
   align-self: flex-end;
 }
 /* A comment's own Edit and Delete, and Save beside Cancel while it is edited. */
-.repertoire-aside .comments .comment-actions {
+.artifact-info .comments .comment-actions {
   margin: var(--space-1) 0 0;
 }
-.repertoire-aside .comment-edit-actions {
+.artifact-info .comment-edit-actions {
   display: flex;
   justify-content: flex-end;
   flex-wrap: wrap;
@@ -5927,11 +6004,6 @@ pre.instruction {
 .profile-view .table tr.muted td {
   color: var(--text-muted);
 }
-.profile-view ul.chips {
-  list-style: none;
-  padding: 0;
-  margin-top: 0;
-}
 /* A skill a line, its name and what it does; one with a SKILL.md opens to it in place. */
 .profile-view ul.skill-list {
   list-style: none;
@@ -5950,9 +6022,25 @@ pre.instruction {
 .profile-link {
   margin-left: var(--space-2);
 }
-/* The page's head sentence: the bundle author's words for it, or the primary agent's. */
+/* The page's head: a label, the name large in the code face, since it is literal, and
+   under it the bundle author's sentence for it, or the primary agent's, as a lede. */
+.screen-head.profile-head > .screen {
+  flex-basis: 100%;
+  margin-top: var(--space-3);
+}
+.screen-head.profile-head h1 {
+  flex-basis: 100%;
+  margin-top: var(--space-1);
+  font-size: clamp(28px, 4.5vw, 40px);
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+  overflow-wrap: anywhere;
+}
 .screen-head p.profile-sentence {
-  max-width: var(--measure-reading);
+  max-width: 62ch;
+  margin-top: var(--space-3);
+  font: var(--t-body);
+  color: var(--text-body);
 }
 /* The sections and, beside them, the rail of what a person checks before starting; on a
    narrow window the rail comes first, as it is in the page's order. */
@@ -5966,13 +6054,61 @@ pre.instruction {
   grid-row: 1;
   position: sticky;
   top: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
   padding: var(--space-4) var(--space-6) var(--space-4) 0;
   min-width: 0;
   overflow-wrap: anywhere;
 }
-.profile-rail > button.primary {
-  margin-top: var(--space-2);
+/* Start is the rail's first and largest thing: the one filled button on the screen. */
+.profile-rail > button.profile-start {
   width: 100%;
+  min-height: 46px;
+  white-space: normal;
+}
+.profile-rail > p.note {
+  margin: 0;
+}
+/* A panel of the rail: a small label and what is under it, ruled like a card. */
+.profile-panel {
+  border: var(--bw-hairline) solid var(--border-hairline);
+  background: var(--bg-raised);
+  padding: var(--space-3) var(--space-4);
+  min-width: 0;
+  font: var(--t-ui-small);
+  color: var(--text-body);
+}
+.profile-panel > h4 {
+  margin: 0 0 var(--space-2);
+  font: var(--t-micro);
+  letter-spacing: var(--tracking-micro);
+  color: var(--text-label);
+  text-transform: uppercase;
+}
+.profile-panel > p {
+  margin: 0;
+}
+.profile-panel .facts.wide {
+  grid-template-columns: minmax(5rem, auto) minmax(0, 1fr);
+  margin: 0;
+}
+/* The places up now, a segment each, the ones running lit in the machine's colour. */
+.profile-meter {
+  display: flex;
+  gap: 3px;
+  margin: 0 0 var(--space-2);
+}
+.profile-meter > span {
+  flex: 1 1 0;
+  min-width: 0;
+  height: 10px;
+  border: var(--bw-hairline) solid var(--border-hairline);
+  background: var(--bg-sunken);
+}
+.profile-meter > span.on {
+  border-color: var(--running-solid);
+  background: var(--running-solid);
 }
 .profile-main {
   grid-column: 1;
@@ -5984,8 +6120,7 @@ pre.instruction {
   margin: 0 var(--space-6) var(--space-4);
   overflow-wrap: anywhere;
 }
-.profile-view .part > h4,
-.profile-card > h4 {
+.profile-view .part > h4 {
   margin: 0 0 var(--space-2);
   font: var(--t-ui-small);
   font-weight: 700;
@@ -5994,8 +6129,7 @@ pre.instruction {
 .profile-view .part > p {
   margin: 0;
 }
-.profile-view ul.plain,
-.profile-card ul.struck {
+.profile-view ul.plain {
   list-style: none;
   padding: 0;
   margin: 0;
@@ -6006,6 +6140,47 @@ pre.instruction {
 .profile-view .group > .banner {
   margin-bottom: var(--space-3);
 }
+/* What it can't do: the promise first, its eye and its sentence, then one list of rows,
+   each with the refused mark: the rules, the withheld servers and the hosts it reaches. */
+.profile-view .group > .banner.promise {
+  margin: 0 var(--space-6) var(--space-3);
+  border: var(--bw-hairline) solid var(--border-hairline);
+  border-left: var(--bw-marker) solid var(--denied-fg);
+  background: var(--bg-raised);
+  color: var(--denied-fg);
+  flex-wrap: nowrap;
+  align-items: center;
+  padding: var(--space-3) var(--space-4);
+}
+.profile-view .banner.promise > p {
+  min-width: 0;
+}
+.profile-cant {
+  list-style: none;
+  margin: 0 var(--space-6) var(--space-4);
+  padding: 0;
+  border: var(--bw-hairline) solid var(--border-hairline);
+  background: var(--bg-raised);
+}
+.profile-cant > li {
+  display: flex;
+  gap: var(--space-3);
+  align-items: baseline;
+  padding: var(--space-3) var(--space-4);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.profile-cant > li + li {
+  border-top: var(--bw-hairline) solid var(--border-hairline);
+}
+.profile-cant > li > .eye {
+  flex: 0 0 auto;
+  align-self: center;
+  color: var(--denied-fg);
+}
+.profile-cant > li > span {
+  min-width: 0;
+}
 /* A card per server the grant offers, and Troupe's own beside them. */
 .profile-cards {
   list-style: none;
@@ -6015,18 +6190,32 @@ pre.instruction {
   grid-template-columns: repeat(auto-fill, minmax(min(100%, 15rem), 1fr));
   gap: var(--space-3);
 }
+/* A card is a system at work: its name, the author's subtitle, its tools as lines, and
+   at its foot whose credential it acts with and whether a call asks first. */
 .profile-card {
+  display: flex;
+  flex-direction: column;
   border: var(--bw-hairline) solid var(--border-hairline);
   background: var(--bg-raised);
-  padding: var(--space-3);
+  padding: var(--space-3) var(--space-4) 0;
   min-width: 0;
   overflow-wrap: anywhere;
 }
-.profile-card .facts.wide {
-  grid-template-columns: minmax(5rem, auto) minmax(0, 1fr);
-  margin-bottom: 0;
+.profile-card > h4 {
+  margin: 0;
+  font: var(--t-subheading);
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--text-primary);
 }
-.profile-card ul.struck s {
+/* A server's name is literal: the code face, at the card's heading size. */
+.profile-card > h4.mono {
+  font-family: var(--font-mono);
+  font-weight: 500;
+}
+.profile-card > p.profile-subtitle {
+  margin: var(--space-1) 0 0;
+  font: var(--t-ui-small);
   color: var(--text-secondary);
 }
 .profile-card > p.micro {
@@ -6035,52 +6224,56 @@ pre.instruction {
   text-transform: uppercase;
 }
 .profile-card > p.note {
-  margin: var(--space-2) 0 0;
+  margin: 0 0 var(--space-3);
 }
-/* The harness's own tools on Troupe's card, a line of names that wraps. */
-.profile-card ul.tool-list {
-  list-style: none;
-  padding: 0;
-  margin: 0;
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-1) var(--space-3);
-}
-.profile-card ul.tool-list s {
-  color: var(--text-secondary);
-}
-/* A server's subtitle under its name, and a line per tool with the tool's name after it,
-   small and in the code face. */
-.profile-card > p.profile-subtitle {
-  margin: 0 0 var(--space-2);
-  font: var(--t-ui-small);
-  color: var(--text-body);
+.profile-card > h4 + p.note {
+  margin-top: var(--space-2);
 }
 .profile-card ul.tool-lines {
   list-style: none;
   padding: 0;
-  margin: 0;
+  margin: var(--space-3) 0;
+  font: var(--t-note);
+  color: var(--text-body);
+}
+.profile-card > p.micro + ul.tool-lines {
+  margin-top: 0;
+}
+.profile-card > h4 + p.micro,
+.profile-card > p.profile-subtitle + p.micro {
+  margin-top: var(--space-3);
 }
 .profile-card ul.tool-lines > li + li {
   margin-top: var(--space-1);
 }
+.profile-card ul.tool-lines > li.mono {
+  font: var(--t-code);
+}
+.profile-card ul.tool-lines > li.every {
+  color: var(--text-secondary);
+}
+/* An author's line carries its tool's name in a small tail, shown on hover or focus. */
 .profile-card ul.tool-lines .tool-name {
   font: var(--t-micro);
   color: var(--text-secondary);
+  opacity: 0;
 }
-/* The rail's limits: a sentence each, under a small heading. */
-.profile-limits {
-  margin: 0 0 var(--space-3);
-  font: var(--t-ui-small);
-  color: var(--text-body);
+.profile-card ul.tool-lines > li.authored:hover .tool-name,
+.profile-card ul.tool-lines > li.authored:focus-visible .tool-name {
+  opacity: 1;
 }
-.profile-limits > h4 {
-  margin: 0 0 var(--space-2);
+.profile-card ul.tool-lines.struck s {
+  color: var(--text-secondary);
+  text-decoration-color: var(--denied-fg);
+}
+.profile-card > p.profile-card-foot {
+  margin: auto calc(-1 * var(--space-4)) 0;
+  padding: var(--space-2) var(--space-4);
+  border-top: var(--bw-hairline) solid var(--border-hairline);
   font: var(--t-micro);
-  letter-spacing: var(--tracking-micro);
-  color: var(--text-muted);
-  text-transform: uppercase;
+  color: var(--text-secondary);
 }
+/* The rail's limits, its last panel: a sentence each. */
 .profile-limits ul.plain > li + li {
   margin-top: var(--space-1);
 }
@@ -6111,6 +6304,8 @@ details.under-hood > summary {
     grid-row: 2;
   }
   .profile-view .group > .part,
+  .profile-view .group > .banner.promise,
+  .profile-cant,
   .profile-cards {
     margin-left: var(--space-4);
     margin-right: var(--space-4);

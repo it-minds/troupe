@@ -56,7 +56,7 @@ defmodule Troupe.Plane.Admin do
   }
 
   alias Troupe.Plane.Control.TLS
-  alias Troupe.Plane.Fleet.{Bundle, Extends, Provisioner, Scaler, SizeClass, Worker}
+  alias Troupe.Plane.Fleet.{Bundle, Extends, Provisioner, Scaler, SizeClass, Sweeper, Worker}
   alias Troupe.Plane.GitHub.Issue, as: GitHubIssue
   alias Troupe.Plane.GitHub.Issues, as: GitHubIssues
   alias Troupe.Plane.GitHub.Policy, as: GitHubPolicy
@@ -2068,10 +2068,17 @@ defmodule Troupe.Plane.Admin do
       sessions = Sessions.for_admin(actor, team_ids(actor), opts)
       # Whether each running pod session's last turn read the memory in force for it now.
       standing = Memory.standing(sessions)
+      pods = Fleet.pod_names(Enum.map(sessions, & &1.worker_id))
 
       {:ok,
        sessions
-       |> Enum.map(&Map.put(session_summary(&1), :memory, standing[&1.id]))
+       |> Enum.map(
+         &(session_summary(&1)
+           |> Map.put(:memory, standing[&1.id])
+           # The pod an active session is on, by name, and `nil` for none: an `active` row
+           # on no pod is one the scaler counts and no pod runs.
+           |> Map.put(:pod, pods[&1.worker_id]))
+       )
        |> Names.decorate(owner: :owner_name)}
     end
   end
@@ -4863,7 +4870,9 @@ defmodule Troupe.Plane.Admin do
       budget_micros: user.budget_micros,
       spent_micros: Ledger.spent_micros_for(user.subject),
       reserved_micros:
-        user.subject |> Ledger.open_reservations_for() |> Map.values() |> Enum.sum()
+        user.subject |> Ledger.open_reservations_for() |> Map.values() |> Enum.sum(),
+      # The month's calls of theirs nobody priced, which `spent_micros` counts as free.
+      unpriced_calls: unpriced_calls({:person, user.subject})
     }
   end
 
@@ -5480,6 +5489,29 @@ defmodule Troupe.Plane.Admin do
       capacity: Enum.sum(Enum.map(workers, & &1.capacity)),
       active_sessions: Enum.sum(Enum.map(workers, & &1.active_sessions))
     }
+    |> Map.merge(adrift(profile.name))
+  end
+
+  # Sessions the scaler counts as running that no pod holds, past the moment a create or a
+  # wake takes to place one: what keeps a profile nobody uses at a pod, said in the
+  # sweep's words. `nil` for none.
+  defp adrift(name) do
+    after_ms = Sweeper.adrift_after_ms()
+
+    case Sessions.adrift_count(name, after_ms) do
+      0 ->
+        %{sessions_without_pod: 0, sessions_without_pod_note: nil}
+
+      n ->
+        %{
+          sessions_without_pod: n,
+          sessions_without_pod_note:
+            "#{Words.count(n, "session")} counted as running #{if n == 1, do: "has", else: "have"} " <>
+              "been on no pod for more than #{Words.duration(after_ms)}; the sweep marks " <>
+              "#{if n == 1, do: "it", else: "them"} dormant, and the profile's demand counts " <>
+              "#{if n == 1, do: "it", else: "them"} until then"
+        }
+    end
   end
 
   # A missing guarantee and the weaker one given in its place, by name:
@@ -5497,8 +5529,18 @@ defmodule Troupe.Plane.Admin do
       set_by: ProfileBudget.set_by(profile.name),
       spent_micros: Ledger.profile_spent_micros(profile.name),
       reserved_micros:
-        profile.name |> Ledger.open_reservations_for_profile() |> Map.values() |> Enum.sum()
+        profile.name |> Ledger.open_reservations_for_profile() |> Map.values() |> Enum.sum(),
+      # The month's calls nobody priced, and their tokens, which `spent_micros` counts as
+      # free; `nil` where every call was priced.
+      unpriced: unpriced_totals(profile.name)
     }
+  end
+
+  defp unpriced_totals(profile) do
+    case Ledger.unpriced({:profile, profile}) do
+      nil -> nil
+      totals -> %{totals | since: DateTime.to_iso8601(totals.since)}
+    end
   end
 
   defp bundle_state(profile) do
@@ -5600,8 +5642,19 @@ defmodule Troupe.Plane.Admin do
       # tuple and raises `BadMapError`. Harmless while a team had nothing reserved —
       # `Enum.map` over an empty map is `[]` — and a 500 on the overview page the moment
       # one session was running. `team_detail/1` above takes `Map.values/1`; so does this.
-      reserved_micros: team.id |> Ledger.open_reservations() |> Map.values() |> Enum.sum()
+      reserved_micros: team.id |> Ledger.open_reservations() |> Map.values() |> Enum.sum(),
+      # The calls of the period nobody priced, which the figure above counts as free: a
+      # spend of nothing from a team whose model has no price is not a team that spent
+      # nothing. Zero where every call was priced.
+      unpriced_calls: unpriced_calls({:team, team})
     }
+  end
+
+  defp unpriced_calls(scope) do
+    case Ledger.unpriced(scope) do
+      nil -> 0
+      totals -> totals.calls
+    end
   end
 
   defp session_summary(session) do

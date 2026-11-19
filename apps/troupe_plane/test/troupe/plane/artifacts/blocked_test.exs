@@ -142,6 +142,66 @@ defmodule Troupe.Plane.Artifacts.BlockedTest do
     end
   end
 
+  describe "a Markdown document" do
+    test "names an image from another site as an HTML page's is named" do
+      markdown = """
+      # Report
+
+      ![Chart](https://cdn.example.test/chart.png "Q3")
+      and a protocol-relative one ![](//img.example.test/x.png)
+      """
+
+      found = Blocked.markdown("index.md", markdown)
+
+      assert found == [
+               %{
+                 "file" => "index.md",
+                 "kind" => "image",
+                 "reference" => "https://cdn.example.test/chart.png",
+                 "line" => 3
+               },
+               %{
+                 "file" => "index.md",
+                 "kind" => "image",
+                 "reference" => "//img.example.test/x.png",
+                 "line" => 4
+               }
+             ]
+
+      [html] = Blocked.scan("index.html", "text/html", ~s(<img src="https://cdn.example.test/chart.png">))
+      assert Map.keys(hd(found)) == Map.keys(html)
+      assert Map.take(hd(found), ~w(kind reference)) == Map.take(html, ~w(kind reference))
+      assert Blocked.directive("image") == "img-src"
+    end
+
+    test "an image of its own, a data: one, code and raw HTML are not read as loads" do
+      markdown = """
+      ![own](chart.png) ![also own](img/b.svg) ![inline](data:image/png;base64,iVBORw0KGgo=)
+
+      `![in a span](https://cdn.example.test/span.png)`
+
+      ```markdown
+      ![in a fence](https://cdn.example.test/fence.png)
+      ```
+
+      > ~~~
+      > ![quoted fence](https://cdn.example.test/quoted.png)
+      > ~~~
+
+      <img src="https://cdn.example.test/raw.png">
+      """
+
+      assert Blocked.markdown("index.md", markdown) == []
+    end
+
+    test "an image after a fence is found on its own line" do
+      markdown = "```\ncode\n```\n\n![x](https://cdn.example.test/after.png)\n"
+
+      assert [%{"line" => 5, "reference" => "https://cdn.example.test/after.png"}] =
+               Blocked.markdown("README.md", markdown)
+    end
+  end
+
   describe "the rules are the host's policy" do
     # The header the host sends, read as a browser reads it: a fetch directive it does not
     # name falls back to default-src.

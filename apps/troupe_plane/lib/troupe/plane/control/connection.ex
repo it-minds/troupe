@@ -65,7 +65,7 @@ defmodule Troupe.Plane.Control.Connection do
     Triggers
   }
 
-  alias Troupe.Plane.Control.{Connections, Refusals, Replay, Router, TLS}
+  alias Troupe.Plane.Control.{Connections, Refusals, Replay, TLS}
   alias Troupe.Plane.Fleet.Bundle
   alias Troupe.Plane.Identity.User
   alias Troupe.Plane.Sessions.Session
@@ -77,6 +77,10 @@ defmodule Troupe.Plane.Control.Connection do
   # Short: this runs on every enrolment, and a pod that cannot answer promptly is
   # better left alone than waited on.
   @index_timeout_ms 10_000
+  # How often a pod is asked again what it holds, and how long before a question a
+  # session must have been placed for the answer to judge it.
+  @index_every_ms 60_000
+  @index_grace_ms 60_000
   # A client that opened a handshake and does not finish it is not waited on for longer,
   # and nor is one that connected and says nothing at all.
   @handshake_timeout_ms 10_000
@@ -190,6 +194,12 @@ defmodule Troupe.Plane.Control.Connection do
       when tag in [:tcp_error, :ssl_error] do
     gone(state)
     {:stop, :normal, state}
+  end
+
+  # The pod is asked again what it holds, on this connection's own schedule.
+  def handle_info(:index, %{worker: worker} = state) when not is_nil(worker) do
+    reconcile_index(worker)
+    {:noreply, state}
   end
 
   def handle_info(_message, state), do: {:noreply, state}
@@ -555,6 +565,7 @@ defmodule Troupe.Plane.Control.Connection do
       input_tokens: params["input_tokens"] || 0,
       output_tokens: params["output_tokens"] || 0,
       cost_micros: params["cost_micros"] || 0,
+      priced: priced?(params),
       gateway_request_id: params["gateway_request_id"]
     }
 
@@ -1131,6 +1142,7 @@ defmodule Troupe.Plane.Control.Connection do
                 input_tokens: non_negative(record["input_tokens"]),
                 output_tokens: non_negative(record["output_tokens"]),
                 cost_micros: non_negative(record["cost_micros"]),
+                priced: priced?(record),
                 gateway_request_id: id,
                 occurred_at: occurred_at(record["occurred_at"])
               }
@@ -1144,6 +1156,11 @@ defmodule Troupe.Plane.Control.Connection do
   end
 
   defp usage_records(_session, _records), do: {:error, "records is a list"}
+
+  # Whether anybody said what a call cost. A pod says so in `priced`; one from before the
+  # flag said it by sending a number as the cost, or none.
+  defp priced?(%{"priced" => priced}) when is_boolean(priced), do: priced
+  defp priced?(record), do: is_integer(record["cost_micros"])
 
   defp non_negative(n) when is_integer(n) and n >= 0, do: n
   defp non_negative(_other), do: 0
@@ -1198,21 +1215,35 @@ defmodule Troupe.Plane.Control.Connection do
   # Only ever on an answer. A pod that cannot be reached has said nothing about what it
   # holds, and reading silence as "holding none" would dormant a healthy fleet.
   #
-  # Asked once, and not again on failure. This is the only thing that rescues the
-  # sessions of a pod that came back under its own name — the sweeper cannot, because the
-  # row they point at is that pod's row, healthy again — which is why `register/1` makes
-  # sure the question reaches the pod that just enrolled. A retry from this task would
-  # outlive the connection it was asked on and could reach whatever was registered under
-  # the name by then, which in the suite was the next test's pod.
+  # Asked at enrolment and then again every minute for as long as this connection lasts,
+  # not once: a pod that came back under its own name is healthy again, so the sweeper
+  # never looks at what its row is believed to hold, and a question that failed at
+  # enrolment left those sessions `active` for good. The question goes down this
+  # connection, by its own pid, never by the pod's name: a task asking by name could
+  # outlive the connection and reach whatever was registered under the name by then,
+  # which in the suite was the next test's pod. A failed ask is not retried; the next one
+  # is the retry, and it ends with the connection.
+  #
+  # An answer judges only what it could have named: a session placed on this pod before
+  # it enrolled, or more than a minute before the question, longer than a pod is given to
+  # take one. A session whose activation is on its way to the pod is not judged by an
+  # answer that was put together before it arrived.
   defp reconcile_index(worker) do
+    connection = self()
+    Process.send_after(connection, :index, index_every_ms())
+    placed_before = placed_before(worker, DateTime.utc_now())
+
     # In a task because the answer arrives on this socket, which this process is the one
     # reading: asking from inside the handler would deadlock waiting on its own reply.
     Task.start(fn ->
-      case Router.push(worker, "session.index", %{}, @index_timeout_ms) do
-        {:ok, %{"sessions" => held}} ->
-          orphans(worker, held) |> Enum.each(&strand(worker, &1))
+      case ask_index(connection) do
+        {:ok, %{"sessions" => held}} when is_list(held) ->
+          worker |> orphans(held, placed_before) |> Enum.each(&strand(worker, &1))
 
         {:ok, _other} ->
+          :ok
+
+        {:error, :connection_closed} ->
           :ok
 
         {:error, reason} ->
@@ -1223,20 +1254,39 @@ defmodule Troupe.Plane.Control.Connection do
     end)
   end
 
-  defp orphans(worker, held) do
-    on_pod = MapSet.new(List.wrap(held), &(is_map(&1) && &1["id"]))
+  defp ask_index(connection) do
+    request(connection, "session.index", %{}, @index_timeout_ms)
+  catch
+    # The connection closed while the question was out: nobody to ask, and nothing said.
+    :exit, {:timeout, _call} -> {:error, :timeout}
+    :exit, _reason -> {:error, :connection_closed}
+  end
+
+  defp placed_before(worker, asked_at) do
+    window = DateTime.add(asked_at, -index_grace_ms(), :millisecond)
+
+    if worker.enrolled_at && DateTime.compare(worker.enrolled_at, window) == :gt,
+      do: worker.enrolled_at,
+      else: window
+  end
+
+  defp index_every_ms, do: Application.get_env(:troupe_plane, :index_every_ms, @index_every_ms)
+  defp index_grace_ms, do: Application.get_env(:troupe_plane, :index_grace_ms, @index_grace_ms)
+
+  defp orphans(worker, held, placed_before) do
+    on_pod = MapSet.new(held, &(is_map(&1) && &1["id"]))
 
     worker.id
-    |> Sessions.on_worker()
+    |> Sessions.on_worker(placed_before)
     |> Enum.reject(&MapSet.member?(on_pod, &1))
   end
 
   defp strand(worker, session_id) do
-    Logger.info(
-      "troupe plane: #{session_id} is not on #{worker.pod_name} any more, marking it dormant"
-    )
-
-    Drain.strand(worker, session_id)
+    with {:ok, _} <- Drain.strand(worker, session_id) do
+      Logger.info(
+        "troupe plane: #{session_id} is not on #{worker.pod_name} any more; it is dormant"
+      )
+    end
   end
 
   defp enrol(params, state) do

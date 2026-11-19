@@ -524,14 +524,14 @@ defmodule Troupe.Plane.Admin.API do
       name: "admin.overview",
       function: :overview,
       summary:
-        "Fleet health, active sessions and spend per team, scoped to what the caller administers. The first call to make. A platform admin's carries `openbao`: each grant the plane's OpenBao role needs, checked look-only, and for one it lacks a sentence and the `bao` lines an OpenBao administrator runs to grant it.",
+        "Fleet health, active sessions and spend per team, scoped to what the caller administers. The first call to make. A team's unpriced_calls is how many calls of its period nobody priced (no cost from the gateway, no catalog entry, no llm.prices), which its spend counts as free. A platform admin's carries `openbao`: each grant the plane's OpenBao role needs, checked look-only, and for one it lacks a sentence and the `bao` lines an OpenBao administrator runs to grant it.",
       risk: :read
     },
     %Method{
       name: "admin.profiles.list",
       function: :profiles_list,
       summary:
-        "Every profile, with its pods, conditions and load. A pod carries gone: true once its substrate no longer runs it and it has been quiet past its lease. at_once is the most sessions the profile's pods could run at once and what bounds it, {sessions, by}: by hosts (the hosts registered for it) or policy (the cluster policy's maxReplicas), and both null where nothing does. On a gitops plane each carries `gitops`: the repository it comes from, the resource generation it was read at, and any problem the last pass reported — `refused` (the resource fails the plane's checks and is not used, with the reasons), `missing` (a row the cluster has no resource for), `plane_only` (nothing applies it from a repository yet) or `unwritten`. A refused resource with no row is listed too.",
+        "Every profile, with its pods, conditions and load. A pod carries gone: true once its substrate no longer runs it and it has been quiet past its lease. sessions_without_pod counts the sessions counted as running that have been on no pod for more than a minute, which the scaler counts until the sweep marks them dormant, with sessions_without_pod_note saying so, or null for none. at_once is the most sessions the profile's pods could run at once and what bounds it, {sessions, by}: by hosts (the hosts registered for it) or policy (the cluster policy's maxReplicas), and both null where nothing does. On a gitops plane each carries `gitops`: the repository it comes from, the resource generation it was read at, and any problem the last pass reported — `refused` (the resource fails the plane's checks and is not used, with the reasons), `missing` (a row the cluster has no resource for), `plane_only` (nothing applies it from a repository yet) or `unwritten`. A refused resource with no row is listed too.",
       risk: :read
     },
     %Method{
@@ -1092,7 +1092,7 @@ defmodule Troupe.Plane.Admin.API do
       name: "admin.sessions.list",
       function: :sessions_list,
       summary:
-        "Session metadata: who, which profile, what state, what it cost, and for a running pod session whether its last turn read the memory in force for it (memory: current or behind). Never content — there is no method that returns content.",
+        "Session metadata: who, which profile, what state, what it cost, which pod an active session is on (pod, null for none), and for a running pod session whether its last turn read the memory in force for it (memory: current or behind). Never content — there is no method that returns content.",
       risk: :read,
       arguments: [
         %Argument{

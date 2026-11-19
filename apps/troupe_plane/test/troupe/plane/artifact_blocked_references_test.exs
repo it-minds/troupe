@@ -164,4 +164,52 @@ defmodule Troupe.Plane.ArtifactBlockedReferencesTest do
     assert kinds(back["blocked"]) == kinds(first["blocked"])
     assert back["blocked_count"] == 3
   end
+
+  test "a Markdown document with an image from another site publishes with it named as a page's is",
+       context do
+    markdown = """
+    # Q3
+
+    ![Chart](https://cdn.example.test/q3.png) beside ![ours](q3-local.png)
+    """
+
+    {:ok, doc} =
+      publish(context.ada, [file("index.md", markdown, "text/markdown")], %{"kind" => "markdown"})
+
+    {:ok, page} =
+      publish(context.ada, [
+        file("index.html", ~s(<img src="https://cdn.example.test/q3.png">), "text/html")
+      ])
+
+    assert [found] = doc["blocked"]
+
+    assert found == %{
+             "file" => "index.md",
+             "kind" => "image",
+             "reference" => "https://cdn.example.test/q3.png",
+             "line" => 3
+           }
+
+    assert Map.take(found, ~w(kind reference)) ==
+             Map.take(hd(page["blocked"]), ~w(kind reference))
+
+    assert doc["blocked_count"] == 1
+    assert row(context.ada, doc["id"])["blocked_count"] == 1
+
+    # A retitle carries the document and what was found in it.
+    {:ok, retitled} =
+      call(context.ada, "artifact.put", %{"id" => doc["id"], "base" => 1, "title" => "Q3 notes"})
+
+    assert retitled["blocked"] == doc["blocked"]
+  end
+
+  test "a Markdown file beside a page is served as it is, so it is not read", context do
+    {:ok, page} =
+      publish(context.ada, [
+        file("index.html", @clean, "text/html"),
+        file("notes.md", "![x](https://cdn.example.test/x.png)", "text/markdown")
+      ])
+
+    assert page["blocked"] == []
+  end
 end

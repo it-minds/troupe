@@ -50,7 +50,7 @@
 
 import { useState } from "react";
 import type { JSX } from "react";
-import { RULE_ACTIONS, ceilingAboveWords, moneyWords } from "@troupe/client";
+import { RULE_ACTIONS, ceilingAboveWords, moneyWords, unpricedWords } from "@troupe/client";
 import type { AdminProfile, AdminTeam, EffectiveBundle, EffectiveProfile, ProfileBelow, ProfileDetail, ProfilePreview, ProfileWrite, ProviderTypeChoice, RuleAction } from "@troupe/client";
 import { href } from "../route";
 import { describeError, recorded, show, useConsole, useLoad } from "../console";
@@ -210,6 +210,7 @@ export function Profile({ name }: { name: string }): JSX.Element {
           const s = STATES[profileState(p)];
           const deletable = !locked || detail.gitops?.problem === "missing";
           const busy = editing || deleting;
+          const unpriced = unpricedWords(detail.budget?.unpriced);
           return (
             <>
               <p className="team-meta">
@@ -224,6 +225,14 @@ export function Profile({ name }: { name: string }): JSX.Element {
                   {detail.gitops?.generation !== null && detail.gitops?.generation !== undefined && <p className="note">What is below is what the plane read, at generation {detail.gitops.generation}.</p>}
                   <GitopsProblem gitops={detail.gitops} />
                 </Locked>
+              )}
+              {unpriced && (
+                <p className="note">
+                  <Status kind={STATES.unpriced.kind} glyph={STATES.unpriced.glyph}>
+                    {STATES.unpriced.word}
+                  </Status>{" "}
+                  {unpriced}
+                </p>
               )}
               {done && <AuditNote action={done.action} subject={done.subject} detail={done.detail} />}
               {!editing && <ProfileReading detail={detail} granted={granted} />}
