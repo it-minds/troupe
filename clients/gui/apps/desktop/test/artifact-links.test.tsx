@@ -2,7 +2,7 @@
 // clipboard by the shell, never by the page: a webview writes its own clipboard only inside
 // the click that asked, and the owner's link is minted by the plane first. Open in browser
 // hands the artifact's address to the shell, and a shell that refuses says why on the
-// panel's error line rather than nothing. Against a fake plane whose artifacts the fake daemon keeps.
+// Info dialog's error line rather than nothing. Against a fake plane whose artifacts the fake daemon keeps.
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { WebSocket as NodeWebSocket } from "ws";
@@ -12,7 +12,7 @@ import { FakeDaemon } from "../../../packages/client/test/support/daemon.js";
 import { startHarness } from "../../../packages/client/test/support/harness.js";
 import { keptBy } from "../../../packages/client/test/support/kept.js";
 import type { Harness } from "../../../packages/client/test/support/harness.js";
-import { nav, render, sees, seesButton, startOnTheList, waitFor } from "./support";
+import { artifactInfo, infoTab, nav, render, sees, seesButton, startOnTheList, waitFor } from "./support";
 
 Element.prototype.scrollIntoView = function scrollIntoView() {};
 globalThis.WebSocket = NodeWebSocket as unknown as typeof WebSocket;
@@ -85,12 +85,11 @@ afterEach(async () => {
   await daemon.stop();
 });
 
-/** The gallery open and the named card's aside. */
+/** The gallery open and the named card's Info, on its Overview, where Copy link and Open in browser are. */
 async function panelOf(title: string): Promise<HTMLElement> {
   unmount = render(<App />).unmount;
   (await waitFor(() => nav("Artifacts"), "the Artifacts entry in the rail")).click();
-  (await waitFor(() => [...document.querySelectorAll<HTMLButtonElement>(".repertoire .card")].find((c) => c.textContent?.includes(title)), "the card")).click();
-  return waitFor(() => document.querySelector<HTMLElement>('[aria-label="Artifact details"]'), "the aside");
+  return infoTab(await artifactInfo(title), "Overview");
 }
 
 describe("the artifact panel in the shell", () => {
@@ -119,7 +118,7 @@ describe("the artifact panel in the shell", () => {
     (await seesButton("Open in browser", panel)).click();
     await waitFor(() => opened.length === 1, "the address handed to the shell");
     expect(opened[0]).toBe("https://artifacts.example.test/a/art-weekly/");
-    expect(panel.querySelector(".note.error")).toBeNull();
+    expect(panel.closest("dialog")!.querySelector(".note.error")).toBeNull();
   });
 
   it("says why when the shell refuses to open the browser", async () => {

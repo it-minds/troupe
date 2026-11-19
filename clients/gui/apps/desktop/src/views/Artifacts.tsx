@@ -1,10 +1,12 @@
 // The person's artifacts in their own app (troupe #62): what they and their troupe published
 // that they may open, as the gallery in the console has them: from the plane itself where
 // the app is signed in to one, through this computer's daemon and its sign-in otherwise. A grid of cards grouped by when, filtered by who each is for (everyone,
-// your teams and profiles, a link's, only you) and by a search; the one chosen in an aside
-// with its versions, where it came from, who can see it, whose it is, and for its owner the
-// controls. An artifact a team owns is every member's: each has the owner's controls, and
-// the owning person gives one of theirs to a team, or the team's admin takes it back.
+// your teams and profiles, a link's, only you) and by a search. The grid has the screen's
+// width: a click on a card opens the artifact, and its Info opens a modal dialog in four tabs
+// (Overview, Access, Versions, Comments) with where it came from, who can see it, whose it
+// is, its versions, its thread, and for its owner the controls. An artifact a team owns is
+// every member's: each has the owner's controls, and the owning person gives one of theirs
+// to a team, or the team's admin takes it back.
 //
 // Nothing of an artifact's content is drawn here: a card is its title, its kind and its
 // size, and the picture its publisher sent of it where there is one (an image the artifacts
@@ -18,8 +20,8 @@
 // What the person keeps at the top is theirs on the plane (`artifact.keep`), so it follows
 // them to every device; the team chips and the published range are this view's, reset with it.
 
-import { useCallback, useEffect, useState } from "react";
-import type { JSX } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
+import type { JSX, KeyboardEvent as ReactKeyboardEvent, ReactNode } from "react";
 import { ago, artifactLinkText, audienceName, audienceOf, blockedKindWords, blockedWords, bytes, errorText, teamOwned, visibilityWords } from "@troupe/client";
 import type { Artifact, ArtifactAudience, ArtifactDetail, ArtifactList, ArtifactShareRole, ArtifactThread, ArtifactVersion, DaemonClient, OwnPlane, Person } from "@troupe/client";
 import { goesLine, goesSentence, versionGoes, versionsSentence } from "@troupe/client";
@@ -218,9 +220,12 @@ export function Artifacts({
   // Published since … until …, each a day or "" for open; this device's for as long as the app runs.
   const [since, setSince] = useState("");
   const [until, setUntil] = useState("");
+  // The one whose Info is open: a link's choice as the gallery opens, else the card's Info.
   const [selected, setSelected] = useState<string | null>(open ?? null);
   const [seen, setSeen] = useState(seenVersions);
   const [asked, setAsked] = useState(0);
+  // Why a card's Open did not open it, said above the grid.
+  const [notOpened, setNotOpened] = useState<string | null>(null);
 
   useEffect(() => {
     if (localOnly || !via) return;
@@ -238,6 +243,21 @@ export function Artifacts({
   }, [via, localOnly, asked]);
 
   const reload = useCallback(() => setAsked((n) => n + 1), []);
+
+  const opened = (id: string, version: number): void => {
+    markSeen(id, version);
+    setSeen(seenVersions());
+  };
+
+  // A card opens the version its address serves, as Open in its Info does.
+  const openCard = (a: Artifact): void => {
+    if (!via) return;
+    setNotOpened(null);
+    show(via, a).then(
+      () => opened(a.id, a.current ?? a.version),
+      (e: unknown) => setNotOpened(`${a.title} did not open: ${errorText(e)}`),
+    );
+  };
 
   const head = (
     <header className="repertoire-head">
@@ -340,20 +360,27 @@ export function Artifacts({
       {open && selected === open && !current && list.enabled && (
         <p className="note">The artifact the link named is not one published for you here. A link someone shared opens it in a browser first, which gives you its role.</p>
       )}
-      <div className="repertoire-body">
-        <div className="repertoire-main">
-          {groups.map((g) => (
-            <section key={g.day} className="day" aria-label={g.day}>
-              <h2>
-                {g.day}
-                <span className="n">{g.items.length}</span>
-              </h2>
-              <div className="cards">
-                {g.items.map((a) => {
-                  const audience = audienceOf(a);
-                  const fresh = !a.mine && (seen[a.id] ?? 0) < a.version;
-                  return (
-                    <button key={a.id} type="button" className="card" aria-current={a.id === selected ? "true" : undefined} onClick={() => setSelected(a.id)}>
+      {notOpened && (
+        <p className="note error" role="alert">
+          {notOpened}
+        </p>
+      )}
+      <div className="repertoire-main">
+        {groups.map((g) => (
+          <section key={g.day} className="day" aria-label={g.day}>
+            <h2>
+              {g.day}
+              <span className="n">{g.items.length}</span>
+            </h2>
+            <div className="cards">
+              {g.items.map((a) => {
+                const audience = audienceOf(a);
+                const fresh = !a.mine && (seen[a.id] ?? 0) < a.version;
+                return (
+                  // A click anywhere on the card opens it, since opening is what people come
+                  // for; Open and Info over its picture are the keyboard's way to the same two.
+                  <article key={a.id} className="card" onClick={() => openCard(a)}>
+                    <span className="placeholder-frame">
                       <span className={a.thumbnail_url ? "placeholder has-picture" : "placeholder"} aria-hidden={a.thumbnail_url ? undefined : "true"}>
                         {a.thumbnail_url && <Picture src={a.thumbnail_url} alt={a.title} />}
                         <span className="what" aria-hidden="true">
@@ -365,77 +392,99 @@ export function Artifacts({
                           </span>
                         )}
                       </span>
-                      <span className="body">
-                        <span className="title">{a.title}</span>
-                        {fresh && <span className="visually-hidden">New to you.</span>}
-                        <span className="byline">
-                          {whose(a)} · {ago(Date.parse(a.published_at))}
-                        </span>
-                        <span className="tags">
-                          <span className={`audience-pill is-${audience}`}>
-                            {AUDIENCE[audience].glyph} {audience === "team" ? (audienceName(a) ?? "TEAM").toUpperCase() : AUDIENCE[audience].short}
-                          </span>
-                          <span className="kind micro">{KIND[a.kind] ?? a.kind.toUpperCase()}</span>
-                          {(a.comments ?? 0) > 0 && <span className="kind micro">{a.comments === 1 ? "1 COMMENT" : `${a.comments} COMMENTS`}</span>}
-                        </span>
-                        {a.goes_at && <span className="byline goes">{goesLine(a)}</span>}
+                      <span className="card-actions">
+                        <button
+                          type="button"
+                          className="primary card-open"
+                          aria-label={`Open ${a.title}`}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            openCard(a);
+                          }}
+                        >
+                          Open
+                        </button>
+                        <button
+                          type="button"
+                          className="card-info"
+                          aria-label={`Info about ${a.title}`}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setSelected(a.id);
+                          }}
+                        >
+                          Info
+                        </button>
                       </span>
-                    </button>
-                  );
-                })}
-              </div>
-            </section>
-          ))}
-          {shown.length === 0 && (
-            <div className="empty">
-              <p className="title">{q ? `Nothing matches “${query.trim()}”${narrowedBy ? ` ${narrowedBy}` : ""}` : narrowedBy ? `Nothing here ${narrowedBy}` : "Nothing here yet"}</p>
-              <p className="muted">
-                {q
-                  ? "Try a person's name or the session it came from."
-                  : widen.length > 0
-                    ? `Try ${widen.join(" or ")}.`
-                    : "When someone publishes for this audience, it appears here. Publish from any session with /publish."}
-              </p>
-              {/* Only where something narrows the list: with every audience shown and
-                  nothing typed it would show what is already shown, which is nothing. */}
-              {(q || filter !== "all" || kind !== "all" || range) && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setFilter("all");
-                    setKind("all");
-                    setTeam("all");
-                    setSince("");
-                    setUntil("");
-                    setQuery("");
-                  }}
-                >
-                  Show everything
-                </button>
-              )}
+                    </span>
+                    <span className="body">
+                      <span className="title">{a.title}</span>
+                      {fresh && <span className="visually-hidden">New to you.</span>}
+                      <span className="byline">
+                        {whose(a)} · {ago(Date.parse(a.published_at))}
+                      </span>
+                      <span className="tags">
+                        <span className={`audience-pill is-${audience}`}>
+                          {AUDIENCE[audience].glyph} {audience === "team" ? (audienceName(a) ?? "TEAM").toUpperCase() : AUDIENCE[audience].short}
+                        </span>
+                        <span className="kind micro">{KIND[a.kind] ?? a.kind.toUpperCase()}</span>
+                        {(a.comments ?? 0) > 0 && <span className="kind micro">{a.comments === 1 ? "1 COMMENT" : `${a.comments} COMMENTS`}</span>}
+                      </span>
+                      {a.goes_at && <span className="byline goes">{goesLine(a)}</span>}
+                    </span>
+                  </article>
+                );
+              })}
             </div>
-          )}
-        </div>
-        {current && (
-          <Aside
-            key={current.id}
-            via={via}
-            daemon={daemon}
-            artifact={current}
-            audience={audienceOf(current)}
-            teams={list.teams}
-            profiles={list.profiles}
-            onOpened={(version) => {
-              markSeen(current.id, version);
-              setSeen(seenVersions());
-            }}
-            onChanged={reload}
-            onOpenSession={onOpenSession}
-            planeUrl={list.plane_url ?? null}
-            webApp={webApp}
-          />
+          </section>
+        ))}
+        {shown.length === 0 && (
+          <div className="empty">
+            <p className="title">{q ? `Nothing matches “${query.trim()}”${narrowedBy ? ` ${narrowedBy}` : ""}` : narrowedBy ? `Nothing here ${narrowedBy}` : "Nothing here yet"}</p>
+            <p className="muted">
+              {q
+                ? "Try a person's name or the session it came from."
+                : widen.length > 0
+                  ? `Try ${widen.join(" or ")}.`
+                  : "When someone publishes for this audience, it appears here. Publish from any session with /publish."}
+            </p>
+            {/* Only where something narrows the list: with every audience shown and
+                nothing typed it would show what is already shown, which is nothing. */}
+            {(q || filter !== "all" || kind !== "all" || range) && (
+              <button
+                type="button"
+                onClick={() => {
+                  setFilter("all");
+                  setKind("all");
+                  setTeam("all");
+                  setSince("");
+                  setUntil("");
+                  setQuery("");
+                }}
+              >
+                Show everything
+              </button>
+            )}
+          </div>
         )}
       </div>
+      {current && (
+        <Info
+          key={current.id}
+          via={via}
+          daemon={daemon}
+          artifact={current}
+          audience={audienceOf(current)}
+          teams={list.teams}
+          profiles={list.profiles}
+          onOpened={(version) => opened(current.id, version)}
+          onChanged={reload}
+          onClose={() => setSelected(null)}
+          onOpenSession={onOpenSession}
+          planeUrl={list.plane_url ?? null}
+          webApp={webApp}
+        />
+      )}
     </div>
   );
 }
@@ -502,8 +551,64 @@ function FromSession({ id, onOpen }: { id: string; onOpen: (id: string) => Promi
   );
 }
 
-/** The artifact chosen: what it is, Open and Copy link, who can see it, where it came from, its versions, and its owner's controls. */
-function Aside({
+type InfoTab = "overview" | "access" | "versions" | "comments";
+
+/**
+ * A native modal dialog, opened with `showModal()`: the browser traps focus in it, makes the
+ * page behind it inert and offers Escape. Escape and a click on the backdrop close it here;
+ * `onClose` decides whether it may (a dialog of its own open inside it keeps it). A page
+ * without `showModal` (a test's) gets it shown open, the same markup.
+ */
+function Modal({ className, labelledBy, onClose, onShown, children }: { className: string; labelledBy: string; onClose: () => void; onShown: (el: HTMLDialogElement) => void; children: ReactNode }): JSX.Element {
+  const ref = useRef<HTMLDialogElement>(null);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const before = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    if (typeof el.showModal === "function") {
+      if (!el.open) el.showModal();
+    } else el.setAttribute("open", "");
+    onShown(el);
+    return () => {
+      if (typeof el.close === "function" && el.open) el.close();
+      if (before?.isConnected) before.focus();
+    };
+    // Shown once, as it mounts; closed as it goes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  return (
+    <dialog
+      ref={ref}
+      className={className}
+      aria-labelledby={labelledBy}
+      onCancel={(e) => {
+        e.preventDefault();
+        onClose();
+      }}
+      onKeyDown={(e) => {
+        if (e.key !== "Escape") return;
+        e.preventDefault();
+        e.stopPropagation();
+        onClose();
+      }}
+      onClick={(e) => {
+        // The dialog itself is hit only outside its content, on the backdrop.
+        if (e.target === e.currentTarget) onClose();
+      }}
+    >
+      {children}
+    </dialog>
+  );
+}
+
+/**
+ * The artifact's Info, in a modal dialog of four tabs: Overview (what it is, Open, Copy link,
+ * Open in browser, Keep at the top, where it came from), Access (who can see it, who it is
+ * shared with, its links, whose it is), Versions, and Comments. Every panel stays drawn while
+ * the dialog is open, hidden but for the chosen one, so a draft or a search typed in one is
+ * still there after a look at another. An owner's controls are absent for anybody else.
+ */
+function Info({
   via,
   daemon,
   artifact,
@@ -512,10 +617,12 @@ function Aside({
   profiles,
   onOpened,
   onChanged,
+  onClose,
   onOpenSession,
   planeUrl = null,
   webApp = null,
 }: {
+  onClose: () => void;
   via: OwnPlane;
   daemon: DaemonClient | null;
   /** The plane the artifact is on, for the `troupe://` line under its link. */
@@ -539,6 +646,10 @@ function Aside({
   const [asked, setAsked] = useState(0);
   const [moveTo, setMoveTo] = useState(artifact.visibility);
   const [giveTo, setGiveTo] = useState(teams?.[0] ?? "");
+  const [tab, setTab] = useState<InfoTab>("overview");
+  // The thread's length once it is read (the row's count till then); null for a plane with no threads.
+  const [commentCount, setCommentCount] = useState<number | null>(artifact.comments ?? 0);
+  const id = useId();
   // A member of the team that owns it is its owner, as the plane says it (`role`, `mine`).
   const owner = artifact.mine || artifact.role === "owner";
   const ofTeam = teamOwned(artifact);
@@ -609,213 +720,286 @@ function Aside({
   const shares = (detail?.shares ?? []).filter((s) => s.state === "live");
   const summary = versions[0]?.note ?? null;
 
+  // A count where one helps: how many versions it keeps, once read, and how long its thread is.
+  const tabs: Array<{ key: InfoTab; label: string; count?: number | undefined }> = [
+    { key: "overview", label: "Overview" },
+    { key: "access", label: "Access" },
+    { key: "versions", label: "Versions", count: detail ? versions.length : undefined },
+    ...(commentCount === null ? [] : [{ key: "comments" as const, label: "Comments", count: commentCount }]),
+  ];
+  const tabId = (k: InfoTab): string => `${id}-tab-${k}`;
+  const panelId = (k: InfoTab): string => `${id}-panel-${k}`;
+  const choose = (k: InfoTab, dialog?: HTMLElement | null): void => {
+    setTab(k);
+    (dialog ?? document).querySelector<HTMLElement>(`[id="${tabId(k)}"]`)?.focus();
+  };
+  // Left and right move between the tabs, Home and End to the first and the last.
+  const onTabKey = (e: ReactKeyboardEvent<HTMLElement>): void => {
+    const at = tabs.findIndex((t) => t.key === tab);
+    const to = e.key === "ArrowRight" ? (at + 1) % tabs.length : e.key === "ArrowLeft" ? (at - 1 + tabs.length) % tabs.length : e.key === "Home" ? 0 : e.key === "End" ? tabs.length - 1 : -1;
+    if (to < 0) return;
+    e.preventDefault();
+    choose(tabs[to]!.key, e.currentTarget.closest("dialog"));
+  };
+  const panel = (k: InfoTab): { id: string; role: "tabpanel"; "aria-labelledby": string; hidden: boolean; className: string } => ({
+    id: panelId(k),
+    role: "tabpanel",
+    "aria-labelledby": tabId(k),
+    hidden: tab !== k,
+    className: "info-panel",
+  });
+
   return (
-    <aside className="repertoire-aside" aria-label="Artifact details">
-      <div>
+    <Modal
+      className="dialog artifact-info"
+      labelledBy={`${id}-title`}
+      // Publishing a version is a dialog of its own inside this one: it closes first.
+      onClose={() => {
+        if (!publishing) onClose();
+      }}
+      onShown={(el) => el.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]')?.focus()}
+    >
+      <div className="info-head">
         <div className="micro what">
           {KIND[artifact.kind] ?? artifact.kind.toUpperCase()} · VERSION {artifact.version} · {bytes(artifact.bytes)}
         </div>
-        <h2>{artifact.title}</h2>
-        {summary && <p className="muted">{summary}</p>}
-      </div>
-      <div className="actions">
-        <button type="button" className="primary" onClick={() => open()}>
-          Open
+        <h2 id={`${id}-title`}>{artifact.title}</h2>
+        <button type="button" className="link info-close" onClick={onClose}>
+          Close
         </button>
-        <button type="button" onClick={() => void copy()}>
-          {copied ? "Link copied" : "Copy link"}
-        </button>
-        <button type="button" onClick={browse}>
-          Open in browser
-        </button>
-        {/* The person's own gallery's: on the plane, so every device and app of theirs shows
-            it at the top. A plane that does not say `kept` keeps none, so there is no choice. */}
-        {artifact.kept !== undefined && (
-          <button
-            type="button"
-            disabled={busy}
-            onClick={() =>
-              void act(
-                () => via.keepArtifact(artifact.id, !artifact.kept),
-                artifact.kept ? "Let go: it is back under when it was published." : "Kept at the top of your gallery, on every device you sign in on.",
-              )
-            }
-          >
-            {artifact.kept ? "Let go from the top" : "Keep at the top"}
-          </button>
-        )}
+        <div className="tabs" role="tablist" aria-label="About this artifact" onKeyDown={onTabKey}>
+          {tabs.map((t) => (
+            <button
+              key={t.key}
+              type="button"
+              role="tab"
+              className="tab"
+              id={tabId(t.key)}
+              aria-controls={panelId(t.key)}
+              aria-selected={tab === t.key}
+              tabIndex={tab === t.key ? 0 : -1}
+              onClick={() => setTab(t.key)}
+            >
+              {t.label}
+              {t.count !== undefined && <span className="n"> {t.count}</span>}
+            </button>
+          ))}
+        </div>
       </div>
       {error && <p className="note error">{error}</p>}
-      {said && <p className="note" role="status">{said}</p>}
-      {(detail ?? artifact).goes_at && <p className="muted goes">{goesSentence(detail ?? artifact)}</p>}
-      <Blocked artifact={detail ?? artifact} versions={versions} />
-
-      <section>
-        <h3 className="screen">Who can see it</h3>
-        <p className={`audience-line is-${audience}`}>
-          {AUDIENCE[audience].glyph} {words.long}
+      {said && (
+        <p className="note" role="status">
+          {said}
         </p>
-        <p className="muted">{words.note}</p>
-        {owner && (
-          <div className="move-visibility">
-            <label>
-              Who may open it
-              <select value={moveTo} disabled={busy} onChange={(e) => setMoveTo(e.target.value)}>
-                <VisibilityOptions teams={teams} profiles={profiles} />
-              </select>
-            </label>
+      )}
+
+      <div {...panel("overview")}>
+        {summary && <p className="summary">{summary}</p>}
+        <div className="actions">
+          <button type="button" className="primary" onClick={() => open()}>
+            Open
+          </button>
+          <button type="button" onClick={() => void copy()}>
+            {copied ? "Link copied" : "Copy link"}
+          </button>
+          <button type="button" onClick={browse}>
+            Open in browser
+          </button>
+          {/* The person's own gallery's: on the plane, so every device and app of theirs shows
+              it at the top. A plane that does not say `kept` keeps none, so there is no choice. */}
+          {artifact.kept !== undefined && (
             <button
               type="button"
-              disabled={busy || moveTo === artifact.visibility}
+              disabled={busy}
               onClick={() =>
                 void act(
-                  () => via.moveArtifact(artifact.id, artifact.version, moveTo),
-                  `Moved: ${artifact.title} is for ${visibilityWords(moveTo)} now, as version ${artifact.version + 1} with the same files.`,
+                  () => via.keepArtifact(artifact.id, !artifact.kept),
+                  artifact.kept ? "Let go: it is back under when it was published." : "Kept at the top of your gallery, on every device you sign in on.",
                 )
               }
             >
-              Change who can see it
+              {artifact.kept ? "Let go from the top" : "Keep at the top"}
             </button>
-          </div>
-        )}
-        {owner && detail && <SharedWith via={via} artifact={artifact} detail={detail} onChanged={() => setAsked((n) => n + 1)} />}
-      </section>
-
-      <section>
-        <h3 className="screen">Whose it is</h3>
-        <p className="owner-line">{ofTeam ? `Team ${artifact.owner_team}${artifact.mine ? " (you are a member)" : ""}` : who(artifact.owner, artifact.mine)}</p>
-        <p className="muted">
-          {ofTeam
-            ? `Anyone on ${artifact.owner_team} can publish versions, change who can see it, share and delete it; a member leaving the team changes nothing.${!artifact.mine && artifact.owner ? ` ${who(artifact.owner, false)} first published it.` : ""}`
-            : artifact.mine
-              ? "Only you have its owner's controls."
-              : `Only ${who(artifact.owner, false)} has its owner's controls.`}
-        </p>
-        {mayGive && (
-          <div className="move-visibility">
-            <label>
-              Give to team
-              <select value={giveTo} disabled={busy} onChange={(e) => setGiveTo(e.target.value)} aria-label="Give to team">
-                {(teams ?? []).map((t) => (
-                  <option key={t} value={t}>
-                    {t}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <button
-              type="button"
-              disabled={busy || giveTo === ""}
-              onClick={() => void act(() => via.transferArtifact(artifact.id, `team:${giveTo}`), `Given: ${artifact.title} is the ${giveTo} team's now, and every member of it is its owner.`)}
-            >
-              Give it to the team
-            </button>
-          </div>
-        )}
-        {mayTakeBack && (
-          <div className="move-visibility">
-            <button type="button" disabled={busy} onClick={() => void act(() => via.transferArtifact(artifact.id, "me"), `Taken back: ${artifact.title} is yours now, not the ${artifact.owner_team} team's.`)}>
-              Take back
-            </button>
-          </div>
-        )}
-      </section>
-
-      <section>
-        <h3 className="screen">Where it came from</h3>
-        <dl className="origin">
-          <dt>BY</dt>
-          <dd>{who(artifact.owner, artifact.mine && !ofTeam)}</dd>
-          {artifact.origin?.session_id && (
-            <>
-              <dt>SESSION</dt>
-              <dd className="mono">{artifact.origin.session_id}</dd>
-            </>
           )}
-          {artifact.origin?.profile && (
-            <>
-              <dt>PROFILE</dt>
-              <dd className="profile">{artifact.origin.profile}</dd>
-            </>
-          )}
-        </dl>
-        {artifact.origin?.session_id && onOpenSession && <FromSession id={artifact.origin.session_id} onOpen={onOpenSession} />}
-      </section>
+        </div>
+        {(detail ?? artifact).goes_at && <p className="muted goes">{goesSentence(detail ?? artifact)}</p>}
+        <Blocked artifact={detail ?? artifact} versions={versions} />
 
-      <section>
-        <h3 className="screen">Versions</h3>
-        {!detail && !error && <Loading what="Reading its versions…" />}
-        {pinned !== null && <p className="muted micro">Its address serves version {pinned}, pinned by its owner.</p>}
-        {detail && versionsSentence(detail) && <p className="muted micro">{versionsSentence(detail)}</p>}
-        <ol className="versions">
-          {versions.map((v, i) => (
-            <li key={v.n} className={i === 0 ? "newest" : undefined}>
-              <span className="n">v{v.n}</span>
-              <span className="note-text">{v.note ?? (v.n === 1 ? "First publish" : "")}</span>
-              <span className="micro" title={v.published_at}>
-                {ago(Date.parse(v.published_at))}
-              </span>
-              {v.goes_at && <span className="micro goes">{versionGoes(v)}</span>}
-              <span className="version-actions">
-                <button type="button" className="link" onClick={() => open(v.n)} aria-label={`Open version ${v.n}`}>
-                  Open
-                </button>
-                {(owner || artifact.may_edit) && i > 0 && (
-                  <button type="button" className="link" disabled={busy} onClick={() => void act(() => via.rollbackArtifact(artifact.id, v.n), `Rolled back: version ${v.n}'s files are the newest version now.`)}>
-                    Roll back to it
-                  </button>
-                )}
-                {owner && (
-                  <button
-                    type="button"
-                    className="link"
-                    disabled={busy}
-                    onClick={() =>
-                      void act(
-                        () => via.pinArtifact(artifact.id, pinned === v.n ? null : v.n),
-                        pinned === v.n ? "Unpinned: its address serves the newest version." : `Pinned: its address serves version ${v.n}.`,
-                      )
-                    }
-                  >
-                    {pinned === v.n ? "Unpin" : "Pin"}
-                  </button>
-                )}
-              </span>
-            </li>
-          ))}
-        </ol>
-        {/* A new version's files are this computer's, sent by its daemon. */}
-        {owner && daemon && (
-          <button type="button" onClick={() => setPublishing(true)}>
-            Publish a new version
-          </button>
-        )}
-      </section>
-
-      <Thread via={via} artifact={artifact} />
-
-      {owner && detail && (
         <section>
-          <h3 className="screen">Links</h3>
-          {shares.length === 0 ? (
-            <p className="muted">No link to it is open. Copy link makes one that opens it for whoever the plane signs in through it.</p>
-          ) : (
-            <ul className="links">
-              {shares.map((s) => (
-                <li key={s.id}>
-                  <span>
-                    {roleLabel(s.role)}
-                    {s.used_by.length > 0 && ` · opened by ${s.used_by.map((u) => u.person.display_name || u.person.subject).join(", ")}`}
-                  </span>
-                  <button type="button" className="link" disabled={busy} onClick={() => void act(() => via.unshareArtifact(artifact.id, { share: s.id }), "Revoked: that link opens nothing now.")}>
-                    Revoke
-                  </button>
-                </li>
-              ))}
-            </ul>
+          <h3 className="screen">Where it came from</h3>
+          <dl className="origin">
+            <dt>BY</dt>
+            <dd>{who(artifact.owner, artifact.mine && !ofTeam)}</dd>
+            {artifact.origin?.session_id && (
+              <>
+                <dt>SESSION</dt>
+                <dd className="mono">{artifact.origin.session_id}</dd>
+              </>
+            )}
+            {artifact.origin?.profile && (
+              <>
+                <dt>PROFILE</dt>
+                <dd className="profile">{artifact.origin.profile}</dd>
+              </>
+            )}
+          </dl>
+          {artifact.origin?.session_id && onOpenSession && <FromSession id={artifact.origin.session_id} onOpen={onOpenSession} />}
+        </section>
+      </div>
+
+      <div {...panel("access")}>
+        <section>
+          <h3 className="screen">Who can see it</h3>
+          <p className={`audience-line is-${audience}`}>
+            {AUDIENCE[audience].glyph} {words.long}
+          </p>
+          <p className="muted">{words.note}</p>
+          {owner && (
+            <div className="move-visibility">
+              <label>
+                Who may open it
+                <select value={moveTo} disabled={busy} onChange={(e) => setMoveTo(e.target.value)}>
+                  <VisibilityOptions teams={teams} profiles={profiles} />
+                </select>
+              </label>
+              <button
+                type="button"
+                disabled={busy || moveTo === artifact.visibility}
+                onClick={() =>
+                  void act(
+                    () => via.moveArtifact(artifact.id, artifact.version, moveTo),
+                    `Moved: ${artifact.title} is for ${visibilityWords(moveTo)} now, as version ${artifact.version + 1} with the same files.`,
+                  )
+                }
+              >
+                Change who can see it
+              </button>
+            </div>
+          )}
+          {owner && detail && <SharedWith via={via} artifact={artifact} detail={detail} onChanged={() => setAsked((n) => n + 1)} />}
+        </section>
+
+        {owner && detail && (
+          <section>
+            <h3 className="screen">Links</h3>
+            {shares.length === 0 ? (
+              <p className="muted">No link to it is open. Copy link makes one that opens it for whoever the plane signs in through it.</p>
+            ) : (
+              <ul className="links">
+                {shares.map((s) => (
+                  <li key={s.id}>
+                    <span>
+                      {roleLabel(s.role)}
+                      {s.used_by.length > 0 && ` · opened by ${s.used_by.map((u) => u.person.display_name || u.person.subject).join(", ")}`}
+                    </span>
+                    <button type="button" className="link" disabled={busy} onClick={() => void act(() => via.unshareArtifact(artifact.id, { share: s.id }), "Revoked: that link opens nothing now.")}>
+                      Revoke
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+        )}
+
+        <section>
+          <h3 className="screen">Whose it is</h3>
+          <p className="owner-line">{ofTeam ? `Team ${artifact.owner_team}${artifact.mine ? " (you are a member)" : ""}` : who(artifact.owner, artifact.mine)}</p>
+          <p className="muted">
+            {ofTeam
+              ? `Anyone on ${artifact.owner_team} can publish versions, change who can see it, share and delete it; a member leaving the team changes nothing.${!artifact.mine && artifact.owner ? ` ${who(artifact.owner, false)} first published it.` : ""}`
+              : artifact.mine
+                ? "Only you have its owner's controls."
+                : `Only ${who(artifact.owner, false)} has its owner's controls.`}
+          </p>
+          {mayGive && (
+            <div className="move-visibility">
+              <label>
+                Give to team
+                <select value={giveTo} disabled={busy} onChange={(e) => setGiveTo(e.target.value)} aria-label="Give to team">
+                  {(teams ?? []).map((t) => (
+                    <option key={t} value={t}>
+                      {t}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <button
+                type="button"
+                disabled={busy || giveTo === ""}
+                onClick={() => void act(() => via.transferArtifact(artifact.id, `team:${giveTo}`), `Given: ${artifact.title} is the ${giveTo} team's now, and every member of it is its owner.`)}
+              >
+                Give it to the team
+              </button>
+            </div>
+          )}
+          {mayTakeBack && (
+            <div className="move-visibility">
+              <button type="button" disabled={busy} onClick={() => void act(() => via.transferArtifact(artifact.id, "me"), `Taken back: ${artifact.title} is yours now, not the ${artifact.owner_team} team's.`)}>
+                Take back
+              </button>
+            </div>
           )}
         </section>
-      )}
+      </div>
+
+      <div {...panel("versions")}>
+        <section>
+          <h3 className="screen">Versions</h3>
+          {!detail && !error && <Loading what="Reading its versions…" />}
+          {pinned !== null && <p className="muted micro">Its address serves version {pinned}, pinned by its owner.</p>}
+          {detail && versionsSentence(detail) && <p className="muted micro">{versionsSentence(detail)}</p>}
+          <ol className="versions">
+            {versions.map((v, i) => (
+              <li key={v.n} className={i === 0 ? "newest" : undefined}>
+                <span className="n">v{v.n}</span>
+                <span className="note-text">{v.note ?? (v.n === 1 ? "First publish" : "")}</span>
+                <span className="micro" title={v.published_at}>
+                  {ago(Date.parse(v.published_at))}
+                </span>
+                {v.goes_at && <span className="micro goes">{versionGoes(v)}</span>}
+                <span className="version-actions">
+                  <button type="button" className="link" onClick={() => open(v.n)} aria-label={`Open version ${v.n}`}>
+                    Open
+                  </button>
+                  {(owner || artifact.may_edit) && i > 0 && (
+                    <button type="button" className="link" disabled={busy} onClick={() => void act(() => via.rollbackArtifact(artifact.id, v.n), `Rolled back: version ${v.n}'s files are the newest version now.`)}>
+                      Roll back to it
+                    </button>
+                  )}
+                  {owner && (
+                    <button
+                      type="button"
+                      className="link"
+                      disabled={busy}
+                      onClick={() =>
+                        void act(
+                          () => via.pinArtifact(artifact.id, pinned === v.n ? null : v.n),
+                          pinned === v.n ? "Unpinned: its address serves the newest version." : `Pinned: its address serves version ${v.n}.`,
+                        )
+                      }
+                    >
+                      {pinned === v.n ? "Unpin" : "Pin"}
+                    </button>
+                  )}
+                </span>
+              </li>
+            ))}
+          </ol>
+          {/* A new version's files are this computer's, sent by its daemon. */}
+          {owner && daemon && (
+            <button type="button" onClick={() => setPublishing(true)}>
+              Publish a new version
+            </button>
+          )}
+        </section>
+      </div>
+
+      {/* Drawn while the dialog is open, so a draft survives a look at another tab; a plane
+          from before threads has no tab for it. */}
+      <div {...panel("comments")} hidden={tab !== "comments" || commentCount === null}>
+        <Thread via={via} artifact={artifact} onRead={setCommentCount} />
+      </div>
 
       {publishing && daemon && (
         <Publish
@@ -828,7 +1012,7 @@ function Aside({
           }}
         />
       )}
-    </aside>
+    </Modal>
   );
 }
 
@@ -967,7 +1151,7 @@ function SharedWith({ via, artifact, detail, onChanged }: { via: OwnPlane; artif
  * Its author edits a comment (marked edited) and deletes it; an owner, or whoever may take
  * the artifact down, deletes any. Each control is there only for whoever may use it.
  */
-function Thread({ via, artifact }: { via: OwnPlane; artifact: Artifact }): JSX.Element {
+function Thread({ via, artifact, onRead }: { via: OwnPlane; artifact: Artifact; onRead: (count: number | null) => void }): JSX.Element {
   const [thread, setThread] = useState<ArtifactThread | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
@@ -981,17 +1165,25 @@ function Thread({ via, artifact }: { via: OwnPlane; artifact: Artifact }): JSX.E
   useEffect(() => {
     let live = true;
     via.artifactComments(artifact.id).then(
-      (t) => live && setThread(t),
+      (t) => {
+        if (!live) return;
+        setThread(t);
+        onRead(t.comments.length);
+      },
       (e: unknown) => {
         if (!live) return;
         // A plane from before comments has no thread to show, which is no fault.
-        if ((e as { code?: unknown } | null)?.code === -32601) setAbsent(true);
-        else setError(errorText(e));
+        if ((e as { code?: unknown } | null)?.code === -32601) {
+          setAbsent(true);
+          onRead(null);
+        } else setError(errorText(e));
       },
     );
     return () => {
       live = false;
     };
+    // `onRead` is the dialog's setter, the same on every render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [via, artifact.id, asked]);
 
   if (absent) return <></>;

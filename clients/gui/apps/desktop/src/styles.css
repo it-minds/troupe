@@ -5209,13 +5209,8 @@ pre.instruction {
   min-height: var(--touch-target);
 }
 
-.repertoire-body {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: flex-start;
-}
+/* The grid has the screen's width: nothing beside it, so choosing a card moves nothing. */
 .repertoire-main {
-  flex: 999 1 520px;
   min-width: 0;
   padding: var(--space-5) var(--space-6) var(--space-8);
 }
@@ -5223,7 +5218,7 @@ pre.instruction {
   margin-bottom: var(--space-7);
 }
 .repertoire .day h2,
-.repertoire-aside h2 {
+.artifact-info h2 {
   display: flex;
   align-items: baseline;
   gap: var(--space-3);
@@ -5244,20 +5239,73 @@ pre.instruction {
 .repertoire .card {
   display: flex;
   flex-direction: column;
-  padding: 0;
   text-align: left;
+  cursor: pointer;
   background: var(--bg-panel);
   border: var(--bw-hairline) solid var(--border-hairline);
 }
-.repertoire .card:hover:not(:disabled) {
-  filter: none;
+.repertoire .card:hover,
+.repertoire .card:focus-within {
   transform: translate(-2px, -2px);
   box-shadow: 6px 6px 0 var(--bg-shadow);
   border-color: var(--border-strong);
 }
-.repertoire .card[aria-current="true"] {
-  border-color: var(--focus);
-  box-shadow: 6px 6px 0 var(--bg-shadow);
+/* Over its picture, under the pointer or the keyboard's focus: Open, large, and Info. The
+   title and byline below stay as they are, so the card is still known by them. */
+.repertoire .placeholder-frame {
+  position: relative;
+  display: block;
+}
+.repertoire .card-actions {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-3);
+  background: var(--scrim);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--dur-fast, 0.12s) ease;
+}
+.repertoire .card:hover .card-actions,
+.repertoire .card:focus-within .card-actions {
+  opacity: 1;
+  pointer-events: auto;
+}
+.repertoire .card-actions .card-open {
+  min-height: 48px;
+  min-width: 140px;
+  font: var(--t-subheading);
+}
+.repertoire .card-actions .card-info {
+  min-height: 48px;
+  background: var(--bg-panel);
+}
+/* No pointer that hovers: a tap on the card opens it, and Info sits in its lower corner,
+   clear of "New to you" above it. */
+@media (hover: none) {
+  .repertoire .card-actions {
+    opacity: 1;
+    background: none;
+    pointer-events: none;
+    align-items: flex-end;
+    justify-content: flex-end;
+    padding: var(--space-2);
+  }
+  .repertoire .card-actions .card-open {
+    display: none;
+  }
+  .repertoire .card-actions .card-info {
+    pointer-events: auto;
+    min-height: var(--touch-target);
+    font: var(--t-micro);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .repertoire .card-actions {
+    transition: none;
+  }
 }
 .repertoire .placeholder {
   position: relative;
@@ -5358,90 +5406,119 @@ pre.instruction {
   margin: 0 0 var(--space-4);
 }
 
-/* The one chosen, beside the grid: what it is, then its sections under screen labels. */
-.repertoire-aside {
-  position: sticky;
+/* An artifact's Info: a native modal dialog standing on the hard shadow as every dialog
+   does; what it is and its four tabs at its head, the chosen tab's sections under screen
+   labels below. Inside 16px gutters on a narrow screen. */
+.artifact-info {
+  width: min(720px, calc(100vw - 2 * var(--space-4)));
+  max-width: none;
+  max-height: min(88vh, 860px);
+  margin: auto;
+  color: var(--text-body);
+  gap: var(--space-5);
+}
+.artifact-info::backdrop {
+  background: var(--scrim);
+}
+.artifact-info .info-head {
+  position: relative;
+}
+.artifact-info .what {
+  color: var(--text-muted);
+}
+.artifact-info h2 {
+  margin: 6px 0 0;
+  padding-right: 64px;
+  font: var(--t-heading);
+}
+.artifact-info .info-close {
+  position: absolute;
   top: 0;
-  flex: 1 1 320px;
-  max-width: 420px;
-  min-width: 0;
+  right: 0;
+  min-height: var(--touch-target);
+}
+.artifact-info .tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-top: var(--space-4);
+}
+.artifact-info .tabs .n {
+  opacity: 0.8;
+}
+.artifact-info .info-panel:not([hidden]) {
   display: flex;
   flex-direction: column;
   gap: var(--space-5);
-  padding: var(--space-5) var(--space-5) var(--space-7);
-  border-left: var(--bw-hairline) solid var(--border-hairline);
 }
-.repertoire-aside .what {
-  color: var(--text-muted);
+.artifact-info .summary {
+  margin: 0;
+  max-width: 62ch;
 }
-.repertoire-aside h2 {
-  margin: 6px 0 0;
-  font: var(--t-heading);
-}
-.repertoire-aside .actions {
+.artifact-info .info-panel > .actions {
   display: flex;
   flex-wrap: wrap;
   gap: var(--space-2);
 }
-.repertoire-aside .actions button {
+.artifact-info .info-panel > .actions button {
   flex: 1 1 120px;
   min-height: var(--touch-target);
 }
-.repertoire-aside section .screen {
+.artifact-info section .screen {
   padding-bottom: 5px;
   margin-bottom: var(--space-3);
   border-bottom: var(--bw-hairline) solid var(--border-hairline);
 }
-.repertoire-aside .audience-line {
+.artifact-info .audience-line {
   margin: 0 0 var(--space-3);
   font-weight: 700;
 }
-.repertoire-aside section > .muted {
+.artifact-info section > .muted {
   margin: 0 0 var(--space-3);
 }
-.repertoire-aside .owner-line {
+.artifact-info .owner-line {
   font-weight: 600;
 }
-.repertoire-aside .move-visibility {
+.artifact-info .move-visibility {
   display: flex;
   flex-wrap: wrap;
   align-items: end;
   gap: var(--space-2);
 }
-.repertoire-aside .move-visibility label {
+.artifact-info .move-visibility label {
   display: flex;
   flex-direction: column;
   gap: var(--space-1);
 }
-.repertoire-aside .origin {
+.artifact-info .origin {
   display: grid;
   grid-template-columns: auto 1fr;
   gap: var(--space-2) var(--space-4);
   margin: 0;
 }
-.repertoire-aside .origin dt {
+.artifact-info .origin dt {
   font: var(--t-micro);
   color: var(--text-muted);
 }
-.repertoire-aside .origin dd {
+.artifact-info .origin dd {
   margin: 0;
   min-width: 0;
   overflow-wrap: anywhere;
 }
-.repertoire-aside .origin .profile {
+.artifact-info .origin .profile {
   font: var(--t-code-small);
   color: var(--running-fg);
 }
-.repertoire-aside .versions,
-.repertoire-aside .links,
+.artifact-info .versions,
+.artifact-info .links,
 .versions-drawer .version-list,
 .versions-drawer .session-reads {
   list-style: none;
   margin: 0 0 var(--space-3);
   padding: 0;
 }
-.repertoire-aside .versions li,
-.repertoire-aside .links li,
+.artifact-info .versions li,
+.artifact-info .links li,
 .versions-drawer .version-list li {
   display: flex;
   flex-wrap: wrap;
@@ -5450,36 +5527,36 @@ pre.instruction {
   padding: 7px 0;
   border-bottom: var(--bw-hairline) solid var(--border-hairline);
 }
-.repertoire-aside .versions .n,
+.artifact-info .versions .n,
 .versions-drawer .version-list .n {
   flex: 0 0 28px;
   font: var(--t-micro);
   color: var(--text-muted);
 }
-.repertoire-aside .versions .newest .n {
+.artifact-info .versions .newest .n {
   color: var(--running-fg);
 }
-.repertoire-aside .versions .note-text {
+.artifact-info .versions .note-text {
   flex: 1 1 auto;
   min-width: 0;
 }
-.repertoire-aside .versions .micro {
+.artifact-info .versions .micro {
   color: var(--text-muted);
 }
-.repertoire-aside .version-actions {
+.artifact-info .version-actions {
   display: flex;
   gap: var(--space-3);
   flex: 1 1 100%;
 }
 /* Who its owner shared it with by name, and the picker that adds somebody. */
-.repertoire-aside .shared-with {
+.artifact-info .shared-with {
   margin-top: var(--space-4);
 }
-.repertoire-aside .shared-with h4 {
+.artifact-info .shared-with h4 {
   margin: 0 0 var(--space-2);
   color: var(--text-muted);
 }
-.repertoire-aside .shared-with .people {
+.artifact-info .shared-with .people {
   list-style: none;
   margin: 0;
   padding: 0;
@@ -5488,50 +5565,50 @@ pre.instruction {
   gap: var(--space-2);
   flex: 1 1 100%;
 }
-.repertoire-aside .shared-with input {
+.artifact-info .shared-with input {
   min-width: 0;
 }
 /* Its thread, oldest first: who and when above each comment. */
-.repertoire-aside .comments {
+.artifact-info .comments {
   list-style: none;
   margin: 0 0 var(--space-3);
   padding: 0;
 }
-.repertoire-aside .comments li {
+.artifact-info .comments li {
   padding: 7px 0;
   border-bottom: var(--bw-hairline) solid var(--border-hairline);
 }
-.repertoire-aside .comments .micro {
+.artifact-info .comments .micro {
   margin: 0 0 var(--space-1);
   color: var(--text-muted);
 }
-.repertoire-aside .comments .author {
+.artifact-info .comments .author {
   color: var(--text-primary);
   font-weight: 600;
 }
-.repertoire-aside .comment-body {
+.artifact-info .comment-body {
   margin: 0;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
-.repertoire-aside .comment-form {
+.artifact-info .comment-form {
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
 }
-.repertoire-aside .comment-form textarea {
+.artifact-info .comment-form textarea {
   width: 100%;
   box-sizing: border-box;
   resize: vertical;
 }
-.repertoire-aside .comment-form button {
+.artifact-info .comment-form button {
   align-self: flex-end;
 }
 /* A comment's own Edit and Delete, and Save beside Cancel while it is edited. */
-.repertoire-aside .comments .comment-actions {
+.artifact-info .comments .comment-actions {
   margin: var(--space-1) 0 0;
 }
-.repertoire-aside .comment-edit-actions {
+.artifact-info .comment-edit-actions {
   display: flex;
   justify-content: flex-end;
   flex-wrap: wrap;

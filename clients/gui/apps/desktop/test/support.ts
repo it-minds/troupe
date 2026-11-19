@@ -133,6 +133,33 @@ export function startOnTheList(): void {
   localStorage.setItem("troupe.pref.start", "sessions");
 }
 
+/** The gallery's card whose title includes `title`, once it is drawn. */
+export function artifactCard(title: string): Promise<HTMLElement> {
+  return waitFor(() => [...document.querySelectorAll<HTMLElement>(".repertoire .card")].find((c) => c.querySelector(".title")?.textContent?.includes(title)), `the card ${title}`);
+}
+
+/** The artifact Info dialog that is open, if one is. */
+export function infoDialog(): HTMLElement | null {
+  return document.querySelector<HTMLElement>("dialog.artifact-info[open]");
+}
+
+/** An artifact's Info, opened as a person opens it: the Info button over its card's picture. */
+export async function artifactInfo(title: string): Promise<HTMLElement> {
+  const card = await artifactCard(title);
+  (await waitFor(() => card.querySelector<HTMLButtonElement>("button.card-info"), `the Info of ${title}`)).click();
+  return waitFor(() => (infoDialog()?.querySelector("h2")?.textContent === title ? infoDialog() : null), `the Info of ${title}`);
+}
+
+/** One of the Info dialog's tabs chosen, and its panel once it shows. */
+export async function infoTab(dialog: HTMLElement, name: "Overview" | "Access" | "Versions" | "Comments"): Promise<HTMLElement> {
+  const tab = await waitFor(() => [...dialog.querySelectorAll<HTMLButtonElement>('[role="tab"]')].find((t) => t.textContent?.startsWith(name)), `the ${name} tab`);
+  tab.click();
+  return waitFor(() => {
+    const panel = dialog.querySelector<HTMLElement>(`[id="${tab.getAttribute("aria-controls") ?? ""}"]`);
+    return panel && !panel.hidden ? panel : null;
+  }, `the ${name} panel`);
+}
+
 /** A navigation entry in the rail, which carries counts after its name. */
 export function nav(label: string): HTMLButtonElement | null {
   return button(label, document.querySelector(".rail nav") ?? document);
