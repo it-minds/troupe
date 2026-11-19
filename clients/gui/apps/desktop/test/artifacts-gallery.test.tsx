@@ -1,11 +1,13 @@
 // The person's artifacts in the app (troupe #62): a gallery beside Sessions,
 // read from the plane the app is signed in to, its cards grouped by when and filtered by who each
-// is for and by a search; the chosen one in an aside with its versions, where it came from,
-// who can see it and its owner's controls. An artifact is shown from its own host in a
+// is for and by a search, across the whole width. A click on a card opens it; its Info is a
+// modal dialog in four tabs with its versions, where it came from, who can see it, its thread
+// and its owner's controls. An artifact is shown from its own host in a
 // window of the shell's, at the one-time address `artifact.open` answers, and nothing of it
 // is fetched into the app. Under Local only the gallery asks nothing. Against a fake plane
 // whose artifacts the fake daemon keeps (`keptBy`).
 
+import { readFileSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { WebSocket as NodeWebSocket } from "ws";
 import { webTokenStore } from "@troupe/client";
@@ -15,7 +17,7 @@ import { FakeDaemon } from "../../../packages/client/test/support/daemon.js";
 import { startHarness } from "../../../packages/client/test/support/harness.js";
 import { keptBy } from "../../../packages/client/test/support/kept.js";
 import type { Harness } from "../../../packages/client/test/support/harness.js";
-import { button, externalResources, nav, recordNetwork, render, sees, seesButton, startOnTheList, type, waitFor } from "./support";
+import { artifactCard, artifactInfo, button, externalResources, infoDialog, infoTab, nav, recordNetwork, render, sees, seesButton, startOnTheList, type, waitFor } from "./support";
 import type { Recorder } from "./support";
 
 Element.prototype.scrollIntoView = function scrollIntoView() {};
@@ -99,7 +101,13 @@ function choose(select: HTMLSelectElement, value: string): void {
 }
 
 const gallery = (): HTMLElement => document.querySelector<HTMLElement>(".repertoire")!;
-const aside = (): HTMLElement | null => document.querySelector<HTMLElement>('[aria-label="Artifact details"]');
+const aside = infoDialog;
+
+/** The Info dialog closed with its Close, as a person closes it before choosing another. */
+async function closeInfo(): Promise<void> {
+  (await seesButton("Close", infoDialog()!)).click();
+  await waitFor(() => infoDialog() === null, "the dialog closed");
+}
 const titles = (): string[] => [...gallery().querySelectorAll(".card .title")].map((e) => e.textContent ?? "");
 const chip = (label: string): HTMLButtonElement => [...gallery().querySelectorAll<HTMLButtonElement>(".audiences button")].find((b) => b.textContent?.includes(label))!;
 
@@ -150,7 +158,7 @@ describe("the gallery", () => {
     const img = card("Weekly figures").querySelector<HTMLImageElement>(".placeholder img")!;
     expect(img.getAttribute("src")).toBe(picture);
     expect(img.alt).toBe("Weekly figures");
-    expect(card("Weekly figures").firstElementChild!.firstElementChild).toBe(img);
+    expect(card("Weekly figures").firstElementChild!.firstElementChild!.firstElementChild).toBe(img);
     // The kind and size stay on it, and nothing else of the artifact is in the app.
     expect(card("Weekly figures").textContent).toContain("html · 1.2 KiB");
     expect(gallery().querySelector("iframe")).toBeNull();
@@ -169,22 +177,34 @@ describe("the gallery", () => {
     }, "the placeholder again");
   });
 
-  it("opens one from its host in a window of the shell's, at a fresh one-time address, and it is new to you until then", async () => {
+  it("opens one from its host in a window of the shell's at a click on its card, at a fresh one-time address, and it is new to you until then", async () => {
     await signedIn();
     await openGallery();
-    const card = await waitFor(() => [...gallery().querySelectorAll<HTMLButtonElement>(".card")].find((c) => c.textContent?.includes("Weekly figures")), "the card");
+    const card = await artifactCard("Weekly figures");
     expect(card.textContent).toContain("NEW TO YOU");
-    card.click();
-    const details = await waitFor(aside, "the aside");
-    await sees("Everyone in your organisation");
-    await sees("s-weekly");
-    (await seesButton("Open", details)).click();
+    // A click anywhere on the card, here its title, opens it: no dialog, nothing else asked.
+    card.querySelector<HTMLElement>(".title")!.click();
     await waitFor(() => windows.length === 1, "the artifact's window");
     expect(windows[0]).toEqual({ url: "https://artifacts.example.test/enter?ticket=t-art-weekly", title: "Weekly figures", key: "art-weekly" });
     await waitFor(() => !card.textContent?.includes("NEW TO YOU"), "no longer new");
-    expect(daemon.artifactCalls.map((c) => c.method).filter((m) => m !== "artifact.comments")).toEqual(["artifact.get", "artifact.open"]);
+    expect(daemon.artifactCalls.map((c) => c.method)).toEqual(["artifact.open"]);
+    expect(infoDialog()).toBeNull();
+
+    // Its Open over the picture does the same.
+    (await seesButton("Open", card)).click();
+    await waitFor(() => windows.length === 2, "a second window");
+
+    // Its Info: Open there opens it too.
+    const details = await artifactInfo("Weekly figures");
+    const overview = await infoTab(details, "Overview");
+    await sees("s-weekly", overview);
+    (await seesButton("Open", overview)).click();
+    await waitFor(() => windows.length === 3, "the window from its Info");
+    expect(daemon.artifactCalls.map((c) => c.method).filter((m) => m !== "artifact.comments")).toEqual(["artifact.open", "artifact.open", "artifact.get", "artifact.open"]);
+    await sees("Everyone in your organisation", await infoTab(details, "Access"));
 
     // Somebody else's: its address is the link, and none of the owner's controls is offered.
+    await infoTab(details, "Overview");
     (await seesButton("Copy link", details)).click();
     await waitFor(() => copied.length === 1, "the copied link");
     expect(copied[0]).toBe(`https://artifacts.example.test/a/art-weekly/\ntroupe://artifact/art-weekly?plane=${encodeURIComponent(harness!.plane.baseUrl)}`);
@@ -207,17 +227,18 @@ describe("the gallery", () => {
     expect((await card("Weekly figures")).querySelector(".goes")).toBeNull();
     expect(gallery().querySelectorAll(".card .goes")).toHaveLength(1);
 
-    (await card("Core runbook")).click();
-    const details = await waitFor(aside, "the aside");
-    await sees("It goes on 4 Mar");
-    await sees("Artifacts nobody opens for 60 days are removed, and opening it starts the 60 days again.");
-    await sees("Versions older than the newest are removed 90 days after they were published; the newest, and a pinned one, are kept. 2 of these go on the days they show.");
-    await waitFor(() => details.querySelectorAll(".versions li").length === 3, "three versions");
-    expect([...details.querySelectorAll(".versions li")].map((li) => li.querySelector(".goes")?.textContent ?? null)).toEqual([null, expect.stringMatching(/^goes 11 Feb/), expect.stringMatching(/^goes 1 Feb/)]);
+    const details = await artifactInfo("Core runbook");
+    const overview = await infoTab(details, "Overview");
+    await sees("It goes on 4 Mar", overview);
+    await sees("Artifacts nobody opens for 60 days are removed, and opening it starts the 60 days again.", overview);
+    const versions = await infoTab(details, "Versions");
+    await sees("Versions older than the newest are removed 90 days after they were published; the newest, and a pinned one, are kept. 2 of these go on the days they show.", versions);
+    await waitFor(() => versions.querySelectorAll(".versions li").length === 3, "three versions");
+    expect([...versions.querySelectorAll(".versions li")].map((li) => li.querySelector(".goes")?.textContent ?? null)).toEqual([null, expect.stringMatching(/^goes 11 Feb/), expect.stringMatching(/^goes 1 Feb/)]);
 
     // One the plane gives no date says nothing of going.
-    (await card("Weekly figures")).click();
-    await waitFor(() => aside()?.textContent?.includes("Weekly figures") ?? false, "its aside");
+    await closeInfo();
+    await artifactInfo("Weekly figures");
     await waitFor(() => (aside()?.querySelectorAll(".versions li").length ?? 0) === 1, "its version");
     expect(aside()!.textContent).not.toContain("It goes on");
     expect(aside()!.textContent).not.toContain("Versions older than");
@@ -231,10 +252,7 @@ describe("the gallery", () => {
     ]);
     await signedIn();
     await openGallery();
-    const card = (title: string) => waitFor(() => [...gallery().querySelectorAll<HTMLButtonElement>(".card")].find((c) => c.textContent?.includes(title)), title);
-
-    (await card("Weekly figures")).click();
-    const details = await waitFor(aside, "the aside");
+    const details = await infoTab(await artifactInfo("Weekly figures"), "Overview");
     await sees("This version references 2 things the artifacts host blocks, so it may look or work broken. An artifact may load only its own files.");
     const list = await waitFor(() => details.querySelector<HTMLDetailsElement>(".note.blocked details"), "the list on request");
     expect(list.open).toBe(false);
@@ -245,24 +263,25 @@ describe("the gallery", () => {
     ]);
 
     // One the host blocks nothing of says nothing of it.
-    (await card("Core runbook")).click();
-    await waitFor(() => aside()?.textContent?.includes("Core runbook") ?? false, "its aside");
+    await closeInfo();
+    await artifactInfo("Core runbook");
     expect(aside()!.querySelector(".note.blocked")).toBeNull();
   });
 
   it("gives its owner a view link, a version, a pin, a rollback and a revoke", async () => {
     await signedIn();
     await openGallery();
-    (await waitFor(() => [...gallery().querySelectorAll<HTMLButtonElement>(".card")].find((c) => c.textContent?.includes("My notes")), "the person's own card")).click();
-    const details = await waitFor(aside, "the aside");
+    const details = await artifactInfo("My notes");
     await waitFor(() => details.querySelectorAll(".versions li").length === 2, "its two versions");
 
-    (await seesButton("Copy link", details)).click();
+    (await seesButton("Copy link", await infoTab(details, "Overview"))).click();
     await waitFor(() => copied.length === 1, "the link copied");
     // Under the link, the app's own, which carries nothing of its key (#959).
     expect(copied[0]).toBe(`https://artifacts.example.test/s/tok-sh-1\ntroupe://artifact/art-mine?plane=${encodeURIComponent(harness!.plane.baseUrl)}`);
-    await sees("Can view");
+    const access = await infoTab(details, "Access");
+    await sees("Can view", access);
 
+    await infoTab(details, "Versions");
     (await waitFor(() => details.querySelector<HTMLButtonElement>('button[aria-label="Open version 1"]'), "version 1's Open")).click();
     await waitFor(() => windows.length === 1, "version 1's window");
     expect(windows[0]).toMatchObject({ url: "https://artifacts.example.test/enter?ticket=t-art-mine-v1", title: "My notes (version 1)", key: "art-mine" });
@@ -272,7 +291,7 @@ describe("the gallery", () => {
     await sees("Pinned: its address serves version 1.");
     button("Roll back to it", v1())!.click();
     await sees("Rolled back: version 1's files are the newest version now.");
-    (await seesButton("Revoke", details)).click();
+    (await seesButton("Revoke", await infoTab(details, "Access"))).click();
     await sees("Revoked: that link opens nothing now.");
 
     expect(daemon.artifactCalls.filter((c) => c.method !== "artifact.get" && c.method !== "artifact.comments").map((c) => [c.method, c.params["version"] ?? c.params["role"] ?? c.params["share"]])).toEqual([
@@ -282,7 +301,7 @@ describe("the gallery", () => {
       ["artifact.rollback", 1],
       ["artifact.unshare", "sh-1"],
     ]);
-    await seesButton("Publish a new version", details);
+    await seesButton("Publish a new version", await infoTab(details, "Versions"));
   });
 
   // Who may open it changes here, not in the console: the next version, every file carried,
@@ -290,8 +309,7 @@ describe("the gallery", () => {
   it("lets its owner change who can see it in the app, as the next version with the same files", async () => {
     await signedIn();
     await openGallery();
-    (await waitFor(() => [...gallery().querySelectorAll<HTMLButtonElement>(".card")].find((c) => c.textContent?.includes("My notes")), "the person's own card")).click();
-    const details = await waitFor(aside, "the aside");
+    const details = await infoTab(await artifactInfo("My notes"), "Access");
     const who = await waitFor(() => [...details.querySelectorAll<HTMLSelectElement>("label select")].find((s) => s.closest("label")?.textContent?.startsWith("Who may open it")) ?? null, "who may open it");
     expect(who.value).toBe("organisation");
     expect([...who.options].map((o) => o.value)).toEqual(["private", "organisation", "team:core", "profile:dev"]);
@@ -306,8 +324,8 @@ describe("the gallery", () => {
     expect(windows).toHaveLength(0); // no console page opened
 
     // Another's artifact offers no choice at all.
-    (await waitFor(() => [...gallery().querySelectorAll<HTMLButtonElement>(".card")].find((c) => c.textContent?.includes("Weekly figures")), "another's card")).click();
-    await waitFor(() => aside()?.textContent?.includes("Weekly figures"), "its aside");
+    await closeInfo();
+    await infoTab(await artifactInfo("Weekly figures"), "Access");
     expect(button("Change who can see it", aside()!)).toBeNull();
   });
 
@@ -319,9 +337,8 @@ describe("the gallery", () => {
     harness!.plane.people = [cy];
     daemon.people = [cy];
     await openGallery();
-    (await waitFor(() => [...gallery().querySelectorAll<HTMLButtonElement>(".card")].find((c) => c.textContent?.includes("My notes")), "the person's own card")).click();
-    const details = await waitFor(aside, "the aside");
-    await sees("Nobody by name.");
+    const details = await infoTab(await artifactInfo("My notes"), "Access");
+    await sees("Nobody by name.", details);
 
     const input = await waitFor(() => details.querySelector<HTMLInputElement>(".shared-with input"), "the picker");
     await waitFor(() => button("Share", details)?.disabled === true, "Share offered only once somebody is picked");
@@ -341,8 +358,8 @@ describe("the gallery", () => {
     await sees("Nobody by name.");
 
     // Another's artifact has no share control.
-    (await waitFor(() => [...gallery().querySelectorAll<HTMLButtonElement>(".card")].find((c) => c.textContent?.includes("Weekly figures")), "another's card")).click();
-    await waitFor(() => aside()?.textContent?.includes("Weekly figures"), "its aside");
+    await closeInfo();
+    await infoTab(await artifactInfo("Weekly figures"), "Access");
     expect(aside()!.querySelector(".shared-with")).toBeNull();
   });
 
@@ -353,11 +370,11 @@ describe("the gallery", () => {
     daemon.artifacts!.push(row({ id: "art-named", title: "Hiring plan", visibility: "private", scope: "shared", role: "comment", may_comment: true, comments: 1 }));
     daemon.artifactComments.set("art-named", [{ id: "c-1", author: { subject: "bo@example.test", display_name: "Bo" }, body: "The second table is wrong.", created_at: lastWeek }]);
     await openGallery();
-    const card = await waitFor(() => [...gallery().querySelectorAll<HTMLButtonElement>(".card")].find((c) => c.textContent?.includes("Hiring plan")), "the shared card");
+    const card = await artifactCard("Hiring plan");
     expect(card.textContent).toContain("1 COMMENT");
-    card.click();
-    const details = await waitFor(aside, "the aside");
-    await sees("You can open it and comment on it until they take it back.");
+    const info = await artifactInfo("Hiring plan");
+    await sees("You can open it and comment on it until they take it back.", await infoTab(info, "Access"));
+    const details = await infoTab(info, "Comments");
     const thread = await waitFor(() => details.querySelector<HTMLElement>('[aria-label="Comments"] .comments'), "the thread");
     expect(thread.textContent).toContain("Bo");
     expect(thread.textContent).toContain("The second table is wrong.");
@@ -369,8 +386,12 @@ describe("the gallery", () => {
     expect(details.querySelector(".comments li:last-child")?.textContent).toContain("Fixed in version 2.");
     expect(daemon.artifactCalls.find((c) => c.method === "artifact.comment")?.params).toMatchObject({ id: "art-named", body: "Fixed in version 2." });
 
+    // The tab counts the thread as it is now.
+    await waitFor(() => info.querySelector('[role="tab"][aria-selected="true"]')?.textContent === "Comments 2", "the count after the comment");
+
     // One the person reads because of who it is for: the thread, and no box.
-    (await waitFor(() => [...gallery().querySelectorAll<HTMLButtonElement>(".card")].find((c) => c.textContent?.includes("Weekly figures")), "another's card")).click();
+    await closeInfo();
+    await infoTab(await artifactInfo("Weekly figures"), "Comments");
     await waitFor(() => aside()?.textContent?.includes("No comments yet."), "an empty thread");
     expect(aside()!.querySelector(".comment-form")).toBeNull();
     await sees("Its owner decides who may write them.");
@@ -387,7 +408,7 @@ describe("the gallery", () => {
     ]);
     daemon.artifactComments.set("art-mine", [{ id: "c-1", author: { subject: "bo@example.test", display_name: "Bo" }, body: "Off topic.", created_at: lastWeek }]);
     await openGallery();
-    (await waitFor(() => [...gallery().querySelectorAll<HTMLButtonElement>(".card")].find((c) => c.textContent?.includes("Hiring plan")), "the shared card")).click();
+    await infoTab(await artifactInfo("Hiring plan"), "Comments");
     const items = (): HTMLLIElement[] => [...(aside()?.querySelectorAll<HTMLLIElement>(".comments li") ?? [])];
     const buttons = (li: HTMLElement): string[] => [...li.querySelectorAll("button")].map((b) => b.textContent ?? "");
     await waitFor(() => items().length === 2, "the thread");
@@ -416,7 +437,8 @@ describe("the gallery", () => {
     expect(daemon.artifactCalls.find((c) => c.method === "artifact.comment.delete")?.params).toMatchObject({ id: "art-named", comment: "c-2" });
 
     // Her own artifact: she deletes Bo's comment, and edits nobody's but her own.
-    (await waitFor(() => [...gallery().querySelectorAll<HTMLButtonElement>(".card")].find((c) => c.textContent?.includes("My notes")), "her card")).click();
+    await closeInfo();
+    await infoTab(await artifactInfo("My notes"), "Comments");
     await waitFor(() => items()[0]?.textContent?.includes("Off topic."), "Bo's comment on hers");
     expect(buttons(items()[0]!)).toEqual(["Delete"]);
     items()[0]!.querySelector("button")!.click();
@@ -446,8 +468,7 @@ describe("the gallery", () => {
     await openGallery();
     await waitFor(() => titles().length === 4, "four cards");
     expect([...gallery().querySelectorAll(".day h2")].map((h) => h.textContent)).toEqual(["Today2", "This week1", "Earlier1"]);
-    (await waitFor(() => [...gallery().querySelectorAll<HTMLButtonElement>(".card")].find((c) => c.textContent?.includes("Field interviews")), "the oldest card")).click();
-    const details = await waitFor(aside, "the aside");
+    const details = await infoTab(await artifactInfo("Field interviews"), "Overview");
     (await seesButton("Keep at the top", details)).click();
     await waitFor(() => gallery().querySelector(".day h2")?.textContent === "Kept at the top1", "a group above the days");
     expect([...gallery().querySelectorAll(".day h2")].map((h) => h.textContent)).toEqual(["Kept at the top1", "Today2", "This week1"]);
@@ -508,8 +529,7 @@ describe("the gallery", () => {
   it("says the plane's refusal of a move in its own words", async () => {
     await signedIn();
     await openGallery();
-    (await waitFor(() => [...gallery().querySelectorAll<HTMLButtonElement>(".card")].find((c) => c.textContent?.includes("My notes")), "the person's own card")).click();
-    const details = await waitFor(aside, "the aside");
+    const details = await infoTab(await artifactInfo("My notes"), "Access");
     // Published elsewhere since the gallery was read: the base is no longer the newest.
     daemon.artifacts!.find((a) => a["id"] === "art-mine")!["version"] = 5;
     const who = await waitFor(() => [...details.querySelectorAll<HTMLSelectElement>("label select")].find((s) => s.closest("label")?.textContent?.startsWith("Who may open it")) ?? null, "who may open it");
@@ -549,5 +569,174 @@ describe("the gallery", () => {
     expect(dayOf("2026-10-22T09:00:00Z", at)).toBe("This week");
     expect(dayOf("2026-09-01T09:00:00Z", at)).toBe("Earlier");
     expect(dayOf(undefined, at)).toBe("Earlier");
+  });
+});
+
+// #1143: no aside. The grid has the width; a card offers Open and Info over its picture, on
+// hover and on keyboard focus (Info alone, in its corner, where nothing hovers); Info is a
+// native modal dialog in four tabs.
+describe("a card and its Info", () => {
+  // A name in a variable, so the bundler reads it as a file to open and not as an asset.
+  const sheet = "../src/styles.css";
+  const css = readFileSync(new URL(sheet, import.meta.url), "utf8");
+  const rule = (selector: string, within = css): string => {
+    const at = within.indexOf(`${selector} {`);
+    if (at < 0) throw new Error(`no ${selector} rule in the sheet`);
+    return within.slice(at, within.indexOf("}", at));
+  };
+
+  it("draws no aside and nothing beside the grid, and choosing a card's Info moves nothing", async () => {
+    await signedIn();
+    await openGallery();
+    await waitFor(() => titles().length === 4, "four cards");
+    expect(gallery().querySelector("aside")).toBeNull();
+    expect(gallery().querySelector(".repertoire-body")).toBeNull();
+    const main = gallery().querySelector(".repertoire-main")!;
+    await artifactInfo("Weekly figures");
+    // The dialog is not in the grid's row: the grid is what it was.
+    expect(gallery().querySelector(".repertoire-main")).toBe(main);
+    expect(main.contains(infoDialog())).toBe(false);
+    expect(gallery().querySelector('.card[aria-current="true"]')).toBeNull();
+    expect(css).not.toContain("repertoire-aside");
+  });
+
+  it("offers Open and Info over the picture, reachable by Tab, shown on hover and on focus", async () => {
+    await signedIn();
+    await openGallery();
+    const card = await artifactCard("Weekly figures");
+    const actions = card.querySelector<HTMLElement>(".placeholder-frame > .card-actions")!;
+    expect([...actions.querySelectorAll("button")].map((b) => [b.textContent, b.getAttribute("aria-label")])).toEqual([
+      ["Open", "Open Weekly figures"],
+      ["Info", "Info about Weekly figures"],
+    ]);
+    // In the tab order, and not hidden from a screen reader.
+    for (const b of actions.querySelectorAll("button")) {
+      expect(b.tabIndex).toBe(0);
+      expect(b.closest('[aria-hidden="true"]')).toBeNull();
+    }
+    // The title and byline are under the picture, not under the buttons.
+    expect(actions.contains(card.querySelector(".title"))).toBe(false);
+    // jsdom lays nothing out, so the sheet says when they show: hidden till hover or focus.
+    expect(rule(".repertoire .card-actions")).toMatch(/opacity: 0;/);
+    expect(rule(".repertoire .card-actions")).toMatch(/pointer-events: none;/);
+    expect(css).toMatch(/\.repertoire \.card:hover \.card-actions,\r?\n\.repertoire \.card:focus-within \.card-actions \{\r?\n {2}opacity: 1;\r?\n {2}pointer-events: auto;/);
+  });
+
+  it("where nothing hovers, keeps Info in the card's corner, and a tap opens the artifact", async () => {
+    const touch = css.slice(css.indexOf("@media (hover: none) {\n  .repertoire .card-actions"));
+    expect(touch.length).toBeLessThan(css.length);
+    expect(rule(".repertoire .card-actions", touch)).toMatch(/opacity: 1;/);
+    expect(rule(".repertoire .card-actions", touch)).toMatch(/justify-content: flex-end;/);
+    expect(rule(".repertoire .card-actions .card-open", touch)).toMatch(/display: none;/);
+    expect(rule(".repertoire .card-actions .card-info", touch)).toMatch(/pointer-events: auto;/);
+
+    await signedIn();
+    await openGallery();
+    const card = await artifactCard("Core runbook");
+    card.querySelector<HTMLElement>(".placeholder")!.click();
+    await waitFor(() => windows.length === 1, "the window a tap opens");
+    expect(windows[0]!.key).toBe("art-core");
+    (await seesButton("Info", card)).click();
+    await waitFor(() => infoDialog(), "its Info");
+    expect(windows).toHaveLength(1); // Info opens nothing but the dialog
+  });
+
+  it("says on the gallery why a card did not open", async () => {
+    await signedIn();
+    window.troupe!.openArtifactWindow = async () => {
+      throw new Error("the window was refused");
+    };
+    await openGallery();
+    (await artifactCard("Weekly figures")).click();
+    await sees("Weekly figures did not open: the window was refused");
+    expect(infoDialog()).toBeNull();
+  });
+
+  it("opens Info as a modal dialog on Overview, with counts on Versions and Comments from the plane", async () => {
+    await signedIn();
+    daemon.artifactComments.set("art-mine", [{ id: "c-1", author: { subject: "bo@example.test", display_name: "Bo" }, body: "Nice.", created_at: lastWeek }]);
+    let shown = 0;
+    HTMLDialogElement.prototype.showModal = function showModal(this: HTMLDialogElement) {
+      shown += 1;
+      this.setAttribute("open", "");
+    };
+    HTMLDialogElement.prototype.close = function close(this: HTMLDialogElement) {
+      this.removeAttribute("open");
+    };
+    try {
+      await openGallery();
+      const details = await artifactInfo("My notes");
+      expect(details.tagName).toBe("DIALOG");
+      expect(shown).toBe(1);
+      expect(details.getAttribute("aria-labelledby")).toBe(details.querySelector("h2")!.id);
+      const tabs = (): string[] => [...details.querySelectorAll('[role="tablist"] [role="tab"]')].map((t) => t.textContent ?? "");
+      await waitFor(() => tabs().join() === "Overview,Access,Versions 2,Comments 1", "the tabs with their counts");
+      const selected = details.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]')!;
+      expect(selected.textContent).toBe("Overview");
+      expect(document.activeElement).toBe(selected);
+      // One panel shows at a time, each labelled by its tab.
+      const panels = [...details.querySelectorAll<HTMLElement>('[role="tabpanel"]')];
+      expect(panels.map((p) => p.hidden)).toEqual([false, true, true, true]);
+      expect(panels.map((p) => document.getElementById(p.getAttribute("aria-labelledby")!)?.textContent)).toEqual(tabs());
+
+      // Each tab's own content.
+      const overview = await infoTab(details, "Overview");
+      expect([...overview.querySelectorAll(".actions button")].map((b) => b.textContent)).toEqual(["Open", "Copy link", "Open in browser", "Keep at the top"]);
+      expect(overview.textContent).toContain("Where it came from");
+      expect(overview.textContent).toContain("s-weekly");
+      const access = await infoTab(details, "Access");
+      expect([...access.querySelectorAll("h3")].map((h) => h.textContent)).toEqual(["Who can see it", "Links", "Whose it is"]);
+      expect(access.querySelector(".shared-with")).not.toBeNull();
+      const versions = await infoTab(details, "Versions");
+      expect(versions.querySelectorAll(".versions li")).toHaveLength(2);
+      const comments = await infoTab(details, "Comments");
+      await sees("Nice.", comments);
+
+      // The arrow keys move between the tabs, round from the last to the first.
+      comments.closest("dialog")!.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]')!.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true }));
+      await waitFor(() => details.querySelector('[role="tab"][aria-selected="true"]')?.textContent === "Overview", "round to Overview");
+
+      // Closing it closes the native dialog.
+      (await seesButton("Close", details)).click();
+      await waitFor(() => infoDialog() === null, "closed");
+    } finally {
+      delete (HTMLDialogElement.prototype as { showModal?: unknown }).showModal;
+      delete (HTMLDialogElement.prototype as { close?: unknown }).close;
+    }
+  });
+
+  it("closes on Escape and on a click on its backdrop, and not on a click inside it", async () => {
+    await signedIn();
+    await openGallery();
+    let details = await artifactInfo("Weekly figures");
+    details.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    await waitFor(() => infoDialog() === null, "closed by Escape");
+
+    details = await artifactInfo("Weekly figures");
+    details.querySelector<HTMLElement>("h2")!.click();
+    // at once: a click inside the dialog changes nothing to wait for
+    expect(infoDialog()).not.toBeNull();
+    // The dialog element itself is hit only on its backdrop.
+    details.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    await waitFor(() => infoDialog() === null, "closed by the backdrop");
+    expect(windows).toEqual([]);
+  });
+
+  it("gives somebody else the same tabs with the owner's controls absent, not disabled", async () => {
+    await signedIn();
+    await openGallery();
+    const details = await artifactInfo("Weekly figures");
+    await waitFor(() => details.querySelectorAll(".versions li").length === 1, "its version");
+    await waitFor(() => details.querySelectorAll('[role="tab"]').length === 4, "four tabs");
+    expect([...details.querySelectorAll('[role="tab"]')].map((t) => t.textContent?.replace(/ \d+$/, ""))).toEqual(["Overview", "Access", "Versions", "Comments"]);
+    for (const label of ["Change who can see it", "Give it to the team", "Take back", "Roll back to it", "Pin", "Unpin", "Publish a new version", "Revoke", "Share"]) {
+      expect(button(label, details), label).toBeNull();
+    }
+    expect(details.querySelector(".shared-with")).toBeNull();
+    expect(details.querySelector('select[aria-label="Give to team"]')).toBeNull();
+    expect([...details.querySelectorAll("h3")].map((h) => h.textContent)).not.toContain("Links");
+    // What anybody may do is there: Open, Copy link, Open in browser, each version's Open.
+    await seesButton("Open in browser", details);
+    await waitFor(() => details.querySelector('button[aria-label="Open version 1"]'), "version 1's Open");
   });
 });

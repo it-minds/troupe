@@ -1,4 +1,4 @@
-// An artifact leads to the session that published it (troupe #1099): the gallery's aside
+// An artifact leads to the session that published it (troupe #1099): its Info's Overview
 // says "Published from a session" with Open session, which opens it in the app as its
 // troupe://session link would. Where the plane answers that there is no such session for
 // this person (gone, or not shared with them, which it answers alike), the line says so
@@ -14,7 +14,7 @@ import { FakeDaemon } from "../../../packages/client/test/support/daemon.js";
 import { startHarness } from "../../../packages/client/test/support/harness.js";
 import { keptBy } from "../../../packages/client/test/support/kept.js";
 import type { Harness } from "../../../packages/client/test/support/harness.js";
-import { nav, render, sees, seesButton, startOnTheList, waitFor } from "./support";
+import { artifactInfo, infoDialog, infoTab, nav, render, sees, seesButton, startOnTheList, waitFor } from "./support";
 
 Element.prototype.scrollIntoView = function scrollIntoView() {};
 globalThis.WebSocket = NodeWebSocket as unknown as typeof WebSocket;
@@ -75,12 +75,11 @@ afterEach(async () => {
   await daemon.stop();
 });
 
-const aside = (): HTMLElement | null => document.querySelector<HTMLElement>('[aria-label="Artifact details"]');
+const aside = infoDialog;
 
+/** The named artifact's Info, on its Overview, where it came from. */
 async function choose(title: string): Promise<HTMLElement> {
-  const card = await waitFor(() => [...document.querySelectorAll<HTMLButtonElement>(".repertoire .card")].find((c) => c.textContent?.includes(title)), `the card ${title}`);
-  card.click();
-  return waitFor(() => (aside()?.textContent?.includes(title) ? aside() : null), `the aside of ${title}`);
+  return infoTab(await artifactInfo(title), "Overview");
 }
 
 async function openGallery(): Promise<void> {
