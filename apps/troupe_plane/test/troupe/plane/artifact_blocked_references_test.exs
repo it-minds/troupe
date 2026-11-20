@@ -102,7 +102,9 @@ defmodule Troupe.Plane.ArtifactBlockedReferencesTest do
       publish(context.ada, [
         file("index.html", @clean, "text/html"),
         file("style.css", "body { background: url(bg.png) }", "text/css"),
-        file("app.js", ~s{fetch("data.json")}, "text/javascript")
+        # Its data as a script that sets a global, which a page here can load; a `fetch` of
+        # its own file it cannot.
+        file("app.js", ~s|window.rows = [{"a": 1}]; render(window.rows)|, "text/javascript")
       ])
 
     assert artifact["blocked"] == []

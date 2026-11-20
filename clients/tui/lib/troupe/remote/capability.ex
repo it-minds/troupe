@@ -32,6 +32,7 @@ defmodule Troupe.Remote.Capability do
         state == :read_only -> {false, "this session is read-only"}
         state == :erasure_pending -> {false, "this session is waiting to be erased"}
         state == :erased -> {false, "this session has been erased"}
+        state == :pending -> {false, "waiting for a free place; it wakes by itself when one frees"}
         match?({:lost, _why}, error) -> {false, "lost the session: #{elem(error, 1)}"}
         not up? -> {false, "reconnecting to the worker"}
         "control" not in scopes -> {false, "your token only has the observe scope"}

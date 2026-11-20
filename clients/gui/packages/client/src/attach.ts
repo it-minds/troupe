@@ -19,6 +19,10 @@
 // because a socket that went is not the person asking for anything: a session that a
 // drain left asleep stays asleep until a command wakes it, and the command that the pod
 // refuses for it is what `retrying` follows in `activate` mode.
+//
+// A session woken on a profile with no room waits for a place as a new one does: the
+// plane answers `pending` with `retry_after_ms` and no endpoint, and the attachment says
+// `waiting` and asks again with `token.mint` until the session is placed.
 
 import type { AuthSession } from "./auth.js";
 import { TroupeConnection, TroupeRpcError } from "./connection.js";
@@ -71,9 +75,17 @@ export interface AttachOptions {
    * with the socket that registered them, so this is where they are offered again.
    */
   onLive?: (conn: TroupeConnection) => void;
+  /**
+   * Whether whoever opened this still wants it, asked while the session waits for a place:
+   * false, and the wait ends with an error rather than asking the plane again.
+   */
+  alive?: () => boolean;
 }
 
-export type AttachStatus = "connecting" | "live" | "refreshing" | "reconnecting" | "closed" | "failed";
+export type AttachStatus = "connecting" | "waiting" | "live" | "refreshing" | "reconnecting" | "closed" | "failed";
+
+/** The least time between two asks while a session waits for a place. */
+const WAIT_FLOOR_MS = 250;
 
 const DEFAULT_BACKOFF = [250, 500, 1_000, 2_000, 5_000, 10_000];
 
@@ -164,7 +176,7 @@ export class SessionAttachment {
 
   private async connect(mode: "read" | "activate"): Promise<void> {
     this.set("connecting");
-    const attachment = await this.opts.open(mode);
+    const attachment = await this.placed(await this.opts.open(mode));
     if (!attachment.token) throw new Error(`the plane minted no token for ${this.sessionId}`);
     this.attachment = attachment;
 
@@ -195,6 +207,20 @@ export class SessionAttachment {
     await this.view.subscribe();
     this.set("live");
     this.opts.onLive?.(conn);
+  }
+
+  /**
+   * The plane's answer once the session has a pod. While it waits for a place (`pending`),
+   * `waiting` with the plane's reason, and `token.mint` again as `retry_after_ms` says.
+   */
+  private async placed(answer: Attachment): Promise<Attachment> {
+    while (answer.state === "pending") {
+      this.set("waiting", typeof answer["reason"] === "string" ? answer["reason"] : undefined);
+      await new Promise((r) => setTimeout(r, Math.max(WAIT_FLOOR_MS, answer.retry_after_ms ?? 2_000)));
+      if (this.stopped || this.opts.alive?.() === false) throw new Error(`stopped waiting for a place for ${this.sessionId}`);
+      answer = await this.opts.mint();
+    }
+    return answer;
   }
 
   /** Mint a new pod token and hand it over without reconnecting. */

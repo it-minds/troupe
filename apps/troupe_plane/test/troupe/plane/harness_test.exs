@@ -427,9 +427,10 @@ defmodule Troupe.Plane.HarnessTest do
       assert results |> Enum.map(fn {:ok, r} -> r["state"] end) |> Enum.uniq() == ["active"]
     end
 
-    # The chunk 46 audit's open question: a ceiling above what the pods run. The refusal
-    # says both numbers, so a person can tell "full for now" from "set past what runs".
-    test "waking a session with every pod full says what the pods run and what the profile allows" do
+    # The chunk 46 audit's open question: a ceiling above what the pods run. Under it the
+    # plane asks for another pod, so the wake waits for a place as a create does, rather
+    # than being refused about a number that is about to change by itself (issue #1149).
+    test "waking a session with every pod full under a ceiling above them waits for a place" do
       team = team_with_grant("engineering", "dev", name: "engineering")
       user = person("ada@example.test", ["engineering"])
       {:ok, _} = Fleet.put_profile(%{name: "dev", max_sessions: 12})
@@ -450,13 +451,14 @@ defmodule Troupe.Plane.HarnessTest do
 
       session = session!("s-full", user, team, state: "dormant")
 
-      assert {:error, error} =
+      assert {:ok, answer} =
                Harness.call("session.open", %{"session_id" => session.id, "mode" => "activate"}, context(user))
 
-      assert error.message == "capacity"
-      assert error.data.capacity == 1
-      assert error.data.max_sessions == 12
-      assert error.data.reason == "every pod is full: its pods run 1 session(s) at once, and dev allows 12 at once"
+      assert answer["state"] == "pending"
+      assert answer["mode"] == "waiting"
+      assert answer["reason"] == "the profile is full and another worker is coming up"
+      refute Map.has_key?(answer, "endpoint")
+      assert %{state: "pending", worker_id: nil} = Sessions.get(session.id)
     end
 
     test "a pod that cannot put the tree back parks the session read-only, and the next open says so",

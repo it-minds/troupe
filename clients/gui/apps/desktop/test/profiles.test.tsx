@@ -1,8 +1,8 @@
 // What a profile gives a session, before one is started: the rail's Profiles, one row per
-// profile the person may use, and a page per profile that leads with what it can and cannot
-// do, as the plane's `profile.get` answers; Start from the page; the way there from the
-// start screen and from a session's Settings; a profile the plane does not let the person
-// use; and answers the example plane does not give: a whole-tool refusal, no primary agent,
+// profile the person may use, and a page per profile that leads with what it can do, drawn as
+// the design draws it, as the plane's `profile.get` answers; Start from the page; the way
+// there from the start screen and from a session's Settings; a profile the plane does not let
+// the person use; and answers the example plane does not give: a whole-tool refusal, no primary agent,
 // a plane from before `skill_details`.
 
 import { readFileSync } from "node:fs";
@@ -73,7 +73,7 @@ function leanSpec(): FakeProfileSpec {
 }
 
 describe("profiles", () => {
-  it("are a rail entry, a row each with what it gives, and a page that leads with what it can and cannot do", async () => {
+  it("are a rail entry, a row each with what it gives, and a page that leads with what it can do, with no list of what it cannot", async () => {
     unmount = render(<App />).unmount;
     (await waitFor(() => nav("Profiles"), "the rail's Profiles")).click();
     await sees("3 you may use");
@@ -84,9 +84,9 @@ describe("profiles", () => {
     (await row("dev")).click();
     const titles = await waitFor(() => {
       const t = [...document.querySelectorAll(".profile-view section.group > h3")].map((h) => h.textContent);
-      return t.length === 3 && t;
-    }, "the three sections");
-    expect(titles).toEqual(["What it can do", "What it can't do", "How it behaves"]);
+      return t.length === 2 && t;
+    }, "the two sections");
+    expect(titles).toEqual(["What it can do", "How it behaves"]);
     // The head: a label, the name, and under it the sentence dev's bundle says it is for, not
     // its first primary's (build's).
     const head = document.querySelector<HTMLElement>(".screen-head.profile-head")!;
@@ -125,6 +125,8 @@ describe("profiles", () => {
     ]);
     expect(rail.querySelector(".profile-limits .note")?.textContent).toBe("An agent may set fewer.");
     await seesButton("Start a session on dev", rail);
+    // Start is the page's one filled button.
+    expect([...document.querySelectorAll("button.primary")].map((b) => b.textContent)).toEqual(["Start a session on dev"]);
     // The rail is first in the page's order, so a narrow window shows it above the sections.
     const layout = document.querySelector(".profile-layout")!;
     expect([...layout.children].map((c) => c.className)).toEqual(["profile-rail", "profile-main"]);
@@ -162,24 +164,29 @@ describe("profiles", () => {
     expect(cards[2]!.textContent).not.toContain("Turned off here");
     expect(cards[2]!.querySelector(".note")).toBeNull();
 
-    // What it can't do: the banner first, its eye and its sentence, then one list of rows,
-    // each with the refused mark: the refusals, the withheld server and the hosts, no headings.
-    const cannot = await section("What it can't do");
-    expect([...cannot.children].map((c) => c.className)).toEqual(["", "banner promise", "profile-cant"]);
-    expect(cannot.querySelector(".banner")?.textContent).toBe("The tools below, and nothing outside the hosts listed.");
-    expect(cannot.querySelector(".banner svg.eye")).not.toBeNull();
-    expect(cannot.querySelector("h4")).toBeNull();
-    const cant = [...cannot.querySelectorAll(".profile-cant > li")];
-    expect(cant.map((li) => li.textContent)).toEqual([
-      "bash(rm -rf *) · refused by the profile",
-      "wiki · not offered: your team's grant leaves it out",
-      "Reaches only: api.githubcopilot.com, github.com, llm-gw.example.com, mcp.example.com, wiki.example.com",
-    ]);
-    expect(cant.every((li) => li.querySelector("svg.eye"))).toBe(true);
+    // The design's marks on the cards. Beside each name its badges: whose credential, in the
+    // accent's line where it is the person's and the machine's where it is the profile's, and
+    // "asks first" where a call asks; Troupe's own badged "core", its card set apart.
+    const badges = (card: HTMLElement): string[] => [...card.querySelectorAll(".profile-card-name .badge")].map((b) => `${b.textContent} ${b.className}`);
+    expect(badges(cards[0]!)).toEqual(["as you badge person", "asks first badge person"]);
+    expect(badges(cards[1]!)).toEqual(["as the profile badge machine"]);
+    expect(badges(cards[2]!)).toEqual(["core badge core"]);
+    expect(cards.map((c) => c.classList.contains("troupe"))).toEqual([false, false, true]);
+    expect(cards[2]!.querySelector(".profile-card-name svg.mask")).not.toBeNull();
+    // The subtitle is in the card's head, under the name and its badges.
+    expect(cards[1]!.querySelector(".profile-card-head > .profile-subtitle")).not.toBeNull();
+    // Every tool line has its bullet, drawn by the sheet before each line, none turned off here.
+    expect(can.querySelectorAll(".tool-lines > li.off")).toHaveLength(0);
+
+    // No "What it can't do" and no promise banner: the refusal, the withheld server and the
+    // hosts are under the hood.
+    expect(document.body.textContent).not.toContain("What it can't do");
+    expect(document.querySelector(".profile-view .banner")).toBeNull();
+    expect(document.querySelector(".profile-view .eye")).toBeNull();
 
     // How it behaves: guidance, under its line; primaries first, then the rest in the answer's order.
     const behaves = await section("How it behaves");
-    expect(behaves.querySelector(".copy")?.textContent).toBe("Guidance, not limits: an agent follows these; the sections above are what it is allowed.");
+    expect(behaves.querySelector(".copy")?.textContent).toBe("Guidance, not limits: an agent follows these; what it can do, above, is what it is allowed.");
     const agents = [...behaves.querySelectorAll(".agents li")].map((li) => li.querySelector(".mono")?.textContent);
     expect(agents).toEqual(["build", "plan", "reviewer", "explore"]);
     expect(behaves.textContent).toContain("Reads a diff and comments on it");
@@ -188,6 +195,9 @@ describe("profiles", () => {
     expect(behaves.textContent).toContain("Surveys the repository for its brief");
     // Each skill says what it does, and opens its SKILL.md rendered (troupe #1003).
     expect(behaves.querySelector(".skills")?.textContent).toContain("review · read a diff and comment");
+    // A skill's name carries its mark, in the code face; an agent's name is in the code face.
+    expect(behaves.querySelector("details.skill summary .skill-name.mono")?.textContent).toBe("review");
+    expect(behaves.querySelector(".agents li .skill-name")).toBeNull();
     const skill = behaves.querySelector<HTMLDetailsElement>("details.skill")!;
     expect(skill.open).toBe(false);
     // jsdom does not toggle a <details> from its summary; a browser does.
@@ -209,6 +219,9 @@ describe("profiles", () => {
     expect(hood.textContent).toContain("llm-gw.example.com");
     // The server's host, off its card, is in the servers' table.
     expect([...hood.querySelectorAll("tr")].find((r) => r.textContent?.includes("github"))?.textContent).toContain("api.githubcopilot.com");
+    // What the can't-do list said is here: the refusing rule, the withheld server and why, and the hosts.
+    expect([...hood.querySelectorAll("tr")].find((r) => r.textContent?.includes("rm -rf *"))?.textContent).toContain("refused");
+    expect(hood.querySelector(".reach p")?.textContent).toBe("Reaches only: api.githubcopilot.com, github.com, llm-gw.example.com, mcp.example.com, wiki.example.com");
     expect(hood.textContent).toContain("12 sessions");
     expect(hood.textContent).toContain("A session you start runs under core.");
 
@@ -249,6 +262,9 @@ describe("profiles", () => {
     expect([...troupe.querySelectorAll("s")].map((s) => s.textContent)).toEqual(["web_fetch"]);
     expect(troupe.querySelector("p.micro")?.textContent).toBe("Turned off here");
     expect(troupe.querySelector(".tool-lines.struck")?.textContent).toBe("web_fetch (turned off here)");
+    // The turned-off line is the bullet's off kind; the lines above are not.
+    expect([...troupe.querySelectorAll(".tool-lines > li.off")].map((li) => li.textContent)).toEqual(["web_fetch (turned off here)"]);
+    expect(troupe.querySelectorAll(".tool-lines:not(.struck) > li.off")).toHaveLength(0);
     const on = [...troupe.querySelectorAll(".tool-lines:not(.struck) li")].map((li) => li.textContent);
     expect(on).toContain("shell");
     expect(on).not.toContain("web_fetch");
@@ -263,13 +279,11 @@ describe("profiles", () => {
     expect(meter.children).toHaveLength(4);
     expect([...meter.children].map((s) => s.className)).toEqual(["on", "", "", ""]);
 
-    const cannot = await section("What it can't do");
-    // The model's and a server's hosts are reach too; this one has neither, nor egress.
-    expect([...cannot.querySelectorAll(".profile-cant > li")].map((li) => li.textContent)).toEqual([
-      "webfetch · refused by the profile",
-      "bash(curl *) · refused by the profile",
-      "Reaches no host outside the plane.",
-    ]);
+    // The refusals are rows of the tools' table under the hood, and the reach its own part:
+    // the model's and a server's hosts are reach too; this one has neither, nor egress.
+    const hood = document.querySelector<HTMLElement>(".profile-view details.under-hood")!;
+    expect([...hood.querySelectorAll("tr")].filter((r) => r.textContent?.includes("refused")).map((r) => r.querySelector("td")?.textContent)).toEqual(["webfetch", "bash"]);
+    expect(hood.querySelector(".reach p")?.textContent).toBe("Reaches no host outside the plane.");
 
     // No primary agent: no sentence and no placeholder; a subagent alone still has Start.
     expect(document.querySelector(".screen-head p")).toBeNull();
@@ -298,13 +312,14 @@ describe("profiles", () => {
     expect(plain!.querySelector(".tool-name")).toBeNull();
   });
 
-  it("says the list is whole only where no tool of the person's, no shell and no web fetch can reach past it", async () => {
+  it("strikes the shell and web fetch where both are refused, and makes no promise of its own about the rest", async () => {
     const whole = composeProfile({ ...leanSpec(), personalTools: "forbid", permissions: { deny: ["bash", "webfetch"] } }, { teams: ["core"] }, { capacity: 4, active_sessions: 0 })!;
     pageOn(whole);
-    const cannot = await section("What it can't do");
-    expect(cannot.querySelector(".banner")?.textContent).toBe("Nothing but the tools above: no tool of your own, no shell, no web fetch, and nothing outside the hosts listed.");
     const can = await section("What it can do");
     expect([...can.querySelectorAll("s")].map((s) => s.textContent)).toEqual(["shell", "web_fetch"]);
+    expect([...can.querySelectorAll(".tool-lines > li.off")]).toHaveLength(2);
+    expect(document.body.textContent).not.toContain("Nothing but the tools above");
+    expect(document.querySelector(".profile-view .banner")).toBeNull();
   });
 
   it("from a plane before the limits, says none of them and names only what the rules turn off", async () => {
@@ -323,7 +338,7 @@ describe("profiles", () => {
     expect(document.querySelector(".profile-limits")).toBeNull();
     // Without the limits the rail ends at who may use it, Start still first.
     expect([...document.querySelector(".profile-rail")!.children].map((c) => (c.tagName === "BUTTON" ? c.textContent : c.querySelector("h4")?.textContent))).toEqual(["Start a session on lean", "Room right now", "At a glance", "Who can use it"]);
-    expect((await section("What it can't do")).querySelector(".banner")?.textContent).toBe("The tools below, and nothing outside the hosts listed.");
+    expect(document.querySelector(".profile-view .banner")).toBeNull();
   });
 
   it("draws no meter where the room is not said or too many places to count by eye", async () => {
@@ -360,10 +375,35 @@ describe("profiles", () => {
     expect(rule(".profile-cards")).toContain("minmax(min(100%, 15rem), 1fr)");
     expect(rule(".profile-rail")).toContain("overflow-wrap: anywhere");
     expect(rule(".profile-card")).toContain("overflow-wrap: anywhere");
-    expect(rule(".profile-cant > li")).toContain("overflow-wrap: anywhere");
     expect(rule(".profile-meter > span")).toContain("min-width: 0");
     expect(rule(".screen-head.profile-head h1")).toContain("overflow-wrap: anywhere");
-    expect(rule(".profile-view .banner.promise > p")).toContain("min-width: 0");
+    // A card's name and its badges wrap onto a second line rather than widen the card.
+    expect(rule(".profile-card-name")).toContain("flex-wrap: wrap");
+    expect(rule(".profile-card ul.tool-lines > li")).toContain("min-width: 0");
+  });
+
+  it("draws the design's marks from the sheet: a bullet before every tool line, the off kind, the set-apart harness card", () => {
+    // jsdom draws no pseudo-element, so the rules are read: every line's filled dot in the
+    // machine's cyan, the turned-off line's hollow square in the refused colour, Troupe's card
+    // on the accent's border and the offset block, a skill's name in the violet, and no amber.
+    const sheet = "../src/styles.css";
+    const css = readFileSync(new URL(sheet, import.meta.url), "utf8");
+    const rule = (selector: string): string => css.slice(css.indexOf(`${selector} {`), css.indexOf("}", css.indexOf(`${selector} {`)));
+    const dot = rule(".profile-card ul.tool-lines > li::before");
+    expect(dot).toContain('content: ""');
+    expect(dot).toContain("border-radius: 50%");
+    expect(dot).toContain("background: var(--running-solid)");
+    const off = rule(".profile-card ul.tool-lines > li.off::before");
+    expect(off).toContain("border-radius: 0");
+    expect(off).toContain("solid var(--denied-fg)");
+    expect(off).toContain("background: none");
+    const troupe = rule(".profile-card.troupe");
+    expect(troupe).toContain("border-color: var(--accent)");
+    expect(troupe).toContain("box-shadow: 4px 4px 0 var(--bg-shadow)");
+    expect(rule(".profile-view .skill-name")).toContain("color: var(--private-fg)");
+    const page = css.slice(css.indexOf("/* -- what a profile gives a session"), css.indexOf("/* -- tools and skills"));
+    expect(page).not.toMatch(/--(waiting|local)-/);
+    expect(page).not.toContain("profile-cant");
   });
 
   it("names the skills alone from a plane before their details", async () => {

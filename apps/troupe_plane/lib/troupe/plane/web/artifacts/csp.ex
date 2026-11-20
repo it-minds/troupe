@@ -40,14 +40,19 @@ defmodule Troupe.Plane.Web.Artifacts.CSP do
     {"form-action", ["'none'"]}
   ]
 
+  # What the page may do in its sandbox. Never `allow-same-origin`: the page's origin is
+  # then `null`, so a load the browser makes in CORS mode (`fetch`, `XMLHttpRequest`,
+  # `EventSource`, a module script, a web font) is another origin's even for its own file,
+  # and this host answers none readably.
+  @sandbox ["allow-scripts", "allow-popups", "allow-popups-to-escape-sandbox", "allow-downloads"]
+
   @doc "The policy, as the header carries it, framed by `plane` (an origin) or by nothing."
   @spec policy(String.t() | nil) :: String.t()
   def policy(plane) do
     (@loads ++
        [
          {"frame-ancestors", [plane || "'none'"]},
-         {"sandbox",
-          ["allow-scripts", "allow-popups", "allow-popups-to-escape-sandbox", "allow-downloads"]}
+         {"sandbox", @sandbox}
        ])
     |> Enum.map_join("; ", fn {directive, sources} -> Enum.join([directive | sources], " ") end)
   end
@@ -55,8 +60,11 @@ defmodule Troupe.Plane.Web.Artifacts.CSP do
   @doc """
   The sources `directive` allows, as a browser reads the header: a fetch directive the
   policy does not name (`frame-src`, `manifest-src`) falls back to `default-src`.
+  `"sandbox"` is the flags the page runs under.
   """
   @spec sources(String.t()) :: [String.t()]
+  def sources("sandbox"), do: @sandbox
+
   def sources(directive) do
     case List.keyfind(@loads, directive, 0) do
       {^directive, sources} -> sources

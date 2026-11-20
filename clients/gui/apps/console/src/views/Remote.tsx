@@ -259,6 +259,8 @@ export function statusWords(status: AttachStatus, detail: string | null, state: 
   switch (status) {
     case "connecting":
       return "Connecting";
+    case "waiting":
+      return "Waiting for a free place";
     case "reconnecting":
       return `${lost}${detail ? `: ${detail}` : ""}. Trying again`;
     case "failed":

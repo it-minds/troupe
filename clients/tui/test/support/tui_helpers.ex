@@ -2,7 +2,7 @@ defmodule Troupe.TUIHelpers do
   @moduledoc "Starts the TUI on a headless CellSession and reads the screen back as text."
 
   alias ExRatatui.CellSession
-  alias ExRatatui.Event.{Key, Mouse, Resize}
+  alias ExRatatui.Event.{Key, Mouse}
   alias Troupe.UI.TUI
 
   @width 220
@@ -68,10 +68,20 @@ defmodule Troupe.TUIHelpers do
     :ok = ExRatatui.Runtime.inject_event(pid, %Mouse{kind: kind, button: "", x: x, y: y})
   end
 
-  @doc "Resizes the headless screen and tells the app about it."
+  @doc """
+  Resizes the headless screen the way a terminal resize does, and returns once the
+  server has taken the new size: every frame from then on is drawn at it.
+
+  The server keeps the frame size of a cell session apart from the app's state, and
+  only the transport's resize message changes it. An injected `%Resize{}` event
+  reaches the app but leaves the frame at the old size, so pages went on rendering
+  at the width the TUI started with.
+  """
   def resize(pid, session, width, height) do
-    _ = CellSession.resize(session, width, height)
-    :ok = ExRatatui.Runtime.inject_event(pid, %Resize{width: width, height: height})
+    :ok = CellSession.resize(session, width, height)
+    send(pid, {:ex_ratatui_resize, width, height})
+    _ = :sys.get_state(pid)
+    :ok
   end
 
   @doc "Clicks the left mouse button at a screen position."
