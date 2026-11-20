@@ -17,7 +17,7 @@ defmodule Troupe.Plane.ScalingTest do
 
   use Troupe.Plane.DataCase, async: false
 
-  alias Troupe.Plane.{Admin, Drain, FakeCluster, FakePod, Fleet, Harness, Placement, Provision, Sessions}
+  alias Troupe.Plane.{Admin, Drain, FakeCluster, FakePod, Fleet, Harness, Identity, Placement, Provision, Sessions}
   alias Troupe.Plane.Control.{Connections, Listener}
   alias Troupe.Plane.Fleet.{Scaler, SizeClass, Sweeper, Worker}
 
@@ -350,37 +350,24 @@ defmodule Troupe.Plane.ScalingTest do
       assert pods == %{placed => "troupe-w-dev-0", "s-adrift" => nil}
     end
 
-    test "a wake with no pod to put it on asks for one, and the sweep puts it back to sleep",
+    test "a wake with no pod to put it on waits for one, and the scaler asks for it",
          context do
-      {:ok, _} =
-        Sessions.create(%{
-          id: "s-asleep",
-          owner_subject: context.ada.subject,
-          owner_id: context.ada.id,
-          team_id: context.team.id,
-          profile: "dev",
-          state: "dormant"
-        })
+      asleep(context, "s-asleep")
 
-      assert {:error, %{message: "unavailable"}} =
-               Harness.call(
-                 "session.open",
-                 %{"session_id" => "s-asleep", "mode" => "activate"},
-                 context.caller
-               )
+      assert {:ok, %{"state" => "pending", "mode" => "waiting"}} = wake(context, "s-asleep")
 
-      # Left `active` on no pod, so the scaler brings a pod up for it, which is how a wake on
-      # a profile at no pods gets one; and once it has been so past the sweep's minute, it
-      # is asleep again and the next open wakes it onto that pod.
-      assert %{state: "active", worker_id: nil} = Sessions.get("s-asleep")
-      assert %{active: 1, want: 1} = plan(context)
+      # Waiting, not `active` on no pod: the scaler counts it as it counts a create that
+      # waits, so a profile at no pods gets one; and the sweep, which puts to sleep only a
+      # row left `active` on no pod, leaves it waiting however long it has been.
+      assert %{state: "pending", worker_id: nil} = Sessions.get("s-asleep")
+      assert %{active: 0, pending: 1, want: 1} = plan(context)
 
       written_ago("s-asleep", Sweeper.adrift_after_ms() + 1_000)
 
       :ok = Sweeper.run()
 
-      assert %{state: "dormant", worker_id: nil} = Sessions.get("s-asleep")
-      assert %{active: 0, want: 0} = plan(context)
+      assert %{state: "pending"} = Sessions.get("s-asleep")
+      assert %{pending: 1, want: 1} = plan(context)
     end
   end
 
@@ -463,6 +450,131 @@ defmodule Troupe.Plane.ScalingTest do
       # Idempotent: a session that is already dormant is not on a worker, so the next
       # sweep has nothing to find and this does not run every five seconds for ever.
       assert Fleet.lost() == []
+    end
+  end
+
+  # Issue #1149: a wake refused for room left the row `active` on no pod, and the next open
+  # was handed a reader pod's endpoint in mode `activate` for a session nothing ran.
+  describe "a wake on a full profile" do
+    test "waits for a place, as a create does, with what its restore needs on its row",
+         context do
+      full_pod(context)
+      asleep(context, "s-asleep")
+
+      assert {:ok, answer} = wake(context, "s-asleep")
+      assert answer["state"] == "pending"
+      assert answer["mode"] == "waiting"
+      assert answer["epoch"] == 2
+      assert answer["profile"] == "dev"
+      assert answer["retry_after_ms"] > 0
+      refute Map.has_key?(answer, "token")
+      refute Map.has_key?(answer, "endpoint")
+
+      # The epoch the wake took stays on the row, with its team and its profile, and no
+      # prompt: a wake brings none.
+      assert %{state: "pending", epoch: 2, worker_id: nil, pending_prompt: nil} =
+               Sessions.get("s-asleep")
+
+      assert %{active: 1, pending: 1} = plan(context)
+    end
+
+    test "is answered waiting again, with no second row and no second epoch", context do
+      full_pod(context)
+      asleep(context, "s-asleep")
+
+      assert {:ok, %{"state" => "pending"}} = wake(context, "s-asleep")
+      assert {:ok, %{"state" => "pending", "epoch" => 2} = again} = wake(context, "s-asleep")
+      refute Map.has_key?(again, "endpoint")
+
+      assert {:ok, %{"state" => "pending"}} =
+               Harness.call("token.mint", %{"session_id" => "s-asleep"}, context.caller)
+
+      assert %{state: "pending", epoch: 2} = Sessions.get("s-asleep")
+      assert %{active: 1, pending: 1} = plan(context)
+    end
+
+    test "is restored, not created, when the scaler finds it room", context do
+      full_pod(context)
+      asleep(context, "s-asleep")
+      assert {:ok, %{"state" => "pending"}} = wake(context, "s-asleep")
+
+      _second_pod = FakePod.enrol(Listener.port(), "dev-token", "troupe-w-dev-1", capacity: 1)
+      Scaler.tick()
+
+      # A restore: the epoch the wake took and the ledger's cursor, and neither the
+      # workspace source nor a prompt, which only a session's first start carries.
+      assert_receive {:pushed, "session.activate", pushed}, 5_000
+      assert pushed["session_id"] == "s-asleep"
+      assert pushed["epoch"] == 2
+      assert Map.has_key?(pushed, "usage_seq")
+      refute Map.has_key?(pushed, "source")
+      refute Map.has_key?(pushed, "prompt")
+
+      assert %{state: "active", epoch: 2, worker_id: worker_id} = Sessions.get("s-asleep")
+      assert Fleet.get_worker(worker_id).pod_name == "troupe-w-dev-1"
+
+      assert {:ok, %{"token" => token, "state" => "active"}} =
+               Harness.call("token.mint", %{"session_id" => "s-asleep"}, context.caller)
+
+      assert is_binary(token)
+    end
+
+    test "waits behind a create that began to wait before it, however old it is", context do
+      asleep(context, "s-asleep")
+      full_pod(context)
+      {:ok, %{"session_id" => created, "state" => "pending"}} = create(context, prompt: "first")
+      assert {:ok, %{"state" => "pending"}} = wake(context, "s-asleep")
+
+      assert [^created, "s-asleep"] = Enum.map(Sessions.pending_for("dev"), & &1.id)
+    end
+
+    test "is left waiting when the pod it is restored on does not take it", context do
+      full_pod(context)
+      asleep(context, "s-asleep")
+      assert {:ok, %{"state" => "pending"}} = wake(context, "s-asleep")
+
+      refused = %{"code" => -32_603, "message" => "internal_error"}
+
+      _second_pod =
+        FakePod.enrol(Listener.port(), "dev-token", "troupe-w-dev-1",
+          capacity: 1,
+          refuse: %{"session.activate" => refused}
+        )
+
+      Scaler.tick()
+      assert_receive {:pushed, "session.activate", %{"session_id" => "s-asleep"}}, 5_000
+
+      # Its owner was told it is coming, so it waits for the next pass rather than being
+      # put to sleep, and the slot it was given is back.
+      assert eventually(fn -> Sessions.get("s-asleep").state == "pending" end, 5_000)
+      assert %{state: "pending", worker_id: nil, epoch: 2} = Sessions.get("s-asleep")
+      assert %{used: 1} = Placement.inspect_state("dev")
+      assert %{active: 1, pending: 1} = plan(context)
+    end
+
+    test "is told its team has nothing left before it waits, and stays asleep", context do
+      full_pod(context)
+      {:ok, _} = Identity.update_team(context.team, %{budget_micros: 1})
+      asleep(context, "s-asleep")
+
+      assert {:error, error} = wake(context, "s-asleep")
+      assert error.message == "budget_exhausted"
+      assert %{state: "dormant", worker_id: nil} = Sessions.get("s-asleep")
+      assert %{active: 1, pending: 0} = plan(context)
+    end
+
+    test "goes back to sleep at the ceiling and says whose number it is", context do
+      full_pod(context)
+      {:ok, _} = Fleet.put_profile(%{name: "dev", max_sessions: 1})
+      asleep(context, "s-asleep")
+
+      assert {:error, error} = wake(context, "s-asleep")
+      assert error.message == "capacity"
+      assert error.data.max_sessions == 1
+
+      # Nobody will bring room for it, so it does not wait for any.
+      assert %{state: "dormant", worker_id: nil} = Sessions.get("s-asleep")
+      assert %{active: 1, pending: 0} = plan(context)
     end
   end
 
@@ -744,6 +856,32 @@ defmodule Troupe.Plane.ScalingTest do
         5_000 -> flunk("a drain the scaler started did not finish")
       end
     end
+  end
+
+  # A dormant session of ada's on `dev`, as a pod's idle timer leaves it.
+  defp asleep(context, id) do
+    {:ok, session} =
+      Sessions.create(%{
+        id: id,
+        owner_subject: context.ada.subject,
+        owner_id: context.ada.id,
+        team_id: context.team.id,
+        profile: "dev",
+        state: "dormant"
+      })
+
+    session
+  end
+
+  defp wake(context, id),
+    do: Harness.call("session.open", %{"session_id" => id, "mode" => "activate"}, context.caller)
+
+  # One pod of one place, taken by a session of ada's.
+  defp full_pod(context) do
+    {:ok, _} = Fleet.put_profile(%{name: "dev", size_class: "standard"})
+    _pod = FakePod.enrol(Listener.port(), "dev-token", "troupe-w-dev-0", capacity: 1)
+    assert {:ok, %{"token" => _}} = create(context)
+    assert_receive {:pushed, "session.activate", _}, 5_000
   end
 
   # A session `active` on no pod, last written `ago_ms` ago.

@@ -420,6 +420,11 @@ label code {
   color: var(--offline-fg);
   background: var(--offline-bg);
 }
+/* A session waiting for a place: the queued amber a full profile has on the new-session screen. */
+.banner.queued {
+  color: var(--queued-fg);
+  background: var(--queued-bg);
+}
 .banner.error {
   color: var(--error-fg);
   background: var(--error-bg);

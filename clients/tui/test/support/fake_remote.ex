@@ -1039,24 +1039,18 @@ defmodule Troupe.FakeRemote do
   defp dispatch(state, _kind, "session.open", params, _pid) do
     id = params["session_id"]
 
+    waking? = params["mode"] == "activate"
+
     case Map.fetch(state.sessions, id) do
+      # A wake on a profile with no free place waits for one as a create does, until
+      # `place/2`; one already waiting is answered the same.
+      {:ok, %{state: asleep, profile: name}} when waking? and asleep in ["dormant", "pending"] ->
+        if asleep == "pending" or no_place?(state, name),
+          do: {{:ok, waiting_for(id, name)}, put_in(state.sessions[id][:state], "pending")},
+          else: opened(state, id, params)
+
       {:ok, _session} ->
-        state =
-          if params["mode"] == "activate",
-            do: put_in(state.sessions[id][:state], "active"),
-            else: state
-
-        session = state.sessions[id]
-
-        {{:ok,
-          %{
-            "endpoint" => endpoint(state, session.worker),
-            "token" => token(id),
-            "state" => session.state,
-            "profile" => session.profile,
-            "team" => session.team,
-            "title" => session.title
-          }}, state}
+        opened(state, id, params)
 
       :error ->
         {{:error, -32_005, "no such session"}, state}
@@ -2083,9 +2077,34 @@ defmodule Troupe.FakeRemote do
       "epoch" => 1,
       "state" => "pending",
       "mode" => "waiting",
+      "profile" => profile,
       "reason" => "waiting for a free place on #{profile}",
       "retry_after_ms" => 50
     }
+
+  defp no_place?(state, name) do
+    profile = Enum.find(state.profiles, &(&1["name"] == name))
+    profile != nil and elem(room_of(profile, state), 0) == 0
+  end
+
+  defp opened(state, id, params) do
+    state =
+      if params["mode"] == "activate",
+        do: put_in(state.sessions[id][:state], "active"),
+        else: state
+
+    session = state.sessions[id]
+
+    {{:ok,
+      %{
+        "endpoint" => endpoint(state, session.worker),
+        "token" => token(id),
+        "state" => session.state,
+        "profile" => session.profile,
+        "team" => session.team,
+        "title" => session.title
+      }}, state}
+  end
 
   defp granted(state), do: Enum.reject(state.profiles, &(&1["granted"] == false))
 

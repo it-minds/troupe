@@ -740,6 +740,8 @@ export function useSessionView(
           // A relayed session is opened, and its token renewed, with `remote.open`; the
           // socket and everything on it are a pod's.
           ...planeOpener(auth!, sessionId, relayed),
+          // A session waiting for a place is not asked after again once this screen has gone.
+          alive: () => live,
           hooks: {
             onEvent: (e) => {
               if (!live) return;

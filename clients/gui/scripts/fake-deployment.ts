@@ -55,7 +55,14 @@ const plane = await FakePlane.start({
 // stopped, a tool that kept failing (Decision 750), so the list has a failure to show.
 const stopped = plane.seed("alice@example.com", { title: "Weekly licence audit", profile: "dev", origin: { kind: "trigger", trigger: "weekly" } });
 plane.fail(stopped.id, "tool_failures");
-plane.seed("alice@example.com", { title: "Rewrite the placement loop", profile: "dev" });
+const rewrite = plane.seed("alice@example.com", { title: "Rewrite the placement loop", profile: "dev" });
+// WAKE_FULL=1: that session is asleep on a full dev profile, so opening it waits for a
+// place (#1149), and the plane gives it one every twenty seconds it has waited.
+if (process.env["WAKE_FULL"]) {
+  rewrite.state = "dormant";
+  plane.setRoom("dev", { capacity: 1, active: 1 });
+  setInterval(() => plane.placeWaiting(rewrite.id), 20_000).unref?.();
+}
 plane.seed("alice@example.com", { title: "Nightly dependency sweep", profile: "ux", origin: { kind: "trigger", trigger: "nightly" } });
 // The people the identity record names, as SCIM or a sign-in left them (troupe #931).
 plane.names.set("alice@example.com", "Alice Example");
