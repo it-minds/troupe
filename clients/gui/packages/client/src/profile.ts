@@ -343,15 +343,3 @@ export function teamBudgetWords(budgets: ProfileViewLimits["budgets"]): string {
   if (budgets.team === null) return amount;
   return budgets.team_period === "monthly" ? `${amount} a month` : budgets.team_period === "never" ? `${amount} in all` : amount;
 }
-
-/**
- * Whether the tools the page lists are every tool a session there has: none of a person's
- * own may be offered, no GitHub tools come with a repository, and neither a shell nor a web
- * fetch is on to reach past them. A plane that does not say is never whole.
- */
-export function toolsAreWhole(view: Pick<ProfileView, "harness_tools" | "personal_tools" | "github">): boolean {
-  const tools = view.harness_tools;
-  if (!tools || view.personal_tools !== "forbid" || view.github !== null) return false;
-  const on = (name: string): boolean => tools.some((t) => t.name === name && !t.refused);
-  return !on("shell") && !on("web_fetch");
-}

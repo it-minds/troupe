@@ -3,7 +3,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { DaemonClient, TroupeRpcError, accessWords, actsAsWords, budgetWords, capacityWords, limitSentences, missingWords, moneyWords, profileSentence, profileSummary, roomWords, ruleAccessWords, ruleText, teamBudgetWords, toolLines, toolsAreWhole, unpricedWords } from "../src/index.js";
+import { DaemonClient, TroupeRpcError, accessWords, actsAsWords, budgetWords, capacityWords, limitSentences, missingWords, moneyWords, profileSentence, profileSummary, roomWords, ruleAccessWords, ruleText, teamBudgetWords, toolLines, unpricedWords } from "../src/index.js";
 import type { ProfileView } from "../src/index.js";
 import { FakeDaemon } from "./support/daemon.js";
 import { startHarness } from "./support/harness.js";
@@ -128,13 +128,6 @@ test("the rail's limits are a sentence each, said only where the plane states th
   assert.equal(unpricedWords({ calls: 1, tokens: 1, since: "2026-11-01T00:00:00Z" })?.startsWith("1 call and 1 token of this period"), true);
   assert.equal(unpricedWords(null), null);
   assert.equal(unpricedWords(undefined), null);
-
-  const tools = (refused: string[]) => ["read_file", "shell", "web_fetch"].map((name) => ({ name, refused: refused.includes(name) }));
-  assert.equal(toolsAreWhole({ harness_tools: tools(["shell", "web_fetch"]), personal_tools: "forbid", github: null }), true);
-  assert.equal(toolsAreWhole({ harness_tools: tools(["shell"]), personal_tools: "forbid", github: null }), false, "web fetch is on");
-  assert.equal(toolsAreWhole({ harness_tools: tools(["shell", "web_fetch"]), personal_tools: "allow", github: null }), false, "a person's own tools");
-  assert.equal(toolsAreWhole({ harness_tools: tools(["shell", "web_fetch"]), personal_tools: "forbid", github }), false, "GitHub's tools");
-  assert.equal(toolsAreWhole({ personal_tools: "forbid", github: null }), false, "a plane that does not say");
 });
 
 test("the sentence under a profile's name is its bundle's about, else its first primary's line, and a server's tools carry their lines", () => {
