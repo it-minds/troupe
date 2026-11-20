@@ -473,23 +473,29 @@ export function CommandPalette({
     };
   }, [planeLinked]);
 
+  // Each read of the list, counted, so an Enter after a refusal can ask again.
+  const [reads, setReads] = useState(0);
+
   // The list is the harness's, read when the palette opens: agents come and go with the
-  // workspace, and nothing here is worth caching over that.
+  // workspace, and nothing here is worth caching over that. A palette opened before the
+  // session's view has attached waits for it, and reads the list when it comes; a refusal
+  // is said until a read succeeds.
   useEffect(() => {
-    let live = true;
-    const v = view.view;
-    if (!v) {
-      setError("not attached");
-      return;
-    }
-    v.commands()
-      .then((r) => live && setCommands(r.commands.map(inThisApp).filter((c) => c.availability !== "tui")))
-      .catch((e: unknown) => live && setError(errorText(e)));
     input.current?.focus();
+    const v = view.view;
+    if (!v) return;
+    let live = true;
+    v.commands()
+      .then((r) => {
+        if (!live) return;
+        setCommands(r.commands.map(inThisApp).filter((c) => c.availability !== "tui"));
+        setError(null);
+      })
+      .catch((e: unknown) => live && setError(errorText(e)));
     return () => {
       live = false;
     };
-  }, [view.view]);
+  }, [view.view, reads]);
 
   // The agents' facts come a moment after the commands, and the list never waits on them:
   // a row without them is still the agent it is. On this computer they are the
@@ -645,8 +651,11 @@ export function CommandPalette({
         return;
       case "Enter":
         e.preventDefault();
-        if (commands === null && error === null) waiting.current = input.current?.value ?? query;
-        else void run(line.rows[line.at], line.args);
+        if (commands === null) {
+          // Held until the list comes; after a refusal, the Enter also asks for it again.
+          waiting.current = input.current?.value ?? query;
+          if (error !== null && view.view) setReads((n) => n + 1);
+        } else void run(line.rows[line.at], line.args);
         return;
       default:
         return;
@@ -684,9 +693,14 @@ export function CommandPalette({
         />
 
         <div className="rows" role="listbox" aria-label="Commands" ref={list}>
-          {error && <p className="note error">Could not read the commands: {error}</p>}
+          {error && (
+            <p className="note error">
+              Could not read the commands: {error}
+              {!commands && " — Enter tries again"}
+            </p>
+          )}
           {commands && rows.length === 0 && <p className="note">Nothing matches "{word}".</p>}
-          {!commands && !error && <p className="note">Reading the commands…</p>}
+          {!commands && !error && <p className="note">{view.view ? "Reading the commands…" : "Waiting for the session to connect…"}</p>}
 
           {grouped.map((group) => (
             <div key={group.section}>
