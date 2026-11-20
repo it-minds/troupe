@@ -241,7 +241,11 @@ The artifact is served from a host of its own, not the plane's. A page there run
 it cannot read a cookie or call the plane as you, and it may load only its own files. A
 stylesheet, script, font, image or frame from another site, an inline `<script>`, an
 `onclick=` and a `fetch` to another site are all blocked; inline styles and `data:` images
-and fonts are not. The plane reads each page, stylesheet and script as it is published, and
+and fonts are not. A page reads its own files only through `<script src>`, `<link>`, `<img>`
+and the like, never `fetch`: because the page belongs to no site, a `fetch`,
+`XMLHttpRequest`, `EventSource` or `import()`, a module script (`type="module"`) and a web
+font file all fail even for the page's own files. Give a script its data in a `.js` file that
+sets a global, loaded with `<script src>`, and a font as a `data:` address. The plane reads each page, stylesheet and script as it is published, and
 the publish says what the host will block, file by file, so an agent can publish a corrected
 version straight away; it is published all the same. The artifact's page in the console and
 the desktop app then says how many references its version has that are blocked, with the list

@@ -170,6 +170,43 @@ defmodule Troupe.Plane.ArtifactsHostTest do
       end
     end
 
+    # A page's `fetch` of its own file comes from origin `null` without the viewer's cookie
+    # (measured in Chromium): it is sent to sign in, and nothing here ever answers a `null`
+    # origin readably, with or without the cookie, so no sandboxed page anywhere reads a
+    # viewer's artifact with their cookie.
+    test "answers no read from a page's origin, its own files included", context do
+      {cookie, _set, _to} = signed_in(context, context.ada)
+      own = context.host <> "/a/#{context.artifact["id"]}/probe.js"
+
+      as_the_page = Req.get!(own, headers: [{"origin", "null"}], redirect: false, retry: false)
+      assert as_the_page.status == 302
+      assert header(as_the_page, "access-control-allow-origin") == nil
+
+      for origin <- ["null", "https://plane.example.test", "https://elsewhere.example.test"] do
+        response =
+          Req.get!(own,
+            headers: [{"origin", origin}, {"cookie", "troupe_artifact_viewer=#{cookie}"}],
+            redirect: false,
+            retry: false
+          )
+
+        assert response.status == 200
+        assert header(response, "access-control-allow-origin") == nil
+        assert header(response, "access-control-allow-credentials") == nil
+      end
+
+      preflight =
+        Req.request!(
+          method: :options,
+          url: own,
+          headers: [{"origin", "null"}, {"access-control-request-method", "GET"}],
+          redirect: false,
+          retry: false
+        )
+
+      assert header(preflight, "access-control-allow-origin") == nil
+    end
+
     test "with no plane address, nothing may frame it" do
       Application.delete_env(:troupe_plane, :base_url)
 

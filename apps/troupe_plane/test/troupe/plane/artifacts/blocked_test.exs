@@ -104,7 +104,7 @@ defmodule Troupe.Plane.Artifacts.BlockedTest do
              ]
     end
 
-    test "a script's literal connections to another site, and not its own" do
+    test "a script's literal connections to another site, and its reads of its own" do
       js = """
       fetch("data.json");
       fetch('https://api.example.test/v1/items');
@@ -114,12 +114,14 @@ defmodule Troupe.Plane.Artifacts.BlockedTest do
       """
 
       assert [
+               %{"kind" => "read", "reference" => "data.json", "line" => 1},
                %{
                  "kind" => "connect",
                  "reference" => "https://api.example.test/v1/items",
                  "line" => 2
                },
                %{"kind" => "connect", "reference" => "wss://live.example.test/feed", "line" => 3},
+               %{"kind" => "read", "reference" => "new XMLHttpRequest", "line" => 4},
                %{"kind" => "connect", "reference" => "https://api.example.test/old", "line" => 4},
                %{
                  "kind" => "script",
@@ -127,6 +129,65 @@ defmodule Troupe.Plane.Artifacts.BlockedTest do
                  "line" => 5
                }
              ] = Blocked.scan("app.js", "text/javascript", js)
+    end
+
+    # Measured in Chromium against this host: the page's origin is `null`, so each of these
+    # goes in CORS mode without the viewer's cookie and is refused, its own file included.
+    test "every fetch, XMLHttpRequest, EventSource and import() is a read the sandbox refuses" do
+      js = """
+      fetch(url).then((r) => r.json());
+      fetch(`./rows.csv`, { credentials: "include" });
+      const x = new XMLHttpRequest();
+      const feed = new EventSource("feed");
+      import("./chart.mjs");
+      log("fetch() and import() failed");
+      """
+
+      assert [
+               %{"file" => "js/app.js", "kind" => "read", "reference" => "fetch(url)", "line" => 1},
+               %{"kind" => "read", "reference" => "./rows.csv", "line" => 2},
+               %{"kind" => "read", "reference" => "new XMLHttpRequest", "line" => 3},
+               %{"kind" => "read", "reference" => "feed", "line" => 4},
+               %{"kind" => "read", "reference" => "./chart.mjs", "line" => 5}
+             ] = Blocked.scan("js/app.js", "text/javascript", js)
+
+      page = ~s[<html><body>\n<script>\n  fetch("data.json")\n</script></body></html>]
+
+      assert [%{"kind" => "inline_script"}, %{"kind" => "read", "line" => 3}] =
+               Blocked.scan("index.html", "text/html", page)
+    end
+
+    test "a module script, a web font and a crossorigin load of its own files are reads" do
+      page = """
+      <html><head>
+        <link rel="modulepreload" href="lib.mjs">
+        <link rel="preload" as="font" href="fonts/a.woff2">
+        <style>@font-face { font-family: a; src: url(fonts/a.woff2) }</style>
+      </head><body>
+        <img src="chart.png" crossorigin>
+        <script type="module" src="app.mjs"></script>
+      </body></html>
+      """
+
+      assert kinds(Blocked.scan("index.html", "text/html", page)) == [
+               {"read", "lib.mjs"},
+               {"read", "fonts/a.woff2"},
+               {"read", "fonts/a.woff2"},
+               {"read", "chart.png"},
+               {"read", "app.mjs"}
+             ]
+
+      assert kinds(Blocked.scan("a.css", "text/css", "@font-face { src: url('b.ttf') }")) ==
+               [{"read", "b.ttf"}]
+
+      # The same from another site is what its kind says.
+      assert kinds(
+               Blocked.scan(
+                 "index.html",
+                 "text/html",
+                 ~s(<script type="module" src="https://cdn.example.test/x.mjs"></script>)
+               )
+             ) == [{"script", "https://cdn.example.test/x.mjs"}]
     end
 
     test "other files are not read" do
@@ -223,13 +284,19 @@ defmodule Troupe.Plane.Artifacts.BlockedTest do
         sources = header_sources(Blocked.directive(kind))
         assert CSP.sources(Blocked.directive(kind)) == sources
 
-        if kind in ["inline_script", "event_handler"],
-          do: refute("'unsafe-inline'" in sources),
-          else:
+        cond do
+          kind in ["inline_script", "event_handler"] ->
+            refute "'unsafe-inline'" in sources
+
+          kind == "read" ->
+            refute "allow-same-origin" in sources
+
+          true ->
             refute(
               Enum.any?(sources, &(&1 in ["*", "https:", "http:"])),
               "#{kind} from another site"
             )
+        end
       end
 
       # What the scan lets through: inline style and data: images and fonts.

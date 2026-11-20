@@ -381,6 +381,28 @@ defmodule Troupe.Tools.PublishArtifactTest do
              "In a document, an image from another site (`![](https://...)`) is shown as a sentence naming that site"
   end
 
+  test "says a page reads its own files only through what loads them, never fetch", context do
+    refute PublishArtifact.description() =~ "Nothing outside the artifact can be fetched"
+
+    assert PublishArtifact.description() =~
+             "A page reads its own files only through `<script src>`, `<link>`, `<img>` and the like, never `fetch`, `XMLHttpRequest`, `EventSource` or `import()`, which fail even for its own files"
+
+    assert PublishArtifact.description() =~ "a web font only as a `data:` address"
+
+    blocked = [%{"file" => "app.js", "kind" => "read", "reference" => "data.json", "line" => 4}]
+    Troupe.Artifacts.install(fn params, _ctx -> {:ok, Map.put(published(params), "blocked", blocked)} end)
+    File.write!(Path.join(context.workspace, "index.html"), "<h1>Weekly</h1>")
+    %{session: session} = start_session(context, steps: [])
+    args = %{"title" => "Weekly", "kind" => "html", "visibility" => "private", "files" => ["index.html"]}
+
+    assert {:ok, said, _} = PublishArtifact.run(args, ctx(session, context))
+
+    assert said =~
+             "app.js: data.json (a read by fetch, XMLHttpRequest, EventSource, import(), a module or a web font, which fails here even for the page's own file, line 4)"
+
+    assert said =~ "An artifact may load only its own files, and only through `<script src>`"
+  end
+
   describe "whom it is for is the person's to say" do
     defp publishing(context, args, opts \\ []) do
       test = self()
