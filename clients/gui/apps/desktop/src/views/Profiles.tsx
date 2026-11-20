@@ -11,9 +11,9 @@
 // The page answers "can this profile do my job?" first: a head, the name large over the
 // sentence the bundle's author wrote for it, or else the primary agent's; a rail with Start
 // first, then the room as a meter, the facts at a glance, who may use it and the limits; then
-// what it can do, a card per system with its work as lines, what it can't as one list under
-// its promise, how it behaves (guidance, not limits), and the configuration's own tables,
-// hosts and tool names among them, folded away under the hood. On a narrow window the rail
+// what it can do, a card per system with its work as lines, how it behaves (guidance, not
+// limits), and the configuration's own tables, the refusals, the withheld servers, the hosts
+// and the tool names among them, folded away under the hood. On a narrow window the rail
 // comes first; a table scrolls inside itself rather than the page sideways.
 
 import { useEffect, useState } from "react";
@@ -41,13 +41,12 @@ import {
   ruleText,
   teamBudgetWords,
   toolLines,
-  toolsAreWhole,
   whoseWords,
 } from "@troupe/client";
 import type { AuthSession, ProfileView, ProfileViewAgent, ProfileViewServer, ProfileViewSkill } from "@troupe/client";
 import { useProfiles } from "../hooks";
 import { Loading, Table } from "./bits";
-import { Eye } from "./brand";
+import { Mask } from "./brand";
 import { ProseFrame } from "./Frames";
 
 /** A profile's answer, or why there is none: one the person may not use is `not_found`. */
@@ -119,7 +118,7 @@ function byMode(agents: readonly ProfileViewAgent[]): ProfileViewAgent[] {
   return [...agents].sort((a, b) => rank(a) - rank(b) || a.mode.localeCompare(b.mode));
 }
 
-/** One profile: a head, the rail, what it can and can't do, how it behaves, and under the hood. */
+/** One profile: a head, the rail, what it can do, how it behaves, and under the hood. */
 export function ProfilePage({
   auth,
   name,
@@ -160,7 +159,6 @@ export function ProfilePage({
             <Rail view={read.view} onStart={onStart} />
             <div className="profile-main">
               <CanDo view={read.view} />
-              <CannotDo view={read.view} />
               <Behaves view={read.view} />
               <UnderTheHood view={read.view} />
             </div>
@@ -273,8 +271,14 @@ function CanDo({ view }: { view: ProfileView }): JSX.Element {
       <ul className="profile-cards">
         {offered.map((s) => (
           <li key={s.name} className="profile-card">
-            <h4 className="mono">{s.name}</h4>
-            {s.about?.summary && <p className="profile-subtitle">{s.about.summary}</p>}
+            <div className="profile-card-head">
+              <div className="profile-card-name">
+                <h4 className="mono">{s.name}</h4>
+                <span className={`badge ${s.access === "yours" ? "person" : "machine"}`}>{badgeWords(s.access)}</span>
+                {s.permission === "ask" && <span className="badge person">asks first</span>}
+              </div>
+              {s.about?.summary && <p className="profile-subtitle">{s.about.summary}</p>}
+            </div>
             <ServerTools server={s} />
             <p className="profile-card-foot">
               {accessWords(s.access)} · {s.permission === "ask" ? "asks first" : askWords(s.permission)}
@@ -285,6 +289,15 @@ function CanDo({ view }: { view: ProfileView }): JSX.Element {
       </ul>
     </section>
   );
+}
+
+/**
+ * Whose credential a server is called with, short enough for a badge beside its name; the
+ * card's foot says it whole. The person's own is drawn in the accent, the profile's in the
+ * machine's colour.
+ */
+function badgeWords(access: string): string {
+  return access === "yours" ? "as you" : access === "profile" ? "as the profile" : access === "system" ? "as its own identity" : access;
 }
 
 /**
@@ -314,16 +327,22 @@ function ServerTools({ server }: { server: ProfileViewServer }): JSX.Element {
 }
 
 /**
- * Troupe's own card, the same shape: a line per harness tool, and the ones a rule refuses
- * whole struck through under "Turned off here". A plane before the list names only what
- * the rules turn off, and says the others are on.
+ * Troupe's own card, the same shape and set apart, since every profile has it: a line per
+ * harness tool, and the ones a rule refuses whole struck through under "Turned off here". A
+ * plane before the list names only what the rules turn off, and says the others are on.
  */
 function TroupeCard({ view }: { view: ProfileView }): JSX.Element {
   const tools = view.harness_tools;
   const off = tools ? tools.filter((t) => t.refused).map((t) => t.name) : view.tools.rules.filter((r) => r.access === "deny" && r.pattern === null).map((r) => r.tool);
   return (
     <li className="profile-card troupe">
-      <h4>Troupe</h4>
+      <div className="profile-card-head">
+        <div className="profile-card-name">
+          <Mask size={20} />
+          <h4>Troupe</h4>
+          <span className="badge core">core</span>
+        </div>
+      </div>
       {tools && (
         <ul className="tool-lines">
           {tools
@@ -340,7 +359,7 @@ function TroupeCard({ view }: { view: ProfileView }): JSX.Element {
           <p className="micro">Turned off here</p>
           <ul className="tool-lines struck">
             {off.map((name, i) => (
-              <li key={`${name}-${i}`}>
+              <li key={`${name}-${i}`} className="off">
                 <s className="mono">{name}</s>
                 <span className="visually-hidden"> (turned off here)</span>
               </li>
@@ -350,56 +369,6 @@ function TroupeCard({ view }: { view: ProfileView }): JSX.Element {
       )}
       {!tools && <p className="note">{off.length > 0 ? "The harness's other tools are on." : "The harness's own tools are on."}</p>}
     </li>
-  );
-}
-
-function CannotDo({ view }: { view: ProfileView }): JSX.Element {
-  const refused = view.tools.rules.filter((r) => r.access === "deny");
-  const withheld = view.tools.mcp.filter((s) => !s.offered);
-  return (
-    <section className="group cannot-do">
-      <h3>What it can't do</h3>
-      <div className="banner promise">
-        <Eye status="denied" />
-        <p>{toolsAreWhole(view) ? "Nothing but the tools above: no tool of your own, no shell, no web fetch, and nothing outside the hosts listed." : "The tools below, and nothing outside the hosts listed."}</p>
-      </div>
-      <ul className="profile-cant">
-        {refused.map((r, i) => (
-          <li key={`rule-${ruleText(r)}-${i}`}>
-            <Eye status="denied" />
-            <span>
-              <span className="mono">{ruleText(r)}</span>
-              <span className="muted"> · refused by {whoseWords(r.from)}</span>
-            </span>
-          </li>
-        ))}
-        {withheld.map((s) => (
-          <li key={`server-${s.name}`}>
-            <Eye status="denied" />
-            <span>
-              <span className="mono">{s.name}</span>
-              <span className="muted"> · not offered: {missingWords(s.why)}</span>
-            </span>
-          </li>
-        ))}
-        <li className="reach">
-          <Eye status="denied" />
-          {view.reach.length === 0 ? (
-            <span>Reaches no host outside the plane.</span>
-          ) : (
-            <span>
-              Reaches only:{" "}
-              {view.reach.map((h, i) => (
-                <span key={h}>
-                  {i > 0 && ", "}
-                  <span className="mono">{h}</span>
-                </span>
-              ))}
-            </span>
-          )}
-        </li>
-      </ul>
-    </section>
   );
 }
 
@@ -420,13 +389,13 @@ function Skills({ view }: { view: ProfileView }): JSX.Element {
             <li key={s.name}>
               {s.body === null ? (
                 <p>
-                  <span className="mono">{s.name}</span>
+                  <span className="mono skill-name">{s.name}</span>
                   {s.description && <span className="muted"> · {s.description}</span>}
                 </p>
               ) : (
                 <details className="skill">
                   <summary>
-                    <span className="mono">{s.name}</span>
+                    <span className="mono skill-name">{s.name}</span>
                     {s.description && <span className="muted"> · {s.description}</span>}
                   </summary>
                   <ProseFrame text={s.body} full />
@@ -446,13 +415,13 @@ function Behaves({ view }: { view: ProfileView }): JSX.Element {
   return (
     <section className="group behaves">
       <h3>How it behaves</h3>
-      <p className="copy">Guidance, not limits: an agent follows these; the sections above are what it is allowed.</p>
+      <p className="copy">Guidance, not limits: an agent follows these; what it can do, above, is what it is allowed.</p>
       <div className="part agents">
         <h4>Agents</h4>
         {view.agents.length === 0 ? (
           <p className="note">No agent: a session cannot start on it.</p>
         ) : (
-          <ul className="plain">
+          <ul className="plain ruled">
             {byMode(view.agents).map((a) => (
               <li key={a.name}>
                 <span className="mono">{a.name}</span>
@@ -466,7 +435,7 @@ function Behaves({ view }: { view: ProfileView }): JSX.Element {
       {functions.length > 0 && (
         <div className="part functions">
           <h4>{FUNCTIONS_HEADING}</h4>
-          <ul className="plain">
+          <ul className="plain ruled">
             {functions.map((a) => (
               <li key={a.name}>
                 <span className="mono">{a.name}</span>
@@ -540,6 +509,23 @@ function UnderTheHood({ view }: { view: ProfileView }): JSX.Element {
               </tr>
             ))}
           </Table>
+        )}
+      </div>
+
+      <div className="part reach">
+        <h4>Reach</h4>
+        {view.reach.length === 0 ? (
+          <p>Reaches no host outside the plane.</p>
+        ) : (
+          <p>
+            Reaches only:{" "}
+            {view.reach.map((h, i) => (
+              <span key={h}>
+                {i > 0 && ", "}
+                <span className="mono">{h}</span>
+              </span>
+            ))}
+          </p>
         )}
       </div>
 

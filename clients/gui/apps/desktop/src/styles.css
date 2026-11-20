@@ -6004,7 +6004,10 @@ pre.instruction {
 .profile-view .table tr.muted td {
   color: var(--text-muted);
 }
-/* A skill a line, its name and what it does; one with a SKILL.md opens to it in place. */
+/* A skill a box, its name and what it does; one with a SKILL.md opens to it in place. The
+   box is dashed until it is open, then ruled in the hue its name is in. A skill's name is in
+   the third hue, violet, the one the connect screen gives what an agent follows: it is a
+   name, never a state, and no session's state is drawn on this page to be mistaken for it. */
 .profile-view ul.skill-list {
   list-style: none;
   padding: 0;
@@ -6013,11 +6016,56 @@ pre.instruction {
 .profile-view ul.skill-list > li + li {
   margin-top: var(--space-2);
 }
+.profile-view ul.skill-list > li > p,
+.profile-view details.skill {
+  border: var(--bw-hairline) dashed var(--border-strong);
+  background: var(--bg-canvas);
+}
+.profile-view ul.skill-list > li > p,
+.profile-view details.skill > summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-1) var(--space-3);
+  margin: 0;
+  padding: var(--space-3) var(--space-4);
+}
 .profile-view details.skill > summary {
   cursor: pointer;
 }
+.profile-view details.skill[open] {
+  border-style: solid;
+  border-color: var(--private-bd);
+  background: var(--bg-panel);
+}
+.profile-view .skill-name {
+  font: var(--t-code);
+  color: var(--private-fg);
+}
+/* Open, its SKILL.md is on the box's own surface under a rule, its headings in the ink. */
 .profile-view details.skill[open] > .frame {
-  margin-top: var(--space-2);
+  --frame-accent: var(--text-primary);
+  width: auto;
+  margin: 0;
+  padding: var(--space-2) var(--space-4) var(--space-4);
+  border: 0;
+  border-top: var(--bw-hairline) solid var(--border-hairline);
+  background: none;
+}
+.profile-view details.skill > p.note {
+  margin: 0;
+  padding: 0 var(--space-4) var(--space-3);
+}
+/* The SKILL.md's marks as the design draws them: the list markers in the name's hue, a
+   quote on the accent's edge. */
+.profile-view details.skill .md li::marker {
+  color: var(--private-fg);
+}
+.profile-view details.skill .md blockquote {
+  padding: var(--space-2) var(--space-3);
+  border-left: var(--bw-marker) solid var(--accent);
+  background: var(--bg-raised);
+  color: var(--text-body);
 }
 .profile-link {
   margin-left: var(--space-2);
@@ -6061,30 +6109,42 @@ pre.instruction {
   min-width: 0;
   overflow-wrap: anywhere;
 }
-/* Start is the rail's first and largest thing: the one filled button on the screen. */
+/* Start is the rail's first and largest thing: the one filled button on the screen, the
+   machine's cyan on its offset block, full width. */
 .profile-rail > button.profile-start {
+  display: block;
   width: 100%;
   min-height: 46px;
+  font-size: 15px;
+  font-weight: 800;
   white-space: normal;
 }
 .profile-rail > p.note {
   margin: 0;
 }
-/* A panel of the rail: a small label and what is under it, ruled like a card. */
+/* A panel of the rail: the panel's surface under a hairline, its own small mono label, and
+   what is under it. */
 .profile-panel {
   border: var(--bw-hairline) solid var(--border-hairline);
-  background: var(--bg-raised);
-  padding: var(--space-3) var(--space-4);
+  background: var(--bg-panel);
+  padding: var(--space-4);
   min-width: 0;
   font: var(--t-ui-small);
   color: var(--text-body);
 }
 .profile-panel > h4 {
-  margin: 0 0 var(--space-2);
+  margin: 0 0 var(--space-3);
   font: var(--t-micro);
   letter-spacing: var(--tracking-micro);
-  color: var(--text-label);
+  color: var(--text-secondary);
   text-transform: uppercase;
+}
+.profile-panel .facts.wide > dt {
+  font: var(--t-micro);
+  letter-spacing: var(--tracking-micro);
+  text-transform: uppercase;
+  color: var(--text-label);
+  padding-top: 2px;
 }
 .profile-panel > p {
   margin: 0;
@@ -6104,7 +6164,7 @@ pre.instruction {
   min-width: 0;
   height: 10px;
   border: var(--bw-hairline) solid var(--border-hairline);
-  background: var(--bg-sunken);
+  background: var(--bg-raised);
 }
 .profile-meter > span.on {
   border-color: var(--running-solid);
@@ -6137,49 +6197,21 @@ pre.instruction {
 .profile-view ul.plain > li + li {
   margin-top: var(--space-2);
 }
-.profile-view .group > .banner {
-  margin-bottom: var(--space-3);
-}
-/* What it can't do: the promise first, its eye and its sentence, then one list of rows,
-   each with the refused mark: the rules, the withheld servers and the hosts it reaches. */
-.profile-view .group > .banner.promise {
-  margin: 0 var(--space-6) var(--space-3);
+/* The agents and the harness's jobs: rows in one panel, a hairline between them, each
+   name in the code face. */
+.profile-view ul.plain.ruled {
   border: var(--bw-hairline) solid var(--border-hairline);
-  border-left: var(--bw-marker) solid var(--denied-fg);
-  background: var(--bg-raised);
-  color: var(--denied-fg);
-  flex-wrap: nowrap;
-  align-items: center;
+  background: var(--bg-panel);
+}
+.profile-view ul.plain.ruled > li {
   padding: var(--space-3) var(--space-4);
 }
-.profile-view .banner.promise > p {
-  min-width: 0;
-}
-.profile-cant {
-  list-style: none;
-  margin: 0 var(--space-6) var(--space-4);
-  padding: 0;
-  border: var(--bw-hairline) solid var(--border-hairline);
-  background: var(--bg-raised);
-}
-.profile-cant > li {
-  display: flex;
-  gap: var(--space-3);
-  align-items: baseline;
-  padding: var(--space-3) var(--space-4);
-  min-width: 0;
-  overflow-wrap: anywhere;
-}
-.profile-cant > li + li {
+.profile-view ul.plain.ruled > li + li {
+  margin-top: 0;
   border-top: var(--bw-hairline) solid var(--border-hairline);
 }
-.profile-cant > li > .eye {
-  flex: 0 0 auto;
-  align-self: center;
-  color: var(--denied-fg);
-}
-.profile-cant > li > span {
-  min-width: 0;
+.profile-view ul.plain.ruled > li > .mono:first-child {
+  color: var(--text-primary);
 }
 /* A card per server the grant offers, and Troupe's own beside them. */
 .profile-cards {
@@ -6190,30 +6222,69 @@ pre.instruction {
   grid-template-columns: repeat(auto-fill, minmax(min(100%, 15rem), 1fr));
   gap: var(--space-3);
 }
-/* A card is a system at work: its name, the author's subtitle, its tools as lines, and
-   at its foot whose credential it acts with and whether a call asks first. */
+/* A card is a system at work, on the panel's surface: a head with its name in the code face,
+   its badges and the author's subtitle over a rule; its tools as lines, each after a bullet;
+   and at its foot whose credential it acts with and whether a call asks first. */
 .profile-card {
   display: flex;
   flex-direction: column;
   border: var(--bw-hairline) solid var(--border-hairline);
-  background: var(--bg-raised);
-  padding: var(--space-3) var(--space-4) 0;
+  background: var(--bg-panel);
+  padding: 0 var(--space-4);
   min-width: 0;
   overflow-wrap: anywhere;
 }
-.profile-card > h4 {
+.profile-card-head {
+  margin: 0 calc(-1 * var(--space-4));
+  padding: var(--space-4) var(--space-4) var(--space-3);
+  border-bottom: var(--bw-hairline) solid var(--border-hairline);
+}
+.profile-card-name {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-1) var(--space-2);
+  min-width: 0;
+}
+.profile-card-name > .mask {
+  align-self: center;
+  flex: 0 0 auto;
+}
+.profile-card-name > h4 {
   margin: 0;
+  min-width: 0;
   font: var(--t-subheading);
+  font-weight: 900;
   letter-spacing: 0;
   text-transform: none;
   color: var(--text-primary);
 }
 /* A server's name is literal: the code face, at the card's heading size. */
-.profile-card > h4.mono {
+.profile-card-name > h4.mono {
   font-family: var(--font-mono);
   font-weight: 500;
 }
-.profile-card > p.profile-subtitle {
+/* A badge beside the name: a small mono word in a ruled box. What is the machine's own (the
+   profile's credential) takes the machine's cyan line; what involves the person (their own
+   credential, a call that asks them first) and Troupe's own "core" take the accent's. */
+.profile-card .badge {
+  font: var(--t-micro);
+  letter-spacing: var(--tracking-micro);
+  padding: 2px 7px;
+  border: var(--bw-hairline) solid var(--border-strong);
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+.profile-card .badge.machine {
+  border-color: var(--running-bd);
+  color: var(--running-fg);
+}
+.profile-card .badge.person,
+.profile-card .badge.core {
+  border-color: var(--accent);
+  color: var(--link);
+}
+.profile-card-head > p.profile-subtitle {
   margin: var(--space-1) 0 0;
   font: var(--t-ui-small);
   color: var(--text-secondary);
@@ -6226,8 +6297,8 @@ pre.instruction {
 .profile-card > p.note {
   margin: 0 0 var(--space-3);
 }
-.profile-card > h4 + p.note {
-  margin-top: var(--space-2);
+.profile-card-head + p.note {
+  margin-top: var(--space-3);
 }
 .profile-card ul.tool-lines {
   list-style: none;
@@ -6239,9 +6310,32 @@ pre.instruction {
 .profile-card > p.micro + ul.tool-lines {
   margin-top: 0;
 }
-.profile-card > h4 + p.micro,
-.profile-card > p.profile-subtitle + p.micro {
+.profile-card-head + p.micro {
   margin-top: var(--space-3);
+}
+/* Every line has its bullet: a filled dot in the machine's cyan, since a tool is the machine
+   at work; one turned off here a hollow square in the refused clay, the line struck in it. */
+.profile-card ul.tool-lines > li {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
+  min-width: 0;
+}
+.profile-card ul.tool-lines > li::before {
+  content: "";
+  flex: 0 0 auto;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--running-solid);
+  transform: translateY(-1px);
+}
+.profile-card ul.tool-lines > li.off::before {
+  width: 6px;
+  height: 6px;
+  border-radius: 0;
+  border: var(--bw-hairline) solid var(--denied-fg);
+  background: none;
 }
 .profile-card ul.tool-lines > li + li {
   margin-top: var(--space-1);
@@ -6252,17 +6346,20 @@ pre.instruction {
 .profile-card ul.tool-lines > li.every {
   color: var(--text-secondary);
 }
-/* An author's line carries its tool's name in a small tail, shown on hover or focus. */
+/* An author's line carries its tool's name in a small tail at its end, shown on hover or focus. */
 .profile-card ul.tool-lines .tool-name {
+  display: none;
+  margin-left: auto;
   font: var(--t-micro);
   color: var(--text-secondary);
-  opacity: 0;
+  white-space: nowrap;
 }
 .profile-card ul.tool-lines > li.authored:hover .tool-name,
 .profile-card ul.tool-lines > li.authored:focus-visible .tool-name {
-  opacity: 1;
+  display: inline;
 }
 .profile-card ul.tool-lines.struck s {
+  min-width: 0;
   color: var(--text-secondary);
   text-decoration-color: var(--denied-fg);
 }
@@ -6273,6 +6370,15 @@ pre.instruction {
   font: var(--t-micro);
   color: var(--text-secondary);
 }
+/* Troupe's own card is set apart, since every profile has it: the accent's border and the
+   offset block the screen's raised things stand on. */
+.profile-card.troupe {
+  border-color: var(--accent);
+  box-shadow: 4px 4px 0 var(--bg-shadow);
+}
+.profile-card.troupe > ul.tool-lines:last-child {
+  margin-bottom: var(--space-4);
+}
 /* The rail's limits, its last panel: a sentence each. */
 .profile-limits ul.plain > li + li {
   margin-top: var(--space-1);
@@ -6280,14 +6386,38 @@ pre.instruction {
 .profile-limits > p.note {
   margin: var(--space-2) 0 0;
 }
-/* Under the hood: the configuration's tables, folded; its summary reads as a section label. */
+/* Under the hood: the configuration's tables, folded in one panel on the cards' surface; its
+   summary is the panel's title, after the mark that says whether it is open. */
+details.under-hood {
+  margin: 0 var(--space-6) var(--space-5);
+  border: var(--bw-hairline) solid var(--border-hairline);
+  background: var(--bg-panel);
+}
 details.under-hood > summary {
-  padding: var(--space-4) var(--space-6) var(--space-3);
-  font: var(--t-screen);
-  letter-spacing: var(--tracking-screen);
-  text-transform: uppercase;
-  color: var(--running-fg);
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+  min-height: 44px;
+  font: var(--t-ui);
+  font-weight: 800;
+  color: var(--text-primary);
+  list-style: none;
   cursor: pointer;
+}
+details.under-hood > summary::-webkit-details-marker {
+  display: none;
+}
+details.under-hood > summary::before {
+  content: "\25B8";
+  font-weight: 400;
+  color: var(--text-secondary);
+}
+details.under-hood[open] > summary::before {
+  content: "\25BE";
+}
+.profile-view details.under-hood > .part {
+  margin: 0 var(--space-4) var(--space-4);
 }
 @media (max-width: 760px) {
   .profile-layout {
@@ -6304,15 +6434,14 @@ details.under-hood > summary {
     grid-row: 2;
   }
   .profile-view .group > .part,
-  .profile-view .group > .banner.promise,
-  .profile-cant,
-  .profile-cards {
+  .profile-cards,
+  details.under-hood {
     margin-left: var(--space-4);
     margin-right: var(--space-4);
   }
-  details.under-hood > summary {
-    padding-left: var(--space-4);
-    padding-right: var(--space-4);
+  .profile-view details.under-hood > .part {
+    margin-left: var(--space-3);
+    margin-right: var(--space-3);
   }
 }
 
