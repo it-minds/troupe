@@ -205,13 +205,17 @@ defmodule Troupe.Plane.Sessions do
   Oldest first is the whole of the fairness here: a session that has been waiting two
   minutes should be placed before one created a moment ago, and a controller that took
   them in any other order would make the wait unbounded for somebody.
+
+  Oldest by when it began to wait, which is `last_active_at`: set when a session is
+  created and again when it is woken. By creation alone, a session made last month and
+  woken now would be placed before one created a minute ago that has waited since.
   """
   @spec pending_for(String.t(), non_neg_integer()) :: [Session.t()]
   def pending_for(profile, limit \\ 50) do
     Repo.all(
       from(s in Session,
         where: s.profile == ^profile and s.state == "pending",
-        order_by: [asc: s.inserted_at],
+        order_by: [asc_nulls_first: s.last_active_at, asc: s.inserted_at],
         limit: ^limit
       )
     )

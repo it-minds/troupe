@@ -583,6 +583,9 @@ defmodule Troupe.Remote.Worker do
   def handle_info(:connect, %{socket: nil} = state), do: {:noreply, connect(state)}
   def handle_info(:connect, state), do: {:noreply, state}
 
+  def handle_info(:placed?, %{session_state: :pending} = state), do: {:noreply, placed?(state)}
+  def handle_info(:placed?, state), do: {:noreply, state}
+
   def handle_info(:flush_deltas, state), do: {:noreply, flush_deltas(%{state | flush_ref: nil})}
 
   # What a task found out for this socket; one for an earlier socket is dropped.
@@ -1479,6 +1482,20 @@ defmodule Troupe.Remote.Worker do
            session_id: state.session_id,
            mode: to_string(mode)
          }) do
+      # Woken on a full profile, it waits for a place as a new session does: no endpoint
+      # yet, and the plane is asked again as `retry_after_ms` says until it has one. What
+      # was sent is not held, since the plane keeps no prompt for a wake; the caller is
+      # told to send it again once the session is awake, which a note says.
+      {:ok, %{"state" => "pending"} = result} ->
+        state = %{state | session_state: :pending, error: nil}
+        publish_status(state)
+        ms = max(result["retry_after_ms"] || 2_000, 250)
+        Process.send_after(self(), :placed?, ms)
+
+        {:error,
+         "#{waiting_line(result)}: the session wakes by itself when one frees; send this again then",
+         state}
+
       {:ok, %{} = result} ->
         if is_binary(result["token"]),
           do: Tokens.put_session_token(state.session_id, result["token"], name: state.tokens)
@@ -1498,6 +1515,35 @@ defmodule Troupe.Remote.Worker do
 
       {:error, reason} ->
         {:error, reason, state}
+    end
+  end
+
+  defp waiting_line(%{"profile" => profile}) when is_binary(profile),
+    do: "waiting for a free place in #{profile}"
+
+  defp waiting_line(_answer), do: "waiting for a free place"
+
+  # Asked again while the session waits for a place. Placed, it is connected and a note
+  # says it is awake; still waiting, `reopen/2` has scheduled the next ask; a plane that
+  # does not answer is asked again; refused, the note says why and nothing more is asked.
+  defp placed?(state) do
+    case reopen(state, :activate) do
+      {:ok, state} ->
+        publish_note(state, "the session has its place and is awake; send what you wrote again")
+        state
+
+      {:error, waiting, state} when is_binary(waiting) ->
+        state
+
+      {:error, %{code: _code} = refused, state} ->
+        state = %{state | session_state: :dormant}
+        publish_status(state)
+        publish_note(state, "the session did not wake: #{RPC.describe(refused)}")
+        state
+
+      {:error, _unreachable, state} ->
+        Process.send_after(self(), :placed?, 2_000)
+        state
     end
   end
 

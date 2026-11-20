@@ -254,8 +254,35 @@ defmodule Troupe.Plane.Harness do
   slice, and the answer is `{:error, :no_grant}` or `{:error, :no_team}`: not a refusal
   for want of room, so the scaler goes on to the next. A session erased since the scaler
   read it is `{:error, :erased}` and stays erased, whenever the erasure landed.
+
+  A session that waits because it was woken with no room, not created, has run before:
+  its epoch was bumped by the wake, so it is past its first. It is restored, as a wake
+  with room restores it, on the slice it reserved before it began to wait; a pod that does
+  not take it leaves it waiting, as it leaves a create.
   """
   @spec admit(Session.t()) :: {:ok, map()} | {:error, term()}
+  def admit(%Session{} = session) when session.epoch > 1 do
+    with {:ok, _team} <- still_granted(session),
+         {:ok, %{worker: worker}} <- Placement.reserve(session.profile, session.id),
+         {:ok, _restored} <-
+           restore_on_pod(worker, Sessions.get(session.id), on_failure: :requeue) do
+      Logger.info("troupe plane: #{session.id} waited to wake and is now on #{worker.pod_name}")
+      {:ok, %{session_id: session.id, worker: worker.id}}
+    else
+      {:error, reason} when reason in [:no_grant, :no_team] ->
+        Drain.park(session)
+
+        Logger.info(
+          "troupe plane: #{session.id} waited to wake on a profile its team may no longer use; read-only"
+        )
+
+        {:error, reason}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
   def admit(%Session{} = session) do
     with {:ok, team} <- still_granted(session),
          {:ok, %{worker: worker}} <- Placement.reserve(session.profile, session.id),
@@ -2498,28 +2525,6 @@ defmodule Troupe.Plane.Harness do
     })
   end
 
-  # Every pod full, in both numbers a person weighs it by: what the pods run at once now,
-  # and the most the profile allows, which may be more than its pods can run (a limit is
-  # not a promise). A profile with no ceiling says so rather than a number.
-  defp pods_full(profile_name) do
-    row = Fleet.get_profile(profile_name)
-    %{capacity: capacity} = Fleet.room(profile_name, row)
-
-    max = row && row.max_sessions
-
-    allows =
-      if is_integer(max),
-        do: "#{profile_name} allows #{max} at once",
-        else: "#{profile_name} sets no ceiling of its own"
-
-    Error.new(:capacity, %{
-      profile: profile_name,
-      capacity: capacity,
-      max_sessions: max,
-      reason: "every pod is full: its pods run #{capacity} session(s) at once, and #{allows}"
-    })
-  end
-
   defp unwind(session) do
     Budget.release(session.team_id, session.id, answerable_for(session), session.profile)
     Sessions.delete(session.id)
@@ -2538,37 +2543,11 @@ defmodule Troupe.Plane.Harness do
       "epoch" => session.epoch,
       "state" => "pending",
       "mode" => "waiting",
+      # Which profile it waits on, for a client that opened the session by id alone.
+      "profile" => session.profile,
       "reason" => "the profile is full and another worker is coming up",
       "retry_after_ms" => @wait_hint_ms
     }
-  end
-
-  defp reserve_capacity(session, opts) do
-    case Placement.reserve(session.profile, session.id) do
-      {:ok, %{worker: worker}} ->
-        {:ok, worker}
-
-      {:error, :at_capacity} ->
-        if Keyword.get(opts, :unwind, false), do: Sessions.delete(session.id)
-        {:error, pods_full(session.profile)}
-
-      # Not full: not there. `capacity` says add replicas, which is useless advice when
-      # the replicas exist and cannot start — and `unavailable` is the code whose whole
-      # job is naming a component that is down.
-      {:error, :no_healthy_worker} ->
-        if Keyword.get(opts, :unwind, false), do: Sessions.delete(session.id)
-
-        {:error,
-         Error.new(:unavailable, %{
-           component: "worker",
-           profile: session.profile,
-           reason: "no pod of this profile is healthy and accepting sessions"
-         })}
-
-      {:error, reason} ->
-        if Keyword.get(opts, :unwind, false), do: Sessions.delete(session.id)
-        {:error, Error.new(:unavailable, %{reason: inspect(reason)})}
-    end
   end
 
   defp reserve_budget(team, session) do
@@ -2837,6 +2816,11 @@ defmodule Troupe.Plane.Harness do
      })}
   end
 
+  # Waiting for a place, woken or created: it is coming up when there is room, and a second
+  # wake is answered as the first was, never with a second row or a pod that does not
+  # hold it.
+  defp activate(%{state: "pending"} = session, _user, _role), do: {:ok, waiting_for(session)}
+
   defp activate(%{state: "active"} = session, user, role) do
     # Already running. Activation is lookup-or-start everywhere, including here.
     with {:ok, worker} <- worker_of(session) do
@@ -2888,11 +2872,66 @@ defmodule Troupe.Plane.Harness do
   end
 
   defp start_elsewhere(session, user, role) do
-    with {:ok, worker} <- reserve_capacity(session, unwind: false),
-         {:ok, placed} <- place(session, worker),
-         :ok <- reserve_budget_again(placed),
-         {:ok, _} <- restore_on_pod(worker, placed) do
-      {:ok, endpoint_for(placed, worker, user, role, mode: "activate")}
+    case Placement.reserve(session.profile, session.id) do
+      {:ok, %{worker: worker}} ->
+        with {:ok, placed} <- place(session, worker),
+             :ok <- reserve_budget_again(placed),
+             {:ok, _} <- restore_on_pod(worker, placed) do
+          {:ok, endpoint_for(placed, worker, user, role, mode: "activate")}
+        end
+
+      {:error, reason} when reason in [:at_capacity, :no_healthy_worker] ->
+        wake_waits(session, reason)
+
+      {:error, reason} ->
+        Drain.rest(session)
+        {:error, Error.new(:unavailable, %{reason: inspect(reason)})}
+    end
+  end
+
+  # No room for a wake: it waits for a place as a create does. The row is `pending`, and
+  # everything its restore needs is on it already (the epoch the wake took, its terms, its
+  # team and its agent), so the scaler's pass counts it, brings a pod up for a profile at
+  # none, and restores it when one has room (`admit/1`). The client is answered as a
+  # waiting create is. Where nobody will bring room (the plane has no record of the
+  # profile, or it is at its ceiling) the session goes back to sleep at once and says why,
+  # as a create in that place is refused.
+  defp wake_waits(session, reason) do
+    profile = Fleet.get_profile(session.profile)
+
+    cond do
+      is_nil(profile) ->
+        Drain.rest(session)
+
+        {:error,
+         Error.new(:unavailable, %{
+           component: "profile",
+           profile: session.profile,
+           reason: "this plane has no record of that profile, so it cannot ask for a worker"
+         })}
+
+      not Scaler.within_ceiling?(profile) ->
+        Drain.rest(session)
+        {:error, at_the_ceiling(profile)}
+
+      true ->
+        # Its slice before it waits, as a create's: admitted later, it would otherwise
+        # start in a team with nothing left, and a team with nothing left is told so now.
+        with :ok <- reserve_budget_again(session) do
+          waits_to_wake(session, profile, reason)
+        end
+    end
+  end
+
+  defp waits_to_wake(session, profile, reason) do
+    case Sessions.wait(session.id, nil) do
+      {:ok, waiting} ->
+        Logger.info("troupe plane: #{session.id} waits to wake on #{profile.name}: #{reason}")
+        {:ok, waiting_for(waiting)}
+
+      {:error, _erased_or_gone} ->
+        Budget.release(session.team_id, session.id, answerable_for(session), session.profile)
+        {:error, gone(session.id)}
     end
   end
 
@@ -2964,7 +3003,11 @@ defmodule Troupe.Plane.Harness do
   # Terms and origin travel on every activation, because the pod applies the terms to
   # the tree it is about to start and records the origin in `session_created` only the
   # first time. The prompt does not: see `start_on_pod/5`.
-  defp restore_on_pod(worker, session) do
+  #
+  # `on_failure: :requeue` is a woken session that waited: a pod that does not take it
+  # leaves it waiting for the next pass, its slot given back, as a create that waited is
+  # left, since its owner has been told it is coming.
+  defp restore_on_pod(worker, session, opts \\ []) do
     params =
       %{
         "session_id" => session.id,
@@ -3018,13 +3061,25 @@ defmodule Troupe.Plane.Harness do
       # Dormant again, holding neither the slot nor the slice it was just given: the pod
       # that refused it will not report a dormancy that would give them back.
       {:error, reason} ->
-        Drain.strand(worker, session.id)
+        not_restored(worker, session, Keyword.get(opts, :on_failure, :strand))
 
         {:error,
          Error.new(:unavailable, %{
            reason: "the pod did not accept the session",
            detail: inspect(reason)
          })}
+    end
+  end
+
+  defp not_restored(worker, session, :strand), do: Drain.strand(worker, session.id)
+
+  # Its slice stays reserved: it is still waiting, and a waiting session holds its money.
+  defp not_restored(_worker, session, :requeue) do
+    Placement.release(session.profile, session.id)
+
+    case Sessions.wait(session.id, nil) do
+      {:ok, _session} -> :ok
+      {:error, _erased_or_gone} -> :ok
     end
   end
 

@@ -1466,6 +1466,14 @@ export class FakePlane {
         if (!row || this.unseen.has(row.id)) return { error: { code: -32005, message: "not_found" } };
         const mode = params["mode"] === "activate" ? "activate" : "read";
         const role = row.owner === subject ? "owner" : "collaborator";
+        // A wake on a profile with no room waits for a place as a create does, until
+        // `placeWaiting` gives it one; a session already waiting is answered the same.
+        const room = this.opts.room?.[row.profile];
+        const full = room !== undefined && room.active >= room.capacity;
+        if (mode === "activate" && (row.state === "pending" || (row.state === "dormant" && full))) {
+          row.state = "pending";
+          return { result: { session_id: row.id, epoch: row.epoch, state: "pending", mode: "waiting", reason: `waiting for a free place on ${row.profile}`, retry_after_ms: this.retryAfterMs } };
+        }
         return { result: this.attachment(row, subject, name, role, mode) };
       }
 

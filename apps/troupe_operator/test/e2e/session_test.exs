@@ -158,7 +158,7 @@ defmodule Troupe.E2E.SessionTest do
 
   # A pod that is Ready is not a pod the plane will place on: readiness is Kubernetes'
   # word and enrolment is the plane's, and between them is exactly the window where a
-  # reopen answers "every pod is full". The plane's own fleet view is what to wait for.
+  # reopen waits for a place. The plane's own fleet view is what to wait for.
   defp placeable?(profile) do
     Enum.any?(Plane.call!("admin.profiles.list"), fn listed ->
       listed["name"] == profile and
