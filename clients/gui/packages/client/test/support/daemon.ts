@@ -549,6 +549,8 @@ export class FakeDaemon {
   commands: typeof COMMANDS = [...COMMANDS];
   /** What `session.compact` is refused with, as the daemon's `conflict` reason; `null` compacts. */
   compactRefusal: string | null = null;
+  /** What `commands.list` is refused with, as the daemon's `conflict` reason; `null` lists. */
+  commandsRefusal: string | null = null;
   readonly sessions = new Map<string, Session>();
   readonly calls: Array<{ method: string; params: Record<string, unknown> }> = [];
   /** Who the daemon says its user is. `null` until somebody links an identity. */
@@ -1852,6 +1854,7 @@ evoked where nothing is set and there was a sign-in. */
 
       case "commands.list":
         if (!session) return reply(ws, id, null, { code: -32005, message: "not_found", data: { kind: "session", id: sessionId } });
+        if (this.commandsRefusal) return reply(ws, id, null, { code: -32006, message: "conflict", data: { reason: this.commandsRefusal } });
         return reply(ws, id, { commands: this.commands });
 
       // A command a file defines, as the daemon runs it (Decision 763): its prompt, with

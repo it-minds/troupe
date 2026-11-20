@@ -246,6 +246,57 @@ describe("the command palette", () => {
     expect(daemon.calls.filter((c) => c.method === "session.goal.set")).toHaveLength(1);
   });
 
+  // A palette opened before the session's view has attached is waiting, not refused
+  // (troupe #1147): it says so, reads the list once the view comes, and says nothing of an
+  // error after; an Enter typed while it waits runs the line once the list is there.
+  it("opened before the session attaches, says it is waiting, then lists the commands with no error", async () => {
+    daemon.subscribeDelayMs = 600;
+    await openSession();
+    key(window, "k", { ctrlKey: true });
+    const dialog = await waitFor(palette, "the palette, before the view");
+    expect(dialog.querySelector(".note")?.textContent).toBe("Waiting for the session to connect…");
+    expect(dialog.querySelector(".note.error")).toBeNull();
+
+    await waitFor(() => rowNames().length === SHOWN, "the list, once the view came");
+    expect(dialog.querySelector(".note")).toBeNull();
+  });
+
+  it("runs a command whose Enter came while the session was still attaching, once the list comes", async () => {
+    daemon.subscribeDelayMs = 600;
+    await openSession();
+    key(window, "k", { ctrlKey: true });
+    const dialog = await waitFor(palette, "the palette, before the view");
+    expect(dialog.querySelector(".note")?.textContent).toBe("Waiting for the session to connect…");
+    const input = dialog.querySelector<HTMLInputElement>("input")!;
+
+    type(input, "goal ship it");
+    key(input, "Enter");
+    expect(daemon.calls.some((c) => c.method === "session.goal.set")).toBe(false);
+    await waitFor(() => says("goal set: ship it"), "the goal's notice, once the list came");
+    expect(daemon.calls.filter((c) => c.method === "session.goal.set").map((c) => c.params["text"])).toEqual(["ship it"]);
+    expect(dialog.querySelector(".note.error")).toBeNull();
+  });
+
+  // A refusal is said, with what to do, and goes when a read succeeds.
+  it("says what refused the list, and clears it when the next read lists them", async () => {
+    const composer = await openSession();
+    await waitFor(() => says("session created"), "the session attached");
+    daemon.commandsRefusal = "the harness is restarting";
+    key(composer, "/");
+    const dialog = await waitFor(palette, "the palette");
+    await waitFor(() => dialog.querySelector(".note.error"), "the refusal");
+    expect(dialog.querySelector(".note.error")?.textContent).toBe("Could not read the commands: the harness is restarting — Enter tries again");
+    expect(rowNames()).toEqual([]);
+
+    daemon.commandsRefusal = null;
+    const input = dialog.querySelector<HTMLInputElement>("input")!;
+    type(input, "goal ship it");
+    key(input, "Enter");
+    await waitFor(() => says("goal set: ship it"), "the goal's notice, once the list came");
+    expect(dialog.querySelector(".note.error")).toBeNull();
+    expect(daemon.calls.filter((c) => c.method === "commands.list")).toHaveLength(2);
+  });
+
   // ↑↓ move the cursor within what the line names, and Enter runs the row under it, even in
   // the tick the cursor moved.
   it("runs the row under the cursor after a prefix that matches several and a move down", async () => {
