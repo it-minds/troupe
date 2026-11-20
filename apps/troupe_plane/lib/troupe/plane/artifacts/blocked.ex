@@ -7,10 +7,18 @@ defmodule Troupe.Plane.Artifacts.Blocked do
   The rules are the host's own policy (`Web.Artifacts.CSP.sources/1`), never a second list:
   a stylesheet, script, image, font, frame, sound or film another site serves, an embedded
   object, an inline `<script>`, an inline event handler (`onclick=`), a `javascript:`
-  address, and a connection a script names literally (`fetch`, `XMLHttpRequest`,
-  `WebSocket`, `EventSource`, an `import`) to another site. A reference relative to the
-  page is one of its own files; a `data:` one is whatever the policy says of `data:` for
-  that kind (images and fonts, yes).
+  address, and a connection a script names literally (`fetch`, `WebSocket`, `EventSource`,
+  an `import`) to another site. A reference relative to the page is one of its own files; a
+  `data:` one is whatever the policy says of `data:` for that kind (images and fonts, yes).
+
+  **A read**, even of the page's own file: the sandbox has no `allow-same-origin`, so the
+  page's origin is `null` and whatever the browser loads in CORS mode is another origin's
+  answer it is refused. That is every `fetch`, `XMLHttpRequest` and `EventSource` a script
+  makes, whatever its address; a dynamic `import()`; a module script
+  (`<script type="module" src>`, `modulepreload`); a web font (`@font-face`'s `url()`,
+  `preload as="font"`); and anything marked `crossorigin`. A page reads its own files only
+  through what loads without CORS: a classic `<script src>`, a `<link rel="stylesheet">`,
+  an `<img>`, `<video>`, `<audio>` or frame; a font only as a `data:` address.
 
   A scan, not a browser: a tokenising pass over each HTML, CSS and JavaScript file, by its
   content type. It finds what a page says literally, never what a script builds at run time,
@@ -41,6 +49,7 @@ defmodule Troupe.Plane.Artifacts.Blocked do
     "frame" => "frame-src",
     "object" => "object-src",
     "connect" => "connect-src",
+    "read" => "sandbox",
     "inline_script" => "script-src",
     "event_handler" => "script-src"
   }
@@ -209,28 +218,31 @@ defmodule Troupe.Plane.Artifacts.Blocked do
           not inline_allowed?("inline_script"),
           do: {at, "inline_script", value}
 
-    loads = name |> loads(attrs) |> Enum.flat_map(&reference(&1, at))
+    loads =
+      name
+      |> loads(attrs)
+      |> Enum.map(&if(Map.has_key?(attrs, "crossorigin"), do: cors(&1), else: &1))
+      |> Enum.flat_map(&reference(&1, at))
 
     handlers ++ styles ++ scripted ++ loads
   end
 
-  # What a tag loads: `{kind, address}`, from its name and attributes.
+  # What a tag loads: `{kind, address}`, or `{:cors, kind, address}` for a load made in CORS
+  # mode, from its name and attributes.
   defp loads("link", attrs) do
-    rel = attrs |> Map.get("rel", "") |> String.downcase() |> String.split()
-
-    kind =
-      cond do
-        "stylesheet" in rel -> "stylesheet"
-        "icon" in rel or "apple-touch-icon" in rel -> "image"
-        "modulepreload" in rel -> "script"
-        "preload" in rel -> preloaded(attrs["as"])
-        true -> nil
-      end
-
-    if kind, do: [{kind, attrs["href"]}], else: []
+    case link_kind(attrs) do
+      nil -> []
+      {:cors, kind} -> [{:cors, kind, attrs["href"]}]
+      kind -> [{kind, attrs["href"]}]
+    end
   end
 
-  defp loads("script", attrs), do: [{"script", attrs["src"]}]
+  defp loads("script", attrs) do
+    if module?(attrs["type"]),
+      do: [{:cors, "script", attrs["src"]}],
+      else: [{"script", attrs["src"]}]
+  end
+
   defp loads("img", attrs), do: [{"image", attrs["src"]} | srcset(attrs["srcset"])]
   defp loads("image", attrs), do: [{"image", attrs["href"] || attrs["xlink:href"]}]
   defp loads("source", attrs), do: [{"media", attrs["src"]} | srcset(attrs["srcset"])]
@@ -241,15 +253,35 @@ defmodule Troupe.Plane.Artifacts.Blocked do
   defp loads("object", attrs), do: [{"object", attrs["data"]}]
   defp loads(_name, _attrs), do: []
 
+  defp link_kind(attrs) do
+    rel = attrs |> Map.get("rel", "") |> String.downcase() |> String.split()
+
+    cond do
+      "stylesheet" in rel -> "stylesheet"
+      "icon" in rel or "apple-touch-icon" in rel -> "image"
+      "modulepreload" in rel -> {:cors, "script"}
+      "preload" in rel -> preloaded(attrs["as"])
+      true -> nil
+    end
+  end
+
   defp preloaded(as) do
     case as && String.downcase(as) do
       "style" -> "stylesheet"
       "script" -> "script"
-      "font" -> "font"
+      "font" -> {:cors, "font"}
+      "fetch" -> {:cors, "connect"}
       "image" -> "image"
       _other -> nil
     end
   end
+
+  defp module?(type), do: is_binary(type) and String.downcase(String.trim(type)) == "module"
+
+  # A load the browser makes in CORS mode: of the page's own file, a read the sandbox
+  # refuses; of another site's, what its kind says.
+  defp cors({kind, address}), do: {:cors, kind, address}
+  defp cors(load), do: load
 
   defp srcset(nil), do: []
 
@@ -262,6 +294,13 @@ defmodule Troupe.Plane.Artifacts.Blocked do
   end
 
   defp reference({_kind, nil}, _at), do: []
+  defp reference({:cors, _kind, nil}, _at), do: []
+
+  defp reference({:cors, kind, address}, at) do
+    if scheme(String.trim(address)),
+      do: reference({kind, address}, at),
+      else: reference({"read", address}, at)
+  end
 
   defp reference({kind, address}, at) do
     address = String.trim(address)
@@ -294,7 +333,8 @@ defmodule Troupe.Plane.Artifacts.Blocked do
       |> Enum.reject(fn [{at, _} | _] -> Enum.any?(spans, &(at in &1)) end)
       |> Enum.flat_map(fn [{at, _} | groups] ->
         address = first(text, groups)
-        reference({if(font?(address), do: "font", else: "image"), address}, offset + at)
+        load = if font?(address), do: {:cors, "font", address}, else: {"image", address}
+        reference(load, offset + at)
       end)
 
     imported ++ urls
@@ -321,21 +361,57 @@ defmodule Troupe.Plane.Artifacts.Blocked do
     {"script", Regex.compile!(~S<\bimport\s*(?:\(\s*|[\w*{}\s,$]+\s+from\s*)> <> @quoted)}
   ]
 
+  # A read whatever its address, unless it names another site literally, which is a
+  # connection above: the call, and its literal address if it has one.
+  @reads ~r/\bfetch\s*\(|\bnew\s+EventSource\s*\(|\bimport\s*\(|\bnew\s+XMLHttpRequest\b/
+  @literal ~r/\A\s*(["'`])([^"'`]*)\1/
+  @call ~r/\A[^)\n]{0,60}\)?/
+
   defp script(text, offset) do
-    Enum.flat_map(@connections, fn {kind, pattern} ->
-      pattern
-      |> Regex.scan(text, return: :index)
-      |> Enum.flat_map(fn [{at, _}, _quote, address] ->
-        reference({kind, slice(text, address)}, offset + at)
+    connections =
+      Enum.flat_map(@connections, fn {kind, pattern} ->
+        pattern
+        |> Regex.scan(text, return: :index)
+        |> Enum.flat_map(fn [{at, _}, _quote, address] ->
+          reference({kind, slice(text, address)}, offset + at)
+        end)
       end)
-    end)
+
+    reads =
+      @reads
+      |> Regex.scan(text, return: :index)
+      |> Enum.flat_map(fn [{at, length}] ->
+        rest = binary_part(text, at + length, byte_size(text) - at - length)
+        read(binary_part(text, at, length), rest, offset + at)
+      end)
+
+    connections ++ reads
+  end
+
+  defp read(call, rest, at) do
+    case Regex.run(@literal, rest, capture: :all_but_first) do
+      [_quote, address] ->
+        if scheme(String.trim(address)), do: [], else: reference({"read", address}, at)
+
+      nil ->
+        cond do
+          allowed?("read", call) -> []
+          # `fetch()` with nothing to read, as a sentence names it, is not a call.
+          Regex.match?(~r/\A\s*\)/, rest) -> []
+          String.ends_with?(call, "(") -> [{at, "read", call <> hd(Regex.run(@call, rest))}]
+          true -> [{at, "read", String.trim(call)}]
+        end
+    end
   end
 
   # -- the policy ---------------------------------------------------------------------
 
-  # Whether the host's policy lets a page load `address` as `kind`: a reference with no
+  # Whether the host's policy lets a page load `address` as `kind`. A reference with no
   # scheme and no host is the artifact's own file, `'self'`; one with a scheme is allowed
   # only where the directive names that scheme.
+  # A read of its own file, only where the sandbox gives the page this host's origin.
+  defp allowed?("read", _address), do: "allow-same-origin" in CSP.sources("sandbox")
+
   defp allowed?(kind, address) do
     sources = CSP.sources(directive(kind))
 

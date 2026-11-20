@@ -48,7 +48,7 @@ defmodule Troupe.Tools.PublishArtifact do
     """
     Publish a report or page from the workspace for people to read in their organisation's gallery: `html` (a page and its CSS, JS and images), `markdown` (a document, rendered with code highlighting and Mermaid flowcharts), or `file` (one file, as a PDF or an image).
 
-    `files`: workspace paths; they keep their paths below the directory they share, so relative links still work. A page opens `index.html`; a document `index.md` or `README.md`. An artifact may load only its own files: no stylesheet, script, font or image from another site, and no inline script or onclick; put the CSS and JS in files of their own and publish them with the page. In a document, an image from another site (`![](https://...)`) is shown as a sentence naming that site; publish the image beside the document and link it relatively. Nothing outside the artifact can be fetched. The answer names anything the artifacts host will block. Keep it to a few megabytes.
+    `files`: workspace paths; they keep their paths below the directory they share, so relative links still work. A page opens `index.html`; a document `index.md` or `README.md`. An artifact may load only its own files: no stylesheet, script, font or image from another site, and no inline script or onclick; put the CSS and JS in files of their own and publish them with the page. In a document, an image from another site (`![](https://...)`) is shown as a sentence naming that site; publish the image beside the document and link it relatively. A page reads its own files only through `<script src>`, `<link>`, `<img>` and the like, never `fetch`, `XMLHttpRequest`, `EventSource` or `import()`, which fail even for its own files; no module scripts (`type="module"`), and a web font only as a `data:` address. To give a script data, publish it as a `.js` file that sets a global and load it with `<script src>` before the script that uses it. The answer names anything the artifacts host will block. Keep it to a few megabytes.
 
     `thumbnail`: optional, a workspace PNG, JPEG or WebP of at most 256 KiB shown on the gallery card; send one only if you already have a screenshot of the page. Never required.
 
@@ -363,10 +363,19 @@ defmodule Troupe.Tools.PublishArtifact do
   defp blocked([_ | _] = found, id) do
     "The artifacts host will block #{length(found)} reference#{if length(found) == 1, do: "", else: "s"}: " <>
       Enum.map_join(found, "; ", &blocked_one/1) <>
-      ". An artifact may load only its own files; publish a corrected version with id #{id}"
+      ". An artifact may load only its own files#{reads(found)}; publish a corrected version with id #{id}"
   end
 
   defp blocked(_none, id), do: "Republish it with id #{id}"
+
+  # A read fails even for the page's own file, so the way it can read one is said with it.
+  defp reads(found) do
+    if Enum.any?(found, &(&1["kind"] == "read")),
+      do:
+        ", and only through `<script src>`, `<link rel=\"stylesheet\">`, `<img>` and the like " <>
+          "(data a script needs goes in a `.js` file that sets a global)",
+      else: ""
+  end
 
   defp blocked_one(found) do
     line = if is_integer(found["line"]), do: ", line #{found["line"]}", else: ""
@@ -381,6 +390,10 @@ defmodule Troupe.Tools.PublishArtifact do
   defp blocked_kind("frame"), do: "a page from another site in a frame"
   defp blocked_kind("object"), do: "an embedded object, which the host never runs"
   defp blocked_kind("connect"), do: "a connection to another site"
+
+  defp blocked_kind("read"),
+    do:
+      "a read by fetch, XMLHttpRequest, EventSource, import(), a module or a web font, which fails here even for the page's own file"
   defp blocked_kind("inline_script"), do: "an inline script"
   defp blocked_kind("event_handler"), do: "an inline event handler"
   defp blocked_kind(other), do: to_string(other)
