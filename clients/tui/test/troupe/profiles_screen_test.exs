@@ -211,8 +211,9 @@ defmodule Troupe.ProfilesScreenTest do
     {narrow, narrow_session} = with_about(width: 50, height: 80)
     command(narrow, "/profile code")
 
-    # The two sessions differ only in their ids on the status line.
-    sid = &String.replace(&1, ~r/\d{8}T\d{6}-\w+/, "SID")
+    # The two sessions differ only in their ids on the status line; an id carries more than
+    # one hyphen, so the mask takes the whole of it.
+    sid = &String.replace(&1, ~r/\d{8}T\d{6}[-\w]+/, "SID")
     assert Enum.map(resized, sid) == Enum.map(screen(narrow, narrow_session), sid)
     assert Enum.all?(resized, &(String.length(&1) <= 50))
     assert Enum.any?(resized, &(String.length(&1) == 50))
