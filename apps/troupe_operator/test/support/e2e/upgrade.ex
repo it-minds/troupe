@@ -137,7 +137,7 @@ defmodule Troupe.E2E.Upgrade do
   @doc """
   Wait until a pod of the profile is one the plane will place a session on: enrolled,
   healthy, not draining and with room. Readiness is Kubernetes' word and enrolment the
-  plane's, and a session opened in between is told every pod is full.
+  plane's, and a session opened in between waits for a place.
   """
   @spec placeable!(String.t(), keyword()) :: :ok
   def placeable!(profile, opts \\ []) do

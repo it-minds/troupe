@@ -170,6 +170,7 @@ export type ArtifactBlockedKind =
   | "frame"
   | "object"
   | "connect"
+  | "read"
   | "inline_script"
   | "event_handler";
 
@@ -200,6 +201,8 @@ export function blockedKindWords(kind: string): string {
       return "an embedded object";
     case "connect":
       return "a connection to another site";
+    case "read":
+      return "a read by fetch, XMLHttpRequest, EventSource, import(), a module or a web font, which fails even for the page's own file";
     case "inline_script":
       return "an inline script";
     case "event_handler":

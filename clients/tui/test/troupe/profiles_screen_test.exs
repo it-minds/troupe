@@ -202,8 +202,26 @@ defmodule Troupe.ProfilesScreenTest do
     refute :dim in mods
   end
 
+  test "a page resized to 50 columns is drawn as one started at 50" do
+    {pid, session} = with_about(height: 80)
+    command(pid, "/profile code")
+    resize(pid, session, 50, 80)
+    resized = screen(pid, session)
+
+    {narrow, narrow_session} = with_about(width: 50, height: 80)
+    command(narrow, "/profile code")
+
+    # The two sessions differ only in their ids on the status line; an id carries more than
+    # one hyphen, so the mask takes the whole of it.
+    sid = &String.replace(&1, ~r/\d{8}T\d{6}[-\w]+/, "SID")
+    assert Enum.map(resized, sid) == Enum.map(screen(narrow, narrow_session), sid)
+    assert Enum.all?(resized, &(String.length(&1) <= 50))
+    assert Enum.any?(resized, &(String.length(&1) == 50))
+  end
+
   test "at a narrow width a tool's line is cut and its name stays on the row" do
-    {pid, session} = with_about(width: 50, height: 80)
+    {pid, session} = with_about(height: 80)
+    resize(pid, session, 50, 80)
     command(pid, "/profile code")
 
     rows = screen(pid, session)

@@ -452,7 +452,14 @@ export function Session({
           <p>{markError}</p>
         </div>
       )}
-      <Banners status={view.status} detail={view.detail} dormant={dormant} readOnly={readOnly} error={view.error} />
+      <Banners
+        status={view.status}
+        detail={view.detail}
+        dormant={dormant}
+        readOnly={readOnly}
+        error={view.error}
+        profile={kind === "team" ? (row?.profile ?? null) : null}
+      />
       <OfferLine offer={view.offer} />
       {/* Your own servers as this session on this computer has them. */}
       {here && daemon && (
@@ -1037,16 +1044,26 @@ function Banners({
   dormant,
   readOnly,
   error,
+  profile,
 }: {
   status: AttachStatus;
   detail: string | null;
   dormant: boolean;
   readOnly: boolean;
   error: string | null;
+  /** The plane profile a team session runs on, which a wait for a place names. */
+  profile: string | null;
 }): JSX.Element | null {
   return (
     <>
-      {dormant && (
+      {/* Woken on a full profile, it waits for a place as a new session does. */}
+      {status === "waiting" && (
+        <div className="banner queued" role="status">
+          <p>{profile ? `Waiting for a free place in ${profile}.` : "Waiting for a free place."} It wakes by itself when one frees.</p>
+          {detail && <span className="micro">{detail}</span>}
+        </div>
+      )}
+      {dormant && status !== "waiting" && (
         <div className="banner dormant">
           <p>This session is asleep. Reading it does not wake it, and sleeping costs nothing.</p>
         </div>

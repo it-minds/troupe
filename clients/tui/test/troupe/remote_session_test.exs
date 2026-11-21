@@ -222,6 +222,47 @@ defmodule Troupe.RemoteSessionTest do
       eventually(fn -> calls(remote, "input.send") != [] end, 15_000)
     end
 
+    # Issue #1149: woken on a full profile, it waits for a place as a new session does.
+    test "woken on a full profile, says it waits for a place, and is awake once placed" do
+      {remote, url} = start_remote!(sessions: [fixture(state: "dormant")])
+      :ok = FakeRemote.room(remote, "code", %{"free" => 0, "total" => 8})
+      origin = connect!(remote, url)
+      sid = attach!(origin, "s-live")
+      :ok = Client.subscribe(sid)
+      eventually(fn -> length(Client.events(sid)) >= 3 end)
+
+      assert {:error, said} = Client.send_input(sid, "code-1", "wake up")
+
+      assert said ==
+               "waiting for a free place in code: the session wakes by itself when one frees; " <>
+                 "send this again then"
+
+      capability = Client.capability(sid)
+      assert capability.state == :pending
+      refute capability.can_input?
+      assert capability.reason == "waiting for a free place; it wakes by itself when one frees"
+      assert calls(remote, "input.send") == []
+
+      # Asked again while it waits, and never a second wake's worth of anything else.
+      eventually(fn -> length(activate_calls(remote)) >= 2 end, 5_000)
+      assert Client.capability(sid).state == :pending
+
+      :ok = FakeRemote.place(remote, "s-live")
+      eventually(fn -> Client.capability(sid).state == :active end, 5_000)
+
+      assert_receive {:troupe_event,
+                      %{
+                        type: :notice,
+                        data: %{
+                          text: "the session has its place and is awake; send what you wrote again"
+                        }
+                      }},
+                     5_000
+
+      :ok = Client.send_input(sid, "code-2", "wake up")
+      eventually(fn -> calls(remote, "input.send") != [] end, 15_000)
+    end
+
     @tag capture_log: false
     test "a read-only session refuses input and says why" do
       {remote, url} = start_remote!(sessions: [fixture(state: "read_only")])
