@@ -71,8 +71,9 @@ defmodule Troupe.Gateway.ActorNameTest do
              )
   end
 
-  # The `user_input` with these words, once the session has written it.
-  defp said(id, text, tries \\ 100) do
+  # The `user_input` with these words, once the session has written it: the first turn has
+  # to end before a queued input is taken, and a loaded machine takes seconds over it.
+  defp said(id, text, tries \\ 500) do
     case Enum.find(Troupe.events(id), &(&1.type == "user_input" and &1.data["text"] == text)) do
       nil when tries > 0 ->
         Process.sleep(20)
