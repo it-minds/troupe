@@ -176,6 +176,8 @@ export interface Marks {
   rename: (row: FleetRow, title: string) => Promise<void>;
   /** Keep it at the top of the list (`on`) or let it go, where it runs (`session.pin`). */
   keep: (row: FleetRow, on: boolean) => Promise<void>;
+  /** Give a pod session to its team (`team`) or take it back (`private`), at the plane (troupe #1169). Rejects with the refusal. */
+  share: (row: FleetRow, visibility: "team" | "private") => Promise<void>;
 }
 
 /**
@@ -221,7 +223,19 @@ export function useMarks(store: FleetStore, auth: AuthSession | null, daemon: Da
     },
     [store, where],
   );
-  return useMemo(() => ({ rename, keep }), [rename, keep]);
+  // Whose a pod session is: the plane's alone, since a session on this computer is never a
+  // team's. The answer's row goes on the list's row at once, as a name does.
+  const share = useCallback(
+    async (row: FleetRow, visibility: "team" | "private") => {
+      if (row.kind !== "team" || !auth) throw new Error("Only a session on the platform is given to a team");
+      const answered = await auth.plane.setSessionVisibility(await auth.token(), row.id, visibility);
+      const raw = (row.raw && typeof row.raw === "object" ? row.raw : {}) as Record<string, unknown>;
+      store.patch(row.id, { raw: { ...raw, visibility: answered.visibility ?? visibility, team: answered.team ?? raw["team"] ?? null } });
+      await store.refreshAfterChange();
+    },
+    [store, auth],
+  );
+  return useMemo(() => ({ rename, keep, share }), [rename, keep, share]);
 }
 
 /** Who sessions on this computer are recorded as, and what to call them. */

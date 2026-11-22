@@ -1004,6 +1004,10 @@ defmodule Troupe.Client.Daemon do
     end
   end
 
+  # A session on this computer, sealed here or not, is never a team's (root #1169).
+  @impl true
+  def share(_sid, _verb), do: {:error, Troupe.Client.Share.not_here()}
+
   @impl true
   def keep(sid, kept?) do
     params = %{session_id: sid, command_id: Troupe.Remote.RPC.command_id()}

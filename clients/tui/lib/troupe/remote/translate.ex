@@ -532,6 +532,14 @@ defmodule Troupe.Remote.Translate do
       "artifact_commented" ->
         {[emit.(:remote_note, %{text: commented(data)})], memory}
 
+      # The session given to its team by its owner, or taken back (root #1169): a line, and
+      # the status line's mark.
+      "session_visibility_changed" ->
+        {[
+           emit.(:remote_note, %{text: visibility_changed(data)}),
+           emit.(:remote_status, %{visibility: data["visibility"]})
+         ], memory}
+
       # A saved `AI!` or `AI?` comment started a branch of this session (root Decision 844):
       # the branch's session, its agent, and the comments, as the daemon wrote them.
       "watch_triggered" ->
@@ -1469,6 +1477,18 @@ defmodule Troupe.Remote.Translate do
     who = present(author["display_name"]) || present(author["subject"]) || "Somebody"
     title = present(artifact["title"]) || "an artifact"
     "#{who} commented on “#{title}”: #{comment["body"] || ""}"
+  end
+
+  defp visibility_changed(data) do
+    who = present(data["by_name"]) || present(data["by"]) || "Its owner"
+
+    case data["visibility"] do
+      "team" ->
+        "#{who} gave this session to the team: everyone on it can open it"
+
+      _private ->
+        "#{who} took this session back from the team: only they and the people invited can open it"
+    end
   end
 
   defp present(value) when is_binary(value) and value != "", do: value

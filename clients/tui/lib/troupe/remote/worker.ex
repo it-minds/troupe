@@ -235,6 +235,10 @@ defmodule Troupe.Remote.Worker do
   @spec post(String.t(), atom(), map()) :: :ok | {:error, term()}
   def post(session_id, type, data), do: call(session_id, {:note, {type, data}})
 
+  @doc "Whose the session is now, as the plane answered it (`team` or `private`): the status line's mark follows."
+  @spec visibility(String.t(), String.t()) :: :ok | {:error, term()}
+  def visibility(session_id, visibility), do: call(session_id, {:visibility, visibility})
+
   @spec blob(String.t(), String.t(), non_neg_integer(), non_neg_integer()) ::
           {:ok, term()} | {:error, term()}
   def blob(session_id, blob, offset \\ 0, length \\ 1_000_000),
@@ -346,6 +350,10 @@ defmodule Troupe.Remote.Worker do
       isolation: Keyword.get(opts, :isolation, :remote),
       team: Keyword.get(opts, :team),
       title: Keyword.get(opts, :title),
+      # Whose a pod session is, as the plane said at the open and the log says since (root
+      # #1169): `team` or `private`, nil where nobody said; and whether it is this person's.
+      visibility: Keyword.get(opts, :visibility),
+      owner?: Keyword.get(opts, :owner?, false),
       agent: nil,
       # Events of this client's own waiting for the window to open (`post/3`), each
       # `{type, data}`.
@@ -385,8 +393,16 @@ defmodule Troupe.Remote.Worker do
        error: state.error,
        relayed?: relayed?(state),
        always_allow?: state.capabilities["approval_allow_always"] == true,
-       attach_artifact?: state.capabilities["fs_upload_artifact"] == true
+       attach_artifact?: state.capabilities["fs_upload_artifact"] == true,
+       visibility: state.visibility,
+       owner?: state.owner?
      }, state}
+  end
+
+  def handle_call({:visibility, visibility}, _from, state) do
+    state = %{state | visibility: visibility}
+    publish_status(state)
+    {:reply, :ok, state}
   end
 
   def handle_call(:asking, _from, state), do: {:reply, asking_events(state), state}
@@ -1321,7 +1337,13 @@ defmodule Troupe.Remote.Worker do
 
   defp durable(state, %{} = params) do
     {events, memory} = Translate.durable(state.session_id, params, state.memory)
-    state = %{state | memory: memory, agent: state.agent || Translate.root_of(params)}
+
+    state = %{
+      state
+      | memory: memory,
+        agent: state.agent || Translate.root_of(params),
+        visibility: given(params) || state.visibility
+    }
 
     state =
       case Journal.append(state.session_id, events) do
@@ -1343,6 +1365,10 @@ defmodule Troupe.Remote.Worker do
   end
 
   defp durable(state, _params), do: state
+
+  # The session given to its team or taken back, as its log says.
+  defp given(%{"type" => "session_visibility_changed", "data" => %{"visibility" => v}}), do: v
+  defp given(_params), do: nil
 
   # The client's own lines go into the window once there is one, stamped after whatever
   # opened it: written earlier, they would sort ahead of the session's first events, which
@@ -1577,6 +1603,8 @@ defmodule Troupe.Remote.Worker do
       # artifact attached by name, its files fetched by the server.
       |> Map.put(:always_allow?, state.capabilities["approval_allow_always"] == true)
       |> Map.put(:attach_artifact?, state.capabilities["fs_upload_artifact"] == true)
+      |> Map.put(:visibility, state.visibility)
+      |> Map.put(:owner?, state.owner?)
     )
   end
 

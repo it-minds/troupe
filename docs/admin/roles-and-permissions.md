@@ -113,8 +113,11 @@ caller's role on the session:
 
 The owner's `admin` comes from owning the session (`owner_subject`), not from a row, so an
 access-list row naming the owner with a narrower role does not narrow them. Anyone else's
-role is their ACL row's; failing one, a `team`-visible session gives a team member
-`control` when the team's `members_may_control` is set, else `observe`. `session.grant` is
+role is the stronger of their ACL row's and, on a `team`-visible session, the team's: a
+team member gets `control` when the team's `members_may_control` is set (through the
+settings ladder), else `observe`. That holds for a session started for the team and for one
+its owner gave to the team later (`session.visibility.set`); taken back, it stops at the
+team members' next command, and invitations stay. `session.grant` is
 for the owner or a team admin. Revoking a team's grant on a profile freezes its sessions
 read-only: a running one is put to sleep on its pod, and one still waiting for a worker is
 never started. Workers re-check the ACL on every command, so a revoked collaborator, or a

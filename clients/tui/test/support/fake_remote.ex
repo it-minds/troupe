@@ -359,7 +359,8 @@ defmodule Troupe.FakeRemote do
       events: Keyword.get(fields, :events, []),
       kind: Keyword.get(fields, :kind, "team"),
       device: Keyword.get(fields, :device),
-      archived: Keyword.get(fields, :archived, false)
+      archived: Keyword.get(fields, :archived, false),
+      visibility: Keyword.get(fields, :visibility, "private")
     }
   end
 
@@ -1036,6 +1037,45 @@ defmodule Troupe.FakeRemote do
     end
   end
 
+  # Given to the team or taken back, the owner's alone (root #1169): the row answered as
+  # `session.get` answers it, and the log's line, which the pod writes, pushed to whoever
+  # is attached.
+  defp dispatch(state, :plane, "session.visibility.set", %{"session_id" => id} = params, _pid) do
+    me = state.principal["sub"]
+    visibility = params["visibility"]
+
+    case Map.fetch(state.sessions, id) do
+      {:ok, %{owner: ^me} = session} when visibility in ["team", "private"] ->
+        session = Map.put(session, :visibility, params["visibility"])
+        state = put_in(state.sessions[id], session)
+
+        {event, state} =
+          append(
+            state,
+            id,
+            "session_visibility_changed",
+            %{
+              "visibility" => params["visibility"],
+              "by" => me,
+              "by_name" => state.principal["name"]
+            },
+            []
+          )
+
+        push(state, id, notification(id, event))
+        {{:ok, pod_row(session, me)}, state}
+
+      {:ok, %{owner: ^me}} ->
+        {{:error, -32_602, "invalid_params", %{"reason" => "visibility is team or private"}}, state}
+
+      {:ok, _theirs} ->
+        {{:error, -32_004, "forbidden", %{"required_role" => "owner"}}, state}
+
+      :error ->
+        {{:error, -32_005, "no such session"}, state}
+    end
+  end
+
   defp dispatch(state, _kind, "session.open", params, _pid) do
     id = params["session_id"]
 
@@ -1273,6 +1313,11 @@ defmodule Troupe.FakeRemote do
   defp dispatch(%{private: private} = state, :plane, "session.get", %{"session_id" => id}, _pid)
        when is_map_key(private, id),
        do: {{:ok, private[id]}, state}
+
+  # A pod session's row, with whose it is and the team it runs for.
+  defp dispatch(%{sessions: sessions} = state, :plane, "session.get", %{"session_id" => id}, _pid)
+       when is_map_key(sessions, id),
+       do: {{:ok, pod_row(sessions[id], state.principal["sub"])}, state}
 
   defp dispatch(state, _kind, "blob.get", params, _pid) do
     bytes = "the whole blob"
@@ -2102,7 +2147,9 @@ defmodule Troupe.FakeRemote do
         "state" => session.state,
         "profile" => session.profile,
         "team" => session.team,
-        "title" => session.title
+        "title" => session.title,
+        "role" => if(session.owner == state.principal["sub"], do: "owner", else: "collaborator"),
+        "visibility" => Map.get(session, :visibility, "private")
       }}, state}
   end
 
@@ -2232,6 +2279,16 @@ defmodule Troupe.FakeRemote do
       "device" => Map.get(session, :device),
       "archived" => Map.get(session, :archived, false)
     }
+  end
+
+  defp pod_row(session, me) do
+    session
+    |> live_summary()
+    |> Map.merge(%{
+      "visibility" => Map.get(session, :visibility, "private"),
+      "team" => session.team,
+      "your_role" => if(session.owner == me, do: "owner", else: "collaborator")
+    })
   end
 
   defp normalise(session) do

@@ -374,6 +374,12 @@ export interface TranscriptState {
    */
   scratch: ScratchDocument[];
   /**
+   * Whose a pod session is since its owner last changed it (troupe #1169), from
+   * `session_visibility_changed`: `team` or `private`; undefined until the log says, when
+   * the session's row is the word.
+   */
+  visibility?: string | undefined;
+  /**
    * A laptop's session steered through the plane, while its laptop is away and once it is
    * back (troupe #932): `offer_paused` says why it went (`stopped`, its daemon said it was
    * stopping; `offline`, it went without a word, asleep or out of reach) and since when,
@@ -970,6 +976,14 @@ function commentedText(d: DurableEvent): string {
   const author = (comment["author"] ?? {}) as Record<string, unknown>;
   const who = str(author["display_name"]) || str(author["subject"]) || "Somebody";
   return `${who} commented on “${str(artifact["title"]) || "an artifact"}”: ${str(comment["body"])}`;
+}
+
+/** A session given to its team or taken back, as one line: who, and who may open it now. */
+function visibilityChangedText(d: DurableEvent): string {
+  const who = str(d.data["by_name"]) || str(d.data["by"]) || "Its owner";
+  return d.data["visibility"] === "team"
+    ? `${who} gave this session to the team: everyone on it can open it`
+    : `${who} took this session back from the team: only they and the people invited can open it`;
 }
 
 function systemText(d: DurableEvent): string {
@@ -1650,6 +1664,13 @@ export function fold(state: TranscriptState, e: TroupeEvent, options: FoldOption
     // with who, which artifact and what, for whoever steers the session to act on. Never input.
     case "artifact_commented":
       return { ...next, entries: [...state.entries, { kind: "system", ...base, type: d.type, text: commentedText(d) }] };
+
+    // Its owner gave the session to its team, or took it back (troupe #1169): one line, and
+    // whose it is now for the head's mark.
+    case "session_visibility_changed": {
+      const visibility = str(d.data["visibility"]) || undefined;
+      return { ...next, visibility, entries: [...state.entries, { kind: "system", ...base, type: d.type, text: visibilityChangedText(d) }] };
+    }
 
     // A reply the output cap cut, or one with nothing in it (troupe-remote Decision 659).
     case "truncated":

@@ -672,6 +672,13 @@ defmodule Troupe.Protocol.Schema do
         "display_name" => optional(:string),
         "by_name" => optional(:string)
       },
+      # A pod session given to its team by its owner (`team`), or taken back to its owner and
+      # the people invited (`private`), from the plane; and by whom.
+      "session_visibility_changed" => %{
+        "visibility" => required(:string),
+        "by" => required(:string),
+        "by_name" => optional(:string)
+      },
       # A comment written on an artifact this session published, from the plane: the
       # artifact, who wrote it and what. Somebody else's words, never input to an agent.
       "artifact_commented" => %{
@@ -827,6 +834,12 @@ defmodule Troupe.Protocol.Schema do
         "person" => required(:string)
       },
       "session.invites" => %{"session_id" => required(:string)},
+      # A pod session given to its team (`team`) or taken back (`private`) by its owner: the
+      # plane's, which the clients ask directly.
+      "session.visibility.set" => %{
+        "session_id" => required(:string),
+        "visibility" => required(:string)
+      },
       # Somebody's private session shared with this machine's person, read from the plane's
       # sealed copy with the keys in their own slot, after `after_seq`.
       "session.read_sealed" => %{

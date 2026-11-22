@@ -297,6 +297,30 @@ defmodule Troupe.Worker.Plane.Commands do
     end
   end
 
+  # The session given to its team by its owner, or taken back. Who may open it is the
+  # plane's, which has already told this pod's mirror the role each member now holds; the
+  # pod's part is the log's line, so everybody attached hears it. Best effort, for the same
+  # reason as an invitation's: a dormant session has no tree to append to.
+  defp dispatch("visibility.changed", params) do
+    session_id = params["session_id"]
+
+    case {params["visibility"], Sessions.whereis(session_id)} do
+      {visibility, _tree} when visibility not in ["team", "private"] ->
+        {:error, Error.new(:invalid_params, %{field: "visibility"})}
+
+      {_visibility, nil} ->
+        {:ok, %{"session_id" => session_id, "recorded" => false, "reason" => "dormant"}}
+
+      {visibility, _tree} ->
+        data =
+          %{"visibility" => visibility, "by" => params["by"]}
+          |> put_present("by_name", params["by_name"])
+
+        {:ok, seq} = Log.append(session_id, [], "session_visibility_changed", data)
+        {:ok, %{"session_id" => session_id, "recorded" => true, "seq" => seq}}
+    end
+  end
+
   # A comment written on an artifact this session published (#62). The pod's part is the
   # log's line, so whoever steers the session reads it beside the work and may ask the
   # agent to act on it; never input, since a comment is somebody else's words. Best

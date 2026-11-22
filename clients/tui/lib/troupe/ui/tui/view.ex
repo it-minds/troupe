@@ -3068,7 +3068,14 @@ defmodule Troupe.UI.TUI.View do
   end
 
   defp remote_note(%{model: %{remote: %{} = remote}}) do
-    state = " · remote (#{remote[:state] || "?"})"
+    # Whose it is, where the plane said: the team's, or its owner's and the people invited.
+    whose =
+      case Troupe.Client.Share.mark(remote[:visibility], remote[:owner?] == true) do
+        nil -> ""
+        mark -> " · " <> mark
+      end
+
+    state = " · remote (#{remote[:state] || "?"})" <> whose
 
     case remote[:reason] do
       reason when is_binary(reason) -> state <> " · #{reason}"

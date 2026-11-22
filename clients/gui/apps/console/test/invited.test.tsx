@@ -55,6 +55,10 @@ describe("Invited to you", () => {
     await sees("on the platform, shared with you by Ada");
     // Everybody present is named.
     await sees(`Shared with ${PEOPLE.carol.subject} (follows)`);
+    // Whose it is, in words, to somebody who may not change it, following the log (troupe #1169).
+    await sees("Given to the core team: everyone on it can open it, and steer it where the team allows. Only its owner changes that.");
+    fake.worker.sessions.get(row.id)!.log.append("session_visibility_changed", { visibility: "private", by: "ada@example.com" }, { kind: "user", subject: "ada@example.com" });
+    await sees("Only its owner and the people they invited can open it. Only its owner changes that.");
 
     fake.plane.uninvite(row.id, PEOPLE.carol.subject);
     await sees("Ada took back your invitation: this session is no longer shared with you.");

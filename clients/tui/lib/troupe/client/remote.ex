@@ -80,6 +80,8 @@ defmodule Troupe.Client.Remote do
     |> Map.put(:relayed?, Map.get(status, :relayed?, false))
     |> Map.put(:always_allow?, Map.get(status, :always_allow?, false))
     |> Map.put(:attach_artifact?, Map.get(status, :attach_artifact?, false))
+    |> Map.put(:visibility, Map.get(status, :visibility))
+    |> Map.put(:owner?, Map.get(status, :owner?, false))
   end
 
   @impl true
@@ -310,6 +312,40 @@ defmodule Troupe.Client.Remote do
     case call(plane, "session.uninvite", %{session_id: sid, subject: person}) do
       {:ok, answer} -> {:ok, Troupe.Client.Invites.uninvited(answer, person)}
       {:error, reason} -> {:error, refusal(reason)}
+    end
+  end
+
+  # Whose a pod session is, at the plane, which holds the row (root #1169). The status
+  # line's mark follows the answer at once; the log's line follows where a pod holds it.
+  @impl true
+  def share(sid, verb) do
+    case attachment(sid) do
+      %{plane_url: plane} when is_binary(plane) -> share_on(plane, sid, verb)
+      _ -> {:error, message(:not_attached)}
+    end
+  end
+
+  defp share_on(plane, sid, :status) do
+    case call(plane, "session.get", %{session_id: sid}) do
+      {:ok, %{} = row} -> {:ok, Troupe.Client.Share.status(row)}
+      {:error, reason} -> {:error, refusal(reason)}
+    end
+  end
+
+  defp share_on(plane, sid, {:set, visibility}) do
+    case call(plane, "session.visibility.set", %{session_id: sid, visibility: visibility}) do
+      {:ok, %{} = row} ->
+        _ = Worker.visibility(sid, row["visibility"])
+        {:ok, Troupe.Client.Share.set(row)}
+
+      {:error, %{message: "forbidden"} = error} ->
+        {:error, Troupe.Client.Share.forbidden(error[:data])}
+
+      {:error, %{code: -32_601}} ->
+        {:error, "this plane does not give a session to a team after it started yet"}
+
+      {:error, reason} ->
+        {:error, refusal(reason)}
     end
   end
 
@@ -737,7 +773,10 @@ defmodule Troupe.Client.Remote do
           state: Worker.session_state(result["state"]) || :active,
           profile: result["profile"],
           team: result["team"],
-          title: result["title"]
+          title: result["title"],
+          # Whose it is, for the status line's mark, where the plane says (root #1169).
+          visibility: result["visibility"],
+          owner?: result["role"] == "owner"
         })
 
       {:error, reason} ->
@@ -958,7 +997,9 @@ defmodule Troupe.Client.Remote do
          state: info[:state] || :active,
          profile: info[:profile],
          team: info[:team],
-         title: info[:title]
+         title: info[:title],
+         visibility: info[:visibility],
+         owner?: info[:owner?] == true
        ]}
 
     case DynamicSupervisor.start_child(Troupe.Remote.Sessions, spec) do
