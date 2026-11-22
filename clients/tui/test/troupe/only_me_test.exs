@@ -128,6 +128,29 @@ defmodule Troupe.OnlyMeTest do
     refute View.only_you?(%{kind: "team", visibility: "private", your_role: "collaborator"})
   end
 
+  test "a session opened by id, as troupe resume does, carries its mark from the answer" do
+    mine = FakeRemote.session(id: "s-mine", visibility: "private")
+    team = FakeRemote.session(id: "s-team", visibility: "team")
+
+    {remote, url} =
+      start_remote!(
+        transport: :http,
+        profiles: FakeRemote.profile_fixtures(),
+        sessions: [mine, team]
+      )
+
+    login!(remote, url)
+    {:ok, origin} = Client.connect_plane(url)
+
+    # No `only_me` option: the open's answer says whom the session is for.
+    {:ok, "s-mine"} = Client.open_session(origin, "s-mine", :read)
+    {:ok, "s-team"} = Client.open_session(origin, "s-team", :read)
+    on_exit(fn -> Enum.each(["s-mine", "s-team"], &Client.stop_session/1) end)
+
+    assert Client.capability("s-mine").only_me?
+    refute Client.capability("s-team").only_me?
+  end
+
   test "/new --only-me starts it as the owner's alone, and the status line says only you" do
     {remote, url} = start_remote!()
     login!(remote, url)
