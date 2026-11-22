@@ -580,6 +580,10 @@ defmodule Troupe.Client do
   @spec share_args(String.t()) :: {:ok, Troupe.Client.Share.verb()} | {:error, String.t()}
   defdelegate share_args(text), to: Troupe.Client.Share, as: :parse
 
+  @doc "The status line's word for whose a session is: `the team's`, `only you`, `by invitation`, or nil."
+  @spec share_mark(String.t() | nil, boolean()) :: String.t() | nil
+  defdelegate share_mark(visibility, owner?), to: Troupe.Client.Share, as: :mark
+
   @doc """
   Archive a session (`true`) or bring it back (`false`), which only its owner may do: an
   archived one is hidden from the session list for everyone who can see it, kept whole, and

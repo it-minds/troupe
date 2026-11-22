@@ -3070,7 +3070,7 @@ defmodule Troupe.UI.TUI.View do
   defp remote_note(%{model: %{remote: %{} = remote}}) do
     # Whose it is, where the plane said: the team's, or its owner's and the people invited.
     whose =
-      case Troupe.Client.Share.mark(remote[:visibility], remote[:owner?] == true) do
+      case Client.share_mark(remote[:visibility], remote[:owner?] == true) do
         nil -> ""
         mark -> " · " <> mark
       end
