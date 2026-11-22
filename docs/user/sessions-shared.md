@@ -56,9 +56,10 @@ Invitations stay as they are either way, and somebody both invited and on the te
 whichever of the two lets them do more.
 
 - **In the desktop app**, open the session and choose **Give it to the eng team** under its
-  ⋯, or **Only me again** on one the team has. The head marks it *only you* or *the team's*.
+  ⋯, or **Only me again** on one the team has. The list and the head say *only you* in place
+  of *Team* while it is yours alone, and *Team* again once it is the team's.
 - **In the terminal**, `/share team` gives it to the team, `/share me` takes it back, and
-  `/share` alone says whose it is; the status line marks it.
+  `/share` alone says whose it is; the status line says *only you* while it is yours alone.
 - **In the console**, *Your sessions* under *Mine* says whose each is, with the same two.
 
 Only the owner gives a session to the team or takes it back; nobody else is offered it, an
