@@ -2,7 +2,7 @@
 
 A session is one agent working in one directory, with a durable log: `active`, `dormant`
 (stopped, log kept, woken when used), `read_only`, or `erased`. In the TUI `/new` starts
-another beside it (`--private`, `--remote PROFILE`, or `--branch` for a fork that goes on
+another beside it (`--private`, `--remote PROFILE`, `--only-me`, or `--branch` for a fork that goes on
 from this one's conversation) and `/back` returns; `troupe resume latest` opens the newest
 in the directory, and `troupe resume ID --headless "message"` runs one more turn on it and
 exits ([command reference](cli-reference.md)). A session you erase reads
@@ -29,7 +29,9 @@ it", each word a picker; the profile is the last used with room, else the first 
 and a line says which. `@dev`, `#plan`, `/local` in the message set those and are removed
 before the agent reads it; a full profile says *Queue it* and starts when a place frees. If
 two of your teams may use the profile you pick the team once (its budget pays); it is kept.
-What a profile gives the session is on [profiles](profiles.md), and the terminal's screen
+On the platform, *Only me, until I invite people* (`/new --only-me`, `troupe run
+--only-me`) starts it as yours alone on the team's profile, marked *only you*, until you
+[invite people](sessions-shared.md#starting-it-as-only-you). What a profile gives the session is on [profiles](profiles.md), and the terminal's screen
 for it on [a new session](terminal-screen.md#a-new-session).
 
 ## Private session

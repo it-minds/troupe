@@ -230,7 +230,8 @@ export function useMarks(store: FleetStore, auth: AuthSession | null, daemon: Da
       if (row.kind !== "team" || !auth) throw new Error("Only a session on the platform is given to a team");
       const answered = await auth.plane.setSessionVisibility(await auth.token(), row.id, visibility);
       const raw = (row.raw && typeof row.raw === "object" ? row.raw : {}) as Record<string, unknown>;
-      store.patch(row.id, { raw: { ...raw, visibility: answered.visibility ?? visibility, team: answered.team ?? raw["team"] ?? null } });
+      const now = answered.visibility ?? visibility;
+      store.patch(row.id, { visibility: now, raw: { ...raw, visibility: now, team: answered.team ?? raw["team"] ?? null } });
       await store.refreshAfterChange();
     },
     [store, auth],

@@ -532,13 +532,10 @@ defmodule Troupe.Remote.Translate do
       "artifact_commented" ->
         {[emit.(:remote_note, %{text: commented(data)})], memory}
 
-      # The session given to its team by its owner, or taken back (root #1169): a line, and
-      # the status line's mark.
+      # The session given to its team by its owner, or taken back (root #1169): a line; the
+      # worker moves the status line's mark.
       "session_visibility_changed" ->
-        {[
-           emit.(:remote_note, %{text: visibility_changed(data)}),
-           emit.(:remote_status, %{visibility: data["visibility"]})
-         ], memory}
+        {[emit.(:remote_note, %{text: visibility_changed(data)})], memory}
 
       # A saved `AI!` or `AI?` comment started a branch of this session (root Decision 844):
       # the branch's session, its agent, and the comments, as the daemon wrote them.

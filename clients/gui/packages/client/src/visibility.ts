@@ -4,13 +4,14 @@
 // after it started (`session.visibility.set`); the terminal's `/share` says the same.
 
 import { TroupeRpcError } from "./connection.js";
+import { ONLY_YOU_MARK } from "./fleet.js";
 import { ErrorCodes } from "./types.js";
 import { errorText } from "./words.js";
 
-/** The head's mark: `the team's`, `only you` to its owner, `by invitation` to anybody else; null where nothing says. */
+/** Whose it is in a word: `the team's`, `only you` (`ONLY_YOU_MARK`) to its owner, `by invitation` to anybody else; null where nothing says. */
 export function sessionWhose(visibility: string | null | undefined, owner: boolean): string | null {
   if (visibility === "team") return "the team's";
-  if (visibility === "private") return owner ? "only you" : "by invitation";
+  if (visibility === "private") return owner ? ONLY_YOU_MARK.label : "by invitation";
   return null;
 }
 

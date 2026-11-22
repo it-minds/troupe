@@ -64,8 +64,9 @@ if (process.env["WAKE_FULL"]) {
   setInterval(() => plane.placeWaiting(rewrite.id), 20_000).unref?.();
 }
 plane.seed("alice@example.com", { title: "Nightly dependency sweep", profile: "ux", origin: { kind: "trigger", trigger: "nightly" } });
-// One only its owner opens, to give to the team from its ⋯ and take back (troupe #1169).
-plane.seed("alice@example.com", { title: "Sketch the retry budget", profile: "dev", visibility: "private" });
+// One on the team's profile that only Alice can open until she invites people (#1168), or
+// gives it to the team from its ⋯ and takes it back (#1169).
+plane.seed("alice@example.com", { title: "Draft the pricing memo", profile: "dev", visibility: "private" });
 // The people the identity record names, as SCIM or a sign-in left them (troupe #931).
 plane.names.set("alice@example.com", "Alice Example");
 plane.names.set("bob@example.com", "Bob Example");

@@ -173,16 +173,28 @@ defmodule Troupe.UI.NewSession do
   end
 
   @doc """
-  Who can open it, as the sentence ends: it follows from where it runs. Private is this
-  computer's: a platform session from the screen is the team's, `--private` or not.
+  Who can open it, as the sentence ends: it follows from where it runs. Private (sealed) is
+  this computer's: a platform session from the screen is the team's, `--private` or not,
+  unless `only_me?` (`/new --only-me`), its owner's and the people they invite, on the
+  team's profile all the same. The desktop app's `whoCanOpen` says the same.
   """
   @spec who(:local | :platform, [String.t()] | nil, boolean()) :: String.t()
-  def who(:local, _teams, _private?), do: "only you can open it"
+  def who(:local, _teams, _only_me?), do: "only you can open it"
 
-  def who(:platform, [_ | _] = teams, _private?),
+  def who(:platform, _teams, true), do: "only you can open it until you invite people"
+
+  def who(:platform, [_ | _] = teams, _only_me?),
     do: "everyone on #{Words.and_list(teams)} can open it"
 
-  def who(:platform, _none, _private?), do: "your team can open it"
+  def who(:platform, _none, _only_me?), do: "your team can open it"
+
+  @doc """
+  What a platform create sends as `visibility`: `team`, or `private`, its owner and the
+  people invited by name. Never a sealed session; the desktop's `platformVisibility`.
+  """
+  @spec visibility(boolean()) :: String.t()
+  def visibility(true), do: "private"
+  def visibility(false), do: "team"
 
   @doc ~S|"Set from your message: /local @dev #plan.", or nil with no token.|
   @spec tokens_sentence(tokens()) :: String.t() | nil

@@ -10,7 +10,9 @@ defmodule Troupe.CLI.RunTarget do
   runs on ops, `plan` as the AGENT word with `#build` runs build. `--profile`, or a
   `@profile` token without `/local`, puts the run on the platform; `/platform` alone does
   too, on the profile the screen would pick (the last used with room, else the first with
-  room). The title is `--title`, else the task's first line.
+  room). The title is `--title`, else the task's first line. A platform run is the team's,
+  or with `--only-me` its owner's until they invite people; a run on this computer is only
+  its owner's anyway.
 
   A full profile makes the run wait for the next free place, as the plane makes every
   create on it wait; the wait is printed one line at a time, as the plane says when to ask
@@ -71,6 +73,9 @@ defmodule Troupe.CLI.RunTarget do
            # Whose it is, where more than one of the person's teams may use the profile: a
            # script says so, and is never given the team this machine's /new remembers.
            team: args[:team],
+           # The team's, as /new's screen starts it, or `--only-me`: its owner's and the
+           # people they invite, on the team's profile all the same.
+           visibility: NewSession.visibility(Map.get(args, :only_me, false) == true),
            title: blank(title),
            prompt: cleaned,
            on_wait: fn answer -> waiting(io, profile, answer) end

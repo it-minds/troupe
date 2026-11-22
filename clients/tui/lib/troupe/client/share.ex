@@ -20,13 +20,6 @@ defmodule Troupe.Client.Share do
     end
   end
 
-  @doc "The wire visibility a status line's mark is drawn from, in its words."
-  @spec mark(String.t() | nil, boolean()) :: String.t() | nil
-  def mark("team", _owner?), do: "the team's"
-  def mark("private", true), do: "only you"
-  def mark("private", false), do: "by invitation"
-  def mark(_other, _owner?), do: nil
-
   @doc "What `/share` alone says of a session row: whose it is, and to its owner what changes it."
   @spec status(map()) :: String.t()
   def status(%{"visibility" => "team"} = row) do

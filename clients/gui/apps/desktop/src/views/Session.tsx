@@ -260,16 +260,18 @@ export function Session({
   // Whose a pod session is (troupe #1169): the plane's row, then the log's word once its
   // owner changes it, and the answer to a change made here until the log says it too. The
   // owner gives it to the team or takes it back from the ⋯ or `/share`.
-  const rowSaid = row?.raw as { visibility?: string; team?: string | null } | undefined;
+  const rowSaid = row?.raw as { team?: string | null } | undefined;
   const [answered, setAnswered] = useState<{ visibility: string; seen: string | undefined } | null>(null);
   const [shareError, setShareError] = useState<string | null>(null);
   useEffect(() => {
     setAnswered(null);
     setShareError(null);
   }, [sessionId]);
-  const visibility = answered && view.state.visibility === answered.seen ? answered.visibility : (view.state.visibility ?? rowSaid?.visibility);
+  const visibility = answered && view.state.visibility === answered.seen ? answered.visibility : (view.state.visibility ?? row?.visibility ?? undefined);
   const team = rowSaid?.team ?? null;
   const whose = row?.kind === "team" ? sessionWhose(visibility, row.yourRole === "owner") : null;
+  // The row as the head marks it: "only you" in place of "Team" follows the visibility now.
+  const headRow = row && visibility ? { ...row, visibility } : row;
   const share =
     marking && marking.row.kind === "team" && (visibility === "team" || visibility === "private")
       ? async (to: "team" | "private"): Promise<string | null> => {
@@ -437,14 +439,13 @@ export function Session({
       )}
 
       <Header
-        row={row}
+        row={headRow}
         sessionId={sessionId}
         state={view.state}
         self={self}
         agent={current}
         onBack={onBack}
         renaming={rename && renaming ? { onRename: async (title) => void (await rename(title)), onDone: () => setRenaming(false) } : null}
-        whose={whose}
         invites={row ? <InviteControl auth={auth} daemon={daemon} row={row} /> : null}
         remoteLine={row?.kind === "remote" ? <RemoteLine row={row} /> : null}
         menu={
@@ -844,7 +845,6 @@ function Header({
   agent,
   onBack,
   renaming,
-  whose,
   invites,
   remoteLine,
   menu,
@@ -858,8 +858,6 @@ function Header({
   onBack: () => void;
   /** The title as a field while it is being renamed, from the ⋯ or /rename; null otherwise. */
   renaming?: { onRename: (title: string) => Promise<void>; onDone: () => void } | null;
-  /** Whose a pod session is, in the head's word: `the team's`, `only you`, `by invitation`; null for any other. */
-  whose?: string | null;
   /** Whom it is shared with by name, and for its owner the invitation (troupe #765). */
   invites?: JSX.Element | null;
   /** Whose laptop a relayed session is on. */
@@ -889,7 +887,7 @@ function Header({
       <div className="crumbs">
         {row && (
           <>
-            <Where kind={row.kind} />
+            <Where kind={row.kind} row={row} />
             {/* How a private session's sealing stands here, as its row in the list says. */}
             <Sync state={row.sync} device={row.device} />
           </>
@@ -902,12 +900,6 @@ function Header({
         <span className="tag profile" title="The agent this window runs">
           {agent ?? "—"}
         </span>
-        {/* Last, so that where the head is narrow it is the one cut short: the ⋯ says it too. */}
-        {whose && (
-          <span className="tag whose" title={whose === "the team's" ? "Everyone on its team can open it" : "Its owner and the people they invited can open it"}>
-            {whose}
-          </span>
-        )}
         {remoteLine}
       </div>
       <span className="spacer" />

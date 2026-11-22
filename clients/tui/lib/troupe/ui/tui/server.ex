@@ -2491,15 +2491,33 @@ defmodule Troupe.UI.TUI.Server do
   # the agent of what it forks, or a plane's profile, which names its own.
   #
   # The screen is prompt-first: the message box, then the settings as
-  # one sentence of chips. `--private` and `--remote PROFILE` pre-set the chips; `--branch`
+  # one sentence of chips. `--private` and `--remote PROFILE` pre-set the chips, and
+  # `--only-me` puts it on the platform as its owner's until they invite people; `--branch`
   # forks what is on screen at once, as it always did.
+  @new_usage "/new [--private | --remote PROFILE | --only-me | --branch]"
+
   defp new_session(state, args) do
     case new_kind(String.split(args)) do
-      {:ok, :branch} -> open_kind(state, :branch, nil)
-      {:ok, :local} -> open_new_page(state, [])
-      {:ok, :private} -> open_new_page(state, private: true)
-      {:ok, {:remote, profile}} -> open_new_page(state, where: :platform, profile: profile)
-      :usage -> notice(state, "usage: /new [--private | --remote PROFILE | --branch]")
+      {:ok, :branch} ->
+        open_kind(state, :branch, nil)
+
+      {:ok, :local} ->
+        open_new_page(state, [])
+
+      {:ok, :private} ->
+        open_new_page(state, private: true)
+
+      {:ok, {:remote, profile}} ->
+        open_new_page(state, where: :platform, profile: profile)
+
+      {:ok, :only_me} ->
+        open_new_page(state, where: :platform, only_me: true)
+
+      {:ok, {:only_me, profile}} ->
+        open_new_page(state, where: :platform, profile: profile, only_me: true)
+
+      :usage ->
+        notice(state, "usage: " <> @new_usage)
     end
   end
 
@@ -2595,9 +2613,10 @@ defmodule Troupe.UI.TUI.Server do
       if Process.alive?(server), do: :go_on, else: :stop
     end
 
+    # Whose it is, the team's or (`--only-me`) its owner's, is the page's to say.
     params =
       if match?({:remote, _}, origin),
-        do: Map.merge(params, %{on_wait: on_wait, visibility: "team"}),
+        do: Map.put(params, :on_wait, on_wait),
         else: params
 
     {:ok, _task} =
@@ -2636,6 +2655,9 @@ defmodule Troupe.UI.TUI.Server do
   defp new_kind(["--private"]), do: {:ok, :private}
   defp new_kind(["--branch"]), do: {:ok, :branch}
   defp new_kind(["--remote", profile]), do: {:ok, {:remote, profile}}
+  defp new_kind(["--only-me"]), do: {:ok, :only_me}
+  defp new_kind(["--remote", profile, "--only-me"]), do: {:ok, {:only_me, profile}}
+  defp new_kind(["--only-me", "--remote", profile]), do: {:ok, {:only_me, profile}}
   defp new_kind(_words), do: :usage
 
   # Here: the session on screen's directory, or with a plane's on screen the one this

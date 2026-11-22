@@ -24,6 +24,7 @@ export { FUNCTIONS_HEADING, UNPRICED_SENTENCE, accessWords, actsAsWords, askWord
 export type { ProfileView, ProfileViewAgent, ProfileViewAllowance, ProfileViewFunction, ProfileViewGitHub, ProfileViewHarnessTool, ProfileViewLimits, ProfileViewMissing, ProfileViewModel, ProfileViewRule, ProfileViewServer, ProfileViewServerAbout, ProfileViewSkill, RuleAccess, ServerAccess, UnpricedCalls } from "./profile.js";
 export {
   LOCAL_DOWN_SENTENCE,
+  ONLY_ME_TICK,
   andList,
   autoPickProfile,
   ceilingSentence,
@@ -32,6 +33,8 @@ export {
   defaultProfileAgent,
   fullHouseSentence,
   messageTokens,
+  onlyMeSentence,
+  platformVisibility,
   profileRoom,
   stripTokens,
   teamQuestion,
@@ -138,6 +141,8 @@ export type {
 export {
   FleetStore,
   PlaneSource,
+  ONLY_YOU_MARK,
+  onlyYou,
   rowFromPlane,
   filterRows,
   awaitingYou,

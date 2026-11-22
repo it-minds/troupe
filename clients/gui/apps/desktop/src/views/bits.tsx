@@ -9,7 +9,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { JSX, ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { ago, firstLine, hasUnseen, moneyWords, sessionStateWords, syncWords, unseenSummary } from "@troupe/client";
+import { ONLY_YOU_MARK, ago, firstLine, hasUnseen, moneyWords, onlyYou, sessionStateWords, syncWords, unseenSummary } from "@troupe/client";
 import type { FleetRow, LineKind, SessionKind, SyncState } from "@troupe/client";
 import { Eye } from "./brand";
 
@@ -92,7 +92,15 @@ export function failedTitle(row: Pick<FleetRow, "failed">): string | undefined {
  *
  * No glyph on the plain two: an eye means a state, and where a session runs is not one.
  */
-export function Where({ kind }: { kind: SessionKind }): JSX.Element {
+export function Where({ kind, row }: { kind: SessionKind; row?: Pick<FleetRow, "kind" | "visibility" | "yourRole"> }): JSX.Element {
+  // A pod session of the person's own the team cannot open is not the team's: "only you"
+  // in the place of "Team", which would say everyone on it can open it.
+  if (row && onlyYou(row))
+    return (
+      <span className="pill team" title={`Runs on the platform. ${ONLY_YOU_MARK.detail}`}>
+        {ONLY_YOU_MARK.label}
+      </span>
+    );
   if (kind === "private") return <Pill status="private">Private</Pill>;
   // Somebody else's private session they invited this person into, read here from the
   // plane's sealed copy with this person's own keys (troupe #765).

@@ -47,7 +47,7 @@ defmodule Troupe.ShareCommandTest do
 
     say(pid, "/share team")
     eventually(fn -> Enum.any?(notices(pid), &(&1 =~ "Given to the eng team")) end)
-    eventually(fn -> screen_text(pid, screen) =~ "remote (active) · the team's" end)
+    eventually(fn -> not (screen_text(pid, screen) =~ "remote (active) · only you") end)
 
     assert Enum.any?(
              FakeRemote.calls(remote),
@@ -78,10 +78,30 @@ defmodule Troupe.ShareCommandTest do
     refute Enum.any?(Client.events(sid), &(&1.type == :input))
   end
 
+  test "the mark follows the log when the owner changes it from another client" do
+    {remote, _sid, pid, screen} = on_a_pod(visibility: "private")
+    eventually(fn -> screen_text(pid, screen) =~ "remote (active) · only you" end)
+
+    FakeRemote.emit(remote, "s-share", "session_visibility_changed", %{
+      "visibility" => "team",
+      "by" => "alice"
+    })
+
+    eventually(fn -> not (screen_text(pid, screen) =~ "remote (active) · only you") end)
+
+    FakeRemote.emit(remote, "s-share", "session_visibility_changed", %{
+      "visibility" => "private",
+      "by" => "alice"
+    })
+
+    eventually(fn -> screen_text(pid, screen) =~ "remote (active) · only you" end)
+  end
+
   test "somebody who is not the owner is told whose it is to change" do
     {_remote, _sid, pid, screen} = on_a_pod(owner: "bea", visibility: "team")
 
-    eventually(fn -> screen_text(pid, screen) =~ "remote (active) · the team's" end)
+    eventually(fn -> screen_text(pid, screen) =~ "remote (active)" end)
+    refute screen_text(pid, screen) =~ "only you"
 
     say(pid, "/share me")
 
@@ -103,15 +123,10 @@ defmodule Troupe.ShareCommandTest do
     assert refused == Share.not_here()
   end
 
-  test "what /share names, and the marks" do
+  test "what /share names" do
     assert {:ok, :status} = Share.parse(" ")
     assert {:ok, {:set, "team"}} = Share.parse("team")
     assert {:ok, {:set, "private"}} = Share.parse(" me ")
     assert {:error, _} = Share.parse("bea@example.com")
-
-    assert Share.mark("team", false) == "the team's"
-    assert Share.mark("private", true) == "only you"
-    assert Share.mark("private", false) == "by invitation"
-    assert Share.mark(nil, true) == nil
   end
 end

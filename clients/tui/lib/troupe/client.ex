@@ -43,6 +43,8 @@ defmodule Troupe.Client do
   @type summary :: %{
           optional(:owner_name) => String.t() | nil,
           optional(:archived) => boolean(),
+          optional(:visibility) => String.t() | nil,
+          optional(:your_role) => String.t() | nil,
           id: session_id(),
           title: String.t(),
           owner: String.t() | nil,
@@ -579,10 +581,6 @@ defmodule Troupe.Client do
   @doc "What `/share` names after the command: nothing, `team` or `me`."
   @spec share_args(String.t()) :: {:ok, Troupe.Client.Share.verb()} | {:error, String.t()}
   defdelegate share_args(text), to: Troupe.Client.Share, as: :parse
-
-  @doc "The status line's word for whose a session is: `the team's`, `only you`, `by invitation`, or nil."
-  @spec share_mark(String.t() | nil, boolean()) :: String.t() | nil
-  defdelegate share_mark(visibility, owner?), to: Troupe.Client.Share, as: :mark
 
   @doc """
   Archive a session (`true`) or bring it back (`false`), which only its owner may do: an

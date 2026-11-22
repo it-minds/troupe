@@ -19,7 +19,7 @@ let unmount: (() => void) | null = null;
 const entry = (text: string): HTMLLIElement | undefined =>
   [...document.querySelectorAll<HTMLLIElement>("ul.rows > li")].find((li) => li.querySelector(".title")?.textContent === text);
 const palette = (): HTMLElement | null => document.querySelector<HTMLElement>('[role="dialog"][aria-label="Commands"]');
-const mark = (): string | null | undefined => document.querySelector(".session-head .tag.whose")?.textContent;
+const mark = (): string | null | undefined => document.querySelector(".session-head .crumbs .pill.team")?.textContent;
 const onTheList = (): boolean => Boolean(document.querySelector(".toolbar input.search"));
 
 function key(target: EventTarget, key: string): void {
@@ -89,7 +89,7 @@ describe("a team session", () => {
     const give = await seesButton("Give it to the core team", await menu());
     expect(give.textContent).toContain("Everyone on the core team can open it, and steer it where the team allows");
     give.click();
-    await waitFor(() => mark() === "the team's", "the team's mark");
+    await waitFor(() => mark() === "Team", "the team's mark");
     expect(sketch.visibility).toBe("team");
     await waitFor(() => says("Ada gave this session to the team: everyone on it can open it"), "the log's line");
 
@@ -107,7 +107,7 @@ describe("a team session", () => {
     await waitFor(() => mark() === "only you", "the only-you mark");
 
     harness.worker.sessions.get(sketch.id)!.log.append("session_visibility_changed", { visibility: "team", by: "ada@example.com", by_name: "Ada" }, { kind: "user", subject: "ada@example.com" });
-    await waitFor(() => mark() === "the team's", "the mark following the event");
+    await waitFor(() => mark() === "Team", "the mark following the event");
   });
 
   it("is given with /share team and says whose it is with /share", async () => {
@@ -120,7 +120,7 @@ describe("a team session", () => {
     key(document.querySelector(".palette input")!, "Escape");
 
     await run("share team");
-    await waitFor(() => mark() === "the team's", "the team's mark");
+    await waitFor(() => mark() === "Team", "the team's mark");
     expect(sketch.visibility).toBe("team");
   });
 
@@ -128,7 +128,7 @@ describe("a team session", () => {
     harness.plane.seed("bob@example.com", { title: "Bob's migration", visibility: "team" });
     await signIn();
     await open("Bob's migration");
-    await waitFor(() => mark() === "the team's", "the team's mark");
+    await waitFor(() => mark() === "Team", "the team's mark");
 
     const pop = await menu();
     expect(button("Only me again", pop)).toBeNull();

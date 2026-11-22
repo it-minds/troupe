@@ -349,6 +349,8 @@ defmodule Troupe.Remote.Worker do
       # caller knows better, as the daemon's client does of its own sessions.
       isolation: Keyword.get(opts, :isolation, :remote),
       team: Keyword.get(opts, :team),
+      # A pod session of the person's own the team cannot open, which the status line says.
+      only_me: Keyword.get(opts, :only_me, false),
       title: Keyword.get(opts, :title),
       # Whose a pod session is, as the plane said at the open and the log says since (root
       # #1169): `team` or `private`, nil where nobody said; and whether it is this person's.
@@ -392,10 +394,9 @@ defmodule Troupe.Remote.Worker do
        endpoint: state.endpoint,
        error: state.error,
        relayed?: relayed?(state),
+       only_me?: only_me?(state),
        always_allow?: state.capabilities["approval_allow_always"] == true,
-       attach_artifact?: state.capabilities["fs_upload_artifact"] == true,
-       visibility: state.visibility,
-       owner?: state.owner?
+       attach_artifact?: state.capabilities["fs_upload_artifact"] == true
      }, state}
   end
 
@@ -1361,6 +1362,7 @@ defmodule Troupe.Remote.Worker do
           %{state | cursor: max(state.cursor, Translate.seq(params) || state.cursor)}
       end
 
+    if given(params), do: publish_status(state)
     write_notes(state)
   end
 
@@ -1603,10 +1605,16 @@ defmodule Troupe.Remote.Worker do
       # artifact attached by name, its files fetched by the server.
       |> Map.put(:always_allow?, state.capabilities["approval_allow_always"] == true)
       |> Map.put(:attach_artifact?, state.capabilities["fs_upload_artifact"] == true)
-      |> Map.put(:visibility, state.visibility)
-      |> Map.put(:owner?, state.owner?)
+      |> Map.put(:only_me?, only_me?(state))
     )
   end
+
+  # Only its owner's and the people invited: as the plane or the log said it last where
+  # either did (root #1169), else as the listing the session was opened from said.
+  defp only_me?(%{visibility: visibility} = state) when is_binary(visibility),
+    do: visibility == "private" and state.owner?
+
+  defp only_me?(state), do: state.only_me
 
   # A laptop's session reached through the plane whose approvals are answered once from
   # here: its daemon says `relayed` in `initialize`, and one that takes an answer for the

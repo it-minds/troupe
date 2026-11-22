@@ -727,16 +727,29 @@ defmodule Troupe.UI.TUI.View do
 
   @doc """
   Where a private session is kept and how its sealing stands, `private · synced`, in the
-  desktop app's words (`@troupe/client`'s `syncWords`); empty for any other session.
+  desktop app's words (`@troupe/client`'s `syncWords`); `only you` for a pod session of the
+  person's own the team cannot open (`@troupe/client`'s `onlyYou`), never "private", which
+  is a sealed session's word; empty for any other session.
   """
   @spec kept(map()) :: String.t()
   def kept(entry) do
     case {Map.get(entry, :kind), Map.get(entry, :sync)} do
       {"private", nil} -> "private"
       {"private", sync} -> "private · " <> elem(sync_words(sync, Map.get(entry, :device)), 0)
-      _other -> ""
+      _other -> if only_you?(entry), do: only_you(), else: ""
     end
   end
+
+  @doc "The mark of a pod session only its owner and the people they invite can open."
+  @spec only_you() :: String.t()
+  def only_you, do: "only you"
+
+  @doc "Whether a row is a pod session of the person's own whose visibility is `private`."
+  @spec only_you?(map()) :: boolean()
+  def only_you?(entry),
+    do:
+      Map.get(entry, :kind) == "team" and Map.get(entry, :visibility) == "private" and
+        Map.get(entry, :your_role) == "owner"
 
   @doc "A private session's sync state in words: the label, and the sentence behind it."
   @spec sync_words(String.t(), String.t() | nil) :: {String.t(), String.t()}
@@ -3068,14 +3081,8 @@ defmodule Troupe.UI.TUI.View do
   end
 
   defp remote_note(%{model: %{remote: %{} = remote}}) do
-    # Whose it is, where the plane said: the team's, or its owner's and the people invited.
-    whose =
-      case Client.share_mark(remote[:visibility], remote[:owner?] == true) do
-        nil -> ""
-        mark -> " · " <> mark
-      end
-
-    state = " · remote (#{remote[:state] || "?"})" <> whose
+    mine = if remote[:only_me?], do: " · " <> only_you(), else: ""
+    state = " · remote (#{remote[:state] || "?"})" <> mine
 
     case remote[:reason] do
       reason when is_binary(reason) -> state <> " · #{reason}"

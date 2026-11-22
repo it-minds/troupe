@@ -19,6 +19,8 @@ interface Row {
   id: string;
   owner: string;
   profile: string;
+  /** `team`, everyone on its team; `private`, its owner and the people invited by name, as the plane's default is. */
+  visibility: string;
   title: string | null;
   /** The agent it was created as; null for the profile's default. */
   agent: string | null;
@@ -33,8 +35,6 @@ interface Row {
   reviewed_by: string | null;
   origin: { kind: string; trigger?: string } | null;
   created_at: number;
-  /** `team`, every member's, or `private`, its owner's and the people invited; a seeded one is the team's unless said. */
-  visibility?: "team" | "private";
 }
 
 /** The agent a session given none runs as: `build` where the profile offers it, else its first; none where it offers none. */
@@ -635,11 +635,11 @@ export class FakePlane {
    * `s-p-<n>`, apart from the fake daemon's `s-l-<n>`, so a list holding both shows each.
    * `prompt` is its first turn.
    */
-  seed(owner: string, params: { id?: string; profile?: string; title?: string; agent?: string | null; origin?: Row["origin"]; prompt?: string; visibility?: Row["visibility"] } = {}): Row {
+  seed(owner: string, params: { id?: string; profile?: string; title?: string; agent?: string | null; origin?: Row["origin"]; prompt?: string; visibility?: string } = {}): Row {
     const id = params.id ?? `s-p-${++this.counter}`;
     const row: Row = { ...this.blankRow(id, owner, params.profile ?? "dev", params.title ?? null), agent: params.agent ?? null };
-    if (params.origin) row.origin = params.origin;
     if (params.visibility) row.visibility = params.visibility;
+    if (params.origin) row.origin = params.origin;
     this.rows.set(id, row);
     this.activate(row, params.prompt);
     return row;
@@ -698,6 +698,14 @@ export class FakePlane {
   /** The teams creates named, in order: whose each session was started for. */
   readonly createdFor: string[] = [];
 
+  /** The visibility each create was made with, in order, the plane's default where it named none. */
+  readonly createdVisibility: string[] = [];
+
+  /** Whether a person sees a session: its owner, one invited into it, or anyone where it is the team's. */
+  private sees(row: Row, subject: string): boolean {
+    return row.visibility !== "private" || row.owner === subject || this.invitations.get(row.id)?.has(subject) === true;
+  }
+
   private agentsOf(profile: string, subject: string): string[] {
     const set = this.opts.agents?.[profile];
     if (set) return set;
@@ -716,6 +724,8 @@ export class FakePlane {
       id,
       owner,
       profile,
+      // A seeded row stands for a team's session, as the lists the tests read were made of.
+      visibility: "team",
       title,
       agent: null,
       state: "active",
@@ -1422,7 +1432,7 @@ export class FakePlane {
 
       case "sessions.list": {
         const rows = [...this.rows.values()]
-          .filter((r) => !this.unseen.has(r.id))
+          .filter((r) => !this.unseen.has(r.id) && this.sees(r, subject))
           .filter((r) => !params["profile"] || r.profile === params["profile"])
           .filter((r) => !params["state"] || r.state === params["state"])
           .filter((r) => !params["status"] || r.status === params["status"])
@@ -1436,7 +1446,7 @@ export class FakePlane {
 
       case "session.get": {
         const row = this.rows.get(String(params["session_id"] ?? ""));
-        if (!row || this.unseen.has(row.id)) return { error: { code: -32005, message: "not_found" } };
+        if (!row || this.unseen.has(row.id) || !this.sees(row, subject)) return { error: { code: -32005, message: "not_found" } };
         return { result: this.sessionJson(row, subject) };
       }
 
@@ -1461,6 +1471,9 @@ export class FakePlane {
         if (!agent) return { error: { code: -32602, message: "invalid_params", data: { field: "agent", reason: `${profile} offers no agent a session can start as`, agents: [] } } };
         const prompt = typeof params["prompt"] === "string" && params["prompt"].trim() ? params["prompt"] : undefined;
         const title = params["title"] === undefined ? undefined : String(params["title"]);
+        // The plane's default: a create naming none is its owner's and the people invited by name.
+        const visibility = typeof params["visibility"] === "string" ? params["visibility"] : "private";
+        this.createdVisibility.push(visibility);
         const room = this.opts.room?.[profile];
         if (room && typeof room.max_sessions === "number" && room.active >= room.max_sessions) {
           const reason = `${profile} allows ${room.max_sessions} session(s) at once, and they are running`;
@@ -1469,12 +1482,12 @@ export class FakePlane {
         if (room && room.active >= room.capacity) {
           // No room, and more coming: the session exists, waits, and holds its prompt.
           const id = `s-p-${++this.counter}`;
-          const row: Row = { ...this.blankRow(id, subject, profile, title ?? null), agent, state: "pending" };
+          const row: Row = { ...this.blankRow(id, subject, profile, title ?? null), agent, visibility, state: "pending" };
           this.rows.set(id, row);
           if (prompt) this.heldPrompts.set(id, prompt);
           return { result: { session_id: id, epoch: 1, state: "pending", mode: "waiting", reason: `waiting for a free place on ${profile}`, retry_after_ms: this.retryAfterMs } };
         }
-        const row = this.seed(subject, { profile, ...(title === undefined ? {} : { title }), agent, ...(prompt ? { prompt } : {}) });
+        const row = this.seed(subject, { profile, ...(title === undefined ? {} : { title }), agent, visibility, ...(prompt ? { prompt } : {}) });
         if (room) room.active += 1;
         return { result: this.attachment(row, subject, name, "owner", "activate") };
       }
@@ -1935,7 +1948,7 @@ export class FakePlane {
         if (row.owner !== subject) return { error: { code: -32004, message: "forbidden", data: { required_role: "owner", reason: "only the session's owner gives it to the team or takes it back" } } };
         const to = params["visibility"];
         if (to !== "team" && to !== "private") return { error: { code: -32602, message: "invalid_params", data: { reason: "visibility is team or private" } } };
-        if ((row.visibility ?? "team") !== to) {
+        if (row.visibility !== to) {
           row.visibility = to;
           const name = this.nameOf(subject);
           const actor = { kind: "user", subject, ...(name ? { display_name: name } : {}) };
@@ -1985,7 +1998,7 @@ export class FakePlane {
       owner: row.owner,
       ...(ownerName ? { owner_name: ownerName } : {}),
       profile: row.profile,
-      visibility: row.visibility ?? "team",
+      visibility: row.visibility,
       team: this.teamsOf(row.owner)[0] ?? null,
       state: row.state,
       epoch: row.epoch,
