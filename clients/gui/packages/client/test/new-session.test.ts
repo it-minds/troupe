@@ -5,7 +5,24 @@
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { autoPickProfile, cleanMessage, defaultProfileAgent, messageTokens, profileRoom, stripTokens, titleFromMessage, tokensSentence, whoCanOpen } from "../src/index.js";
+import {
+  ONLY_ME_TICK,
+  ONLY_YOU_MARK,
+  autoPickProfile,
+  cleanMessage,
+  defaultProfileAgent,
+  messageTokens,
+  onlyMeSentence,
+  onlyYou,
+  platformVisibility,
+  profileRoom,
+  rowFromPlane,
+  stripTokens,
+  titleFromMessage,
+  tokensSentence,
+  whoCanOpen,
+} from "../src/index.js";
+import type { SessionRow } from "../src/index.js";
 
 const names = { profiles: ["dev", "standard", "research-let"], agents: ["build", "plan", "orchestrate"] };
 
@@ -108,5 +125,53 @@ describe("who can open it", () => {
     assert.equal(whoCanOpen("platform", { teams: ["core"], private: true }), "only you can open it");
     assert.equal(whoCanOpen("platform", { teams: ["core"] }), "everyone on core can open it");
     assert.equal(whoCanOpen("platform", { teams: ["core", "salg", "ops"] }), "everyone on core, salg and ops can open it");
+  });
+
+  // troupe #1168: on the team's profile and only the owner's until they invite people.
+  it("says only you until you invite people for a platform session ticked only me, and sends private", () => {
+    assert.equal(whoCanOpen("platform", { teams: ["core"], onlyMe: true }), "only you can open it until you invite people");
+    assert.equal(whoCanOpen("local", { onlyMe: true }), "only you can open it");
+    assert.equal(platformVisibility(true), "private");
+    assert.equal(platformVisibility(false), "team");
+    assert.equal(ONLY_ME_TICK, "Only me, until I invite people");
+  });
+
+  it("says under the tick who can open it either way", () => {
+    assert.equal(onlyMeSentence(false, ["core"]), "Everyone on core can open it.");
+    assert.equal(onlyMeSentence(false, null), "Everyone on your team can open it.");
+    assert.equal(onlyMeSentence(true, ["core"]), "Only you can open it until you invite people; administrators oversee it as any session.");
+  });
+});
+
+describe("the only-you mark", () => {
+  // A plane's row with only the fields the mark reads beside the index's, as an older plane
+  // that answers fewer would send it, and what each case changes.
+  const plane = (over: { visibility?: string; your_role?: SessionRow["your_role"]; kind?: string }): SessionRow =>
+    ({
+    id: "s-1",
+    owner: "alice",
+    profile: "dev",
+    state: "active",
+    epoch: 1,
+    title: "t",
+    last_active_at: null,
+    last_seq: 0,
+    head_hash: null,
+    object_bytes: null,
+    workspace_bytes: null,
+    your_role: over.your_role ?? "owner",
+    visibility: over.visibility ?? "team",
+    ...(over.kind ? { kind: over.kind } : {}),
+  }) as unknown as SessionRow;
+
+  it("is on a pod session of the person's own whose visibility is private, and on no other", () => {
+    assert.equal(rowFromPlane(plane({ visibility: "private" })).visibility, "private");
+    assert.equal(onlyYou(rowFromPlane(plane({ visibility: "private" }))), true);
+    assert.equal(onlyYou(rowFromPlane(plane({}))), false);
+    // Somebody else's, which the person was invited into.
+    assert.equal(onlyYou(rowFromPlane(plane({ visibility: "private", your_role: "collaborator" }))), false);
+    // A sealed session is "private", never "only you".
+    assert.equal(onlyYou(rowFromPlane(plane({ visibility: "private", kind: "private" }))), false);
+    assert.equal(ONLY_YOU_MARK.label, "only you");
   });
 });

@@ -175,7 +175,8 @@ defmodule Troupe.NewSessionTest do
     press(pid, "enter")
 
     eventually(fn ->
-      screen_text(pid, session) =~ "usage: /new [--private | --remote PROFILE | --branch]"
+      screen_text(pid, session) =~
+        "usage: /new [--private | --remote PROFILE | --only-me | --branch]"
     end)
   end
 

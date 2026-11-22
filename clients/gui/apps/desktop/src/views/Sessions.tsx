@@ -356,7 +356,7 @@ function Rows({
                   </span>
                 )}
                 <Unread row={r} />
-                <Where kind={r.kind} />
+                <Where kind={r.kind} row={r} />
                 {r.kind === "remote" && r.remote && r.remote.state !== "online" && (
                   <span className="micro muted">{presenceWords(r.remote)}</span>
                 )}

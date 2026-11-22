@@ -156,11 +156,35 @@ export function andList(names: readonly string[]): string {
   return `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
 }
 
-/** Who can open the session, as the sentence ends: it follows from where it runs. */
-export function whoCanOpen(where: NewSessionWhere, opts: { teams?: readonly string[] | null; private?: boolean } = {}): string {
+/**
+ * Who can open the session, as the sentence ends: it follows from where it runs. On the
+ * platform it is the team's unless `onlyMe`, a session on the team's profile that only its
+ * owner and the people they invite by name can open.
+ */
+export function whoCanOpen(where: NewSessionWhere, opts: { teams?: readonly string[] | null; private?: boolean; onlyMe?: boolean } = {}): string {
   if (where === "local" || opts.private) return "only you can open it";
+  if (opts.onlyMe) return "only you can open it until you invite people";
   const teams = (opts.teams ?? []).filter((t) => typeof t === "string" && t);
   return teams.length > 0 ? `everyone on ${andList(teams)} can open it` : "your team can open it";
+}
+
+/** The tick on the platform path, off by default: the session is its owner's until they invite people. */
+export const ONLY_ME_TICK = "Only me, until I invite people";
+
+/**
+ * What a platform create sends as `visibility`: `team`, everyone on the session's team, or
+ * `private`, its owner and the people invited by name. Either runs on the team's profile,
+ * pods and budget; "private" here is the plane's word, never a sealed session.
+ */
+export function platformVisibility(onlyMe: boolean): "team" | "private" {
+  return onlyMe ? "private" : "team";
+}
+
+/** The line under the tick: who can open the session either way. */
+export function onlyMeSentence(onlyMe: boolean, teams: readonly string[] | null = null): string {
+  if (onlyMe) return "Only you can open it until you invite people; administrators oversee it as any session.";
+  const named = (teams ?? []).filter((t) => typeof t === "string" && t);
+  return named.length > 0 ? `Everyone on ${andList(named)} can open it.` : "Everyone on your team can open it.";
 }
 
 /** "Set from your message: /local @dev #plan." */

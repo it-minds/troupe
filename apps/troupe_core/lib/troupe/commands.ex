@@ -295,7 +295,7 @@ defmodule Troupe.Commands do
   def builtins do
     [
       entry("new", "session", "Start a fresh session here, without leaving the client",
-        usage: "/new [--private | --remote PROFILE | --branch]",
+        usage: "/new [--private | --remote PROFILE | --only-me | --branch]",
         args: [arg("flags", false, "text")],
         detail:
           "Opens the new-session screen and the session takes the screen; the one you " <>
@@ -307,8 +307,9 @@ defmodule Troupe.Commands do
             "are taken out of it. Enter starts (a full profile queues, and the wait is " <>
             "shown; Esc goes back to the form and the start goes on); Ctrl-J is a new " <>
             "line; Tab reaches the recent sessions, where Enter or 1-3 sets the chips " <>
-            "like one. --private and --remote PROFILE set the chips, and " <>
-            "--branch forks the one on screen at once: a session of its own that starts " <>
+            "like one. --private and --remote PROFILE set the chips; --only-me starts it " <>
+            "on the platform as yours alone until you invite people (with --remote " <>
+            "PROFILE too), on the team's profile all the same; and --branch forks the one on screen at once: a session of its own that starts " <>
             "from this conversation as it stands.",
         example: "/new --branch"
       ),
