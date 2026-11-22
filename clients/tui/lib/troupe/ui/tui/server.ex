@@ -1283,7 +1283,7 @@ defmodule Troupe.UI.TUI.Server do
   # 698); this is only which of them the TUI implements, and the suite holds the two
   # equal, so a command added to the table without a clause here fails a test rather
   # than being dispatched as an agent.
-  @builtins ~w(new cancel dismiss merge discard compact goal loop steer invite uninvite sessions archive
+  @builtins ~w(new cancel dismiss merge discard compact goal loop steer invite uninvite share sessions archive
                unarchive rename keep back hq observer files
                scratch upload save publish artifacts profiles profile copy memory context watch settings
                models mcp
@@ -1702,6 +1702,15 @@ defmodule Troupe.UI.TUI.Server do
           {:error, sentence} ->
             {:error, sentence}
         end
+    end
+  end
+
+  # Whose a session on the platform is (root #1169): alone it says, `team` gives it to its
+  # team, `me` takes it back; the status line's mark follows.
+  defp builtin("share", args, state, _target) do
+    case Client.share_args(args) do
+      {:ok, verb} -> notice_of(Client.share(state.session_id, verb))
+      {:error, sentence} -> {:error, sentence}
     end
   end
 

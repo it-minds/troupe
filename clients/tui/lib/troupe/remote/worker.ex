@@ -235,6 +235,10 @@ defmodule Troupe.Remote.Worker do
   @spec post(String.t(), atom(), map()) :: :ok | {:error, term()}
   def post(session_id, type, data), do: call(session_id, {:note, {type, data}})
 
+  @doc "Whose the session is now, as the plane answered it (`team` or `private`): the status line's mark follows."
+  @spec visibility(String.t(), String.t()) :: :ok | {:error, term()}
+  def visibility(session_id, visibility), do: call(session_id, {:visibility, visibility})
+
   @spec blob(String.t(), String.t(), non_neg_integer(), non_neg_integer()) ::
           {:ok, term()} | {:error, term()}
   def blob(session_id, blob, offset \\ 0, length \\ 1_000_000),
@@ -348,6 +352,10 @@ defmodule Troupe.Remote.Worker do
       # A pod session of the person's own the team cannot open, which the status line says.
       only_me: Keyword.get(opts, :only_me, false),
       title: Keyword.get(opts, :title),
+      # Whose a pod session is, as the plane said at the open and the log says since (root
+      # #1169): `team` or `private`, nil where nobody said; and whether it is this person's.
+      visibility: Keyword.get(opts, :visibility),
+      owner?: Keyword.get(opts, :owner?, false),
       agent: nil,
       # Events of this client's own waiting for the window to open (`post/3`), each
       # `{type, data}`.
@@ -386,10 +394,16 @@ defmodule Troupe.Remote.Worker do
        endpoint: state.endpoint,
        error: state.error,
        relayed?: relayed?(state),
-       only_me?: state.only_me,
+       only_me?: only_me?(state),
        always_allow?: state.capabilities["approval_allow_always"] == true,
        attach_artifact?: state.capabilities["fs_upload_artifact"] == true
      }, state}
+  end
+
+  def handle_call({:visibility, visibility}, _from, state) do
+    state = %{state | visibility: visibility}
+    publish_status(state)
+    {:reply, :ok, state}
   end
 
   def handle_call(:asking, _from, state), do: {:reply, asking_events(state), state}
@@ -1324,7 +1338,13 @@ defmodule Troupe.Remote.Worker do
 
   defp durable(state, %{} = params) do
     {events, memory} = Translate.durable(state.session_id, params, state.memory)
-    state = %{state | memory: memory, agent: state.agent || Translate.root_of(params)}
+
+    state = %{
+      state
+      | memory: memory,
+        agent: state.agent || Translate.root_of(params),
+        visibility: given(params) || state.visibility
+    }
 
     state =
       case Journal.append(state.session_id, events) do
@@ -1342,10 +1362,15 @@ defmodule Troupe.Remote.Worker do
           %{state | cursor: max(state.cursor, Translate.seq(params) || state.cursor)}
       end
 
+    if given(params), do: publish_status(state)
     write_notes(state)
   end
 
   defp durable(state, _params), do: state
+
+  # The session given to its team or taken back, as its log says.
+  defp given(%{"type" => "session_visibility_changed", "data" => %{"visibility" => v}}), do: v
+  defp given(_params), do: nil
 
   # The client's own lines go into the window once there is one, stamped after whatever
   # opened it: written earlier, they would sort ahead of the session's first events, which
@@ -1580,8 +1605,16 @@ defmodule Troupe.Remote.Worker do
       # artifact attached by name, its files fetched by the server.
       |> Map.put(:always_allow?, state.capabilities["approval_allow_always"] == true)
       |> Map.put(:attach_artifact?, state.capabilities["fs_upload_artifact"] == true)
+      |> Map.put(:only_me?, only_me?(state))
     )
   end
+
+  # Only its owner's and the people invited: as the plane or the log said it last where
+  # either did (root #1169), else as the listing the session was opened from said.
+  defp only_me?(%{visibility: visibility} = state) when is_binary(visibility),
+    do: visibility == "private" and state.owner?
+
+  defp only_me?(state), do: state.only_me
 
   # A laptop's session reached through the plane whose approvals are answered once from
   # here: its daemon says `relayed` in `initialize`, and one that takes an answer for the

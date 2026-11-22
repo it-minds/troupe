@@ -158,6 +158,8 @@ defmodule Troupe.Client do
   @callback remote_steering(session_id(), :status | :withdraw | {:offer, String.t()}) ::
               {:ok, String.t()} | {:error, term()}
   @callback invites(session_id(), invite_verb()) :: {:ok, String.t()} | {:error, term()}
+  @callback share(session_id(), Troupe.Client.Share.verb()) ::
+              {:ok, String.t()} | {:error, String.t()}
   @callback archive(session_id(), boolean()) :: {:ok, String.t()} | {:error, String.t()}
   @callback rename(session_id(), String.t()) :: {:ok, String.t()} | {:error, String.t()}
   @callback keep(session_id(), boolean()) :: {:ok, String.t()} | {:error, String.t()}
@@ -567,6 +569,18 @@ defmodule Troupe.Client do
   """
   @spec invites(session_id(), invite_verb()) :: {:ok, String.t()} | {:error, term()}
   def invites(sid, verb), do: impl(sid).invites(sid, verb)
+
+  @doc """
+  Whose a session on the platform is (root #1169): `:status` says, `{:set, "team"}` gives
+  it to its team and `{:set, "private"}` takes it back, which only its owner may do. A
+  session on this computer is never a team's. Answers the sentence to show.
+  """
+  @spec share(session_id(), Troupe.Client.Share.verb()) :: {:ok, String.t()} | {:error, String.t()}
+  def share(sid, verb), do: impl(sid).share(sid, verb)
+
+  @doc "What `/share` names after the command: nothing, `team` or `me`."
+  @spec share_args(String.t()) :: {:ok, Troupe.Client.Share.verb()} | {:error, String.t()}
+  defdelegate share_args(text), to: Troupe.Client.Share, as: :parse
 
   @doc """
   Archive a session (`true`) or bring it back (`false`), which only its owner may do: an

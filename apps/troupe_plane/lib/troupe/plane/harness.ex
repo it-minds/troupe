@@ -165,6 +165,8 @@ defmodule Troupe.Plane.Harness do
     # A session's name, as its owner calls it; the daemon's of the same name for one of
     # its own.
     "session.title.set" => :control,
+    # Given to its team after it started, or taken back: its owner's alone.
+    "session.visibility.set" => :control,
     "session.erase" => :control,
     "session.archive" => :control,
     "session.unarchive" => :control,
@@ -823,7 +825,7 @@ defmodule Troupe.Plane.Harness do
       |> put_option(:archived, params["archived"] == true)
 
     sessions = Sessions.visible_to(user, options)
-    {:ok, %{"sessions" => sessions |> Enum.map(&session_row(&1, user)) |> Names.decorate(@owner_name)}}
+    {:ok, %{"sessions" => session_rows(sessions, user)}}
   end
 
   # Laptop sessions offered for steering from another device (#58): the caller's own, from
@@ -1537,6 +1539,19 @@ defmodule Troupe.Plane.Harness do
     end
   end
 
+  # Given to its team, or taken back to its owner and the people they invited: the owner's
+  # alone, an administrator's oversight of every session being a reading one. Invitations
+  # stay as they are; the team's rule on steering applies while it is the team's. The pod
+  # holding it is told who may now do what, so a connection open on it meets the change at
+  # its next command, and gives the log its line.
+  defp handle("session.visibility.set", params, %{user: user} = context) do
+    with {:ok, session} <- owned_pod_session(params["session_id"], user, context),
+         {:ok, visibility} <- visibility_param(params["visibility"]),
+         {:ok, updated} <- give_or_take(session, visibility, user) do
+      {:ok, session_json(updated, user)}
+    end
+  end
+
   defp pin(params, %{user: user}, pinned?) do
     with {:ok, session} <- visible(params["session_id"], user),
          :ok <- must_administer(user, session) do
@@ -1544,6 +1559,109 @@ defmodule Troupe.Plane.Harness do
         {:ok, updated} -> {:ok, session_json(updated, user)}
         {:error, reason} -> {:error, Error.new(:internal_error, %{reason: inspect(reason)})}
       end
+    end
+  end
+
+  # The owner's pod session. Anybody else who may see it, a platform administrator among
+  # them, is refused saying whose it is to change; to anybody who may not, it is not there.
+  defp owned_pod_session(session_id, user, context) do
+    with {:ok, session} <- existing(session_id),
+         :ok <- owner_alone(session, user, context) do
+      if session.kind == "private",
+        do:
+          {:error,
+           Error.new(:conflict, %{
+             reason: "a private session is sealed on its owner's machine and is never a team's"
+           })},
+        else: {:ok, session}
+    end
+  end
+
+  defp existing(nil), do: {:error, Error.new(:invalid_params, %{missing: "session_id"})}
+
+  defp existing(session_id) do
+    case Sessions.get(session_id) do
+      nil -> {:error, Error.new(:not_found, %{session_id: session_id})}
+      %Session{state: state} when state in ["erased", "erasure_pending"] -> {:error, gone(session_id)}
+      session -> {:ok, session}
+    end
+  end
+
+  defp owner_alone(%Session{owner_subject: subject}, %User{subject: subject}, _context), do: :ok
+
+  defp owner_alone(session, user, context) do
+    if Map.get(context, :platform_admin?, false) or Sessions.role_for(user, session) do
+      {:error,
+       Error.new(:forbidden, %{
+         required_role: "owner",
+         reason: "only the session's owner gives it to the team or takes it back"
+       })}
+    else
+      {:error, Error.new(:not_found, %{session_id: session.id})}
+    end
+  end
+
+  defp visibility_param(visibility) when visibility in ["team", "private"], do: {:ok, visibility}
+  defp visibility_param(_other), do: invalid("visibility is team or private")
+
+  defp give_or_take(%Session{visibility: visibility} = session, visibility, _user),
+    do: {:ok, session}
+
+  defp give_or_take(%Session{team_id: nil}, "team", _user) do
+    {:error, Error.new(:conflict, %{reason: "this session has no team to give it to"})}
+  end
+
+  defp give_or_take(session, visibility, user) do
+    case Sessions.set_visibility(session.id, visibility) do
+      {:ok, updated} ->
+        {:ok, _audit} =
+          Audit.record(user.subject, "session.visibility.set", session.id, %{
+            "from" => session.visibility,
+            "to" => visibility
+          })
+
+        tell_pod_visibility(updated, user)
+        {:ok, updated}
+
+      {:error, reason} ->
+        {:error, Error.new(:internal_error, %{reason: inspect(reason)})}
+    end
+  end
+
+  # Best effort, as an invitation's push is: a dormant session has no pod, the row is the
+  # record, and the next token anybody is minted reads it. Every member of the team is told
+  # at the role they hold now, the stronger of an invitation and the team's, or refused.
+  defp tell_pod_visibility(%Session{worker_id: nil}, _user), do: :ok
+
+  defp tell_pod_visibility(session, user) do
+    case Fleet.get_worker(session.worker_id) do
+      nil ->
+        :ok
+
+      worker ->
+        changes =
+          for member <- team_members(session), member.subject != session.owner_subject do
+            role = member |> Sessions.role_for(session) |> role_name()
+            %{"session_id" => session.id, "subject" => member.subject, "role" => role}
+          end
+
+        if changes != [], do: Router.push(worker, "acl.changed", %{"changes" => changes})
+
+        Router.push(worker, "visibility.changed", %{
+          "session_id" => session.id,
+          "visibility" => session.visibility,
+          "by" => user.subject,
+          "by_name" => Map.get(user, :display_name)
+        })
+
+        :ok
+    end
+  end
+
+  defp team_members(session) do
+    case team_of(session) do
+      nil -> []
+      team -> Identity.members_of_team(team)
     end
   end
 
@@ -3116,6 +3234,8 @@ defmodule Troupe.Plane.Harness do
       "worker_id" => worker.id,
       "pod" => worker.pod_name,
       "role" => role,
+      # Whose it is, which a client opening it marks it with: the team's or its owner's.
+      "visibility" => session.visibility,
       "token" => token,
       "expires_at" => expires_at
     }
@@ -3982,7 +4102,17 @@ defmodule Troupe.Plane.Harness do
   end
 
   # A session by its owner's name as well as their subject, where the plane knows one.
-  defp session_json(session, user), do: session |> session_row(user) |> Names.decorate(@owner_name)
+  defp session_json(session, user), do: [session] |> session_rows(user) |> hd()
+
+  # Each with its team by name, which a client says a session is given to: one query for
+  # every row, as for the owners' names.
+  defp session_rows(sessions, user) do
+    teams = Sessions.team_names(sessions)
+
+    sessions
+    |> Enum.map(&Map.put(session_row(&1, user), "team", teams[&1.team_id]))
+    |> Names.decorate(@owner_name)
+  end
 
   defp session_row(session, user) do
     %{

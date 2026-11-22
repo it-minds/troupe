@@ -79,6 +79,28 @@ describe("what is a person's own", () => {
     expect(methods.filter((m) => m.startsWith("admin.") && m !== "admin.teams.list")).toEqual([]);
   });
 
+  it("lets a person give their own session to the team and take it back, saying whose it is (troupe #1169)", async () => {
+    const sketch = fake.plane.seed(PEOPLE.carol.subject, { id: "s-carol-2", title: "Sketch the retry budget", profile: "ux", visibility: "private" });
+    await signedInAs(fake, PEOPLE.carol);
+    visit("#/sessions");
+    unmount = render(<App />).unmount;
+
+    const sessions = () => document.querySelector<HTMLElement>('[aria-label="Your sessions"]');
+    await sees("only you", sessions);
+    const team = fake.plane.teamsOf(PEOPLE.carol.subject)[0]!;
+    (await seesButton(`Give it to the ${team} team`, sessions()!)).click();
+    await sees("the team's", sessions);
+    expect(sketch.visibility).toBe("team");
+
+    (await seesButton("Only me again", sessions()!)).click();
+    await sees("only you", sessions);
+    expect(sketch.visibility).toBe("private");
+
+    fake.plane.refuseNext("session.visibility.set", { code: -32004, message: "forbidden", data: { required_role: "owner" } });
+    (await seesButton(`Give it to the ${team} team`, sessions()!)).click();
+    await sees("It was not given to the team: only the session's owner gives it to the team or takes it back.", sessions);
+  });
+
   it("says where each of a member's sessions opens, and that only their own memory is theirs to change", async () => {
     await fake.stop();
     fake = await startFake(exampleAdmin(), {

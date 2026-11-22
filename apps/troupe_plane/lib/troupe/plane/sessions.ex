@@ -513,6 +513,18 @@ defmodule Troupe.Plane.Sessions do
   end
 
   @doc """
+  Who may open a session besides its owner and the people invited: `team` for every member
+  of its team, `private` for nobody else. Its invitations are rows of their own and stay.
+  """
+  @spec set_visibility(String.t(), String.t()) :: {:ok, Session.t()} | {:error, term()}
+  def set_visibility(session_id, visibility) do
+    case Repo.get(Session, session_id) do
+      nil -> {:error, :not_found}
+      session -> session |> Session.changeset(%{visibility: visibility}) |> Repo.update()
+    end
+  end
+
+  @doc """
   Pin a session, exempting it from retention, or unpin it.
 
   Recorded with who did it and when, because a pin is a decision somebody made about
@@ -930,6 +942,15 @@ defmodule Troupe.Plane.Sessions do
     )
   end
 
+  @doc "The names of these sessions' teams, as `%{team_id => name}`; a session with none is absent."
+  @spec team_names([Session.t()]) :: %{Ecto.UUID.t() => String.t()}
+  def team_names(sessions) do
+    case sessions |> Enum.map(& &1.team_id) |> Enum.reject(&is_nil/1) |> Enum.uniq() do
+      [] -> %{}
+      ids -> Map.new(Repo.all(from(t in Team, where: t.id in ^ids, select: {t.id, t.name})))
+    end
+  end
+
   @doc "One session, or `nil`."
   @spec get(String.t()) :: Session.t() | nil
   def get(session_id), do: Repo.get(Session, session_id)
@@ -1162,16 +1183,27 @@ defmodule Troupe.Plane.Sessions do
 
   Owner administers, collaborator steers, viewer watches. Team visibility gives observe,
   and control too when the team allows it — which is a team setting rather than a
-  session one, because it is a statement about how a team works.
+  session one, because it is a statement about how a team works. Somebody both invited and
+  a member of a team the session is given to holds the stronger of the two.
   """
   @spec role_for(User.t(), Session.t()) :: :admin | :control | :observe | nil
   def role_for(%User{} = user, %Session{} = session) do
-    cond do
-      session.owner_subject == user.subject -> :admin
-      acl = Repo.get_by(ACL, session_id: session.id, subject: user.subject) -> ACL.scope(acl.role)
-      session.visibility == "team" -> team_role(user, session)
-      true -> nil
+    if session.owner_subject == user.subject do
+      :admin
+    else
+      acl = Repo.get_by(ACL, session_id: session.id, subject: user.subject)
+      invited = acl && ACL.scope(acl.role)
+      team = if session.visibility == "team", do: team_role(user, session)
+      stronger(invited, team)
     end
+  end
+
+  @ladder [nil, :observe, :control, :admin]
+
+  defp stronger(a, b) do
+    if Enum.find_index(@ladder, &(&1 == a)) >= Enum.find_index(@ladder, &(&1 == b)),
+      do: a,
+      else: b
   end
 
   defp team_role(user, session) do

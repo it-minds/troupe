@@ -120,7 +120,10 @@ export interface SessionRow {
   /** The owner's name, where the plane has one (troupe #931); absent from an older plane. */
   owner_name?: string | null;
   profile: string;
+  /** `team` for every member of its team, `private` for its owner and the people invited. */
   visibility: string;
+  /** The team it runs for, by name, which it is given to; absent from an older plane. */
+  team?: string | null;
   /** `erasure_pending`: a private session somebody erased whose key is not destroyed yet (troupe Decision 756). */
   state: "active" | "dormant" | "read_only" | "erasure_pending" | "erased" | string;
   /** `private` for one of the person's own sessions, listed beside the team's; absent from a plane before the column. */
@@ -518,6 +521,15 @@ export class PlaneClient {
   /** Name a session, or take its name off with an empty title; the answer is its row. Its owner's alone. */
   setSessionTitle(planeToken: string, sessionId: string, title: string): Promise<SessionRow> {
     return this.rpc<SessionRow>(planeToken, "session.title.set", { session_id: sessionId, title });
+  }
+
+  /**
+   * Give a pod session to its team (`team`) or take it back (`private`) after it started
+   * (troupe #1169); the answer is its row. Its owner's alone: anybody else is refused
+   * `forbidden`. Invitations stay as they are.
+   */
+  setSessionVisibility(planeToken: string, sessionId: string, visibility: "team" | "private"): Promise<SessionRow> {
+    return this.rpc<SessionRow>(planeToken, "session.visibility.set", { session_id: sessionId, visibility });
   }
 
   /**

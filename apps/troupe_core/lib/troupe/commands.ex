@@ -430,6 +430,16 @@ defmodule Troupe.Commands do
             "already showed.",
         example: "/uninvite bea@example.com"
       ),
+      entry("share", "session", "Give this session to its team, or take it back",
+        usage: "/share [team | me]",
+        args: [arg("to", false, "text")],
+        detail:
+          "Its owner's to do, for a session on the platform. /share team gives it to the " <>
+            "team it runs for: everyone on the team can open it, and steer it where the " <>
+            "team allows. /share me takes it back: only you and the people you invited can " <>
+            "open it, and the invitations stay as they were. /share alone says whose it is.",
+        example: "/share team"
+      ),
       entry(
         "archive",
         "session",

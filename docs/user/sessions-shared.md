@@ -45,6 +45,27 @@ A session on your computer alone is not invited this way: offer it for steering 
 another device instead (`/steer on bea@example.com`, see
 [steering from another device](sessions.md#steering-from-another-device)).
 
+## Giving a session to the team
+
+A session on the platform that you started for yourself (only you, and the people you
+invited, can open it) can be given to its team later, and taken back. Given to the team,
+everyone on it sees the session in their list and can open it, and steers it where the
+team allows: a team whose administrators let members steer sessions gives them that, and
+otherwise they follow it. Taken back, only you and the people you invited can open it again.
+Invitations stay as they are either way, and somebody both invited and on the team holds
+whichever of the two lets them do more.
+
+- **In the desktop app**, open the session and choose **Give it to the eng team** under its
+  ⋯, or **Only me again** on one the team has. The list and the head say *only you* in place
+  of *Team* while it is yours alone, and *Team* again once it is the team's.
+- **In the terminal**, `/share team` gives it to the team, `/share me` takes it back, and
+  `/share` alone says whose it is; the status line says *only you* while it is yours alone.
+- **In the console**, *Your sessions* under *Mine* says whose each is, with the same two.
+
+Only the owner gives a session to the team or takes it back; nobody else is offered it, an
+administrator included. Everybody attached sees a line saying it changed. A session on your
+computer, private or not, is never a team's: invite people into it by name instead.
+
 ## A private session
 
 A private session is sealed on your computer under your own key, which the plane cannot

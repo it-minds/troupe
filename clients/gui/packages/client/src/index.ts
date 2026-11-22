@@ -115,6 +115,7 @@ export { ONCE_ONLY_SENTENCE, callConsequence, callEvidence, callHeadline, callSc
 export type { CallEvidence, CallWhere } from "./calls.js";
 export { foldScratch, scratchDocumentOf, scratchVersion } from "./scratch.js";
 export { ago, bytes, countWords, durationWords, errorText, moneyWords, sessionStateWords } from "./words.js";
+export { TAKE_BACK_LINE, giveLine, sessionWhose, teamWords, visibilityRefusal, whoseSentence } from "./visibility.js";
 export type {
   Entry,
   DelegationGate,

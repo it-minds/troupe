@@ -62,6 +62,7 @@ import {
   toolTarget,
   TroupeRpcError,
   watchRemote,
+  whoseSentence,
 } from "@troupe/client";
 import type { AgentRow, AttachStatus, Entry, Invitation, Invitee, TranscriptState } from "@troupe/client";
 import { describeError, useConsole } from "../console";
@@ -398,12 +399,19 @@ export function RemoteSession({ id, pod }: { id: string; pod?: { mode: "read" | 
   const [alwaysAllow, setAlwaysAllow] = useState(false);
   const attachment = useRef<SessionAttachment | null>(null);
 
+  // Whose a pod session is, as its row says, until its log says its owner changed it (troupe #1169).
+  const [podRow, setPodRow] = useState<{ visibility: string; team: string | null } | null>(null);
+
   useEffect(() => {
     if (!pod) return;
     let live = true;
     auth
       .withToken((plane, token) => plane.sessionInvites(token, id))
       .then((r) => live && setShared(r.invites))
+      .catch(() => undefined);
+    auth
+      .withToken((plane, token) => plane.getSession(token, id))
+      .then((r) => live && setPodRow({ visibility: r.visibility, team: r.team ?? null }))
       .catch(() => undefined);
     return () => {
       live = false;
@@ -505,6 +513,9 @@ export function RemoteSession({ id, pod }: { id: string; pod?: { mode: "read" | 
       </p>
       {shared.length > 0 && (
         <p className="meta shared">Shared with {shared.map((i) => `${personName(i)} (${roleWords(i.role)})`).join(", ")}</p>
+      )}
+      {pod && whoseSentence(state.visibility ?? podRow?.visibility, podRow?.team) && (
+        <p className="meta whose">{whoseSentence(state.visibility ?? podRow?.visibility, podRow?.team)} Only its owner changes that.</p>
       )}
       {error ? (
         <Empty title="Not reachable now">{error}</Empty>

@@ -314,6 +314,40 @@ defmodule Troupe.Client.Remote do
     end
   end
 
+  # Whose a pod session is, at the plane, which holds the row (root #1169). The status
+  # line's mark follows the answer at once; the log's line follows where a pod holds it.
+  @impl true
+  def share(sid, verb) do
+    case attachment(sid) do
+      %{plane_url: plane} when is_binary(plane) -> share_on(plane, sid, verb)
+      _ -> {:error, message(:not_attached)}
+    end
+  end
+
+  defp share_on(plane, sid, :status) do
+    case call(plane, "session.get", %{session_id: sid}) do
+      {:ok, %{} = row} -> {:ok, Troupe.Client.Share.status(row)}
+      {:error, reason} -> {:error, refusal(reason)}
+    end
+  end
+
+  defp share_on(plane, sid, {:set, visibility}) do
+    case call(plane, "session.visibility.set", %{session_id: sid, visibility: visibility}) do
+      {:ok, %{} = row} ->
+        _ = Worker.visibility(sid, row["visibility"])
+        {:ok, Troupe.Client.Share.set(row)}
+
+      {:error, %{message: "forbidden"} = error} ->
+        {:error, Troupe.Client.Share.forbidden(error[:data])}
+
+      {:error, %{code: -32_601}} ->
+        {:error, "this plane does not give a session to a team after it started yet"}
+
+      {:error, reason} ->
+        {:error, refusal(reason)}
+    end
+  end
+
   @doc """
   The invitations to the person signed in at `plane` (`invites.list`): each the session, its
   title, whose it is, the role and who invited them, newest first. A plane from before
@@ -745,7 +779,11 @@ defmodule Troupe.Client.Remote do
           profile: result["profile"],
           team: result["team"],
           only_me: only_me,
-          title: result["title"]
+          title: result["title"],
+          # Whose it is, where the plane says (root #1169), which `/share` and the log's
+          # `session_visibility_changed` then change.
+          visibility: result["visibility"],
+          owner?: result["role"] == "owner"
         })
 
       {:error, reason} ->
@@ -967,7 +1005,9 @@ defmodule Troupe.Client.Remote do
          profile: info[:profile],
          team: info[:team],
          only_me: info[:only_me] == true,
-         title: info[:title]
+         title: info[:title],
+         visibility: info[:visibility],
+         owner?: info[:owner?] == true
        ]}
 
     case DynamicSupervisor.start_child(Troupe.Remote.Sessions, spec) do

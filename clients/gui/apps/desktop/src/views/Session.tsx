@@ -38,9 +38,14 @@ import {
   severalSteer,
   rootState,
   scratchVersion,
+  sessionWhose,
   settleLoop,
   stoppedSentence,
+  TAKE_BACK_LINE,
+  giveLine,
+  teamWords,
   unseenSummary,
+  visibilityRefusal,
 } from "@troupe/client";
 import type {
   Artifact,
@@ -252,6 +257,36 @@ export function Session({
         }
       }
     : undefined;
+  // Whose a pod session is (troupe #1169): the plane's row, then the log's word once its
+  // owner changes it, and the answer to a change made here until the log says it too. The
+  // owner gives it to the team or takes it back from the ⋯ or `/share`.
+  const rowSaid = row?.raw as { team?: string | null } | undefined;
+  const [answered, setAnswered] = useState<{ visibility: string; seen: string | undefined } | null>(null);
+  const [shareError, setShareError] = useState<string | null>(null);
+  useEffect(() => {
+    setAnswered(null);
+    setShareError(null);
+  }, [sessionId]);
+  const visibility = answered && view.state.visibility === answered.seen ? answered.visibility : (view.state.visibility ?? row?.visibility ?? undefined);
+  const team = rowSaid?.team ?? null;
+  const whose = row?.kind === "team" ? sessionWhose(visibility, row.yourRole === "owner") : null;
+  // The row as the head marks it: "only you" in place of "Team" follows the visibility now.
+  const headRow = row && visibility ? { ...row, visibility } : row;
+  const share =
+    marking && marking.row.kind === "team" && (visibility === "team" || visibility === "private")
+      ? async (to: "team" | "private"): Promise<string | null> => {
+          setShareError(null);
+          try {
+            await marking.marks.share(marking.row, to);
+            setAnswered({ visibility: to, seen: view.state.visibility });
+            return null;
+          } catch (e) {
+            const why = visibilityRefusal(e, to === "team");
+            setShareError(why);
+            return why;
+          }
+        }
+      : undefined;
   // Onboarding, then the brief, as the session's start found them due (Decision 835), and
   // the librarian for a session started here; what they came to is said in the transcript.
   const start = useStartQuestions(daemon, sessionId, view.state.onboarding, { local: here, canAnswer: !readOnly, startedIn });
@@ -381,6 +416,17 @@ export function Session({
               },
             }
           : {}),
+        ...(row?.kind === "team"
+          ? {
+              share: async (to: "team" | "private" | null) => {
+                if (to === null) return whoseLine(visibility, team, row.yourRole === "owner");
+                if (!share) return "only its owner gives this session to the team or takes it back";
+                if (visibility === to) return to === "team" ? `it is ${teamWords(team)}'s already` : "only you and the people you invited can open it already";
+                const why = await share(to);
+                return why ?? (to === "team" ? `given to ${teamWords(team)}` : "only you again: the invitations stay");
+              },
+            }
+          : {}),
       }}
     />
   ) : null;
@@ -393,7 +439,7 @@ export function Session({
       )}
 
       <Header
-        row={row}
+        row={headRow}
         sessionId={sessionId}
         state={view.state}
         self={self}
@@ -419,6 +465,8 @@ export function Session({
             onArchive={archive && mayArchive(row) ? (on) => void archive(on) : undefined}
             onRename={rename ? () => setRenaming(true) : undefined}
             onKeep={keep ? (on) => void keep(on) : undefined}
+            sharing={share && (visibility === "team" || visibility === "private") ? { visibility, team, onShare: (to) => void share(to) } : undefined}
+            whose={whose}
             remote={
               row && daemon && auth && (row.kind === "local" || row.kind === "private") ? (
                 <RemoteOfferControl daemon={daemon} row={row} presence={view.state.presence} />
@@ -450,6 +498,11 @@ export function Session({
       {markError && (
         <div className="banner error" role="alert">
           <p>{markError}</p>
+        </div>
+      )}
+      {shareError && (
+        <div className="banner error" role="alert">
+          <p>{shareError}</p>
         </div>
       )}
       <Banners
@@ -883,6 +936,14 @@ function Header({
   );
 }
 
+/** What `/share` alone says of a pod session: whose it is, and to its owner what changes it. */
+function whoseLine(visibility: string | undefined, team: string | null, owner: boolean): string {
+  if (visibility === "team") return `given to ${teamWords(team)}: everyone on it can open it, and steer it where the team allows${owner ? "; /share me takes it back" : ""}`;
+  if (visibility === "private" && owner) return `only you and the people you invited can open it; /share team gives it to ${teamWords(team)}`;
+  if (visibility === "private") return "only its owner and the people they invited can open it";
+  return "the plane has not said whose this session is";
+}
+
 /** What every turn shows at the level in force, under the fold in the ⋯ menu. */
 const WORKING_NOW: Record<Detail, string> = {
   quiet: "Now quiet: each turn's thinking and tool steps are in its strip",
@@ -909,6 +970,8 @@ function SessionMenu({
   onArchive,
   onRename,
   onKeep,
+  sharing,
+  whose,
   remote,
 }: {
   sessionId: string;
@@ -928,6 +991,10 @@ function SessionMenu({
   onRename?: (() => void) | undefined;
   /** Keep it at the top of the session list (`true`) or let it go: its owner's alone. */
   onKeep?: ((on: boolean) => void) | undefined;
+  /** Give a pod session to its team or take it back: its owner's alone. */
+  sharing?: { visibility: "team" | "private"; team: string | null; onShare: (to: "team" | "private") => void } | undefined;
+  /** Whose a pod session is, as the head marks it. */
+  whose?: string | null;
   /** Steering from another device: this computer's offer. */
   remote?: JSX.Element | null;
 }): JSX.Element {
@@ -992,6 +1059,12 @@ function SessionMenu({
             <span className="d">{row?.pinned ? "Back among the rest, by when it was last active" : "Listed first, for everyone who sees it"}</span>
           </button>
         )}
+        {sharing && (
+          <button type="button" className="item" onClick={then(() => sharing.onShare(sharing.visibility === "team" ? "private" : "team"))}>
+            <span className="t">{sharing.visibility === "team" ? "Only me again" : `Give it to ${teamWords(sharing.team)}`}</span>
+            <span className="d">{sharing.visibility === "team" ? TAKE_BACK_LINE : giveLine(sharing.team)}</span>
+          </button>
+        )}
         {onArchive && (
           <button type="button" className="item" onClick={then(() => onArchive(!row?.archived))}>
             <span className="t">{archiveItem(Boolean(row?.archived)).title}</span>
@@ -1008,6 +1081,12 @@ function SessionMenu({
               <dd>
                 you are {role === "owner" ? "the owner" : role === "collaborator" || role === "control" ? "a collaborator" : "a reader"}
               </dd>
+            </>
+          )}
+          {whose && (
+            <>
+              <dt>Opens</dt>
+              <dd>{whose === "the team's" ? "for everyone on its team" : whose === "only you" ? "for only you and the people you invited" : "for its owner and the people they invited"}</dd>
             </>
           )}
           {row?.invitation && (

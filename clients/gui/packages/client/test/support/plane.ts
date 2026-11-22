@@ -1154,6 +1154,14 @@ export class FakePlane {
    * A turn the harness stopped, as the pod's report leaves the row (Decision 750): the
    * reason and nothing else, and a root that kept crashing asleep after it.
    */
+  /** Refusals put in the way of a method's next call, each answered once (`refuseNext`). */
+  private readonly refusals = new Map<string, { code: number; message: string; data?: unknown }>();
+
+  /** Answer the next call of `method` with this error instead, once. */
+  refuseNext(method: string, error: { code: number; message: string; data?: unknown }): void {
+    this.refusals.set(method, error);
+  }
+
   fail(id: string, reason: "tool_failures" | "agent_failed"): void {
     const row = this.rows.get(id);
     if (!row) throw new Error(`no session ${id}`);
@@ -1308,6 +1316,13 @@ export class FakePlane {
   ): { result: unknown } | { error: { code: number; message: string; data?: unknown } } {
     const worker = this.opts.worker;
     const profiles = this.opts.profiles ?? ["dev", "ux"];
+
+    // A refusal a test put in the way of the next call of this method, answered once.
+    const refusal = this.refusals.get(method);
+    if (refusal) {
+      this.refusals.delete(method);
+      return { error: refusal };
+    }
 
     const policy = (component: string) => {
       const p = this.opts.clientVersions?.[component] ?? {};
@@ -1925,6 +1940,23 @@ export class FakePlane {
         return { result: this.sessionJson(row, subject) };
       }
 
+      // Given to its team or taken back, by its owner alone (troupe #1169): the row, and the
+      // log's line the pod writes, which every client attached hears.
+      case "session.visibility.set": {
+        const row = this.rows.get(String(params["session_id"] ?? ""));
+        if (!row) return { error: { code: -32005, message: "not_found" } };
+        if (row.owner !== subject) return { error: { code: -32004, message: "forbidden", data: { required_role: "owner", reason: "only the session's owner gives it to the team or takes it back" } } };
+        const to = params["visibility"];
+        if (to !== "team" && to !== "private") return { error: { code: -32602, message: "invalid_params", data: { reason: "visibility is team or private" } } };
+        if (row.visibility !== to) {
+          row.visibility = to;
+          const name = this.nameOf(subject);
+          const actor = { kind: "user", subject, ...(name ? { display_name: name } : {}) };
+          this.opts.worker.sessions.get(row.id)?.log.append("session_visibility_changed", { visibility: to, by: subject, ...(name ? { by_name: name } : {}) }, actor);
+        }
+        return { result: this.sessionJson(row, subject) };
+      }
+
       // Its owner's alone; archiving a running session puts it to sleep, and only
       // `session.unarchive` brings it back to the list.
       case "session.archive":
@@ -1967,6 +1999,7 @@ export class FakePlane {
       ...(ownerName ? { owner_name: ownerName } : {}),
       profile: row.profile,
       visibility: row.visibility,
+      team: this.teamsOf(row.owner)[0] ?? null,
       state: row.state,
       epoch: row.epoch,
       title: row.title,

@@ -15,8 +15,8 @@
 
 import { useState } from "react";
 import type { JSX } from "react";
-import { appLink } from "@troupe/client";
-import type { OwnClient, OwnMemory, OwnMemoryPreview, PlaneDocument } from "@troupe/client";
+import { TAKE_BACK_LINE, appLink, giveLine, sessionWhose, teamWords, visibilityRefusal } from "@troupe/client";
+import type { OwnClient, OwnMemory, OwnMemoryPreview, PlaneDocument, SessionRow } from "@troupe/client";
 import { OpenInApp } from "./OpenInApp";
 import { describeError, show, useConsole, useLoad } from "../console";
 import { href } from "../route";
@@ -41,6 +41,46 @@ export function MySessions(): JSX.Element {
       <RemoteSessions load={offered} reload={reload} />
       <InvitedToYou load={invites} reload={reload} />
       <YourSessions />
+    </>
+  );
+}
+
+/**
+ * Whose one of the person's own sessions on the plane is, and the one control that changes
+ * it (troupe #1169): a pod session given to its team, or taken back. A private session is
+ * sealed on its owner's machine and is never a team's, so it says so and offers nothing.
+ */
+function Whose({ session, onChanged }: { session: SessionRow; onChanged: () => void }): JSX.Element {
+  const { auth, notify } = useConsole();
+  const [busy, setBusy] = useState(false);
+  const [refused, setRefused] = useState<string | null>(null);
+  if (session.kind === "private") return <span className="muted">only you, sealed on your computer</span>;
+  const team = session.visibility === "team";
+  const change = async (): Promise<void> => {
+    setBusy(true);
+    setRefused(null);
+    try {
+      await auth.withToken((plane, token) => plane.setSessionVisibility(token, session.id, team ? "private" : "team"));
+      notify(team ? `${session.title ?? session.id} is yours again.` : `${session.title ?? session.id} is given to ${teamWords(session.team)}.`);
+      onChanged();
+    } catch (e) {
+      setRefused(visibilityRefusal(e, !team));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <>
+      <span title={team ? giveLine(session.team) : TAKE_BACK_LINE}>{sessionWhose(session.visibility, true)}</span>{" "}
+      <button type="button" className="link" disabled={busy} title={team ? TAKE_BACK_LINE : giveLine(session.team)} onClick={() => void change()}>
+        {team ? "Only me again" : `Give it to ${teamWords(session.team)}`}
+      </button>
+      {refused && (
+        <span className="hint" role="alert">
+          {" "}
+          {refused}
+        </span>
+      )}
     </>
   );
 }
@@ -75,6 +115,7 @@ function YourSessions(): JSX.Element {
                     <th>Profile</th>
                     <th>State</th>
                     <th>Last active</th>
+                    <th>Who opens it</th>
                     <th>Where it opens</th>
                   </tr>
                 </thead>
@@ -89,6 +130,9 @@ function YourSessions(): JSX.Element {
                         {s.state === "active" && s.status && s.status !== "idle" && ` · ${s.status.replace(/_/g, " ")}`}
                       </td>
                       <td>{when(s.last_active_at ?? null)}</td>
+                      <td>
+                        <Whose session={s} onChanged={reload} />
+                      </td>
                       <td>
                         <OpenInApp link={appLink({ kind: "session", id: s.id, plane: plane.url })} />, or in the terminal.
                         {onSessions.has(s.id) && (
