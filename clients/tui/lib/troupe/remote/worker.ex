@@ -345,6 +345,8 @@ defmodule Troupe.Remote.Worker do
       # caller knows better, as the daemon's client does of its own sessions.
       isolation: Keyword.get(opts, :isolation, :remote),
       team: Keyword.get(opts, :team),
+      # A pod session of the person's own the team cannot open, which the status line says.
+      only_me: Keyword.get(opts, :only_me, false),
       title: Keyword.get(opts, :title),
       agent: nil,
       # Events of this client's own waiting for the window to open (`post/3`), each
@@ -384,6 +386,7 @@ defmodule Troupe.Remote.Worker do
        endpoint: state.endpoint,
        error: state.error,
        relayed?: relayed?(state),
+       only_me?: state.only_me,
        always_allow?: state.capabilities["approval_allow_always"] == true,
        attach_artifact?: state.capabilities["fs_upload_artifact"] == true
      }, state}

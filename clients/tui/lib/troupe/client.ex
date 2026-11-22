@@ -43,6 +43,8 @@ defmodule Troupe.Client do
   @type summary :: %{
           optional(:owner_name) => String.t() | nil,
           optional(:archived) => boolean(),
+          optional(:visibility) => String.t() | nil,
+          optional(:your_role) => String.t() | nil,
           id: session_id(),
           title: String.t(),
           owner: String.t() | nil,

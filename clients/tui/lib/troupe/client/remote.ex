@@ -78,6 +78,7 @@ defmodule Troupe.Client.Remote do
     status.state
     |> Capability.of(status.scopes, status.up?, status.error)
     |> Map.put(:relayed?, Map.get(status, :relayed?, false))
+    |> Map.put(:only_me?, Map.get(status, :only_me?, false))
     |> Map.put(:always_allow?, Map.get(status, :always_allow?, false))
     |> Map.put(:attach_artifact?, Map.get(status, :attach_artifact?, false))
   end
@@ -645,7 +646,10 @@ defmodule Troupe.Client.Remote do
         agent: params[:agent],
         title: params[:title],
         source: source(params[:source]),
-        visibility: params[:visibility] || "private",
+        # The team's, as the desktop app sends; `private` (`/new --only-me`, `troupe run
+        # --only-me`) is its owner's and the people they invite, on the team's profile all
+        # the same. Never a sealed session, which is this computer's daemon's.
+        visibility: params[:visibility] || "team",
         prompt: params[:prompt] || "",
         command_id: RPC.command_id()
       })
@@ -658,6 +662,7 @@ defmodule Troupe.Client.Remote do
         state: :active,
         profile: params[:profile],
         team: params[:team],
+        only_me: body[:visibility] == "private",
         title: params[:title] || params[:prompt]
       })
     else
@@ -723,12 +728,14 @@ defmodule Troupe.Client.Remote do
   def open_session({:remote, plane} = origin, sid, mode, opts) do
     if Keyword.get(opts, :kind) == "remote",
       do: open_offered(plane, sid),
-      else: open_pod(plane, origin, sid, mode)
+      else: open_pod(plane, origin, sid, mode, Keyword.get(opts, :only_me, false))
   end
 
   def open_session(_origin, _sid, _mode, _opts), do: {:error, :unsupported}
 
-  defp open_pod(plane, origin, sid, mode) do
+  # `only_me` is what the listing said of the row opened (`session.open` does not say it),
+  # for the status line.
+  defp open_pod(plane, origin, sid, mode, only_me) do
     case call(plane, "session.open", %{session_id: sid, mode: to_string(mode)}) do
       {:ok, %{} = result} ->
         attach(origin, sid, %{
@@ -737,6 +744,7 @@ defmodule Troupe.Client.Remote do
           state: Worker.session_state(result["state"]) || :active,
           profile: result["profile"],
           team: result["team"],
+          only_me: only_me,
           title: result["title"]
         })
 
@@ -958,6 +966,7 @@ defmodule Troupe.Client.Remote do
          state: info[:state] || :active,
          profile: info[:profile],
          team: info[:team],
+         only_me: info[:only_me] == true,
          title: info[:title]
        ]}
 
@@ -1153,6 +1162,10 @@ defmodule Troupe.Client.Remote do
       parent: nil,
       workspace: nil,
       kind: session["kind"] || "team",
+      # Who may open a pod session (`team`, or `private`: its owner and the people invited),
+      # and this person's part in it, which together say "only you".
+      visibility: session["visibility"],
+      your_role: session["your_role"],
       # A plane cannot say how this machine's copy of a private session stands, only that
       # it is waiting to be erased (root Decision 756).
       sync: if(session["state"] == "erasure_pending", do: "erasure_pending"),

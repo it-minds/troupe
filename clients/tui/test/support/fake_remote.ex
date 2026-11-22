@@ -2022,6 +2022,7 @@ defmodule Troupe.FakeRemote do
       "tokens" => session.tokens,
       "cost" => session.cost,
       "updated_at" => session.updated_at,
+      "visibility" => Map.get(session, :visibility, "team"),
       "archived" => Map.get(session, :archived, false)
     }
   end
@@ -2040,6 +2041,8 @@ defmodule Troupe.FakeRemote do
       )
       |> normalise()
       |> Map.put(:agent, params["agent"])
+      # As the plane keeps it: what the create said, else its own default.
+      |> Map.put(:visibility, params["visibility"] || "private")
 
     state = put_in(state.sessions[id], session)
 
@@ -2229,6 +2232,8 @@ defmodule Troupe.FakeRemote do
       "your_role" => "owner",
       # One of the person's own private sessions, listed beside the team's.
       "kind" => Map.get(session, :kind, "team"),
+      # Who may open a pod session: a seeded one is the team's.
+      "visibility" => Map.get(session, :visibility, "team"),
       "device" => Map.get(session, :device),
       "archived" => Map.get(session, :archived, false)
     }

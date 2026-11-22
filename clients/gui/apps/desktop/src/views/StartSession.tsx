@@ -37,6 +37,9 @@ import {
   fullHouseSentence,
   pickLine,
   messageTokens,
+  ONLY_ME_TICK,
+  onlyMeSentence,
+  platformVisibility,
   profileRoom,
   stripTokens,
   teamQuestion,
@@ -117,6 +120,9 @@ export function StartSession({
   const [worktree, setWorktree] = useState<"auto" | "never" | "always">("auto");
   const [watch, setWatch] = useState(false);
   const [privately, setPrivately] = useState(false);
+  // On the platform: the session is its owner's alone until they invite people, on the
+  // team's profile and budget all the same. Off, it is the team's from its first second.
+  const [onlyMe, setOnlyMe] = useState(false);
   const [open, setOpen] = useState<Picker | null>(null);
   const [ceilingSaid, setCeilingSaid] = useState<Record<string, string>>({});
   const [casting, setCasting] = useState<Casting | null>(null);
@@ -176,7 +182,9 @@ export function StartSession({
   const teamCandidates = !local && prof ? (teamsAsked[prof.name] ?? prof.teams ?? []) : [];
   const teamChoice = teamCandidates.length > 1;
   const team = prof && auth ? chosenTeam(teamCandidates, teamPicks[prof.name], prefs.get(teamPref(auth.planeUrl, prof.name)) || null) : null;
-  const who = whoCanOpen(where, { teams: team ? [team] : (prof?.teams ?? myTeams), private: privately });
+  // Each tick says only where it applies: a sealed session is this computer's, only-me the platform's.
+  const whoTeams = team ? [team] : (prof?.teams ?? myTeams);
+  const who = whoCanOpen(where, { teams: whoTeams, private: local && privately, onlyMe: !local && onlyMe });
 
   let why = "";
   let warn = false;
@@ -310,7 +318,7 @@ export function StartSession({
         setOpen("team");
         setStartOnTeam(true);
       };
-      void castOnPlatform(auth!, prof, { agent: as ?? platformDefault, title: startedTitle, prompt: cleaned, team: forTeam }, set, alive, (reason) => setCeilingSaid((c) => ({ ...c, [prof.name]: reason })), askTeam);
+      void castOnPlatform(auth!, prof, { agent: as ?? platformDefault, title: startedTitle, prompt: cleaned, team: forTeam, onlyMe }, set, alive, (reason) => setCeilingSaid((c) => ({ ...c, [prof.name]: reason })), askTeam);
     } else if (daemon) {
       void castHere(daemon, { workspace: folder.trim(), agent: as, worktree, watch, privately, title: startedTitle, prompt: cleaned }, set);
     }
@@ -411,11 +419,11 @@ export function StartSession({
             </Chip>{" "}
             {teamChoice ? (
               <span>
-                · everyone on{" "}
+                {onlyMe ? "· for " : "· everyone on "}
                 <Chip label="Which team it is for" expanded={shownPicker === "team"} onClick={() => toggle("team")} tone={team ? undefined : "queued"}>
                   {team ?? "which team?"}
                 </Chip>{" "}
-                can open it
+                {onlyMe ? `· ${who}` : "can open it"}
               </span>
             ) : (
               <span>· {who}</span>
@@ -437,7 +445,7 @@ export function StartSession({
                   tag="REMOTE"
                   tone="running"
                   pressed={!local}
-                  detail="Keeps running when you close this window. Your team can open it."
+                  detail={`Keeps running when you close this window. ${onlyMe ? "Only you can open it until you invite people." : "Your team can open it."}`}
                   onClick={() => pick({ where: "platform" })}
                 />
               )}
@@ -525,6 +533,18 @@ export function StartSession({
               {local && localAgents.error && <p className="note">Could not read the agents here: {localAgents.error}</p>}
               {local && !localAgents.rows && !localAgents.error && <p className="note">Reading the agents here…</p>}
             </PickerPanel>
+          )}
+
+          {!local && prof && (
+            <div className="ns-only-me">
+              <label className="inline ns-small">
+                <input type="checkbox" checked={onlyMe} onChange={(e) => setOnlyMe(e.target.checked)} />
+                {ONLY_ME_TICK}
+              </label>
+              <p className="ns-who">
+                {onlyMeSentence(onlyMe, team ? [team] : teamChoice ? null : whoTeams)}
+              </p>
+            </div>
           )}
 
           <div className="ns-foot">
@@ -838,7 +858,7 @@ const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms
 async function castOnPlatform(
   auth: AuthSession,
   prof: ProfileOffering,
-  ask: { agent: string | null; title: string; prompt: string; team: string | null },
+  ask: { agent: string | null; title: string; prompt: string; team: string | null; onlyMe: boolean },
   set: SetCasting,
   alive: () => boolean,
   onCeiling: (reason: string) => void,
@@ -849,8 +869,9 @@ async function castOnPlatform(
     answer = await auth.withToken((plane, token) =>
       plane.createSession(token, {
         profile: prof.name,
-        // The sentence says everyone on the profile's team can open it, so it is a team's.
-        visibility: "team",
+        // As the sentence says: the team's, or with the tick its owner's and the people
+        // they invite, on the team's profile and budget either way.
+        visibility: platformVisibility(ask.onlyMe),
         // Named only where the person chose: with one team of theirs the plane takes it.
         ...(ask.team ? { team: ask.team } : {}),
         ...(ask.agent ? { agent: ask.agent } : {}),

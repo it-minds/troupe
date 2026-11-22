@@ -301,6 +301,8 @@ Plain language, sentence case, active verbs. Name things the way the reader does
 | "Are you sure?" | Say the consequence: "Allow every file change for this session" |
 | "Replay failed: corrupt event at seq 412" | "The agent could not start from this session's log: … Wake it anyway" (it skips what it cannot read), and in the transcript "An event from 14:02 could not be read and was skipped" |
 
+**"Private" means a sealed session and nothing else.** A session on a team's profile that only its owner and the people they invite can open is started with the tick "Only me, until I invite people" and marked "only you" in the list and the head.
+
 Errors say what happened and what to do next. Empty screens invite. Waiting times are given as honest ranges ("about twenty seconds"), never as fake progress.
 
 ---

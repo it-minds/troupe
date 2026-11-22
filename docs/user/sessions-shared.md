@@ -30,6 +30,17 @@ those rules do not cover is refused with *not on this profile's teams*. Into a *
 session**, which has no profile, anybody who shares a team with you. A platform
 administrator can be invited into either. The picker only offers people you could invite.
 
+## Starting it as only you
+
+A session on a team's profile is the team's from its first second: everyone on the team
+sees it in their list. To work alone for a while first, tick **Only me, until I invite
+people** on the new-session screen in the desktop app, after choosing the profile and the
+team, or start it with `/new --only-me` in the terminal or `troupe run --profile NAME
+--only-me`. It runs on the team's profile and pods and against the team's budget as any
+team session; nobody on the team sees it until you invite them by name as above, and your
+list and the session's head mark it *only you*. Administrators oversee it as they oversee
+any session. It is not a private session: that word is for one sealed on your computer.
+
 A session on your computer alone is not invited this way: offer it for steering from
 another device instead (`/steer on bea@example.com`, see
 [steering from another device](sessions.md#steering-from-another-device)).

@@ -160,6 +160,21 @@ export function claimable(row: Pick<FleetRow, "kind" | "sync">): boolean {
   return row.kind === "private" && row.sync === "elsewhere";
 }
 
+/**
+ * The mark of a session on a team's profile that its owner has not opened to the team:
+ * the plane's `visibility: "private"` on a pod session. Never "private", which is a sealed
+ * session's word; the terminal client says the same.
+ */
+export const ONLY_YOU_MARK = {
+  label: "only you",
+  detail: "Only you and the people you invite can open it; administrators oversee it as any session",
+} as const;
+
+/** Whether a row carries the "only you" mark: a pod session of the person's own, not the team's. */
+export function onlyYou(row: Pick<FleetRow, "kind" | "visibility" | "yourRole">): boolean {
+  return row.kind === "team" && row.visibility === "private" && row.yourRole === "owner";
+}
+
 export interface FleetRow {
   id: string;
   kind: SessionKind;
@@ -186,6 +201,11 @@ export interface FleetRow {
    * nothing else.
    */
   archived?: boolean;
+  /**
+   * Who may open a pod session, as the plane says: `team`, or `private`, its owner and the
+   * people invited by name. Absent from a daemon's rows, whose kind says it.
+   */
+  visibility?: string | null;
   yourRole: string | null;
   origin: { kind?: string; trigger?: string; [k: string]: unknown } | null;
   reviewedBy: string | null;
@@ -261,6 +281,7 @@ export function rowFromPlane(row: SessionRow, source = "plane"): FleetRow {
     lastActiveAt: row.last_active_at ?? null,
     pinned: Boolean(row.pinned),
     archived: row.archived === true,
+    visibility: row.visibility ?? null,
     yourRole: row.your_role ?? null,
     origin: row.origin ?? null,
     reviewedBy: row.reviewed_by ?? null,

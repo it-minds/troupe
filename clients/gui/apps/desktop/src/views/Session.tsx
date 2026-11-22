@@ -834,7 +834,7 @@ function Header({
       <div className="crumbs">
         {row && (
           <>
-            <Where kind={row.kind} />
+            <Where kind={row.kind} row={row} />
             {/* How a private session's sealing stands here, as its row in the list says. */}
             <Sync state={row.sync} device={row.device} />
           </>

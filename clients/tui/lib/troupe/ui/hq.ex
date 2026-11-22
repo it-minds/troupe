@@ -432,7 +432,11 @@ defmodule Troupe.UI.HQ do
         # Browsing is always mode `read`: opening a dormant session must not
         # wake it, and the first activating action is what does. A laptop's session
         # offered for steering (root #58) is opened through the relay, by its kind.
-        case Client.open_session(session.origin, session.id, :read, kind: session.kind) do
+        # One of the person's own the team cannot open says so on the status line.
+        case Client.open_session(session.origin, session.id, :read,
+               kind: session.kind,
+               only_me: View.only_you?(session)
+             ) do
           {:ok, session_id} -> {:open, %{hq | error: nil}, session_id}
           {:error, reason} -> {:ok, %{hq | error: message(reason)}}
         end

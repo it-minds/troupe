@@ -79,6 +79,9 @@ defmodule Troupe.UI.TUI.NewSessionPage do
       # next key takes it away.
       said: nil,
       private: Keyword.get(opts, :private, false),
+      # `/new --only-me`: on the platform, its owner's and the people they invite until it
+      # is shared, on the team's profile and budget all the same.
+      only_me: Keyword.get(opts, :only_me, false),
       # The team HQ had selected, which the plane charges and opens the session to.
       team: Keyword.get(opts, :team),
       # Where more than one of the person's teams may use a profile: the team picked for
@@ -318,7 +321,8 @@ defmodule Troupe.UI.TUI.NewSessionPage do
       local_down: local_down,
       why: why,
       who:
-        NewSession.who(where, if(team, do: [team], else: profile && profile["teams"]), page.private),
+        NewSession.who(where, if(team, do: [team], else: profile && profile["teams"]), page.only_me),
+      only_me: where == :platform and page.only_me,
       team_candidates: candidates,
       team_choice: team_choice,
       team: team,
@@ -726,7 +730,8 @@ defmodule Troupe.UI.TUI.NewSessionPage do
            agent: r.sent_agent,
            prompt: r.cleaned,
            title: title,
-           team: r.team || page.team
+           team: r.team || page.team,
+           visibility: NewSession.visibility(page.only_me)
          }}
     end
   end
@@ -1031,6 +1036,13 @@ defmodule Troupe.UI.TUI.NewSessionPage do
 
   # Whose it is: a chip where more than one of the person's teams may use the profile, the
   # sentence's end as it was where one may.
+  defp who_spans(%{where: :platform, team_choice: true, only_me: true} = r, chip),
+    do: [
+      Span.new(" · for "),
+      chip.(3, r.team || "which team?", if(r.team, do: nil, else: :stale)),
+      Span.new(" · " <> r.who)
+    ]
+
   defp who_spans(%{where: :platform, team_choice: true} = r, chip),
     do: [
       Span.new(" · everyone on "),
