@@ -465,6 +465,7 @@ export function Session({
             onRename={rename ? () => setRenaming(true) : undefined}
             onKeep={keep ? (on) => void keep(on) : undefined}
             sharing={share && (visibility === "team" || visibility === "private") ? { visibility, team, onShare: (to) => void share(to) } : undefined}
+            whose={whose}
             remote={
               row && daemon && auth && (row.kind === "local" || row.kind === "private") ? (
                 <RemoteOfferControl daemon={daemon} row={row} presence={view.state.presence} />
@@ -898,14 +899,15 @@ function Header({
             {row.profile}
           </span>
         )}
+        <span className="tag profile" title="The agent this window runs">
+          {agent ?? "—"}
+        </span>
+        {/* Last, so that where the head is narrow it is the one cut short: the ⋯ says it too. */}
         {whose && (
           <span className="tag whose" title={whose === "the team's" ? "Everyone on its team can open it" : "Its owner and the people they invited can open it"}>
             {whose}
           </span>
         )}
-        <span className="tag profile" title="The agent this window runs">
-          {agent ?? "—"}
-        </span>
         {remoteLine}
       </div>
       <span className="spacer" />
@@ -977,6 +979,7 @@ function SessionMenu({
   onRename,
   onKeep,
   sharing,
+  whose,
   remote,
 }: {
   sessionId: string;
@@ -998,6 +1001,8 @@ function SessionMenu({
   onKeep?: ((on: boolean) => void) | undefined;
   /** Give a pod session to its team or take it back: its owner's alone. */
   sharing?: { visibility: "team" | "private"; team: string | null; onShare: (to: "team" | "private") => void } | undefined;
+  /** Whose a pod session is, as the head marks it. */
+  whose?: string | null;
   /** Steering from another device: this computer's offer. */
   remote?: JSX.Element | null;
 }): JSX.Element {
@@ -1084,6 +1089,12 @@ function SessionMenu({
               <dd>
                 you are {role === "owner" ? "the owner" : role === "collaborator" || role === "control" ? "a collaborator" : "a reader"}
               </dd>
+            </>
+          )}
+          {whose && (
+            <>
+              <dt>Opens</dt>
+              <dd>{whose === "the team's" ? "for everyone on its team" : whose === "only you" ? "for only you and the people you invited" : "for its owner and the people they invited"}</dd>
             </>
           )}
           {row?.invitation && (
