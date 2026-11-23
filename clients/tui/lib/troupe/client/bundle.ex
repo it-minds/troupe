@@ -42,7 +42,8 @@ defmodule Troupe.Client.Bundle do
   @doc "The sentence for a session just raised."
   @spec raised(map()) :: String.t()
   def raised(row),
-    do: "Configuration v#{version(row["bundle_version"])} now: its tools, skills and servers are the new version's."
+    do:
+      "Configuration v#{version(row["bundle_version"])} now: its tools, skills and servers are the new version's."
 
   @doc "The sentence for a raise the plane keeps while the agent works."
   @spec kept(term()) :: String.t()
