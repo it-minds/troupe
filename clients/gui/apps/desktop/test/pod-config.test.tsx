@@ -135,7 +135,7 @@ describe("the backstage's configuration row", () => {
     row.click();
     await showBackstage();
     await waitFor(() => fact("Configuration"), "the configuration row");
-    expect(fact("Configuration")).toBe("Bundle 3");
+    expect(fact("Configuration")).toBe("v3");
   });
 
   it("is not there on a session on this computer, which has no bundle", async () => {

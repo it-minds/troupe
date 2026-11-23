@@ -15,7 +15,21 @@
 
 import { useState } from "react";
 import type { JSX } from "react";
-import { TAKE_BACK_LINE, appLink, giveLine, sessionWhose, teamWords, visibilityRefusal } from "@troupe/client";
+import {
+  TAKE_BACK_LINE,
+  appLink,
+  behind,
+  configurationLine,
+  giveLine,
+  owedLine,
+  raiseKept,
+  raiseRefusal,
+  sessionWhose,
+  teamWords,
+  updateLine,
+  versionOf,
+  visibilityRefusal,
+} from "@troupe/client";
 import type { OwnClient, OwnMemory, OwnMemoryPreview, PlaneDocument, SessionRow } from "@troupe/client";
 import { OpenInApp } from "./OpenInApp";
 import { describeError, show, useConsole, useLoad } from "../console";
@@ -86,6 +100,57 @@ function Whose({ session, onChanged }: { session: SessionRow; onChanged: () => v
 }
 
 /**
+ * Which configuration one of the person's own pod sessions runs on, and Update where its
+ * channel has published a newer version (troupe #1177): at once when its agent is at rest,
+ * else when the agent is done, which it then says. A session on a computer has no bundle.
+ */
+function Configuration({ session, onChanged }: { session: SessionRow; onChanged: () => void }): JSX.Element {
+  const { auth, notify } = useConsole();
+  const [busy, setBusy] = useState(false);
+  const [refused, setRefused] = useState<string | null>(null);
+  const version = versionOf(session.bundle_version);
+  const current = versionOf(session.bundle_current);
+  const owed = versionOf(session.bundle_raise_to);
+  if (session.kind === "private" || version === null) return <span className="muted">—</span>;
+  const update = async (): Promise<void> => {
+    setBusy(true);
+    setRefused(null);
+    try {
+      await auth.withToken((plane, token) => plane.raiseSessionBundle(token, session.id));
+      notify(`${session.title ?? session.id} runs on v${current} now.`);
+    } catch (e) {
+      const kept = raiseKept(e);
+      if (kept !== null) notify(`${session.title ?? session.id}: ${owedLine(kept).toLowerCase()}.`);
+      else setRefused(raiseRefusal(e));
+    } finally {
+      setBusy(false);
+      onChanged();
+    }
+  };
+  return (
+    <>
+      {configurationLine(version, current)}
+      {owed !== null && owed > version ? (
+        <span className="muted"> · {owedLine(owed)}</span>
+      ) : current !== null && behind(version, current) ? (
+        <>
+          {" "}
+          <button type="button" className="link" disabled={busy} title={updateLine(current, session.status === "thinking" || session.status === "acting")} onClick={() => void update()}>
+            Update
+          </button>
+        </>
+      ) : null}
+      {refused && (
+        <span className="hint" role="alert">
+          {" "}
+          {refused}
+        </span>
+      )}
+    </>
+  );
+}
+
+/**
  * The person's sessions on the plane, each saying where it opens: a session is read and
  * steered in the desktop app or the terminal, and one this person's role may see on
  * Sessions links there too. Which those are is what `admin.sessions.list` answers them; a
@@ -116,6 +181,7 @@ function YourSessions(): JSX.Element {
                     <th>State</th>
                     <th>Last active</th>
                     <th>Who opens it</th>
+                    <th>Configuration</th>
                     <th>Where it opens</th>
                   </tr>
                 </thead>
@@ -132,6 +198,9 @@ function YourSessions(): JSX.Element {
                       <td>{when(s.last_active_at ?? null)}</td>
                       <td>
                         <Whose session={s} onChanged={reload} />
+                      </td>
+                      <td>
+                        <Configuration session={s} onChanged={reload} />
                       </td>
                       <td>
                         <OpenInApp link={appLink({ kind: "session", id: s.id, plane: plane.url })} />, or in the terminal.

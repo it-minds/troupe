@@ -6,6 +6,7 @@
 // the message being produced, the agent's state, who else is here — and may be dropped
 // under load without changing what the transcript says.
 
+import { upgradedText } from "./bundle.js";
 import { named } from "./people.js";
 import { when } from "./remote.js";
 import { foldScratch, scratchDocumentOf } from "./scratch.js";
@@ -1664,6 +1665,15 @@ export function fold(state: TranscriptState, e: TroupeEvent, options: FoldOption
     // with who, which artifact and what, for whoever steers the session to act on. Never input.
     case "artifact_commented":
       return { ...next, entries: [...state.entries, { kind: "system", ...base, type: d.type, text: commentedText(d) }] };
+
+    // Its configuration moved to another bundle version (troupe #1177): its owner raised it,
+    // or its version was retired. One line, and the version the panel says from now on.
+    case "config_upgraded":
+      return {
+        ...next,
+        bundleVersion: str(d.data["to"]) || next.bundleVersion,
+        entries: [...state.entries, { kind: "system", ...base, type: d.type, text: upgradedText(d.data) }],
+      };
 
     // Its owner gave the session to its team, or took it back (troupe #1169): one line, and
     // whose it is now for the head's mark.

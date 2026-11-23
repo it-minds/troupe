@@ -46,6 +46,13 @@ import {
   teamWords,
   unseenSummary,
   visibilityRefusal,
+  behind,
+  configurationLine,
+  owedLine,
+  raiseKept,
+  raiseRefusal,
+  updateLine,
+  versionOf,
 } from "@troupe/client";
 import type {
   Artifact,
@@ -287,6 +294,34 @@ export function Session({
           }
         }
       : undefined;
+  // Which configuration a pod session runs on (troupe #1177): the log's version once it
+  // names one, else the row's, beside the version its channel would start a session on now.
+  // Its owner updates it from the panel; a raise kept while the agent works says so there.
+  const pinRow = row?.raw as { bundle_version?: unknown; bundle_current?: unknown; bundle_raise_to?: unknown } | undefined;
+  const [raiseError, setRaiseError] = useState<string | null>(null);
+  useEffect(() => setRaiseError(null), [sessionId]);
+  const pinned = versionOf(view.state.bundleVersion) ?? versionOf(pinRow?.bundle_version);
+  const owed = versionOf(pinRow?.bundle_raise_to);
+  const configuration: Configuration | undefined =
+    row?.kind === "team" && pinned !== null
+      ? {
+          version: pinned,
+          current: versionOf(pinRow?.bundle_current),
+          owed: owed !== null && owed > pinned ? owed : null,
+          busy: isBusy(view.state),
+          onUpdate:
+            marking && row.yourRole === "owner"
+              ? async () => {
+                  setRaiseError(null);
+                  try {
+                    await marking.marks.raise(marking.row);
+                  } catch (e) {
+                    if (raiseKept(e) === null) setRaiseError(raiseRefusal(e));
+                  }
+                }
+              : undefined,
+        }
+      : undefined;
   // Onboarding, then the brief, as the session's start found them due (Decision 835), and
   // the librarian for a session started here; what they came to is said in the transcript.
   const start = useStartQuestions(daemon, sessionId, view.state.onboarding, { local: here, canAnswer: !readOnly, startedIn });
@@ -505,6 +540,11 @@ export function Session({
           <p>{shareError}</p>
         </div>
       )}
+      {raiseError && (
+        <div className="banner error" role="alert">
+          <p>{raiseError}</p>
+        </div>
+      )}
       <Banners
         status={view.status}
         detail={view.detail}
@@ -612,6 +652,7 @@ export function Session({
             view={view}
             daemon={daemon}
             row={row}
+            configuration={configuration}
             onEditTodo={!readOnly && view.view ? (action, params) => view.view!.editTodo(action, params) : undefined}
             self={self}
             selfName={named(auth?.me?.display_name, auth?.me?.subject)}
@@ -1810,10 +1851,21 @@ function useScratchText(view: SessionView | null, doc: ScratchDocument | undefin
   return read && read.name === name ? read : { content: null, error: null };
 }
 
+/** A pod session's configuration as the panel says it, with Update for its owner. */
+interface Configuration {
+  version: number;
+  current: number | null;
+  /** A raise the plane keeps for the agent's rest. */
+  owed: number | null;
+  busy: boolean;
+  onUpdate?: (() => Promise<void>) | undefined;
+}
+
 function Backstage({
   view,
   daemon,
   row,
+  configuration,
   onEditTodo,
   self,
   selfName,
@@ -1827,6 +1879,8 @@ function Backstage({
   view: SessionHandle;
   daemon: DaemonClient | null;
   row: FleetRow | undefined;
+  /** A pod session's bundle version and its channel's current one; absent elsewhere. */
+  configuration?: Configuration | undefined;
   /** Change the task list (`todo.edit`); absent where the person may only read the session. */
   onEditTodo?: TodoEdit | undefined;
   self: string | undefined;
@@ -1979,12 +2033,38 @@ function Backstage({
                   : "—"}
           </dd>
           {/* The bundle is what the platform loaded the session's agents from: a session on
-              this computer has none, so it has no row rather than a dash. */}
-          {view.state.bundleVersion && !(row && onThisComputer(row.kind)) && (
+              this computer has none, so it has no row rather than a dash. Behind its
+              channel, its owner updates it: now at rest, else when the agent is done. */}
+          {configuration ? (
             <>
               <dt>Configuration</dt>
-              <dd>Bundle {view.state.bundleVersion}</dd>
+              <dd>
+                {configurationLine(configuration.version, configuration.current)}
+                {configuration.owed !== null ? (
+                  <span className="muted"> · {owedLine(configuration.owed)}</span>
+                ) : configuration.onUpdate && configuration.current !== null && behind(configuration.version, configuration.current) ? (
+                  <>
+                    {" "}
+                    <button
+                      type="button"
+                      className="link"
+                      title={updateLine(configuration.current, configuration.busy)}
+                      onClick={() => void configuration.onUpdate?.()}
+                    >
+                      {configuration.busy ? "Update when the agent is done" : "Update"}
+                    </button>
+                  </>
+                ) : null}
+              </dd>
             </>
+          ) : (
+            view.state.bundleVersion &&
+            !(row && onThisComputer(row.kind)) && (
+              <>
+                <dt>Configuration</dt>
+                <dd>v{view.state.bundleVersion}</dd>
+              </>
+            )
           )}
         </dl>
       </section>
