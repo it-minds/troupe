@@ -936,9 +936,9 @@ defmodule Troupe do
     Log.head_seq(session_id)
   catch
     :exit, _ ->
-      case off_disk(session_id) do
-        [] -> 0
-        events -> List.last(events).seq || 0
+      case Log.last_on_disk(session_id, state_dirs()) do
+        nil -> 0
+        event -> event.seq || 0
       end
   end
 
@@ -947,8 +947,7 @@ defmodule Troupe do
   def replay_from(session_id, from_seq) do
     Log.replay_from(session_id, from_seq)
   catch
-    :exit, _ ->
-      session_id |> off_disk() |> Enum.filter(&(&1.seq && &1.seq > from_seq))
+    :exit, _ -> Log.read_session_after(session_id, state_dirs(), from_seq)
   end
 
   @doc "Read a stored blob, optionally a byte range."
