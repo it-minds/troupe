@@ -495,9 +495,40 @@ defmodule Troupe.Plane.Sessions do
     :ok
   end
 
-  @doc "Record which bundle version a session is pinned to."
-  @spec pin_bundle(String.t(), integer()) :: {:ok, Session.t()} | {:error, term()}
-  def pin_bundle(session_id, version), do: put_fields(session_id, %{bundle_version: version})
+  @doc """
+  Record which bundle version, of which channel, a session is pinned to: once a pod has
+  started it there. A raise it owed up to that version is taken.
+  """
+  @spec pin_bundle(String.t(), integer(), String.t() | nil) :: {:ok, Session.t()} | {:error, term()}
+  def pin_bundle(session_id, version, channel \\ nil) do
+    case Repo.get(Session, session_id) do
+      nil ->
+        {:error, :not_found}
+
+      session ->
+        attrs =
+          %{bundle_version: version}
+          |> then(&if(channel, do: Map.put(&1, :bundle_channel, channel), else: &1))
+          |> Map.merge(raise_taken(session, version))
+
+        session |> Session.changeset(attrs) |> Repo.update()
+    end
+  end
+
+  # A raise owed up to the version a pod now runs is no longer owed.
+  defp raise_taken(%Session{bundle_raise_to: to}, version)
+       when is_integer(to) and is_integer(version) and to <= version,
+       do: %{bundle_raise_to: nil, bundle_raise_by: nil}
+
+  defp raise_taken(_session, _version), do: %{}
+
+  @doc """
+  Owe a session a raise to `version` of its channel, asked by `by`: kept until a pod starts
+  it on that version, at once, at its root's next rest, or at its next wake.
+  """
+  @spec owe_raise(String.t(), integer(), String.t()) :: {:ok, Session.t()} | {:error, term()}
+  def owe_raise(session_id, version, by),
+    do: put_fields(session_id, %{bundle_raise_to: version, bundle_raise_by: by})
 
   @doc "Set a session's lifecycle state directly. Erasure is the only caller."
   @spec put_state(String.t(), String.t()) :: {:ok, Session.t()} | {:error, term()}
@@ -756,6 +787,7 @@ defmodule Troupe.Plane.Sessions do
       |> put_status_field(:pending_questions, report["pending_questions"])
       |> put_status_field(:cost_micros, report["cost_micros"])
       |> put_status_field(:agent, report["agent"])
+      |> put_status_field(:bundle_version, report["bundle_version"])
       |> put_reason(:done_reason, report)
       |> put_reason(:failed_reason, report)
 
@@ -768,10 +800,24 @@ defmodule Troupe.Plane.Sessions do
       end
 
     case Repo.update_all(query, set: fields) do
-      {0, _} -> if Repo.get(Session, session_id), do: {:error, :stale_epoch}, else: {:ok, 0}
-      {count, _} -> {:ok, count}
+      {0, _} ->
+        if Repo.get(Session, session_id), do: {:error, :stale_epoch}, else: {:ok, 0}
+
+      {count, _} ->
+        raise_reached(session_id, report["bundle_version"])
+        {:ok, count}
     end
   end
+
+  # A raise owed up to the version the pod's tree now runs on is taken.
+  defp raise_reached(session_id, version) when is_integer(version) do
+    Repo.update_all(
+      from(s in Session, where: s.id == ^session_id and s.bundle_raise_to <= ^version),
+      set: [bundle_raise_to: nil, bundle_raise_by: nil]
+    )
+  end
+
+  defp raise_reached(_session_id, _version), do: :ok
 
   defp put_status_field(set, :status, status) when is_binary(status) do
     if status in Session.statuses(), do: Keyword.put(set, :status, status), else: set
@@ -786,6 +832,12 @@ defmodule Troupe.Plane.Sessions do
   # the row keeps the one the session was created as.
   defp put_status_field(set, :agent, agent) when is_binary(agent) and agent != "",
     do: Keyword.put(set, :agent, agent)
+
+  # The bundle version the pod's tree runs on: the pin follows it, so a raise the pod kept
+  # for its root's rest and then applied lands on the row. A pod pinned to nothing, or from
+  # before it said, reports none.
+  defp put_status_field(set, :bundle_version, version) when is_integer(version) and version > 0,
+    do: Keyword.put(set, :bundle_version, version)
 
   defp put_status_field(set, _key, _value), do: set
 

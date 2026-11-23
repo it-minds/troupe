@@ -76,6 +76,12 @@ defmodule Troupe.Plane.Sessions.Session do
     # pod reports, never anything the session wrote.
     field(:github, :map)
     field(:bundle_version, :integer)
+    # The channel `bundle_version` is a version of, so a pin names one document.
+    field(:bundle_channel, :string)
+    # A raise to the channel's current version its owner asked for and no pod has taken
+    # yet: the version, and who asked. Cleared when a pod starts the session on it.
+    field(:bundle_raise_to, :integer)
+    field(:bundle_raise_by, :string)
     field(:retention_class, :string)
     field(:pinned, :boolean, default: false)
     field(:pinned_by, :string)
@@ -162,6 +168,9 @@ defmodule Troupe.Plane.Sessions.Session do
     :repository,
     :github,
     :bundle_version,
+    :bundle_channel,
+    :bundle_raise_to,
+    :bundle_raise_by,
     :retention_class,
     :pinned,
     :pinned_by,
