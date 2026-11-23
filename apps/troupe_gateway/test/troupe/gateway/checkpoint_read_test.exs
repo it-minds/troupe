@@ -109,6 +109,90 @@ defmodule Troupe.Gateway.CheckpointReadTest do
              Client.subscribe(client, "session:" <> id, from: :somewhere)
   end
 
+  test "an open from the checkpoint, and a page before it, decode only what they answer", context do
+    # 2,000 events, the checkpoint at 1,990 standing for 1,989.
+    events =
+      Enum.map(1..2_000, fn
+        1_990 ->
+          %Event{type: "checkpoint", agent: ["root"], data: checkpoint_data(1_989)}
+
+        n ->
+          %Event{type: "user_input", agent: ["root"], data: %{"text" => "line #{n}"}}
+      end)
+
+    id = dormant_log(context, seal(events))
+    client = connect(context)
+
+    # The offsets beside the log, and the session's row, are built by the first look at
+    # it, which a listing makes; what is counted is the open after that.
+    assert Troupe.head_seq(id) == 2_000
+    assert Troupe.get_session(id)
+
+    {result, decoded} = counting(fn -> Client.subscribe(client, "session:" <> id, from: :checkpoint) end)
+    assert {:ok, %{"from_seq" => 1_989, "checkpoint" => %{"seq" => 1_990}}} = result
+    assert length(collect(11)) == 11
+    assert decoded < 200, "decoded #{decoded} events for an open from the checkpoint"
+
+    # Reading it marked it read, and the index folds its row again from the log (the row
+    # every read looks a session up by), which is the index's read and not this one.
+    assert Troupe.get_session(id)
+
+    {result, decoded} = counting(fn -> Client.session_events(client, id, 1_000, limit: 50) end)
+    assert {:ok, %{"events" => page, "more" => true}} = result
+    assert Enum.map(page, & &1["seq"]) == Enum.to_list(950..999)
+    assert decoded == 50
+  end
+
+  defp checkpoint_data(through) do
+    %{
+      "shape" => "session/1",
+      "through" => through,
+      "compacted" => through - 1,
+      "previous" => nil,
+      "summary" => "earlier",
+      "facts" => Troupe.Session.Checkpoint.new() |> Troupe.Session.Checkpoint.facts()
+    }
+  end
+
+  defp seal(events) do
+    {sealed, _} =
+      Enum.map_reduce(Enum.with_index(events, 1), nil, fn {event, seq}, previous ->
+        sealed = Event.seal(event, seq, previous)
+        {sealed, sealed}
+      end)
+
+    sealed
+  end
+
+  # How many events the log's reads decoded while `fun` ran.
+  defp counting(fun) do
+    handler = "checkpoint-read-#{System.unique_integer([:positive])}"
+    :telemetry.attach(handler, [:troupe, :log, :read], &__MODULE__.decoded/4, self())
+    result = fun.()
+    :telemetry.detach(handler)
+    {result, drain_decoded(0)}
+  end
+
+  @doc false
+  def decoded(_name, %{events: n}, _meta, test), do: send(test, {:decoded, n})
+
+  defp drain_decoded(sum) do
+    receive do
+      {:decoded, n} -> drain_decoded(sum + n)
+    after
+      0 -> sum
+    end
+  end
+
+  defp dormant_log(context, events) do
+    id = "20261123T#{System.unique_integer([:positive]) |> rem(1_000_000) |> pad()}-seeked"
+    session_dir = Paths.session_dir(context.workspace, id, context.state_dir)
+    File.mkdir_p!(session_dir)
+    lines = Enum.map(events, &[Jason.encode_to_iodata!(Event.to_json(&1)), ?\n])
+    File.write!(Path.join(session_dir, "events.jsonl"), lines)
+    id
+  end
+
   # A recorded log as a dormant session of this daemon's: only its log, under a fresh id.
   defp dormant(context, dir, name) do
     id = "20261123T#{System.unique_integer([:positive]) |> rem(1_000_000) |> pad()}-#{String.slice(name <> "______", 0, 6)}"

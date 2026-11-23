@@ -93,6 +93,12 @@ defmodule Troupe.Session.Log do
     GenServer.call(Troupe.Registry.log(session_id), {:replay_from, from_seq}, 30_000)
   end
 
+  @doc "Events after `from_seq` and before `before`: a page of history, read only as far as `before`."
+  @spec replay_between(String.t(), non_neg_integer(), pos_integer()) :: [Event.t()]
+  def replay_between(session_id, from_seq, before) do
+    GenServer.call(Troupe.Registry.log(session_id), {:replay_between, from_seq, before}, 30_000)
+  end
+
   @doc "The highest sequence number written."
   @spec head_seq(String.t()) :: non_neg_integer()
   def head_seq(session_id), do: GenServer.call(Troupe.Registry.log(session_id), :head_seq)
@@ -197,6 +203,35 @@ defmodule Troupe.Session.Log do
       path -> path |> offsets_of() |> elem(1)
     end
   end
+
+  @doc """
+  A session's events after `from_seq` and before `before`, with nothing running: read from
+  the offset the side file names up to where `before` starts, when the side file is the
+  log's; the whole log otherwise.
+  """
+  @spec read_session_between(
+          String.t(),
+          Path.t() | [Path.t() | nil] | nil,
+          non_neg_integer(),
+          pos_integer()
+        ) :: [Event.t()]
+  def read_session_between(session_id, state_dir, from_seq, before) do
+    case locate(session_id, state_dir) do
+      nil ->
+        []
+
+      path ->
+        with {:ok, offsets} <- Offsets.load(path),
+             {:ok, events} <- Offsets.read_between(path, offsets, from_seq, before) do
+          events
+        else
+          _ -> path |> read_after(from_seq) |> between(from_seq, before)
+        end
+    end
+  end
+
+  defp between(events, from_seq, before),
+    do: Enum.filter(events, &(&1.seq && &1.seq > from_seq and &1.seq < before))
 
   defp read_after(path, from_seq) do
     with {:ok, offsets} <- Offsets.load(path),
@@ -384,6 +419,13 @@ defmodule Troupe.Session.Log do
     case Offsets.read_after(state.path, state.offsets, from_seq) do
       {:ok, events} -> {:reply, events, state}
       :whole -> {:reply, Enum.filter(read_file(state.path), &(&1.seq > from_seq)), state}
+    end
+  end
+
+  def handle_call({:replay_between, from_seq, before}, _from, state) do
+    case Offsets.read_between(state.path, state.offsets, from_seq, before) do
+      {:ok, events} -> {:reply, events, state}
+      :whole -> {:reply, between(read_file(state.path), from_seq, before), state}
     end
   end
 

@@ -44,8 +44,19 @@ defmodule Troupe.Session.Checkpoints do
     # replay already folded is dropped when it arrives (`last_seq`).
     Events.subscribe(session_id, :internal)
 
-    state = %{session_id: session_id, fold: Checkpoint.new(), last_seq: 0}
-    state = Enum.reduce(Log.replay(session_id), state, &step(&2, &1))
+    # From the latest checkpoint, when there is one this build reads: its facts and the
+    # events after its `through` are the fold of the whole log, which is what a checkpoint
+    # is for; so a wake decodes the tail and not the session.
+    {fold, through} =
+      with %Event{} = checkpoint <- Troupe.latest_checkpoint(session_id),
+           {:ok, fold} <- Checkpoint.from_checkpoint(checkpoint) do
+        {fold, checkpoint.data["through"]}
+      else
+        _ -> {Checkpoint.new(), 0}
+      end
+
+    state = %{session_id: session_id, fold: fold, last_seq: through}
+    state = Enum.reduce(Log.replay_from(session_id, through), state, &step(&2, &1))
 
     {:ok, state, {:continue, :owed}}
   end
