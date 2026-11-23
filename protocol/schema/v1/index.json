@@ -80,6 +80,7 @@
     "commands/remote.withdraw.json",
     "commands/scratch.list.json",
     "commands/session.archive.json",
+    "commands/session.bundle.raise.json",
     "commands/session.claim.json",
     "commands/session.compact.json",
     "commands/session.create.json",
