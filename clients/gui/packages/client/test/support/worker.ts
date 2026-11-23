@@ -271,8 +271,8 @@ export class FakeWorker {
           // in for a laptop through the relay, it says what a laptop's daemon says there
           // (troupe #932), which reaches no file of the laptop's.
           capabilities: token.relayed
-            ? { blobs: true, tools: true, remote: true, relayed: true, relayed_allow_session: this.relayedAllowSession }
-            : { blobs: true, tools: true, fs_upload_artifact: true },
+            ? { blobs: true, tools: true, remote: true, relayed: true, relayed_allow_session: this.relayedAllowSession, checkpoints: true }
+            : { blobs: true, tools: true, fs_upload_artifact: true, checkpoints: true },
           principal: { subject: token.sub, display_name: token.name, kind: "user" },
           scopes: token.scopes,
           limits: { max_message_bytes: 1_048_576 },
@@ -406,7 +406,10 @@ export class FakeWorker {
         if (!target) return reply(ws, id, null, { code: -32005, message: "not_found" });
         const level = (params["level"] as "detail" | "summary") ?? "detail";
         const subId = `sub-${++this.subCounter}`;
-        const from = typeof params["from_seq"] === "number" ? (params["from_seq"] as number) : target.log.headSeq;
+        // `from: "checkpoint"`: the latest checkpoint, and the replay after its `through`.
+        const start = params["from"] === undefined ? null : target.log.start(params);
+        if (start && "refused" in start) return reply(ws, id, null, { code: -32602, message: "invalid_params", data: { reason: start.refused } });
+        const from = start ? start.from : typeof params["from_seq"] === "number" ? (params["from_seq"] as number) : target.log.headSeq;
 
         // Replay first, then live, with the boundary closed: events appended while the
         // replay is being written are queued and flushed after it, so the client sees
@@ -418,11 +421,23 @@ export class FakeWorker {
           else this.deliver(client, subId, target.id, level, e);
         });
         client.subs.set(subId, { sessionId: target.id, level, off });
-        reply(ws, id, { subscription_id: subId, head_seq: target.log.headSeq });
+        reply(ws, id, { subscription_id: subId, head_seq: target.log.headSeq, ...(start ? { checkpoint: start.checkpoint, from_seq: start.from } : {}) });
         for (const e of target.log.from(from)) this.deliver(client, subId, target.id, level, e);
         replaying = false;
         for (const e of queued) if (e.seq > from) this.deliver(client, subId, target.id, level, e);
         return;
+      }
+
+      // A page of history before `before`, oldest first (the `checkpoints` capability).
+      case "session.events": {
+        const target = this.sessions.get(String(params["session_id"] ?? ""));
+        if (!target) return reply(ws, id, null, { code: -32005, message: "not_found" });
+        const before = params["before"];
+        const limit = params["limit"] ?? 500;
+        if (typeof before !== "number" || before < 1 || typeof limit !== "number" || limit < 1 || limit > 500) {
+          return reply(ws, id, null, { code: -32602, message: "invalid_params" });
+        }
+        return reply(ws, id, target.log.page(before, limit));
       }
 
       case "unsubscribe": {

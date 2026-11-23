@@ -634,6 +634,10 @@ evoked where nothing is set and there was a sign-in. */
   directories: string[] = ["/home/ada/project", "/home/ada/notes", "/home/ada/repo"];
   /** How long `subscribe` takes to answer: a busy machine, where a screen is up before its view is. */
   subscribeDelayMs = 0;
+  /** Where each session subscription asked to start: a `from_seq`, or `"checkpoint"`. */
+  readonly subscribedFrom: Array<{ sessionId: string; from: number | "checkpoint" }> = [];
+  /** Each `session.events` asked, by its `before`. */
+  readonly pagesAsked: number[] = [];
   /** How long a method takes to answer, by its name: a busy machine, for any other method. */
   delayMs: Record<string, number> = {};
   /**
@@ -766,7 +770,7 @@ evoked where nothing is set and there was a sign-in. */
     this.token = opts.token ?? "daemon-token";
     // A daemon writes a person's lasting rule from an approval and fetches an artifact into a
     // session's workspace from its plane (troupe #920).
-    this.capabilities = opts.capabilities ?? { blobs: true, tools: true, approval_allow_always: true, fs_upload_artifact: true };
+    this.capabilities = opts.capabilities ?? { blobs: true, tools: true, approval_allow_always: true, fs_upload_artifact: true, checkpoints: true };
     this.osUser = opts.osUser ?? "ada";
     this.modelSettings = opts.modelSettings ?? true;
     this.overrides = opts.overrides ?? [];
@@ -1608,18 +1612,37 @@ evoked where nothing is set and there was a sign-in. */
         const target = this.sessions.get(topic.replace(/^session:/, ""));
         if (!target) return reply(ws, id, null, { code: -32005, message: "not_found" });
 
+        // `from: "checkpoint"` where the daemon says it keeps them: the latest, and the
+        // replay after its `through` (PROTOCOL.md, "Checkpoints").
+        const start = this.capabilities["checkpoints"] === true ? target.log.start(params) : { checkpoint: null, from };
+        if ("refused" in start) return reply(ws, id, null, { code: -32602, message: "invalid_params", data: { reason: start.refused } });
+        this.subscribedFrom.push({ sessionId: target.id, from: params["from"] === "checkpoint" ? "checkpoint" : from });
         const subscriptionId = `sub-${this.nextId++}`;
         // The replay is closed before anything live is sent, which is what lets a client
         // resume from its cursor with no gap and no duplicate.
-        const backlog = target.log.from(from);
+        const backlog = target.log.from(start.from);
         const off = target.log.listen((e) => notify(ws, "event", { topic, subscription_id: subscriptionId, session_id: target.id, event: e }));
         client.subs.set(subscriptionId, { id: subscriptionId, topic, off });
         this.reading(topic, 1);
-        reply(ws, id, { subscription_id: subscriptionId, head_seq: target.log.headSeq, replayed: backlog.length });
+        const cursor = params["from"] === "checkpoint" ? { checkpoint: start.checkpoint, from_seq: start.from } : {};
+        reply(ws, id, { subscription_id: subscriptionId, head_seq: target.log.headSeq, replayed: backlog.length, ...cursor });
         for (const e of backlog) {
           notify(ws, "event", { topic, subscription_id: subscriptionId, session_id: target.id, event: e });
         }
         return;
+      }
+
+      // A page of history before `before`, oldest first (the `checkpoints` capability).
+      case "session.events": {
+        const target = this.sessions.get(String(params["session_id"] ?? ""));
+        if (!target) return reply(ws, id, null, { code: -32005, message: "not_found" });
+        const before = params["before"];
+        const limit = params["limit"] ?? 500;
+        if (typeof before !== "number" || before < 1 || typeof limit !== "number" || limit < 1 || limit > 500) {
+          return reply(ws, id, null, { code: -32602, message: "invalid_params" });
+        }
+        this.pagesAsked.push(before);
+        return reply(ws, id, target.log.page(before, limit));
       }
 
       case "unsubscribe": {
