@@ -677,19 +677,23 @@ defmodule Troupe do
   down, and killed after thirty seconds, without holding up any other session's start or
   stop. A second stop of a session already being stopped waits for that one and writes
   nothing.
+
+  `dormant: false` stops the tree without the marker, for a tree its host starts again
+  at once over the same log (a pod raising a session's configuration in place): the
+  session never slept, and a client reading the log should not be told it did.
   """
-  @spec stop_session(String.t()) :: :ok | {:error, :not_found}
-  def stop_session(session_id) do
+  @spec stop_session(String.t(), keyword()) :: :ok | {:error, :not_found}
+  def stop_session(session_id, opts \\ []) do
     case Registry.whereis({:session, session_id}) do
       nil -> {:error, :not_found}
-      pid -> stop_tree(session_id, pid)
+      pid -> stop_tree(session_id, pid, Keyword.get(opts, :dormant, true))
     end
   end
 
-  defp stop_tree(session_id, pid) do
+  defp stop_tree(session_id, pid, mark?) do
     if Registry.first?({:stopping, session_id}) do
       try do
-        dormant(session_id)
+        if mark?, do: dormant(session_id)
         Sessions.stop_session(session_id)
       after
         Registry.release({:stopping, session_id})

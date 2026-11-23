@@ -106,6 +106,10 @@ defmodule Troupe.Agent.State do
     # and read into every prompt the root agent makes; a subagent is handed a task
     # instead and never carries one.
     goal: nil,
+    # The last move of the session's configuration from one bundle version to another
+    # (`config_upgraded`: `from`, `to`, `reason`, `by_name`), which the root's turn context
+    # says once. Folded, so a restart after it still knows what it said.
+    configuration: nil,
     # The `/loop` whose iterations this agent takes (Decision 679), as the loop process
     # last said. Not folded: that process says it again whenever either of them restarts.
     loop: nil,
@@ -275,6 +279,7 @@ defmodule Troupe.Agent.State do
           todos: [Troupe.Todo.t()],
           prompt_todos: [Troupe.Todo.t()],
           goal: String.t() | nil,
+          configuration: map() | nil,
           loop: String.t() | nil,
           cancelled_by: Troupe.Protocol.Event.Actor.t() | nil,
           turn_tools: [Troupe.Tool.handle()] | nil,
