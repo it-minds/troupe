@@ -87,6 +87,7 @@ export type {
 } from "./onboard.js";
 export {
   fold,
+  foldMany,
   addPending,
   dropPending,
   emptyTranscript,
@@ -138,7 +139,10 @@ export type {
   CurtainPhase,
   CurtainState,
   FoldOptions,
+  EarlierState,
 } from "./transcript.js";
+export { CHECKPOINTS, CHECKPOINT_SHAPE, EARLIER_PAGE, TranscriptFeed, fromCheckpoint, isCheckpoint, withEarlier } from "./opening.js";
+export type { Subscribed } from "./opening.js";
 export {
   FleetStore,
   PlaneSource,

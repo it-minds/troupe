@@ -10,7 +10,6 @@ import {
   dropPending,
   emptyTranscript,
   errorText,
-  fold,
   DaemonClient,
   DaemonSource,
   FleetStore,
@@ -23,7 +22,9 @@ import {
   ServerOffer,
   SessionAttachment,
   StartQuestions,
+  TranscriptFeed,
   TroupeRpcError,
+  withEarlier,
 } from "@troupe/client";
 import { storedLocalOnly } from "./mode";
 import { noticeEvent } from "./notify";
@@ -658,6 +659,13 @@ export interface SessionHandle {
   offer: OfferState;
   /** Answer the session's question about your servers: yes to those ticked, no, or the servers picked. */
   answerOffer(allow: OfferAnswer): void;
+  /**
+   * A transcript opened from a checkpoint (troupe #1182): page in the part before what is
+   * drawn, `session.events` before it, and draw it above. Nothing where all of it is drawn.
+   */
+  loadEarlier(): Promise<void>;
+  /** A page of history on its way, or why the last one did not come. */
+  earlier: { loading: boolean; error: string | null };
   error: string | null;
 }
 
@@ -682,6 +690,10 @@ export function useSessionView(
 ): SessionHandle {
   const { daemon = null, kind = "team", mode = "activate" } = opts;
   const [state, setState] = useState<TranscriptState>(emptyTranscript);
+  const [earlier, setEarlier] = useState<{ loading: boolean; error: string | null }>({ loading: false, error: null });
+  // What is drawn, for a page asked for from outside a render: where history starts.
+  const drawnRef = useRef(state);
+  drawnRef.current = state;
   const [status, setStatus] = useState<AttachStatus>("connecting");
   const [detail, setDetail] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -717,17 +729,21 @@ export function useSessionView(
     // knows whether it owes the daemon a `close` — the one it would otherwise pay twice
     // when the open resolves after the unmount and that path closes too.
     let held = false;
+    // The replay is held until it reaches the head the subscription answered with, and
+    // folded at once, from the checkpoint where it started at one; then each event as it
+    // comes. Each folds with the time it arrived, which the curtain line and live reasoning
+    // count from.
+    const feed = new TranscriptFeed((update) => live && setState(update));
     // The local view's stream, from its first event. The replay may arrive before `open`
     // has resolved, and until it has, nothing that arrives is news.
-    // Each event folds with the time it arrived, which the curtain line and live reasoning count from.
     const listener = (e: TroupeEvent): void => {
       if (!live) return;
-      const now = Date.now();
-      setState((s) => fold(s, e, { now }));
+      feed.push(e);
       const v = ref.current;
       noticeEvent(sessionId, e, held && Boolean(v) && isDurable(e) && e.seq > v!.headSeq);
     };
     setState(emptyTranscript);
+    setEarlier({ loading: false, error: null });
     setError(null);
     setStatus("connecting");
     setOffer({ state: "none" });
@@ -763,10 +779,11 @@ export function useSessionView(
     // it is there before the replay is.
     const opened = local
       ? daemon!
-          .open(sessionId, {}, listener)
+          .open(sessionId, {}, listener, { fromCheckpoint: true })
           .then((v) => {
             if (!live) return void daemon!.close(sessionId, listener);
             held = true;
+            feed.subscribed({ head_seq: v.headSeq, checkpoint: v.checkpoint });
             ref.current = v;
             setView(v);
             settle(v);
@@ -784,11 +801,11 @@ export function useSessionView(
           ...planeOpener(auth!, sessionId, relayed),
           // A session waiting for a place is not asked after again once this screen has gone.
           alive: () => live,
+          fromCheckpoint: true,
           hooks: {
             onEvent: (e) => {
               if (!live) return;
-              const now = Date.now();
-              setState((s) => fold(s, e, { now }));
+              feed.push(e);
               // Until the attachment is here, what arrives is the replay.
               const v = ref.current;
               noticeEvent(sessionId, e, Boolean(v) && isDurable(e) && e.seq > v!.headSeq);
@@ -802,6 +819,7 @@ export function useSessionView(
           ...(offering ? { onToolInvoke: offering.invoke, onLive: (conn) => void offering.offer(conn) } : {}),
         }).then((a) => {
           if (!live) return void a.close();
+          feed.subscribed({ head_seq: a.view.headSeq, checkpoint: a.view.checkpoint });
           attachment.current = a;
           ref.current = a.view;
           setView(a.view);
@@ -818,6 +836,7 @@ export function useSessionView(
 
     return () => {
       live = false;
+      feed.stop();
       settle(null);
       if (offering) globalThis.removeEventListener("focus", lookAgain);
       if (looking) clearInterval(looking);
@@ -930,7 +949,28 @@ export function useSessionView(
     resolve?.(allow);
   }, []);
 
-  return { state, status, detail, view, send, respond, answer, cancel, switchProfile, setGoal, clearGoal, startLoop, stopLoop, readBlob, offer, answerOffer, error };
+  // One page at a time: a second press while one is on its way asks for nothing more. A
+  // page that comes after the screen moved to another session is not drawn into it.
+  const paging = useRef(false);
+  const loadEarlier = useCallback(async (): Promise<void> => {
+    const v = ref.current;
+    const from = drawnRef.current.earlier;
+    if (!v || !from?.more || paging.current) return;
+    paging.current = true;
+    setEarlier({ loading: true, error: null });
+    try {
+      const page = await v.events(from.from);
+      if (ref.current !== v) return;
+      setState((s) => withEarlier(s, page.events, page.more));
+      setEarlier({ loading: false, error: null });
+    } catch (e) {
+      if (ref.current === v) setEarlier({ loading: false, error: errorText(e) });
+    } finally {
+      paging.current = false;
+    }
+  }, []);
+
+  return { state, status, detail, view, send, respond, answer, cancel, switchProfile, setGoal, clearGoal, startLoop, stopLoop, readBlob, offer, answerOffer, loadEarlier, earlier, error };
 }
 
 // The start this app began for each session it started, by daemon connection: a screen

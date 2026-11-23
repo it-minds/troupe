@@ -10,6 +10,7 @@
 import { FakeDaemon, exampleFacts, exampleOnboarding } from "../packages/client/test/support/daemon.js";
 import { FakeIdp } from "../packages/client/test/support/idp.js";
 import { keptBy } from "../packages/client/test/support/kept.js";
+import { longSession } from "../packages/client/test/support/long.js";
 import { FakePlane, GATEWAY_DEFAULTS, SAMPLE_PICTURE } from "../packages/client/test/support/plane.js";
 import { exampleProfiles } from "../packages/client/test/support/profiles.js";
 import { FakeWorker } from "../packages/client/test/support/worker.js";
@@ -310,6 +311,25 @@ parser.log.listen((e) => {
   if (e.type === "input_queued") sent.set(String(e.data["command_id"]), String(e.data["text"] ?? ""));
   if (e.type === "input_accepted") setTimeout(() => rehearse(sent.get(String(e.data["command_id"])) ?? "again", true), 0);
 });
+// Two long sessions of a thousand turns, about 10,000 events each (troupe #1182): one
+// that never compacted, which opens from its first event, and one that compacted at turn
+// 950 and opens from its checkpoint, the turns before it a press on Earlier away.
+longSession(daemon.seed("/home/ada/long").log, 1000);
+const compacted = daemon.seed("/home/ada/compacted");
+longSession(compacted.log, 1000, { compactAt: 950 });
+// What is sent there is taken as a turn and answered, so a line sent while Earlier reads
+// the part before the checkpoint has somewhere to land.
+const heard = new Map<string, string>();
+compacted.log.listen((e) => {
+  if (e.type === "input_queued") heard.set(String(e.data["command_id"]), String(e.data["text"] ?? ""));
+  if (e.type !== "input_accepted") return;
+  const text = heard.get(String(e.data["command_id"])) ?? "";
+  setTimeout(() => {
+    compacted.log.append("user_input", { source: "user", text }, e.actor);
+    compacted.log.append("llm_response", { message: { role: "assistant", content: [{ type: "text", text: `Heard: ${text}` }] } });
+    compacted.log.append("turn_ended", {});
+  }, 0);
+});
 // The agents manager (troupe #503) with every layer to show: the built-ins, the
 // repository's own reviewer, whose shell runs without asking, and a bundle's.
 daemon.agents.files.push(
@@ -349,4 +369,6 @@ then to rewrite the brief; /memory there lists its facts. A new session in
 rail, manages the agents of /home/ada/notes: the built-ins, the repository's review and
 a bundle's deploy. The session in /home/ada/notes has two documents in its scratchpad.
 The session in /home/ada/parser shows a turn's frames; send it anything to watch one run.
+/home/ada/long and /home/ada/compacted hold about 10,000 events each; the second opens
+from its checkpoint, and Earlier at its top pages back.
 `);

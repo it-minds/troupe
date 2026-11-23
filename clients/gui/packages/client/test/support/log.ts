@@ -57,6 +57,31 @@ export class SessionLog {
     return this.events.filter((e) => e.seq > seq);
   }
 
+  /** The latest `checkpoint`, or null for a session that never compacted. */
+  latestCheckpoint(): LoggedEvent | null {
+    for (let i = this.events.length - 1; i >= 0; i--) if (this.events[i]!.type === "checkpoint") return this.events[i]!;
+    return null;
+  }
+
+  /**
+   * Where `subscribe` replays from, as the servers read its `from_seq` and `from`: the
+   * checkpoint the answer carries (`from: "checkpoint"`) and the cursor after which events
+   * are sent.
+   */
+  start(params: Record<string, unknown>): { checkpoint: LoggedEvent | null; from: number } | { refused: string } {
+    if (params["from"] === undefined) return { checkpoint: null, from: Number(params["from_seq"] ?? 0) };
+    if (params["from"] !== "checkpoint" || params["from_seq"] !== undefined) return { refused: "from is \"checkpoint\", and not with from_seq" };
+    const checkpoint = this.latestCheckpoint();
+    return { checkpoint, from: checkpoint ? Number(checkpoint.data["through"]) : 0 };
+  }
+
+  /** `session.events`: up to `limit` events before `before`, oldest first, and whether there are earlier ones. */
+  page(before: number, limit = 500): { events: LoggedEvent[]; more: boolean } {
+    const below = this.events.filter((e) => e.seq < before);
+    const events = below.slice(Math.max(below.length - limit, 0));
+    return { events, more: below.length > events.length };
+  }
+
   listen(l: Listener): () => void {
     this.listeners.add(l);
     return () => void this.listeners.delete(l);

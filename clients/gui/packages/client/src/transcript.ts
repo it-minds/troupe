@@ -230,7 +230,13 @@ export type Entry =
    */
   | { kind: "file"; seq: number; agent: string[]; path: string; size: number; hash: string; title: string | undefined; localPath: string | undefined }
   /** Lifecycle: started, switched, compacted, done, cancelled, dormant, resumed, errors. */
-  | { kind: "system"; seq: number; agent: string[]; type: string; text: string };
+  | { kind: "system"; seq: number; agent: string[]; type: string; text: string }
+  /**
+   * Where a transcript opened from a checkpoint begins (troupe #1182): what the compaction
+   * said of everything before it, and when it was written. `seq` is the checkpoint's
+   * `through`; what came before is drawn above it as it is paged in.
+   */
+  | { kind: "earlier"; seq: number; agent: string[]; summary: string; at: string | undefined };
 
 /**
  * The session's latest loop towards its goal (`session.loop.start`), as its events say:
@@ -387,6 +393,33 @@ export interface TranscriptState {
    * and `offer_resumed` that it is back, which holds until the session next says anything.
    */
   laptop?: LaptopPresence;
+  /** Opened from a checkpoint (troupe #1182): what is drawn of the session before it. */
+  earlier?: EarlierState;
+}
+
+/**
+ * The part of a session before the checkpoint a transcript opened from: the events paged in
+ * so far with `session.events`, oldest first, and whether there are more before them. Its
+ * entries are drawn above the `earlier` entry; the head's facts are the checkpoint's and the
+ * tail's, never these.
+ */
+export interface EarlierState {
+  /** The checkpoint's `through`: every event at or below it is history. */
+  through: number;
+  /** The first seq paged in, `through + 1` before the first page. */
+  from: number;
+  /** Whether there is history before `from` still to page in. */
+  more: boolean;
+  events: DurableEvent[];
+  /** How many entries at the front of `entries` the history is, ahead of the `earlier` entry. */
+  drawn: number;
+  /**
+   * The tail's events that answer an entry of the history (a call a background child
+   * started before the checkpoint and ended after it), folded onto each page as it comes.
+   */
+  late: DurableEvent[];
+  /** The approvals and questions the checkpoint said were open: drawn once, in the tail. */
+  seeded: string[];
 }
 
 /** Where a relayed session's laptop is, as the plane said it on the session's stream. */
@@ -1256,6 +1289,35 @@ function writtenAt(d: DurableEvent): number | undefined {
  * reads (`FoldOptions`); it is the clock's when not given.
  */
 export function fold(state: TranscriptState, e: TroupeEvent, options: FoldOptions = {}): TranscriptState {
+  const next = foldOne(state, e, options);
+  const earlier = state.earlier;
+  if (!earlier || !isDurable(e) || !ANSWERS_EARLIER.has(e.type)) return next;
+  // An answer to something the tail drew is the tail's; one to something before the
+  // checkpoint waits for its page, which may not be in yet.
+  const id = str(e.data["call_id"]);
+  const ours = id !== "" && state.entries.some((en) => en.seq > earlier.through && "callId" in en && en.callId === id);
+  return ours ? next : { ...next, earlier: { ...earlier, late: [...earlier.late, e] } };
+}
+
+/** The events that change an entry already drawn, found by its call, and draw none of their own. */
+const ANSWERS_EARLIER: ReadonlySet<string> = new Set([
+  "tool_call_completed",
+  "approval_decided",
+  "approval_resolved",
+  "question_answered",
+  "budget_ask_answered",
+  "tool_failures_ask_answered",
+  "scratch_updated",
+]);
+
+/** Every event in turn, as `fold` folds one: a replay folded at once, to be set once. */
+export function foldMany(state: TranscriptState, events: readonly TroupeEvent[], options: FoldOptions = {}): TranscriptState {
+  let s = state;
+  for (const e of events) s = fold(s, e, options);
+  return s;
+}
+
+function foldOne(state: TranscriptState, e: TroupeEvent, options: FoldOptions = {}): TranscriptState {
   const now = (): number => options.now ?? Date.now();
   // The context window and what is in it, durable or not: the ring's, and nothing else's.
   if (e.type === "context_status") {
