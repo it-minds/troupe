@@ -12,6 +12,7 @@ defmodule Troupe.Worker.SessionRestartTest do
   use Troupe.Worker.SessionCase, async: false
 
   alias Troupe.LLM.Fake
+  alias Troupe.Session.Log
   alias Troupe.Sessions.Sealer
   alias Troupe.Worker.Plane.Commands
   alias Troupe.Worker.Session.Manager
@@ -41,7 +42,7 @@ defmodule Troupe.Worker.SessionRestartTest do
     sid = context.sid
     {:ok, _} = activate(context, bundle: @v12, report: reporter_to(self()), fake: fake([]))
     File.write!(Path.join(context.workspace, "notes.txt"), "kept\n")
-    {:ok, _seq} = Troupe.Session.Log.append(sid, ["root"], :goal_set, %{"text" => "kept too"})
+    {:ok, _seq} = Log.append(sid, ["root"], :goal_set, %{"text" => "kept too"})
 
     manager = Sessions.whereis(sid)
     before = Manager.status(manager)

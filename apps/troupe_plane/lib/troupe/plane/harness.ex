@@ -1566,14 +1566,7 @@ defmodule Troupe.Plane.Harness do
          :ok <- raisable(session),
          {:ok, team} <- granted_for_raise(session),
          {:ok, channel, target} <- raise_target(session) do
-      if session.bundle_version == target.version do
-        {:ok, session_json(session, user)}
-      else
-        with :ok <- agent_on(session, team, channel, target),
-             {:ok, owed} <- owe_raise(session, target, user) do
-          raise_now(owed, team, target, user)
-        end
-      end
+      raise_to(session, team, channel, target, user)
     end
   end
 
@@ -1687,6 +1680,17 @@ defmodule Troupe.Plane.Harness do
     case team_of(session) do
       nil -> []
       team -> Identity.members_of_team(team)
+    end
+  end
+
+  # Already on it: the row, and nothing written.
+  defp raise_to(%Session{bundle_version: version} = session, _team, _channel, %{version: version}, user),
+    do: {:ok, session_json(session, user)}
+
+  defp raise_to(session, team, channel, target, user) do
+    with :ok <- agent_on(session, team, channel, target),
+         {:ok, owed} <- owe_raise(session, target, user) do
+      raise_now(owed, team, target, user)
     end
   end
 
