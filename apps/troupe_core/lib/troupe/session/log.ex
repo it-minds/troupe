@@ -15,6 +15,11 @@ defmodule Troupe.Session.Log do
   A tampered or missing event is therefore detectable from the stored bytes alone, by
   anyone, in any language — see `Troupe.Protocol.Event.verify/1` and
   `troupe ctl verify`.
+
+  Beside the log it keeps where each event starts (`Troupe.Session.Log.Offsets`), so a
+  read from a cursor decodes only what follows it and a restart reads only the last line.
+  That is cache, rebuilt from the log whenever it might not describe it; nothing reads it
+  as truth.
   """
 
   use GenServer
@@ -22,9 +27,8 @@ defmodule Troupe.Session.Log do
   alias Troupe.{Events, Paths}
   alias Troupe.Protocol.Event
   alias Troupe.Protocol.Event.Actor
+  alias Troupe.Session.Log.Offsets
   alias Troupe.Session.Usage
-
-  require Logger
 
   @enforce_keys [:session_id, :path, :device, :starts]
   defstruct [
@@ -36,8 +40,15 @@ defmodule Troupe.Session.Log do
     # Log the tree restarts still knows; one of its own for a Log started alone.
     :starts,
     seq: 0,
-    last: nil
+    last: nil,
+    offsets: %Offsets{},
+    # Whether the side file is to be written again: once, a moment after appends stop.
+    save_due: false
   ]
+
+  # How long after an append the offsets' side file is written, so a run of appends writes
+  # it once.
+  @save_after_ms 1_000
 
   @type event_type :: atom()
 
@@ -80,6 +91,12 @@ defmodule Troupe.Session.Log do
   @spec replay_from(String.t(), non_neg_integer()) :: [Event.t()]
   def replay_from(session_id, from_seq) do
     GenServer.call(Troupe.Registry.log(session_id), {:replay_from, from_seq}, 30_000)
+  end
+
+  @doc "Events after `from_seq` and before `before`: a page of history, read only as far as `before`."
+  @spec replay_between(String.t(), non_neg_integer(), pos_integer()) :: [Event.t()]
+  def replay_between(session_id, from_seq, before) do
+    GenServer.call(Troupe.Registry.log(session_id), {:replay_between, from_seq, before}, 30_000)
   end
 
   @doc "The highest sequence number written."
@@ -162,6 +179,91 @@ defmodule Troupe.Session.Log do
     |> Path.join()
     |> Paths.wildcard()
     |> List.first()
+  end
+
+  @doc """
+  A session's events after a cursor, with nothing running: from the offset the side file
+  names when it is the log's, the whole log otherwise (and the side file written for the
+  next read). `0` reads everything.
+  """
+  @spec read_session_after(String.t(), Path.t() | [Path.t() | nil] | nil, non_neg_integer()) ::
+          [Event.t()]
+  def read_session_after(session_id, state_dir, from_seq) do
+    case locate(session_id, state_dir) do
+      nil -> []
+      path -> read_after(path, from_seq)
+    end
+  end
+
+  @doc "A session's last event, with nothing running, read as one line when it can be."
+  @spec last_on_disk(String.t(), Path.t() | [Path.t() | nil] | nil) :: Event.t() | nil
+  def last_on_disk(session_id, state_dir) do
+    case locate(session_id, state_dir) do
+      nil -> nil
+      path -> path |> offsets_of() |> elem(1)
+    end
+  end
+
+  @doc """
+  A session's events after `from_seq` and before `before`, with nothing running: read from
+  the offset the side file names up to where `before` starts, when the side file is the
+  log's; the whole log otherwise.
+  """
+  @spec read_session_between(
+          String.t(),
+          Path.t() | [Path.t() | nil] | nil,
+          non_neg_integer(),
+          pos_integer()
+        ) :: [Event.t()]
+  def read_session_between(session_id, state_dir, from_seq, before) do
+    case locate(session_id, state_dir) do
+      nil ->
+        []
+
+      path ->
+        with {:ok, offsets} <- Offsets.load(path),
+             {:ok, events} <- Offsets.read_between(path, offsets, from_seq, before) do
+          events
+        else
+          _ -> path |> read_after(from_seq) |> between(from_seq, before)
+        end
+    end
+  end
+
+  defp between(events, from_seq, before),
+    do: Enum.filter(events, &(&1.seq && &1.seq > from_seq and &1.seq < before))
+
+  defp read_after(path, from_seq) do
+    with {:ok, offsets} <- Offsets.load(path),
+         {:ok, events} <- Offsets.read_after(path, offsets, from_seq) do
+      events
+    else
+      _ ->
+        {offsets, events} = rebuild(path)
+        Offsets.save(path, offsets)
+        Enum.filter(events, &(&1.seq && &1.seq > from_seq))
+    end
+  end
+
+  # The offsets for a log and its last event: the side file's when its stamp is the log's,
+  # else built by one pass over the log and written beside it.
+  defp offsets_of(path) do
+    with {:ok, offsets} <- Offsets.load(path),
+         {:ok, last} <- Offsets.last(path, offsets) do
+      {offsets, last}
+    else
+      _ ->
+        {offsets, events} = rebuild(path)
+        Offsets.save(path, offsets)
+        {offsets, List.last(events)}
+    end
+  end
+
+  defp rebuild(path) do
+    case :file.read_file(path, [:raw]) do
+      {:ok, contents} -> Offsets.scan(contents)
+      {:error, _} -> {%Offsets{}, []}
+    end
   end
 
   @doc "Every event for a session, running or not, found as `locate/2` finds it."
@@ -251,13 +353,17 @@ defmodule Troupe.Session.Log do
     File.mkdir_p!(dir)
     path = Path.join(dir, "events.jsonl")
 
-    # Existing events set the starting sequence *and* the chain's tail, so a restarted
-    # Log continues the same chain rather than starting a second one.
-    existing = read_file(path)
-    last = List.last(existing)
-
     case File.open(path, [:append, :binary, :raw]) do
       {:ok, device} ->
+        # A torn last line is closed first, so the next event is a line of its own and not
+        # the unreadable end of that one.
+        close_torn_line(path, device)
+
+        # Existing events set the starting sequence *and* the chain's tail, so a restarted
+        # Log continues the same chain rather than starting a second one. Only the last
+        # line is read, when the offsets beside the log are the log's.
+        {offsets, last} = offsets_of(path)
+
         {:ok,
          %__MODULE__{
            session_id: session_id,
@@ -265,7 +371,8 @@ defmodule Troupe.Session.Log do
            device: device,
            starts: starts,
            seq: (last && last.seq) || 0,
-           last: last
+           last: last,
+           offsets: offsets
          }}
 
       {:error, reason} ->
@@ -287,7 +394,8 @@ defmodule Troupe.Session.Log do
       %Event{type: to_string(type), agent: agent_path, data: data, actor: actor || Actor.system()}
       |> Event.seal(seq, state.last)
 
-    :ok = IO.binwrite(state.device, [Jason.encode_to_iodata!(Event.to_json(event)), ?\n])
+    line = [Jason.encode_to_iodata!(Event.to_json(event)), ?\n]
+    :ok = IO.binwrite(state.device, line)
     :ok = :file.sync(state.device)
 
     Events.publish(state.session_id, event)
@@ -297,7 +405,8 @@ defmodule Troupe.Session.Log do
     # whether the log says it.
     Usage.observe(state.session_id, event)
 
-    {:reply, {:ok, seq}, %{state | seq: seq, last: event}}
+    offsets = Offsets.add(state.offsets, seq, IO.iodata_length(line))
+    {:reply, {:ok, seq}, schedule_save(%{state | seq: seq, last: event, offsets: offsets})}
   end
 
   def handle_call(:replay, _from, state), do: {:reply, read_file(state.path), state}
@@ -307,7 +416,17 @@ defmodule Troupe.Session.Log do
   end
 
   def handle_call({:replay_from, from_seq}, _from, state) do
-    {:reply, Enum.filter(read_file(state.path), &(&1.seq > from_seq)), state}
+    case Offsets.read_after(state.path, state.offsets, from_seq) do
+      {:ok, events} -> {:reply, events, state}
+      :whole -> {:reply, Enum.filter(read_file(state.path), &(&1.seq > from_seq)), state}
+    end
+  end
+
+  def handle_call({:replay_between, from_seq, before}, _from, state) do
+    case Offsets.read_between(state.path, state.offsets, from_seq, before) do
+      {:ok, events} -> {:reply, events, state}
+      :whole -> {:reply, between(read_file(state.path), from_seq, before), state}
+    end
   end
 
   def handle_call(:head_seq, _from, state), do: {:reply, state.seq, state}
@@ -336,6 +455,35 @@ defmodule Troupe.Session.Log do
 
   def handle_call({:first, key}, _from, state), do: {:reply, Troupe.Registry.first?(key), state}
 
+  @impl GenServer
+  def handle_info(:save_offsets, state) do
+    Offsets.save(state.path, state.offsets)
+    {:noreply, %{state | save_due: false}}
+  end
+
+  defp schedule_save(%__MODULE__{save_due: true} = state), do: state
+
+  defp schedule_save(state) do
+    Process.send_after(self(), :save_offsets, @save_after_ms)
+    %{state | save_due: true}
+  end
+
+  # Appends a newline when the log ends without one: bytes added, none rewritten.
+  defp close_torn_line(path, device) do
+    with {size, _mtime} when size > 0 <- Offsets.stamp(path),
+         {:ok, file} <- :file.open(path, [:read, :raw, :binary]) do
+      last_byte = :file.pread(file, size - 1, 1)
+      :file.close(file)
+
+      if last_byte != {:ok, "\n"} do
+        :ok = IO.binwrite(device, "\n")
+        :ok = :file.sync(device)
+      end
+    end
+
+    :ok
+  end
+
   defp recent_restarts(state, agent_path, within_ms, now) do
     times =
       case :ets.lookup(state.starts, {:restarts, agent_path}) do
@@ -346,20 +494,5 @@ defmodule Troupe.Session.Log do
     Enum.take_while(times, &(now - &1 < within_ms))
   end
 
-  defp decode_lines(contents) do
-    contents
-    |> String.split("\n", trim: true)
-    |> Enum.flat_map(fn line ->
-      case Jason.decode(line) do
-        {:ok, json} ->
-          [Event.from_json(json)]
-
-        {:error, _} ->
-          # A torn final line is what a hard kill mid-write leaves behind. Skipping it
-          # is right: the event was never acknowledged, so nothing acted on it.
-          Logger.debug("troupe: skipping unreadable log line")
-          []
-      end
-    end)
-  end
+  defp decode_lines(contents), do: Offsets.decode_lines(contents)
 end

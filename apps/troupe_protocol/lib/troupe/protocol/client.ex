@@ -109,6 +109,8 @@ defmodule Troupe.Protocol.Client do
   Subscribe to a topic. Events arrive at the owner as `{:troupe_event, topic, event}`.
 
   `from_seq: 0` replays a session from the beginning; omitting it starts live.
+  `from: :checkpoint` replays from the session's latest checkpoint, which the answer
+  carries, where the server has the `checkpoints` capability.
   """
   @spec subscribe(pid(), String.t(), keyword()) :: {:ok, map()} | {:error, Error.t()}
   def subscribe(client, topic, opts \\ []) do
@@ -116,8 +118,19 @@ defmodule Troupe.Protocol.Client do
       %{"topic" => topic, "level" => to_string(Keyword.get(opts, :level, :detail))}
       |> put_command_id(opts)
       |> maybe_put("from_seq", Keyword.get(opts, :from_seq))
+      |> maybe_put("from", opts |> Keyword.get(:from) |> then(&(&1 && to_string(&1))))
 
     call(client, "subscribe", params)
+  end
+
+  @doc "A page of a session's history before `before`: `{events, more}`, at most `:limit`."
+  @spec session_events(pid(), String.t(), pos_integer(), keyword()) ::
+          {:ok, map()} | {:error, Error.t()}
+  def session_events(client, session_id, before, opts \\ []) do
+    params =
+      maybe_put(%{"session_id" => session_id, "before" => before}, "limit", Keyword.get(opts, :limit))
+
+    call(client, "session.events", params)
   end
 
   @spec unsubscribe(pid(), String.t()) :: {:ok, map()} | {:error, Error.t()}

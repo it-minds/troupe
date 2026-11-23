@@ -109,6 +109,23 @@ defmodule Troupe.RemoteSessionTest do
       assert seqs(sid) == server_seqs(remote, "s-live")
     end
 
+    test "the subscription names the last seq held: the first attach gets seq 1, a reconnect the next" do
+      {remote, url} = start_remote!(sessions: [fixture()])
+      origin = connect!(remote, url)
+      sid = attach!(origin, "s-live")
+
+      eventually(fn -> length(seqs(sid)) >= 2 end)
+      assert Enum.take(seqs(sid), 2) == [1, 2]
+      assert [%{"from_seq" => 0}] = session_subscribes(remote)
+
+      FakeRemote.kill_workers(remote)
+      FakeRemote.emit(remote, "s-live", "llm_response", FakeRemote.said("one more"))
+      eventually(fn -> rendered_text(sid) =~ "one more" end, 15_000)
+
+      assert seqs(sid) == server_seqs(remote, "s-live")
+      assert List.last(session_subscribes(remote))["from_seq"] == 2
+    end
+
     test "a crashed worker connection is restarted and resumes from its cursor" do
       {remote, url} = start_remote!(sessions: [fixture()])
       origin = connect!(remote, url)
@@ -367,6 +384,9 @@ defmodule Troupe.RemoteSessionTest do
   defp calls(remote, method) do
     for {^method, params} <- FakeRemote.calls(remote), do: params
   end
+
+  defp session_subscribes(remote),
+    do: Enum.filter(calls(remote, "subscribe"), &(&1["topic"] == "session:s-live"))
 
   defp activate_calls(remote) do
     for {"session.open", %{"mode" => "activate"} = params} <- FakeRemote.calls(remote), do: params

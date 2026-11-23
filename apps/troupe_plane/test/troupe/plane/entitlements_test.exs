@@ -290,6 +290,80 @@ defmodule Troupe.Plane.EntitlementsTest do
     end
   end
 
+  describe "a pinned session's wake" do
+    # v1 is the setup's bundle; v2 drops `pr-reviewer` and adds `triager`. A session is
+    # pinned to the version it was created on, so its wake is composed from that version.
+    setup context do
+      {:ok, v2} = Bundles.publish("stable", second_version(), announce: false)
+      Map.put(context, :v2, v2)
+    end
+
+    test "has the agents of the version it is pinned to, not those published since", context do
+      _pod = FakePod.enrol(context.port, "dev-token", "troupe-w-dev-0")
+      session = dormant!(context, context.bundle.version, "pr-reviewer")
+
+      assert {:ok, _opened} = open(session, context.ada)
+      assert_receive {:pushed, "session.activate", pushed}, 5_000
+
+      assert pushed["bundle_version"] == context.bundle.version
+      assert pushed["agent"] == "pr-reviewer"
+      assert "pr-reviewer" in pushed["entitlements"]["agents"]
+      refute "triager" in pushed["entitlements"]["agents"]
+      assert pushed["entitlements"]["skills"] == ["review", "handbook"]
+      assert Sessions.get(session.id).state != "read_only"
+    end
+
+    test "on the current version has the current version's agents", context do
+      _pod = FakePod.enrol(context.port, "dev-token", "troupe-w-dev-0")
+      session = dormant!(context, context.v2.version, "triager")
+
+      assert {:ok, _opened} = open(session, context.ada)
+      assert_receive {:pushed, "session.activate", pushed}, 5_000
+
+      assert pushed["bundle_version"] == context.v2.version
+      assert "triager" in pushed["entitlements"]["agents"]
+      refute "pr-reviewer" in pushed["entitlements"]["agents"]
+      assert pushed["entitlements"]["skills"] == ["review"]
+    end
+
+    test "whose version was retired is upgraded, and has the version it now runs on",
+         context do
+      _pod = FakePod.enrol(context.port, "dev-token", "troupe-w-dev-0")
+      {:ok, _retired} = Bundles.retire("stable", context.bundle.version)
+      session = dormant!(context, context.bundle.version, "build")
+
+      assert {:ok, _opened} = open(session, context.ada)
+      assert_receive {:pushed, "session.activate", pushed}, 5_000
+
+      assert pushed["bundle_upgraded_from"] == context.bundle.version
+      assert pushed["bundle_version"] == context.v2.version
+      assert "triager" in pushed["entitlements"]["agents"]
+      refute "pr-reviewer" in pushed["entitlements"]["agents"]
+    end
+
+    test "is still narrowed by the team's grant", context do
+      _pod = FakePod.enrol(context.port, "dev-token", "troupe-w-dev-0")
+      entitle(context.team, [%{"kind" => "agent", "name" => "pr-reviewer", "mode" => "deny"}])
+      session = dormant!(context, context.bundle.version, "build")
+
+      assert {:ok, _opened} = open(session, context.ada)
+      assert_receive {:pushed, "session.activate", pushed}, 5_000
+
+      refute "pr-reviewer" in pushed["entitlements"]["agents"]
+      assert "build" in pushed["entitlements"]["agents"]
+    end
+
+    test "Bundles.offering_at/4 reads a version retired or not, and nil is the current one",
+         context do
+      {:ok, _retired} = Bundles.retire("stable", context.bundle.version)
+
+      assert "pr-reviewer" in Bundles.offering_at("stable", context.bundle.version).agents
+      refute "triager" in Bundles.offering_at("stable", context.bundle.version).agents
+      assert Bundles.offering_at("stable", nil).bundle_version == context.v2.version
+      assert Bundles.offering_at("stable", 999).bundle_version == context.v2.version
+    end
+  end
+
   describe "the admin surface" do
     test "writes the rows, and the audit diff is a diff of names", context do
       root = platform_admin()
@@ -370,6 +444,43 @@ defmodule Troupe.Plane.EntitlementsTest do
   end
 
   defp row(name, mode), do: %{kind: "skill", name: name, mode: mode}
+
+  defp open(session, user) do
+    Harness.call("session.open", %{"session_id" => session.id, "mode" => "activate"}, as(user))
+  end
+
+  defp dormant!(context, version, agent) do
+    {:ok, session} =
+      Sessions.create(%{
+        id: "s-pinned-#{System.unique_integer([:positive])}",
+        owner_id: context.ada.id,
+        owner_subject: context.ada.subject,
+        team_id: context.team.id,
+        profile: "dev",
+        visibility: "team",
+        state: "dormant",
+        agent: agent,
+        bundle_version: version,
+        epoch: 1
+      })
+
+    session
+  end
+
+  # The setup's bundle with `pr-reviewer` and the `handbook` skill dropped, and a primary
+  # of its own added.
+  defp second_version do
+    content = bundle_content()
+
+    %{
+      content
+      | "agents" => [
+          %{"name" => "triager", "definition" => "---\nmode: primary\n---\nTriage."},
+          %{"name" => "helper", "definition" => "---\nmode: subagent\n---\nYou help."}
+        ],
+        "skills" => Enum.take(content["skills"], 1)
+    }
+  end
 
   # The agents a session may start as, from a `profile.get` answer, in its order.
   defp primaries(view),

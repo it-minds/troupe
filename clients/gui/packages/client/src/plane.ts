@@ -164,6 +164,15 @@ export interface SessionRow {
    * listed only when `sessions.list` is asked for archived ones. Absent from a plane before it.
    */
   archived?: boolean;
+  /**
+   * The bundle version it is pinned to, of `bundle_channel`; the version that channel would
+   * start a session on now (`bundle_current`), which its owner may raise it to; and a raise
+   * asked for that no pod has taken yet (`bundle_raise_to`). Absent from an older plane.
+   */
+  bundle_version?: number | null;
+  bundle_channel?: string | null;
+  bundle_current?: number | null;
+  bundle_raise_to?: number | null;
   [k: string]: unknown;
 }
 
@@ -530,6 +539,15 @@ export class PlaneClient {
    */
   setSessionVisibility(planeToken: string, sessionId: string, visibility: "team" | "private"): Promise<SessionRow> {
     return this.rpc<SessionRow>(planeToken, "session.visibility.set", { session_id: sessionId, visibility });
+  }
+
+  /**
+   * Raise a pod session to its channel's current bundle version (troupe #1177); the answer
+   * is its row. Its owner's alone. A session whose agent is working is refused `conflict`
+   * with `raise_to`: the raise is kept, and lands when the agent is done (`raiseKept`).
+   */
+  raiseSessionBundle(planeToken: string, sessionId: string): Promise<SessionRow> {
+    return this.rpc<SessionRow>(planeToken, "session.bundle.raise", { session_id: sessionId });
   }
 
   /**

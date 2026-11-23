@@ -35,6 +35,10 @@ interface Row {
   reviewed_by: string | null;
   origin: { kind: string; trigger?: string } | null;
   created_at: number;
+  /** The bundle version it is pinned to, as the worker's `agent_started` says (3), until its owner raises it. */
+  bundle_version: number;
+  /** A raise kept while its agent works, landed when the agent is done (troupe #1177). */
+  bundle_raise_to: number | null;
 }
 
 /** The agent a session given none runs as: `build` where the profile offers it, else its first; none where it offers none. */
@@ -737,8 +741,17 @@ export class FakePlane {
       reviewed_by: null,
       origin: { kind: "user" },
       created_at: Date.now() + this.counter,
+      bundle_version: this.bundleCurrent.get(profile) ?? 3,
+      bundle_raise_to: null,
     };
   }
+
+  /**
+   * The version each profile's channel would start a session on now, by profile: 3 where
+   * none is set, the version the worker's `agent_started` names. A test or the fake
+   * deployment publishes a newer one by setting it, which leaves running sessions behind.
+   */
+  readonly bundleCurrent = new Map<string, number>();
 
   /** A laptop's session, offered by `owner` and shared as `shares` says, its laptop online. */
   relay(
@@ -1957,6 +1970,30 @@ export class FakePlane {
         return { result: this.sessionJson(row, subject) };
       }
 
+      // Raised to its channel's current version by its owner (troupe #1177): at once when its
+      // agent is at rest, with the log's `config_upgraded`, which every client attached hears;
+      // kept while it works, and refused `conflict` saying so.
+      case "session.bundle.raise": {
+        const row = this.rows.get(String(params["session_id"] ?? ""));
+        if (!row) return { error: { code: -32005, message: "not_found" } };
+        if (row.owner !== subject) return { error: { code: -32004, message: "forbidden", data: { required_role: "owner" } } };
+        const current = this.bundleCurrent.get(row.profile) ?? 3;
+        if (row.bundle_version >= current) return { result: this.sessionJson(row, subject) };
+        const session = this.opts.worker.sessions.get(row.id);
+        if (session && (session.status === "thinking" || session.status === "acting")) {
+          row.bundle_raise_to = current;
+          return {
+            error: {
+              code: -32006,
+              message: "conflict",
+              data: { reason: `the agent is working; the session moves to v${current} when it is done`, status: session.status, raise_to: current },
+            },
+          };
+        }
+        this.raise(row, subject, current);
+        return { result: this.sessionJson(row, subject) };
+      }
+
       // Its owner's alone; archiving a running session puts it to sleep, and only
       // `session.unarchive` brings it back to the list.
       case "session.archive":
@@ -1988,6 +2025,24 @@ export class FakePlane {
       token: encodeToken({ sub: subject, name, session_id: row.id, role, scopes, aud: this.opts.worker.workerId, exp }),
       expires_at: exp,
     };
+  }
+
+  /** Move a row to `to` as its pod would on a raise: the pin, and the log's line. */
+  raise(row: Row, by: string, to: number): void {
+    const from = row.bundle_version;
+    row.bundle_version = to;
+    row.bundle_raise_to = null;
+    const name = this.nameOf(by);
+    const actor = { kind: "system" };
+    this.opts.worker.sessions
+      .get(row.id)
+      ?.log.append("config_upgraded", { channel: "stable", from, to, hash: `sha256:v${to}`, reason: "raised", by, ...(name ? { by_name: name } : {}) }, actor);
+  }
+
+  /** A raise kept while the agent worked, landed now that it is done, as the pod does at its root's rest. */
+  landRaise(id: string): void {
+    const row = this.rows.get(id);
+    if (row?.bundle_raise_to) this.raise(row, row.owner, row.bundle_raise_to);
   }
 
   private sessionJson(row: Row, subject: string): unknown {
@@ -2023,6 +2078,10 @@ export class FakePlane {
       reviewed_by: row.reviewed_by,
       reviewed_at: row.reviewed_by ? new Date().toISOString() : null,
       your_role: row.owner === subject ? "owner" : "collaborator",
+      bundle_version: row.bundle_version,
+      bundle_channel: "stable",
+      bundle_current: this.bundleCurrent.get(row.profile) ?? 3,
+      bundle_raise_to: row.bundle_raise_to,
     };
   }
 }

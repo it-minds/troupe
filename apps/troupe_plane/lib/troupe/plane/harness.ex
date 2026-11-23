@@ -167,6 +167,8 @@ defmodule Troupe.Plane.Harness do
     "session.title.set" => :control,
     # Given to its team after it started, or taken back: its owner's alone.
     "session.visibility.set" => :control,
+    # Raised to its channel's current bundle version: its owner's, as archiving is.
+    "session.bundle.raise" => :control,
     "session.erase" => :control,
     "session.archive" => :control,
     "session.unarchive" => :control,
@@ -1552,6 +1554,22 @@ defmodule Troupe.Plane.Harness do
     end
   end
 
+  # Raised to its channel's current bundle version, by its owner or a holder of the owner
+  # role, as archiving is: it changes the session for everybody attached. Never lowered,
+  # and never to another version than the current one. The raise is kept on the row until
+  # a pod starts the session on it: a dormant session takes it at its next wake; a running
+  # one has its tree started again on its pod at once when it is at rest, and when its root
+  # next comes to rest when it is not, which is answered `conflict` with what it is doing.
+  defp handle("session.bundle.raise", params, %{user: user}) do
+    with {:ok, session} <- visible(params["session_id"], user),
+         :ok <- must_administer(user, session),
+         :ok <- raisable(session),
+         {:ok, team} <- granted_for_raise(session),
+         {:ok, channel, target} <- raise_target(session) do
+      raise_to(session, team, channel, target, user)
+    end
+  end
+
   defp pin(params, %{user: user}, pinned?) do
     with {:ok, session} <- visible(params["session_id"], user),
          :ok <- must_administer(user, session) do
@@ -1663,6 +1681,154 @@ defmodule Troupe.Plane.Harness do
       nil -> []
       team -> Identity.members_of_team(team)
     end
+  end
+
+  # Already on it: the row, and nothing written.
+  defp raise_to(%Session{bundle_version: version} = session, _team, _channel, %{version: version}, user),
+    do: {:ok, session_json(session, user)}
+
+  defp raise_to(session, team, channel, target, user) do
+    with :ok <- agent_on(session, team, channel, target),
+         {:ok, owed} <- owe_raise(session, target, user) do
+      raise_now(owed, team, target, user)
+    end
+  end
+
+  defp raisable(%Session{kind: "private"}) do
+    {:error,
+     Error.new(:conflict, %{
+       reason: "a session on a computer has no bundle: its agents are its machine's own"
+     })}
+  end
+
+  defp raisable(%Session{state: "pending"}) do
+    {:error,
+     Error.new(:conflict, %{
+       reason: "this session has not started on the platform yet",
+       state: "pending"
+     })}
+  end
+
+  defp raisable(%Session{state: "read_only"}) do
+    {:error,
+     Error.new(:conflict, %{
+       reason: "this session is read-only; nothing starts it again",
+       state: "read_only"
+     })}
+  end
+
+  defp raisable(%Session{}), do: :ok
+
+  # A raise is a start on the new version, and nothing starts on a grant that has gone.
+  defp granted_for_raise(session) do
+    case still_granted(session) do
+      {:ok, team} -> {:ok, team}
+      {:error, _no_grant_or_team} -> may_wake(session)
+    end
+  end
+
+  defp raise_target(session) do
+    case Fleet.get_profile(session.profile) do
+      nil ->
+        {:error,
+         Error.new(:conflict, %{
+           reason: "this plane has no record of #{session.profile}, so nothing is published for it",
+           profile: session.profile
+         })}
+
+      %{config_bundle_channel: channel} ->
+        case Bundles.current(channel) do
+          nil ->
+            {:error,
+             Error.new(:conflict, %{
+               reason: "nothing is published on #{channel}",
+               channel: channel
+             })}
+
+          bundle ->
+            {:ok, channel, bundle}
+        end
+    end
+  end
+
+  # The agent the session runs as must be one the target offers under the team's grant, as
+  # a create checks it: otherwise its next start would be refused and the session parked.
+  defp agent_on(session, team, channel, target) do
+    agent = run_as(session, team)
+    entitlements = Identity.entitlements_for(team, session.profile)
+    %{agents: agents} = ProfileView.offering_at(session.profile, target.version, entitlements)
+
+    if agent in agents do
+      :ok
+    else
+      {:error,
+       Error.new(:invalid_params, %{
+         field: "agent",
+         agent: agent,
+         reason: "v#{target.version} of #{channel} does not offer #{agent}, which this session runs as",
+         agents: agents
+       })}
+    end
+  end
+
+  defp owe_raise(session, target, user) do
+    case Sessions.owe_raise(session.id, target.version, user.subject) do
+      {:ok, owed} ->
+        {:ok, _audit} =
+          Audit.record(user.subject, "session.bundle.raise", session.id, %{
+            "from" => session.bundle_version,
+            "to" => target.version
+          })
+
+        {:ok, owed}
+
+      {:error, reason} ->
+        {:error, Error.new(:internal_error, %{reason: inspect(reason)})}
+    end
+  end
+
+  # A session no pod holds takes the raise at its next wake, which is the row's to say.
+  defp raise_now(%Session{state: "active", worker_id: worker_id} = session, team, target, user)
+       when is_binary(worker_id) do
+    with {:ok, worker} <- worker_of(session) do
+      case Router.push(worker, "session.restart", restart_params(session, team), @archive_ms) do
+        {:ok, %{"restarted" => true}} ->
+          {:ok, pinned} = Sessions.pin_bundle(session.id, target.version, target.channel)
+          {:ok, session_json(pinned, user)}
+
+        {:ok, %{"pending" => true} = pending} ->
+          {:error,
+           Error.new(:conflict, %{
+             reason: "the agent is working; the session moves to v#{target.version} when it is done",
+             status: pending["status"],
+             raise_to: target.version
+           })}
+
+        {:error, reason} ->
+          {:error,
+           Error.new(:unavailable, %{
+             reason: "the pod did not start the session again; it moves to v#{target.version} at its next wake",
+             raise_to: target.version,
+             detail: inspect(reason)
+           })}
+      end
+    end
+  end
+
+  defp raise_now(session, _team, _target, user), do: {:ok, session_json(session, user)}
+
+  # What an activation carries that a raise reads again, the pin the raise moves it to among
+  # them; the epoch, the placement and the budget slice stay as they are.
+  defp restart_params(session, team) do
+    %{
+      "session_id" => session.id,
+      "epoch" => session.epoch,
+      "profile" => session.profile,
+      "agent" => run_as(session, team),
+      "entitlements" => entitlement_set(session, team)
+    }
+    |> Map.merge(bundle_params(session))
+    |> Map.merge(memory_params(session, team))
   end
 
   # One audit row each way; an archive that put a pod's session to sleep names the pod.
@@ -1795,7 +1961,7 @@ defmodule Troupe.Plane.Harness do
 
   defp run_as(%Session{} = session, team) do
     entitlements = if team, do: Identity.entitlements_for(team, session.profile), else: []
-    %{agents: agents} = offering(session.profile, entitlements)
+    %{agents: agents} = pinned_offering(session, entitlements)
     default_agent(agents)
   end
 
@@ -2743,6 +2909,8 @@ defmodule Troupe.Plane.Harness do
   end
 
   defp create_row(session_id, user, team, profile, params, terms, origin) do
+    version = bundle_version(profile)
+
     attrs = %{
       id: session_id,
       owner_id: user.id,
@@ -2761,9 +2929,11 @@ defmodule Troupe.Plane.Harness do
       parent_session_id: get_in(params, ["fork", "parent"]),
       parent_seq: get_in(params, ["fork", "seq"]),
       fork_reason: get_in(params, ["fork", "reason"]),
-      # Pinned at creation and kept for the life of the session. A session whose agent
-      # definitions changed underneath it would be a different session halfway through.
-      bundle_version: bundle_version(profile)
+      # Pinned at creation, to a version of one channel, and kept until its owner raises it
+      # or the version is retired. A session whose agent definitions changed underneath it
+      # would be a different session halfway through.
+      bundle_version: version,
+      bundle_channel: version && profile_channel(profile)
     }
 
     case Sessions.create(attrs) do
@@ -3140,10 +3310,10 @@ defmodule Troupe.Plane.Harness do
         # The agent it runs as, which its root comes back on unless its log says it was
         # switched since: without it the pod would take its own default.
         "agent" => run_as(session, team_of(session)),
-        # Re-resolved at every activation rather than read back from the log: a publish
-        # can add an entry the team is not entitled to, and a session that came back
-        # holding the set it was created with would be holding a stale one. The pod
-        # records the re-resolved set on its `config_upgraded`.
+        # Re-resolved at every activation rather than read back from the log, from the
+        # version the session runs on, not the channel's current one: a grant changed
+        # since narrows it at the next wake, and a newer publish's entries are not in the
+        # pinned version. The pod records the re-resolved set on its `config_upgraded`.
         "entitlements" => entitlement_set(session, team_of(session))
       }
       |> Map.merge(bundle_params(session))
@@ -3738,11 +3908,20 @@ defmodule Troupe.Plane.Harness do
   end
 
   defp bundle_version(profile) do
-    case Fleet.get_profile(profile) do
+    case profile_channel(profile) do
       nil -> nil
-      %{config_bundle_channel: channel} -> Bundles.current(channel) |> then(&(&1 && &1.version))
+      channel -> Bundles.current(channel) |> then(&(&1 && &1.version))
     end
   end
+
+  defp profile_channel(profile) when is_binary(profile) do
+    case Fleet.get_profile(profile) do
+      nil -> nil
+      %{config_bundle_channel: channel} -> channel
+    end
+  end
+
+  defp profile_channel(_none), do: nil
 
   # The person-mode servers a profile's current bundle carries. A profile with none is
   # every profile that existed before there was a mode.
@@ -3784,21 +3963,43 @@ defmodule Troupe.Plane.Harness do
     }
   end
 
-  # What this session should run on now, and whether that is a change. An upgrade is the
-  # only way a session's configuration ever moves, and the worker records it as a durable
-  # event so the model is told rather than left to notice.
+  defp team_of(%{team_id: nil}), do: nil
+  defp team_of(%{team_id: team_id}), do: Identity.fetch_team(team_id)
+
   # What this session may see, by name, as `session_created` and `config_upgraded`
   # record it. One team, one set: a person picks the team they create under, so a
   # session's set is that team's rather than an intersection over their teams — simpler
   # to explain and simpler to audit, and a person in two teams with different
   # entitlements can create two sessions.
-  defp team_of(%{team_id: nil}), do: nil
-  defp team_of(%{team_id: team_id}), do: Identity.fetch_team(team_id)
-
+  #
+  # Composed from the version the activation runs the session on, the one `bundle_params/1`
+  # sends beside it, and not from the channel's current one: a session pinned to a version
+  # whose agent a later publish dropped still has that agent, and one a later publish
+  # added is not offered to definitions that do not have it.
   defp entitlement_set(session, team) do
-    session.profile
-    |> offering(Identity.entitlements_for(team, session.profile))
+    session
+    |> pinned_offering(Identity.entitlements_for(team, session.profile))
     |> Bundles.entitlement_set()
+  end
+
+  defp pinned_offering(session, entitlements),
+    do: ProfileView.offering_at(session.profile, running_version(session), entitlements)
+
+  # The version `bundle_params/1` pins this activation to, by the same resolution: the
+  # pinned one while it is live, the current one where it was retired or its owner raised
+  # it, and the pinned number where nothing is published to resolve to.
+  defp running_version(%Session{profile: profile, bundle_version: pinned} = session) do
+    case Fleet.get_profile(profile) do
+      %{} = row ->
+        case resolve_pin(session, row) do
+          {:keep, bundle} -> bundle.version
+          {:upgrade, _from, bundle, _why} -> bundle.version
+          {:error, _reason} -> pinned
+        end
+
+      nil ->
+        pinned
+    end
   end
 
   # Sent on every activation of a forked session, not only the first. The plane does not
@@ -3833,30 +4034,32 @@ defmodule Troupe.Plane.Harness do
     end
   end
 
+  # The pin a start sends: the version the session is pinned to, or the channel's current
+  # one when that was retired or its owner raised it, with why and who. The row's pin moves
+  # only once the pod has started it there (`activated/3`, or the restart's answer): a push
+  # that fails leaves the old pin, and the raise still owed.
   defp bundle_params(session) do
-    with %{config_bundle_channel: channel} = profile <- Fleet.get_profile(session.profile),
-         resolved <- Bundles.resolve(channel, session.bundle_version) do
+    with %{} = profile <- Fleet.get_profile(session.profile),
+         resolved <- resolve_pin(session, profile) do
       pin =
         case resolved do
           {:keep, bundle} ->
             %{
               "bundle_version" => bundle.version,
               "bundle_hash" => bundle.hash,
-              "channel" => channel
+              "channel" => bundle.channel
             }
 
-          {:upgrade, from, bundle} ->
-            Sessions.pin_bundle(session.id, bundle.version)
-
-            %{
+          {:upgrade, from, bundle, why} ->
+            Map.merge(why, %{
               "bundle_version" => bundle.version,
               "bundle_hash" => bundle.hash,
-              "channel" => channel,
+              "channel" => bundle.channel,
               "bundle_upgraded_from" => from
-            }
+            })
 
           {:error, _reason} ->
-            %{"bundle_version" => session.bundle_version, "channel" => channel}
+            %{"bundle_version" => session.bundle_version, "channel" => pin_channel(session, profile)}
         end
 
       pin
@@ -3877,6 +4080,46 @@ defmodule Troupe.Plane.Harness do
     end
   end
 
+  # The pin is a version of the session's own channel, which it was pinned on; a row from
+  # before the column names none, and its profile's is the one it was read against. A raise
+  # owed moves it to the profile's channel's current version, which is what was asked.
+  defp resolve_pin(session, %{config_bundle_channel: target} = profile) do
+    case Bundles.resolve(pin_channel(session, profile), session.bundle_version) do
+      {:keep, pinned} -> raised(target, session, pinned)
+      {:upgrade, from, current} -> {:upgrade, from, current, why_moved(session)}
+      none -> none
+    end
+  end
+
+  defp pin_channel(%Session{bundle_channel: channel}, _profile) when is_binary(channel), do: channel
+  defp pin_channel(_session, %{config_bundle_channel: channel}), do: channel
+
+  defp raised(target, %Session{bundle_raise_to: to} = session, pinned) when is_integer(to) do
+    case Bundles.current(target) do
+      %{version: version, channel: channel} = current
+      when version > pinned.version or channel != pinned.channel ->
+        {:upgrade, pinned.version, current, why_moved(session)}
+
+      _not_newer ->
+        {:keep, pinned}
+    end
+  end
+
+  defp raised(_target, _session, pinned), do: {:keep, pinned}
+
+  defp why_moved(%Session{bundle_raise_to: to, bundle_raise_by: by}) when is_integer(to) do
+    %{
+      "bundle_upgrade_reason" => "raised",
+      "bundle_upgraded_by" => by,
+      "bundle_upgraded_by_name" => by && name_of(Identity.get_user(by))
+    }
+  end
+
+  defp why_moved(_session), do: %{"bundle_upgrade_reason" => "retired"}
+
+  defp name_of(%{display_name: name}) when is_binary(name), do: name
+  defp name_of(_user), do: nil
+
   defp put_agent_rule(params, nil), do: params
 
   defp put_agent_rule(params, rule),
@@ -3894,11 +4137,24 @@ defmodule Troupe.Plane.Harness do
 
   # A session the pod took holds the memory its activation carried, until its first turn
   # says what it read: kept so, it is among the readers of each document before that turn.
-  # And its log is given the lines of the invitations made while no pod held it.
+  # And its log is given the lines of the invitations made while no pod held it. And its pin
+  # is the version the pod started it on, of the channel it was resolved on: a raise or a
+  # retirement moves it here, after the pod took it, and not before the push.
   defp activated(worker, session, params) do
     :ok = Memory.activated(session, params["memory"] || [])
     :ok = announce_pending(worker, session)
+    :ok = pinned_on(session, params)
   end
+
+  defp pinned_on(session, %{"bundle_version" => version, "channel" => channel})
+       when is_integer(version) do
+    if version != session.bundle_version or channel != session.bundle_channel,
+      do: {:ok, _pinned} = Sessions.pin_bundle(session.id, version, channel)
+
+    :ok
+  end
+
+  defp pinned_on(_session, _params), do: :ok
 
   # Whether the profile lets a repository's agents and skills replace its bundle's and the
   # built-ins of the same name (Decision 826): `spec.repositoryOverridesBundle`, on only
@@ -4108,10 +4364,27 @@ defmodule Troupe.Plane.Harness do
   # every row, as for the owners' names.
   defp session_rows(sessions, user) do
     teams = Sessions.team_names(sessions)
+    current = current_versions(sessions)
 
     sessions
-    |> Enum.map(&Map.put(session_row(&1, user), "team", teams[&1.team_id]))
+    |> Enum.map(fn session ->
+      session
+      |> session_row(user)
+      |> Map.put("team", teams[session.team_id])
+      |> Map.put("bundle_current", current[session.profile])
+    end)
     |> Names.decorate(@owner_name)
+  end
+
+  # The version a pod session's profile's channel would start a session on now, which a
+  # raise moves it to: one lookup per profile, not per row. A session on a computer has
+  # no bundle, and nil.
+  defp current_versions(sessions) do
+    sessions
+    |> Enum.reject(&(&1.kind == "private"))
+    |> Enum.map(& &1.profile)
+    |> Enum.uniq()
+    |> Map.new(&{&1, bundle_version(&1)})
   end
 
   defp session_row(session, user) do
@@ -4122,11 +4395,13 @@ defmodule Troupe.Plane.Harness do
       "kind" => session.kind,
       "device" => session.device,
       "visibility" => session.visibility,
-      # Which configuration this session is pinned to, fixed when it was created. A
-      # session whose agent definitions changed underneath it would be a different
-      # session halfway through, so it does not move when a new version is published —
-      # and until this was here, that promise was one no client could check.
+      # Which configuration this session is pinned to, a version of `bundle_channel`. It
+      # does not move when a new version is published: its owner raises it to the current
+      # one (`bundle_current`, beside it), or it moves when its version is retired. A
+      # raise asked for that no pod has taken yet is `bundle_raise_to`.
       "bundle_version" => session.bundle_version,
+      "bundle_channel" => session.bundle_channel,
+      "bundle_raise_to" => session.bundle_raise_to,
       "state" => session.state,
       "epoch" => session.epoch,
       "title" => session.title,

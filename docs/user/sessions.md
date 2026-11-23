@@ -34,6 +34,19 @@ On the platform, *Only me, until I invite people* (`/new --only-me`, `troupe run
 [invite people](sessions-shared.md#starting-it-as-only-you). What a profile gives the session is on [profiles](profiles.md), and the terminal's screen
 for it on [a new session](terminal-screen.md#a-new-session).
 
+## Raising a session to the current configuration
+
+A session on the platform runs on the bundle version its profile's channel had when it
+started, and keeps it when your administrators publish a newer one: its agents, skills and
+servers do not change under it. The session panel says which (*Configuration v12 · v14 is
+current*), and `/bundle` in the terminal. Its owner moves it to the current version with
+*Update* (`/bundle update`): the conversation, the goal, the task list and the files stay,
+and the agent is told once that its configuration moved. While the agent works the update
+waits and happens when it is done; a sleeping session takes it when it next wakes. It is
+refused, saying why, when the new version no longer has the agent the session runs as.
+There is no going back to an older version; an administrator republishes the old content
+instead, and you update to that.
+
 ## Private session
 
 A session on your machine sealed under your own key, listed by the

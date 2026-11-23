@@ -20,8 +20,8 @@ own commands (Decision 813), right under it; `Approvals`, `Questions`, `ClientTo
 the MCP sessions and servers above the agent, so a restarted agent finds the same answers
 and registrations; the root `Agent.Node`; then `Watcher` and `Files`, so file watching can
 never disturb a running agent; `Loop`, which runs `/loop` as turns of the root agent
-(Decision 679); and `Session.Summary` last, because a projection that could restart an
-agent by crashing would be worse than none. Sessions live in the core's tree, not the
+(Decision 679); and the projections last, `Session.Summary` and `Session.Checkpoints`,
+because a projection that could restart an agent by crashing would be worse than none. Sessions live in the core's tree, not the
 daemon's, so a daemon can lose its listener and every client without an agent noticing.
 
 **Core** (`Troupe.Application`, `one_for_one`): `Troupe.Registry`, `Troupe.Events`
@@ -52,7 +52,8 @@ flowchart LR
   session --> watcher["10 · Session.Watcher<br/>watch mode"]
   session --> files["11 · Session.Files<br/>fs_changed events"]
   session --> loop["12 · Session.Loop<br/>/loop, one root turn per iteration"]
-  session --> summary["13 · Session.Summary<br/>the summary projection, last on purpose"]
+  session --> summary["13 · Session.Summary<br/>the summary projection"]
+  session --> checkpoints["14 · Session.Checkpoints<br/>a checkpoint after each root compaction, last on purpose"]
   node --> tasks["Agent.Tasks<br/>Task.Supervisor: tool calls, the model stream"]
   node --> children["Agent.Children<br/>DynamicSupervisor: each subagent's own Agent.Node"]
   node --> server["Agent.Server<br/>the gen_statem"]
@@ -282,8 +283,22 @@ step at a time and may add or rename, never drop. The hash chain is not recomput
 come with the fold each produces, hashed over a *witness* of the event types replay acts
 on; a test reads the replay clauses from the source and asserts the witness covers them.
 Snapshots are cache: one this build cannot trust is discarded for a full replay, which
-produces the same fold. Protocol schemas are add-only within version 1, enforced by
+produces the same fold. So is `events.jsonl.offsets` beside a log, where each event starts
+(`Troupe.Session.Log.Offsets`): trusted while it bears the log's size and time, else built
+again from the log. Protocol schemas are add-only within version 1, enforced by
 `mix troupe.schema.diff`.
+
+A `checkpoint` event is cache in the chain (PROTOCOL.md, Checkpoints). After each root
+`compacted`, `Session.Checkpoints` waits for the root's next rest and appends the facts of
+the log up to it (`Troupe.Session.Checkpoint`, a pure fold), naming that rest as
+`through`; a compaction left owed by a crash is written when the tree comes back to a rest.
+The contract is that a checkpoint's facts plus the fold of the events after `through` equal
+the fold of the whole log: a property test holds it over generated logs, and
+`test/fixtures/checkpoints/` (manual, threshold and overflow compactions, a background
+child's approval held across one) is read by the core, the TUI and `@troupe/client`.
+`subscribe {from: "checkpoint"}` and `session.events` read through the offsets, so neither
+decodes more than it answers; the writer starts from the latest checkpoint too. A seal
+report names the latest sealed (`checkpoint_seq`), which the plane keeps on the row.
 
 ## 6. The daemon
 
@@ -316,8 +331,9 @@ flowchart LR
 ```
 
 `one_for_one` is the degraded mode: an unreachable plane does not touch attached sessions.
-A worker connection subscribes from the journal's cursor + 1; the journal drops a batch it
-already has, so a reconnect or a `resync_required` produces the same transcript. Deltas
+A worker connection subscribes with the journal's cursor as `from_seq` (the servers replay what is after it), or, with an empty journal and `checkpoints`, `from: "checkpoint"`:
+the journal then starts with its summary and facts at `through`, and PgUp at the pane's top pages back (`session.events`).
+The journal drops a batch it already has, so a reconnect or a `resync_required` produces the same transcript. Deltas
 are coalesced per 33 ms and dropped past 64 KB. `Troupe.Remote.Translate` turns protocol
 events into the harness's own at the edge, so the model and view never branch on "is this
 remote". Browsing opens with `session.open read`; the first activating action calls

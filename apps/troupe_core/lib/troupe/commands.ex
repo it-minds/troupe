@@ -440,6 +440,18 @@ defmodule Troupe.Commands do
             "open it, and the invitations stay as they were. /share alone says whose it is.",
         example: "/share team"
       ),
+      entry("bundle", "session", "Say which configuration this session runs on, or update it",
+        usage: "/bundle [update]",
+        args: [arg("verb", false, "text")],
+        availability: "tui",
+        detail:
+          "For a session on the platform: the bundle version it is pinned to, and the one " <>
+            "its channel would start a session on now where that is newer. /bundle update " <>
+            "moves it there, its owner's to do: at once when its agent is at rest, and when " <>
+            "the agent is done otherwise; the conversation stays, and tools, skills and " <>
+            "servers are the new version's.",
+        example: "/bundle update"
+      ),
       entry(
         "archive",
         "session",

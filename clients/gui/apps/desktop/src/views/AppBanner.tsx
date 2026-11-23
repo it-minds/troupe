@@ -63,7 +63,10 @@ export function AppBanner({ link, downloads }: { link: string; downloads: AppDow
   const [dismissedAt, setDismissedAt] = useState(downloads.version);
   if (dismissedAt !== downloads.version) {
     setDismissedAt(downloads.version);
-    setDismissed(bannerDismissed(storage(), downloads.version));
+    // A line put away before the plane answered (no version yet) stays away at the version
+    // it then recommends: the person dismissed what they saw, not a version they never saw.
+    if (dismissed && dismissedAt === null) dismissBanner(storage(), downloads.version);
+    else setDismissed(bannerDismissed(storage(), downloads.version));
   }
   const [stage, setStage] = useState<Stage>("offer");
   const [copied, setCopied] = useState(false);

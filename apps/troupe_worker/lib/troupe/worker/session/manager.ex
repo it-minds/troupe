@@ -72,6 +72,10 @@ defmodule Troupe.Worker.Session.Manager do
     :workspace,
     :sealer,
     :session_pid,
+    :session_ref,
+    # A raise of the session's configuration asked while its agents worked: the options
+    # its tree is started again with when the root next comes to rest.
+    :pending_raise,
     :report,
     :opts,
     :idle_timer,
@@ -126,6 +130,20 @@ defmodule Troupe.Worker.Session.Manager do
   """
   @spec fence(pid(), pos_integer()) :: :ok
   def fence(pid, epoch), do: GenServer.call(pid, {:fence, epoch}, 60_000)
+
+  @doc """
+  Start the session's tree again here, over the same log and workspace, with `opts` over
+  the ones it was activated with: its owner raised its configuration to another bundle
+  version (`:bundle`, with the rules and memory the plane read again).
+
+  At once when no agent of the tree is working (`interrupted` is at rest): `{:ok,
+  :restarted}`. Otherwise the raise is kept and applied when the root next comes to rest,
+  and the answer is `{:ok, {:pending, status}}`. A tree that does not come back takes the
+  session to sleep, so its next wake applies the raise the plane still owes.
+  """
+  @spec restart(pid(), keyword(), timeout()) ::
+          {:ok, :restarted | {:pending, String.t()}} | {:error, term()}
+  def restart(pid, opts, timeout \\ 120_000), do: GenServer.call(pid, {:restart, opts}, timeout)
 
   @doc """
   What to tell the plane about an activation that failed, or `nil` for one it should
@@ -205,6 +223,29 @@ defmodule Troupe.Worker.Session.Manager do
   def handle_call(:go_dormant, _from, state),
     do: {:reply, {:error, {:not_active, state.status}}, state}
 
+  # Never inside a turn: a tree stopped while an agent thinks or runs a tool would lose
+  # what it was doing. A command an attached client sends meanwhile waits for this call,
+  # as it waits for a wake (`Sessions.running/1` awaits the manager), and then reaches
+  # the new tree.
+  def handle_call({:restart, opts}, _from, %__MODULE__{status: :active} = state) do
+    if busy?(state.session_id) do
+      status = lifecycle_status(state.lifecycle)
+      {:reply, {:ok, {:pending, status}}, %{state | pending_raise: opts}}
+    else
+      case restart_tree(state, opts) do
+        {:ok, state} ->
+          {:reply, {:ok, :restarted}, state}
+
+        {:error, reason, state} ->
+          dormancy(state)
+          {:stop, :normal, {:error, reason}, state}
+      end
+    end
+  end
+
+  def handle_call({:restart, _opts}, _from, state),
+    do: {:reply, {:error, {:not_active, state.status}}, state}
+
   def handle_call({:fence, epoch}, _from, state) do
     if state.context && epoch > state.context.epoch do
       Logger.warning(
@@ -229,8 +270,29 @@ defmodule Troupe.Worker.Session.Manager do
   end
 
   def handle_info({:troupe_event, _session_id, event}, state) do
-    {:noreply, state |> observe(event) |> touch()}
+    {:noreply, state |> observe(event) |> raise_at_rest() |> touch()}
   end
+
+  # The raise kept while the tree worked, now that its root came to rest. Asked again,
+  # because an input may have started another turn since: then it waits for that one.
+  def handle_info(:raise_now, %__MODULE__{status: :active, pending_raise: opts} = state)
+      when is_list(opts) do
+    if busy?(state.session_id) do
+      {:noreply, state}
+    else
+      case restart_tree(state, opts) do
+        {:ok, state} ->
+          {:noreply, touch(state)}
+
+        {:error, reason, state} ->
+          Logger.error("troupe worker: could not raise #{state.session_id}: #{inspect(reason)}")
+          dormancy(state)
+          {:stop, :normal, state}
+      end
+    end
+  end
+
+  def handle_info(:raise_now, state), do: {:noreply, state}
 
   def handle_info(:status_tick, state) do
     state = %{state | status_timer: nil}
@@ -319,7 +381,7 @@ defmodule Troupe.Worker.Session.Manager do
       record_upgrade(context.session_id, Keyword.get(opts, :bundle))
 
       # Watched, because the tree can stop under this process as well as by its hand.
-      Process.monitor(session.pid)
+      ref = Process.monitor(session.pid)
 
       {:ok,
        %{
@@ -328,6 +390,7 @@ defmodule Troupe.Worker.Session.Manager do
            workspace: root,
            sealer: sealer,
            session_pid: session.pid,
+           session_ref: ref,
            status: :active,
            restored: log,
            activated_at: System.system_time(:millisecond)
@@ -379,6 +442,42 @@ defmodule Troupe.Worker.Session.Manager do
     end
   end
 
+  # The tree stopped and started again on this pod over the log and the workspace it left,
+  # which stay where they are; so do the sealer and every subscription, which follow the
+  # session by its id rather than its tree. Unwatched first, so its stop is not read as a
+  # crash; stopped without the dormancy marker, since the session never slept. The move is
+  # written once the new tree is up, as an activation writes it.
+  defp restart_tree(state, opts) do
+    if state.session_ref, do: Process.demonitor(state.session_ref, [:flush])
+    _ = Troupe.stop_session(state.session_id, dormant: false)
+    opts = Keyword.merge(state.opts, opts)
+    state = %{state | opts: opts, pending_raise: nil, session_pid: nil, session_ref: nil}
+
+    case Restore.start(state.context, state.workspace, opts) do
+      {:ok, session} ->
+        record_upgrade(state.session_id, Keyword.get(opts, :bundle))
+        ref = Process.monitor(session.pid)
+        state = %{state | session_pid: session.pid, session_ref: ref}
+        {:ok, state |> seed_lifecycle() |> status_changed()}
+
+      {:error, reason} ->
+        {:error, reason, state}
+    end
+  catch
+    kind, reason -> {:error, {kind, reason}, state}
+  end
+
+  # A raise is owed and the root has just come to rest: it is applied from the mailbox,
+  # after this event, so the turn's last events are written first.
+  defp raise_at_rest(%__MODULE__{pending_raise: opts} = state) when is_list(opts) do
+    if lifecycle_status(state.lifecycle) in ["idle", "done", "interrupted"],
+      do: send(self(), :raise_now)
+
+    state
+  end
+
+  defp raise_at_rest(state), do: state
+
   # An empty directory holds nothing to keep.
   defp found(context, root) do
     %{
@@ -396,9 +495,10 @@ defmodule Troupe.Worker.Session.Manager do
     :ok
   end
 
-  # Only when the version it was pinned to has been retired. A session whose bundle did
-  # not move says nothing, because a `config_upgraded` on every activation would be noise
-  # that hid the one that mattered.
+  # Only when the version it was pinned to has been retired, or its owner raised it
+  # (`reason`, and who: `by`, `by_name`). A session whose bundle did not move says nothing,
+  # because a `config_upgraded` on every activation would be noise that hid the one that
+  # mattered.
   #
   # The entitlement set rides along, re-resolved by the plane at this activation: a
   # publish can add an entry the team is not entitled to, and the event that says the
@@ -408,12 +508,16 @@ defmodule Troupe.Worker.Session.Manager do
   defp record_upgrade(_session_id, %{upgraded_from: nil}), do: :ok
 
   defp record_upgrade(session_id, bundle) do
-    data = %{
-      "channel" => bundle.channel,
-      "from" => bundle.upgraded_from,
-      "to" => bundle.version,
-      "hash" => bundle.hash
-    }
+    data =
+      %{
+        "channel" => bundle.channel,
+        "from" => bundle.upgraded_from,
+        "to" => bundle.version,
+        "hash" => bundle.hash
+      }
+      |> put_present("reason", Map.get(bundle, :upgrade_reason))
+      |> put_present("by", Map.get(bundle, :upgraded_by))
+      |> put_present("by_name", Map.get(bundle, :upgraded_by_name))
 
     data =
       case Map.get(bundle, :entitlements) do
@@ -423,6 +527,9 @@ defmodule Troupe.Worker.Session.Manager do
 
     Log.append(session_id, ["root"], :config_upgraded, data)
   end
+
+  defp put_present(data, _key, nil), do: data
+  defp put_present(data, key, value), do: Map.put(data, key, value)
 
   # Started before the tree, so that everything the tree appends on the way up is sealed
   # like any other durable event.
@@ -790,8 +897,18 @@ defmodule Troupe.Worker.Session.Manager do
       "pending_approvals" => map_size(state.lifecycle.approvals),
       "pending_questions" => map_size(state.lifecycle.questions),
       "cost_micros" => cost_micros(state.session_id),
-      "agent" => state.lifecycle.agent
+      "agent" => state.lifecycle.agent,
+      # The bundle version the tree runs on, which moves when a raise kept for the root's
+      # rest is applied: the plane's pin follows it.
+      "bundle_version" => bundle_version(state.opts)
     }
+  end
+
+  defp bundle_version(opts) do
+    case Keyword.get(opts || [], :bundle) do
+      %{version: version} -> version
+      _ -> nil
+    end
   end
 
   # The pod's usage collector, where there is one. There is none on a laptop and none

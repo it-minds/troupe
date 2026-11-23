@@ -624,6 +624,24 @@ defmodule Troupe.UI.TUI.Server do
     end
   end
 
+  # A page of history asked for at the top of the pane (`earlier_at_top/1`), drawn above
+  # what is there; one asked before the screen changed what it holds is dropped.
+  def handle_info({:earlier, sid, before, answer}, %{session_id: sid} = state) do
+    case {state.model.earlier, answer} do
+      {%{before: ^before, loading: true}, {:ok, page}} ->
+        state = keep_place(state, &Model.prepend(&1, page.events, page.more, page.first))
+        {:noreply, schedule_tick(%{state | dirty: true}), render?: false}
+
+      {%{before: ^before, loading: true}, {:error, reason}} ->
+        state = %{state | model: Model.earlier_failed(state.model)}
+        state = notice(state, "the earlier events did not load: " <> to_message(reason))
+        {:noreply, schedule_tick(%{state | dirty: true}), render?: false}
+
+      _stale ->
+        {:noreply, state, render?: false}
+    end
+  end
+
   # A branch command mode said it was starting (TUI Decision 155), started once that line
   # has been drawn: the session it creates takes a moment, and the person has been told.
   def handle_info({:start_command, sid, agent, name, args}, %{session_id: sid} = state) do
@@ -1283,7 +1301,7 @@ defmodule Troupe.UI.TUI.Server do
   # 698); this is only which of them the TUI implements, and the suite holds the two
   # equal, so a command added to the table without a clause here fails a test rather
   # than being dispatched as an agent.
-  @builtins ~w(new cancel dismiss merge discard compact goal loop steer invite uninvite share sessions archive
+  @builtins ~w(new cancel dismiss merge discard compact goal loop steer invite uninvite share bundle sessions archive
                unarchive rename keep back hq observer files
                scratch upload save publish artifacts profiles profile copy memory context watch settings
                models mcp
@@ -1710,6 +1728,15 @@ defmodule Troupe.UI.TUI.Server do
   defp builtin("share", args, state, _target) do
     case Client.share_args(args) do
       {:ok, verb} -> notice_of(Client.share(state.session_id, verb))
+      {:error, sentence} -> {:error, sentence}
+    end
+  end
+
+  # Which configuration a session on the platform runs on (root #1177): alone it says,
+  # `update` raises it to its channel's current version; the log's note follows.
+  defp builtin("bundle", args, state, _target) do
+    case Client.bundle_args(args) do
+      {:ok, verb} -> notice_of(Client.bundle(state.session_id, verb))
       {:error, sentence} -> {:error, sentence}
     end
   end
@@ -4322,9 +4349,16 @@ defmodule Troupe.UI.TUI.Server do
 
   # Scrolling: PgUp/PgDn, Home and End always; ↑/↓ while nothing is typed; End (or
   # reaching the bottom) follows the tail again.
-  defp window_key(%Key{code: "page_up"}, _path, state), do: page_by(state, -1)
+  # PgUp or Home with the view already at the top asks for the history above it, where the
+  # session was opened from a checkpoint.
+  defp window_key(%Key{code: "page_up"}, _path, state),
+    do: state |> earlier_at_top() |> page_by(-1)
+
   defp window_key(%Key{code: "page_down"}, _path, state), do: page_by(state, 1)
-  defp window_key(%Key{code: "home"}, _path, %{win_text: ""} = state), do: scroll_to(state, 0)
+
+  defp window_key(%Key{code: "home"}, _path, %{win_text: ""} = state),
+    do: state |> earlier_at_top() |> scroll_to(0)
+
   defp window_key(%Key{code: "end"}, _path, %{win_text: ""} = state), do: follow(state)
   defp window_key(%Key{code: "up"}, _path, %{win_text: ""} = state), do: scroll_by(state, -1)
   defp window_key(%Key{code: "down"}, _path, %{win_text: ""} = state), do: scroll_by(state, 1)
@@ -4896,6 +4930,51 @@ defmodule Troupe.UI.TUI.Server do
     do: %{agent: agent, scroll: :follow, seen_entries: 0, open: MapSet.new()}
 
   ## Pane scrolling
+
+  # The view sits at its top and the session has history this screen has not folded:
+  # the page is asked for off the screen's process, and the title says so until it lands.
+  defp earlier_at_top(%{model: %{earlier: %{more: true, loading: false, before: before}}} = state) do
+    case View.pane_geometry(state) do
+      %{offset: 0} ->
+        server = self()
+        sid = state.session_id
+
+        {:ok, _task} =
+          Task.start(fn -> send(server, {:earlier, sid, before, Client.earlier(sid, before)}) end)
+
+        %{state | model: Model.loading_earlier(state.model), dirty: true}
+
+      _ ->
+        state
+    end
+  end
+
+  defp earlier_at_top(state), do: state
+
+  # A page of history drawn above what the pane holds keeps the reader where they were:
+  # the rows it added go above the view, the turns `e` opened keep their numbers' meaning,
+  # and what arrived since they scrolled is still what arrived since.
+  defp keep_place(state, fun) do
+    before = View.pane_geometry(state)
+    state = %{state | model: fun.(state.model)}
+
+    case {before, View.pane_geometry(state)} do
+      {%{} = was, %{} = now} ->
+        turns = length(now.turns) - length(was.turns)
+        open = MapSet.new(state.pane.open, &(&1 + turns))
+        seen = state.pane.seen_entries + now.entries - was.entries
+
+        state =
+          if was.follow? and was.max_off > 0,
+            do: state,
+            else: set_scroll(state, now, was.offset + now.total - was.total)
+
+        %{state | pane: %{state.pane | open: open, seen_entries: seen}}
+
+      _ ->
+        state
+    end
+  end
 
   defp page_by(state, direction) do
     case View.pane_geometry(state) do

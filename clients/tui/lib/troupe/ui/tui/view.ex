@@ -2640,15 +2640,23 @@ defmodule Troupe.UI.TUI.View do
     " #{w.path} › #{String.replace_prefix(agent, w.path <> "/", "")} (#{name}) — Esc back "
   end
 
-  defp scroll_title(%{follow?: true}, _state), do: " ⇣ following "
+  defp scroll_title(%{follow?: true}, state), do: " ⇣ following" <> loading_earlier(state) <> " "
 
   defp scroll_title(g, state) do
     new = g.entries - state.pane.seen_entries
     last = min(g.offset + g.inner_h, g.total)
 
     " ↕ #{g.offset + 1}–#{last}/#{g.total}" <>
-      if(new > 0, do: " · #{new} new", else: "") <> " "
+      if(new > 0, do: " · #{new} new", else: "") <> loading_earlier(state) <> " "
   end
+
+  # A page of the history before the checkpoint the session opened from is on its way.
+  defp loading_earlier(%{model: %{earlier: %{loading: true}}}), do: " · loading earlier…"
+  defp loading_earlier(_state), do: ""
+
+  # The view is at its top and the session has history this screen has not drawn.
+  defp earlier_above?(%{offset: 0}, %{model: %{earlier: %{more: true, loading: false}}}), do: true
+  defp earlier_above?(_g, _state), do: false
 
   # Context keys on the bottom border: the widest phrasing that fits, and only the keys
   # that do something right now. `End` stays in every form — once you have scrolled up it
@@ -2674,6 +2682,7 @@ defmodule Troupe.UI.TUI.View do
     selection? = Map.get(state, :selection) != nil
 
     pieces = [
+      {earlier_above?(g, state), ["PgUp loads earlier", "PgUp earlier", "PgUp ↑"]},
       {true, ["PgUp/PgDn ↑↓ scroll", "PgUp/PgDn scroll", "PgUp/PgDn"]},
       {not g.follow?, ["End follows the tail", "End follows", "End"]},
       {agents > 1, ["←→ other agents", "←→ agents", "←→"]},

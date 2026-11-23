@@ -583,25 +583,34 @@ export class DaemonClient implements OwnPlane {
    * An open that fails, refused or cut off, fails for everybody who joined it, and leaves
    * nothing behind: no view for the next `open` to find unsubscribed, and no holder who
    * owes a `close`.
+   *
+   * `fromCheckpoint` opens it from its latest checkpoint where the daemon keeps them
+   * (`SessionView.fromCheckpoint`); the first opener's word is the view's.
    */
-  async open(sessionId: string, hooks: ConstructorParameters<typeof SessionView>[2] = {}, listener?: Listener): Promise<SessionView> {
+  async open(
+    sessionId: string,
+    hooks: ConstructorParameters<typeof SessionView>[2] = {},
+    listener?: Listener,
+    opts: { fromCheckpoint?: boolean } = {},
+  ): Promise<SessionView> {
     this.holders.set(sessionId, (this.holders.get(sessionId) ?? 0) + 1);
     const existing = this.views.get(sessionId);
     if (listener) this.listenersOf(sessionId).set(listener, existing ? existing.listen(listener) : null);
     // Joined while it is still subscribing, rather than handed a view that may never be.
     const pending = this.openingViews.get(sessionId);
     try {
-      return await (pending ?? existing ?? this.subscribeView(sessionId, hooks));
+      return await (pending ?? existing ?? this.subscribeView(sessionId, hooks, opts.fromCheckpoint === true));
     } catch (e) {
       await this.close(sessionId, listener);
       throw e;
     }
   }
 
-  private subscribeView(sessionId: string, hooks: ConstructorParameters<typeof SessionView>[2]): Promise<SessionView> {
+  private subscribeView(sessionId: string, hooks: ConstructorParameters<typeof SessionView>[2], fromCheckpoint: boolean): Promise<SessionView> {
     const opening = (async () => {
       const conn = await this.connection();
       const view = new SessionView(conn, sessionId, hooks);
+      view.fromCheckpoint = fromCheckpoint;
       // Everybody who asked while the socket was being dialled, before the first event.
       const listeners = this.listenersOf(sessionId);
       for (const [l, stop] of listeners) if (!stop) listeners.set(l, view.listen(l));

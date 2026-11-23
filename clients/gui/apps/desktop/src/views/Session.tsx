@@ -13,7 +13,7 @@
 // reshuffle what somebody has already read.
 
 import { Fragment, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import type { JSX } from "react";
+import type { JSX, ReactNode } from "react";
 import {
   ALLOW_ALWAYS,
   PlaneOwn,
@@ -46,6 +46,14 @@ import {
   teamWords,
   unseenSummary,
   visibilityRefusal,
+  behind,
+  configurationLine,
+  owedLine,
+  raiseKept,
+  raiseRefusal,
+  remoteWhen,
+  updateLine,
+  versionOf,
 } from "@troupe/client";
 import type {
   Artifact,
@@ -66,7 +74,8 @@ import { useSessionView, useStartQuestions } from "../hooks";
 import { useNarrow } from "../narrow";
 import type { Marks, SessionHandle } from "../hooks";
 import { curtainLine, curtainUp, DEFAULT_DETAIL, isDetail, layout, waitingOn, waitingWords } from "../frames";
-import type { Detail, Drawn } from "../frames";
+import type { Detail, Drawn, LayoutCache } from "../frames";
+import { holdPlace } from "../anchor";
 import { copyText } from "../clipboard";
 import { saveFile, shell } from "../shell";
 import { AgentSwitch, sessionAgents } from "./AgentSwitch";
@@ -78,7 +87,7 @@ import type { PaletteScreen } from "./CommandPalette";
 import { Files } from "./Files";
 import { PodConfig } from "./PodConfig";
 import { Publish } from "./Publish";
-import { Curtain, InlineMarkdown, ProseFrame, ReasoningFrame, StripLine, ToolFrame, useNow } from "./Frames";
+import { Curtain, InlineMarkdown, Markdown, ProseFrame, ReasoningFrame, StripLine, ToolFrame, useNow } from "./Frames";
 import { GoalLine, LoopStatus } from "./Goal";
 import { LocalControls } from "./LocalControls";
 import { Instructions } from "./Instructions";
@@ -175,10 +184,14 @@ export function Session({
     setBackstage(on);
     if (on && narrow) setScratch(null);
   };
-  const showScratch = (name: string | null): void => {
-    setScratch(name);
-    if (name !== null && narrow) setBackstage(false);
-  };
+  // The same function from one event to the next, so a turn nothing changed is not drawn anew.
+  const showScratch = useCallback(
+    (name: string | null): void => {
+      setScratch(name);
+      if (name !== null && narrow) setBackstage(false);
+    },
+    [narrow],
+  );
   // On this computer, through its daemon; a team session and a laptop's relayed one are
   // reached through the plane, and the person is who the plane says.
   const here = onThisComputer(kind);
@@ -287,6 +300,34 @@ export function Session({
           }
         }
       : undefined;
+  // Which configuration a pod session runs on (troupe #1177): the log's version once it
+  // names one, else the row's, beside the version its channel would start a session on now.
+  // Its owner updates it from the panel; a raise kept while the agent works says so there.
+  const pinRow = row?.raw as { bundle_version?: unknown; bundle_current?: unknown; bundle_raise_to?: unknown } | undefined;
+  const [raiseError, setRaiseError] = useState<string | null>(null);
+  useEffect(() => setRaiseError(null), [sessionId]);
+  const pinned = versionOf(view.state.bundleVersion) ?? versionOf(pinRow?.bundle_version);
+  const owed = versionOf(pinRow?.bundle_raise_to);
+  const configuration: Configuration | undefined =
+    row?.kind === "team" && pinned !== null
+      ? {
+          version: pinned,
+          current: versionOf(pinRow?.bundle_current),
+          owed: owed !== null && owed > pinned ? owed : null,
+          busy: isBusy(view.state),
+          onUpdate:
+            marking && row.yourRole === "owner"
+              ? async () => {
+                  setRaiseError(null);
+                  try {
+                    await marking.marks.raise(marking.row);
+                  } catch (e) {
+                    if (raiseKept(e) === null) setRaiseError(raiseRefusal(e));
+                  }
+                }
+              : undefined,
+        }
+      : undefined;
   // Onboarding, then the brief, as the session's start found them due (Decision 835), and
   // the librarian for a session started here; what they came to is said in the transcript.
   const start = useStartQuestions(daemon, sessionId, view.state.onboarding, { local: here, canAnswer: !readOnly, startedIn });
@@ -360,7 +401,9 @@ export function Session({
   // the plane they are signed in to, for a session there; this computer's daemon otherwise.
   const own = useMemo<OwnPlane | null>(() => (!here && auth ? new PlaneOwn((method, params) => auth.rpc(method, params), auth.planeUrl) : daemon), [here, auth, daemon]);
   // A reply's Retry sends the person's words again, as a new turn.
-  const retry = useCallback((text: string) => view.send(text), [view]);
+  const send = view.send;
+  const retry = useCallback((text: string) => send(text), [send]);
+  const goSetup = useMemo(() => (onGo ? () => onGo("setup") : undefined), [onGo]);
   const publishReply = useMemo(() => (daemon ? (text: string) => setPublishing({ text }) : undefined), [daemon]);
 
   const commands = palette ? (
@@ -505,6 +548,11 @@ export function Session({
           <p>{shareError}</p>
         </div>
       )}
+      {raiseError && (
+        <div className="banner error" role="alert">
+          <p>{raiseError}</p>
+        </div>
+      )}
       <Banners
         status={view.status}
         detail={view.detail}
@@ -533,11 +581,13 @@ export function Session({
             local={kind === "local"}
             detail={detail.level}
             readBlob={view.readBlob}
-            onSetup={onGo ? () => onGo("setup") : undefined}
+            onSetup={goSetup}
             onScratch={showScratch}
             onSave={saveReady}
             onRetry={readOnly ? undefined : (stopped ?? retry)}
             onPublish={publishReply}
+            earlier={view.earlier}
+            onEarlier={view.loadEarlier}
           />
 
           {/* Cards at the foot of the transcript, where the eye already is; sticky, so
@@ -612,6 +662,7 @@ export function Session({
             view={view}
             daemon={daemon}
             row={row}
+            configuration={configuration}
             onEditTodo={!readOnly && view.view ? (action, params) => view.view!.editTodo(action, params) : undefined}
             self={self}
             selfName={named(auth?.me?.display_name, auth?.me?.subject)}
@@ -1249,9 +1300,15 @@ function Stream({
   onSave,
   onRetry,
   onPublish,
+  earlier,
+  onEarlier,
 }: {
   /** What the curtain line's words are taken in the order of, with the turn: the session's id. */
   seed: string;
+  /** A page of the history before a checkpoint on its way, or why the last did not come. */
+  earlier: SessionHandle["earlier"];
+  /** Page in the part before what is drawn. */
+  onEarlier: () => Promise<void>;
   state: TranscriptState;
   /** This app's own lines, each after the event it was said at. */
   notes: Note[];
@@ -1278,16 +1335,23 @@ function Stream({
   // level draws every turn again, all of them as it says.
   const [opened, setOpened] = useState<ReadonlySet<string>>(new Set());
   useEffect(() => setOpened(new Set()), [detail]);
-  const toggle = (turn: string): void =>
-    setOpened((was) => {
-      const next = new Set(was);
-      if (!next.delete(turn)) next.add(turn);
-      return next;
-    });
+  const toggle = useCallback(
+    (turn: string): void =>
+      setOpened((was) => {
+        const next = new Set(was);
+        if (!next.delete(turn)) next.add(turn);
+        return next;
+      }),
+    [],
+  );
 
   // The clock, while something runs: a running call's strip and the curtain line count from it.
   const now = useNow(isBusy(state) || needsYou(state));
-  const drawn = useMemo(() => layout(state.entries, { detail, opened, now }), [state.entries, detail, opened, now]);
+  // Each turn is laid out again only when it changed, or while a call of it runs and the
+  // clock moves, so a tick draws the strip that counts and the curtain line, and no turn
+  // else (`TurnGroup` below hands React the same props for the rest).
+  const laid = useRef<LayoutCache>(new Map());
+  const drawn = useMemo(() => layout(state.entries, { detail, opened, now }, laid.current), [state.entries, detail, opened, now]);
   // What streams belongs to the last turn, and is drawn at its level.
   const live = drawn.at(-1)?.level ?? detail;
   const line = curtainLine(state, now, seed);
@@ -1296,20 +1360,34 @@ function Stream({
   const several = severalSteer(state, self);
 
   const bottom = useRef<HTMLDivElement>(null);
+  // What the session adds goes at the bottom; a page of its history drawn above is not that.
+  const tail = state.entries.length - (state.earlier?.drawn ?? 0);
   useEffect(() => {
     // Scrolling is not focus: an arriving event must never move the caret.
     bottom.current?.scrollIntoView({ block: "end" });
-  }, [state.entries.length, state.streaming, state.pending.length, notes.length, state.thinking === "", line === null]);
+  }, [tail, state.streaming, state.pending.length, notes.length, state.thinking === "", line === null]);
+
+  // A page of history goes in above what is on screen, which stays where it was.
+  const stream = useRef<HTMLDivElement>(null);
+  const place = useRef<(() => void) | null>(null);
+  useLayoutEffect(() => {
+    place.current?.();
+    place.current = null;
+  }, [state.earlier?.from]);
+  const pageBack = (): void => {
+    place.current = holdPlace(stream.current);
+    void onEarlier();
+  };
 
   // The turns as the chat draws them: the person's line that began each, then the rest.
-  const groups: Array<{ turn: string; person: Drawn | null; rest: Array<{ d: Drawn; next: number }> }> = [];
+  const groups: Group[] = [];
   drawn.forEach((d, i) => {
     const next = drawn[i + 1]?.entry.seq ?? Infinity;
     const group = groups.at(-1);
     if (!group || group.turn !== d.turn) {
       const opens = d.entry.kind === "user" && isRoot(d.entry.agent);
       groups.push({ turn: d.turn, person: opens ? d : null, rest: opens ? [] : [{ d, next }] });
-      if (opens) groups.at(-1)!.rest.push({ d: { ...d, hidden: true, strip: null }, next });
+      if (opens) groups.at(-1)!.rest.push({ d: drawnAside(d), next });
     } else group.rest.push({ d, next });
   });
 
@@ -1334,32 +1412,21 @@ function Stream({
   // The last turn is still being answered while it has not said what it cost.
   const lastOpen = drawn.at(-1)?.entry.kind !== "turn";
 
-  const entryOf = ({ d, next }: { d: Drawn; next: number }): JSX.Element => (
-    <Fragment key={`${d.entry.kind}-${d.entry.seq}`}>
-      {d.strip && <StripLine strip={d.strip} onToggle={() => toggle(d.turn)} />}
-      {!d.hidden && (
-        <StreamEntry
-          drawn={d}
-          words={startWords && startWords.seq === d.entry.seq ? startWords.text : null}
-          self={self}
-          several={several}
-          local={local}
-          readBlob={readBlob}
-          onSetup={onSetup}
-          onScratch={onScratch}
-          onSave={onSave}
-          reply={d.entry.kind === "turn" ? replies.get(d.turn) : undefined}
-          onRetry={onRetry}
-          onPublish={onPublish}
-        />
-      )}
-      <NotesAt notes={notes} from={d.entry.seq} to={next} />
-    </Fragment>
-  );
-
   return (
-    <div className="stream" aria-live="polite">
+    <div className="stream" aria-live="polite" ref={stream}>
       {state.entries.length === 0 && <Loading what="Reading the session. The newest part arrives first." />}
+      {state.earlier?.more && (
+        <p className="note earlier-more">
+          <button type="button" className="link" disabled={earlier.loading} onClick={pageBack}>
+            Earlier
+          </button>{" "}
+          {earlier.loading
+            ? "Reading the part before this."
+            : earlier.error
+              ? `The part before this could not be read: ${earlier.error}`
+              : "What came before this, as it happened."}
+        </p>
+      )}
       {state.entries[0]?.seq === 1 && (
         <div className="divider" aria-hidden="true">
           {curtainUp(state.startedAt)}
@@ -1369,26 +1436,27 @@ function Stream({
       <NotesAt notes={notes} from={-Infinity} to={state.entries[0]?.seq ?? Infinity} />
       {groups.map((g, gi) => {
         const last = gi === groups.length - 1;
-        // A reply is the troupe's part of a turn; the session's own lines stand on their own.
-        const isReply = g.rest.some(({ d }) => REPLY_KINDS.has(d.entry.kind) && !(d.hidden && d.entry.kind === "user")) || (last && working);
+        const reply = replies.get(g.turn);
         return (
-          <Fragment key={g.turn}>
-            {g.person && <StreamEntry drawn={g.person} words={null} self={self} local={local} readBlob={readBlob} onScratch={onScratch} onSave={onSave} />}
-            {isReply ? (
-              <div className="reply">
-                <span className="avatar" aria-hidden="true">
-                  <Mask size={20} />
-                </span>
-                <div className="reply-body">
-                  <span className="who">Troupe</span>
-                  {g.rest.map(entryOf)}
-                  {last && lastOpen && liveParts}
-                </div>
-              </div>
-            ) : (
-              g.rest.map(entryOf)
-            )}
-          </Fragment>
+          <TurnGroup
+            key={g.turn}
+            group={g}
+            working={last && working}
+            liveParts={last && lastOpen ? liveParts : null}
+            startWords={startWords}
+            notes={notes}
+            reply={reply}
+            self={self}
+            several={several}
+            local={local}
+            readBlob={readBlob}
+            onSetup={onSetup}
+            onScratch={onScratch}
+            onSave={onSave}
+            onRetry={onRetry}
+            onPublish={onPublish}
+            onToggle={toggle}
+          />
         );
       })}
       {/* Under way with nothing of the turn drawn yet, or after a turn that said its cost. */}
@@ -1418,6 +1486,93 @@ function Stream({
     </div>
   );
 }
+
+// The person's line that began a turn, drawn on its own, stands in the reply only for the
+// notes said after it: the same object for the same line, so the turn is not drawn anew.
+const asides = new WeakMap<Drawn, Drawn>();
+function drawnAside(d: Drawn): Drawn {
+  const kept = asides.get(d);
+  if (kept) return kept;
+  const aside = { ...d, hidden: true, strip: null };
+  asides.set(d, aside);
+  return aside;
+}
+
+/** A turn as the chat draws it: the person's line that began it, then the rest, each with the seq after it. */
+interface Group {
+  turn: string;
+  person: Drawn | null;
+  rest: Array<{ d: Drawn; next: number }>;
+}
+
+type GroupProps = Omit<EntryProps, "drawn" | "words" | "reply"> & {
+  group: Group;
+  /** The last turn while something is under way: drawn as a reply, with `liveParts` in it. */
+  working: boolean;
+  liveParts: ReactNode;
+  startWords?: { seq: number; text: string | null } | undefined;
+  notes: Note[];
+  reply: TurnReply | undefined;
+  onToggle: (turn: string) => void;
+};
+
+/**
+ * Whether a turn would draw the same: its laid-out entries are the same objects (`layout`
+ * hands them back for a turn nothing changed), and so is everything else it is given. The
+ * clock's tick and a page of history drawn above leave every other turn as it was.
+ */
+function sameGroup(a: GroupProps, b: GroupProps): boolean {
+  for (const key of Object.keys(a) as Array<keyof GroupProps>) {
+    if (key === "group") {
+      const [x, y] = [a.group, b.group];
+      if (x.turn !== y.turn || x.person !== y.person || x.rest.length !== y.rest.length) return false;
+      if (!x.rest.every((r, i) => r.d === y.rest[i]!.d && r.next === y.rest[i]!.next)) return false;
+    } else if (key === "reply") {
+      if (a.reply?.answer !== b.reply?.answer || a.reply?.prompt !== b.reply?.prompt) return false;
+    } else if (key === "startWords") {
+      if (a.startWords?.seq !== b.startWords?.seq || a.startWords?.text !== b.startWords?.text) return false;
+    } else if (a[key] !== b[key]) return false;
+  }
+  return Object.keys(a).length === Object.keys(b).length;
+}
+
+const TurnGroup = memo(function TurnGroup({ group: g, working, liveParts, startWords, notes, reply, onToggle, ...entry }: GroupProps): JSX.Element {
+  const entryOf = ({ d, next }: { d: Drawn; next: number }): JSX.Element => (
+    <Fragment key={`${d.entry.kind}-${d.entry.seq}`}>
+      {d.strip && <StripLine strip={d.strip} onToggle={() => onToggle(d.turn)} />}
+      {!d.hidden && (
+        <StreamEntry
+          drawn={d}
+          words={startWords && startWords.seq === d.entry.seq ? startWords.text : null}
+          {...entry}
+          reply={d.entry.kind === "turn" ? reply : undefined}
+        />
+      )}
+      <NotesAt notes={notes} from={d.entry.seq} to={next} />
+    </Fragment>
+  );
+  // A reply is the troupe's part of a turn; the session's own lines stand on their own.
+  const isReply = g.rest.some(({ d }) => REPLY_KINDS.has(d.entry.kind) && !(d.hidden && d.entry.kind === "user")) || working;
+  return (
+    <>
+      {g.person && <StreamEntry drawn={g.person} words={null} self={entry.self} local={entry.local} readBlob={entry.readBlob} onScratch={entry.onScratch} onSave={entry.onSave} />}
+      {isReply ? (
+        <div className="reply">
+          <span className="avatar" aria-hidden="true">
+            <Mask size={20} />
+          </span>
+          <div className="reply-body">
+            <span className="who">Troupe</span>
+            {g.rest.map(entryOf)}
+            {liveParts}
+          </div>
+        </div>
+      ) : (
+        g.rest.map(entryOf)
+      )}
+    </>
+  );
+}, sameGroup);
 
 /**
  * Each turn's answer and the person's words that began it, by turn: what its foot's Copy,
@@ -1633,6 +1788,24 @@ const StreamEntry = memo(function StreamEntry({
     case "todo":
       return null;
 
+    // A transcript opened from a checkpoint begins with what the compaction said of the
+    // part before it, as a quote; Earlier, above, reads that part as it happened.
+    case "earlier":
+      return (
+        <section className="earlier" aria-label="Earlier in this session, in short">
+          <p className="note">
+            Earlier{entry.at ? `, summarised ${remoteWhen(entry.at)}` : ""}
+          </p>
+          {entry.summary ? (
+            <blockquote className="earlier-summary">
+              <Markdown text={entry.summary} full={level === "everything"} />
+            </blockquote>
+          ) : (
+            <p className="note">The session summarised what came before this.</p>
+          )}
+        </section>
+      );
+
     case "approval":
       return entry.decision ? <DecisionRecord entry={entry} self={self} /> : null;
 
@@ -1810,10 +1983,21 @@ function useScratchText(view: SessionView | null, doc: ScratchDocument | undefin
   return read && read.name === name ? read : { content: null, error: null };
 }
 
+/** A pod session's configuration as the panel says it, with Update for its owner. */
+interface Configuration {
+  version: number;
+  current: number | null;
+  /** A raise the plane keeps for the agent's rest. */
+  owed: number | null;
+  busy: boolean;
+  onUpdate?: (() => Promise<void>) | undefined;
+}
+
 function Backstage({
   view,
   daemon,
   row,
+  configuration,
   onEditTodo,
   self,
   selfName,
@@ -1827,6 +2011,8 @@ function Backstage({
   view: SessionHandle;
   daemon: DaemonClient | null;
   row: FleetRow | undefined;
+  /** A pod session's bundle version and its channel's current one; absent elsewhere. */
+  configuration?: Configuration | undefined;
   /** Change the task list (`todo.edit`); absent where the person may only read the session. */
   onEditTodo?: TodoEdit | undefined;
   self: string | undefined;
@@ -1979,12 +2165,38 @@ function Backstage({
                   : "—"}
           </dd>
           {/* The bundle is what the platform loaded the session's agents from: a session on
-              this computer has none, so it has no row rather than a dash. */}
-          {view.state.bundleVersion && !(row && onThisComputer(row.kind)) && (
+              this computer has none, so it has no row rather than a dash. Behind its
+              channel, its owner updates it: now at rest, else when the agent is done. */}
+          {configuration ? (
             <>
               <dt>Configuration</dt>
-              <dd>Bundle {view.state.bundleVersion}</dd>
+              <dd>
+                {configurationLine(configuration.version, configuration.current)}
+                {configuration.owed !== null ? (
+                  <span className="muted"> · {owedLine(configuration.owed)}</span>
+                ) : configuration.onUpdate && configuration.current !== null && behind(configuration.version, configuration.current) ? (
+                  <>
+                    {" "}
+                    <button
+                      type="button"
+                      className="link"
+                      title={updateLine(configuration.current, configuration.busy)}
+                      onClick={() => void configuration.onUpdate?.()}
+                    >
+                      {configuration.busy ? "Update when the agent is done" : "Update"}
+                    </button>
+                  </>
+                ) : null}
+              </dd>
             </>
+          ) : (
+            view.state.bundleVersion &&
+            !(row && onThisComputer(row.kind)) && (
+              <>
+                <dt>Configuration</dt>
+                <dd>v{view.state.bundleVersion}</dd>
+              </>
+            )
           )}
         </dl>
       </section>

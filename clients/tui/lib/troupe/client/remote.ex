@@ -34,6 +34,9 @@ defmodule Troupe.Client.Remote do
   def events(sid), do: Journal.all(sid) ++ Worker.asking(sid)
 
   @impl true
+  def earlier(sid, before), do: Worker.earlier(sid, before)
+
+  @impl true
   def commands(sid) do
     with %{plane_url: plane, team: team} when is_binary(plane) <- attachment(sid),
          {:ok, profiles} <- profiles({:remote, plane}, team) do
@@ -321,6 +324,46 @@ defmodule Troupe.Client.Remote do
     case attachment(sid) do
       %{plane_url: plane} when is_binary(plane) -> share_on(plane, sid, verb)
       _ -> {:error, message(:not_attached)}
+    end
+  end
+
+  # Which configuration a pod session runs on, at the plane, which holds the pin (root
+  # #1177); raised, the log's `config_upgraded` follows where a pod holds it.
+  @impl true
+  def bundle(sid, verb) do
+    case attachment(sid) do
+      %{plane_url: plane} when is_binary(plane) -> bundle_on(plane, sid, verb)
+      _ -> {:error, message(:not_attached)}
+    end
+  end
+
+  defp bundle_on(plane, sid, :status) do
+    case call(plane, "session.get", %{session_id: sid}) do
+      {:ok, %{} = row} -> {:ok, Troupe.Client.Bundle.status(row)}
+      {:error, reason} -> {:error, refusal(reason)}
+    end
+  end
+
+  defp bundle_on(plane, sid, :update) do
+    case call(plane, "session.bundle.raise", %{session_id: sid}) do
+      {:ok, %{} = row} ->
+        {:ok, Troupe.Client.Bundle.raised(row)}
+
+      # The agent was working: the plane keeps the raise for when it is done.
+      {:error, %{message: "conflict", data: %{"raise_to" => to}}} ->
+        {:ok, Troupe.Client.Bundle.kept(to)}
+
+      {:error, %{message: "forbidden"} = error} ->
+        {:error, Troupe.Client.Bundle.forbidden(error[:data])}
+
+      {:error, %{code: -32_601}} ->
+        {:error, "this plane does not update a session's configuration yet"}
+
+      {:error, %{data: %{"reason" => said}}} when is_binary(said) ->
+        {:error, said}
+
+      {:error, reason} ->
+        {:error, refusal(reason)}
     end
   end
 

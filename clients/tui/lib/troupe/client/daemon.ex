@@ -95,6 +95,10 @@ defmodule Troupe.Client.Daemon do
     |> Enum.map(&elem(&1, 1))
   end
 
+  # The daemon's sessions are read over the same worker connection a pod's are.
+  @impl true
+  def earlier(sid, before), do: Worker.earlier(sid, before)
+
   # The agents a slash command may start a branch on, plus `/worktree`: the default
   # agent, always in a worktree of its own; and `/workflow`: `orchestrate` on a step list,
   # in one too.
@@ -1007,6 +1011,10 @@ defmodule Troupe.Client.Daemon do
   # A session on this computer, sealed here or not, is never a team's (root #1169).
   @impl true
   def share(_sid, _verb), do: {:error, Troupe.Client.Share.not_here()}
+
+  # A session on this computer runs its agents from this computer's files (root #1177).
+  @impl true
+  def bundle(_sid, _verb), do: {:error, Troupe.Client.Bundle.not_here()}
 
   @impl true
   def keep(sid, kept?) do

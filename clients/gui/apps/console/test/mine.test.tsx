@@ -101,6 +101,27 @@ describe("what is a person's own", () => {
     await sees("It was not given to the team: only the session's owner gives it to the team or takes it back.", sessions);
   });
 
+  it("says which configuration a session of theirs runs on and updates one behind its channel (troupe #1177)", async () => {
+    const sweep = fake.plane.seed(PEOPLE.carol.subject, { id: "s-carol-3", title: "Sweep the tokens", profile: "ux" });
+    fake.plane.bundleCurrent.set("ux", 4);
+    await signedInAs(fake, PEOPLE.carol);
+    visit("#/sessions");
+    unmount = render(<App />).unmount;
+
+    const sessions = () => document.querySelector<HTMLElement>('[aria-label="Your sessions"]');
+    await sees("v3 · v4 is current", sessions);
+
+    fake.plane.refuseNext("session.bundle.raise", { code: -32006, message: "conflict", data: { reason: "nothing is published on beta", channel: "beta" } });
+    (await seesButton("Update", sessions()!)).click();
+    await sees("Its configuration was not updated: nothing is published on beta.", sessions);
+    expect(sweep.bundle_version).toBe(3);
+
+    (await seesButton("Update", sessions()!)).click();
+    await waitFor(() => sweep.bundle_version === 4, "the raise");
+    await waitFor(() => [...sessions()!.querySelectorAll("td")].some((td) => td.textContent === "v4"), "the version it runs on now");
+    expect(sessions()!.querySelector("td button.link[title^='Moves to']")).toBeNull();
+  });
+
   it("says where each of a member's sessions opens, and that only their own memory is theirs to change", async () => {
     await fake.stop();
     fake = await startFake(exampleAdmin(), {

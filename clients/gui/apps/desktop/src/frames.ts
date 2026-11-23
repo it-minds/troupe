@@ -59,8 +59,11 @@ export interface Turn {
   end: number;
 }
 
-const opensTurn = (e: Entry): boolean => isRoot(e.agent) && (e.kind === "user" || (e.kind === "system" && e.type === "loop_iteration_started"));
-const closesTurn = (e: Entry): boolean => isRoot(e.agent) && e.kind === "turn";
+// The summary a transcript opened from a checkpoint begins with is a turn of its own, between
+// the history paged in above it and the tail under it.
+const opensTurn = (e: Entry): boolean =>
+  isRoot(e.agent) && (e.kind === "user" || e.kind === "earlier" || (e.kind === "system" && e.type === "loop_iteration_started"));
+const closesTurn = (e: Entry): boolean => isRoot(e.agent) && (e.kind === "turn" || e.kind === "earlier");
 
 /**
  * The transcript as turns: one starts at a person's line or a loop's iteration and ends at
@@ -159,44 +162,69 @@ export function flip(level: Detail): Detail {
  * click on the strip). From the first budget stop on, nothing is collapsed: what happened
  * after the money ran out is all on screen.
  */
-export function layout(entries: Entry[], opts: { detail: Detail; opened: ReadonlySet<string>; now: number }): Drawn[] {
+export function layout(entries: Entry[], opts: { detail: Detail; opened: ReadonlySet<string>; now: number }, cache?: LayoutCache): Drawn[] {
   const stop = entries.findIndex((e) => (e.kind === "system" && e.type === "budget_exhausted") || (e.kind === "question" && e.asked === "budget"));
   const openFrom = stop < 0 ? Infinity : stop;
 
+  // A turn is laid out again only when something it reads changed: its entries (the fold
+  // hands back the same object for one nothing changed), its level, where the budget stop
+  // opens it, the clock while one of its calls runs, and whether a lifecycle note follows
+  // it. Otherwise the same `Drawn` objects come back, and the screen draws nothing anew.
+  const kept = new Set<string>();
   const drawn = turns(entries).flatMap((t) => {
     const level = opts.opened.has(t.key) ? flip(opts.detail) : opts.detail;
-    const at = (i: number): Detail => (i >= openFrom ? "everything" : level);
-    const indices = Array.from({ length: t.end - t.start }, (_, k) => t.start + k);
-
-    let lastCall = -1;
-    for (const i of indices) {
-      const e = entries[i]!;
-      if (e.kind === "tool" && isRoot(e.agent) && e.name !== "finish") lastCall = i;
-    }
-    const roles = indices.map((i) => roleOf(entries[i]!, i, lastCall));
-
-    // The calls it stands for: every call of the turn drawn at its level, `finish` aside,
-    // which says itself in the line under it.
-    const steps = indices.filter((i) => {
-      const e = entries[i]!;
-      return e.kind === "tool" && e.name !== "finish" && at(i) === level;
-    });
-    const strip = steps.length > 0 ? stripOf(t.key, steps.map((i) => entries[i] as ToolEntry), level, opts.now) : null;
-    const stripAt = strip ? indices.find((i, k) => at(i) === level && roles[k] !== "other" && roles[k] !== "answer") : undefined;
-
-    return indices.map((i, k): Drawn => {
-      const role = roles[k]!;
-      const drawnAt = at(i);
-      // Quiet folds the working into the strip; a call that worked is shut at quiet even
-      // with no strip to stand for it (a `finish` alone), and one that failed never is.
-      const hidden = drawnAt === "quiet" && (role === "step" || (strip !== null && (role === "reasoning" || role === "narration")));
-      return { entry: entries[i]!, role, level: drawnAt, hidden, strip: i === stripAt ? strip : null, turn: t.key };
-    });
+    const slice = entries.slice(t.start, t.end);
+    const openAt = Math.min(Math.max(openFrom - t.start, 0), slice.length);
+    const now = slice.some((e) => e.kind === "tool" && e.ok === undefined) ? opts.now : null;
+    const before = isLifecycle(entries[t.end]);
+    kept.add(t.key);
+    const was = cache?.get(t.key);
+    if (was && was.level === level && was.openAt === openAt && was.now === now && was.before === before && sameEntries(was.entries, slice)) return was.drawn;
+    const laid = layTurn(entries, t, level, openFrom, opts.now);
+    cache?.set(t.key, { entries: slice, level, openAt, now, before, drawn: laid });
+    return laid;
   });
+  if (cache) for (const key of cache.keys()) if (!kept.has(key)) cache.delete(key);
+  return drawn;
+}
 
-  // A run of sleeping and waking notes is its latest line below everything: each wake of a
-  // pod session writes four, and only the last says where the session stands.
-  return drawn.map((d, i) => (d.level !== "everything" && isLifecycle(d.entry) && isLifecycle(drawn[i + 1]?.entry) ? { ...d, hidden: true } : d));
+/** What `layout` laid out of each turn, by its key, to hand back where nothing it reads changed. */
+export type LayoutCache = Map<string, { entries: Entry[]; level: Detail; openAt: number; now: number | null; before: boolean; drawn: Drawn[] }>;
+
+const sameEntries = (a: Entry[], b: Entry[]): boolean => a.length === b.length && a.every((e, i) => e === b[i]);
+
+function layTurn(entries: Entry[], t: Turn, level: Detail, openFrom: number, now: number): Drawn[] {
+  const at = (i: number): Detail => (i >= openFrom ? "everything" : level);
+  const indices = Array.from({ length: t.end - t.start }, (_, k) => t.start + k);
+
+  let lastCall = -1;
+  for (const i of indices) {
+    const e = entries[i]!;
+    if (e.kind === "tool" && isRoot(e.agent) && e.name !== "finish") lastCall = i;
+  }
+  const roles = indices.map((i) => roleOf(entries[i]!, i, lastCall));
+
+  // The calls it stands for: every call of the turn drawn at its level, `finish` aside,
+  // which says itself in the line under it.
+  const steps = indices.filter((i) => {
+    const e = entries[i]!;
+    return e.kind === "tool" && e.name !== "finish" && at(i) === level;
+  });
+  const strip = steps.length > 0 ? stripOf(t.key, steps.map((i) => entries[i] as ToolEntry), level, now) : null;
+  const stripAt = strip ? indices.find((i, k) => at(i) === level && roles[k] !== "other" && roles[k] !== "answer") : undefined;
+
+  return indices.map((i, k): Drawn => {
+    const role = roles[k]!;
+    const drawnAt = at(i);
+    // Quiet folds the working into the strip; a call that worked is shut at quiet even
+    // with no strip to stand for it (a `finish` alone), and one that failed never is.
+    // A run of sleeping and waking notes is its latest line below everything: each wake
+    // of a pod session writes four, and only the last says where the session stands.
+    const hidden =
+      (drawnAt === "quiet" && (role === "step" || (strip !== null && (role === "reasoning" || role === "narration")))) ||
+      (drawnAt !== "everything" && isLifecycle(entries[i]) && isLifecycle(entries[i + 1]));
+    return { entry: entries[i]!, role, level: drawnAt, hidden, strip: i === stripAt ? strip : null, turn: t.key };
+  });
 }
 
 /** The notes a session's sleeping, waking and replaying write, which a run of folds to its latest. */

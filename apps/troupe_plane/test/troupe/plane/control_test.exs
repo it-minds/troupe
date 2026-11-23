@@ -660,6 +660,34 @@ defmodule Troupe.Plane.ControlTest do
       assert Sessions.get("s-1").last_seq == 40
     end
 
+    test "the row keeps the latest checkpoint a seal report named", %{port: port} do
+      worker = enrolled(port, "dev-token", "troupe-w-dev-0")
+      {:ok, _} = Sessions.create(%{id: "s-1", owner_subject: "idp|alice", profile: "dev"})
+
+      sealed = fn first, last, checkpoint ->
+        report =
+          %{
+            "session_id" => "s-1",
+            "epoch" => 1,
+            "first_seq" => first,
+            "last_seq" => last,
+            "head_hash" => "sha256:h#{last}",
+            "object_key" => "sessions/s-1/segments/1-#{first}-#{last}.seg"
+          }
+
+        report = if checkpoint, do: Map.put(report, "checkpoint_seq", checkpoint), else: report
+        assert {:ok, %{"ok" => true}} = call(worker, "session.sealed", report)
+        Sessions.get("s-1").checkpoint_seq
+      end
+
+      # None yet; then one; a report naming none keeps it, an older one does not undo it.
+      assert sealed.(1, 10, nil) == nil
+      assert sealed.(11, 20, 18) == 18
+      assert sealed.(21, 30, nil) == 18
+      assert sealed.(31, 40, 12) == 18
+      assert sealed.(41, 50, 47) == 47
+    end
+
     test "a seal report from a stale epoch is refused", %{port: port} do
       worker = enrolled(port, "dev-token", "troupe-w-dev-0")
 

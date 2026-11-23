@@ -43,7 +43,8 @@ import {
   callScopedLabel,
   decisionWords,
   emptyTranscript,
-  fold,
+  TranscriptFeed,
+  withEarlier,
   invitationsFrom,
   isBusy,
   needsYou,
@@ -435,12 +436,17 @@ export function RemoteSession({ id, pod }: { id: string; pod?: { mode: "read" | 
     setState(emptyTranscript);
     setError(null);
     setSteer(null);
+    setEarlier({ loading: false, error: null });
+    // The replay folded at once, from the checkpoint where it starts at one, as the desktop
+    // folds it; then each event as it comes.
+    const feed = new TranscriptFeed((update) => live && setState(update));
     SessionAttachment.open({
       sessionId: id,
       mode: pod?.mode ?? "activate",
       ...planeOpener(auth, id, !pod),
       clientInfo: { name: "troupe-console", version: __TROUPE_VERSION__ },
-      hooks: { onEvent: (e) => live && setState((s) => fold(s, e, { now: Date.now() })) },
+      fromCheckpoint: true,
+      hooks: { onEvent: (e) => live && feed.push(e) },
       onStatus: (s, said) => {
         if (!live) return;
         setStatus(s);
@@ -450,6 +456,7 @@ export function RemoteSession({ id, pod }: { id: string; pod?: { mode: "read" | 
     })
       .then((a) => {
         if (!live) return void a.close();
+        feed.subscribed({ head_seq: a.view.headSeq, checkpoint: a.view.checkpoint });
         attachment.current = a;
         // A follow-only grant holds `observe` alone; a pod session opened to read is followed too.
         setSteer(pod?.mode !== "read" && (a.conn?.scopes.has("control") ?? false));
@@ -466,11 +473,29 @@ export function RemoteSession({ id, pod }: { id: string; pod?: { mode: "read" | 
 
     return () => {
       live = false;
+      feed.stop();
       const a = attachment.current;
       attachment.current = null;
       if (a) void a.close();
     };
   }, [auth, id, pod?.mode]);
+
+  // The part of the session before its checkpoint, a page at a time, drawn above the rest.
+  const [earlier, setEarlier] = useState<{ loading: boolean; error: string | null }>({ loading: false, error: null });
+  const loadEarlier = async (): Promise<void> => {
+    const a = attachment.current;
+    const from = state.earlier;
+    if (!a || !from?.more || earlier.loading) return;
+    setEarlier({ loading: true, error: null });
+    try {
+      const page = await a.view.events(from.from);
+      if (attachment.current !== a) return;
+      setState((s) => withEarlier(s, page.events, page.more));
+      setEarlier({ loading: false, error: null });
+    } catch (e) {
+      if (attachment.current === a) setEarlier({ loading: false, error: describeError(e) });
+    }
+  };
 
   /** Send something to the session: true once it took it, and on a refusal the reason said and nothing cleared. */
   const act = async (f: (a: SessionAttachment) => Promise<unknown>): Promise<boolean> => {
@@ -502,7 +527,13 @@ export function RemoteSession({ id, pod }: { id: string; pod?: { mode: "read" | 
   const laptop = !pod;
   const following = steer === false;
   const shown = state.entries.filter(
-    (e) => e.kind === "user" || e.kind === "assistant" || e.kind === "tool" || (e.kind === "approval" && e.decision !== undefined) || (e.kind === "question" && e.answer !== undefined),
+    (e) =>
+      e.kind === "user" ||
+      e.kind === "assistant" ||
+      e.kind === "tool" ||
+      e.kind === "earlier" ||
+      (e.kind === "approval" && e.decision !== undefined) ||
+      (e.kind === "question" && e.answer !== undefined),
   );
   const folder = row?.workspace ?? null;
 
@@ -531,8 +562,27 @@ export function RemoteSession({ id, pod }: { id: string; pod?: { mode: "read" | 
             <p className="note empty">Nothing yet: the session has not said anything.</p>
           ) : (
             <ol className="transcript" aria-label="Transcript">
+              {state.earlier?.more && (
+                <li className="earlier-more">
+                  <button type="button" className="link" disabled={earlier.loading} onClick={() => void loadEarlier()}>
+                    Earlier
+                  </button>{" "}
+                  <span className="meta">
+                    {earlier.loading
+                      ? "Reading the part before this."
+                      : earlier.error
+                        ? `The part before this could not be read: ${earlier.error}`
+                        : "What came before this, as it happened."}
+                  </span>
+                </li>
+              )}
               {shown.map((e) =>
-                e.kind === "user" ? (
+                e.kind === "earlier" ? (
+                  <li key={`earlier-${e.seq}`} className="earlier">
+                    <span className="meta">Earlier{e.at ? `, summarised ${remoteWhen(e.at)}` : ""}</span>
+                    <blockquote>{e.summary || "The session summarised what came before this."}</blockquote>
+                  </li>
+                ) : e.kind === "user" ? (
                   <li key={e.seq} className="person">
                     <b>{nameOf(e.author).replace(/^you$/, "You")}</b>
                     {e.via === "plane" && e.author !== me.subject ? <span className="meta"> from another device</span> : null}: {e.text}
