@@ -12,6 +12,7 @@ defmodule Troupe.Gateway.CheckpointReadTest do
   alias Troupe.Gateway.Daemon
   alias Troupe.Paths
   alias Troupe.Protocol.{Client, Endpoint, Error, Event}
+  alias Troupe.Session.Checkpoint
 
   @recorded Path.expand(Path.join([File.cwd!(), "..", "..", "test", "fixtures", "checkpoints"]))
   @approvals Path.expand(Path.join([File.cwd!(), "..", "..", "test", "fixtures", "approvals"]))
@@ -150,7 +151,7 @@ defmodule Troupe.Gateway.CheckpointReadTest do
       "compacted" => through - 1,
       "previous" => nil,
       "summary" => "earlier",
-      "facts" => Troupe.Session.Checkpoint.new() |> Troupe.Session.Checkpoint.facts()
+      "facts" => Checkpoint.new() |> Checkpoint.facts()
     }
   end
 

@@ -863,13 +863,7 @@ defmodule Troupe.Gateway.Dispatch do
 
       head_seq = if session_id, do: Troupe.head_seq(session_id), else: 0
 
-      # From the latest checkpoint: the replay starts after the seq its facts stand for,
-      # and a session with none replays from the start.
-      {checkpoint, from_seq} =
-        case {kind, from} do
-          {:session, :checkpoint} -> from_checkpoint(session_id)
-          _ -> {nil, Map.get(params, "from_seq")}
-        end
+      {checkpoint, from_seq} = start_at(kind, from, session_id, params)
 
       replay =
         case {kind, from_seq} do
@@ -886,26 +880,7 @@ defmodule Troupe.Gateway.Dispatch do
         replay: replay
       }
 
-      # A presence subscription has no head to be at and nothing to catch up on. Saying
-      # `0` rather than the session's head is the honest answer: a client that treated it
-      # as a cursor would be holding a number that means nothing on this topic.
-      answer =
-        cond do
-          kind == :presence ->
-            %{"subscription_id" => subscription.id, "head_seq" => 0, "cursored" => false}
-
-          from == :checkpoint and kind == :session ->
-            %{
-              "subscription_id" => subscription.id,
-              "head_seq" => head_seq,
-              "checkpoint" => checkpoint && Event.to_json(checkpoint),
-              "from_seq" => from_seq
-            }
-
-          true ->
-            %{"subscription_id" => subscription.id, "head_seq" => head_seq}
-        end
-
+      answer = subscribe_answer(kind, from, subscription.id, head_seq, checkpoint, from_seq)
       {:ok, answer, {:subscribed, subscription}}
     end
   end
@@ -2832,6 +2807,29 @@ defmodule Troupe.Gateway.Dispatch do
         {:error, Error.new(:invalid_params, %{field: "from", value: other})}
     end
   end
+
+  # From the latest checkpoint: the replay starts after the seq its facts stand for, and a
+  # session with none replays from the start.
+  defp start_at(:session, :checkpoint, session_id, _params), do: from_checkpoint(session_id)
+  defp start_at(_kind, _from, _session_id, params), do: {nil, Map.get(params, "from_seq")}
+
+  # A presence subscription has no head to be at and nothing to catch up on. Saying `0`
+  # rather than the session's head is the honest answer: a client that treated it as a
+  # cursor would be holding a number that means nothing on this topic.
+  defp subscribe_answer(:presence, _from, id, _head_seq, _checkpoint, _from_seq),
+    do: %{"subscription_id" => id, "head_seq" => 0, "cursored" => false}
+
+  defp subscribe_answer(:session, :checkpoint, id, head_seq, checkpoint, from_seq) do
+    %{
+      "subscription_id" => id,
+      "head_seq" => head_seq,
+      "checkpoint" => checkpoint && Event.to_json(checkpoint),
+      "from_seq" => from_seq
+    }
+  end
+
+  defp subscribe_answer(_kind, _from, id, head_seq, _checkpoint, _from_seq),
+    do: %{"subscription_id" => id, "head_seq" => head_seq}
 
   defp from_checkpoint(session_id) do
     case Troupe.latest_checkpoint(session_id) do
