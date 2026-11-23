@@ -64,6 +64,9 @@ if (process.env["WAKE_FULL"]) {
   setInterval(() => plane.placeWaiting(rewrite.id), 20_000).unref?.();
 }
 plane.seed("alice@example.com", { title: "Nightly dependency sweep", profile: "ux", origin: { kind: "trigger", trigger: "nightly" } });
+// The ux channel published v4 since that session started on v3: its panel says so, and
+// Alice updates it from there (#1177).
+plane.bundleCurrent.set("ux", 4);
 // One on the team's profile that only Alice can open until she invites people (#1168), or
 // gives it to the team from its ⋯ and takes it back (#1169).
 plane.seed("alice@example.com", { title: "Draft the pricing memo", profile: "dev", visibility: "private" });
