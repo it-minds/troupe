@@ -169,6 +169,46 @@ defmodule Troupe.Worker.Plane.Commands do
     end
   end
 
+  # The session's configuration raised by its owner to its channel's current bundle version
+  # while it runs here. Its tree is started again on this pod over its own log and workspace,
+  # with the new pin and what the plane read again with it (entitlements, the agents rule,
+  # per-tool rules, memory): at once when its agents are at rest, `restarted`; otherwise the
+  # raise is kept for the root's next rest, `pending` with the status it is in. Never the
+  # sleep-and-wake path, which would cut a turn and might move the session to another pod.
+  defp dispatch("session.restart", params) do
+    session_id = params["session_id"]
+
+    with :ok <- shaped(session_id),
+         {:ok, _tree} <- running_at(session_id, params["epoch"]),
+         {:ok, bundle} <- bundle_of(params),
+         {:ok, manager} <- manager_of(session_id) do
+      opts =
+        Enum.reject(
+          [
+            bundle: bundle,
+            agent: params["agent"],
+            permission_rules: params["permission_rules"],
+            memory: params["memory"]
+          ],
+          &match?({_key, nil}, &1)
+        )
+
+      case Manager.restart(manager, opts) do
+        {:ok, :restarted} ->
+          {:ok, %{"session_id" => session_id, "restarted" => true, "bundle_version" => bundle.version}}
+
+        {:ok, {:pending, status}} ->
+          {:ok, %{"session_id" => session_id, "pending" => true, "status" => status}}
+
+        {:error, {:not_active, _status}} ->
+          {:error, Error.new(:not_found, %{reason: "the session is not up on this pod"})}
+
+        {:error, reason} ->
+          {:error, activation_error(reason)}
+      end
+    end
+  end
+
   # The organisation's memory documents a session reads, saved again on the plane while the
   # session runs here: the organisation's, its team's and its worker profile's chain, as an
   # activation carries them. Given to the session, whose agents read them at their next
@@ -293,6 +333,30 @@ defmodule Troupe.Worker.Plane.Commands do
           |> put_present("by_name", invite["by_name"])
 
         {:ok, seq} = Log.append(session_id, [], type, data)
+        {:ok, %{"session_id" => session_id, "recorded" => true, "seq" => seq}}
+    end
+  end
+
+  # The session given to its team by its owner, or taken back. Who may open it is the
+  # plane's, which has already told this pod's mirror the role each member now holds; the
+  # pod's part is the log's line, so everybody attached hears it. Best effort, for the same
+  # reason as an invitation's: a dormant session has no tree to append to.
+  defp dispatch("visibility.changed", params) do
+    session_id = params["session_id"]
+
+    case {params["visibility"], Sessions.whereis(session_id)} do
+      {visibility, _tree} when visibility not in ["team", "private"] ->
+        {:error, Error.new(:invalid_params, %{field: "visibility"})}
+
+      {_visibility, nil} ->
+        {:ok, %{"session_id" => session_id, "recorded" => false, "reason" => "dormant"}}
+
+      {visibility, _tree} ->
+        data =
+          %{"visibility" => visibility, "by" => params["by"]}
+          |> put_present("by_name", params["by_name"])
+
+        {:ok, seq} = Log.append(session_id, [], "session_visibility_changed", data)
         {:ok, %{"session_id" => session_id, "recorded" => true, "seq" => seq}}
     end
   end
@@ -599,6 +663,13 @@ defmodule Troupe.Worker.Plane.Commands do
     end
   end
 
+  defp manager_of(session_id) do
+    case Sessions.whereis(session_id) do
+      nil -> {:error, Error.new(:not_found, %{reason: "the session is not up on this pod"})}
+      manager -> {:ok, manager}
+    end
+  end
+
   defp not_found({:ok, tree}), do: {:ok, tree}
 
   defp not_found({:error, :not_found}),
@@ -764,6 +835,11 @@ defmodule Troupe.Worker.Plane.Commands do
            Map.merge(pin, %{
              dir: dir,
              upgraded_from: params["bundle_upgraded_from"],
+             # Why it moved (`retired`, or `raised` by its owner) and who raised it, which
+             # its `config_upgraded` says and its root is told.
+             upgrade_reason: params["bundle_upgrade_reason"],
+             upgraded_by: params["bundle_upgraded_by"],
+             upgraded_by_name: params["bundle_upgraded_by_name"],
              entitlements: params["entitlements"],
              # The worker profile's rule on which agents exist on it, which the session
              # applies to every definition it loads, subagents included; absent where the

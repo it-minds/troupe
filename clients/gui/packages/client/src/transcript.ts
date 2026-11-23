@@ -6,6 +6,7 @@
 // the message being produced, the agent's state, who else is here — and may be dropped
 // under load without changing what the transcript says.
 
+import { upgradedText } from "./bundle.js";
 import { named } from "./people.js";
 import { when } from "./remote.js";
 import { foldScratch, scratchDocumentOf } from "./scratch.js";
@@ -229,7 +230,13 @@ export type Entry =
    */
   | { kind: "file"; seq: number; agent: string[]; path: string; size: number; hash: string; title: string | undefined; localPath: string | undefined }
   /** Lifecycle: started, switched, compacted, done, cancelled, dormant, resumed, errors. */
-  | { kind: "system"; seq: number; agent: string[]; type: string; text: string };
+  | { kind: "system"; seq: number; agent: string[]; type: string; text: string }
+  /**
+   * Where a transcript opened from a checkpoint begins (troupe #1182): what the compaction
+   * said of everything before it, and when it was written. `seq` is the checkpoint's
+   * `through`; what came before is drawn above it as it is paged in.
+   */
+  | { kind: "earlier"; seq: number; agent: string[]; summary: string; at: string | undefined };
 
 /**
  * The session's latest loop towards its goal (`session.loop.start`), as its events say:
@@ -374,12 +381,45 @@ export interface TranscriptState {
    */
   scratch: ScratchDocument[];
   /**
+   * Whose a pod session is since its owner last changed it (troupe #1169), from
+   * `session_visibility_changed`: `team` or `private`; undefined until the log says, when
+   * the session's row is the word.
+   */
+  visibility?: string | undefined;
+  /**
    * A laptop's session steered through the plane, while its laptop is away and once it is
    * back (troupe #932): `offer_paused` says why it went (`stopped`, its daemon said it was
    * stopping; `offline`, it went without a word, asleep or out of reach) and since when,
    * and `offer_resumed` that it is back, which holds until the session next says anything.
    */
   laptop?: LaptopPresence;
+  /** Opened from a checkpoint (troupe #1182): what is drawn of the session before it. */
+  earlier?: EarlierState;
+}
+
+/**
+ * The part of a session before the checkpoint a transcript opened from: the events paged in
+ * so far with `session.events`, oldest first, and whether there are more before them. Its
+ * entries are drawn above the `earlier` entry; the head's facts are the checkpoint's and the
+ * tail's, never these.
+ */
+export interface EarlierState {
+  /** The checkpoint's `through`: every event at or below it is history. */
+  through: number;
+  /** The first seq paged in, `through + 1` before the first page. */
+  from: number;
+  /** Whether there is history before `from` still to page in. */
+  more: boolean;
+  events: DurableEvent[];
+  /** How many entries at the front of `entries` the history is, ahead of the `earlier` entry. */
+  drawn: number;
+  /**
+   * The tail's events that answer an entry of the history (a call a background child
+   * started before the checkpoint and ended after it), folded onto each page as it comes.
+   */
+  late: DurableEvent[];
+  /** The approvals and questions the checkpoint said were open: drawn once, in the tail. */
+  seeded: string[];
 }
 
 /** Where a relayed session's laptop is, as the plane said it on the session's stream. */
@@ -972,6 +1012,14 @@ function commentedText(d: DurableEvent): string {
   return `${who} commented on “${str(artifact["title"]) || "an artifact"}”: ${str(comment["body"])}`;
 }
 
+/** A session given to its team or taken back, as one line: who, and who may open it now. */
+function visibilityChangedText(d: DurableEvent): string {
+  const who = str(d.data["by_name"]) || str(d.data["by"]) || "Its owner";
+  return d.data["visibility"] === "team"
+    ? `${who} gave this session to the team: everyone on it can open it`
+    : `${who} took this session back from the team: only they and the people invited can open it`;
+}
+
 function systemText(d: DurableEvent): string {
   switch (d.type) {
     case "session_created":
@@ -1241,6 +1289,35 @@ function writtenAt(d: DurableEvent): number | undefined {
  * reads (`FoldOptions`); it is the clock's when not given.
  */
 export function fold(state: TranscriptState, e: TroupeEvent, options: FoldOptions = {}): TranscriptState {
+  const next = foldOne(state, e, options);
+  const earlier = state.earlier;
+  if (!earlier || !isDurable(e) || !ANSWERS_EARLIER.has(e.type)) return next;
+  // An answer to something the tail drew is the tail's; one to something before the
+  // checkpoint waits for its page, which may not be in yet.
+  const id = str(e.data["call_id"]);
+  const ours = id !== "" && state.entries.some((en) => en.seq > earlier.through && "callId" in en && en.callId === id);
+  return ours ? next : { ...next, earlier: { ...earlier, late: [...earlier.late, e] } };
+}
+
+/** The events that change an entry already drawn, found by its call, and draw none of their own. */
+const ANSWERS_EARLIER: ReadonlySet<string> = new Set([
+  "tool_call_completed",
+  "approval_decided",
+  "approval_resolved",
+  "question_answered",
+  "budget_ask_answered",
+  "tool_failures_ask_answered",
+  "scratch_updated",
+]);
+
+/** Every event in turn, as `fold` folds one: a replay folded at once, to be set once. */
+export function foldMany(state: TranscriptState, events: readonly TroupeEvent[], options: FoldOptions = {}): TranscriptState {
+  let s = state;
+  for (const e of events) s = fold(s, e, options);
+  return s;
+}
+
+function foldOne(state: TranscriptState, e: TroupeEvent, options: FoldOptions = {}): TranscriptState {
   const now = (): number => options.now ?? Date.now();
   // The context window and what is in it, durable or not: the ring's, and nothing else's.
   if (e.type === "context_status") {
@@ -1650,6 +1727,22 @@ export function fold(state: TranscriptState, e: TroupeEvent, options: FoldOption
     // with who, which artifact and what, for whoever steers the session to act on. Never input.
     case "artifact_commented":
       return { ...next, entries: [...state.entries, { kind: "system", ...base, type: d.type, text: commentedText(d) }] };
+
+    // Its configuration moved to another bundle version (troupe #1177): its owner raised it,
+    // or its version was retired. One line, and the version the panel says from now on.
+    case "config_upgraded":
+      return {
+        ...next,
+        bundleVersion: str(d.data["to"]) || next.bundleVersion,
+        entries: [...state.entries, { kind: "system", ...base, type: d.type, text: upgradedText(d.data) }],
+      };
+
+    // Its owner gave the session to its team, or took it back (troupe #1169): one line, and
+    // whose it is now for the head's mark.
+    case "session_visibility_changed": {
+      const visibility = str(d.data["visibility"]) || undefined;
+      return { ...next, visibility, entries: [...state.entries, { kind: "system", ...base, type: d.type, text: visibilityChangedText(d) }] };
+    }
 
     // A reply the output cap cut, or one with nothing in it (troupe-remote Decision 659).
     case "truncated":

@@ -83,6 +83,11 @@ export interface PaletteActions {
   rename?: ((name: string) => Promise<string | undefined>) | undefined;
   /** `/keep` (`true`) and `/keep off`: keep this session at the top of the session list, or let it go. */
   keep?: ((on: boolean) => Promise<string | undefined>) | undefined;
+  /**
+   * `/share team` and `/share me`: give a session on the platform to its team, or take it
+   * back (troupe #1169); `null` asks whose it is. A sentence back is a notice.
+   */
+  share?: ((to: "team" | "private" | null) => Promise<string | undefined>) | undefined;
 }
 
 interface RunContext extends PaletteActions {
@@ -180,6 +185,13 @@ const RUNNERS: Record<string, (ctx: RunContext, args: string) => Promise<string 
     if (args === "") return keep(true);
     if (args === "off") return keep(false);
     return `unknown /keep ${args}; use /keep or /keep off`;
+  },
+  share: ({ share }, args) => {
+    if (!share) return "only a session on the platform is given to a team";
+    if (args === "") return share(null);
+    if (args === "team") return share("team");
+    if (args === "me") return share("private");
+    return `unknown /share ${args}; use /share team, /share me or /share alone`;
   },
 };
 

@@ -243,5 +243,7 @@ place in code*, the plane is asked again as it says, and the session screen open
 is placed. Esc on the casting steps goes back to the form and the start goes on: the form
 says *Starting <title> on <profile>…*, Enter there starts nothing a second time, and if
 you close the screen the curtain line says when it started (`/sessions` lists it) or why
-it did not. `/new --remote PROFILE` and `/new --private` set the chips first; `/new --branch`
-forks at once. HQ's `n` opens the same screen on the platform.
+it did not. `/new --remote PROFILE` and `/new --private` set the chips first; `/new --only-me`
+starts it on the platform as yours alone until you invite people, the sentence ending
+*only you can open it until you invite people*, and such a session says *only you* in
+`/sessions`, HQ and the status line; `/new --branch` forks at once. HQ's `n` opens the same screen on the platform.

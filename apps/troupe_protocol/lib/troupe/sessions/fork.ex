@@ -302,7 +302,39 @@ defmodule Troupe.Sessions.Fork do
 
   # A copied event arrives as the map a segment holds and leaves with its numbering taken
   # off, ready to be given the child's.
-  defp carried(json), do: %{to_event(json) | seq: nil, prev_hash: nil}
+  defp carried(json), do: %{shifted(to_event(json)) | seq: nil, prev_hash: nil}
+
+  # The child's numbering is the parent's moved up by one, `session_forked` being first, so
+  # an event that names another by its seq names it moved up too: a checkpoint's range and
+  # the open calls in its facts, and the event a repair skipped.
+  defp shifted(%Event{type: "checkpoint", data: data} = event) do
+    facts = data["facts"] || %{}
+
+    facts =
+      Enum.reduce(["open_approvals", "open_questions", "running", "error"], facts, fn key, facts ->
+        case facts do
+          %{^key => list} when is_list(list) -> Map.put(facts, key, Enum.map(list, &shift(&1, "seq")))
+          %{^key => %{} = one} -> Map.put(facts, key, shift(one, "seq"))
+          _ -> facts
+        end
+      end)
+
+    data = Enum.reduce(["through", "compacted", "previous"], data, &shift(&2, &1))
+    %{event | data: if(data["facts"], do: Map.put(data, "facts", facts), else: data)}
+  end
+
+  defp shifted(%Event{type: "log_repaired", data: data} = event), do: %{event | data: shift(data, "event")}
+
+  defp shifted(event), do: event
+
+  defp shift(%{} = map, key) do
+    case map do
+      %{^key => seq} when is_integer(seq) -> Map.put(map, key, seq + 1)
+      _ -> map
+    end
+  end
+
+  defp shift(other, _key), do: other
 
   defp to_event(%Event{} = event), do: event
   defp to_event(%{} = json), do: Event.from_json(json)

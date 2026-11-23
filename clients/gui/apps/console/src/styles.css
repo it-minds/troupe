@@ -1628,6 +1628,14 @@ pre.manifest {
 .remote-session .transcript .decision.allowed {
   color: var(--allowed-fg);
 }
+/* A transcript opened from a checkpoint: its summary in the quote's shape (troupe #1182). */
+.remote-session .transcript .earlier blockquote {
+  margin: var(--space-1) 0 0;
+  padding-left: var(--space-3);
+  border-left: var(--bw-edge) solid var(--border-strong);
+  color: var(--text-secondary);
+  white-space: pre-wrap;
+}
 .remote-session .approval {
   margin: var(--space-4) 0;
   padding: var(--space-3) var(--space-4);

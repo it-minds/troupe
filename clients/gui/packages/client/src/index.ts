@@ -24,6 +24,7 @@ export { FUNCTIONS_HEADING, UNPRICED_SENTENCE, accessWords, actsAsWords, askWord
 export type { ProfileView, ProfileViewAgent, ProfileViewAllowance, ProfileViewFunction, ProfileViewGitHub, ProfileViewHarnessTool, ProfileViewLimits, ProfileViewMissing, ProfileViewModel, ProfileViewRule, ProfileViewServer, ProfileViewServerAbout, ProfileViewSkill, RuleAccess, ServerAccess, UnpricedCalls } from "./profile.js";
 export {
   LOCAL_DOWN_SENTENCE,
+  ONLY_ME_TICK,
   andList,
   autoPickProfile,
   ceilingSentence,
@@ -32,6 +33,8 @@ export {
   defaultProfileAgent,
   fullHouseSentence,
   messageTokens,
+  onlyMeSentence,
+  platformVisibility,
   profileRoom,
   stripTokens,
   teamQuestion,
@@ -84,6 +87,7 @@ export type {
 } from "./onboard.js";
 export {
   fold,
+  foldMany,
   addPending,
   dropPending,
   emptyTranscript,
@@ -112,6 +116,8 @@ export { ONCE_ONLY_SENTENCE, callConsequence, callEvidence, callHeadline, callSc
 export type { CallEvidence, CallWhere } from "./calls.js";
 export { foldScratch, scratchDocumentOf, scratchVersion } from "./scratch.js";
 export { ago, bytes, countWords, durationWords, errorText, moneyWords, sessionStateWords } from "./words.js";
+export { TAKE_BACK_LINE, giveLine, sessionWhose, teamWords, visibilityRefusal, whoseSentence } from "./visibility.js";
+export { behind, configurationLine, owedLine, raiseKept, raiseRefusal, updateLine, upgradedText, versionOf } from "./bundle.js";
 export type {
   Entry,
   DelegationGate,
@@ -133,10 +139,15 @@ export type {
   CurtainPhase,
   CurtainState,
   FoldOptions,
+  EarlierState,
 } from "./transcript.js";
+export { CHECKPOINTS, CHECKPOINT_SHAPE, EARLIER_PAGE, TranscriptFeed, fromCheckpoint, isCheckpoint, withEarlier } from "./opening.js";
+export type { Subscribed } from "./opening.js";
 export {
   FleetStore,
   PlaneSource,
+  ONLY_YOU_MARK,
+  onlyYou,
   rowFromPlane,
   filterRows,
   awaitingYou,

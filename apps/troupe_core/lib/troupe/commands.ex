@@ -295,7 +295,7 @@ defmodule Troupe.Commands do
   def builtins do
     [
       entry("new", "session", "Start a fresh session here, without leaving the client",
-        usage: "/new [--private | --remote PROFILE | --branch]",
+        usage: "/new [--private | --remote PROFILE | --only-me | --branch]",
         args: [arg("flags", false, "text")],
         detail:
           "Opens the new-session screen and the session takes the screen; the one you " <>
@@ -307,8 +307,9 @@ defmodule Troupe.Commands do
             "are taken out of it. Enter starts (a full profile queues, and the wait is " <>
             "shown; Esc goes back to the form and the start goes on); Ctrl-J is a new " <>
             "line; Tab reaches the recent sessions, where Enter or 1-3 sets the chips " <>
-            "like one. --private and --remote PROFILE set the chips, and " <>
-            "--branch forks the one on screen at once: a session of its own that starts " <>
+            "like one. --private and --remote PROFILE set the chips; --only-me starts it " <>
+            "on the platform as yours alone until you invite people (with --remote " <>
+            "PROFILE too), on the team's profile all the same; and --branch forks the one on screen at once: a session of its own that starts " <>
             "from this conversation as it stands.",
         example: "/new --branch"
       ),
@@ -428,6 +429,28 @@ defmodule Troupe.Commands do
             "read before stays read, since an invitation cannot be taken back for what it " <>
             "already showed.",
         example: "/uninvite bea@example.com"
+      ),
+      entry("share", "session", "Give this session to its team, or take it back",
+        usage: "/share [team | me]",
+        args: [arg("to", false, "text")],
+        detail:
+          "Its owner's to do, for a session on the platform. /share team gives it to the " <>
+            "team it runs for: everyone on the team can open it, and steer it where the " <>
+            "team allows. /share me takes it back: only you and the people you invited can " <>
+            "open it, and the invitations stay as they were. /share alone says whose it is.",
+        example: "/share team"
+      ),
+      entry("bundle", "session", "Say which configuration this session runs on, or update it",
+        usage: "/bundle [update]",
+        args: [arg("verb", false, "text")],
+        availability: "tui",
+        detail:
+          "For a session on the platform: the bundle version it is pinned to, and the one " <>
+            "its channel would start a session on now where that is newer. /bundle update " <>
+            "moves it there, its owner's to do: at once when its agent is at rest, and when " <>
+            "the agent is done otherwise; the conversation stays, and tools, skills and " <>
+            "servers are the new version's.",
+        example: "/bundle update"
       ),
       entry(
         "archive",

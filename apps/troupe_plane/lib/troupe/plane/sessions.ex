@@ -495,9 +495,40 @@ defmodule Troupe.Plane.Sessions do
     :ok
   end
 
-  @doc "Record which bundle version a session is pinned to."
-  @spec pin_bundle(String.t(), integer()) :: {:ok, Session.t()} | {:error, term()}
-  def pin_bundle(session_id, version), do: put_fields(session_id, %{bundle_version: version})
+  @doc """
+  Record which bundle version, of which channel, a session is pinned to: once a pod has
+  started it there. A raise it owed up to that version is taken.
+  """
+  @spec pin_bundle(String.t(), integer(), String.t() | nil) :: {:ok, Session.t()} | {:error, term()}
+  def pin_bundle(session_id, version, channel \\ nil) do
+    case Repo.get(Session, session_id) do
+      nil ->
+        {:error, :not_found}
+
+      session ->
+        attrs =
+          %{bundle_version: version}
+          |> then(&if(channel, do: Map.put(&1, :bundle_channel, channel), else: &1))
+          |> Map.merge(raise_taken(session, version))
+
+        session |> Session.changeset(attrs) |> Repo.update()
+    end
+  end
+
+  # A raise owed up to the version a pod now runs is no longer owed.
+  defp raise_taken(%Session{bundle_raise_to: to}, version)
+       when is_integer(to) and is_integer(version) and to <= version,
+       do: %{bundle_raise_to: nil, bundle_raise_by: nil}
+
+  defp raise_taken(_session, _version), do: %{}
+
+  @doc """
+  Owe a session a raise to `version` of its channel, asked by `by`: kept until a pod starts
+  it on that version, at once, at its root's next rest, or at its next wake.
+  """
+  @spec owe_raise(String.t(), integer(), String.t()) :: {:ok, Session.t()} | {:error, term()}
+  def owe_raise(session_id, version, by),
+    do: put_fields(session_id, %{bundle_raise_to: version, bundle_raise_by: by})
 
   @doc "Set a session's lifecycle state directly. Erasure is the only caller."
   @spec put_state(String.t(), String.t()) :: {:ok, Session.t()} | {:error, term()}
@@ -509,6 +540,18 @@ defmodule Troupe.Plane.Sessions do
     case Repo.get(Session, session_id) do
       nil -> {:error, :not_found}
       session -> session |> Session.changeset(%{title: title}) |> Repo.update()
+    end
+  end
+
+  @doc """
+  Who may open a session besides its owner and the people invited: `team` for every member
+  of its team, `private` for nobody else. Its invitations are rows of their own and stay.
+  """
+  @spec set_visibility(String.t(), String.t()) :: {:ok, Session.t()} | {:error, term()}
+  def set_visibility(session_id, visibility) do
+    case Repo.get(Session, session_id) do
+      nil -> {:error, :not_found}
+      session -> session |> Session.changeset(%{visibility: visibility}) |> Repo.update()
     end
   end
 
@@ -578,7 +621,7 @@ defmodule Troupe.Plane.Sessions do
   def seal(session_id, attrs) do
     put_fields(
       session_id,
-      Map.take(attrs, [:last_seq, :head_hash, :object_bytes, :workspace_bytes])
+      Map.take(attrs, [:last_seq, :head_hash, :object_bytes, :workspace_bytes, :checkpoint_seq])
     )
   end
 
@@ -744,6 +787,7 @@ defmodule Troupe.Plane.Sessions do
       |> put_status_field(:pending_questions, report["pending_questions"])
       |> put_status_field(:cost_micros, report["cost_micros"])
       |> put_status_field(:agent, report["agent"])
+      |> put_status_field(:bundle_version, report["bundle_version"])
       |> put_reason(:done_reason, report)
       |> put_reason(:failed_reason, report)
 
@@ -756,10 +800,24 @@ defmodule Troupe.Plane.Sessions do
       end
 
     case Repo.update_all(query, set: fields) do
-      {0, _} -> if Repo.get(Session, session_id), do: {:error, :stale_epoch}, else: {:ok, 0}
-      {count, _} -> {:ok, count}
+      {0, _} ->
+        if Repo.get(Session, session_id), do: {:error, :stale_epoch}, else: {:ok, 0}
+
+      {count, _} ->
+        raise_reached(session_id, report["bundle_version"])
+        {:ok, count}
     end
   end
+
+  # A raise owed up to the version the pod's tree now runs on is taken.
+  defp raise_reached(session_id, version) when is_integer(version) do
+    Repo.update_all(
+      from(s in Session, where: s.id == ^session_id and s.bundle_raise_to <= ^version),
+      set: [bundle_raise_to: nil, bundle_raise_by: nil]
+    )
+  end
+
+  defp raise_reached(_session_id, _version), do: :ok
 
   defp put_status_field(set, :status, status) when is_binary(status) do
     if status in Session.statuses(), do: Keyword.put(set, :status, status), else: set
@@ -774,6 +832,12 @@ defmodule Troupe.Plane.Sessions do
   # the row keeps the one the session was created as.
   defp put_status_field(set, :agent, agent) when is_binary(agent) and agent != "",
     do: Keyword.put(set, :agent, agent)
+
+  # The bundle version the pod's tree runs on: the pin follows it, so a raise the pod kept
+  # for its root's rest and then applied lands on the row. A pod pinned to nothing, or from
+  # before it said, reports none.
+  defp put_status_field(set, :bundle_version, version) when is_integer(version) and version > 0,
+    do: Keyword.put(set, :bundle_version, version)
 
   defp put_status_field(set, _key, _value), do: set
 
@@ -915,12 +979,20 @@ defmodule Troupe.Plane.Sessions do
       seal(session.id, %{
         last_seq: max(params["last_seq"] || 0, session.last_seq),
         head_hash: params["head_hash"] || session.head_hash,
-        object_bytes: params["object_bytes"] || session.object_bytes
+        object_bytes: params["object_bytes"] || session.object_bytes,
+        checkpoint_seq: latest_checkpoint(params["checkpoint_seq"], session.checkpoint_seq)
       })
 
       {:ok, anchor}
     end
   end
+
+  # The latest checkpoint sealed: a report that names one moves it on, and one that names
+  # none, or an older one (a sealer started partway knows only what it sealed), keeps it.
+  defp latest_checkpoint(reported, kept) when is_integer(reported) and reported > 0,
+    do: max(reported, kept || 0)
+
+  defp latest_checkpoint(_reported, kept), do: kept
 
   @doc "Every sealed segment head the plane holds for a session, oldest first."
   @spec anchors(String.t()) :: [Anchor.t()]
@@ -928,6 +1000,15 @@ defmodule Troupe.Plane.Sessions do
     Repo.all(
       from(a in Anchor, where: a.session_id == ^session_id, order_by: [a.epoch, a.last_seq])
     )
+  end
+
+  @doc "The names of these sessions' teams, as `%{team_id => name}`; a session with none is absent."
+  @spec team_names([Session.t()]) :: %{Ecto.UUID.t() => String.t()}
+  def team_names(sessions) do
+    case sessions |> Enum.map(& &1.team_id) |> Enum.reject(&is_nil/1) |> Enum.uniq() do
+      [] -> %{}
+      ids -> Map.new(Repo.all(from(t in Team, where: t.id in ^ids, select: {t.id, t.name})))
+    end
   end
 
   @doc "One session, or `nil`."
@@ -1162,16 +1243,27 @@ defmodule Troupe.Plane.Sessions do
 
   Owner administers, collaborator steers, viewer watches. Team visibility gives observe,
   and control too when the team allows it — which is a team setting rather than a
-  session one, because it is a statement about how a team works.
+  session one, because it is a statement about how a team works. Somebody both invited and
+  a member of a team the session is given to holds the stronger of the two.
   """
   @spec role_for(User.t(), Session.t()) :: :admin | :control | :observe | nil
   def role_for(%User{} = user, %Session{} = session) do
-    cond do
-      session.owner_subject == user.subject -> :admin
-      acl = Repo.get_by(ACL, session_id: session.id, subject: user.subject) -> ACL.scope(acl.role)
-      session.visibility == "team" -> team_role(user, session)
-      true -> nil
+    if session.owner_subject == user.subject do
+      :admin
+    else
+      acl = Repo.get_by(ACL, session_id: session.id, subject: user.subject)
+      invited = acl && ACL.scope(acl.role)
+      team = if session.visibility == "team", do: team_role(user, session)
+      stronger(invited, team)
     end
+  end
+
+  @ladder [nil, :observe, :control, :admin]
+
+  defp stronger(a, b) do
+    if Enum.find_index(@ladder, &(&1 == a)) >= Enum.find_index(@ladder, &(&1 == b)),
+      do: a,
+      else: b
   end
 
   defp team_role(user, session) do

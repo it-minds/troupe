@@ -596,7 +596,9 @@ defmodule Troupe.Gateway.Connection do
       "private_sessions" => false,
       # `fs.upload` takes `artifact` in place of bytes: the plane sends its files down the
       # control link, for the person who asked.
-      "fs_upload_artifact" => true
+      "fs_upload_artifact" => true,
+      # `subscribe` takes `from: "checkpoint"` and `session.events` pages back before it.
+      "checkpoints" => true
     }
   end
 
@@ -612,7 +614,8 @@ defmodule Troupe.Gateway.Connection do
       "remote" => true,
       "relayed" => true,
       "relayed_allow_session" => true,
-      "private_sessions" => false
+      "private_sessions" => false,
+      "checkpoints" => true
     }
   end
 
@@ -632,7 +635,9 @@ defmodule Troupe.Gateway.Connection do
       "approval_allow_always" => true,
       # `fs.upload` takes `artifact` in place of bytes, which this daemon fetches from its
       # plane with its sign-in.
-      "fs_upload_artifact" => true
+      "fs_upload_artifact" => true,
+      # `subscribe` takes `from: "checkpoint"` and `session.events` pages back before it.
+      "checkpoints" => true
     }
   end
 

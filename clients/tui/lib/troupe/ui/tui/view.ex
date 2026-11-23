@@ -727,16 +727,29 @@ defmodule Troupe.UI.TUI.View do
 
   @doc """
   Where a private session is kept and how its sealing stands, `private · synced`, in the
-  desktop app's words (`@troupe/client`'s `syncWords`); empty for any other session.
+  desktop app's words (`@troupe/client`'s `syncWords`); `only you` for a pod session of the
+  person's own the team cannot open (`@troupe/client`'s `onlyYou`), never "private", which
+  is a sealed session's word; empty for any other session.
   """
   @spec kept(map()) :: String.t()
   def kept(entry) do
     case {Map.get(entry, :kind), Map.get(entry, :sync)} do
       {"private", nil} -> "private"
       {"private", sync} -> "private · " <> elem(sync_words(sync, Map.get(entry, :device)), 0)
-      _other -> ""
+      _other -> if only_you?(entry), do: only_you(), else: ""
     end
   end
+
+  @doc "The mark of a pod session only its owner and the people they invite can open."
+  @spec only_you() :: String.t()
+  def only_you, do: "only you"
+
+  @doc "Whether a row is a pod session of the person's own whose visibility is `private`."
+  @spec only_you?(map()) :: boolean()
+  def only_you?(entry),
+    do:
+      Map.get(entry, :kind) == "team" and Map.get(entry, :visibility) == "private" and
+        Map.get(entry, :your_role) == "owner"
 
   @doc "A private session's sync state in words: the label, and the sentence behind it."
   @spec sync_words(String.t(), String.t() | nil) :: {String.t(), String.t()}
@@ -2627,15 +2640,23 @@ defmodule Troupe.UI.TUI.View do
     " #{w.path} › #{String.replace_prefix(agent, w.path <> "/", "")} (#{name}) — Esc back "
   end
 
-  defp scroll_title(%{follow?: true}, _state), do: " ⇣ following "
+  defp scroll_title(%{follow?: true}, state), do: " ⇣ following" <> loading_earlier(state) <> " "
 
   defp scroll_title(g, state) do
     new = g.entries - state.pane.seen_entries
     last = min(g.offset + g.inner_h, g.total)
 
     " ↕ #{g.offset + 1}–#{last}/#{g.total}" <>
-      if(new > 0, do: " · #{new} new", else: "") <> " "
+      if(new > 0, do: " · #{new} new", else: "") <> loading_earlier(state) <> " "
   end
+
+  # A page of the history before the checkpoint the session opened from is on its way.
+  defp loading_earlier(%{model: %{earlier: %{loading: true}}}), do: " · loading earlier…"
+  defp loading_earlier(_state), do: ""
+
+  # The view is at its top and the session has history this screen has not drawn.
+  defp earlier_above?(%{offset: 0}, %{model: %{earlier: %{more: true, loading: false}}}), do: true
+  defp earlier_above?(_g, _state), do: false
 
   # Context keys on the bottom border: the widest phrasing that fits, and only the keys
   # that do something right now. `End` stays in every form — once you have scrolled up it
@@ -2661,6 +2682,7 @@ defmodule Troupe.UI.TUI.View do
     selection? = Map.get(state, :selection) != nil
 
     pieces = [
+      {earlier_above?(g, state), ["PgUp loads earlier", "PgUp earlier", "PgUp ↑"]},
       {true, ["PgUp/PgDn ↑↓ scroll", "PgUp/PgDn scroll", "PgUp/PgDn"]},
       {not g.follow?, ["End follows the tail", "End follows", "End"]},
       {agents > 1, ["←→ other agents", "←→ agents", "←→"]},
@@ -3068,7 +3090,8 @@ defmodule Troupe.UI.TUI.View do
   end
 
   defp remote_note(%{model: %{remote: %{} = remote}}) do
-    state = " · remote (#{remote[:state] || "?"})"
+    mine = if remote[:only_me?], do: " · " <> only_you(), else: ""
+    state = " · remote (#{remote[:state] || "?"})" <> mine
 
     case remote[:reason] do
       reason when is_binary(reason) -> state <> " · #{reason}"

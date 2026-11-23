@@ -21,6 +21,7 @@ import type {
   TroupeEvent,
 } from "./types.js";
 import { isDurable } from "./types.js";
+import { CHECKPOINTS, EARLIER_PAGE, isCheckpoint } from "./opening.js";
 
 /**
  * An answer to an approval. `allow_always` writes a lasting per-tool rule for the person;
@@ -80,6 +81,14 @@ export class SessionView {
    */
   lastSeq = 0;
   headSeq = 0;
+  /**
+   * Open from the session's latest checkpoint where the server keeps them (troupe #1182):
+   * the first subscription, from 0, asks `from: "checkpoint"` instead, and `checkpoint` is
+   * what it answered, null for a session that never compacted. A resubscription goes on
+   * from the cursor as before.
+   */
+  fromCheckpoint = false;
+  checkpoint: DurableEvent | null = null;
   subscriptionId: string | null = null;
   /** The `presence:<id>` subscription, once `followPresence` asked for it. */
   presenceId: string | null = null;
@@ -161,14 +170,16 @@ export class SessionView {
    * so resuming from the cursor leaves no gap and no duplicate.
    */
   async subscribe(fromSeq: number = this.lastSeq, level: "detail" | "summary" = "detail"): Promise<SubscribeResult> {
+    const atCheckpoint = fromSeq === 0 && this.fromCheckpoint && this.capabilities[CHECKPOINTS] === true;
     const r = await this.conn.call<SubscribeResult>("subscribe", {
       command_id: this.conn.nextCommandId(),
       topic: this.topic,
       level,
-      from_seq: fromSeq,
+      ...(atCheckpoint ? { from: "checkpoint" } : { from_seq: fromSeq }),
     });
     this.subscriptionId = r.subscription_id;
     this.headSeq = r.head_seq;
+    if (atCheckpoint) this.checkpoint = isCheckpoint(r.checkpoint) ? r.checkpoint : null;
     // A new socket holds no presence yet; one that still has it is not asked twice.
     if (this.presence) await this.subscribePresence();
     return r;
@@ -211,6 +222,16 @@ export class SessionView {
   listen(fn: (e: TroupeEvent) => void): () => void {
     this.listeners.add(fn);
     return () => void this.listeners.delete(fn);
+  }
+
+  /**
+   * `session.events`: up to `limit` durable events before the seq `before`, oldest first,
+   * and whether there are earlier ones. How a transcript opened from a checkpoint pages
+   * back; a read that wakes nothing.
+   */
+  async events(before: number, limit = EARLIER_PAGE): Promise<{ events: DurableEvent[]; more: boolean }> {
+    const r = await this.conn.call<{ events?: DurableEvent[]; more?: boolean }>("session.events", { session_id: this.sessionId, before, limit });
+    return { events: Array.isArray(r.events) ? r.events : [], more: r.more === true };
   }
 
   /** Re-subscribe from the cursor. What `resync_required` and a reconnect both want. */

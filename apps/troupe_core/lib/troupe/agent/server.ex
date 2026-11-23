@@ -483,6 +483,11 @@ defmodule Troupe.Agent.Server do
   defp fold_event(%Event{type: "goal_set", data: data}, state), do: %{state | goal: data["text"]}
   defp fold_event(%Event{type: "goal_cleared"}, state), do: %{state | goal: nil}
 
+  # The session's configuration moved to another bundle version: kept, so the turn context
+  # that says so is the same after a restart and is not sent twice.
+  defp fold_event(%Event{type: "config_upgraded", data: data}, state),
+    do: %{state | configuration: Map.take(data, ["from", "to", "reason", "by_name"])}
+
   # The number the next child takes (Decision 688), a head of its own for the same reason.
   defp fold_event(%Event{type: "delegation_started", data: data}, state),
     do: %{state | child_seq: child_seq(state, data["child_path"])}
@@ -1952,7 +1957,8 @@ defmodule Troupe.Agent.Server do
       ),
       environment_section(state),
       skills_section(state, definition),
-      unless(stable?, do: goal_section(state))
+      unless(stable?, do: goal_section(state)),
+      unless(stable?, do: configuration_section(state))
     ]
     |> Enum.reject(&(&1 in [nil, ""]))
     |> Enum.join("\n\n")
@@ -2036,9 +2042,45 @@ defmodule Troupe.Agent.Server do
       {"instructions",
        Instructions.to_prompt(state.instructions, recall: recall?(effective_definition(state)))},
       {"goal", goal_section(state)},
-      {"task_list", todo_section(state.prompt_todos)}
+      {"task_list", todo_section(state.prompt_todos)},
+      {"configuration", configuration_section(state)}
     ]
   end
+
+  # The root is told when the session's configuration moved to another bundle version,
+  # once, as the other sections are: by the pin it started with, when this start is the
+  # move (its `config_upgraded` is written after the tree is up), or by the last
+  # `config_upgraded` folded. A session that never moved sends nothing.
+  defp configuration_section(%State{agent_path: ["root"]} = state) do
+    case configuration_moved(state) do
+      %{"from" => from, "to" => to} = moved when not is_nil(to) ->
+        "<configuration>\nYour configuration moved from v#{from} to v#{to} (#{why_moved(moved)}); " <>
+          "tools, skills and servers are the new version's.\n</configuration>"
+
+      _ ->
+        ""
+    end
+  end
+
+  defp configuration_section(_state), do: ""
+
+  defp configuration_moved(%State{bundle: %{upgraded_from: from} = bundle})
+       when not is_nil(from) do
+    %{
+      "from" => from,
+      "to" => bundle.version,
+      "reason" => Map.get(bundle, :upgrade_reason),
+      "by_name" => Map.get(bundle, :upgraded_by_name)
+    }
+  end
+
+  defp configuration_moved(state), do: state.configuration
+
+  defp why_moved(%{"reason" => "raised", "by_name" => name}) when is_binary(name) and name != "",
+    do: "raised by #{name}"
+
+  defp why_moved(%{"reason" => "raised"}), do: "raised by the session's owner"
+  defp why_moved(%{"from" => from}), do: "v#{from} was retired"
 
   defp render_turn_context(sections) do
     body =
@@ -4063,6 +4105,7 @@ defmodule Troupe.Agent.Server do
           compact_resume: resume,
           compact_reason: state.compact_reason || "threshold",
           compact_prompt: Spend.prompt_bytes(request, ""),
+          compact_head: Log.head_seq(state.session_id),
           llm_text: ""
         })
 
@@ -4197,6 +4240,7 @@ defmodule Troupe.Agent.Server do
         "usage" => Usage.to_json(response.usage),
         "gateway" => gateway
       })
+      |> put_folded(state.compact_head)
 
     log(state, :compacted, data, actor)
 
@@ -4217,6 +4261,11 @@ defmodule Troupe.Agent.Server do
     |> show_todos()
     |> instructions_due()
   end
+
+  # The range the compaction folded: the agent's events through the log's head when the
+  # summariser was asked, its earlier summaries among them.
+  defp put_folded(data, head) when is_integer(head), do: Map.put(data, "folded_through", head)
+  defp put_folded(data, _head), do: data
 
   # What a compaction keeps was said after the messages the summary replaces, so each
   # thinking block in it is bound to a conversation no later request has: on a model that
@@ -4286,7 +4335,7 @@ defmodule Troupe.Agent.Server do
   end
 
   defp resume_after_compaction(state) do
-    state = %{state | compact_reason: nil, compact_prompt: nil, compact_command: nil}
+    state = %{state | compact_reason: nil, compact_prompt: nil, compact_command: nil, compact_head: nil}
 
     case state.compact_resume do
       :thinking -> start_turn(%{state | compact_resume: :idle})
@@ -4315,7 +4364,13 @@ defmodule Troupe.Agent.Server do
     )
 
     # A compaction it stopped leaves nothing behind for the next one to write as its own.
-    compaction = %{compact_reason: nil, compact_prompt: nil, compact_command: nil, compact_resume: :idle}
+    compaction = %{
+      compact_reason: nil,
+      compact_prompt: nil,
+      compact_command: nil,
+      compact_head: nil,
+      compact_resume: :idle
+    }
 
     state =
       state

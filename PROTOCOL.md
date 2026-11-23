@@ -207,6 +207,7 @@ The server's `capabilities`:
 | `private_sessions` | this server can seal a session under the caller's own key, so a client may offer to make one |
 | `approval_allow_always` | `approval.respond` takes `allow_always`, which writes the person's own rule for the tool (a daemon's; a pod's rules are its worker profile's, and a relayed connection's the laptop's) |
 | `fs_upload_artifact` | `fs.upload` takes `artifact` in place of `content`, and the server fetches the artifact's files from the plane itself (a daemon and a pod) |
+| `checkpoints` | `subscribe` takes `from: "checkpoint"`, and `session.events` pages back through a session's history (a daemon, a pod and a relayed connection) |
 
 `private_sessions` is computed at every `initialize`, never compiled in, and it is what
 un-gates the client's control. It is true only where both things it needs are true: a
@@ -343,7 +344,8 @@ Durable:
 | `loop_iteration_finished` | `loop_id`, `iteration`, `outcome` (`continue`: the turn ended and the goal is not met; `complete`: the agent called `goal_complete`; `failed`: the turn ended in an error; `stopped`: the loop stopped around it), `detail` |
 | `loop_stopped` | `loop_id`, `reason` (`goal_complete`, `max_iterations`, `failures`, `budget`, `requested`, `cancelled`, `goal_cleared`, `interrupted`, `agent_done`), `iterations`, `detail`, `summary` (the evidence `goal_complete` gave), `command_id` (the `session.loop.stop` that asked) |
 | `delegation_started` | `call_id`, `agent`, `child_path` (the parent's path and `<agent>#<n>`; `n` goes on counting across restarts, so a path names one child), `task` (the child's first message: the brief's parts under their names), `brief` (the parts, `goal`, `context`, `constraints`, `deliverable` and `do_not`; absent from a log written before briefs had them, Decision 847), `wait` (`false` for a child started in the background: the `delegate` call answered at once, and the child's end reaches the parent later as a `user_input` from `subagent`; absent otherwise, Decision 853). The child writes its `agent_done` before the parent's `tool_call_completed` for the call, and is stopped once the parent has its result: from then on it is only its log. A delegation a restart closes as interrupted or takes up again leaves a child nothing starts again, so the restart closes that child's part of the log, and the part of each agent under it: a `tool_call_completed` for each call still open, then `agent_done` with `reason: interrupted` |
-| `compacted` | `summary`, `reason` (`threshold`; `context_overflow` when the provider refused the prompt and the turn is sent again after compacting; `manual` when a person asked with `session.compact`), `command_id` (with `manual`, the command's), `conversation` (the conversation the agent goes on with: the summary as a message, then what was kept, a large tool result as a blob; a large result among the kept messages up to the model's last reply is sent to the model as a stub naming its `read_output` call. If the turn sent again still does not fit, it is sent once more with every large result left out that way, the turn's own the model has not read included, and that request's `llm_request` says so with `behind`: the conversation is the same, what the model is sent of it is not), and the summariser's own model call as `llm_request` and `llm_response` say one: `model`, `prompt_bytes`, `usage`, `gateway` (absent from a log written before 0.8.2) |
+| `compacted` | `summary`, `reason` (`threshold`; `context_overflow` when the provider refused the prompt and the turn is sent again after compacting; `manual` when a person asked with `session.compact`), `command_id` (with `manual`, the command's), `conversation` (the conversation the agent goes on with: the summary as a message, then what was kept, a large tool result as a blob; a large result among the kept messages up to the model's last reply is sent to the model as a stub naming its `read_output` call. If the turn sent again still does not fit, it is sent once more with every large result left out that way, the turn's own the model has not read included, and that request's `llm_request` says so with `behind`: the conversation is the same, what the model is sent of it is not), and the summariser's own model call as `llm_request` and `llm_response` say one: `model`, `prompt_bytes`, `usage`, `gateway` (absent from a log written before 0.8.2); `folded_through`, the range it folded: the summary and what it kept stand for the agent's events through this seq, the log's head when the summariser was asked (absent from a log written before it) |
+| `checkpoint` | `shape`, `through`, `compacted`, `previous`, `summary`, `facts` — what the session comes to at `through`, written by the session itself under the root after each root `compacted`, when the root next rests (see [Checkpoints](#checkpoints)) |
 | `budget_exhausted` | `limit` |
 | `budget_ask_started` | `call_id` (`budget-<n>`), `dimension`, `used`, `limit`, `detail` — the budget is spent and the agent asks before its next model call; the question itself is a `question_asked` under the same `call_id`, answered with `question.answer`. Its `question` says what the limit protects against, what the session has used and spent, and what the raise on offer would cost; its `options` are sizes and scopes — `+25 turns this run`, `+50 turns this session`, `no limit this session`, `+50 turns this workspace`, `stop` — and a typed amount (`50`, `+50 turns`, `+50k tokens`, `+15 min`, with `run`, `session` or `workspace` after it) is an answer too (Decision 699) |
 | `budget_ask_answered` | `call_id`, `decision` (`allow`: one more slice of the original size, `grant` says how much; `always`: the limit the question was about, named in `lifted` — `max_turns`, `max_input_tokens`, `max_output_tokens` or `wall_clock` — is lifted for this agent and its subagents, and the others still ask; `raise`: `limit` goes up by `amount` — turns, tokens or milliseconds — for `scope` `run` (given back at the turn's end), `session` or `workspace`, the last also written to the project's file named in `path`, or `note` says why it was not; `unclear`: the answer could not be read, `note` says why, and the question is asked again under the next id; `deny`: `budget_exhausted` follows). An `always` without `lifted`, from a log written before Decision 687, lifted the limit its `budget_ask_started` named |
@@ -376,9 +378,10 @@ Durable:
 | `scratch_updated` | `name`, `path`, `kind`, `title`, `size`, `hash`, `version`, `call_id` — a document the `show` tool wrote to the session's scratchpad, or replaced (Decision 870), or the `patch` tool revised in place: a plan, report, comparison, diagram or table the agent shows the person beside the chat instead of printing it there. `path` is where `fs.read` reads it (`scratch:/<name>`), `kind` how to show it (`markdown`, `mermaid`, `json`, `csv` or `text`), `hash` the same `sha256:…` `fs.read` answers, `version` the writes of that name in the session from 1, and `call_id` the `show` or `patch` call that wrote it, so a client puts a card where the call was rather than the call's `content`. `scratch.list` lists the documents |
 | `artifact_commented` | `artifact: {id, title}`, `comment: {id, author: {subject, display_name}, body, created_at}` — somebody wrote a comment on an artifact this session published (Decision 1007), from the plane, on a pod at once and on a laptop at its daemon's next poll (Decision 1015): whoever steers the session reads it beside the work and may ask the agent to act on it. Somebody else's words, never input: no turn starts |
 | `session_invited` / `session_uninvited` | `subject`, `role` (invited only), `by`, `display_name`, `by_name` — a person invited into the session by name, to follow it (`observe`) or steer it (`control`), or the invitation taken back (Decision 949): written by the pod holding a pod session when the plane tells it, and by the daemon sealing a private one when its owner invites from there. A private session's daemon reads who it has invited from these, and puts a new key only in the slots of people they name |
+| `session_visibility_changed` | `visibility`, `by`, `by_name` — a pod session given to its team by its owner (`team`), or taken back to its owner and the people invited (`private`), after it started (`session.visibility.set`): written by the pod holding it when the plane tells it; a dormant session gets no line, and its row is the record |
 | `mounts_resolved` | `mounts` — the volumes a pod session's working tree was given, as the session started |
 | `published` | `source`, `destination`, `hash`, `bytes`, `direction` — a file the `publish` tool copied to or from a shared volume |
-| `config_upgraded` | `channel`, `from`, `to`, `hash`, `entitlements` — the configuration a session was pinned to was retired, and an activation moved it to the channel's current version |
+| `config_upgraded` | `channel`, `from`, `to`, `hash`, `entitlements`, `reason?`, `by?`, `by_name?` — the session's configuration moved to the channel's current version: the version it was pinned to was retired (`reason: retired`), or its owner raised it (`raised`, with who: `session.bundle.raise`), either at a wake or, for a running session, as its pod started its tree again in place. Its root is told once, in a `configuration` section of its turn context |
 | `share_created` | `id`, `role` (`observe` or `control`), `expires_at`, `audience` — a share of a team session, announced by the plane |
 | `share_revoked` | `id`, `reason` |
 | `tools_registered` | `tools`, `connection`, `consent` — a client offered tools of its own (§8) |
@@ -575,6 +578,32 @@ Text is markdown. A diff is structured hunks, not a rendered patch:
 Tool calls and results are objects; todo lists are arrays of
 `{"id", "content", "status"}`.
 
+### Checkpoints
+
+A `checkpoint` says what a session's log comes to at one seq, so a reader can start there
+rather than at seq 1. The session writes one after each compaction of its root agent, when
+the root next comes to rest (`turn_ended`, `cancelled`, `agent_done`, or a restart that
+leaves its turn interrupted): nothing of the root's is in flight then. A compaction a crash
+left without one gets it at the next rest. It is a durable event like any other, in the
+chain and sealed with the rest, never edited, and a log before it is never dropped.
+
+| field | meaning |
+| --- | --- |
+| `shape` | the version of `facts`, `session/1`. A reader that does not know it replays from seq 1 |
+| `through` | the seq `facts` stand for: the root's rest. Every event after it folds on top |
+| `compacted`, `previous` | the seq of the root `compacted` it follows; the seq of the checkpoint before it, or `null` |
+| `summary` | the summary as that compaction wrote it, so a reader can show it without the larger `compacted` |
+| `facts` | `agent` (the root's), `profile`, `bundle_version`, `kind`, `visibility`, `workspace`, `owner`, `owner_name`, `started_at` (when `session_created` was written); `goal`; `loop` (the latest: `loop_id`, `goal`, `max_iterations`, `max_failures`, `iteration`, `outcome`, `running`, `reason`); `todos` (the root's items); `done` (the root's `reason` and `limit`, or `null`) and `limits` (ceilings by `turns`, `input`, `output`, `wall`); `error` (the root's last `llm_error` `reason` and `seq`, until its next reply); `usage` (the four disjoint figures, every reply's and every summariser's), `cost_micros`, `unpriced` and `turns` (the root's turns that ended with a `turn`); `context` (`used`, the root's last prompt; its window is never in the log); `open_approvals` and `open_questions` (each `{call_id, seq, agent, actor, data}`, `data` as the request said it); `running` (delegations whose child has not ended: `call_id`, `agent`, `child_path`, `wait`, `seq`); `agents` (by path: `profile`, `done`); `scratch` (by name: `version`, `kind`, `title`); `taint` (as `session_tainted` says it) |
+
+The facts are a fold of the log and nothing else: no title, pin or archive, no presence or
+unseen mark, nothing about who reads it or when, and no blob's, artifact's or document's
+content. It is a cache that happens to be chained: correct as far as the build that folded
+it, which raises `shape` when what a fact means changes, and a reader that does not know a
+shape starts from seq 1 instead. A fork moves the seqs a carried checkpoint
+names (`through`, `compacted`, `previous`, and each `seq` in its facts) by one, as it moves
+every event. A pod's seal report to the plane names the latest checkpoint it sealed as
+`checkpoint_seq`, which the plane keeps on the session's row.
+
 ### Large payloads
 
 A tool's output over **16 KiB** — `tool_call_completed.content`, a result in `tool_results`,
@@ -607,6 +636,7 @@ and never shared between sessions.
 | `topic` | `"fleet"`, `"session:<id>"` or `"presence:<id>"` |
 | `level` | `"summary"` or `"detail"` |
 | `from_seq` | optional; replay durable events with `seq > from_seq` |
+| `from` | optional; `"checkpoint"`: replay from the session's latest checkpoint (below), not with `from_seq` |
 
 Result:
 
@@ -620,6 +650,17 @@ order, forever.
 
 `from_seq: 0` replays everything. Omitting `from_seq` starts live from `head_seq`
 with no replay.
+
+`from: "checkpoint"` in place of `from_seq` (a server with the `checkpoints` capability)
+starts from the session's latest [`checkpoint`](#checkpoints) in a shape the server reads:
+the answer carries it whole and the cursor it replays from, its `through`, and the replay is
+every event after that, the checkpoint itself among them. A session that never compacted
+answers `checkpoint: null` and replays from 0, as `from_seq: 0` does. `from` with `from_seq`,
+or any other `from`, is `invalid_params`.
+
+```json
+{"subscription_id": "sub-4", "head_seq": 4210, "checkpoint": {"seq": 4180, "type": "checkpoint", …}, "from_seq": 4179}
+```
 
 A subscription that names a session — `session:<id>`, or its `presence:<id>` — is also how
 a client says it is reading the session: the daemon does not put one to sleep under a
@@ -1394,6 +1435,14 @@ linking changes is the name in the record. A daemon reachable by somebody who sh
 be linking has a much larger problem than the label.
 
 ### Reading
+
+#### `session.events`
+`{"session_id", "before", "limit"}` → `{"events": [...], "more": true}`: up to `limit` durable
+events before the seq `before`, oldest first, and whether there are earlier ones; how a
+reader that started from a [checkpoint](#checkpoints) pages back. `limit` is 1 to 500, and
+500 when absent; `before` is a seq from 1 (`invalid_params` otherwise). Scope `observe`, a
+read that wakes nothing, served by a daemon, a pod and a relayed connection (the
+`checkpoints` capability). A session that is not there is `not_found`.
 
 #### `blob.get`
 ```json
@@ -3436,6 +3485,8 @@ than an admin uses them:
 | `session.invite` | control | a pod session's owner or an admin of its team; a private session's owner | `{session_id, subject, role, keys}` → `{session_id, invite: {subject, display_name, email, role, invited_by, invited_at}, pushed}`: a person invited by name (Decision 949), `subject` their subject or their email, `role` `observe` (default) or `control`. A pod session's is its grant made visible: the ACL row (`viewer` or `collaborator`) pushed to the pod as `acl.changed`, and the pod told `invite.changed`, which gives the log `session_invited`. A private session's `control` steers it while its owner offers it (Decision 952), and it carries `keys: [{key_version, slot}]`, where its owner's daemon put each generation of its key in the invitee's own slot (`troupe/people/<invitee>/invited/<session_id>/k<n>-<random>`), one for each of the session's `key_version`; the plane keeps the paths and cannot read what is there. `forbidden` with `reason: "not on this profile's teams"` and `profile` for a person the pod session's profile does not cover, `"shares no team with this session's owner"` for a private one; a platform admin is always invitable; `not_found` for nobody of that name. Inviting again changes the role. The invitee's watch is told (`invites.changed`) |
 | `session.uninvite` | control | as `session.invite` | `{session_id, subject}` → `{session_id, subject, rekey_due, pushed}`: the invitation taken back. A pod session's ACL row goes and the pod is pushed `acl.changed` with `role: null`, refusing the person's next command, and `invite.changed` (`session_uninvited`); a private session's copies of its key in their slot are destroyed with the plane's credential, and the session is `rekey_due` until its owner's daemon reports a new key (`session.rekeyed`). `not_found` for a person not invited |
 | `session.invites` | observe | anybody who may see the session, or is invited into it | `{session_id}` → `{session_id, invites: [{subject, display_name, email, role, invited_by, invited_at}]}`: whom it is shared with, the oldest first |
+| `session.visibility.set` | control | a pod session's owner alone: anybody else who may see it, a platform administrator too, is `forbidden` with `required_role: "owner"`; to anybody who may not, `not_found` | `{session_id, visibility}`, `team` or `private` → the session's row, as `session.get` answers it: the session given to its team, whose members open it and steer it where the team's `members_may_control` (through the ladder) lets them, or taken back to its owner and the people invited. Invitations stay; somebody both invited and a member holds the stronger role. Audited (`session.visibility.set`, `from`, `to`); the pod holding it is pushed `acl.changed` with each member's role now (`null` where they have none) and `visibility.changed`. Asked for what it already is, it answers the row and writes nothing. `invalid_params` for another visibility, `conflict` for a private session or one with no team to give it to, `not_found` for an erased one. Every session row the plane answers a person (`sessions.list`, `session.get`, this) names its team as `team`, `null` for none, which is whom a client says it gives it to |
+| `session.bundle.raise` | control | a pod session's owner, or a holder of its `owner` role, as `session.archive`: anybody else who may see it is `forbidden` with `required_role: "owner"` | `{session_id}` → the session's row: raised to its profile's channel's current bundle version, never another and never lower (a rollback is a republish followed by a raise). Audited (`session.bundle.raise`, `from`, `to`). A dormant session takes it at its next wake; a running one is pushed `session.restart` and answers the row on the new version, or, while its agent works, `conflict` with `status` and `raise_to`: the raise is kept (`bundle_raise_to`) and lands when the root next comes to rest, or at the next wake. The pin moves only once a pod started the session on the new version. Already current, it answers the row and writes nothing. `conflict` for a session on a computer, a `pending` or read-only one, and a channel with nothing published; `forbidden` where the team's grant is gone; `not_found` for an erased one; `invalid_params` with `field: "agent"`, `agent` and the target's `agents` where the current version does not offer the agent the session runs as |
 | `session.invite_slot` | control | a private session's owner | `{session_id, subject}` → `{session_id, subject, display_name, prefix, key_version}`: where to put the session's key for a person about to be invited, the invitee's own `troupe/people/<name>/invited/<session_id>/`, after the same refusals `session.invite` makes, so nothing is put anywhere for somebody it would refuse |
 | `session.keys` | observe | a person invited into a private session | `{session_id}` → `{assertion, expires_at, audience, key_manager, session_id, key_version, last_seq, keys: [{key_version, slot}]}`: where each generation of the session's key was put for the caller, and an assertion for their own name, which their daemon spends at the key manager to read them. `not_found` for anybody not invited, and for a session erased or being erased |
 | `session.rekeyed` | control | a private session's owner | `{session_id, key_version, keys: [{subject, slot}]}` → the session row: sealed from now on under generation `key_version` of its key (`<session_id>.k<n>` beside the first), put in the slot of every person still invited; no longer `rekey_due`. `conflict` for a version that is neither the session's nor the next, `invalid_params` with `missing` where a person still invited has no key in it. The same version again is a retry |
@@ -3537,6 +3588,8 @@ notification is not answered, and the one the pod asks is marked so.
 | `acl.changed` | push, at a grant, an invitation made or changed, or one taken back | `{changes: [{session_id, subject, role}]}`; `role: null` for one taken back | updates its mirror of the session's access, which its next command from that person is checked against |
 | `artifact.commented` | notification, at a comment on an artifact a session running here published | `{session_id, epoch, artifact: {id, title}, comment: {id, author, body, created_at}}` | writes `artifact_commented` in the session's log at that epoch; nothing for a session not up here (Decision 1007) |
 | `invite.changed` | push, at an invitation made or taken back while the pod holds the session, and at its next activation for one made while none did | `{session_id, type, invite: {subject, display_name?, role?, by, by_name?}}`, `type` `session_invited` or `session_uninvited` | writes the event of that type in the session's log |
+| `visibility.changed` | push, at `session.visibility.set` while the pod holds the session, after the `acl.changed` that carries each member's role | `{session_id, visibility, by, by_name?}`, `visibility` `team` or `private` | writes `session_visibility_changed` in the session's log; a session not up here records nothing |
+| `session.restart` | push, at `session.bundle.raise` while the pod holds the session | `{session_id, epoch, profile, agent, entitlements, memory, bundle pin}`, the pin with `bundle_upgraded_from`, `bundle_upgrade_reason: raised`, `bundle_upgraded_by`, `bundle_upgraded_by_name`, `permission_rules`, `agent_rule?` | at rest (no agent of the tree thinking or running a tool; `interrupted` is at rest), stops the tree and starts it again over the session's own log and workspace on the new pin, writes `config_upgraded` and answers `{restarted: true, bundle_version}`; a command a client sends meanwhile waits for it as for a wake. Busy, answers `{pending: true, status}` and applies it when the root next comes to rest, after which its `session.status` carries the new `bundle_version`. A tree that does not come back puts the session to sleep, and its next wake applies the raise |
 
 A daemon exchanges its grant at `POST /auth/relay {grant}` → `{token, expires_at, subject,
 device}`: a fifteen-minute token whose audience is `troupe-relay-laptop` and which names the
@@ -3593,8 +3646,13 @@ A session's JSON carries `agent`, the agent it was created as or its pod last re
 it switched to (`null` where none was named and the profile's default ran; a session that
 waited for a place starts as it), `created_at`, `kind` and, for a private one, the
 `device` that last sealed it, `owner_name` beside `owner` (see [People by name](#people-by-name)), and `bundle_version` — the configuration it was pinned to when it was created,
-which does not move when a newer version is published. A session whose agent
-definitions changed underneath it would be a different session halfway through.
+a version of `bundle_channel`, kept until its owner raises it to the channel's current
+version (`session.bundle.raise`) or the version is retired; either way the move happens as
+a pod starts it and is in its log as `config_upgraded`. A newer publish alone moves nothing:
+a session whose agent definitions changed underneath it would be a different session
+halfway through. Beside it, `bundle_current` is the version the channel would start a
+session on now (`null` for a session on a computer, or nothing published), and
+`bundle_raise_to` a raise asked for that no pod has taken yet.
  `sessions.list` takes `kind` (`team` or `private`) alongside its other filters, so one
 list can show both and either can be asked for on its own. `kind` is not `visibility`:
 `visibility` is who else on the team may see a session and defaults to `private`, so an

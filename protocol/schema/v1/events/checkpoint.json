@@ -1,0 +1,37 @@
+{
+  "$id": "https://troupe.dev/schema/v1/events/checkpoint.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "properties": {
+    "compacted": {
+      "type": "integer"
+    },
+    "facts": {
+      "type": "object"
+    },
+    "previous": {
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "shape": {
+      "type": "string"
+    },
+    "summary": {
+      "type": "string"
+    },
+    "through": {
+      "type": "integer"
+    }
+  },
+  "required": [
+    "compacted",
+    "facts",
+    "previous",
+    "shape",
+    "through"
+  ],
+  "title": "checkpoint",
+  "type": "object"
+}

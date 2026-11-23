@@ -43,6 +43,8 @@ defmodule Troupe.Client do
   @type summary :: %{
           optional(:owner_name) => String.t() | nil,
           optional(:archived) => boolean(),
+          optional(:visibility) => String.t() | nil,
+          optional(:your_role) => String.t() | nil,
           id: session_id(),
           title: String.t(),
           owner: String.t() | nil,
@@ -102,11 +104,15 @@ defmodule Troupe.Client do
   """
   @type command :: %{String.t() => term()}
 
+  @typedoc "A page of a session's history: its events, whether earlier ones exist, its lowest seq."
+  @type page :: %{events: [Event.t()], more: boolean(), first: pos_integer() | nil}
+
   ## Session-scoped
 
   @callback subscribe(session_id()) :: :ok
   @callback unsubscribe(session_id()) :: :ok
   @callback events(session_id()) :: [Event.t()]
+  @callback earlier(session_id(), pos_integer()) :: {:ok, page()} | {:error, term()}
   @callback commands(session_id()) :: [String.t()]
   @callback command_table(session_id()) :: [command()]
   @callback context(session_id()) :: {String.t(), Config.t()}
@@ -156,6 +162,10 @@ defmodule Troupe.Client do
   @callback remote_steering(session_id(), :status | :withdraw | {:offer, String.t()}) ::
               {:ok, String.t()} | {:error, term()}
   @callback invites(session_id(), invite_verb()) :: {:ok, String.t()} | {:error, term()}
+  @callback share(session_id(), Troupe.Client.Share.verb()) ::
+              {:ok, String.t()} | {:error, String.t()}
+  @callback bundle(session_id(), Troupe.Client.Bundle.verb()) ::
+              {:ok, String.t()} | {:error, String.t()}
   @callback archive(session_id(), boolean()) :: {:ok, String.t()} | {:error, String.t()}
   @callback rename(session_id(), String.t()) :: {:ok, String.t()} | {:error, String.t()}
   @callback keep(session_id(), boolean()) :: {:ok, String.t()} | {:error, String.t()}
@@ -227,6 +237,14 @@ defmodule Troupe.Client do
 
   @spec events(session_id()) :: [Event.t()]
   def events(sid), do: impl(sid).events(sid)
+
+  @doc """
+  A page of the history before `before`, for a screen whose session was
+  opened from a checkpoint: its events as the stream's, whether there are earlier ones,
+  and the lowest seq in it.
+  """
+  @spec earlier(session_id(), pos_integer()) :: {:ok, page()} | {:error, term()}
+  def earlier(sid, before), do: impl(sid).earlier(sid, before)
 
   @doc "The agents a slash command may start a branch on."
   @spec commands(session_id()) :: [String.t()]
@@ -565,6 +583,32 @@ defmodule Troupe.Client do
   """
   @spec invites(session_id(), invite_verb()) :: {:ok, String.t()} | {:error, term()}
   def invites(sid, verb), do: impl(sid).invites(sid, verb)
+
+  @doc """
+  Whose a session on the platform is (root #1169): `:status` says, `{:set, "team"}` gives
+  it to its team and `{:set, "private"}` takes it back, which only its owner may do. A
+  session on this computer is never a team's. Answers the sentence to show.
+  """
+  @spec share(session_id(), Troupe.Client.Share.verb()) :: {:ok, String.t()} | {:error, String.t()}
+  def share(sid, verb), do: impl(sid).share(sid, verb)
+
+  @doc "What `/share` names after the command: nothing, `team` or `me`."
+  @spec share_args(String.t()) :: {:ok, Troupe.Client.Share.verb()} | {:error, String.t()}
+  defdelegate share_args(text), to: Troupe.Client.Share, as: :parse
+
+  @doc """
+  Which configuration a session on the platform runs on (root #1177): `:status` says its
+  bundle version and its channel's current one, `:update` raises it to the current one,
+  which only its owner may do. A session on this computer has no bundle. Answers the
+  sentence to show.
+  """
+  @spec bundle(session_id(), Troupe.Client.Bundle.verb()) ::
+          {:ok, String.t()} | {:error, String.t()}
+  def bundle(sid, verb), do: impl(sid).bundle(sid, verb)
+
+  @doc "What `/bundle` names after the command: nothing or `update`."
+  @spec bundle_args(String.t()) :: {:ok, Troupe.Client.Bundle.verb()} | {:error, String.t()}
+  defdelegate bundle_args(text), to: Troupe.Client.Bundle, as: :parse
 
   @doc """
   Archive a session (`true`) or bring it back (`false`), which only its owner may do: an

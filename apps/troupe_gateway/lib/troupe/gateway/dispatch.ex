@@ -90,6 +90,7 @@ defmodule Troupe.Gateway.Dispatch do
     "initialize" => :observe,
     "subscribe" => :observe,
     "unsubscribe" => :observe,
+    "session.events" => :observe,
     "session.list" => :observe,
     "session.get" => :observe,
     "blob.get" => :observe,
@@ -852,15 +853,17 @@ defmodule Troupe.Gateway.Dispatch do
   defp handle("subscribe", params, context) do
     with {:ok, topic} <- fetch(params, "topic"),
          {:ok, kind, session_id} <- parse_topic(topic),
-         :ok <- ensure_exists(kind, session_id) do
+         :ok <- ensure_exists(kind, session_id),
+         {:ok, from} <- subscribe_from(params) do
       level = if Map.get(params, "level") == "summary", do: :summary, else: :detail
-      from_seq = Map.get(params, "from_seq")
 
       # Register before reading the head, so an event published during the replay is
       # delivered after it rather than lost between the two.
       :ok = Session.subscribe(topic)
 
       head_seq = if session_id, do: Troupe.head_seq(session_id), else: 0
+
+      {checkpoint, from_seq} = start_at(kind, from, session_id, params)
 
       replay =
         case {kind, from_seq} do
@@ -877,15 +880,20 @@ defmodule Troupe.Gateway.Dispatch do
         replay: replay
       }
 
-      # A presence subscription has no head to be at and nothing to catch up on. Saying
-      # `0` rather than the session's head is the honest answer: a client that treated it
-      # as a cursor would be holding a number that means nothing on this topic.
-      answer =
-        if kind == :presence,
-          do: %{"subscription_id" => subscription.id, "head_seq" => 0, "cursored" => false},
-          else: %{"subscription_id" => subscription.id, "head_seq" => head_seq}
-
+      answer = subscribe_answer(kind, from, subscription.id, head_seq, checkpoint, from_seq)
       {:ok, answer, {:subscribed, subscription}}
+    end
+  end
+
+  # A page of the history before a seq, for a reader that started from a checkpoint and
+  # scrolls back. A read: it activates nothing.
+  defp handle("session.events", params, _context) do
+    with {:ok, session_id} <- fetch(params, "session_id"),
+         {:ok, before} <- seq_param(params, "before"),
+         {:ok, limit} <- events_limit(params),
+         {:ok, _session} <- lookup(session_id) do
+      {events, more} = Troupe.events_before(session_id, before, limit)
+      {:ok, %{"events" => Enum.map(events, &Event.to_json/1), "more" => more}}
     end
   end
 
@@ -2779,6 +2787,75 @@ defmodule Troupe.Gateway.Dispatch do
     case Session.parse_topic(topic) do
       {:ok, kind, id} -> {:ok, kind, id}
       :error -> {:error, Error.new(:invalid_params, %{field: "topic", value: topic})}
+    end
+  end
+
+  # `subscribe`'s `from`: `checkpoint`, or nothing, when `from_seq` says where to start.
+  # Both at once say two places.
+  defp subscribe_from(params) do
+    case {Map.get(params, "from"), Map.has_key?(params, "from_seq")} do
+      {nil, _} ->
+        {:ok, nil}
+
+      {"checkpoint", false} ->
+        {:ok, :checkpoint}
+
+      {"checkpoint", true} ->
+        {:error, Error.new(:invalid_params, %{field: "from", reason: "`from` or `from_seq`, not both"})}
+
+      {other, _} ->
+        {:error, Error.new(:invalid_params, %{field: "from", value: other})}
+    end
+  end
+
+  # From the latest checkpoint: the replay starts after the seq its facts stand for, and a
+  # session with none replays from the start.
+  defp start_at(:session, :checkpoint, session_id, _params), do: from_checkpoint(session_id)
+  defp start_at(_kind, _from, _session_id, params), do: {nil, Map.get(params, "from_seq")}
+
+  # A presence subscription has no head to be at and nothing to catch up on. Saying `0`
+  # rather than the session's head is the honest answer: a client that treated it as a
+  # cursor would be holding a number that means nothing on this topic.
+  defp subscribe_answer(:presence, _from, id, _head_seq, _checkpoint, _from_seq),
+    do: %{"subscription_id" => id, "head_seq" => 0, "cursored" => false}
+
+  defp subscribe_answer(:session, :checkpoint, id, head_seq, checkpoint, from_seq) do
+    %{
+      "subscription_id" => id,
+      "head_seq" => head_seq,
+      "checkpoint" => checkpoint && Event.to_json(checkpoint),
+      "from_seq" => from_seq
+    }
+  end
+
+  defp subscribe_answer(_kind, _from, id, head_seq, _checkpoint, _from_seq),
+    do: %{"subscription_id" => id, "head_seq" => head_seq}
+
+  defp from_checkpoint(session_id) do
+    case Troupe.latest_checkpoint(session_id) do
+      nil -> {nil, 0}
+      checkpoint -> {checkpoint, checkpoint.data["through"]}
+    end
+  end
+
+  # A page of `session.events`: at most this many.
+  @events_page 500
+
+  defp events_limit(params) do
+    case Map.get(params, "limit", @events_page) do
+      limit when is_integer(limit) and limit > 0 and limit <= @events_page ->
+        {:ok, limit}
+
+      other ->
+        {:error,
+         Error.new(:invalid_params, %{field: "limit", value: other, reason: "from 1 to #{@events_page}"})}
+    end
+  end
+
+  defp seq_param(params, field) do
+    case Map.get(params, field) do
+      n when is_integer(n) and n > 0 -> {:ok, n}
+      n -> {:error, Error.new(:invalid_params, %{field: field, value: n, reason: "a seq, from 1"})}
     end
   end
 

@@ -80,6 +80,8 @@ export interface AttachOptions {
    * false, and the wait ends with an error rather than asking the plane again.
    */
   alive?: () => boolean;
+  /** Open from the session's latest checkpoint where the pod keeps them (`SessionView.fromCheckpoint`). */
+  fromCheckpoint?: boolean;
 }
 
 export type AttachStatus = "connecting" | "waiting" | "live" | "refreshing" | "reconnecting" | "closed" | "failed";
@@ -116,6 +118,7 @@ export class SessionAttachment {
   private constructor(opts: AttachOptions) {
     this.opts = { mode: opts.mode ?? "read", backoffMs: opts.backoffMs ?? DEFAULT_BACKOFF, ...opts };
     this.view = new SessionView(opts.sessionId, this.opts.hooks ?? {});
+    this.view.fromCheckpoint = opts.fromCheckpoint === true;
   }
 
   static async open(opts: AttachOptions): Promise<SessionAttachment> {

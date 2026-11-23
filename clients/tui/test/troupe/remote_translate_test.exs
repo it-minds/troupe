@@ -173,6 +173,20 @@ defmodule Troupe.RemoteTranslateTest do
     assert spawned.data.name == "code"
   end
 
+  # A fork's seq 1 names no agent. Now that a subscription starts at the first event, it
+  # arrives, and must not open a window of its own beside the session's `root`.
+  test "a fork's opening event belongs to the root window, not a second one" do
+    event = Map.delete(durable("session_forked", %{"reason" => "branch"}), "agent")
+
+    {events, memory} = Translate.durable("s-1", event, Translate.memory())
+
+    assert [%{agent_path: "root", type: :branch_spawned}] =
+             Enum.filter(events, &(&1.type == :branch_spawned))
+
+    assert MapSet.member?(memory.agents, "root")
+    refute MapSet.member?(memory.agents, "session-1")
+  end
+
   test "an agent path arrives as a list and becomes this client's spelling" do
     [event] = translate(durable("user_input", %{"source" => "user", "text" => "hello"}))
     assert event.agent_path == "root"

@@ -82,6 +82,83 @@ defmodule Troupe.Remote.Translate do
     {spawned ++ events, memory}
   end
 
+  @doc """
+  The checkpoint a subscription started from (`subscribe {from: "checkpoint"}`), as the
+  local events a window folds in place of the history before it: the window's opening,
+  the summary as the block the transcript starts with (`:earlier`, which also carries the
+  facts the window keeps: usage, goal, the root's tasks, a running loop), the root at rest
+  as the event at `through` left it, and each approval and question still open, as the
+  events that asked them. Each carries `through` as its seq, an open ask the seq it was
+  asked at, so the journal's cursor is where the replay resumes and two asks are never
+  taken for one. `:unknown` for a shape this client does not read, which
+  starts from seq 1 instead.
+  """
+  @spec checkpoint(String.t(), map(), memory()) :: {:ok, [Event.t()], memory()} | :unknown
+  def checkpoint(
+        session_id,
+        %{"data" => %{"shape" => "session/1", "through" => through, "facts" => %{} = facts} = data} =
+          event,
+        memory
+      )
+      when is_integer(through) do
+    agent = agent_path(event)
+    at = ts(event)
+    started = if is_binary(facts["started_at"]), do: ts(%{"ts" => facts["started_at"]}), else: at
+    {spawned, memory} = ensure_branch(session_id, agent, %{"ts" => started}, memory)
+    emit = &durable_event(session_id, agent, &1, at, &2, through)
+
+    earlier =
+      emit.(:earlier, %{
+        summary: to_string(data["summary"] || ""),
+        at: at,
+        before: through + 1,
+        usage: usage(facts["usage"]),
+        goal: if(is_binary(facts["goal"]), do: facts["goal"]),
+        todos: todos(%{"items" => facts["todos"] || []}),
+        loop: running_loop(facts["loop"])
+      })
+
+    named =
+      if is_binary(facts["agent"]), do: [emit.(:agent_named, %{name: facts["agent"]})], else: []
+
+    {rest, memory} = at_rest(emit, agent, facts["done"], memory)
+
+    {open, memory} =
+      (Enum.map(facts["open_approvals"] || [], &{"approval_requested", &1}) ++
+         Enum.map(facts["open_questions"] || [], &{"question_asked", &1}))
+      |> Enum.sort_by(fn {_type, ask} -> ask["seq"] || 0 end)
+      |> Enum.flat_map_reduce(memory, fn {type, ask}, memory ->
+        asked = %{
+          "type" => type,
+          "seq" => ask["seq"] || through,
+          "ts" => at,
+          "agent" => ask["agent"] || agent,
+          "actor" => ask["actor"],
+          "data" => ask["data"] || %{}
+        }
+
+        durable(session_id, asked, memory)
+      end)
+
+    {:ok, spawned ++ [earlier] ++ named ++ rest ++ open, memory}
+  end
+
+  def checkpoint(_session_id, _event, _memory), do: :unknown
+
+  # How the root rested at `through`: done, with why where the harness wakes it no more,
+  # or idle after a turn.
+  defp at_rest(emit, agent, %{"reason" => reason} = done, memory) when is_binary(reason) do
+    {stopped, memory} = done_stop(emit, agent, done, memory)
+    {[emit.(:agent_state, %{to: :done, reason: reason})] ++ stopped, memory}
+  end
+
+  defp at_rest(emit, _agent, _done, memory), do: {[emit.(:agent_state, %{to: :idle})], memory}
+
+  defp running_loop(%{"running" => true} = loop),
+    do: %{id: loop["loop_id"], iteration: loop["iteration"] || 0, max: loop["max_iterations"]}
+
+  defp running_loop(_loop), do: nil
+
   @doc "An ephemeral event (`llm_delta`, `agent_state`, `progress`, `presence`) as a transient local event."
   @spec ephemeral(String.t(), map(), memory()) :: {[Event.t()], memory()}
   def ephemeral(session_id, %{} = event, memory) do
@@ -189,6 +266,9 @@ defmodule Troupe.Remote.Translate do
 
   # The worker writes the path as a list from the root (`["root", "explore#1"]`); the
   # contract's example and the fake write one string. Either becomes `root/explore#1`.
+  # A fork's first event names no agent; it is the session's own, whose window is `root`,
+  # not a second one beside it.
+  defp agent_path(%{"type" => "session_forked"} = event), do: agent_of(event) || "root"
   defp agent_path(event), do: agent_of(event) || "session-1"
 
   # `actor` is `{"kind", "subject", "display_name"}` on the wire; a name is what a
@@ -389,13 +469,16 @@ defmodule Troupe.Remote.Translate do
         {[emit.(:tool_call_completed, completed(data))], memory}
 
       # What the prompt was read from (`instructions_loaded`) is `/context`'s to show, not a
-      # line in the transcript at every turn the files changed.
+      # line in the transcript at every turn the files changed. A `checkpoint` says what
+      # the log comes to so far, which the window has folded already; the compaction it
+      # follows has its own line.
       type
       when type in [
              "tool_results",
              "mounts_resolved",
              "config_upgraded_ack",
-             "instructions_loaded"
+             "instructions_loaded",
+             "checkpoint"
            ] ->
         {[], memory}
 
@@ -531,6 +614,11 @@ defmodule Troupe.Remote.Translate do
       # who, on which and what, for whoever steers the session to act on. Never input.
       "artifact_commented" ->
         {[emit.(:remote_note, %{text: commented(data)})], memory}
+
+      # The session given to its team by its owner, or taken back (root #1169): a line; the
+      # worker moves the status line's mark.
+      "session_visibility_changed" ->
+        {[emit.(:remote_note, %{text: visibility_changed(data)})], memory}
 
       # A saved `AI!` or `AI?` comment started a branch of this session (root Decision 844):
       # the branch's session, its agent, and the comments, as the daemon wrote them.
@@ -719,7 +807,8 @@ defmodule Troupe.Remote.Translate do
          ], memory}
 
       "config_upgraded" ->
-        {[emit.(:remote_note, %{text: "config upgraded" <> version(data)})], memory}
+        {[emit.(:remote_note, %{text: "config upgraded" <> version(data) <> moved_by(data)})],
+         memory}
 
       "fs_changed" ->
         {[emit.(:fs_changed, %{paths: paths(data)})], memory}
@@ -1304,6 +1393,13 @@ defmodule Troupe.Remote.Translate do
   defp version(%{"to" => to}), do: " to #{to}"
   defp version(_data), do: ""
 
+  # Who raised the session's configuration (root #1177), or that its version was retired.
+  defp moved_by(%{"reason" => "raised"} = data),
+    do: ", raised by " <> (present(data["by_name"]) || present(data["by"]) || "its owner")
+
+  defp moved_by(%{"reason" => "retired"}), do: ", its version retired"
+  defp moved_by(_data), do: ""
+
   defp truncated(data) do
     what =
       case data["reason"] do
@@ -1469,6 +1565,18 @@ defmodule Troupe.Remote.Translate do
     who = present(author["display_name"]) || present(author["subject"]) || "Somebody"
     title = present(artifact["title"]) || "an artifact"
     "#{who} commented on “#{title}”: #{comment["body"] || ""}"
+  end
+
+  defp visibility_changed(data) do
+    who = present(data["by_name"]) || present(data["by"]) || "Its owner"
+
+    case data["visibility"] do
+      "team" ->
+        "#{who} gave this session to the team: everyone on it can open it"
+
+      _private ->
+        "#{who} took this session back from the team: only they and the people invited can open it"
+    end
   end
 
   defp present(value) when is_binary(value) and value != "", do: value

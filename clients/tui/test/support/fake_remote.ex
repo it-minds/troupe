@@ -359,7 +359,13 @@ defmodule Troupe.FakeRemote do
       events: Keyword.get(fields, :events, []),
       kind: Keyword.get(fields, :kind, "team"),
       device: Keyword.get(fields, :device),
-      archived: Keyword.get(fields, :archived, false)
+      archived: Keyword.get(fields, :archived, false),
+      visibility: Keyword.get(fields, :visibility, "private"),
+      # The bundle version it is pinned to and its channel's current one (root #1177); a
+      # session whose agent is working (`busy`) has a raise kept rather than taken.
+      bundle_version: Keyword.get(fields, :bundle_version, 3),
+      bundle_current: Keyword.get(fields, :bundle_current, 3),
+      busy: Keyword.get(fields, :busy, false)
     }
   end
 
@@ -448,7 +454,10 @@ defmodule Troupe.FakeRemote do
       invites: Keyword.get(opts, :invites, []),
       # What a pod says it can do at `initialize`, beyond its own: a laptop's relay says
       # `relayed`, and `relayed_allow_session` where it takes an answer for the session.
-      capabilities: Keyword.get(opts, :capabilities, %{})
+      capabilities: Keyword.get(opts, :capabilities, %{}),
+      # The most `session.events` gives in one page, below what the client asks for, so a
+      # test can page a short log in several steps.
+      events_page: Keyword.get(opts, :events_page, 500)
     }
 
     owner = self()
@@ -776,7 +785,7 @@ defmodule Troupe.FakeRemote do
   @addressed ~w(approval.respond blob.get fs.list fs.read fs.upload input.send presence.set
                 profile.switch session.archive session.erase session.get session.pin
                 session.unpin todo.edit tools.register tools.unregister turn.cancel
-                shell.run shell.cancel session.compact)
+                shell.run shell.cancel session.compact session.events)
 
   # What `Troupe.Gateway.Dispatch` refuses a command without, beyond `session_id`, for the
   # commands this client sends. Accepting any spelling is how `profile.switch`,
@@ -1036,6 +1045,86 @@ defmodule Troupe.FakeRemote do
     end
   end
 
+  # Given to the team or taken back, the owner's alone (root #1169): the row answered as
+  # `session.get` answers it, and the log's line, which the pod writes, pushed to whoever
+  # is attached.
+  defp dispatch(state, :plane, "session.visibility.set", %{"session_id" => id} = params, _pid) do
+    me = state.principal["sub"]
+    visibility = params["visibility"]
+
+    case Map.fetch(state.sessions, id) do
+      {:ok, %{owner: ^me} = session} when visibility in ["team", "private"] ->
+        session = Map.put(session, :visibility, params["visibility"])
+        state = put_in(state.sessions[id], session)
+
+        {event, state} =
+          append(
+            state,
+            id,
+            "session_visibility_changed",
+            %{
+              "visibility" => params["visibility"],
+              "by" => me,
+              "by_name" => state.principal["name"]
+            },
+            []
+          )
+
+        push(state, id, notification(id, event))
+        {{:ok, pod_row(session, me)}, state}
+
+      {:ok, %{owner: ^me}} ->
+        {{:error, -32_602, "invalid_params", %{"reason" => "visibility is team or private"}}, state}
+
+      {:ok, _theirs} ->
+        {{:error, -32_004, "forbidden", %{"required_role" => "owner"}}, state}
+
+      :error ->
+        {{:error, -32_005, "no such session"}, state}
+    end
+  end
+
+  # Raised to its channel's current version, the owner's alone (root #1177): at once with the
+  # log's `config_upgraded`, pushed to whoever is attached; kept while its agent works.
+  defp dispatch(state, :plane, "session.bundle.raise", %{"session_id" => id}, _pid) do
+    me = state.principal["sub"]
+
+    case Map.fetch(state.sessions, id) do
+      {:ok, %{owner: ^me, bundle_version: from, bundle_current: to}} when from >= to ->
+        {{:ok, pod_row(state.sessions[id], me)}, state}
+
+      {:ok, %{owner: ^me, busy: true, bundle_current: to}} ->
+        state = put_in(state.sessions[id][:bundle_raise_to], to)
+        reason = "the agent is working; the session moves to v#{to} when it is done"
+
+        {{:error, -32_006, "conflict",
+          %{"reason" => reason, "status" => "acting", "raise_to" => to}}, state}
+
+      {:ok, %{owner: ^me, bundle_version: from, bundle_current: to} = session} ->
+        state = put_in(state.sessions[id], Map.put(session, :bundle_version, to))
+
+        data = %{
+          "channel" => "stable",
+          "from" => from,
+          "to" => to,
+          "hash" => "sha256:#{to}",
+          "reason" => "raised",
+          "by" => me,
+          "by_name" => state.principal["name"]
+        }
+
+        {event, state} = append(state, id, "config_upgraded", data, [])
+        push(state, id, notification(id, event))
+        {{:ok, pod_row(state.sessions[id], me)}, state}
+
+      {:ok, _theirs} ->
+        {{:error, -32_004, "forbidden", %{"required_role" => "owner"}}, state}
+
+      :error ->
+        {{:error, -32_005, "no such session"}, state}
+    end
+  end
+
   defp dispatch(state, _kind, "session.open", params, _pid) do
     id = params["session_id"]
 
@@ -1077,19 +1166,45 @@ defmodule Troupe.FakeRemote do
     {{:ok, %{}}, put_in(state.subscriptions[pid], :fleet)}
   end
 
+  # From the session's latest checkpoint, as the servers start one (root #1181): the answer
+  # carries it and the seq its facts stand for, and the replay is everything after that.
+  defp dispatch(state, kind, "subscribe", %{"from" => "checkpoint"} = params, pid) do
+    "session:" <> id = params["topic"]
+    events = state.sessions[id][:events] || []
+    checkpoint = events |> Enum.filter(&(&1["type"] == "checkpoint")) |> List.last()
+    from_seq = if checkpoint, do: checkpoint["data"]["through"], else: 0
+    params = params |> Map.delete("from") |> Map.put("from_seq", from_seq)
+    {{:ok, answer}, state} = dispatch(state, kind, "subscribe", params, pid)
+    {{:ok, Map.merge(answer, %{"checkpoint" => checkpoint, "from_seq" => from_seq})}, state}
+  end
+
   defp dispatch(state, _kind, "subscribe", %{"topic" => "session:" <> id} = params, pid) do
-    from_seq = params["from_seq"] || 1
+    from_seq = params["from_seq"] || 0
     events = state.sessions[id][:events] || []
 
     # The replay lands in the handler's mailbox while it is still blocked on
     # this call, so it goes out after the reply, in order, and never repeats
     # anything the client already has.
-    replay = Enum.filter(events, &(&1["seq"] >= from_seq))
+    replay = Enum.filter(events, &(&1["seq"] > from_seq))
 
     for event <- replay, do: send(pid, {:push, notification(id, event)})
 
     head = events |> Enum.map(& &1["seq"]) |> Enum.max(fn -> 0 end)
     {{:ok, %{"head_seq" => head}}, put_in(state.subscriptions[pid], id)}
+  end
+
+  # A page of the history before a seq, oldest first, at most `limit` (500 when absent).
+  defp dispatch(
+         state,
+         _kind,
+         "session.events",
+         %{"session_id" => id, "before" => before} = params,
+         _pid
+       )
+       when is_integer(before) and before >= 1 do
+    above = Enum.filter(state.sessions[id][:events] || [], &(&1["seq"] < before))
+    page = Enum.take(above, -min(params["limit"] || 500, state.events_page))
+    {{:ok, %{"events" => page, "more" => length(above) > length(page)}}, state}
   end
 
   defp dispatch(state, _kind, "unsubscribe", _params, pid),
@@ -1273,6 +1388,11 @@ defmodule Troupe.FakeRemote do
   defp dispatch(%{private: private} = state, :plane, "session.get", %{"session_id" => id}, _pid)
        when is_map_key(private, id),
        do: {{:ok, private[id]}, state}
+
+  # A pod session's row, with whose it is and the team it runs for.
+  defp dispatch(%{sessions: sessions} = state, :plane, "session.get", %{"session_id" => id}, _pid)
+       when is_map_key(sessions, id),
+       do: {{:ok, pod_row(sessions[id], state.principal["sub"])}, state}
 
   defp dispatch(state, _kind, "blob.get", params, _pid) do
     bytes = "the whole blob"
@@ -2022,6 +2142,7 @@ defmodule Troupe.FakeRemote do
       "tokens" => session.tokens,
       "cost" => session.cost,
       "updated_at" => session.updated_at,
+      "visibility" => Map.get(session, :visibility, "team"),
       "archived" => Map.get(session, :archived, false)
     }
   end
@@ -2040,6 +2161,8 @@ defmodule Troupe.FakeRemote do
       )
       |> normalise()
       |> Map.put(:agent, params["agent"])
+      # As the plane keeps it: what the create said, else its own default.
+      |> Map.put(:visibility, params["visibility"] || "private")
 
     state = put_in(state.sessions[id], session)
 
@@ -2102,7 +2225,9 @@ defmodule Troupe.FakeRemote do
         "state" => session.state,
         "profile" => session.profile,
         "team" => session.team,
-        "title" => session.title
+        "title" => session.title,
+        "role" => if(session.owner == state.principal["sub"], do: "owner", else: "collaborator"),
+        "visibility" => Map.get(session, :visibility, "private")
       }}, state}
   end
 
@@ -2229,9 +2354,25 @@ defmodule Troupe.FakeRemote do
       "your_role" => "owner",
       # One of the person's own private sessions, listed beside the team's.
       "kind" => Map.get(session, :kind, "team"),
+      # Who may open a pod session: a seeded one is the team's.
+      "visibility" => Map.get(session, :visibility, "team"),
       "device" => Map.get(session, :device),
       "archived" => Map.get(session, :archived, false)
     }
+  end
+
+  defp pod_row(session, me) do
+    session
+    |> live_summary()
+    |> Map.merge(%{
+      "visibility" => Map.get(session, :visibility, "private"),
+      "team" => session.team,
+      "your_role" => if(session.owner == me, do: "owner", else: "collaborator"),
+      "bundle_version" => Map.get(session, :bundle_version, 3),
+      "bundle_channel" => "stable",
+      "bundle_current" => Map.get(session, :bundle_current, 3),
+      "bundle_raise_to" => Map.get(session, :bundle_raise_to)
+    })
   end
 
   defp normalise(session) do

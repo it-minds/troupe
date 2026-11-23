@@ -34,6 +34,9 @@ defmodule Troupe.Client.Remote do
   def events(sid), do: Journal.all(sid) ++ Worker.asking(sid)
 
   @impl true
+  def earlier(sid, before), do: Worker.earlier(sid, before)
+
+  @impl true
   def commands(sid) do
     with %{plane_url: plane, team: team} when is_binary(plane) <- attachment(sid),
          {:ok, profiles} <- profiles({:remote, plane}, team) do
@@ -78,6 +81,7 @@ defmodule Troupe.Client.Remote do
     status.state
     |> Capability.of(status.scopes, status.up?, status.error)
     |> Map.put(:relayed?, Map.get(status, :relayed?, false))
+    |> Map.put(:only_me?, Map.get(status, :only_me?, false))
     |> Map.put(:always_allow?, Map.get(status, :always_allow?, false))
     |> Map.put(:attach_artifact?, Map.get(status, :attach_artifact?, false))
   end
@@ -310,6 +314,80 @@ defmodule Troupe.Client.Remote do
     case call(plane, "session.uninvite", %{session_id: sid, subject: person}) do
       {:ok, answer} -> {:ok, Troupe.Client.Invites.uninvited(answer, person)}
       {:error, reason} -> {:error, refusal(reason)}
+    end
+  end
+
+  # Whose a pod session is, at the plane, which holds the row (root #1169). The status
+  # line's mark follows the answer at once; the log's line follows where a pod holds it.
+  @impl true
+  def share(sid, verb) do
+    case attachment(sid) do
+      %{plane_url: plane} when is_binary(plane) -> share_on(plane, sid, verb)
+      _ -> {:error, message(:not_attached)}
+    end
+  end
+
+  # Which configuration a pod session runs on, at the plane, which holds the pin (root
+  # #1177); raised, the log's `config_upgraded` follows where a pod holds it.
+  @impl true
+  def bundle(sid, verb) do
+    case attachment(sid) do
+      %{plane_url: plane} when is_binary(plane) -> bundle_on(plane, sid, verb)
+      _ -> {:error, message(:not_attached)}
+    end
+  end
+
+  defp bundle_on(plane, sid, :status) do
+    case call(plane, "session.get", %{session_id: sid}) do
+      {:ok, %{} = row} -> {:ok, Troupe.Client.Bundle.status(row)}
+      {:error, reason} -> {:error, refusal(reason)}
+    end
+  end
+
+  defp bundle_on(plane, sid, :update) do
+    case call(plane, "session.bundle.raise", %{session_id: sid}) do
+      {:ok, %{} = row} ->
+        {:ok, Troupe.Client.Bundle.raised(row)}
+
+      # The agent was working: the plane keeps the raise for when it is done.
+      {:error, %{message: "conflict", data: %{"raise_to" => to}}} ->
+        {:ok, Troupe.Client.Bundle.kept(to)}
+
+      {:error, %{message: "forbidden"} = error} ->
+        {:error, Troupe.Client.Bundle.forbidden(error[:data])}
+
+      {:error, %{code: -32_601}} ->
+        {:error, "this plane does not update a session's configuration yet"}
+
+      {:error, %{data: %{"reason" => said}}} when is_binary(said) ->
+        {:error, said}
+
+      {:error, reason} ->
+        {:error, refusal(reason)}
+    end
+  end
+
+  defp share_on(plane, sid, :status) do
+    case call(plane, "session.get", %{session_id: sid}) do
+      {:ok, %{} = row} -> {:ok, Troupe.Client.Share.status(row)}
+      {:error, reason} -> {:error, refusal(reason)}
+    end
+  end
+
+  defp share_on(plane, sid, {:set, visibility}) do
+    case call(plane, "session.visibility.set", %{session_id: sid, visibility: visibility}) do
+      {:ok, %{} = row} ->
+        _ = Worker.visibility(sid, row["visibility"])
+        {:ok, Troupe.Client.Share.set(row)}
+
+      {:error, %{message: "forbidden"} = error} ->
+        {:error, Troupe.Client.Share.forbidden(error[:data])}
+
+      {:error, %{code: -32_601}} ->
+        {:error, "this plane does not give a session to a team after it started yet"}
+
+      {:error, reason} ->
+        {:error, refusal(reason)}
     end
   end
 
@@ -645,7 +723,10 @@ defmodule Troupe.Client.Remote do
         agent: params[:agent],
         title: params[:title],
         source: source(params[:source]),
-        visibility: params[:visibility] || "private",
+        # The team's, as the desktop app sends; `private` (`/new --only-me`, `troupe run
+        # --only-me`) is its owner's and the people they invite, on the team's profile all
+        # the same. Never a sealed session, which is this computer's daemon's.
+        visibility: params[:visibility] || "team",
         prompt: params[:prompt] || "",
         command_id: RPC.command_id()
       })
@@ -658,6 +739,7 @@ defmodule Troupe.Client.Remote do
         state: :active,
         profile: params[:profile],
         team: params[:team],
+        only_me: body[:visibility] == "private",
         title: params[:title] || params[:prompt]
       })
     else
@@ -723,12 +805,14 @@ defmodule Troupe.Client.Remote do
   def open_session({:remote, plane} = origin, sid, mode, opts) do
     if Keyword.get(opts, :kind) == "remote",
       do: open_offered(plane, sid),
-      else: open_pod(plane, origin, sid, mode)
+      else: open_pod(plane, origin, sid, mode, Keyword.get(opts, :only_me, false))
   end
 
   def open_session(_origin, _sid, _mode, _opts), do: {:error, :unsupported}
 
-  defp open_pod(plane, origin, sid, mode) do
+  # `only_me` is what the listing said of the row opened (`session.open` does not say it),
+  # for the status line.
+  defp open_pod(plane, origin, sid, mode, only_me) do
     case call(plane, "session.open", %{session_id: sid, mode: to_string(mode)}) do
       {:ok, %{} = result} ->
         attach(origin, sid, %{
@@ -737,7 +821,12 @@ defmodule Troupe.Client.Remote do
           state: Worker.session_state(result["state"]) || :active,
           profile: result["profile"],
           team: result["team"],
-          title: result["title"]
+          only_me: only_me,
+          title: result["title"],
+          # Whose it is, where the plane says (root #1169), which `/share` and the log's
+          # `session_visibility_changed` then change.
+          visibility: result["visibility"],
+          owner?: result["role"] == "owner"
         })
 
       {:error, reason} ->
@@ -958,7 +1047,10 @@ defmodule Troupe.Client.Remote do
          state: info[:state] || :active,
          profile: info[:profile],
          team: info[:team],
-         title: info[:title]
+         only_me: info[:only_me] == true,
+         title: info[:title],
+         visibility: info[:visibility],
+         owner?: info[:owner?] == true
        ]}
 
     case DynamicSupervisor.start_child(Troupe.Remote.Sessions, spec) do
@@ -1153,6 +1245,10 @@ defmodule Troupe.Client.Remote do
       parent: nil,
       workspace: nil,
       kind: session["kind"] || "team",
+      # Who may open a pod session (`team`, or `private`: its owner and the people invited),
+      # and this person's part in it, which together say "only you".
+      visibility: session["visibility"],
+      your_role: session["your_role"],
       # A plane cannot say how this machine's copy of a private session stands, only that
       # it is waiting to be erased (root Decision 756).
       sync: if(session["state"] == "erasure_pending", do: "erasure_pending"),

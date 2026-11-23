@@ -30,9 +30,41 @@ those rules do not cover is refused with *not on this profile's teams*. Into a *
 session**, which has no profile, anybody who shares a team with you. A platform
 administrator can be invited into either. The picker only offers people you could invite.
 
+## Starting it as only you
+
+A session on a team's profile is the team's from its first second: everyone on the team
+sees it in their list. To work alone for a while first, tick **Only me, until I invite
+people** on the new-session screen in the desktop app, after choosing the profile and the
+team, or start it with `/new --only-me` in the terminal or `troupe run --profile NAME
+--only-me`. It runs on the team's profile and pods and against the team's budget as any
+team session; nobody on the team sees it until you invite them by name as above, and your
+list and the session's head mark it *only you*. Administrators oversee it as they oversee
+any session. It is not a private session: that word is for one sealed on your computer.
+
 A session on your computer alone is not invited this way: offer it for steering from
 another device instead (`/steer on bea@example.com`, see
 [steering from another device](sessions.md#steering-from-another-device)).
+
+## Giving a session to the team
+
+A session on the platform that you started for yourself (only you, and the people you
+invited, can open it) can be given to its team later, and taken back. Given to the team,
+everyone on it sees the session in their list and can open it, and steers it where the
+team allows: a team whose administrators let members steer sessions gives them that, and
+otherwise they follow it. Taken back, only you and the people you invited can open it again.
+Invitations stay as they are either way, and somebody both invited and on the team holds
+whichever of the two lets them do more.
+
+- **In the desktop app**, open the session and choose **Give it to the eng team** under its
+  ⋯, or **Only me again** on one the team has. The list and the head say *only you* in place
+  of *Team* while it is yours alone, and *Team* again once it is the team's.
+- **In the terminal**, `/share team` gives it to the team, `/share me` takes it back, and
+  `/share` alone says whose it is; the status line says *only you* while it is yours alone.
+- **In the console**, *Your sessions* under *Mine* says whose each is, with the same two.
+
+Only the owner gives a session to the team or takes it back; nobody else is offered it, an
+administrator included. Everybody attached sees a line saying it changed. A session on your
+computer, private or not, is never a team's: invite people into it by name instead.
 
 ## A private session
 

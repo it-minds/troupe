@@ -27,9 +27,9 @@ defmodule Troupe.Plane.ProfileView do
   it exists at all. Nothing secret is in it: an identity at a server is the server and its
   token host, never its client id or its key.
 
-  The offering helpers here (`offering/2`, `listing_entitlements/2`, `agent_rule/1`) are the
-  ones the harness uses for `profiles.list`, `session.create` and every activation, so the
-  view and the pod cannot drift apart.
+  The offering helpers here (`offering/2`, `offering_at/3`, `listing_entitlements/2`,
+  `agent_rule/1`) are the ones the harness uses for `profiles.list`, `session.create` and
+  every activation, so the view and the pod cannot drift apart.
   """
 
   alias Troupe.Plane.{Bundles, Fleet, Identity, Ledger}
@@ -63,6 +63,22 @@ defmodule Troupe.Plane.ProfileView do
 
       %{config_bundle_channel: channel} = row ->
         Bundles.offering(channel, entitlements, agent_rule(row))
+    end
+  end
+
+  @doc """
+  `offering/2` for a session pinned to `version` of the profile's channel: that version's
+  agents, skills and servers, not the current bundle's, cut and narrowed the same way.
+  `nil` is the current version.
+  """
+  @spec offering_at(String.t(), integer() | nil, [map()]) :: map()
+  def offering_at(profile, version, entitlements) do
+    case Fleet.get_profile(profile) do
+      nil ->
+        Bundles.offering(nil, entitlements)
+
+      %{config_bundle_channel: channel} = row ->
+        Bundles.offering_at(channel, version, entitlements, agent_rule(row))
     end
   end
 

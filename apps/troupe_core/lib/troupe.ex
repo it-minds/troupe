@@ -20,7 +20,7 @@ defmodule Troupe do
   alias Troupe.LLM.Catalog.Refresher
   alias Troupe.Onboard.Notice
   alias Troupe.Protocol.{Event, Origin}
-  alias Troupe.Session.{Approvals, Blobs, Log, Questions, Watcher}
+  alias Troupe.Session.{Approvals, Blobs, Checkpoint, Log, Questions, Watcher}
   alias Troupe.Sessions.{Archive, Fork, Index, Pin, Title, Unseen}
 
   require Logger
@@ -677,19 +677,23 @@ defmodule Troupe do
   down, and killed after thirty seconds, without holding up any other session's start or
   stop. A second stop of a session already being stopped waits for that one and writes
   nothing.
+
+  `dormant: false` stops the tree without the marker, for a tree its host starts again
+  at once over the same log (a pod raising a session's configuration in place): the
+  session never slept, and a client reading the log should not be told it did.
   """
-  @spec stop_session(String.t()) :: :ok | {:error, :not_found}
-  def stop_session(session_id) do
+  @spec stop_session(String.t(), keyword()) :: :ok | {:error, :not_found}
+  def stop_session(session_id, opts \\ []) do
     case Registry.whereis({:session, session_id}) do
       nil -> {:error, :not_found}
-      pid -> stop_tree(session_id, pid)
+      pid -> stop_tree(session_id, pid, Keyword.get(opts, :dormant, true))
     end
   end
 
-  defp stop_tree(session_id, pid) do
+  defp stop_tree(session_id, pid, mark?) do
     if Registry.first?({:stopping, session_id}) do
       try do
-        dormant(session_id)
+        if mark?, do: dormant(session_id)
         Sessions.stop_session(session_id)
       after
         Registry.release({:stopping, session_id})
@@ -936,9 +940,9 @@ defmodule Troupe do
     Log.head_seq(session_id)
   catch
     :exit, _ ->
-      case off_disk(session_id) do
-        [] -> 0
-        events -> List.last(events).seq || 0
+      case Log.last_on_disk(session_id, state_dirs()) do
+        nil -> 0
+        event -> event.seq || 0
       end
   end
 
@@ -947,8 +951,55 @@ defmodule Troupe do
   def replay_from(session_id, from_seq) do
     Log.replay_from(session_id, from_seq)
   catch
-    :exit, _ ->
-      session_id |> off_disk() |> Enum.filter(&(&1.seq && &1.seq > from_seq))
+    :exit, _ -> Log.read_session_after(session_id, state_dirs(), from_seq)
+  end
+
+  @doc """
+  The session's latest `checkpoint` in a shape this build reads (`Troupe.Session.Checkpoint`),
+  or `nil`: a session that never compacted, or one whose checkpoints are all of a shape a
+  reader replays from seq 1 for.
+
+  Looked for back from the head a window at a time, each twice the last, so what is decoded
+  is about what lies between the head and the checkpoint; a session with none is read once
+  through.
+  """
+  @checkpoint_window 64
+
+  @spec latest_checkpoint(String.t()) :: Event.t() | nil
+  def latest_checkpoint(session_id),
+    do: find_checkpoint(session_id, head_seq(session_id) + 1, @checkpoint_window)
+
+  defp find_checkpoint(_session_id, before, _window) when before <= 1, do: nil
+
+  defp find_checkpoint(session_id, before, window) do
+    from = max(before - 1 - window, 0)
+
+    found =
+      session_id
+      |> events_between(from, before)
+      |> Enum.reverse()
+      |> Enum.find(&(&1.type == "checkpoint" and match?({:ok, _}, Checkpoint.from_checkpoint(&1))))
+
+    found || find_checkpoint(session_id, from + 1, window * 2)
+  end
+
+  @doc """
+  Up to `limit` durable events before `before`, oldest first, and whether there are more
+  before those: a page of history for a reader that started from a checkpoint. Read only
+  from the page's first event to `before`.
+  """
+  @spec events_before(String.t(), pos_integer(), pos_integer()) :: {[Event.t()], boolean()}
+  def events_before(session_id, before, limit) do
+    from = max(before - 1 - limit, 0)
+    {events_between(session_id, from, before), from > 0}
+  end
+
+  @doc "Durable events after `from_seq` and before `before`, read no further than `before`."
+  @spec events_between(String.t(), non_neg_integer(), pos_integer()) :: [Event.t()]
+  def events_between(session_id, from_seq, before) do
+    Log.replay_between(session_id, from_seq, before)
+  catch
+    :exit, _ -> Log.read_session_between(session_id, state_dirs(), from_seq, before)
   end
 
   @doc "Read a stored blob, optionally a byte range."

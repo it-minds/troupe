@@ -1,0 +1,22 @@
+{
+  "$id": "https://troupe.dev/schema/v1/events/session_visibility_changed.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "properties": {
+    "by": {
+      "type": "string"
+    },
+    "by_name": {
+      "type": "string"
+    },
+    "visibility": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "by",
+    "visibility"
+  ],
+  "title": "session_visibility_changed",
+  "type": "object"
+}

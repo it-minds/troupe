@@ -323,7 +323,22 @@ defmodule Troupe.Protocol.Schema do
         "model" => optional(:string),
         "prompt_bytes" => optional(:object),
         "usage" => optional(:object),
-        "gateway" => optional(:object)
+        "gateway" => optional(:object),
+        # The range it folded: the agent's events through this seq, the log's head when the
+        # summariser was asked. Absent from a log written before it.
+        "folded_through" => optional(:integer)
+      },
+      # What the log comes to at `through`, the root's rest after the root's `compacted` at
+      # `compacted`, written by the session itself (`Troupe.Session.Checkpoint`). A cache in
+      # the chain: a reader that does not know `shape` replays from seq 1, and every event
+      # after `through` folds on top of `facts`.
+      "checkpoint" => %{
+        "shape" => required(:string),
+        "through" => required(:integer),
+        "compacted" => required(:integer),
+        "previous" => required({:nullable, :integer}),
+        "summary" => optional(:string),
+        "facts" => required(:object)
       },
       "budget_exhausted" => %{"limit" => required(:string)},
       # The budget is spent and the agent asks before the next model call (Decision 660).
@@ -606,7 +621,11 @@ defmodule Troupe.Protocol.Schema do
         # Re-resolved at this activation: a publish can add an entry the team is not
         # entitled to, so the event that says the configuration moved says what the
         # session may now see.
-        "entitlements" => optional(:object)
+        "entitlements" => optional(:object),
+        # Why it moved, `retired` or `raised` by its owner, and who raised it.
+        "reason" => optional(:string),
+        "by" => optional(:string),
+        "by_name" => optional(:string)
       },
       "fs_changed" => %{
         "path" => required(:string),
@@ -670,6 +689,13 @@ defmodule Troupe.Protocol.Schema do
         "subject" => required(:string),
         "by" => required(:string),
         "display_name" => optional(:string),
+        "by_name" => optional(:string)
+      },
+      # A pod session given to its team by its owner (`team`), or taken back to its owner and
+      # the people invited (`private`), from the plane; and by whom.
+      "session_visibility_changed" => %{
+        "visibility" => required(:string),
+        "by" => required(:string),
         "by_name" => optional(:string)
       },
       # A comment written on an artifact this session published, from the plane: the
@@ -769,9 +795,19 @@ defmodule Troupe.Protocol.Schema do
         "command_id" => required(:string),
         "topic" => required(:string),
         "level" => optional(:string),
-        "from_seq" => optional(:integer)
+        "from_seq" => optional(:integer),
+        # `checkpoint`: replay from the session's latest checkpoint, which the answer
+        # carries (the `checkpoints` capability). Not with `from_seq`.
+        "from" => optional(:string)
       },
       "unsubscribe" => %{"subscription_id" => required(:string)},
+      # A page of history: up to `limit` (500 at most, and by default) events before
+      # `before`, oldest first, and whether there are more. A read; it wakes nothing.
+      "session.events" => %{
+        "session_id" => required(:string),
+        "before" => required(:integer),
+        "limit" => optional(:integer)
+      },
       "session.list" => %{"filter" => optional(:object)},
       "session.get" => %{"session_id" => required(:string)},
       "session.create" => %{
@@ -827,6 +863,15 @@ defmodule Troupe.Protocol.Schema do
         "person" => required(:string)
       },
       "session.invites" => %{"session_id" => required(:string)},
+      # A pod session given to its team (`team`) or taken back (`private`) by its owner: the
+      # plane's, which the clients ask directly.
+      "session.visibility.set" => %{
+        "session_id" => required(:string),
+        "visibility" => required(:string)
+      },
+      # A pod session raised to its channel's current bundle version by its owner: the
+      # plane's, which the clients ask directly.
+      "session.bundle.raise" => %{"session_id" => required(:string)},
       # Somebody's private session shared with this machine's person, read from the plane's
       # sealed copy with the keys in their own slot, after `after_seq`.
       "session.read_sealed" => %{

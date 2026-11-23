@@ -837,6 +837,24 @@ describe("questions, and what the daemon says about limits (troupe-remote Decisi
     assert.equal((state.entries[0] as Extract<Entry, { kind: "system" }>).text, "Cy commented on “Plan”: Can you add last quarter?");
   });
 
+  it("says a session given to its team and taken back, and keeps whose it is now (troupe #1169)", () => {
+    seq = 0;
+    const given = foldAll([durable("session_visibility_changed", { visibility: "team", by: "ada@example.test", by_name: "Ada" })]);
+    assert.equal(given.visibility, "team");
+    assert.equal((given.entries[0] as Extract<Entry, { kind: "system" }>).text, "Ada gave this session to the team: everyone on it can open it");
+
+    const taken = foldAll([
+      durable("session_visibility_changed", { visibility: "team", by: "ada@example.test" }),
+      durable("session_visibility_changed", { visibility: "private", by: "ada@example.test" }),
+    ]);
+    assert.equal(taken.visibility, "private");
+    assert.equal(
+      (taken.entries[1] as Extract<Entry, { kind: "system" }>).text,
+      "ada@example.test took this session back from the team: only they and the people invited can open it",
+    );
+    assert.equal(foldAll([]).visibility, undefined);
+  });
+
   it("says the organisation's memory changed under a running session as the harness's sentence (troupe #55)", () => {
     seq = 0;
     const message = "The organisation's memory changed: the team design's memory is now version 6 (it was 5). Read from this turn on.";

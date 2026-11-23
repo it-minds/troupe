@@ -2033,6 +2033,25 @@ details.advanced > summary {
   border-left: var(--bw-edge) solid var(--border-strong);
   color: var(--text-secondary);
 }
+/* A transcript opened from a checkpoint (troupe #1182): the summary of what came before,
+   in the quote's shape, and the line at the top that pages the part before it in. */
+.earlier {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.earlier-summary {
+  margin: 0;
+  padding-left: var(--space-3);
+  border-left: var(--bw-edge) solid var(--border-strong);
+  color: var(--text-secondary);
+}
+.earlier-summary .md > :last-child {
+  margin-bottom: 0;
+}
+.earlier-more {
+  margin: 0;
+}
 .md hr {
   margin: var(--space-3) 0;
   border: none;
@@ -4098,6 +4117,22 @@ details.advanced > summary {
 }
 .ns-small {
   font: var(--t-ui-small);
+}
+/* The only-me tick on the platform path, and who can open the session under it. */
+.ns-only-me {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding-top: var(--space-2);
+}
+.ns-only-me > label {
+  padding: 0 var(--space-5);
+}
+.ns-who {
+  margin: 0;
+  padding: 0 var(--space-5) var(--space-3);
+  font: var(--t-note);
+  color: var(--text-secondary);
 }
 .ns-foot {
   border-top: var(--bw-hairline) solid var(--divider);

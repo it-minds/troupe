@@ -6,9 +6,10 @@ defmodule Troupe.Remote.Worker do
   What it guarantees:
 
     * the durable stream is gap-free — the subscription always resumes at
-      `cursor + 1`, and the journal drops anything it has already seen, so a
-      reconnect, a `resync_required` and a move to another pod all produce the
-      same transcript as an unbroken connection;
+      the last `seq` it holds (`from_seq`; the servers replay what is after it), and
+      the journal drops anything it has already seen, so a reconnect, a
+      `resync_required` and a move to another pod all produce the same transcript
+      as an unbroken connection;
     * nothing pushes back on the stream — durable events are published the
       moment they arrive, `llm_delta` is coalesced into one event per frame
       interval with a byte cap, and a TUI that cannot keep up costs this
@@ -55,6 +56,8 @@ defmodule Troupe.Remote.Worker do
   # cannot keep up gets the completed message as a durable event anyway.
   @delta_cap 64 * 1024
   @max_waiting 64
+  # Events asked for in one page of history, the most `session.events` gives.
+  @page 500
   # Attempts in a row that reach no session before a plane session is given up on: about
   # a minute of backoff, long enough for a pod to be replaced.
   @max_tries 10
@@ -235,10 +238,40 @@ defmodule Troupe.Remote.Worker do
   @spec post(String.t(), atom(), map()) :: :ok | {:error, term()}
   def post(session_id, type, data), do: call(session_id, {:note, {type, data}})
 
+  @doc "Whose the session is now, as the plane answered it (`team` or `private`): the status line's mark follows."
+  @spec visibility(String.t(), String.t()) :: :ok | {:error, term()}
+  def visibility(session_id, visibility), do: call(session_id, {:visibility, visibility})
+
   @spec blob(String.t(), String.t(), non_neg_integer(), non_neg_integer()) ::
           {:ok, term()} | {:error, term()}
   def blob(session_id, blob, offset \\ 0, length \\ 1_000_000),
     do: call(session_id, {:rpc, "blob.get", %{blob: blob, range: [offset, offset + length - 1]}})
+
+  @doc """
+  A page of the session's history before `before`, for a window opened from a checkpoint:
+  `session.events`, translated as the stream is but with a memory of its own, since the
+  page comes before everything the stream's memory has seen. Answers the page's events,
+  whether the server has earlier ones, and the lowest seq in it.
+  """
+  @spec earlier(String.t(), pos_integer()) ::
+          {:ok, %{events: [Troupe.Event.t()], more: boolean(), first: pos_integer() | nil}}
+          | {:error, term()}
+  def earlier(session_id, before) do
+    with {:ok, %{"events" => events} = page} when is_list(events) <-
+           call(session_id, {:rpc, "session.events", %{before: before, limit: @page}}),
+         {:ok, memory} <- call(session_id, :page_memory) do
+      {translated, _memory} =
+        Enum.flat_map_reduce(events, memory, &Translate.durable(session_id, &1, &2))
+
+      first =
+        events |> Enum.map(&Translate.seq/1) |> Enum.reject(&is_nil/1) |> Enum.min(fn -> nil end)
+
+      {:ok, %{events: translated, more: page["more"] == true, first: first}}
+    else
+      {:ok, _other} -> {:error, "the server's answer had no events"}
+      {:error, reason} -> {:error, reason}
+    end
+  end
 
   @doc "What the connection and the session look like right now."
   @spec status(String.t()) :: map()
@@ -335,6 +368,9 @@ defmodule Troupe.Remote.Worker do
       cursor: Journal.cursor(sid),
       head_seq: nil,
       subscribed?: false,
+      # Whether a first subscribe may start from the session's checkpoint: until one came
+      # in a shape this client does not read.
+      from_checkpoint?: true,
       scopes: [],
       capabilities: %{},
       # The largest message the server takes, as `initialize` says (`limits`); nil before.
@@ -345,7 +381,13 @@ defmodule Troupe.Remote.Worker do
       # caller knows better, as the daemon's client does of its own sessions.
       isolation: Keyword.get(opts, :isolation, :remote),
       team: Keyword.get(opts, :team),
+      # A pod session of the person's own the team cannot open, which the status line says.
+      only_me: Keyword.get(opts, :only_me, false),
       title: Keyword.get(opts, :title),
+      # Whose a pod session is, as the plane said at the open and the log says since (root
+      # #1169): `team` or `private`, nil where nobody said; and whether it is this person's.
+      visibility: Keyword.get(opts, :visibility),
+      owner?: Keyword.get(opts, :owner?, false),
       agent: nil,
       # Events of this client's own waiting for the window to open (`post/3`), each
       # `{type, data}`.
@@ -384,12 +426,26 @@ defmodule Troupe.Remote.Worker do
        endpoint: state.endpoint,
        error: state.error,
        relayed?: relayed?(state),
+       only_me?: only_me?(state),
        always_allow?: state.capabilities["approval_allow_always"] == true,
        attach_artifact?: state.capabilities["fs_upload_artifact"] == true
      }, state}
   end
 
+  def handle_call({:visibility, visibility}, _from, state) do
+    state = %{state | visibility: visibility}
+    publish_status(state)
+    {:reply, :ok, state}
+  end
+
   def handle_call(:asking, _from, state), do: {:reply, asking_events(state), state}
+
+  # A fresh memory for a page of history, knowing only who this connection is and what the
+  # session's window is called.
+  def handle_call(:page_memory, _from, %{memory: memory} = state),
+    do:
+      {:reply, {:ok, Translate.me(Translate.memory(memory.isolation, memory.profile), memory.me)},
+       state}
 
   def handle_call(:attachment, _from, state) do
     {:reply,
@@ -1100,14 +1156,44 @@ defmodule Troupe.Remote.Worker do
   defp subscribe(%{subscribed?: true} = state), do: state
 
   defp subscribe(state) do
-    params = %{
-      topic: "session:" <> state.session_id,
-      level: "detail",
-      from_seq: state.cursor + 1
-    }
-
+    params = Map.merge(%{topic: "session:" <> state.session_id, level: "detail"}, start(state))
     state = send_request(state, {:internal, :subscribe}, "subscribe", params)
     %{state | subscribed?: true}
+  end
+
+  # Where the replay starts. A session this machine holds nothing of starts from its
+  # latest checkpoint where the server keeps them; otherwise `from_seq` is the last seq
+  # already held: the server replays what is after it, so the cursor itself, never
+  # cursor + 1 (which skips an event).
+  defp start(%{cursor: 0, from_checkpoint?: true, capabilities: %{"checkpoints" => true}}),
+    do: %{from: "checkpoint"}
+
+  defp start(state), do: %{from_seq: state.cursor}
+
+  # An answer from the session's checkpoint: its events go into the journal at its
+  # `through`, ahead of the replay after it.
+  defp subscribed(state, %{"checkpoint" => %{} = checkpoint} = result) do
+    case Translate.checkpoint(state.session_id, checkpoint, state.memory) do
+      {:ok, events, memory} ->
+        visibility = get_in(checkpoint, ["data", "facts", "visibility"])
+        state = %{state | memory: memory, agent: state.agent || Translate.root_of(checkpoint)}
+        for event <- Journal.append(state.session_id, events), do: publish(state, event)
+
+        state = %{
+          state
+          | cursor: max(state.cursor, checkpoint["data"]["through"]),
+            visibility: if(is_binary(visibility), do: visibility, else: state.visibility)
+        }
+
+        publish_status(state)
+        subscribed(state, Map.delete(result, "checkpoint"))
+
+      # A shape this client cannot read: from seq 1 on a new socket, before the replay
+      # from the checkpoint's `through` has drawn anything.
+      :unknown ->
+        send(self(), :connect)
+        %{drop_socket(state, keep_waiting: true) | from_checkpoint?: false}
+    end
   end
 
   # The session is reached, which is what ends a run of failures: a pod that takes the
@@ -1321,7 +1407,13 @@ defmodule Troupe.Remote.Worker do
 
   defp durable(state, %{} = params) do
     {events, memory} = Translate.durable(state.session_id, params, state.memory)
-    state = %{state | memory: memory, agent: state.agent || Translate.root_of(params)}
+
+    state = %{
+      state
+      | memory: memory,
+        agent: state.agent || Translate.root_of(params),
+        visibility: given(params) || state.visibility
+    }
 
     state =
       case Journal.append(state.session_id, events) do
@@ -1339,10 +1431,15 @@ defmodule Troupe.Remote.Worker do
           %{state | cursor: max(state.cursor, Translate.seq(params) || state.cursor)}
       end
 
+    if given(params), do: publish_status(state)
     write_notes(state)
   end
 
   defp durable(state, _params), do: state
+
+  # The session given to its team or taken back, as its log says.
+  defp given(%{"type" => "session_visibility_changed", "data" => %{"visibility" => v}}), do: v
+  defp given(_params), do: nil
 
   # The client's own lines go into the window once there is one, stamped after whatever
   # opened it: written earlier, they would sort ahead of the session's first events, which
@@ -1577,8 +1674,16 @@ defmodule Troupe.Remote.Worker do
       # artifact attached by name, its files fetched by the server.
       |> Map.put(:always_allow?, state.capabilities["approval_allow_always"] == true)
       |> Map.put(:attach_artifact?, state.capabilities["fs_upload_artifact"] == true)
+      |> Map.put(:only_me?, only_me?(state))
     )
   end
+
+  # Only its owner's and the people invited: as the plane or the log said it last where
+  # either did (root #1169), else as the listing the session was opened from said.
+  defp only_me?(%{visibility: visibility} = state) when is_binary(visibility),
+    do: visibility == "private" and state.owner?
+
+  defp only_me?(state), do: state.only_me
 
   # A laptop's session reached through the plane whose approvals are answered once from
   # here: its daemon says `relayed` in `initialize`, and one that takes an answer for the

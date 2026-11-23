@@ -6,6 +6,9 @@
     "command_id": {
       "type": "string"
     },
+    "from": {
+      "type": "string"
+    },
     "from_seq": {
       "type": "integer"
     },
