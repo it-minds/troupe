@@ -18,6 +18,7 @@ import {
   onThisComputer,
   PlaneSource,
   planeOpener,
+  raiseKept,
   RemoteSource,
   ServerOffer,
   SessionAttachment,
@@ -178,6 +179,12 @@ export interface Marks {
   keep: (row: FleetRow, on: boolean) => Promise<void>;
   /** Give a pod session to its team (`team`) or take it back (`private`), at the plane (troupe #1169). Rejects with the refusal. */
   share: (row: FleetRow, visibility: "team" | "private") => Promise<void>;
+  /**
+   * Raise a pod session to its channel's current bundle version, at the plane (troupe
+   * #1177). Rejects with the refusal: `conflict` with `raise_to` while its agent works, the
+   * raise kept for when it is done, which the row says from then on.
+   */
+  raise: (row: FleetRow) => Promise<void>;
 }
 
 /**
@@ -236,7 +243,27 @@ export function useMarks(store: FleetStore, auth: AuthSession | null, daemon: Da
     },
     [store, auth],
   );
-  return useMemo(() => ({ rename, keep, share }), [rename, keep, share]);
+  // Which configuration a pod session runs on: the plane's alone. The answer's versions go
+  // on the list's row at once, as a name does; a raise kept for the agent's rest says so too.
+  const raise = useCallback(
+    async (row: FleetRow) => {
+      if (row.kind !== "team" || !auth) throw new Error("Only a session on the platform has a configuration to update");
+      const raw = (row.raw && typeof row.raw === "object" ? row.raw : {}) as Record<string, unknown>;
+      try {
+        const answered = await auth.plane.raiseSessionBundle(await auth.token(), row.id);
+        store.patch(row.id, {
+          raw: { ...raw, bundle_version: answered.bundle_version, bundle_current: answered.bundle_current, bundle_raise_to: answered.bundle_raise_to ?? null },
+        });
+      } catch (e) {
+        const kept = raiseKept(e);
+        if (kept !== null) store.patch(row.id, { raw: { ...raw, bundle_raise_to: kept } });
+        throw e;
+      }
+      await store.refreshAfterChange();
+    },
+    [store, auth],
+  );
+  return useMemo(() => ({ rename, keep, share, raise }), [rename, keep, share, raise]);
 }
 
 /** Who sessions on this computer are recorded as, and what to call them. */

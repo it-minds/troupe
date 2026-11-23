@@ -9,10 +9,12 @@ defmodule Troupe.Plane.Bundles do
   session whose agent definitions changed underneath it would be a different session
   halfway through.
 
-  Retiring a version is how that promise ends. A session pinned to a retired version
+  Retiring a version is one way that promise ends. A session pinned to a retired version
   cannot be started again on it, and its next activation moves it to the channel's
-  current version and says so with a durable `config_upgraded` event — which is the only
-  way a session's configuration ever changes, and it is in the log.
+  current version and says so with a durable `config_upgraded` event. The other is its
+  owner raising it to the current version (`session.bundle.raise`), which lands the same
+  way, at its next wake or as its pod starts its tree again in place. Those are the only
+  ways a session's configuration ever changes, and each is in the log.
 
   ## What a bundle is checked against
 

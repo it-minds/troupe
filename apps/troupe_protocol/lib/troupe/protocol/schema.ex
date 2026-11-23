@@ -606,7 +606,11 @@ defmodule Troupe.Protocol.Schema do
         # Re-resolved at this activation: a publish can add an entry the team is not
         # entitled to, so the event that says the configuration moved says what the
         # session may now see.
-        "entitlements" => optional(:object)
+        "entitlements" => optional(:object),
+        # Why it moved, `retired` or `raised` by its owner, and who raised it.
+        "reason" => optional(:string),
+        "by" => optional(:string),
+        "by_name" => optional(:string)
       },
       "fs_changed" => %{
         "path" => required(:string),
@@ -840,6 +844,9 @@ defmodule Troupe.Protocol.Schema do
         "session_id" => required(:string),
         "visibility" => required(:string)
       },
+      # A pod session raised to its channel's current bundle version by its owner: the
+      # plane's, which the clients ask directly.
+      "session.bundle.raise" => %{"session_id" => required(:string)},
       # Somebody's private session shared with this machine's person, read from the plane's
       # sealed copy with the keys in their own slot, after `after_seq`.
       "session.read_sealed" => %{

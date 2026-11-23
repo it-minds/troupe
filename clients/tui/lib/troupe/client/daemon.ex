@@ -1008,6 +1008,10 @@ defmodule Troupe.Client.Daemon do
   @impl true
   def share(_sid, _verb), do: {:error, Troupe.Client.Share.not_here()}
 
+  # A session on this computer runs its agents from this computer's files (root #1177).
+  @impl true
+  def bundle(_sid, _verb), do: {:error, Troupe.Client.Bundle.not_here()}
+
   @impl true
   def keep(sid, kept?) do
     params = %{session_id: sid, command_id: Troupe.Remote.RPC.command_id()}

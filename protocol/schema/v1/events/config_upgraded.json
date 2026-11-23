@@ -3,6 +3,12 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": true,
   "properties": {
+    "by": {
+      "type": "string"
+    },
+    "by_name": {
+      "type": "string"
+    },
     "channel": {
       "type": "string"
     },
@@ -13,6 +19,9 @@
       "type": "integer"
     },
     "hash": {
+      "type": "string"
+    },
+    "reason": {
       "type": "string"
     },
     "to": {

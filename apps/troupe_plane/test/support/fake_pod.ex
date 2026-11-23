@@ -4,7 +4,8 @@ defmodule Troupe.Plane.FakePod do
   test process, so assertions are about what actually crossed the wire.
 
   Every request the plane pushes is answered `{"ok": true}` — or, for a method named in
-  `refuse:`, with the error object given for it; notifications are forwarded and not
+  `refuse:`, with the error object given for it, and for one named in `answers:`, with the
+  result given for it; notifications are forwarded and not
   answered. The test receives `{:pushed, method, params}` for both. A method named in
   `hold:` is not answered until the test says so: it receives
   `{:held, method, params, answer}` instead and calls `answer.()`, and the pod goes on
@@ -24,7 +25,9 @@ defmodule Troupe.Plane.FakePod do
           %{worker_id: String.t(), socket: port()}
   def enrol(port, token, pod_name, opts \\ []) do
     test = Keyword.get(opts, :notify, self())
-    refuse = Keyword.get(opts, :refuse, %{})
+    # A method named in `answers:` is answered with the result given for it.
+    answers = Map.new(Keyword.get(opts, :answers, %{}), fn {method, result} -> {method, {:result, result}} end)
+    refuse = Map.merge(Keyword.get(opts, :refuse, %{}), answers)
     hold = Keyword.get(opts, :hold, [])
     {:ok, socket} = :gen_tcp.connect(~c"127.0.0.1", port, [:binary, active: false, packet: :raw])
 
@@ -99,6 +102,7 @@ defmodule Troupe.Plane.FakePod do
   defp answer(id, method, refuse) do
     case Map.get(refuse, method) do
       nil -> Jason.encode!(%{"jsonrpc" => "2.0", "id" => id, "result" => %{"ok" => true}})
+      {:result, result} -> Jason.encode!(%{"jsonrpc" => "2.0", "id" => id, "result" => result})
       error -> Jason.encode!(%{"jsonrpc" => "2.0", "id" => id, "error" => error})
     end
   end
