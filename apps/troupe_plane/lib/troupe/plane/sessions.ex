@@ -621,7 +621,7 @@ defmodule Troupe.Plane.Sessions do
   def seal(session_id, attrs) do
     put_fields(
       session_id,
-      Map.take(attrs, [:last_seq, :head_hash, :object_bytes, :workspace_bytes])
+      Map.take(attrs, [:last_seq, :head_hash, :object_bytes, :workspace_bytes, :checkpoint_seq])
     )
   end
 
@@ -979,12 +979,20 @@ defmodule Troupe.Plane.Sessions do
       seal(session.id, %{
         last_seq: max(params["last_seq"] || 0, session.last_seq),
         head_hash: params["head_hash"] || session.head_hash,
-        object_bytes: params["object_bytes"] || session.object_bytes
+        object_bytes: params["object_bytes"] || session.object_bytes,
+        checkpoint_seq: latest_checkpoint(params["checkpoint_seq"], session.checkpoint_seq)
       })
 
       {:ok, anchor}
     end
   end
+
+  # The latest checkpoint sealed: a report that names one moves it on, and one that names
+  # none, or an older one (a sealer started partway knows only what it sealed), keeps it.
+  defp latest_checkpoint(reported, kept) when is_integer(reported) and reported > 0,
+    do: max(reported, kept || 0)
+
+  defp latest_checkpoint(_reported, kept), do: kept
 
   @doc "Every sealed segment head the plane holds for a session, oldest first."
   @spec anchors(String.t()) :: [Anchor.t()]
