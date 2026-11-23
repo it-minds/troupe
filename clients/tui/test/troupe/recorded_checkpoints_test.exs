@@ -27,7 +27,9 @@ defmodule Troupe.RecordedCheckpointsTest do
 
       for checkpoint <- checkpoints do
         through = checkpoint["data"]["through"]
-        assert facts_shared(checkpoint["data"]["facts"]) == shared(Enum.filter(log, &(&1["seq"] <= through))),
+
+        assert facts_shared(checkpoint["data"]["facts"]) ==
+                 shared(Enum.filter(log, &(&1["seq"] <= through))),
                "the facts at #{through}"
 
         tail = Enum.filter(log, &(&1["seq"] > through))
@@ -67,7 +69,10 @@ defmodule Troupe.RecordedCheckpointsTest do
       },
       goal: facts["goal"],
       todos: Enum.map(facts["todos"], & &1["content"]),
-      pending: (facts["open_approvals"] ++ facts["open_questions"]) |> Enum.map(& &1["call_id"]) |> Enum.sort()
+      pending:
+        (facts["open_approvals"] ++ facts["open_questions"])
+        |> Enum.map(& &1["call_id"])
+        |> Enum.sort()
     }
   end
 
@@ -88,11 +93,17 @@ defmodule Troupe.RecordedCheckpointsTest do
 
     goal = if facts["goal"], do: [{"goal_set", root, %{"text" => facts["goal"]}}], else: []
 
-    [{"agent_started", root, %{"profile" => facts["agent"]}}, {"llm_response", root, usage}] ++
-      goal ++ [{"todo_updated", root, %{"items" => facts["todos"]}}] ++ open
+    ([{"agent_started", root, %{"profile" => facts["agent"]}}, {"llm_response", root, usage}] ++
+       goal ++ [{"todo_updated", root, %{"items" => facts["todos"]}}] ++ open)
     |> Enum.with_index(1)
     |> Enum.map(fn {{type, agent, data}, seq} ->
-      %{"seq" => seq, "type" => type, "agent" => agent, "data" => data, "actor" => %{"kind" => "system"}}
+      %{
+        "seq" => seq,
+        "type" => type,
+        "agent" => agent,
+        "data" => data,
+        "actor" => %{"kind" => "system"}
+      }
     end)
   end
 
