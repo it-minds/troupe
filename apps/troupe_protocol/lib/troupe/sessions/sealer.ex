@@ -79,6 +79,9 @@ defmodule Troupe.Sessions.Sealer do
     last_snapshot_at: 0,
     seal_interval_ms: @seal_interval_ms,
     snapshot_every: @snapshot_every,
+    # The seq of the latest `checkpoint` sealed, which a report says, so the plane knows
+    # the segment a reader of the session may start from.
+    checkpoint_seq: nil,
     fenced: false
   ]
 
@@ -270,6 +273,7 @@ defmodule Troupe.Sessions.Sealer do
       {:ok, segment} ->
         state
         |> record(segment)
+        |> checkpointed(events)
         |> write_manifest()
         |> maybe_snapshot()
         |> report(segment)
@@ -293,6 +297,13 @@ defmodule Troupe.Sessions.Sealer do
         # bounds.
         Logger.error("troupe worker: could not seal #{context.session_id}: #{inspect(reason)}")
         state
+    end
+  end
+
+  defp checkpointed(state, events) do
+    case events |> Enum.filter(&(&1.type == "checkpoint")) |> List.last() do
+      nil -> state
+      %Event{seq: seq} -> %{state | checkpoint_seq: seq}
     end
   end
 
@@ -377,7 +388,8 @@ defmodule Troupe.Sessions.Sealer do
         "object_key" => segment.key,
         "bytes" => segment.bytes,
         "object_bytes" => state.object_bytes
-      })
+      }
+      |> then(&if(state.checkpoint_seq, do: Map.put(&1, "checkpoint_seq", state.checkpoint_seq), else: &1)))
 
     %{state | fenced: reported == {:error, :stale_version}}
   end

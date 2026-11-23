@@ -44,7 +44,7 @@ defmodule Troupe.Worker.Auth do
   # own configuration. `initialize` and `auth.refresh` are the connection's own and never
   # get here.
   @session_methods ~w(
-    subscribe unsubscribe session.list
+    subscribe unsubscribe session.list session.events
     session.get commands.list commands.run
     input.send turn.cancel profile.switch approval.respond question.answer todo.edit
     shell.run shell.cancel

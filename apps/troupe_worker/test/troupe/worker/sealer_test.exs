@@ -78,6 +78,25 @@ defmodule Troupe.Worker.SealerTest do
     assert Sealer.status(session.sealer).sealed_through >= seq
   end
 
+  test "a sealed checkpoint's seq is in the report, and in every report after it", context do
+    context = requires_tier(context)
+    assert {:ok, _session} = activate(context, seal_interval_ms: 300, report: reporter_to(self()))
+    refute Map.has_key?(await_sealed(), "checkpoint_seq")
+
+    {:ok, _} = Log.append(context.session_id, ["root"], :compacted, %{"summary" => "earlier"})
+    {:ok, rest} = Log.append(context.session_id, ["root"], :turn_ended, %{})
+
+    checkpoint =
+      eventually(fn ->
+        Enum.find(Troupe.replay_from(context.session_id, rest), &(&1.type == "checkpoint"))
+      end)
+
+    assert eventually(fn -> await_sealed()["checkpoint_seq"] == checkpoint.seq end, 10_000)
+
+    {:ok, _} = Log.append(context.session_id, ["root"], :progress_note, %{"n" => 1})
+    assert eventually(fn -> await_sealed()["checkpoint_seq"] == checkpoint.seq end, 10_000)
+  end
+
   test "the manifest names the head, in plaintext, and says nothing about content", context do
     context = requires_tier(context)
     assert {:ok, _} = activate(context, report: reporter_to(self()))

@@ -48,6 +48,7 @@ defmodule Troupe.Protocol.Relay do
     "subscribe" => :observe,
     "unsubscribe" => :observe,
     "session.get" => :observe,
+    "session.events" => :observe,
     "session.list" => :observe,
     "session.goal.get" => :observe,
     "session.loop.get" => :observe,

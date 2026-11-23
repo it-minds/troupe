@@ -207,6 +207,7 @@ The server's `capabilities`:
 | `private_sessions` | this server can seal a session under the caller's own key, so a client may offer to make one |
 | `approval_allow_always` | `approval.respond` takes `allow_always`, which writes the person's own rule for the tool (a daemon's; a pod's rules are its worker profile's, and a relayed connection's the laptop's) |
 | `fs_upload_artifact` | `fs.upload` takes `artifact` in place of `content`, and the server fetches the artifact's files from the plane itself (a daemon and a pod) |
+| `checkpoints` | `subscribe` takes `from: "checkpoint"`, and `session.events` pages back through a session's history (a daemon, a pod and a relayed connection) |
 
 `private_sessions` is computed at every `initialize`, never compiled in, and it is what
 un-gates the client's control. It is true only where both things it needs are true: a
@@ -343,7 +344,8 @@ Durable:
 | `loop_iteration_finished` | `loop_id`, `iteration`, `outcome` (`continue`: the turn ended and the goal is not met; `complete`: the agent called `goal_complete`; `failed`: the turn ended in an error; `stopped`: the loop stopped around it), `detail` |
 | `loop_stopped` | `loop_id`, `reason` (`goal_complete`, `max_iterations`, `failures`, `budget`, `requested`, `cancelled`, `goal_cleared`, `interrupted`, `agent_done`), `iterations`, `detail`, `summary` (the evidence `goal_complete` gave), `command_id` (the `session.loop.stop` that asked) |
 | `delegation_started` | `call_id`, `agent`, `child_path` (the parent's path and `<agent>#<n>`; `n` goes on counting across restarts, so a path names one child), `task` (the child's first message: the brief's parts under their names), `brief` (the parts, `goal`, `context`, `constraints`, `deliverable` and `do_not`; absent from a log written before briefs had them, Decision 847), `wait` (`false` for a child started in the background: the `delegate` call answered at once, and the child's end reaches the parent later as a `user_input` from `subagent`; absent otherwise, Decision 853). The child writes its `agent_done` before the parent's `tool_call_completed` for the call, and is stopped once the parent has its result: from then on it is only its log. A delegation a restart closes as interrupted or takes up again leaves a child nothing starts again, so the restart closes that child's part of the log, and the part of each agent under it: a `tool_call_completed` for each call still open, then `agent_done` with `reason: interrupted` |
-| `compacted` | `summary`, `reason` (`threshold`; `context_overflow` when the provider refused the prompt and the turn is sent again after compacting; `manual` when a person asked with `session.compact`), `command_id` (with `manual`, the command's), `conversation` (the conversation the agent goes on with: the summary as a message, then what was kept, a large tool result as a blob; a large result among the kept messages up to the model's last reply is sent to the model as a stub naming its `read_output` call. If the turn sent again still does not fit, it is sent once more with every large result left out that way, the turn's own the model has not read included, and that request's `llm_request` says so with `behind`: the conversation is the same, what the model is sent of it is not), and the summariser's own model call as `llm_request` and `llm_response` say one: `model`, `prompt_bytes`, `usage`, `gateway` (absent from a log written before 0.8.2) |
+| `compacted` | `summary`, `reason` (`threshold`; `context_overflow` when the provider refused the prompt and the turn is sent again after compacting; `manual` when a person asked with `session.compact`), `command_id` (with `manual`, the command's), `conversation` (the conversation the agent goes on with: the summary as a message, then what was kept, a large tool result as a blob; a large result among the kept messages up to the model's last reply is sent to the model as a stub naming its `read_output` call. If the turn sent again still does not fit, it is sent once more with every large result left out that way, the turn's own the model has not read included, and that request's `llm_request` says so with `behind`: the conversation is the same, what the model is sent of it is not), and the summariser's own model call as `llm_request` and `llm_response` say one: `model`, `prompt_bytes`, `usage`, `gateway` (absent from a log written before 0.8.2); `folded_through`, the range it folded: the summary and what it kept stand for the agent's events through this seq, the log's head when the summariser was asked (absent from a log written before it) |
+| `checkpoint` | `shape`, `through`, `compacted`, `previous`, `summary`, `facts` — what the session comes to at `through`, written by the session itself under the root after each root `compacted`, when the root next rests (see [Checkpoints](#checkpoints)) |
 | `budget_exhausted` | `limit` |
 | `budget_ask_started` | `call_id` (`budget-<n>`), `dimension`, `used`, `limit`, `detail` — the budget is spent and the agent asks before its next model call; the question itself is a `question_asked` under the same `call_id`, answered with `question.answer`. Its `question` says what the limit protects against, what the session has used and spent, and what the raise on offer would cost; its `options` are sizes and scopes — `+25 turns this run`, `+50 turns this session`, `no limit this session`, `+50 turns this workspace`, `stop` — and a typed amount (`50`, `+50 turns`, `+50k tokens`, `+15 min`, with `run`, `session` or `workspace` after it) is an answer too (Decision 699) |
 | `budget_ask_answered` | `call_id`, `decision` (`allow`: one more slice of the original size, `grant` says how much; `always`: the limit the question was about, named in `lifted` — `max_turns`, `max_input_tokens`, `max_output_tokens` or `wall_clock` — is lifted for this agent and its subagents, and the others still ask; `raise`: `limit` goes up by `amount` — turns, tokens or milliseconds — for `scope` `run` (given back at the turn's end), `session` or `workspace`, the last also written to the project's file named in `path`, or `note` says why it was not; `unclear`: the answer could not be read, `note` says why, and the question is asked again under the next id; `deny`: `budget_exhausted` follows). An `always` without `lifted`, from a log written before Decision 687, lifted the limit its `budget_ask_started` named |
@@ -576,6 +578,32 @@ Text is markdown. A diff is structured hunks, not a rendered patch:
 Tool calls and results are objects; todo lists are arrays of
 `{"id", "content", "status"}`.
 
+### Checkpoints
+
+A `checkpoint` says what a session's log comes to at one seq, so a reader can start there
+rather than at seq 1. The session writes one after each compaction of its root agent, when
+the root next comes to rest (`turn_ended`, `cancelled`, `agent_done`, or a restart that
+leaves its turn interrupted): nothing of the root's is in flight then. A compaction a crash
+left without one gets it at the next rest. It is a durable event like any other, in the
+chain and sealed with the rest, never edited, and a log before it is never dropped.
+
+| field | meaning |
+| --- | --- |
+| `shape` | the version of `facts`, `session/1`. A reader that does not know it replays from seq 1 |
+| `through` | the seq `facts` stand for: the root's rest. Every event after it folds on top |
+| `compacted`, `previous` | the seq of the root `compacted` it follows; the seq of the checkpoint before it, or `null` |
+| `summary` | the summary as that compaction wrote it, so a reader can show it without the larger `compacted` |
+| `facts` | `agent` (the root's), `profile`, `bundle_version`, `kind`, `visibility`, `workspace`, `owner`, `owner_name`, `started_at` (when `session_created` was written); `goal`; `loop` (the latest: `loop_id`, `goal`, `max_iterations`, `max_failures`, `iteration`, `outcome`, `running`, `reason`); `todos` (the root's items); `done` (the root's `reason` and `limit`, or `null`) and `limits` (ceilings by `turns`, `input`, `output`, `wall`); `error` (the root's last `llm_error` `reason` and `seq`, until its next reply); `usage` (the four disjoint figures, every reply's and every summariser's), `cost_micros`, `unpriced` and `turns` (the root's turns that ended with a `turn`); `context` (`used`, the root's last prompt; its window is never in the log); `open_approvals` and `open_questions` (each `{call_id, seq, agent, actor, data}`, `data` as the request said it); `running` (delegations whose child has not ended: `call_id`, `agent`, `child_path`, `wait`, `seq`); `agents` (by path: `profile`, `done`); `scratch` (by name: `version`, `kind`, `title`); `taint` (as `session_tainted` says it) |
+
+The facts are a fold of the log and nothing else: no title, pin or archive, no presence or
+unseen mark, nothing about who reads it or when, and no blob's, artifact's or document's
+content. It is a cache that happens to be chained: correct as far as the build that folded
+it, which raises `shape` when what a fact means changes, and a reader that does not know a
+shape starts from seq 1 instead. A fork moves the seqs a carried checkpoint
+names (`through`, `compacted`, `previous`, and each `seq` in its facts) by one, as it moves
+every event. A pod's seal report to the plane names the latest checkpoint it sealed as
+`checkpoint_seq`, which the plane keeps on the session's row.
+
 ### Large payloads
 
 A tool's output over **16 KiB** — `tool_call_completed.content`, a result in `tool_results`,
@@ -608,6 +636,7 @@ and never shared between sessions.
 | `topic` | `"fleet"`, `"session:<id>"` or `"presence:<id>"` |
 | `level` | `"summary"` or `"detail"` |
 | `from_seq` | optional; replay durable events with `seq > from_seq` |
+| `from` | optional; `"checkpoint"`: replay from the session's latest checkpoint (below), not with `from_seq` |
 
 Result:
 
@@ -621,6 +650,17 @@ order, forever.
 
 `from_seq: 0` replays everything. Omitting `from_seq` starts live from `head_seq`
 with no replay.
+
+`from: "checkpoint"` in place of `from_seq` (a server with the `checkpoints` capability)
+starts from the session's latest [`checkpoint`](#checkpoints) in a shape the server reads:
+the answer carries it whole and the cursor it replays from, its `through`, and the replay is
+every event after that, the checkpoint itself among them. A session that never compacted
+answers `checkpoint: null` and replays from 0, as `from_seq: 0` does. `from` with `from_seq`,
+or any other `from`, is `invalid_params`.
+
+```json
+{"subscription_id": "sub-4", "head_seq": 4210, "checkpoint": {"seq": 4180, "type": "checkpoint", …}, "from_seq": 4179}
+```
 
 A subscription that names a session — `session:<id>`, or its `presence:<id>` — is also how
 a client says it is reading the session: the daemon does not put one to sleep under a
@@ -1395,6 +1435,14 @@ linking changes is the name in the record. A daemon reachable by somebody who sh
 be linking has a much larger problem than the label.
 
 ### Reading
+
+#### `session.events`
+`{"session_id", "before", "limit"}` → `{"events": [...], "more": true}`: up to `limit` durable
+events before the seq `before`, oldest first, and whether there are earlier ones; how a
+reader that started from a [checkpoint](#checkpoints) pages back. `limit` is 1 to 500, and
+500 when absent; `before` is a seq from 1 (`invalid_params` otherwise). Scope `observe`, a
+read that wakes nothing, served by a daemon, a pod and a relayed connection (the
+`checkpoints` capability). A session that is not there is `not_found`.
 
 #### `blob.get`
 ```json

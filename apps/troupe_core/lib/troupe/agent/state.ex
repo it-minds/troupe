@@ -198,6 +198,9 @@ defmodule Troupe.Agent.State do
     compact_reason: nil,
     compact_prompt: nil,
     compact_command: nil,
+    # The log's head when the summariser was asked: nothing joins the conversation while it
+    # compacts, so the summary and what it keeps stand for the agent's events through it.
+    compact_head: nil,
     # How many messages at the head of the conversation are behind: up to the model's last
     # reply in what the last compaction kept, so a result it had not answered yet is not
     # among them, or the whole conversation once a prompt too long for the window was sent
@@ -308,6 +311,7 @@ defmodule Troupe.Agent.State do
           compact_reason: String.t() | nil,
           compact_prompt: map() | nil,
           compact_command: {Troupe.Protocol.Event.Actor.t() | nil, String.t() | nil} | nil,
+          compact_head: non_neg_integer() | nil,
           compacted_through: non_neg_integer(),
           budget_ask_pending: String.t() | nil,
           budget_ask_task: pid() | nil,

@@ -97,6 +97,9 @@ defmodule Troupe.Plane.Sessions.Session do
     field(:head_hash, :string)
     field(:object_bytes, :integer, default: 0)
     field(:workspace_bytes, :integer, default: 0)
+    # The latest checkpoint the session's sealer reported sealed: where a reader of it may
+    # start. Nil for a session that never compacted, or reported before it was kept.
+    field(:checkpoint_seq, :integer)
 
     # Lifecycle the worker reports, so a queue can be listed without reading a log.
     field(:status, :string, default: "idle")
@@ -183,6 +186,7 @@ defmodule Troupe.Plane.Sessions.Session do
     :head_hash,
     :object_bytes,
     :workspace_bytes,
+    :checkpoint_seq,
     :status,
     :done_reason,
     :failed_reason,

@@ -83,6 +83,10 @@ defmodule Troupe.Registry do
   @spec summary(String.t()) :: GenServer.name()
   def summary(session_id), do: via({:summary, session_id})
 
+  @doc "The session's checkpoint writer."
+  @spec checkpoints(String.t()) :: GenServer.name()
+  def checkpoints(session_id), do: via({:checkpoints, session_id})
+
   @doc "The scripted model, when the fake provider is selected."
   @spec fake(String.t()) :: GenServer.name()
   def fake(session_id), do: via({:fake, session_id})

@@ -65,6 +65,23 @@ defmodule Troupe.Session.LogOffsetsTest do
     assert Log.replay_from(context.sid, 0) == Log.read_file(context.log)
   end
 
+  test "a page between two seqs decodes only the page, running or not", context do
+    write_log(context, chain(2_000))
+    log = start_log(context)
+    drain()
+
+    assert Log.replay_between(context.sid, 949, 1_000) |> Enum.map(& &1.seq) == Enum.to_list(950..999)
+    assert_received {:read, ^log, %{events: 50}}
+    assert Log.replay_between(context.sid, 1_995, 9_999) |> Enum.map(& &1.seq) == Enum.to_list(1_996..2_000)
+    assert Log.replay_between(context.sid, 10, 5) == []
+
+    :ok = stop_supervised(Log)
+    drain()
+    page = Log.read_session_between(context.sid, context.state_dir, 0, 11)
+    assert Enum.map(page, & &1.seq) == Enum.to_list(1..10)
+    assert_received {:read, _reader, %{events: 10}}
+  end
+
   test "a restarted Log on a 10k-event log reads one line", context do
     write_log(context, chain(10_000))
     first = start_log(context)

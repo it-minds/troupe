@@ -97,6 +97,35 @@ defmodule Troupe.Session.Log.Offsets do
     end
   end
 
+  @doc """
+  The events after `from_seq` and before `before`, read from the first one's offset up to
+  where `before` starts: what `read_after/3` answers, cut at `before` without decoding
+  what follows it. `:whole` as there.
+  """
+  @spec read_between(Path.t(), t(), non_neg_integer(), pos_integer()) :: {:ok, [Event.t()]} | :whole
+  def read_between(_path, %__MODULE__{rising: false}, _from_seq, _before), do: :whole
+
+  def read_between(path, %__MODULE__{} = offsets, from_seq, before) do
+    iterator = :gb_trees.iterator_from(from_seq + 1, offsets.entries)
+
+    case :gb_trees.next(iterator) do
+      {seq, offset, _rest} when seq < before ->
+        stop =
+          case :gb_trees.next(:gb_trees.iterator_from(before, offsets.entries)) do
+            {_seq, at, _rest} -> at
+            :none -> nil
+          end
+
+        case read_at(path, offset, seq, stop) do
+          {:ok, events} -> {:ok, Enum.filter(events, &(&1.seq > from_seq and &1.seq < before))}
+          :error -> :whole
+        end
+
+      _ ->
+        {:ok, []}
+    end
+  end
+
   @doc "The log's last event, read from its offset: `{:ok, event}`, `:none`, or `:error`."
   @spec last(Path.t(), t()) :: {:ok, Event.t()} | :none | :error
   def last(_path, %__MODULE__{last: nil}), do: :none
@@ -244,11 +273,12 @@ defmodule Troupe.Session.Log.Offsets do
 
   # The lines from `offset` on, when `offset` begins a line and that line is the event
   # `seq`; `:error` otherwise.
-  defp read_at(path, offset, seq) do
+  # Up to `stop`, the offset of a line not to read, when one is given.
+  defp read_at(path, offset, seq, stop \\ nil) do
     case :file.open(path, [:read, :raw, :binary]) do
       {:ok, file} ->
         try do
-          read_open(file, path, offset, seq)
+          read_open(file, path, offset, seq, stop)
         after
           :file.close(file)
         end
@@ -258,11 +288,12 @@ defmodule Troupe.Session.Log.Offsets do
     end
   end
 
-  defp read_open(file, path, offset, seq) do
+  defp read_open(file, path, offset, seq, stop) do
     from = max(offset - 1, 0)
 
     with {size, _mtime} <- stamp(path),
-         {:ok, bytes} <- :file.pread(file, from, size - from),
+         upto = if(is_integer(stop) and stop > offset and stop <= size, do: stop, else: size),
+         {:ok, bytes} <- :file.pread(file, from, upto - from),
          {:ok, rest} <- line_start(bytes, offset),
          [%Event{seq: ^seq} | _] = events <- decode_lines(rest) do
       {:ok, events}
