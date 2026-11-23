@@ -445,6 +445,26 @@ defmodule Troupe.Plane.Bundles do
     end
   end
 
+  @doc """
+  What `version` of `channel` gives a session, composed as `offering/3` composes the
+  current one: the profile's rule, then the grant. A session is pinned to the version it
+  was created on, so what it may run is that version's and not whatever was published
+  since; a retired version's content is kept, so the version is read retired or not.
+  `nil`, or a version the channel has no row for, is the current one.
+  """
+  @spec offering_at(String.t() | nil, integer() | nil, [map()], AgentRule.t() | nil) :: map()
+  def offering_at(channel, version, entitlements \\ [], rule \\ nil)
+
+  def offering_at(channel, nil, entitlements, rule), do: offering(channel, entitlements, rule)
+  def offering_at(nil, _version, entitlements, rule), do: offering(nil, entitlements, rule)
+
+  def offering_at(channel, version, entitlements, rule) do
+    case get(channel, version) do
+      nil -> offering(channel, entitlements, rule)
+      bundle -> offering_of(channel, bundle, entitlements, rule)
+    end
+  end
+
   defp offering_of(channel, nil, entitlements, rule) do
     %{
       channel: channel,

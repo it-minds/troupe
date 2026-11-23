@@ -1795,7 +1795,7 @@ defmodule Troupe.Plane.Harness do
 
   defp run_as(%Session{} = session, team) do
     entitlements = if team, do: Identity.entitlements_for(team, session.profile), else: []
-    %{agents: agents} = offering(session.profile, entitlements)
+    %{agents: agents} = pinned_offering(session, entitlements)
     default_agent(agents)
   end
 
@@ -3140,10 +3140,10 @@ defmodule Troupe.Plane.Harness do
         # The agent it runs as, which its root comes back on unless its log says it was
         # switched since: without it the pod would take its own default.
         "agent" => run_as(session, team_of(session)),
-        # Re-resolved at every activation rather than read back from the log: a publish
-        # can add an entry the team is not entitled to, and a session that came back
-        # holding the set it was created with would be holding a stale one. The pod
-        # records the re-resolved set on its `config_upgraded`.
+        # Re-resolved at every activation rather than read back from the log, from the
+        # version the session runs on, not the channel's current one: a grant changed
+        # since narrows it at the next wake, and a newer publish's entries are not in the
+        # pinned version. The pod records the re-resolved set on its `config_upgraded`.
         "entitlements" => entitlement_set(session, team_of(session))
       }
       |> Map.merge(bundle_params(session))
@@ -3787,18 +3787,43 @@ defmodule Troupe.Plane.Harness do
   # What this session should run on now, and whether that is a change. An upgrade is the
   # only way a session's configuration ever moves, and the worker records it as a durable
   # event so the model is told rather than left to notice.
+  defp team_of(%{team_id: nil}), do: nil
+  defp team_of(%{team_id: team_id}), do: Identity.fetch_team(team_id)
+
   # What this session may see, by name, as `session_created` and `config_upgraded`
   # record it. One team, one set: a person picks the team they create under, so a
   # session's set is that team's rather than an intersection over their teams — simpler
   # to explain and simpler to audit, and a person in two teams with different
   # entitlements can create two sessions.
-  defp team_of(%{team_id: nil}), do: nil
-  defp team_of(%{team_id: team_id}), do: Identity.fetch_team(team_id)
-
+  #
+  # Composed from the version the activation runs the session on, the one `bundle_params/1`
+  # sends beside it, and not from the channel's current one: a session pinned to a version
+  # whose agent a later publish dropped still has that agent, and one a later publish
+  # added is not offered to definitions that do not have it.
   defp entitlement_set(session, team) do
-    session.profile
-    |> offering(Identity.entitlements_for(team, session.profile))
+    session
+    |> pinned_offering(Identity.entitlements_for(team, session.profile))
     |> Bundles.entitlement_set()
+  end
+
+  defp pinned_offering(session, entitlements),
+    do: ProfileView.offering_at(session.profile, running_version(session), entitlements)
+
+  # The version `bundle_params/1` pins this activation to, by the same resolution: the
+  # pinned one while it is live, the current one where it was retired, and the pinned
+  # number where nothing is published to resolve to.
+  defp running_version(%Session{profile: profile, bundle_version: pinned}) do
+    case Fleet.get_profile(profile) do
+      %{config_bundle_channel: channel} ->
+        case Bundles.resolve(channel, pinned) do
+          {:keep, bundle} -> bundle.version
+          {:upgrade, _from, bundle} -> bundle.version
+          {:error, _reason} -> pinned
+        end
+
+      nil ->
+        pinned
+    end
   end
 
   # Sent on every activation of a forked session, not only the first. The plane does not
