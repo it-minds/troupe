@@ -160,6 +160,8 @@ defmodule Troupe.Client do
   @callback invites(session_id(), invite_verb()) :: {:ok, String.t()} | {:error, term()}
   @callback share(session_id(), Troupe.Client.Share.verb()) ::
               {:ok, String.t()} | {:error, String.t()}
+  @callback bundle(session_id(), Troupe.Client.Bundle.verb()) ::
+              {:ok, String.t()} | {:error, String.t()}
   @callback archive(session_id(), boolean()) :: {:ok, String.t()} | {:error, String.t()}
   @callback rename(session_id(), String.t()) :: {:ok, String.t()} | {:error, String.t()}
   @callback keep(session_id(), boolean()) :: {:ok, String.t()} | {:error, String.t()}
@@ -581,6 +583,20 @@ defmodule Troupe.Client do
   @doc "What `/share` names after the command: nothing, `team` or `me`."
   @spec share_args(String.t()) :: {:ok, Troupe.Client.Share.verb()} | {:error, String.t()}
   defdelegate share_args(text), to: Troupe.Client.Share, as: :parse
+
+  @doc """
+  Which configuration a session on the platform runs on (root #1177): `:status` says its
+  bundle version and its channel's current one, `:update` raises it to the current one,
+  which only its owner may do. A session on this computer has no bundle. Answers the
+  sentence to show.
+  """
+  @spec bundle(session_id(), Troupe.Client.Bundle.verb()) ::
+          {:ok, String.t()} | {:error, String.t()}
+  def bundle(sid, verb), do: impl(sid).bundle(sid, verb)
+
+  @doc "What `/bundle` names after the command: nothing or `update`."
+  @spec bundle_args(String.t()) :: {:ok, Troupe.Client.Bundle.verb()} | {:error, String.t()}
+  defdelegate bundle_args(text), to: Troupe.Client.Bundle, as: :parse
 
   @doc """
   Archive a session (`true`) or bring it back (`false`), which only its owner may do: an

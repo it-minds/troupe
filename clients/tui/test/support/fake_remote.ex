@@ -360,7 +360,12 @@ defmodule Troupe.FakeRemote do
       kind: Keyword.get(fields, :kind, "team"),
       device: Keyword.get(fields, :device),
       archived: Keyword.get(fields, :archived, false),
-      visibility: Keyword.get(fields, :visibility, "private")
+      visibility: Keyword.get(fields, :visibility, "private"),
+      # The bundle version it is pinned to and its channel's current one (root #1177); a
+      # session whose agent is working (`busy`) has a raise kept rather than taken.
+      bundle_version: Keyword.get(fields, :bundle_version, 3),
+      bundle_current: Keyword.get(fields, :bundle_current, 3),
+      busy: Keyword.get(fields, :busy, false)
     }
   end
 
@@ -1067,6 +1072,47 @@ defmodule Troupe.FakeRemote do
 
       {:ok, %{owner: ^me}} ->
         {{:error, -32_602, "invalid_params", %{"reason" => "visibility is team or private"}}, state}
+
+      {:ok, _theirs} ->
+        {{:error, -32_004, "forbidden", %{"required_role" => "owner"}}, state}
+
+      :error ->
+        {{:error, -32_005, "no such session"}, state}
+    end
+  end
+
+  # Raised to its channel's current version, the owner's alone (root #1177): at once with the
+  # log's `config_upgraded`, pushed to whoever is attached; kept while its agent works.
+  defp dispatch(state, :plane, "session.bundle.raise", %{"session_id" => id}, _pid) do
+    me = state.principal["sub"]
+
+    case Map.fetch(state.sessions, id) do
+      {:ok, %{owner: ^me, bundle_version: from, bundle_current: to}} when from >= to ->
+        {{:ok, pod_row(state.sessions[id], me)}, state}
+
+      {:ok, %{owner: ^me, busy: true, bundle_current: to}} ->
+        state = put_in(state.sessions[id][:bundle_raise_to], to)
+        reason = "the agent is working; the session moves to v#{to} when it is done"
+
+        {{:error, -32_006, "conflict",
+          %{"reason" => reason, "status" => "acting", "raise_to" => to}}, state}
+
+      {:ok, %{owner: ^me, bundle_version: from, bundle_current: to} = session} ->
+        state = put_in(state.sessions[id], Map.put(session, :bundle_version, to))
+
+        data = %{
+          "channel" => "stable",
+          "from" => from,
+          "to" => to,
+          "hash" => "sha256:#{to}",
+          "reason" => "raised",
+          "by" => me,
+          "by_name" => state.principal["name"]
+        }
+
+        {event, state} = append(state, id, "config_upgraded", data, [])
+        push(state, id, notification(id, event))
+        {{:ok, pod_row(state.sessions[id], me)}, state}
 
       {:ok, _theirs} ->
         {{:error, -32_004, "forbidden", %{"required_role" => "owner"}}, state}
@@ -2292,7 +2338,11 @@ defmodule Troupe.FakeRemote do
     |> Map.merge(%{
       "visibility" => Map.get(session, :visibility, "private"),
       "team" => session.team,
-      "your_role" => if(session.owner == me, do: "owner", else: "collaborator")
+      "your_role" => if(session.owner == me, do: "owner", else: "collaborator"),
+      "bundle_version" => Map.get(session, :bundle_version, 3),
+      "bundle_channel" => "stable",
+      "bundle_current" => Map.get(session, :bundle_current, 3),
+      "bundle_raise_to" => Map.get(session, :bundle_raise_to)
     })
   end
 

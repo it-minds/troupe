@@ -724,7 +724,8 @@ defmodule Troupe.Remote.Translate do
          ], memory}
 
       "config_upgraded" ->
-        {[emit.(:remote_note, %{text: "config upgraded" <> version(data)})], memory}
+        {[emit.(:remote_note, %{text: "config upgraded" <> version(data) <> moved_by(data)})],
+         memory}
 
       "fs_changed" ->
         {[emit.(:fs_changed, %{paths: paths(data)})], memory}
@@ -1308,6 +1309,13 @@ defmodule Troupe.Remote.Translate do
   defp version(%{"from" => from, "to" => to}) when is_integer(from), do: " from #{from} to #{to}"
   defp version(%{"to" => to}), do: " to #{to}"
   defp version(_data), do: ""
+
+  # Who raised the session's configuration (root #1177), or that its version was retired.
+  defp moved_by(%{"reason" => "raised"} = data),
+    do: ", raised by " <> (present(data["by_name"]) || present(data["by"]) || "its owner")
+
+  defp moved_by(%{"reason" => "retired"}), do: ", its version retired"
+  defp moved_by(_data), do: ""
 
   defp truncated(data) do
     what =
