@@ -9,6 +9,9 @@
     "conversation": {
       "type": "array"
     },
+    "folded_through": {
+      "type": "integer"
+    },
     "gateway": {
       "type": "object"
     },

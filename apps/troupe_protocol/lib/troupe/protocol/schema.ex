@@ -323,7 +323,22 @@ defmodule Troupe.Protocol.Schema do
         "model" => optional(:string),
         "prompt_bytes" => optional(:object),
         "usage" => optional(:object),
-        "gateway" => optional(:object)
+        "gateway" => optional(:object),
+        # The range it folded: the agent's events through this seq, the log's head when the
+        # summariser was asked. Absent from a log written before it.
+        "folded_through" => optional(:integer)
+      },
+      # What the log comes to at `through`, the root's rest after the root's `compacted` at
+      # `compacted`, written by the session itself (`Troupe.Session.Checkpoint`). A cache in
+      # the chain: a reader that does not know `shape` replays from seq 1, and every event
+      # after `through` folds on top of `facts`.
+      "checkpoint" => %{
+        "shape" => required(:string),
+        "through" => required(:integer),
+        "compacted" => required(:integer),
+        "previous" => required({:nullable, :integer}),
+        "summary" => optional(:string),
+        "facts" => required(:object)
       },
       "budget_exhausted" => %{"limit" => required(:string)},
       # The budget is spent and the agent asks before the next model call (Decision 660).
@@ -780,9 +795,19 @@ defmodule Troupe.Protocol.Schema do
         "command_id" => required(:string),
         "topic" => required(:string),
         "level" => optional(:string),
-        "from_seq" => optional(:integer)
+        "from_seq" => optional(:integer),
+        # `checkpoint`: replay from the session's latest checkpoint, which the answer
+        # carries (the `checkpoints` capability). Not with `from_seq`.
+        "from" => optional(:string)
       },
       "unsubscribe" => %{"subscription_id" => required(:string)},
+      # A page of history: up to `limit` (500 at most, and by default) events before
+      # `before`, oldest first, and whether there are more. A read; it wakes nothing.
+      "session.events" => %{
+        "session_id" => required(:string),
+        "before" => required(:integer),
+        "limit" => optional(:integer)
+      },
       "session.list" => %{"filter" => optional(:object)},
       "session.get" => %{"session_id" => required(:string)},
       "session.create" => %{
