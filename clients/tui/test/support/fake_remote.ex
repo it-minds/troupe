@@ -454,7 +454,10 @@ defmodule Troupe.FakeRemote do
       invites: Keyword.get(opts, :invites, []),
       # What a pod says it can do at `initialize`, beyond its own: a laptop's relay says
       # `relayed`, and `relayed_allow_session` where it takes an answer for the session.
-      capabilities: Keyword.get(opts, :capabilities, %{})
+      capabilities: Keyword.get(opts, :capabilities, %{}),
+      # The most `session.events` gives in one page, below what the client asks for, so a
+      # test can page a short log in several steps.
+      events_page: Keyword.get(opts, :events_page, 500)
     }
 
     owner = self()
@@ -782,7 +785,7 @@ defmodule Troupe.FakeRemote do
   @addressed ~w(approval.respond blob.get fs.list fs.read fs.upload input.send presence.set
                 profile.switch session.archive session.erase session.get session.pin
                 session.unpin todo.edit tools.register tools.unregister turn.cancel
-                shell.run shell.cancel session.compact)
+                shell.run shell.cancel session.compact session.events)
 
   # What `Troupe.Gateway.Dispatch` refuses a command without, beyond `session_id`, for the
   # commands this client sends. Accepting any spelling is how `profile.switch`,
@@ -1163,6 +1166,18 @@ defmodule Troupe.FakeRemote do
     {{:ok, %{}}, put_in(state.subscriptions[pid], :fleet)}
   end
 
+  # From the session's latest checkpoint, as the servers start one (root #1181): the answer
+  # carries it and the seq its facts stand for, and the replay is everything after that.
+  defp dispatch(state, kind, "subscribe", %{"from" => "checkpoint"} = params, pid) do
+    "session:" <> id = params["topic"]
+    events = state.sessions[id][:events] || []
+    checkpoint = events |> Enum.filter(&(&1["type"] == "checkpoint")) |> List.last()
+    from_seq = if checkpoint, do: checkpoint["data"]["through"], else: 0
+    params = params |> Map.delete("from") |> Map.put("from_seq", from_seq)
+    {{:ok, answer}, state} = dispatch(state, kind, "subscribe", params, pid)
+    {{:ok, Map.merge(answer, %{"checkpoint" => checkpoint, "from_seq" => from_seq})}, state}
+  end
+
   defp dispatch(state, _kind, "subscribe", %{"topic" => "session:" <> id} = params, pid) do
     from_seq = params["from_seq"] || 0
     events = state.sessions[id][:events] || []
@@ -1176,6 +1191,20 @@ defmodule Troupe.FakeRemote do
 
     head = events |> Enum.map(& &1["seq"]) |> Enum.max(fn -> 0 end)
     {{:ok, %{"head_seq" => head}}, put_in(state.subscriptions[pid], id)}
+  end
+
+  # A page of the history before a seq, oldest first, at most `limit` (500 when absent).
+  defp dispatch(
+         state,
+         _kind,
+         "session.events",
+         %{"session_id" => id, "before" => before} = params,
+         _pid
+       )
+       when is_integer(before) and before >= 1 do
+    above = Enum.filter(state.sessions[id][:events] || [], &(&1["seq"] < before))
+    page = Enum.take(above, -min(params["limit"] || 500, state.events_page))
+    {{:ok, %{"events" => page, "more" => length(above) > length(page)}}, state}
   end
 
   defp dispatch(state, _kind, "unsubscribe", _params, pid),

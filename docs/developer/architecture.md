@@ -331,8 +331,9 @@ flowchart LR
 ```
 
 `one_for_one` is the degraded mode: an unreachable plane does not touch attached sessions.
-A worker connection subscribes with the journal's cursor as `from_seq` (the servers replay what is after it); the journal drops a batch it
-already has, so a reconnect or a `resync_required` produces the same transcript. Deltas
+A worker connection subscribes with the journal's cursor as `from_seq` (the servers replay what is after it), or, with an empty journal and `checkpoints`, `from: "checkpoint"`:
+the journal then starts with its summary and facts at `through`, and PgUp at the pane's top pages back (`session.events`).
+The journal drops a batch it already has, so a reconnect or a `resync_required` produces the same transcript. Deltas
 are coalesced per 33 ms and dropped past 64 KB. `Troupe.Remote.Translate` turns protocol
 events into the harness's own at the edge, so the model and view never branch on "is this
 remote". Browsing opens with `session.open read`; the first activating action calls

@@ -56,6 +56,8 @@ defmodule Troupe.Remote.Worker do
   # cannot keep up gets the completed message as a durable event anyway.
   @delta_cap 64 * 1024
   @max_waiting 64
+  # Events asked for in one page of history, the most `session.events` gives.
+  @page 500
   # Attempts in a row that reach no session before a plane session is given up on: about
   # a minute of backoff, long enough for a pod to be replaced.
   @max_tries 10
@@ -245,6 +247,32 @@ defmodule Troupe.Remote.Worker do
   def blob(session_id, blob, offset \\ 0, length \\ 1_000_000),
     do: call(session_id, {:rpc, "blob.get", %{blob: blob, range: [offset, offset + length - 1]}})
 
+  @doc """
+  A page of the session's history before `before`, for a window opened from a checkpoint:
+  `session.events`, translated as the stream is but with a memory of its own, since the
+  page comes before everything the stream's memory has seen. Answers the page's events,
+  whether the server has earlier ones, and the lowest seq in it.
+  """
+  @spec earlier(String.t(), pos_integer()) ::
+          {:ok, %{events: [Troupe.Event.t()], more: boolean(), first: pos_integer() | nil}}
+          | {:error, term()}
+  def earlier(session_id, before) do
+    with {:ok, %{"events" => events} = page} when is_list(events) <-
+           call(session_id, {:rpc, "session.events", %{before: before, limit: @page}}),
+         {:ok, memory} <- call(session_id, :page_memory) do
+      {translated, _memory} =
+        Enum.flat_map_reduce(events, memory, &Translate.durable(session_id, &1, &2))
+
+      first =
+        events |> Enum.map(&Translate.seq/1) |> Enum.reject(&is_nil/1) |> Enum.min(fn -> nil end)
+
+      {:ok, %{events: translated, more: page["more"] == true, first: first}}
+    else
+      {:ok, _other} -> {:error, "the server's answer had no events"}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
   @doc "What the connection and the session look like right now."
   @spec status(String.t()) :: map()
   def status(session_id) do
@@ -340,6 +368,9 @@ defmodule Troupe.Remote.Worker do
       cursor: Journal.cursor(sid),
       head_seq: nil,
       subscribed?: false,
+      # Whether a first subscribe may start from the session's checkpoint: until one came
+      # in a shape this client does not read.
+      from_checkpoint?: true,
       scopes: [],
       capabilities: %{},
       # The largest message the server takes, as `initialize` says (`limits`); nil before.
@@ -408,6 +439,13 @@ defmodule Troupe.Remote.Worker do
   end
 
   def handle_call(:asking, _from, state), do: {:reply, asking_events(state), state}
+
+  # A fresh memory for a page of history, knowing only who this connection is and what the
+  # session's window is called.
+  def handle_call(:page_memory, _from, %{memory: memory} = state),
+    do:
+      {:reply, {:ok, Translate.me(Translate.memory(memory.isolation, memory.profile), memory.me)},
+       state}
 
   def handle_call(:attachment, _from, state) do
     {:reply,
@@ -1118,16 +1156,44 @@ defmodule Troupe.Remote.Worker do
   defp subscribe(%{subscribed?: true} = state), do: state
 
   defp subscribe(state) do
-    # `from_seq` is the last seq already held: the server replays what is after it, so the
-    # cursor itself, never cursor + 1 (which skips an event).
-    params = %{
-      topic: "session:" <> state.session_id,
-      level: "detail",
-      from_seq: state.cursor
-    }
-
+    params = Map.merge(%{topic: "session:" <> state.session_id, level: "detail"}, start(state))
     state = send_request(state, {:internal, :subscribe}, "subscribe", params)
     %{state | subscribed?: true}
+  end
+
+  # Where the replay starts. A session this machine holds nothing of starts from its
+  # latest checkpoint where the server keeps them; otherwise `from_seq` is the last seq
+  # already held: the server replays what is after it, so the cursor itself, never
+  # cursor + 1 (which skips an event).
+  defp start(%{cursor: 0, from_checkpoint?: true, capabilities: %{"checkpoints" => true}}),
+    do: %{from: "checkpoint"}
+
+  defp start(state), do: %{from_seq: state.cursor}
+
+  # An answer from the session's checkpoint: its events go into the journal at its
+  # `through`, ahead of the replay after it.
+  defp subscribed(state, %{"checkpoint" => %{} = checkpoint} = result) do
+    case Translate.checkpoint(state.session_id, checkpoint, state.memory) do
+      {:ok, events, memory} ->
+        visibility = get_in(checkpoint, ["data", "facts", "visibility"])
+        state = %{state | memory: memory, agent: state.agent || Translate.root_of(checkpoint)}
+        for event <- Journal.append(state.session_id, events), do: publish(state, event)
+
+        state = %{
+          state
+          | cursor: max(state.cursor, checkpoint["data"]["through"]),
+            visibility: if(is_binary(visibility), do: visibility, else: state.visibility)
+        }
+
+        publish_status(state)
+        subscribed(state, Map.delete(result, "checkpoint"))
+
+      # A shape this client cannot read: from seq 1 on a new socket, before the replay
+      # from the checkpoint's `through` has drawn anything.
+      :unknown ->
+        send(self(), :connect)
+        %{drop_socket(state, keep_waiting: true) | from_checkpoint?: false}
+    end
   end
 
   # The session is reached, which is what ends a run of failures: a pod that takes the
