@@ -4105,6 +4105,7 @@ defmodule Troupe.Agent.Server do
           compact_resume: resume,
           compact_reason: state.compact_reason || "threshold",
           compact_prompt: Spend.prompt_bytes(request, ""),
+          compact_head: Log.head_seq(state.session_id),
           llm_text: ""
         })
 
@@ -4239,6 +4240,7 @@ defmodule Troupe.Agent.Server do
         "usage" => Usage.to_json(response.usage),
         "gateway" => gateway
       })
+      |> put_folded(state.compact_head)
 
     log(state, :compacted, data, actor)
 
@@ -4259,6 +4261,11 @@ defmodule Troupe.Agent.Server do
     |> show_todos()
     |> instructions_due()
   end
+
+  # The range the compaction folded: the agent's events through the log's head when the
+  # summariser was asked, its earlier summaries among them.
+  defp put_folded(data, head) when is_integer(head), do: Map.put(data, "folded_through", head)
+  defp put_folded(data, _head), do: data
 
   # What a compaction keeps was said after the messages the summary replaces, so each
   # thinking block in it is bound to a conversation no later request has: on a model that
@@ -4328,7 +4335,7 @@ defmodule Troupe.Agent.Server do
   end
 
   defp resume_after_compaction(state) do
-    state = %{state | compact_reason: nil, compact_prompt: nil, compact_command: nil}
+    state = %{state | compact_reason: nil, compact_prompt: nil, compact_command: nil, compact_head: nil}
 
     case state.compact_resume do
       :thinking -> start_turn(%{state | compact_resume: :idle})
@@ -4357,7 +4364,13 @@ defmodule Troupe.Agent.Server do
     )
 
     # A compaction it stopped leaves nothing behind for the next one to write as its own.
-    compaction = %{compact_reason: nil, compact_prompt: nil, compact_command: nil, compact_resume: :idle}
+    compaction = %{
+      compact_reason: nil,
+      compact_prompt: nil,
+      compact_command: nil,
+      compact_head: nil,
+      compact_resume: :idle
+    }
 
     state =
       state

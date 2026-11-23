@@ -191,7 +191,10 @@ defmodule Troupe.Session do
           {Troupe.Session.Loop, session_id: session_id, config: config},
           # Last, and deliberately so: a projection is a subscriber, and one that could
           # restart an agent by crashing would be worse than no projection at all.
-          {Troupe.Session.Summary, session_id: session_id}
+          {Troupe.Session.Summary, session_id: session_id},
+          # A projection too, which writes: one `checkpoint` after each root compaction, at
+          # the root's next rest. Last, so its crash restarts nothing else.
+          {Troupe.Session.Checkpoints, session_id: session_id}
         ]
 
     Supervisor.init(children,
