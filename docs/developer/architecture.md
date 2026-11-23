@@ -318,7 +318,7 @@ flowchart LR
 ```
 
 `one_for_one` is the degraded mode: an unreachable plane does not touch attached sessions.
-A worker connection subscribes from the journal's cursor + 1; the journal drops a batch it
+A worker connection subscribes with the journal's cursor as `from_seq` (the servers replay what is after it); the journal drops a batch it
 already has, so a reconnect or a `resync_required` produces the same transcript. Deltas
 are coalesced per 33 ms and dropped past 64 KB. `Troupe.Remote.Translate` turns protocol
 events into the harness's own at the edge, so the model and view never branch on "is this

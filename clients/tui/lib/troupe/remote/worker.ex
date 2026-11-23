@@ -6,9 +6,10 @@ defmodule Troupe.Remote.Worker do
   What it guarantees:
 
     * the durable stream is gap-free — the subscription always resumes at
-      `cursor + 1`, and the journal drops anything it has already seen, so a
-      reconnect, a `resync_required` and a move to another pod all produce the
-      same transcript as an unbroken connection;
+      the last `seq` it holds (`from_seq`; the servers replay what is after it), and
+      the journal drops anything it has already seen, so a reconnect, a
+      `resync_required` and a move to another pod all produce the same transcript
+      as an unbroken connection;
     * nothing pushes back on the stream — durable events are published the
       moment they arrive, `llm_delta` is coalesced into one event per frame
       interval with a byte cap, and a TUI that cannot keep up costs this
@@ -1117,10 +1118,12 @@ defmodule Troupe.Remote.Worker do
   defp subscribe(%{subscribed?: true} = state), do: state
 
   defp subscribe(state) do
+    # `from_seq` is the last seq already held: the server replays what is after it, so the
+    # cursor itself, never cursor + 1 (which skips an event).
     params = %{
       topic: "session:" <> state.session_id,
       level: "detail",
-      from_seq: state.cursor + 1
+      from_seq: state.cursor
     }
 
     state = send_request(state, {:internal, :subscribe}, "subscribe", params)
