@@ -95,6 +95,10 @@ defmodule Troupe.Client.Daemon do
     |> Enum.map(&elem(&1, 1))
   end
 
+  # The daemon's sessions are read over the same worker connection a pod's are.
+  @impl true
+  def earlier(sid, before), do: Worker.earlier(sid, before)
+
   # The agents a slash command may start a branch on, plus `/worktree`: the default
   # agent, always in a worktree of its own; and `/workflow`: `orchestrate` on a step list,
   # in one too.

@@ -34,6 +34,9 @@ defmodule Troupe.Client.Remote do
   def events(sid), do: Journal.all(sid) ++ Worker.asking(sid)
 
   @impl true
+  def earlier(sid, before), do: Worker.earlier(sid, before)
+
+  @impl true
   def commands(sid) do
     with %{plane_url: plane, team: team} when is_binary(plane) <- attachment(sid),
          {:ok, profiles} <- profiles({:remote, plane}, team) do

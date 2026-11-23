@@ -104,11 +104,15 @@ defmodule Troupe.Client do
   """
   @type command :: %{String.t() => term()}
 
+  @typedoc "A page of a session's history: its events, whether earlier ones exist, its lowest seq."
+  @type page :: %{events: [Event.t()], more: boolean(), first: pos_integer() | nil}
+
   ## Session-scoped
 
   @callback subscribe(session_id()) :: :ok
   @callback unsubscribe(session_id()) :: :ok
   @callback events(session_id()) :: [Event.t()]
+  @callback earlier(session_id(), pos_integer()) :: {:ok, page()} | {:error, term()}
   @callback commands(session_id()) :: [String.t()]
   @callback command_table(session_id()) :: [command()]
   @callback context(session_id()) :: {String.t(), Config.t()}
@@ -233,6 +237,14 @@ defmodule Troupe.Client do
 
   @spec events(session_id()) :: [Event.t()]
   def events(sid), do: impl(sid).events(sid)
+
+  @doc """
+  A page of the history before `before`, for a screen whose session was
+  opened from a checkpoint: its events as the stream's, whether there are earlier ones,
+  and the lowest seq in it.
+  """
+  @spec earlier(session_id(), pos_integer()) :: {:ok, page()} | {:error, term()}
+  def earlier(sid, before), do: impl(sid).earlier(sid, before)
 
   @doc "The agents a slash command may start a branch on."
   @spec commands(session_id()) :: [String.t()]

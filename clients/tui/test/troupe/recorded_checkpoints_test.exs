@@ -38,6 +38,38 @@ defmodule Troupe.RecordedCheckpointsTest do
     end
   end
 
+  # The window a subscription from a checkpoint opens (#1183): `Translate.checkpoint/3` in
+  # place of the history, then the tail, says what the fold from seq 1 says, and its
+  # transcript starts with the summary.
+  for name <- ~w(manual threshold overflow background_approval) do
+    test "#{name}: a window opened from each checkpoint says what the whole log does" do
+      log = recorded(unquote(name))
+      whole = shared(log)
+
+      for checkpoint <- Enum.filter(log, &(&1["type"] == "checkpoint")) do
+        through = checkpoint["data"]["through"]
+        {:ok, seed, memory} = Translate.checkpoint("s-1", checkpoint, Translate.memory())
+        assert seed |> Enum.map(&(&1.seq || 0)) |> Enum.max() == through
+
+        {tail, _memory} =
+          log
+          |> Enum.filter(&(&1["seq"] > through))
+          |> Enum.flat_map_reduce(memory, &Translate.durable("s-1", &1, &2))
+
+        [window] = "s-1" |> Model.rebuild("/w", seed ++ tail) |> Model.windows()
+        assert local_shared(window) == whole, "from #{checkpoint["seq"]}"
+
+        assert [{:earlier, %{lines: [_ | _]}} | _] = window.agents["root"].transcript
+      end
+    end
+  end
+
+  test "a checkpoint in a shape this client does not read is not started from" do
+    [checkpoint | _] = "manual" |> recorded() |> Enum.filter(&(&1["type"] == "checkpoint"))
+    unknown = put_in(checkpoint, ["data", "shape"], "session/9")
+    assert Translate.checkpoint("s-1", unknown, Translate.memory()) == :unknown
+  end
+
   test "a checkpoint draws nothing in the window" do
     log = recorded("manual")
     without = Enum.reject(log, &(&1["type"] == "checkpoint"))
@@ -47,7 +79,10 @@ defmodule Troupe.RecordedCheckpointsTest do
   # What both folds keep, as this one keeps it.
   defp shared(events) do
     [window] = windows(events)
+    local_shared(window)
+  end
 
+  defp local_shared(window) do
     %{
       usage: window.usage,
       goal: window.goal,

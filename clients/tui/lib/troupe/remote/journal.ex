@@ -11,7 +11,14 @@ defmodule Troupe.Remote.Journal do
 
   Events are written in arrival order and read back in it. `seq` is the
   server's, so an event that arrives twice (a replay overlapping what we
-  already have) is dropped here rather than rendered twice (Decision 76).
+  already have) is dropped here rather than rendered twice.
+
+  A session first opened from its latest checkpoint starts with that checkpoint's
+  events instead of its history: the summary and the facts, translated, all at the
+  checkpoint's `through`, which is the cursor until the replay after it moves it on. A
+  reattach so draws the same window from here and resumes after the cursor, asking for
+  neither the history nor the checkpoint again; the history is paged in on screen and
+  never written here, so the cursor stays the highest seq held.
   """
 
   use GenServer
