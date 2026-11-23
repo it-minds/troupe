@@ -20,7 +20,7 @@ defmodule Troupe do
   alias Troupe.LLM.Catalog.Refresher
   alias Troupe.Onboard.Notice
   alias Troupe.Protocol.{Event, Origin}
-  alias Troupe.Session.{Approvals, Blobs, Log, Questions, Watcher}
+  alias Troupe.Session.{Approvals, Blobs, Checkpoint, Log, Questions, Watcher}
   alias Troupe.Sessions.{Archive, Fork, Index, Pin, Title, Unseen}
 
   require Logger
@@ -952,6 +952,31 @@ defmodule Troupe do
     Log.replay_from(session_id, from_seq)
   catch
     :exit, _ -> Log.read_session_after(session_id, state_dirs(), from_seq)
+  end
+
+  @doc """
+  The session's latest `checkpoint` in a shape this build reads (`Troupe.Session.Checkpoint`),
+  or `nil`: a session that never compacted, or one whose checkpoints are all of a shape a
+  reader replays from seq 1 for.
+  """
+  @spec latest_checkpoint(String.t()) :: Event.t() | nil
+  def latest_checkpoint(session_id) do
+    session_id
+    |> replay_from(0)
+    |> Enum.reverse()
+    |> Enum.find(&(&1.type == "checkpoint" and match?({:ok, _}, Checkpoint.from_checkpoint(&1))))
+  end
+
+  @doc """
+  Up to `limit` durable events before `before`, oldest first, and whether there are more
+  before those: a page of history for a reader that started from a checkpoint.
+  """
+  @spec events_before(String.t(), pos_integer(), pos_integer()) ::
+          {[Event.t()], boolean()}
+  def events_before(session_id, before, limit) do
+    earlier = session_id |> replay_from(0) |> Enum.filter(&(&1.seq < before))
+    more = length(earlier) > limit
+    {Enum.take(earlier, -limit), more}
   end
 
   @doc "Read a stored blob, optionally a byte range."
