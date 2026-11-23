@@ -282,7 +282,9 @@ step at a time and may add or rename, never drop. The hash chain is not recomput
 come with the fold each produces, hashed over a *witness* of the event types replay acts
 on; a test reads the replay clauses from the source and asserts the witness covers them.
 Snapshots are cache: one this build cannot trust is discarded for a full replay, which
-produces the same fold. Protocol schemas are add-only within version 1, enforced by
+produces the same fold. So is `events.jsonl.offsets` beside a log, where each event starts
+(`Troupe.Session.Log.Offsets`): trusted while it bears the log's size and time, else built
+again from the log. Protocol schemas are add-only within version 1, enforced by
 `mix troupe.schema.diff`.
 
 ## 6. The daemon
