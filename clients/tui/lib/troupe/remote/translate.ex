@@ -389,13 +389,16 @@ defmodule Troupe.Remote.Translate do
         {[emit.(:tool_call_completed, completed(data))], memory}
 
       # What the prompt was read from (`instructions_loaded`) is `/context`'s to show, not a
-      # line in the transcript at every turn the files changed.
+      # line in the transcript at every turn the files changed. A `checkpoint` says what
+      # the log comes to so far, which the window has folded already; the compaction it
+      # follows has its own line.
       type
       when type in [
              "tool_results",
              "mounts_resolved",
              "config_upgraded_ack",
-             "instructions_loaded"
+             "instructions_loaded",
+             "checkpoint"
            ] ->
         {[], memory}
 
