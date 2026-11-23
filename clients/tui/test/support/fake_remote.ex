@@ -1164,13 +1164,13 @@ defmodule Troupe.FakeRemote do
   end
 
   defp dispatch(state, _kind, "subscribe", %{"topic" => "session:" <> id} = params, pid) do
-    from_seq = params["from_seq"] || 1
+    from_seq = params["from_seq"] || 0
     events = state.sessions[id][:events] || []
 
     # The replay lands in the handler's mailbox while it is still blocked on
     # this call, so it goes out after the reply, in order, and never repeats
     # anything the client already has.
-    replay = Enum.filter(events, &(&1["seq"] >= from_seq))
+    replay = Enum.filter(events, &(&1["seq"] > from_seq))
 
     for event <- replay, do: send(pid, {:push, notification(id, event)})
 

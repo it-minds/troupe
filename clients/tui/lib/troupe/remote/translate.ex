@@ -189,6 +189,9 @@ defmodule Troupe.Remote.Translate do
 
   # The worker writes the path as a list from the root (`["root", "explore#1"]`); the
   # contract's example and the fake write one string. Either becomes `root/explore#1`.
+  # A fork's first event names no agent; it is the session's own, whose window is `root`,
+  # not a second one beside it.
+  defp agent_path(%{"type" => "session_forked"} = event), do: agent_of(event) || "root"
   defp agent_path(event), do: agent_of(event) || "session-1"
 
   # `actor` is `{"kind", "subject", "display_name"}` on the wire; a name is what a
