@@ -9,7 +9,10 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { WebSocket as NodeWebSocket } from "ws";
-import { webTokenStore } from "@troupe/client";
+import { useState } from "react";
+import type { JSX } from "react";
+import { downloadsOf, webTokenStore } from "@troupe/client";
+import { AppBanner } from "../src/views/AppBanner";
 import { App } from "../src/App";
 import { SESSION_GONE, addressOf, placeOfAddress, signInSentence, stepForAddress } from "../src/links";
 import { adoptFragment } from "../src/shell";
@@ -156,6 +159,24 @@ describe("the line in the browser build", () => {
     localStorage.setItem("troupe.appBanner.dismissed", "0.38.0-beta");
     unmount = render(<App />).unmount;
     await waitFor(banner, "the line again, for a new version");
+  });
+
+  it("stays dismissed when the plane's answer, and its version, arrives after the person dismissed", async () => {
+    // The line is drawn at once with the public release page; the plane's discovery answers
+    // later. A dismissal in between is of the line the person saw, not of a version they did not.
+    let answer: () => void = () => undefined;
+    function Late(): JSX.Element {
+      const [known, setKnown] = useState(false);
+      answer = () => setKnown(true);
+      return <AppBanner link="troupe://open" downloads={known ? downloadsOf({ plane: { downloads: DOWNLOADS } }) : downloadsOf(null)} />;
+    }
+    unmount = render(<Late />).unmount;
+    button("Dismiss", await waitFor(banner, "the line"))!.click();
+    await waitFor(() => banner() === null || null, "the line gone");
+    answer();
+    await new Promise((r) => setTimeout(r, 100));
+    expect(banner()).toBeNull();
+    expect(localStorage.getItem("troupe.appBanner.dismissed")).toBe("0.39.0-beta");
   });
 
   it("on a phone says the app is for a computer and copies the link, and offers no install", async () => {
