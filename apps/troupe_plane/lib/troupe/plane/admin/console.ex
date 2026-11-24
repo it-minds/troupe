@@ -90,6 +90,7 @@ defmodule Troupe.Plane.Admin.Console do
     # profile; Integrations answers it for every host at once, which is a different question.
     mcp_check: {:area, :profiles},
     bundles_list: {:area, :bundles},
+    bundle_channels: {:area, :bundles},
     bundle_get: {:area, :bundles},
     bundle_validate: {:area, :bundles},
     # The agent builder in the bundle editor asks it as an agent's fields are typed.
