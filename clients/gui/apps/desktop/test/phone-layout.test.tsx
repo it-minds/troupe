@@ -82,8 +82,11 @@ describe("the desktop app at phone width", () => {
     menu()!.click();
     const opened = await waitFor(sheet, "the sheet");
     expect(opened.getAttribute("role")).toBe("dialog");
-    const words = [...opened.querySelectorAll("nav button")].map((b) => b.textContent?.trim().replace(/\d+$/, "").trim());
-    expect(words).toEqual(["Sessions", "Artifacts", "Memory", "Waiting for you", "This computer", "Agents", "Tools and skills", "Appearance", "Setup"]);
+    const words = (): string => [...opened.querySelectorAll("nav button")].map((b) => b.textContent?.trim().replace(/\d+$/, "").trim()).join(", ");
+    // The rail's own groups and order, Setup's check once the daemon has said it is done,
+    // and the same connection rows under them.
+    await waitFor(() => words() === "Sessions, Waiting for you, Artifacts, Memory, This computer, Agents, Tools and skills, Appearance, Setup✓", "the rail's list in the sheet");
+    expect([...opened.querySelectorAll(".conn button")].map((b) => b.getAttribute("aria-label"))).toEqual(["This computer: Connected"]);
     // Who you are at its foot, as the rail has it, and the focus on its Close.
     expect(opened.querySelector(".me .name")?.textContent).toBe("This computer");
     expect(document.activeElement?.textContent).toBe("Close");

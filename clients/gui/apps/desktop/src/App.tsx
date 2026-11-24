@@ -31,10 +31,11 @@ import { Approvals } from "./views/Approvals";
 import { Artifacts } from "./views/Artifacts";
 import { MemoryScreen } from "./views/OwnMemory";
 import { Launcher, opensOnLauncher } from "./views/Launcher";
-import { Local } from "./views/Local";
+import { Connect, Local } from "./views/Local";
 import { ConnectScreen } from "./views/ConnectScreen";
 import { AppearanceSettings, Onboarding } from "./views/Appearance";
-import { FirstRun, SetupScreen, useSetupNeeded } from "./views/Onboarding";
+import { FirstRun, SetupScreen, setupProgress, useSetupNeeded } from "./views/Onboarding";
+import { hasLocalSide, localSide, onAbsentSide, PlaneAway, planeSide, RailBody } from "./views/Rail";
 import type { SetupOutcome } from "./views/Onboarding";
 import { Review } from "./views/Review";
 import { Sessions } from "./views/Sessions";
@@ -420,9 +421,21 @@ export function App(): JSX.Element {
     const t = setTimeout(() => setLinkNote(null), 8000);
     return () => clearTimeout(t);
   }, [linkNote]);
-  // A fresh machine in local mode meets the first run's questions (Decision 705); the
-  // daemon says whether they are needed, once per connection.
-  const setup = useSetupNeeded(mode === "local" ? daemon.client : null);
+  // A fresh machine in local mode meets the first run's questions; the daemon says whether
+  // they are needed, once per connection and again as the person leaves Setup, and in
+  // either mode how far they have got, which the rail's card counts.
+  const setup = useSetupNeeded(daemon.client, where.screen === "setup" ? 1 : 0);
+  // Which sides this install has: a plane unless Local only is on (an install with none
+  // configured is at the sign-in, not here), and this computer where a daemon can be found
+  // or this window has been told of one. A daemon let go of on This computer stays a side
+  // until the next load, so the page that says how to connect it again does not vanish
+  // under the person. A screen of a side the install does not have gives way to Sessions.
+  const hadLocal = useRef(false);
+  if (hasLocalSide(daemon) || capabilities().localSessions) hadLocal.current = true;
+  const sides = { local: hadLocal.current, plane: !localOnly };
+  useEffect(() => {
+    if (onAbsentSide(where.screen, sides)) setWhere({ screen: "sessions" });
+  }, [where.screen, sides.local, sides.plane]);
 
   const signOut = useCallback(async () => {
     // The daemon gives back the plane token this app handed it, where it is this person's
@@ -642,97 +655,57 @@ export function App(): JSX.Element {
     );
   }
 
+  // Each side's state, said once at the rail's foot and beside its group's heading.
+  const localState = sides.local ? localSide(daemon) : null;
+  const planeState = sides.plane ? planeSide({ signedIn: planeAuth !== null, listError: planeError, offline, expired, refused }) : null;
+  const setupState = setup.needed === true && setup.flow ? setupProgress(setup.flow) : setup.needed === false ? ("finished" as const) : null;
+
   // The rail's destinations and who you are: down the rail's side on a wide window, and in
   // the sheet the top bar opens on a phone, where pressing one shuts the sheet.
   const destinations = (
-    <>
-      <nav>
-        <button aria-current={where.screen === "sessions" ? "page" : undefined} onClick={() => setWhere({ screen: "sessions" })}>
-          Sessions <span className="count muted">{snapshot.rows.length}</span>
-        </button>
-        {/* A person's own things, read and changed here rather than in the console: what
-            they and their troupe published for them, and what every session of theirs
-            remembers. Both from the plane the app is signed in to, through this
-            computer's daemon where it is not; neither asks a plane under Local only. */}
-        <button aria-current={where.screen === "artifacts" ? "page" : undefined} onClick={() => setWhere({ screen: "artifacts" })}>
-          Artifacts
-        </button>
-        <button aria-current={where.screen === "memory" ? "page" : undefined} onClick={() => setWhere({ screen: "memory" })}>
-          Memory
-        </button>
-        <button aria-current={where.screen === "approvals" ? "page" : undefined} onClick={() => setWhere({ screen: "approvals" })}>
-          Waiting for you
-          {waiting > 0 && (
-            <span className="pill waiting">
-              <Eye status="waiting" />
-              {waiting}
-            </span>
-          )}
-        </button>
-        {/* Review reads the plane's record of unattended runs. There is none without
-            a plane, so it is not offered, rather than offered and empty. */}
-        {planeAuth && (
-          <button aria-current={where.screen === "review" ? "page" : undefined} onClick={() => setWhere({ screen: "review" })}>
-            Review
-          </button>
-        )}
-        {/* What each profile the person may use gives a session, before they start one: the
-            plane's to say, so offered only while signed in to one, as Review is. */}
-        {planeAuth && (
-          <button aria-current={where.screen === "profiles" ? "page" : undefined} onClick={() => setWhere({ screen: "profiles" })}>
-            Profiles
-          </button>
-        )}
-        <button aria-current={where.screen === "local" ? "page" : undefined} onClick={() => setWhere({ screen: "local" })}>
-          This computer
-          {daemon.status === "connected" && <span className="count muted">{local}</span>}
-        </button>
-        <button aria-current={where.screen === "agents" ? "page" : undefined} onClick={() => setWhere({ screen: "agents" })}>
-          Agents
-        </button>
-        {/* Your own MCP servers and skills, which every session on this computer starts. */}
-        <button aria-current={where.screen === "connect" ? "page" : undefined} onClick={() => setWhere({ screen: "connect" })}>
-          Tools and skills
-        </button>
-        <button aria-current={where.screen === "appearance" ? "page" : undefined} onClick={() => setWhere({ screen: "appearance" })}>
-          Appearance
-        </button>
-        <button aria-current={where.screen === "setup" ? "page" : undefined} onClick={() => setWhere({ screen: "setup" })}>
-          Setup
-        </button>
-      </nav>
-      <span className="spacer" />
-      {planeAuth ? (
-        <div className="me">
-          <div className="name">{planeAuth.me?.display_name ?? planeAuth.me?.subject ?? "Signed in"}</div>
-          <div className="teams muted">{planeAuth.me?.teams.join(", ") || "no team"}</div>
-          <div className="host muted micro" title={`Your sign-in is kept in: ${caps.secrets.replace("-", " ")}`}>
-            {caps.shellName ?? "browser"}
+    <RailBody
+      current={where.screen}
+      go={(screen) => setWhere({ screen })}
+      local={localState}
+      plane={planeState}
+      sessions={snapshot.rows.length}
+      waiting={waiting}
+      here={local}
+      setup={setupState}
+      onLocalRow={() => setWhere({ screen: "local" })}
+      // Offline, the plane's page is the sign-in, which asks it again and says how it
+      // answers; signed in, This computer names the plane and holds Local only, and an
+      // install with no local side has the plane's own group to show instead.
+      onPlaneRow={() => {
+        if (offline) {
+          setOffline(false);
+          setExpired(false);
+        } else setWhere({ screen: sides.local ? "local" : "profiles" });
+      }}
+      me={
+        planeAuth ? (
+          <div className="me">
+            <div className="name">{planeAuth.me?.display_name ?? planeAuth.me?.subject ?? "Signed in"}</div>
+            <div className="teams muted">{planeAuth.me?.teams.join(", ") || "no team"}</div>
+            <div className="host muted micro" title={`Your sign-in is kept in: ${caps.secrets.replace("-", " ")}`}>
+              {caps.shellName ?? "browser"}
+            </div>
+            <button className="link" onClick={() => void signOut()}>
+              Sign out
+            </button>
           </div>
-          <button className="link" onClick={() => void signOut()}>
-            Sign out
-          </button>
-        </div>
-      ) : (
-        // Nobody is signed in, and nobody needs to be: the sessions here belong to
-        // this computer's user, so that is who is named.
-        <div className="me">
-          <div className="name">This computer</div>
-          <div className="teams muted">{daemon.user?.name ?? "the daemon is not connected"}</div>
-          <div className="host muted micro">
-            {refused
-              ? "the platform needs a newer version"
-              : !offline
-                ? "local only"
-                : expired
-                  ? "not signed in to the platform"
-                  : "the platform is not answering"}{" "}
-            ·{" "}
-            {caps.shellName ?? "browser"}
+        ) : (
+          // Nobody is signed in, and nobody needs to be: the sessions here belong to
+          // this computer's user, so that is who is named. How each side stands is the
+          // connection rows' to say.
+          <div className="me">
+            <div className="name">This computer</div>
+            {daemon.user?.name && <div className="teams muted">{daemon.user.name}</div>}
+            <div className="host muted micro">{caps.shellName ?? "browser"}</div>
           </div>
-        </div>
-      )}
-    </>
+        )
+      }
+    />
   );
 
   return (
@@ -880,6 +853,11 @@ export function App(): JSX.Element {
             <Review auth={planeAuth} admin={adminApi} daemon={daemon.client} teams={planeAuth.me?.teams ?? []} onOpen={(id) => setWhere({ screen: "session", id })} />
           )}
 
+          {/* The plane's pages still open while it is offline, and say so. */}
+          {(where.screen === "review" || where.screen === "profiles") && !planeAuth && planeState && (
+            <PlaneAway what={where.screen === "review" ? "The runs to review" : "Profiles"} side={planeState} />
+          )}
+
           {where.screen === "profiles" &&
             planeAuth &&
             (where.profile ? (
@@ -916,7 +894,9 @@ export function App(): JSX.Element {
 
           {where.screen === "appearance" && <AppearanceSettings {...appearance} daemon={daemon.client} />}
 
-          {where.screen === "setup" && <SetupScreen client={daemon.client} opened={daemon.opened} onDone={setupDone} />}
+          {where.screen === "setup" && (
+            <SetupScreen client={daemon.client} opened={daemon.opened} onDone={setupDone} noDaemon={sides.local ? undefined : <Connect daemon={daemon} />} />
+          )}
 
           {where.screen === "approvals" && (
             <Approvals

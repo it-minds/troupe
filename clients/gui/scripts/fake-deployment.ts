@@ -99,7 +99,8 @@ setInterval(() => idp.approve("alice@example.com", "Alice Example"), 500).unref?
 // onboarded, a brief an older survey wrote, and facts with each status for the memory
 // view (troupe #248). Another repository has no brief, so a start there starts the
 // librarian by itself.
-const daemon = new FakeDaemon({ osUser: "ada" });
+// FIRST_RUN=1: this computer has not been set up, so the rail carries setup's card (#1199).
+const daemon = new FakeDaemon({ osUser: "ada", ...(process.env["FIRST_RUN"] ? { firstRun: true } : {}) });
 await daemon.start();
 daemon.onboarding["/home/ada/repo"] = exampleOnboarding({ briefOutdated: true });
 daemon.memory["/home/ada/repo"] = { status: "fresh", built_at: "2026-10-08T09:00:00Z", facts: exampleFacts() };
