@@ -26,7 +26,7 @@ the first number not yet reserved: a chunk's coordinator reserves a block of num
 the chunk and moves the line past the block on the chunk's branch, and a fixer never
 edits it, so two pull requests that each decide something touch no file in common:
 
-<!-- next: 1100 -->
+<!-- next: 1110 -->
 
 A decision is short: what was decided, what was not chosen and why, and what breaks if it
 is undone, in at most 40 lines that are not blank. It does not list the tests that prove
