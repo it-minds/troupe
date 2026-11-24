@@ -38,7 +38,7 @@ defmodule Troupe.Plane.Bundles do
   alias Troupe.Plane.Bundles.Effective
   alias Troupe.Plane.{ClusterPolicy, Fleet, Provision, Reach, Repo}
   alias Troupe.Plane.Control.Router
-  alias Troupe.Plane.Fleet.{Bundle, Extends}
+  alias Troupe.Plane.Fleet.{Bundle, BundleHold, Extends}
   alias Troupe.Plane.Identity.Entitlement
   alias Troupe.Protocol.{AgentCheck, AgentRule}
   alias Troupe.Protocol.Bundle, as: Document
@@ -159,30 +159,171 @@ defmodule Troupe.Plane.Bundles do
   true).
 
   Refused for what `check/1` refuses, and, without Cilium, for an MCP server the pods
-  of a profile on the channel could not reach (`Troupe.Plane.Reach`, Decision 749).
+  of a profile on the channel could not reach (`Troupe.Plane.Reach`). `unheld: true` refuses it too, as `{:error, {:held, hold}}`, where a repository holds the
+  channel (`hold/1`): what a person's publish asks, decided under the channel's lock so a
+  GitOps pass taking the channel at the same moment is either before it or after it.
   """
   @spec publish(String.t(), map(), keyword()) :: {:ok, Bundle.t()} | {:error, term()}
   def publish(channel, content, opts \\ []) do
+    written =
+      locked(channel, fn ->
+        case Keyword.get(opts, :unheld, false) && hold(channel) do
+          %BundleHold{} = hold -> {:error, {:held, hold}}
+          _unheld -> insert(channel, content, opts)
+        end
+      end)
+
+    with {:ok, bundle} <- written, do: {:ok, published(bundle, channel, opts)}
+  end
+
+  # The version row, checked and numbered. Under the channel's lock, so the number and,
+  # for the GitOps pass, the hold are decided against what no other writer is changing.
+  defp insert(channel, content, opts) do
     with {:ok, parsed} <- check(content),
          :ok <- Reach.bundle(channel, parsed) do
-      version = next_version(channel)
-
       %Bundle{}
       |> Bundle.changeset(%{
         channel: channel,
-        version: version,
+        version: next_version(channel),
         hash: Bundle.hash(content),
         content: content,
         summary: Document.summary(parsed),
         published_at: DateTime.utc_now(),
-        published_by: Keyword.get(opts, :by, "system")
+        published_by: Keyword.get(opts, :by, "system"),
+        resource_generation: Keyword.get(opts, :resource_generation),
+        source_revision: Keyword.get(opts, :source_revision)
       })
       |> Repo.insert()
-      |> case do
-        {:ok, bundle} -> {:ok, published(bundle, channel, opts)}
-        error -> error
-      end
     end
+  end
+
+  # One writer at a time per channel, across every replica: a transaction holding an
+  # advisory lock named for the channel. `fun` answers `{:ok, value}` or `{:error, reason}`,
+  # and an error undoes whatever it wrote.
+  defp locked(channel, fun) do
+    Repo.transaction(fn ->
+      Repo.query!("SELECT pg_advisory_xact_lock(hashtext($1))", ["bundle:" <> channel])
+
+      case fun.() do
+        {:ok, value} -> value
+        {:error, reason} -> Repo.rollback(reason)
+      end
+    end)
+  end
+
+  # -- a channel a repository holds -------------------------------------------
+
+  @doc "The hold on a channel a `ConfigBundle` resource names, or `nil` for one published by hand."
+  @spec hold(String.t()) :: BundleHold.t() | nil
+  def hold(channel), do: Repo.get(BundleHold, channel)
+
+  @doc "Whether a repository holds the channel, so a person's publish to it is refused."
+  @spec held?(String.t()) :: boolean()
+  def held?(channel), do: not is_nil(hold(channel))
+
+  @doc "Every channel a repository holds, by channel."
+  @spec holds() :: %{String.t() => BundleHold.t()}
+  def holds, do: Map.new(Repo.all(BundleHold), &{&1.channel, &1})
+
+  @doc """
+  Make a channel say what a repository's resource says, for the GitOps pass.
+
+  The content's hash is compared with the hash the hold last published, never with the
+  channel's current version: a version an administrator retired would otherwise be
+  published again at the next pass. So:
+
+    * the hold's hash: `{:unchanged, hold}`, with its generation and revision brought up to
+      date, or `{:retired, hold, current}` where its version has since been retired, which
+      publishes nothing until the content changes;
+    * no hold, and the content is the channel's current version: `{:adopted, bundle}`, a
+      hold on that version and no new one;
+    * otherwise `{:published, bundle}`, the channel's next version by `system:gitops`,
+      with the generation and revision on it, refused as `publish/3` refuses.
+
+  `meta` is `%{resource_generation, source_revision}`.
+  """
+  @spec follow(String.t(), map(), map()) ::
+          {:ok,
+           {:unchanged, BundleHold.t()}
+           | {:retired, BundleHold.t(), Bundle.t() | nil}
+           | {:adopted, Bundle.t()}
+           | {:published, Bundle.t()}}
+          | {:error, term()}
+  def follow(channel, content, meta) do
+    hash = Bundle.hash(content)
+
+    taken =
+      locked(channel, fn ->
+        hold = hold(channel)
+
+        cond do
+          hold && hold.hash == hash -> kept(channel, hold, meta)
+          is_nil(hold) && match?(%Bundle{hash: ^hash}, current(channel)) -> adopted(channel, meta)
+          true -> published_by_repository(channel, content, hold, meta)
+        end
+      end)
+
+    case taken do
+      {:ok, {:published, bundle}} ->
+        {:ok, {:published, published(bundle, channel, by: "system:gitops")}}
+
+      other ->
+        other
+    end
+  end
+
+  defp kept(channel, hold, meta) do
+    hold =
+      if {hold.resource_generation, hold.source_revision} ==
+           {meta.resource_generation, meta.source_revision},
+         do: hold,
+         else: hold |> BundleHold.changeset(meta) |> Repo.update!()
+
+    case get(channel, hold.version) do
+      %Bundle{retired_at: nil} -> {:ok, {:unchanged, hold}}
+      _retired -> {:ok, {:retired, hold, current(channel)}}
+    end
+  end
+
+  defp adopted(channel, meta) do
+    bundle = current(channel)
+    hold_on(nil, channel, bundle, meta)
+    {:ok, {:adopted, bundle}}
+  end
+
+  defp published_by_repository(channel, content, hold, meta) do
+    opts = [
+      by: "system:gitops",
+      resource_generation: meta.resource_generation,
+      source_revision: meta.source_revision
+    ]
+
+    with {:ok, bundle} <- insert(channel, content, opts) do
+      hold_on(hold, channel, bundle, meta)
+      {:ok, {:published, bundle}}
+    end
+  end
+
+  defp hold_on(hold, channel, bundle, meta) do
+    (hold || %BundleHold{channel: channel})
+    |> BundleHold.changeset(Map.merge(meta, %{hash: bundle.hash, version: bundle.version}))
+    |> Repo.insert_or_update!()
+  end
+
+  @doc """
+  Let a channel go when its resource has: the hold goes, and nothing else. No version is
+  retired and the current one stays current, so a session pinned to any of them notices
+  nothing; the channel is published by hand again from here.
+  """
+  @spec release(BundleHold.t()) :: :ok
+  def release(%BundleHold{channel: channel}) do
+    {:ok, :ok} =
+      locked(channel, fn ->
+        Repo.delete_all(from(h in BundleHold, where: h.channel == ^channel))
+        {:ok, :ok}
+      end)
+
+    :ok
   end
 
   defp next_version(channel) do

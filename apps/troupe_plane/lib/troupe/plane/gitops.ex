@@ -34,10 +34,20 @@ defmodule Troupe.Plane.Gitops do
 
   A kind joins by implementing this behaviour and being listed in `sources/0`. The
   engine lists, reads, reports and removes; the source knows what a row is, what its
-  checks are and what writing one means. `Troupe.Plane.Gitops.Profiles` is the first and
-  `Troupe.Plane.Gitops.Triggers` the second (Decision 737), in that order, so that a pass
-  reads a trigger after the profile it names. `Troupe.Plane.Gitops.GitHubApp` is the third:
-  the plane's GitHub App and the teams' repositories, never its key.
+  checks are and what writing one means. A pass reads them in this order:
+
+    * `Troupe.Plane.Gitops.Bundles`, a channel's configuration bundle, whose row is the
+      channel's hold and whose write publishes a version. First, so that a profile and the
+      prompt and servers its bundle gives it, changed in one commit, land in one pass: the
+      profiles read next already see the new version.
+    * `Troupe.Plane.Gitops.Profiles`, the profiles and the cluster policy.
+    * `Troupe.Plane.Gitops.Triggers`, after the profiles, so that a pass reads a trigger
+      after the profile it names.
+    * `Troupe.Plane.Gitops.GitHubApp`, the plane's GitHub App and the teams' repositories,
+      never its key.
+
+  A kind the cluster does not serve, a CRD this release added and nobody has applied yet,
+  is a list that fails: said once, and the other kinds go on.
   """
 
   use GenServer
@@ -45,6 +55,7 @@ defmodule Troupe.Plane.Gitops do
   import Ecto.Query
 
   alias Troupe.Plane.{ClusterPolicy, Provision, Repo, Settings, Singleton}
+  alias Troupe.Plane.Gitops.Bundles, as: ConfigBundles
   alias Troupe.Plane.Gitops.{GitHubApp, Profiles, Report, Triggers}
 
   require Logger
@@ -104,7 +115,7 @@ defmodule Troupe.Plane.Gitops do
 
   @doc "Every kind a pass reads."
   @spec sources() :: [module()]
-  def sources, do: [Profiles, Triggers, GitHubApp]
+  def sources, do: [ConfigBundles, Profiles, Triggers, GitHubApp]
 
   @doc """
   Where the resources come from, as a person should read it: the repository and path the
@@ -444,7 +455,9 @@ defmodule Troupe.Plane.Gitops do
       true ->
         Logger.warning(
           "troupe plane: gitops: could not read " <>
-            Enum.map_join(failed, "; ", fn {kind, reason} -> "#{kind}: #{inspect(reason)}" end)
+            Enum.map_join(failed, "; ", fn {kind, reason} ->
+              "#{kind}: #{unread(kind, reason)}"
+            end)
         )
     end
 
@@ -454,6 +467,17 @@ defmodule Troupe.Plane.Gitops do
       Logger.error("troupe plane: gitops pass failed: #{Exception.message(exception)}")
       state
   end
+
+  # Discovery not knowing a kind is a CRD nobody applied: Helm installs `crds/` once and
+  # never upgrades them, so a release that adds a kind needs them applied by hand.
+  @doc false
+  @spec unread(String.t(), term()) :: String.t()
+  def unread(kind, %K8s.Discovery.Error{}),
+    do:
+      "the cluster does not serve #{kind}, so its CRD is not applied: apply this release's " <>
+        "CRDs (helm show crds, server-side)"
+
+  def unread(_kind, reason), do: inspect(reason)
 
   defmodule Keeper do
     @moduledoc """

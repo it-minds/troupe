@@ -32,6 +32,10 @@ defmodule Troupe.Plane.Fleet.Bundle do
     field(:published_at, :utc_datetime_usec)
     field(:published_by, :string)
     field(:retired_at, :utc_datetime_usec)
+    # The `ConfigBundle` resource's generation, and the revision it named, for a version the
+    # GitOps pass published; `nil` for one a person published.
+    field(:resource_generation, :integer)
+    field(:source_revision, :string)
 
     timestamps(type: :utc_datetime_usec)
   end
@@ -46,7 +50,9 @@ defmodule Troupe.Plane.Fleet.Bundle do
     :summary,
     :published_at,
     :published_by,
-    :retired_at
+    :retired_at,
+    :resource_generation,
+    :source_revision
   ]
 
   @doc false
