@@ -1,0 +1,89 @@
+# A channel's configuration bundle, as a repository holds it. Read by the plane in gitops
+# mode, which publishes the spec as the channel's next version when it differs from the
+# version this resource last published; in direct mode, and for a channel no ConfigBundle
+# names, bundles are published by hand (admin.bundle.publish) and nothing reads this kind.
+#
+# One per channel, in the plane's namespace, named for the channel. The spec is the bundle
+# document exactly as admin.bundle.publish takes it, in its own snake_case, so the sha256
+# of its canonical JSON is the hash of the version it becomes. That is why nothing here has
+# a default: a value the API server filled in would be content nobody committed and a hash
+# that never matches. The spec keeps what it is not told about, so that a misspelt key
+# reaches the plane and is reported instead of being dropped on the way.
+#
+# At most 1 MiB (1048576 bytes of the spec as JSON); a bundle published by hand may be
+# 4 MiB. Apply it server-side: a client-side kubectl apply copies the object into an
+# annotation, and annotations stop at 256 KiB.
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: configbundles.troupe.dev
+  labels:
+    app.kubernetes.io/name: troupe
+spec:
+  group: troupe.dev
+  scope: Namespaced
+  names:
+    kind: ConfigBundle
+    plural: configbundles
+    singular: configbundle
+    shortNames: [cb]
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          required: [spec]
+          properties:
+            spec:
+              type: object
+              required: [schema]
+              x-kubernetes-preserve-unknown-fields: true
+              description: >-
+                The bundle document as admin.bundle.publish takes it, at most 1 MiB
+                (1048576 bytes as JSON). The plane publishes it as the channel named by
+                metadata.name when its hash differs from the version this resource last
+                published, as system:gitops.
+              properties:
+                schema:
+                  type: integer
+                  minimum: 1
+                  description: The document's schema. 1.
+                about:
+                  type: object
+                  x-kubernetes-preserve-unknown-fields: true
+                  description: "The profile's sentence for a reader: {summary}."
+                agents:
+                  type: array
+                  description: "Agent definitions: {name, definition}."
+                  items:
+                    type: object
+                    x-kubernetes-preserve-unknown-fields: true
+                skills:
+                  type: array
+                  description: "Skills: {name, description, agents, files}."
+                  items:
+                    type: object
+                    x-kubernetes-preserve-unknown-fields: true
+                mcp_servers:
+                  type: array
+                  description: >-
+                    MCP server entries: {name, url, credential_ref, header, timeout_ms,
+                    permission, tools, about}. A credential is named, never carried.
+                  items:
+                    type: object
+                    x-kubernetes-preserve-unknown-fields: true
+                acp_agents:
+                  type: array
+                  description: "ACP agents: {name, command, args, hash}."
+                  items:
+                    type: object
+                    x-kubernetes-preserve-unknown-fields: true
+      additionalPrinterColumns:
+        - name: Schema
+          type: integer
+          jsonPath: .spec.schema
+        - name: Age
+          type: date
+          jsonPath: .metadata.creationTimestamp
