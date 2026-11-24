@@ -3,7 +3,9 @@
 //
 // A profile follows a channel, not a version, so the channels are the profiles' channels
 // (stable where a profile names none), each with its current version, when it was
-// published and which profiles follow it. A version reads whole: its agents, skills and
+// published and which profiles follow it (`admin.bundle.channels`). On a gitops plane a
+// channel a ConfigBundle resource holds is marked held, and one whose resource the plane
+// refused before it ever published is marked refused. A version reads whole: its agents, skills and
 // MCP servers, the Secret each server's credential needs, what changed from the version
 // before it, and which profiles use it, with the pods that report it and those still
 // behind.
@@ -16,9 +18,11 @@
 // because the new version no longer has it. A
 // publish that takes something away from a team is confirmed by typing the channel's name;
 // otherwise a plain confirm, since history is append-only and a rollback is publishing an
-// older version's content again, which a version's page offers. Retiring a version is a
-// plain confirm too: nothing new starts on it, and sessions on it are untouched. Each is
-// shown as the audit recorded it.
+// older version's content again, which a version's page offers. On a channel a repository
+// holds there is no publishing here, neither the editor nor publishing again: a version is a
+// commit, and a rollback is a revert the plane publishes as a new version. Retiring a version
+// is a plain confirm, held channel or not: nothing new starts on it, and sessions on it are
+// untouched. Each is shown as the audit recorded it.
 //
 // A team admin reads the channels their teams' profiles follow, as the plane lets them;
 // publishing and retiring are a platform admin's.
@@ -26,15 +30,39 @@
 import { useEffect, useMemo, useState } from "react";
 import type { JSX } from "react";
 import { agentTemplate, bundleErrors, parseAgent, withBody, withFields } from "@troupe/client";
-import type { AdminProfile, AgentFinding, BundleDetail, BundlePreview, BundleSummary } from "@troupe/client";
+import type { AgentFinding, BundleChannel, BundleDetail, BundlePreview, BundleSummary, ChannelGitops } from "@troupe/client";
 import { go, href } from "../route";
 import { describeError, recorded, show, useConsole, useLoad } from "../console";
-import { AuditNote, Diff, Empty, Field, Fields, Loaded, Preview, Region, Status, count, linesOf, useChange, when } from "./bits";
+import { AuditNote, Diff, Empty, Field, Fields, GitopsProblem, Loaded, Locked, Preview, Region, Status, count, linesOf, useChange, when } from "./bits";
 import type { Done } from "./bits";
 
-/** The channels worth listing: every one a profile follows, and stable, which a profile naming none follows. */
-function channelsOf(profiles: AdminProfile[]): string[] {
-  return [...new Set(["stable", ...profiles.map((p) => p.channel ?? "stable")])].sort((a, b) => (a === "stable" ? -1 : b === "stable" ? 1 : a.localeCompare(b)));
+/** A channel's word on the list where a repository names it: held, or a resource the plane refused that holds nothing. */
+function HeldMark({ gitops }: { gitops: ChannelGitops | null }): JSX.Element {
+  if (!gitops) return <span className="muted">—</span>;
+  if (!gitops.locked) {
+    return (
+      <Status kind="denied" glyph="✕">
+        refused, not held
+      </Status>
+    );
+  }
+  return (
+    <Status kind={gitops.problem ? "waiting" : "dormant"} glyph="◆">
+      held{gitops.problem ? `, ${gitops.problem}` : ""}
+    </Status>
+  );
+}
+
+/** What the last pass read of a channel a repository holds, and what it made. */
+function lastRead(gitops: ChannelGitops): string {
+  const read = gitops.generation === null ? "Last read" : `Last read: generation ${gitops.generation}`;
+  const made = gitops.version === null ? "" : `, published as v${gitops.version}`;
+  return `${read}${made}${gitops.revision ? ` (revision ${gitops.revision}, as the resource says)` : ""}.`;
+}
+
+/** The channel's entry in `admin.bundle.channels`, or null where the plane lists none for it. */
+async function channelOf(admin: { bundleChannels(): Promise<BundleChannel[]> }, channel: string): Promise<BundleChannel | null> {
+  return (await admin.bundleChannels()).find((c) => c.channel === channel) ?? null;
 }
 
 /** The newest version that is not retired: what a new session on the channel gets. */
@@ -51,35 +79,30 @@ function carries(summary: BundleSummary["summary"]): string {
 
 export function Bundles(): JSX.Element {
   const { admin } = useConsole();
-  const [load, reload] = useLoad(async () => {
-    const profiles = await admin.profiles();
-    const channels = channelsOf(profiles);
-    const versions = await Promise.all(channels.map((c) => admin.bundles(c)));
-    return { profiles, rows: channels.map((c, i) => ({ channel: c, versions: versions[i]! })) };
-  }, [admin]);
+  const [load, reload] = useLoad(() => admin.bundleChannels(), [admin]);
   const [other, setOther] = useState("");
 
   return (
     <div className="page">
       <p className="lead">A bundle is a versioned set of agents, skills and MCP servers. A profile follows a channel, not a version: publishing to a channel reaches every pod on it.</p>
       <Loaded load={load} what="the channels" retry={reload}>
-        {({ profiles, rows }) => (
-          <div className="scroll">
-            <table className="channels">
-              <thead>
-                <tr>
-                  <th>Channel</th>
-                  <th>Current</th>
-                  <th>Carries</th>
-                  <th>Published</th>
-                  <th>Profiles</th>
-                </tr>
-              </thead>
-              <tbody>
-                {rows.map(({ channel, versions }) => {
-                  const current = currentOf(versions);
-                  const following = profiles.filter((p) => (p.channel ?? "stable") === channel).map((p) => p.name);
-                  return (
+        {(rows) => {
+          const repository = rows.some((r) => r.gitops);
+          return (
+            <div className="scroll">
+              <table className="channels">
+                <thead>
+                  <tr>
+                    <th>Channel</th>
+                    <th>Current</th>
+                    <th>Carries</th>
+                    <th>Published</th>
+                    <th>Profiles</th>
+                    {repository && <th>Repository</th>}
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.map(({ channel, current, followers, gitops }) => (
                     <tr key={channel}>
                       <td>
                         <a href={href({ page: "bundles", path: [channel] })}>{channel}</a>
@@ -87,14 +110,19 @@ export function Bundles(): JSX.Element {
                       <td>{current ? `v${current.version}` : <span className="muted">nothing published</span>}</td>
                       <td>{current ? carries(current.summary) : "—"}</td>
                       <td>{current ? `${when(current.published_at)} by ${show(current.published_by)}` : "—"}</td>
-                      <td>{following.join(", ") || <span className="muted">none</span>}</td>
+                      <td>{followers.join(", ") || <span className="muted">none</span>}</td>
+                      {repository && (
+                        <td>
+                          <HeldMark gitops={gitops} />
+                        </td>
+                      )}
                     </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        )}
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          );
+        }}
       </Loaded>
       <form
         className="edit"
@@ -126,14 +154,14 @@ export function Bundles(): JSX.Element {
 export function Channel({ channel, opening = null }: { channel: string; opening?: Opening | null }): JSX.Element {
   const { admin, role } = useConsole();
   const platform = role === "platform_admin";
-  const [load, reload] = useLoad(() => Promise.all([admin.bundles(channel), admin.profiles()]), [admin, channel]);
+  const [load, reload] = useLoad(() => Promise.all([admin.bundles(channel), admin.profiles(), channelOf(admin, channel)]), [admin, channel]);
   const [publishing, setPublishing] = useState<Record<string, unknown> | null>(null);
   const [opened, setOpened] = useState<Opening | null>(null);
   const [openError, setOpenError] = useState<unknown>(null);
   const { done, apply } = useChange(reload);
 
   useEffect(() => {
-    if (!opening || !platform || (opened?.kind === opening.kind && opened.name === opening.name) || load.state !== "ready") return;
+    if (!opening || !platform || (opened?.kind === opening.kind && opened.name === opening.name) || load.state !== "ready" || load.data[2]?.gitops?.locked) return;
     setOpened(opening);
     const current = currentOf(load.data[0]);
     if (!current) setPublishing(BLANK);
@@ -147,11 +175,33 @@ export function Channel({ channel, opening = null }: { channel: string; opening?
       </p>
       {done && <AuditNote action={done.action} subject={done.subject} detail={done.detail} />}
       <Loaded load={load} what={`the ${channel} channel`} retry={reload}>
-        {([versions, profiles]) => {
+        {([versions, profiles, listed]) => {
           const current = currentOf(versions);
           const following = profiles.filter((p) => (p.channel ?? "stable") === channel);
+          const gitops = listed?.gitops ?? null;
+          const held = gitops?.locked === true;
           return (
             <>
+              {held ? (
+                <Locked
+                  source={gitops.source}
+                  one={{
+                    what: (
+                      <>
+                        The <code>{channel}</code> channel's bundle
+                      </>
+                    ),
+                    refused: "The plane refuses a publish from here. To go back, revert the commit: the old content is published as a new version. Retiring a version stays here.",
+                  }}
+                >
+                  <p>
+                    It is the ConfigBundle <code>{gitops.resource}</code>. {lastRead(gitops)}
+                  </p>
+                  <GitopsProblem gitops={gitops} />
+                </Locked>
+              ) : (
+                gitops && <GitopsProblem gitops={gitops} />
+              )}
               <Fields
                 rows={[
                   ["Current", current ? <a href={href({ page: "bundles", path: [channel, String(current.version)] })}>v{current.version}</a> : "nothing published"],
@@ -162,7 +212,7 @@ export function Channel({ channel, opening = null }: { channel: string; opening?
               />
               <Region>Versions</Region>
               {versions.length === 0 ? (
-                <Empty title="Nothing published on this channel">{platform ? "Publish its first version below." : "A platform admin publishes one."}</Empty>
+                <Empty title="Nothing published on this channel">{held ? "Its resource publishes one." : platform ? "Publish its first version below." : "A platform admin publishes one."}</Empty>
               ) : (
                 <div className="scroll">
                   <table className="versions">
@@ -195,18 +245,18 @@ export function Channel({ channel, opening = null }: { channel: string; opening?
                   </table>
                 </div>
               )}
-              {platform && publishing === null && !current && (
+              {platform && !held && publishing === null && !current && (
                 <button type="button" onClick={() => setPublishing(BLANK)}>
                   {versions.length ? "Publish a new version" : "Publish the first version"}
                 </button>
               )}
-              {platform && publishing === null && current && <PublishFrom channel={channel} version={current.version} onOpen={setPublishing} />}
+              {platform && !held && publishing === null && current && <PublishFrom channel={channel} version={current.version} onOpen={setPublishing} />}
               {openError !== null && (
                 <p className="field-error" role="alert">
                   {describeError(openError)}
                 </p>
               )}
-              {publishing !== null && (
+              {publishing !== null && !held && (
                 <BundleEditor
                   channel={channel}
                   initial={publishing}
@@ -283,12 +333,12 @@ export function Version({ channel, version }: { channel: string; version: number
   const { admin, me, role, notify } = useConsole();
   const platform = role === "platform_admin";
   const [load, reload] = useLoad(async () => {
-    const [bundle, versions] = await Promise.all([admin.bundle(channel, version), admin.bundles(channel)]);
+    const [bundle, versions, listed] = await Promise.all([admin.bundle(channel, version), admin.bundles(channel), channelOf(admin, channel)]);
     const before = versions.find((v) => v.version < version);
     // What changed from the version before it, from the plane's diff. A version an older
     // plane published may not validate any more, and has no diff to show.
     const changed = before ? await admin.previewBundle(channel, bundle.content, before.version).catch(() => null) : null;
-    return { bundle, versions, before: before?.version ?? null, changed };
+    return { bundle, versions, before: before?.version ?? null, changed, held: listed?.gitops?.locked === true };
   }, [admin, channel, version]);
   const [retiring, setRetiring] = useState(false);
   const [republishing, setRepublishing] = useState(false);
@@ -301,7 +351,7 @@ export function Version({ channel, version }: { channel: string; version: number
       </p>
       {done && <AuditNote action={done.action} subject={done.subject} detail={done.detail} />}
       <Loaded load={load} what={`${channel} v${version}`} retry={reload}>
-        {({ bundle, versions, before, changed }) => {
+        {({ bundle, versions, before, changed, held }) => {
           const current = currentOf(versions);
           const isCurrent = current?.version === bundle.version;
           return (
@@ -330,7 +380,7 @@ export function Version({ channel, version }: { channel: string; version: number
 
               {platform && !retiring && !republishing && (
                 <div className="actions">
-                  {!isCurrent && (
+                  {!isCurrent && !held && (
                     <button type="button" onClick={() => setRepublishing(true)}>
                       Publish this content again
                     </button>
@@ -364,7 +414,9 @@ export function Version({ channel, version }: { channel: string; version: number
                   effects={[
                     `Nothing new starts on v${bundle.version}; sessions already running on it are untouched.`,
                     isCurrent ? (versions.find((v) => v.version < bundle.version && !v.retired_at) ? `${channel}'s current version becomes v${versions.find((v) => v.version < bundle.version && !v.retired_at)!.version}.` : `${channel} has no live version after this: a new session on it gets no bundle.`) : `${channel}'s current version stays v${current?.version ?? "—"}.`,
-                    "A retired version stays retired: to bring its content back, publish it again as a new version.",
+                    held
+                      ? "A retired version stays retired, and the repository's pass does not publish it again: a commit that changes the channel's ConfigBundle publishes a new version."
+                      : "A retired version stays retired: to bring its content back, publish it again as a new version.",
                   ]}
                   verb={`Retire v${bundle.version}`}
                   onCancel={() => setRetiring(false)}

@@ -229,6 +229,8 @@ export type {
   BundlePreview,
   BundleSummary,
   GitopsState,
+  BundleChannel,
+  ChannelGitops,
   PolicyVerdict,
   EffectiveProfile,
   EffectiveBundle,

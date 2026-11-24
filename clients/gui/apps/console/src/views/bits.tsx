@@ -323,17 +323,33 @@ export function useChange(onApplied: () => void): {
  * What a plane in `gitops` mode holds in a repository rather than here: said first, with
  * where the repository is, because a screen with nothing to press and no reason given reads
  * as a broken one. The plane refuses a write to any of it, so nothing here offers one.
+ *
+ * `one` is a single thing a resource holds where the mode alone does not hold it, such as
+ * one channel's bundle: said of it, and of the writes refused, rather than of every such
+ * thing on the plane.
  */
-export function Locked({ things, source, children }: { things: string; source: string | null | undefined; children?: ReactNode }): JSX.Element {
+export function Locked({ things, one, source, children }: { things?: string; one?: { what: ReactNode; refused: ReactNode }; source: string | null | undefined; children?: ReactNode }): JSX.Element {
+  const where = source ? (
+    <>
+      {" "}
+      (<code>{source}</code>)
+    </>
+  ) : null;
   return (
     <section className="banner locked" role="note" aria-label="Held in a repository">
       <Status kind="dormant" glyph="◆">
         Held in a repository
       </Status>
-      <p>
-        This plane is in <code>gitops</code> mode: its {things} are resources a repository holds{source ? <> (<code>{source}</code>)</> : null}, and a change
-        to one is a commit there. The plane refuses a write from here, so nothing on this screen offers one.
-      </p>
+      {one ? (
+        <p>
+          {one.what} is a resource a repository holds{where}, and a change to it is a commit there. {one.refused}
+        </p>
+      ) : (
+        <p>
+          This plane is in <code>gitops</code> mode: its {things} are resources a repository holds{where}, and a change to one is a commit there. The plane
+          refuses a write from here, so nothing on this screen offers one.
+        </p>
+      )}
       {children}
     </section>
   );
@@ -348,6 +364,7 @@ export function GitopsProblem({ gitops }: { gitops: { problem: string | null; re
     plane_only: "Nothing applies it from a repository yet",
     unwritten: "The plane has not written it to the cluster",
     unknown_teams: "It names teams this plane does not have; the rest of it is used",
+    retired: "The version the repository's content is has been retired, and nothing is published again until the content changes",
   };
   return (
     <div className="gitops-problem" role="status">
