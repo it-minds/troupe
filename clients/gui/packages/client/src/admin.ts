@@ -674,6 +674,28 @@ export interface BundleSummary {
   retired_at: string | null;
 }
 
+/**
+ * A channel a `ConfigBundle` resource names, on a plane in `gitops` mode: `locked` while the
+ * resource holds it (a person's publish is refused), the generation and the revision the
+ * last pass read it at and the version that made, and any problem the pass reported:
+ * `refused` (with the reasons), or `retired` where an administrator retired the version
+ * the repository's content is.
+ */
+export interface ChannelGitops extends GitopsState {
+  resource: string;
+  version: number | null;
+  revision: string | null;
+}
+
+/** One channel worth listing (`admin.bundle.channels`): its current version, who follows it, and what a repository says of it. */
+export interface BundleChannel {
+  channel: string;
+  current: BundleSummary | null;
+  followers: string[];
+  /** Null where no `ConfigBundle` names the channel, and on a `direct` plane. */
+  gitops: ChannelGitops | null;
+}
+
 export interface BundleDetail extends BundleSummary {
   content: Record<string, unknown>;
   /** What the version carries, read whole: null for one an older plane published and this one cannot read. */
@@ -1862,6 +1884,11 @@ export class AdminApi {
 
   bundles(channel: string): Promise<BundleSummary[]> {
     return this.rpc<BundleSummary[]>("admin.bundles.list", { channel });
+  }
+
+  /** The channels: stable, every one the caller's profiles follow, and on a gitops plane the ones a repository holds or tried to. */
+  bundleChannels(): Promise<BundleChannel[]> {
+    return this.rpc<BundleChannel[]>("admin.bundle.channels", {});
   }
 
   bundle(channel: string, version: number): Promise<BundleDetail> {

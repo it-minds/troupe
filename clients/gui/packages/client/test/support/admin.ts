@@ -389,6 +389,18 @@ export interface FakeBundle {
   retired_at: string | null;
 }
 
+/** A `ConfigBundle` resource on a gitops plane, and what the last pass made of it. */
+export interface FakeBundleResource {
+  /** Whether it holds its channel: false for one refused before it ever published. */
+  held: boolean;
+  generation: number | null;
+  version: number | null;
+  revision?: string | null;
+  problem?: "refused" | "retired" | null;
+  problem_generation?: number | null;
+  reasons?: string[];
+}
+
 /** A team's trigger, as the plane keeps one, with its revisions. */
 export interface FakeTrigger {
   id: string;
@@ -1101,6 +1113,11 @@ export class FakeAdmin {
   gitopsSource: string | null = null;
   /** Every published version, by channel, oldest first. */
   readonly bundles = new Map<string, FakeBundle[]>();
+  /**
+   * On a gitops plane, the `ConfigBundle` resources by channel: `held` where one holds the
+   * channel (a person's publish is refused), with what the last pass read and made of it.
+   */
+  readonly bundleResources = new Map<string, FakeBundleResource>();
   readonly triggerRows: FakeTrigger[] = [];
   /** The Trigger resources in the plane's namespace, which a direct plane lists and copies from. */
   readonly triggerResources: FakeTriggerResource[] = [];
@@ -1614,6 +1631,37 @@ export class FakeAdmin {
         return { result: [...(this.bundles.get(params["channel"]) ?? [])].reverse().map((b) => this.bundleSummary(b)) };
       }
 
+      case "admin.bundle.channels": {
+        if (!admin) return notAdmin;
+        const profiles = this.profilesFor(subject);
+        const resources = this.mode === "gitops" ? [...this.bundleResources.keys()] : [];
+        const channels = [...new Set(["stable", ...profiles.map((p) => p.channel ?? "stable"), ...resources])].sort((a, b) => (a === "stable" ? -1 : b === "stable" ? 1 : a.localeCompare(b)));
+        return {
+          result: channels.map((channel) => {
+            const current = this.current(channel);
+            const r = this.mode === "gitops" ? this.bundleResources.get(channel) : undefined;
+            return {
+              channel,
+              current: current ? this.bundleSummary(current) : null,
+              followers: profiles.filter((p) => (p.channel ?? "stable") === channel).map((p) => p.name),
+              gitops: r
+                ? {
+                    locked: r.held,
+                    source: this.gitopsSource,
+                    resource: channel,
+                    generation: r.held ? r.generation : null,
+                    version: r.held ? r.version : null,
+                    revision: r.held ? (r.revision ?? null) : null,
+                    problem: r.problem ?? null,
+                    problem_generation: r.problem_generation ?? null,
+                    reasons: r.reasons ?? [],
+                  }
+                : null,
+            };
+          }),
+        };
+      }
+
       case "admin.bundle.get": {
         if (!admin) return notAdmin;
         const b = this.bundleAt(params["channel"], params["version"]);
@@ -1666,6 +1714,10 @@ export class FakeAdmin {
         if (typeof channel !== "string" || channel === "") return refuse(INVALID_PARAMS, "invalid_params", { method, missing: ["channel"] });
         if (channel.startsWith("profile:"))
           return refuse(INVALID_PARAMS, "invalid_params", { channel, reason: `${channel} is the bundle the plane composes for a profile from the channels of the profiles it extends; publish to those channels instead` });
+        if (this.bundleResources.get(channel)?.held) {
+          const held = this.heldByRepository(subject, "bundle.publish", channel, "ConfigBundle");
+          if (held) return held;
+        }
         const errors = bundleProblems(params["content"], this.policy.egress);
         if (errors.length) return refuse(INVALID_PARAMS, "invalid_params", { errors });
         const versions = this.bundles.get(channel) ?? [];

@@ -149,6 +149,7 @@ nav:
       - "An MCP identity's key": admin/mcp-identity-keys.md
       - Profiles from a repository: admin/gitops.md
       - Bundles, triggers, budgets: admin/bundles-and-triggers.md
+      - Triggers from a repository: admin/triggers-from-a-repository.md
       - Integrations: admin/integrations.md
       - What OpenBao must grant: admin/openbao.md
       - The GitHub App: admin/github.md

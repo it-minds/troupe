@@ -308,6 +308,63 @@ describe("the builder, profile first (#594)", () => {
   });
 });
 
+describe("a plane in gitops mode", () => {
+  const source = "https://git.example.com/platform/troupe.git";
+
+  beforeEach(() => {
+    fake.admin.mode = "gitops";
+    fake.admin.gitopsSource = source;
+    fake.admin.bundleResources.set("stable", { held: true, generation: 4, version: 2, revision: "4f2a9c1" });
+    fake.admin.bundleResources.set("drafts", { held: false, generation: null, version: null, problem: "refused", problem_generation: 1, reasons: ["agent Bad: a name is lowercase letters, digits and dashes"] });
+  });
+
+  it("marks the channel a repository holds, the one it refused, and leaves the rest as they are", async () => {
+    await open("#/bundles");
+    await waitFor(() => rowOf("channels", "stable") && rowOf("channels", "drafts"), "the channels");
+    await sees("held", () => rowOf("channels", "stable"));
+    await sees("refused, not held", () => rowOf("channels", "drafts"));
+    await sees("nothing published", () => rowOf("channels", "drafts"));
+    expect(rowOf("channels", "canary")!.textContent).not.toContain("held");
+  });
+
+  it("locks a held channel: what the pass last read, no publish, and retiring still offered", async () => {
+    await open("#/bundles/stable");
+    await waitFor(() => heading() === "stable" && rowOf("versions", "v2") && says("Held in a repository"), "stable, held");
+    await sees("channel's bundle is a resource a repository holds");
+    await sees(source);
+    await sees("To go back, revert the commit: the old content is published as a new version.");
+    await sees("Last read: generation 4, published as v2 (revision 4f2a9c1, as the resource says).");
+    expect(button("Publish a new version")).toBeNull();
+
+    visit("#/bundles/stable/1");
+    await waitFor(() => heading() === "stable v1" && says("Which profiles use it"), "v1");
+    expect(button("Publish this content again")).toBeNull();
+    (await waitFor(() => button("Retire v1"), "retire offered")).click();
+    await waitFor(() => says("the repository's pass does not publish it again"), "the retire preview");
+  });
+
+  it("says why a resource that holds nothing was refused, and still publishes by hand", async () => {
+    await open("#/bundles/drafts");
+    await waitFor(() => heading() === "drafts" && says("The plane refused the resource"), "drafts, refused");
+    await sees("a name is lowercase letters, digits and dashes");
+    expect(says("Held in a repository")).toBe(false);
+    await waitFor(() => button("Publish the first version"), "the publish offered");
+  });
+
+  it("a held version retired is said, with nothing published again", async () => {
+    fake.admin.bundleResources.set("stable", { held: true, generation: 4, version: 2, problem: "retired", reasons: ["v2, the repository's content, is retired: new sessions get v1; commit a change to publish again"] });
+    await open("#/bundles/stable");
+    await waitFor(() => heading() === "stable" && says("has been retired"), "stable, retired");
+    await sees("commit a change to publish again");
+  });
+
+  it("an unheld channel publishes as on a direct plane", async () => {
+    await open("#/bundles/canary");
+    await waitFor(() => heading() === "canary" && button("Publish a new version"), "canary");
+    expect(says("Held in a repository")).toBe(false);
+  });
+});
+
 describe("a team admin", () => {
   it("reads the channels their teams' profiles follow, and is offered no publish or retire", async () => {
     await open("#/bundles", PEOPLE.bob);

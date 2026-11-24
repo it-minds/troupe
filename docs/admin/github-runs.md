@@ -122,7 +122,7 @@ GitHub at that path; nothing else of it needs to be.
 **A trigger on a repository** is a webhook trigger whose source names the repository and
 what on it starts a run, in the console (**Triggers → New trigger → an issue on a GitHub
 repository**), with `admin.trigger.put`, or as a `Trigger` resource
-([bundles-and-triggers.md](bundles-and-triggers.md#triggers-from-a-repository)):
+([triggers-from-a-repository.md](triggers-from-a-repository.md)):
 
 ```json
 {
