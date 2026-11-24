@@ -9,7 +9,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { AdminApi } from "../src/index.js";
-import type { TeamDisableEffect } from "../src/index.js";
+import type { BundleChannel, TeamDisableEffect } from "../src/index.js";
 
 function recording(): { api: AdminApi; calls: Array<{ method: string; params: unknown }> } {
   const calls: Array<{ method: string; params: unknown }> = [];
@@ -146,5 +146,26 @@ describe("the team methods", () => {
     const api = new AdminApi(async <T,>(): Promise<T> => effect as T);
 
     assert.deepEqual(await api.disableTeamPreview("engineering"), effect);
+  });
+});
+
+describe("the bundle channels", () => {
+  it("are asked for with nothing, and answered as the plane lists them", async () => {
+    const listed: BundleChannel[] = [
+      {
+        channel: "stable",
+        current: null,
+        followers: ["dev"],
+        gitops: { locked: true, source: null, resource: "stable", generation: 3, version: 2, revision: null, problem: null, problem_generation: null, reasons: [] },
+      },
+    ];
+    const calls: Array<{ method: string; params: unknown }> = [];
+    const api = new AdminApi(async <T,>(method: string, params: unknown): Promise<T> => {
+      calls.push({ method, params });
+      return listed as T;
+    });
+
+    assert.deepEqual(await api.bundleChannels(), listed);
+    assert.deepEqual(calls, [{ method: "admin.bundle.channels", params: {} }]);
   });
 });

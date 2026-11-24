@@ -60,6 +60,7 @@ defmodule Troupe.Plane.Admin do
   alias Troupe.Plane.GitHub.Issue, as: GitHubIssue
   alias Troupe.Plane.GitHub.Issues, as: GitHubIssues
   alias Troupe.Plane.GitHub.Policy, as: GitHubPolicy
+  alias Troupe.Plane.Gitops.Bundles, as: GitopsBundles
   alias Troupe.Plane.Gitops.GitHubApp, as: GitopsGitHubApp
   alias Troupe.Plane.Gitops.TriggerCopies
   alias Troupe.Plane.Gitops.Triggers, as: GitopsTriggers
@@ -1093,12 +1094,14 @@ defmodule Troupe.Plane.Admin do
   # break-glass login: the attempt is an event, and "somebody tried to change a profile
   # the repository holds" is one an administrator reading the trail should be able to
   # find next to the commits that did change it. By kind, for whatever else a repository
-  # comes to hold.
-  defp not_held_by_repository(actor, action, name, kind \\ "WorkerProfile") do
+  # comes to hold. `reason` says it of one resource where the mode alone does not hold it:
+  # a channel's bundle is a repository's only where a ConfigBundle names the channel.
+  defp not_held_by_repository(actor, action, name, kind \\ "WorkerProfile", reason \\ nil) do
     if Gitops.enabled?() do
       source = Gitops.source()
       detail = %{"outcome" => "refused", "reason" => "managed_by_gitops"}
       {:ok, _} = Audit.record(actor.subject, action, name, detail)
+      where = if source, do: " (#{source})", else: ""
 
       {:error,
        Error.new(:managed_by_gitops, %{
@@ -1106,8 +1109,12 @@ defmodule Troupe.Plane.Admin do
          name: name,
          source: source,
          reason:
-           "this plane is in gitops mode: a #{kind} is a resource a repository holds" <>
-             "#{if source, do: " (#{source})", else: ""}, and a change to one is a commit there"
+           if(reason,
+             do: reason.(where),
+             else:
+               "this plane is in gitops mode: a #{kind} is a resource a repository holds" <>
+                 "#{where}, and a change to one is a commit there"
+           )
        })}
     else
       :ok
@@ -3873,6 +3880,76 @@ defmodule Troupe.Plane.Admin do
   end
 
   @doc """
+  The channels worth listing: `stable`, every one a profile the caller administers follows,
+  and on a GitOps plane every one a `ConfigBundle` holds and every `ConfigBundle` the pass
+  refused that holds nothing yet, so a manifest that never became a version is somewhere
+  an administrator sees it. Each with its current version, the profiles that follow it and,
+  where a resource names it, `gitops`: whether it is held (`locked`), the resource, the
+  generation and revision the pass last read it at, the version that made, and any problem
+  the last pass reported. A team admin sees the channels of their teams' profiles.
+  """
+  @spec bundle_channels(actor()) :: result()
+  def bundle_channels(actor) do
+    with :ok <- require_admin(actor) do
+      profiles = profiles_for(actor)
+      followed = Enum.group_by(profiles, &(&1.config_bundle_channel || "stable"), & &1.name)
+      {holds, reports} = bundle_gitops(actor, Map.keys(followed))
+
+      channels =
+        (["stable"] ++ Map.keys(followed) ++ Map.keys(holds) ++ Map.keys(reports))
+        |> Enum.uniq()
+        |> Enum.sort_by(&{&1 != "stable", &1})
+
+      {:ok,
+       for channel <- channels do
+         %{
+           channel: channel,
+           current: channel |> Bundles.current() |> then(&(&1 && bundle_summary(&1))),
+           followers: Map.get(followed, channel, []),
+           gitops: channel_gitops(channel, Map.get(holds, channel), Map.get(reports, channel))
+         }
+       end}
+    end
+  end
+
+  # What a GitOps plane holds and reported, by channel: every one for a platform admin, the
+  # ones their profiles follow for a team admin. Nothing on a direct plane, which reads no
+  # resource and whose holds, if a switch left any, hold nothing.
+  defp bundle_gitops(actor, followed) do
+    if Gitops.enabled?() do
+      seen? = &(actor.role == :platform_admin or &1 in followed)
+      holds =
+        for {channel, hold} <- Bundles.holds(), seen?.(channel), into: %{}, do: {channel, hold}
+
+      reports =
+        for report <- Gitops.reports(GitopsBundles.kind()),
+            seen?.(report.name),
+            into: %{},
+            do: {report.name, report}
+
+      {holds, reports}
+    else
+      {%{}, %{}}
+    end
+  end
+
+  defp channel_gitops(_channel, nil, nil), do: nil
+
+  defp channel_gitops(channel, hold, report) do
+    %{
+      locked: not is_nil(hold),
+      source: Gitops.source(),
+      resource: channel,
+      generation: hold && hold.resource_generation,
+      version: hold && hold.version,
+      revision: hold && hold.source_revision,
+      problem: report && report.problem,
+      problem_generation: report && report.generation,
+      reasons: (report && report.reasons) || []
+    }
+  end
+
+  @doc """
   One version in full: the document, what it carries, and which pods have it.
 
   Either role, like the list: a bundle holds prompts and skill files and the *names* of
@@ -4059,12 +4136,25 @@ defmodule Troupe.Plane.Admin do
         do: %{team: team.name, profile: profile, kind: row.kind, name: row.name}
   end
 
-  @doc "Publish a new version, which pushes `config.updated` to every pod on the channel."
+  @doc """
+  Publish a new version, which pushes `config.updated` to every pod on the channel.
+
+  Refused on a GitOps plane as `managed_by_gitops` for a channel a `ConfigBundle` holds,
+  audited as the other refusals are: its versions are the repository's commits. Every other
+  channel on that plane is published here as on a direct one. A direct plane reads no
+  `ConfigBundle`, so a hold left from when it did goes with a person's publish.
+  """
   @spec bundle_publish(actor(), String.t(), map()) :: result()
   def bundle_publish(actor, channel, content) do
     with :ok <- require_platform_admin(actor),
-         :ok <- not_composed(channel) do
-      case Bundles.publish(channel, content, by: actor.subject) do
+         :ok <- not_composed(channel),
+         :ok <- not_held_channel(actor, channel) do
+      holds = if Gitops.enabled?(), do: [unheld: true], else: [release: true]
+
+      case Bundles.publish(channel, content, [by: actor.subject] ++ holds) do
+        {:error, {:held, _hold}} ->
+          refuse_held(actor, channel)
+
         {:ok, bundle} ->
           {:ok, _} =
             Audit.record(actor.subject, "bundle.publish", channel, %{
@@ -4100,6 +4190,26 @@ defmodule Troupe.Plane.Admin do
           {:error, Error.new(:not_found, %{reason: inspect(reason)})}
       end
     end
+  end
+
+  # Asked before the publish and again under the channel's lock, inside it, so a pass that
+  # takes the channel while a person publishes is refused one way or the other.
+  defp not_held_channel(actor, channel) do
+    if Gitops.enabled?() and Bundles.held?(channel),
+      do: refuse_held(actor, channel),
+      else: :ok
+  end
+
+  defp refuse_held(actor, channel) do
+    not_held_by_repository(
+      actor,
+      "bundle.publish",
+      channel,
+      GitopsBundles.kind(),
+      &("the channel #{channel} is a ConfigBundle a repository holds#{&1}, and a change to it " <>
+          "is a commit there; to go back, revert the commit, and the old content is published " <>
+          "as a new version")
+    )
   end
 
   # A profile's composed bundle is the plane's to write, from the channels of its chain: a

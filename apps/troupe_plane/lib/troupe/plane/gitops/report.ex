@@ -13,6 +13,9 @@ defmodule Troupe.Plane.Gitops.Report do
       applies it from a repository yet and the plane writes none of its fields.
     * `unknown_teams` — a `GitHubApp` in use that names teams the plane does not have,
       whose entries wait for those teams.
+    * `retired` — a `ConfigBundle` whose content is the version it published, which an
+      administrator has since retired: nothing is published again until the content
+      changes.
 
   `reasons` are sentences, because a person reads them on the console and a model reads
   them in `admin.profiles.list`, and neither can act on a tuple.

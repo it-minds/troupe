@@ -16,7 +16,8 @@
 //
 // HOLD_MS holds every admin answer that long (250 by default), so the loading states are
 // there to be seen; HOLD_MS=0 for none. GITOPS=1 is a plane in gitops mode, whose profiles
-// and triggers a repository holds, so the Configure area shows them locked.
+// and triggers a repository holds, so the Configure area shows them locked, and one
+// channel's bundle with them.
 //
 // Sessions' Mine has something of the person's own: a laptop's session offered to them and
 // one of their sessions on a worker; Client versions two of their clients' versions; Memory
@@ -60,6 +61,10 @@ if (unpricedProfile) {
 if (process.env["GITOPS"]) {
   admin.mode = "gitops";
   admin.gitopsSource = "https://git.example.com/platform/troupe.git";
+  // stable's bundle is a ConfigBundle the repository holds; drafts' was refused before it
+  // ever published; canary is published by hand as on a direct plane.
+  admin.bundleResources.set("stable", { held: true, generation: 4, version: 2, revision: "4f2a9c1" });
+  admin.bundleResources.set("drafts", { held: false, generation: null, version: null, problem: "refused", problem_generation: 1, reasons: ["unknown keys: agentz"] });
 }
 // The person's desktop app, beside what the plane has seen of them already, in the records
 // Client versions counts: Your clients reads the same ones (`me.clients`), so the two agree.

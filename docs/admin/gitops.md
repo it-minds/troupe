@@ -5,8 +5,10 @@ On a plane with `plane.provisioningMode: gitops`
 a repository holds the `WorkerProfile` manifests; Flux, Argo CD or a pipeline running
 `kubectl apply --server-side` applies them, and the plane never writes git and holds no
 credential for it (Decision 736). The same repository can hold the triggers
-([bundles-and-triggers.md](bundles-and-triggers.md#triggers-from-a-repository)) and the
-GitHub App's settings ([github.md §8](github.md#8-the-app-from-a-repository)). Teams, their
+([triggers-from-a-repository.md](triggers-from-a-repository.md)), the GitHub App's settings
+([github.md §8](github.md#8-the-app-from-a-repository)) and, channel by channel, the
+configuration bundles
+([bundles-and-triggers.md](bundles-and-triggers.md#bundles-from-a-repository)). Teams, their
 grants and service principals stay in the plane's database.
 
 ## What the plane reads
@@ -17,7 +19,11 @@ resource that goes takes its profile with it, its sessions becoming read-only as
 delete; each is audited as `profile.put` or `profile.delete` by `system:gitops`. The
 scaler's count is the plane's: a row takes `spec.replicas` from the resource when it is
 made, and the scaler's number from then on. The same pass then reads the `Trigger`
-resources (Decision 737) and the `GitHubApp`.
+resources (Decision 737) and the `GitHubApp`. Before the profiles it reads the
+`ConfigBundle` resources, each a channel's bundle, and publishes one as the channel's next
+version when its content changes, so a profile and the prompt its bundle gives it land in
+one pass ([bundles-and-triggers.md](bundles-and-triggers.md#bundles-from-a-repository));
+`admin.bundle.channels` lists the channels with what the pass made of each.
 
 A resource is used only if the plane could have saved it itself: its annotations parse,
 `spec.image` names a repository, `spec.sessionsPerPod` is a size class's (4 is `standard`,
@@ -206,7 +212,7 @@ direct-mode Role gives it `get` and `list` on `triggers` and no write.
 - **Listed.** `admin.triggers.repository` and the console's Triggers page, under **In the
   repository**, show the team's resources beside its rows: each one's source, generation,
   and whether it would pass the plane's checks today, which are a gitops pass's
-  ([bundles-and-triggers.md](bundles-and-triggers.md#triggers-from-a-repository)) and one
+  ([triggers-from-a-repository.md](triggers-from-a-repository.md)) and one
   more, that the principal may use the profile. Where it would not, the reason is said:
   "metadata.name names the team admin, which this plane does not have", or
   "svc:admin/x is not granted the profile dev".
@@ -256,6 +262,9 @@ has no triggers. Then redeploy the plane with `plane.provisioningMode: gitops` a
   ([github.md §8](github.md#8-the-app-from-a-repository)). Until its manifest is
   committed the App is reported `missing` and goes on as it was; from the first pass that
   reads it, a team the manifest does not name lists no repository.
+- A channel's bundle moves when you commit its `ConfigBundle`, before the switch or after:
+  the export has no bundles, so write it from `admin.bundle.get`'s `content`. Content equal
+  to the current version is held at that version; anything else is the next version.
 
 **Gitops to direct.** Stop the applier reconciling the profiles first (suspend the
 Kustomization, or take them out of it), or it puts back the repository's version at its
@@ -263,4 +272,6 @@ next interval. Redeploy with `direct`. The profiles are what the plane last read
 editor writes again, and each profile's first write applies the whole resource as
 `troupe-plane`, taking its fields back. The three annotations stay on the resources,
 unread. So do the `Trigger` resources: the triggers are what the plane last read, and the
-console and `admin.trigger.put` change them again.
+console and `admin.trigger.put` change them again. The channels the `ConfigBundle`
+resources held are published by hand again with every version kept; a direct plane reads
+no `ConfigBundle`.

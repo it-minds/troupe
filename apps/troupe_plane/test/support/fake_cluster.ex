@@ -1,7 +1,7 @@
 defmodule Troupe.Plane.FakeCluster do
   @moduledoc """
-  An API server in memory that knows `WorkerProfile`, `TroupePolicy` and `Trigger`, and
-  who wrote which field of them.
+  An API server in memory that knows `WorkerProfile`, `TroupePolicy`, `Trigger`,
+  `GitHubApp` and `ConfigBundle`, and who wrote which field of them.
 
   For the GitOps tests (Decision 736), where the subject is two writers sharing one
   resource: a repository's applier and the plane. The plane talks to it through its own
@@ -47,7 +47,8 @@ defmodule Troupe.Plane.FakeCluster do
       id: __MODULE__,
       start:
         {Agent, :start_link,
-         [fn -> %{objects: %{}, requests: [], refuse: false} end, [name: __MODULE__]]}
+         [fn -> %{objects: %{}, requests: [], refuse: false, unserved: []} end,
+          [name: __MODULE__]]}
     })
 
     conn = %K8s.Conn{url: "https://kubernetes.example.test", http_provider: __MODULE__}
@@ -140,19 +141,31 @@ defmodule Troupe.Plane.FakeCluster do
 
   # -- the provider -------------------------------------------------------------
 
+  @doc """
+  Stop serving a kind, as a cluster whose CRD for it was never applied: discovery does not
+  list it, so a client cannot name it.
+  """
+  @spec unserve(String.t()) :: :ok
+  def unserve(kind), do: Agent.update(__MODULE__, &%{&1 | unserved: [kind | &1.unserved]})
+
   @impl K8s.Client.Provider
   def request(:get, %URI{path: "/apis/" <> @group_version}, _body, _headers, _opts) do
+    unserved = Agent.get(__MODULE__, & &1.unserved)
+
+    resources = [
+      %{"name" => "workerprofiles", "kind" => "WorkerProfile", "namespaced" => true},
+      %{"name" => "workerprofiles/status", "kind" => "WorkerProfile", "namespaced" => true},
+      %{"name" => "troupepolicies", "kind" => "TroupePolicy", "namespaced" => false},
+      %{"name" => "triggers", "kind" => "Trigger", "namespaced" => true},
+      %{"name" => "githubapps", "kind" => "GitHubApp", "namespaced" => true},
+      %{"name" => "configbundles", "kind" => "ConfigBundle", "namespaced" => true}
+    ]
+
     {:ok,
      %{
        "kind" => "APIResourceList",
        "groupVersion" => @group_version,
-       "resources" => [
-         %{"name" => "workerprofiles", "kind" => "WorkerProfile", "namespaced" => true},
-         %{"name" => "workerprofiles/status", "kind" => "WorkerProfile", "namespaced" => true},
-         %{"name" => "troupepolicies", "kind" => "TroupePolicy", "namespaced" => false},
-         %{"name" => "triggers", "kind" => "Trigger", "namespaced" => true},
-         %{"name" => "githubapps", "kind" => "GitHubApp", "namespaced" => true}
-       ]
+       "resources" => Enum.reject(resources, &(&1["kind"] in unserved))
      }}
   end
 
@@ -181,7 +194,8 @@ defmodule Troupe.Plane.FakeCluster do
   @namespaced %{
     "workerprofiles" => "WorkerProfile",
     "triggers" => "Trigger",
-    "githubapps" => "GitHubApp"
+    "githubapps" => "GitHubApp",
+    "configbundles" => "ConfigBundle"
   }
 
   defp target(path) do
@@ -461,7 +475,7 @@ defmodule Troupe.Plane.FakeCluster do
       )
     )
     |> then(fn resource ->
-      if resource["kind"] in ["WorkerProfile", "Trigger", "GitHubApp"],
+      if resource["kind"] in ["WorkerProfile", "Trigger", "GitHubApp", "ConfigBundle"],
         do: update_in(resource, ["metadata"], &Map.put_new(&1, "namespace", @namespace)),
         else: resource
     end)

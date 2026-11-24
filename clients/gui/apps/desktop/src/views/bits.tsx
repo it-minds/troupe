@@ -236,7 +236,7 @@ export function unreachedWords(daemon: { status: "unsupported" | "searching" | "
     case "error":
       return `You are not signed in here, and this computer's daemon did not answer${daemon.error ? ` (${daemon.error})` : ""}, so ${what} cannot be read. Sign in, or find the daemon again on This computer.`;
     case "unsupported":
-      return `You are not signed in here, and a browser cannot find this computer's daemon by itself, so ${what} cannot be read. Sign in, or connect the daemon on This computer.`;
+      return `You are not signed in here, and a browser cannot find this computer's daemon by itself, so ${what} cannot be read. Sign in, or connect the daemon on Setup.`;
     default:
       return null;
   }

@@ -26,26 +26,38 @@ export function patienceWords(ms: number = setupTiming.patienceMs): string {
 const sleep = (ms: number) => new Promise<null>((r) => setTimeout(() => r(null), ms));
 
 /**
- * Whether the daemon wants the first run offered: asked once per connection, `null`
- * until it answers. A daemon that has no `setup.get` is one that has nothing to ask.
+ * Whether the daemon wants the first run offered, and the flow it said that with, which
+ * the rail counts the steps of: asked once per connection, and again each time `asked`
+ * changes (the person leaving the Setup screen), `null` until it answers. A daemon that has
+ * no `setup.get` is one that has nothing to ask. Asked again, what it said last stays until
+ * it answers, and stays if it does not.
  */
-export function useSetupNeeded(client: DaemonClient | null): { needed: boolean | null; done: () => void } {
-  const [needed, setNeeded] = useState<boolean | null>(null);
+export function useSetupNeeded(
+  client: DaemonClient | null,
+  asked = 0,
+): { needed: boolean | null; flow: SetupFlow | null; done: () => void } {
+  const [said, setSaid] = useState<{ client: DaemonClient | null; needed: boolean | null; flow: SetupFlow | null }>({
+    client,
+    needed: null,
+    flow: null,
+  });
+  // A new connection starts from nothing known.
+  const now = said.client === client ? said : { client, needed: null, flow: null };
+  if (now !== said) setSaid(now);
 
   useEffect(() => {
-    setNeeded(null);
     if (!client) return;
     let live = true;
     client
       .setup()
-      .then((flow) => live && setNeeded(flow.needed))
-      .catch(() => live && setNeeded(false));
+      .then((flow) => live && setSaid({ client, needed: flow.needed, flow }))
+      .catch(() => live && setSaid((s) => (s.client === client && s.needed !== null ? s : { client, needed: false, flow: null })));
     return () => {
       live = false;
     };
-  }, [client]);
+  }, [client, asked]);
 
-  return { needed, done: useCallback(() => setNeeded(false), []) };
+  return { needed: now.needed, flow: now.flow, done: useCallback(() => setSaid((s) => ({ ...s, needed: false })), []) };
 }
 
 export interface SetupHandle {

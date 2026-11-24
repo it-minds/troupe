@@ -120,7 +120,8 @@ function LocalOnly({ on, onChange }: { on: boolean; onChange: (on: boolean) => v
   );
 }
 
-function Connect({ daemon }: { daemon: DaemonState }): JSX.Element {
+/** Where the daemon is reached, or how to reach it: on This computer, and on Setup where the install has no local side yet. */
+export function Connect({ daemon }: { daemon: DaemonState }): JSX.Element {
   const [port, setPort] = useState("");
   const [token, setToken] = useState("");
 
