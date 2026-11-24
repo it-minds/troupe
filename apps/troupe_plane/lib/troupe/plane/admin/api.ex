@@ -1253,6 +1253,14 @@ defmodule Troupe.Plane.Admin.API do
       ]
     },
     %Method{
+      name: "admin.bundle.channels",
+      function: :bundle_channels,
+      summary:
+        "The channels: stable, every one a profile you administer follows, and on a gitops plane every one a ConfigBundle holds and every ConfigBundle the last pass refused that holds none yet. Each has its current version, the profiles that follow it and `gitops`, null where no resource names it: `locked` while a ConfigBundle holds it, the resource, the generation and revision the pass last read and the version that made, and any problem (`refused` with the reasons, or `retired`).",
+      risk: :read,
+      arguments: []
+    },
+    %Method{
       name: "admin.bundle.get",
       function: :bundle_get,
       summary:
@@ -1339,7 +1347,7 @@ defmodule Troupe.Plane.Admin.API do
       function: :bundle_publish,
       role: :platform_admin,
       summary:
-        "Publish a new version of a channel, which pushes config.updated to every pod on it. History is append-only: a rollback is a new version carrying the old content. Refused, with Cilium or without, for an MCP server at a loopback or link-local address when a profile whose workers are pods follows the channel.",
+        "Publish a new version of a channel, which pushes config.updated to every pod on it. History is append-only: a rollback is a new version carrying the old content, and on a channel a repository holds it is a revert commit, which the plane publishes as a new version. Refused, with Cilium or without, for an MCP server at a loopback or link-local address when a profile whose workers are pods follows the channel. Refused on a gitops plane as managed_by_gitops for a channel a ConfigBundle holds; every other channel there publishes as on a direct plane.",
       risk: :write,
       arguments: [
         %Argument{name: "channel", type: :string, required: true, description: "The channel."},

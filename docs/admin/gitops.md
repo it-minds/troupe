@@ -17,7 +17,11 @@ resource that goes takes its profile with it, its sessions becoming read-only as
 delete; each is audited as `profile.put` or `profile.delete` by `system:gitops`. The
 scaler's count is the plane's: a row takes `spec.replicas` from the resource when it is
 made, and the scaler's number from then on. The same pass then reads the `Trigger`
-resources (Decision 737) and the `GitHubApp`.
+resources (Decision 737) and the `GitHubApp`. Before the profiles it reads the
+`ConfigBundle` resources, each a channel's bundle, and publishes one as the channel's next
+version when its content changes, so a profile and the prompt its bundle gives it land in
+one pass ([bundles-and-triggers.md](bundles-and-triggers.md#bundles-from-a-repository));
+`admin.bundle.channels` lists the channels with what the pass made of each.
 
 A resource is used only if the plane could have saved it itself: its annotations parse,
 `spec.image` names a repository, `spec.sessionsPerPod` is a size class's (4 is `standard`,

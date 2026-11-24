@@ -162,14 +162,25 @@ defmodule Troupe.Plane.Bundles do
   of a profile on the channel could not reach (`Troupe.Plane.Reach`). `unheld: true` refuses it too, as `{:error, {:held, hold}}`, where a repository holds the
   channel (`hold/1`): what a person's publish asks, decided under the channel's lock so a
   GitOps pass taking the channel at the same moment is either before it or after it.
+  `release: true` instead lets the hold go with the publish, for a plane that no longer
+  reads the resources.
   """
   @spec publish(String.t(), map(), keyword()) :: {:ok, Bundle.t()} | {:error, term()}
   def publish(channel, content, opts \\ []) do
     written =
       locked(channel, fn ->
-        case Keyword.get(opts, :unheld, false) && hold(channel) do
-          %BundleHold{} = hold -> {:error, {:held, hold}}
-          _unheld -> insert(channel, content, opts)
+        hold = hold(channel)
+
+        cond do
+          hold && Keyword.get(opts, :unheld, false) ->
+            {:error, {:held, hold}}
+
+          hold && Keyword.get(opts, :release, false) ->
+            Repo.delete!(hold)
+            insert(channel, content, opts)
+
+          true ->
+            insert(channel, content, opts)
         end
       end)
 

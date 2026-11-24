@@ -25,7 +25,8 @@ defmodule Troupe.Plane.Gitops do
 
   Each resource is read with the plane's own checks before anything is written, and one
   that fails them is reported — in `gitops_reports`, in the log once, in
-  `admin.profiles.list` or `admin.triggers.list` and on the console — instead of used. A new one gets no row; a
+  `admin.profiles.list`, `admin.triggers.list` or `admin.bundle.channels` and on the
+  console — instead of used. A new one gets no row; a
   changed one leaves the row as the last version that passed, so a typo in a repository
   does not take down a profile that was running. A row the cluster has no resource for is
   reported too, unless it followed one that has since gone, in which case it goes with it.

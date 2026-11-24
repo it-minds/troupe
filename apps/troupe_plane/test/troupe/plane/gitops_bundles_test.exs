@@ -9,10 +9,12 @@ defmodule Troupe.Plane.GitopsBundlesTest do
 
   import ExUnit.CaptureLog
 
+  alias Ecto.Adapters.SQL.Sandbox
   alias Troupe.Plane.{Admin, Audit, Bundles, FakeCluster, Fleet, Gitops, Identity, Repo}
+  alias Troupe.Plane.Admin.API
   alias Troupe.Plane.Fleet.Bundle
   alias Troupe.Plane.Gitops.Bundles, as: GitopsBundles
-  alias Troupe.Plane.Gitops.Triggers
+  alias Troupe.Plane.Gitops.{Profiles, Triggers}
   alias Troupe.Protocol.Bundle, as: Document
 
   @moduletag timeout: 60_000
@@ -378,7 +380,7 @@ defmodule Troupe.Plane.GitopsBundlesTest do
 
       by_hand =
         Task.async(fn ->
-          Ecto.Adapters.SQL.Sandbox.allow(Repo, parent, self())
+          Sandbox.allow(Repo, parent, self())
 
           Bundles.publish("stable", document("By hand."),
             by: "root@example.test",
@@ -405,6 +407,118 @@ defmodule Troupe.Plane.GitopsBundlesTest do
         # After it: refused, and only the repository's version is there.
         {:error, {:held, _hold}} -> assert Enum.map(rows, & &1.version) == [1]
       end
+    end
+  end
+
+  describe "a person's publish on a channel a repository holds" do
+    setup do
+      flux(manifest("stable", document()))
+      pass()
+      :ok
+    end
+
+    test "is refused as managed_by_gitops, and the attempt is in the trail", context do
+      params = %{"channel" => "stable", "content" => document("By hand.")}
+      assert {:error, error} = API.call("admin.bundle.publish", params, context.root)
+
+      assert error.message == "managed_by_gitops"
+      assert error.code == -32_015
+      assert error.data.kind == "ConfigBundle"
+      assert error.data.name == "stable"
+      assert error.data.source == @source
+
+      assert error.data.reason =~
+               "the channel stable is a ConfigBundle a repository holds (#{@source})"
+
+      assert error.data.reason =~ "revert the commit"
+
+      assert versions("stable") == [1]
+
+      assert [event | _] = Audit.list(actor: "root@example.test")
+      assert event.action == "bundle.publish"
+      assert event.subject_id == "stable"
+      assert event.detail == %{"outcome" => "refused", "reason" => "managed_by_gitops"}
+    end
+
+    test "on a channel no resource holds publishes as it always has", context do
+      params = %{"channel" => "beta", "content" => document("By hand.")}
+
+      assert {:ok, %{version: 1, published_by: "root@example.test"}} =
+               API.call("admin.bundle.publish", params, context.root)
+
+      assert Bundles.hold("beta") == nil
+    end
+
+    test "retiring, validating and previewing stay open", context do
+      content = document("Another.")
+
+      assert {:ok, %{ok: true, hash: hash}} =
+               API.call("admin.bundle.validate", %{"content" => content}, context.root)
+
+      assert hash == Document.hash(content)
+
+      assert {:ok, _preview} =
+               API.call(
+                 "admin.bundle.preview",
+                 %{"channel" => "stable", "content" => content},
+                 context.root
+               )
+
+      assert {:ok, %{retired_at: %DateTime{}}} =
+               API.call(
+                 "admin.bundle.retire",
+                 %{"channel" => "stable", "version" => 1},
+                 context.root
+               )
+    end
+
+    test "admin.bundle.channels lists the held, the unheld and the refused with no hold",
+         context do
+      flux(manifest("broken", Map.put(document(), "agentz", [])))
+      flux(manifest("stable", document(), %{"troupe.dev/revision" => "4f2a9c1"}))
+      pass()
+      flux(profile("dev", %{"configBundleChannel" => "beta"}))
+      {:ok, _} = Gitops.sync(Profiles)
+      {:ok, _} = Bundles.publish("beta", document("By hand."), by: "root@example.test")
+
+      assert {:ok, listed} = API.call("admin.bundle.channels", %{}, context.root)
+      by = Map.new(listed, &{&1.channel, &1})
+
+      assert Enum.map(listed, & &1.channel) == ["stable", "beta", "broken"]
+
+      assert %{
+               current: %{version: 1, published_by: "system:gitops"},
+               followers: [],
+               gitops: %{
+                 locked: true,
+                 source: @source,
+                 resource: "stable",
+                 generation: 1,
+                 version: 1,
+                 revision: "4f2a9c1",
+                 problem: nil,
+                 reasons: []
+               }
+             } = by["stable"]
+
+      assert %{current: %{version: 1}, followers: ["dev"], gitops: nil} = by["beta"]
+
+      assert %{current: nil, gitops: %{locked: false, problem: "refused", reasons: [_ | _]}} =
+               by["broken"]
+
+      # A direct plane reads no resource, so nothing it lists says gitops.
+      Application.put_env(:troupe_plane, :provisioning_mode, :direct)
+      assert {:ok, direct} = API.call("admin.bundle.channels", %{}, context.root)
+      assert Enum.all?(direct, &is_nil(&1.gitops))
+      refute Enum.any?(direct, &(&1.channel == "broken"))
+    end
+
+    test "a direct plane publishes a channel a hold was left on, and the hold goes", context do
+      Application.put_env(:troupe_plane, :provisioning_mode, :direct)
+
+      params = %{"channel" => "stable", "content" => document("By hand.")}
+      assert {:ok, %{version: 2}} = API.call("admin.bundle.publish", params, context.root)
+      assert Bundles.hold("stable") == nil
     end
   end
 
