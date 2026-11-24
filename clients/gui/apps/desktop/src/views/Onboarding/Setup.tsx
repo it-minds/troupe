@@ -8,7 +8,7 @@
 // end is the hook's to notice (`onFinished`), from the answer to `finish` or from the
 // daemon's record when that answer was lost, so no screen here waits on one reply.
 
-import type { JSX } from "react";
+import type { JSX, ReactNode } from "react";
 import { previousStep } from "@troupe/client";
 import type { DaemonClient, SetupFlow, SetupStepName } from "@troupe/client";
 import { Failed, Loading } from "../bits";
@@ -137,10 +137,13 @@ export function SetupScreen({
   client,
   opened = 0,
   onDone,
+  noDaemon,
 }: {
   client: DaemonClient | null;
   opened?: number;
   onDone: (outcome: SetupOutcome) => void;
+  /** Shown instead of the questions where the install has no daemon yet: how to add this computer's side. */
+  noDaemon?: ReactNode;
 }): JSX.Element {
   return (
     <div className="listing">
@@ -152,7 +155,7 @@ export function SetupScreen({
             in. Everything is written to this computer&apos;s own settings, and the terminal client reads the same file.
           </p>
         </header>
-        <SetupSteps client={client} opened={opened} onDone={onDone} />
+        {!client && noDaemon ? noDaemon : <SetupSteps client={client} opened={opened} onDone={onDone} />}
       </div>
     </div>
   );

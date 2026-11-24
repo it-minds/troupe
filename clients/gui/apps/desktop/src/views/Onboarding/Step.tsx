@@ -30,6 +30,20 @@ export function planeChosen(flow: SetupFlow | null): boolean {
   return flow?.answers.where?.["choice"] === "plane";
 }
 
+/** A step's name as the run's row of steps says it: a plane's run ends on the sign-in. */
+export function stepWord(flow: SetupFlow, name: SetupStepName): string {
+  return name === "finish" && planeChosen(flow) ? "Sign in" : STEP_WORDS[name];
+}
+
+/**
+ * How far an unfinished run has got, for the rail's card: the steps done of the steps
+ * this path takes, and the one in hand (or the first not done) by its name.
+ */
+export function setupProgress(flow: SetupFlow): { done: number; of: number; next: string } {
+  const next = flow.step !== "done" ? flow.step : (flow.steps.find((s) => !s.done)?.name ?? flow.steps[flow.steps.length - 1]?.name ?? "finish");
+  return { done: flow.steps.filter((s) => s.done).length, of: flow.steps.length, next: stepWord(flow, next) };
+}
+
 /** The steps this path takes, with the one in hand marked. Read with the glyphs, not only the colour. */
 export function Progress({ flow }: { flow: SetupFlow }): JSX.Element {
   return (
@@ -49,7 +63,7 @@ export function Progress({ flow }: { flow: SetupFlow }): JSX.Element {
           >
             {s.done ? "✓ " : current ? "→ " : "· "}
             {/* A plane's run ends on the sign-in, and starts no session here. */}
-            {s.name === "finish" && planeChosen(flow) ? "Sign in" : STEP_WORDS[s.name]}
+            {stepWord(flow, s.name)}
           </li>
         );
       })}
