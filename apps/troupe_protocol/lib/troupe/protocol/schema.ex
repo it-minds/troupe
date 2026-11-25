@@ -887,6 +887,17 @@ defmodule Troupe.Protocol.Schema do
       # A pod session raised to its channel's current bundle version by its owner: the
       # plane's, which the clients ask directly.
       "session.bundle.raise" => %{"session_id" => required(:string)},
+      # A GitHub repository attached to a pod session by its owner, cloned by its pod into
+      # `<owner>/<name>` without a restart, or one taken off: the plane's, which the clients
+      # ask directly. `repository` is `owner/name`, or `{owner, name, ref}` to attach.
+      "session.repository.add" => %{
+        "session_id" => required(:string),
+        "repository" => required(:any)
+      },
+      "session.repository.remove" => %{
+        "session_id" => required(:string),
+        "repository" => required(:string)
+      },
       # Somebody's private session shared with this machine's person, read from the plane's
       # sealed copy with the keys in their own slot, after `after_seq`.
       "session.read_sealed" => %{

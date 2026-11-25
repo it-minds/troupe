@@ -17,6 +17,7 @@ import type { AgentCheck } from "./agents.js";
 import type { ArtifactComment, ArtifactDetail } from "./artifacts.js";
 import type { MemoryEntry } from "./entries.js";
 import type { MemoryProposal } from "./instructions.js";
+import type { SessionRepository } from "./plane.js";
 import type { UnpricedCalls } from "./profile.js";
 
 /**
@@ -43,6 +44,11 @@ export interface AdminSessionRow {
   repository?: { owner: string; name: string; ref?: string | null } | null;
   /** What it did there, as its pod reported it; null until it has done something. */
   github?: SessionGitHub | null;
+  /**
+   * Every repository it holds, the one above first, each with its own record (troupe #1207);
+   * absent from an older plane.
+   */
+  repositories?: SessionRepository[] | null;
   /**
    * For a session running on a pod that has had a turn: whether that turn read the memory in
    * force for it (`current`) or an older version (`behind`). Absent otherwise, and from a

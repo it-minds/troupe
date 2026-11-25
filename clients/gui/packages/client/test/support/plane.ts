@@ -39,6 +39,8 @@ interface Row {
   bundle_version: number;
   /** A raise kept while its agent works, landed when the agent is done (troupe #1177). */
   bundle_raise_to: number | null;
+  /** The GitHub repositories it holds, the one it was created on first (troupe #1207). */
+  repositories: Array<{ owner: string; name: string; ref: string | null; path: string; attached_by: string; attached_at: string; github: null }>;
 }
 
 /** The agent a session given none runs as: `build` where the profile offers it, else its first; none where it offers none. */
@@ -82,6 +84,13 @@ export interface PlaneOptions {
   agents?: Record<string, string[]>;
   /** The teams every person signed in here is in, which `team:<name>` artifacts are for. */
   teams?: string[];
+  /**
+   * GitHub, as the plane's App and its profiles set it (troupe #1207): the repositories the
+   * person's teams list, `owner/name` or `owner/*`, and how many a session holds on each
+   * profile with `spec.github`. A profile not named has none, and is offered none. None at
+   * all is a plane with no App: every profile offers none.
+   */
+  github?: { repositories: string[]; profiles: Record<string, number> };
   /**
    * The teams of particular people, by subject, where membership differs between them: a
    * person named here is in these teams and no other, and anybody else in `teams`.
@@ -743,6 +752,7 @@ export class FakePlane {
       created_at: Date.now() + this.counter,
       bundle_version: this.bundleCurrent.get(profile) ?? 3,
       bundle_raise_to: null,
+      repositories: [],
     };
   }
 
@@ -1386,7 +1396,7 @@ export class FakePlane {
             subject,
             display_name: name,
             kind: "user",
-            teams: [{ name: "core", id: "t-1", budget_micros: 1_000_000 }],
+            teams: [{ name: "core", id: "t-1", budget_micros: 1_000_000, repositories: this.opts.github?.repositories ?? [] }],
             profiles,
             platform_admin: this.opts.admin?.role(subject) === "platform_admin",
           },
@@ -1398,7 +1408,7 @@ export class FakePlane {
         return { result: this.opts.clientDefaults ?? GATEWAY_DEFAULTS };
 
       case "teams.list":
-        return { result: { teams: [{ name: "core", id: "t-1", budget_micros: 1_000_000 }] } };
+        return { result: { teams: [{ name: "core", id: "t-1", budget_micros: 1_000_000, repositories: this.opts.github?.repositories ?? [] }] } };
 
       case "profiles.list":
         return {
@@ -1414,6 +1424,7 @@ export class FakePlane {
               active_sessions: this.roomOf(p).active,
               healthy_pods: 1,
               max_sessions: this.roomOf(p).max_sessions ?? null,
+              max_repositories: this.opts.github?.profiles[p] ?? null,
               teams: this.opts.listsOneTeam ? this.teamsOf(subject).slice(0, 1) : this.teamsOf(subject),
               channel: "stable",
               bundle_version: "3",
@@ -1487,6 +1498,8 @@ export class FakePlane {
         // The plane's default: a create naming none is its owner's and the people invited by name.
         const visibility = typeof params["visibility"] === "string" ? params["visibility"] : "private";
         this.createdVisibility.push(visibility);
+        const held = this.repositoriesFor(profile, params, subject);
+        if ("error" in held) return held;
         const room = this.opts.room?.[profile];
         if (room && typeof room.max_sessions === "number" && room.active >= room.max_sessions) {
           const reason = `${profile} allows ${room.max_sessions} session(s) at once, and they are running`;
@@ -1495,12 +1508,13 @@ export class FakePlane {
         if (room && room.active >= room.capacity) {
           // No room, and more coming: the session exists, waits, and holds its prompt.
           const id = `s-p-${++this.counter}`;
-          const row: Row = { ...this.blankRow(id, subject, profile, title ?? null), agent, visibility, state: "pending" };
+          const row: Row = { ...this.blankRow(id, subject, profile, title ?? null), agent, visibility, state: "pending", repositories: held.repositories };
           this.rows.set(id, row);
           if (prompt) this.heldPrompts.set(id, prompt);
           return { result: { session_id: id, epoch: 1, state: "pending", mode: "waiting", reason: `waiting for a free place on ${profile}`, retry_after_ms: this.retryAfterMs } };
         }
         const row = this.seed(subject, { profile, ...(title === undefined ? {} : { title }), agent, visibility, ...(prompt ? { prompt } : {}) });
+        row.repositories = held.repositories;
         if (room) room.active += 1;
         return { result: this.attachment(row, subject, name, "owner", "activate") };
       }
@@ -1994,6 +2008,38 @@ export class FakePlane {
         return { result: this.sessionJson(row, subject) };
       }
 
+      // A repository attached by the session's owner, or taken off (troupe #1207): checked as
+      // a create checks one, cloned at once here, and said in the log as the pod says it.
+      case "session.repository.add":
+      case "session.repository.remove": {
+        const row = this.rows.get(String(params["session_id"] ?? ""));
+        if (!row) return { error: { code: -32005, message: "not_found" } };
+        if (row.owner !== subject) return { error: { code: -32004, message: "forbidden", data: { required_role: "owner" } } };
+        const named = this.repositoryNamed(params["repository"]);
+        if (!named) return { error: { code: -32602, message: "invalid_params", data: { field: "repository", reason: "a repository is owner/name, or {owner, name, ref}" } } };
+        const full = `${named.owner}/${named.name}`;
+        const at = row.repositories.findIndex((r) => `${r.owner}/${r.name}`.toLowerCase() === full.toLowerCase());
+        if (method === "session.repository.remove") {
+          if (at < 0) return { error: { code: -32602, message: "invalid_params", data: { field: "repository", reason: `this session holds no repository ${full}` } } };
+          if (row.repositories[at]!.path === "." && row.repositories.length === 1) {
+            return { error: { code: -32006, message: "conflict", data: { reason: `${full} is the repository this session was created on, at the workspace's root; it is taken off only while another remains` } } };
+          }
+          const [gone] = row.repositories.splice(at, 1);
+          this.sayRepository(row, subject, "detached", gone!);
+          return { result: this.sessionJson(row, subject) };
+        }
+        const max = this.opts.github?.profiles[row.profile];
+        if (max === undefined) return { error: { code: -32602, message: "invalid_params", data: { field: "repository", reason: `the profile ${row.profile} has no spec.github, so its sessions hold no GitHub repository beyond the one they were created on` } } };
+        if (at >= 0) return { error: { code: -32602, message: "invalid_params", data: { field: "repository", reason: `the session holds ${full} already` } } };
+        if (row.repositories.length + 1 > max) return { error: { code: -32602, message: "invalid_params", data: { field: "repository", reason: `a session on the profile ${row.profile} holds at most ${max} ${max === 1 ? "repository" : "repositories"} (spec.github.maxRepositories)` } } };
+        const unlisted = this.unlisted(full);
+        if (unlisted) return { error: { code: -32602, message: "invalid_params", data: { field: "repository", reason: unlisted } } };
+        const entry = { ...named, path: full, attached_by: subject, attached_at: new Date().toISOString(), github: null };
+        row.repositories.push(entry);
+        this.sayRepository(row, subject, "attached", entry);
+        return { result: this.sessionJson(row, subject) };
+      }
+
       // Its owner's alone; archiving a running session puts it to sleep, and only
       // `session.unarchive` brings it back to the list.
       case "session.archive":
@@ -2045,6 +2091,68 @@ export class FakePlane {
     if (row?.bundle_raise_to) this.raise(row, row.owner, row.bundle_raise_to);
   }
 
+  /** `session.create`'s `repositories`, checked as the plane checks them, or its refusal. */
+  private repositoriesFor(profile: string, params: Record<string, unknown>, subject: string): { repositories: Row["repositories"] } | { error: { code: number; message: string; data: Record<string, unknown> } } {
+    const given = params["repositories"];
+    if (given === undefined || given === null) return { repositories: [] };
+    const refuse = (reason: string) => ({ error: { code: -32602, message: "invalid_params", data: { field: "repositories", reason } } });
+    if (params["repository"] !== undefined && params["repository"] !== null) return refuse("send repository or repositories, not both");
+    if (!Array.isArray(given)) return refuse("repositories is a list, each owner/name or {owner, name, ref}");
+    const max = this.opts.github?.profiles[profile];
+    if (max === undefined) return refuse(`the profile ${profile} has no spec.github, so its sessions hold no GitHub repository beyond the one they were created on`);
+    if (given.length > max) return refuse(`a session on the profile ${profile} holds at most ${max} ${max === 1 ? "repository" : "repositories"} (spec.github.maxRepositories)`);
+    const at = new Date().toISOString();
+    const out: Row["repositories"] = [];
+    for (const g of given) {
+      const named = this.repositoryNamed(g);
+      if (!named) return refuse("a repository is owner/name, or {owner, name, ref}");
+      const full = `${named.owner}/${named.name}`;
+      const unlisted = this.unlisted(full);
+      if (unlisted) return refuse(`${full}: ${unlisted}`);
+      if (out.some((r) => `${r.owner}/${r.name}`.toLowerCase() === full.toLowerCase())) return refuse(`the session holds ${full} already`);
+      out.push({ ...named, path: out.length === 0 ? "." : full, attached_by: subject, attached_at: at, github: null });
+    }
+    return { repositories: out };
+  }
+
+  private repositoryNamed(given: unknown): { owner: string; name: string; ref: string | null } | null {
+    if (typeof given === "string") {
+      const [owner, name, ...rest] = given.split("/");
+      return owner && name && rest.length === 0 ? { owner, name, ref: null } : null;
+    }
+    const g = given as { owner?: unknown; name?: unknown; ref?: unknown } | null;
+    if (typeof g?.owner !== "string" || typeof g?.name !== "string") return null;
+    return { owner: g.owner, name: g.name, ref: typeof g.ref === "string" && g.ref ? g.ref : null };
+  }
+
+  /** Why the person's team may not name it, as the plane says it, or null where it lists it. */
+  private unlisted(full: string): string | null {
+    const listed = this.opts.github?.repositories ?? [];
+    const owner = full.split("/")[0]!.toLowerCase();
+    if (listed.some((l) => l.toLowerCase() === full.toLowerCase() || l.toLowerCase() === `${owner}/*`)) return null;
+    return listed.length === 0
+      ? `the team core lists no GitHub repositories, so its sessions name none: a team admin adds ${full} to the team's github.repositories`
+      : `the team core does not list ${full} among the GitHub repositories its sessions may name: a team admin adds it to the team's github.repositories`;
+  }
+
+  /** The log's `session_repository_changed`, as the pod writes it with the list as it now is. */
+  private sayRepository(row: Row, subject: string, action: string, entry: Row["repositories"][number]): void {
+    const name = this.nameOf(subject);
+    const actor = { kind: "user", subject, ...(name ? { display_name: name } : {}) };
+    this.opts.worker.sessions.get(row.id)?.log.append(
+      "session_repository_changed",
+      {
+        action,
+        repository: `${entry.owner}/${entry.name}`,
+        path: entry.path,
+        by: subject,
+        ...(name ? { by_name: name } : {}),
+        repositories: row.repositories.map((r) => ({ repository: `${r.owner}/${r.name}`, path: r.path, ref: r.ref })),
+      },
+      actor,
+    );
+  }
+
   private sessionJson(row: Row, subject: string): unknown {
     const session = this.opts.worker.sessions.get(row.id);
     const ownerName = this.nameOf(row.owner);
@@ -2082,6 +2190,7 @@ export class FakePlane {
       bundle_channel: "stable",
       bundle_current: this.bundleCurrent.get(row.profile) ?? 3,
       bundle_raise_to: row.bundle_raise_to,
+      repositories: row.repositories,
     };
   }
 }
