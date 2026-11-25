@@ -324,7 +324,8 @@ defmodule Troupe.Plane.Proposals do
           "team" => team.name,
           "name" => trigger.name,
           "url" => triggers_url(team.name, trigger.name),
-          "artifact_url" => artifact["url"]
+          "artifact_url" => artifact["url"],
+          "cron" => trigger.source["cron"]
         }
 
         tell(worker, session, id, "accepted", result, edited, owner)

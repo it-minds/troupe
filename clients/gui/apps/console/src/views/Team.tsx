@@ -562,7 +562,7 @@ function Admins({ team, onApplied }: { team: AdminTeam; onApplied: () => void })
 
 // -- limits ------------------------------------------------------------------------------
 
-type LimitKey = "budget_micros" | "budget_period" | "idle_timeout_seconds" | "cache_eviction_days" | "erase_after_days" | "members_may_control" | "pins_allowed" | "volume_size" | "volume_storage_class" | "allow_unenforced_workers" | "remote_offering_allowed" | "artifact_quota_bytes";
+type LimitKey = "budget_micros" | "budget_period" | "idle_timeout_seconds" | "cache_eviction_days" | "erase_after_days" | "members_may_control" | "pins_allowed" | "members_may_schedule" | "volume_size" | "volume_storage_class" | "allow_unenforced_workers" | "remote_offering_allowed" | "artifact_quota_bytes";
 
 interface Limit {
   field: LimitKey;
@@ -581,6 +581,7 @@ const LIMITS: Limit[] = [
   { field: "erase_after_days", label: "Sessions erased after", kind: "days" },
   { field: "members_may_control", label: "Members may steer team sessions", kind: "switch" },
   { field: "pins_allowed", label: "Members may pin a session", kind: "switch" },
+  { field: "members_may_schedule", label: "Members may schedule a report", kind: "switch", answered: true },
   { field: "remote_offering_allowed", label: "Members may offer a laptop session for steering", kind: "switch" },
   { field: "volume_size", label: "Team volume size", kind: "text" },
   { field: "volume_storage_class", label: "Team volume storage class", kind: "text" },
@@ -845,6 +846,8 @@ function limitRefusal(field: string, asked: unknown, ceiling: unknown): string {
       return "The platform does not let members pin a session; a team may not turn it on.";
     case "members_may_control":
       return "The platform does not let members steer a team session; a team may not turn it on.";
+    case "members_may_schedule":
+      return "The platform does not let members turn on a proposed trigger; a team may not turn it on.";
     default:
       return `The platform allows at most ${show(ceiling)} for ${limitOf(field).label.toLowerCase()}; ${show(asked)} is more than that.`;
   }
@@ -874,6 +877,10 @@ function consequence(team: string, line: DiffLine, laddered: LadderValue | undef
       return to ? `${team}'s members may steer a team session.` : `${team}'s members may watch a team session and no longer steer it, from their next request.`;
     case "pins_allowed":
       return to ? `${team}'s members may pin a session against eviction.` : `${team}'s members may no longer pin a session.`;
+    case "members_may_schedule":
+      return to
+        ? `When a ${team} member publishes a report built from live data, Troupe asks whether to rerun it on a schedule, as their own trigger on their own budget.`
+        : `Troupe no longer offers ${team}'s members to rerun a report on a schedule; a trigger one already turned on keeps running.`;
     case "remote_offering_allowed":
       return to
         ? `${team}'s members may offer a session on their laptop, to steer it from another device.`

@@ -945,6 +945,8 @@ export class FakeWorker {
     this.respond(session, "Published “Weekly numbers”.");
     session.log.append("turn_ended", { reason: "end_turn" });
     this.setStatus(session, "idle");
+    // Once per session, as the harness proposes a kind of thing.
+    if (session.proposals > 0) return;
     const daily = /\b(daily|every day)\b/i.test(words);
     const monday = /\bmonday\b/i.test(words);
     const schedule = daily ? "every day" : monday ? "every Monday" : "every week";
@@ -973,6 +975,17 @@ export class FakeWorker {
         artifact: { id: artifact.id, title: "Weekly numbers", version: 1, url: artifact.url, visibility: "private" },
       },
     });
+  }
+
+  /**
+   * A session whose person already asked for a report and got one, and the proposal that
+   * followed (troupe #1208): what the fake deployment seeds so the card is there to answer.
+   */
+  async seedReport(sessionId: string, owner: string, words: string): Promise<void> {
+    const session = this.sessions.get(sessionId);
+    if (!session) return;
+    session.log.append("user_input", { source: "user", text: `Pull this week's numbers and publish the report, ${words}` }, { kind: "user", subject: owner });
+    await this.report(session, words);
   }
 
   /**
