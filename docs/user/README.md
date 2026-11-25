@@ -91,6 +91,8 @@ and the others link to it.
   brief, and bringing other tools' files in.
 - [Memory](memory.md): what every session of yours starts knowing, at each level, and
   what an agent may write there.
+- [Reruns on a schedule](reruns.md): when Troupe asks to rerun a report built from live
+  data, and what a yes makes.
 - [Artifacts](artifacts.md): pages, documents and files published for other people, and
   where a file you ask for goes.
 - [MCP servers and skills](mcp.md): the tools a session is given, and signing in to one.

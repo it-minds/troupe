@@ -37,7 +37,7 @@ team, a trigger already reruns the artifact, or a `never` stands. The schedule c
 person's words, else Monday 06:00 UTC.
 
 **Yes** makes or reuses the person's own principal in the session's team
-(`svc:<team>/<handle>`), sponsored by them, so runs draw on their budget and stop when they
+(`svc:<team>/own-<handle>`), sponsored by them, so runs draw on their budget and stop when they
 leave; the trigger is the team's row with `review: required`, `notify: [owner]`, the
 session's visibility and `terms.budget_micros` 1 000 000 unless edited; the principal is
 granted `edit` on a person-owned artifact; audited `trigger.put` with `via: proposal`. On a

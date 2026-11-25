@@ -277,6 +277,35 @@ done_reason, failed_reason, pull_request}` when the run is `done` or `failed`, w
 `state` as the run listing gives it and `pull_request` the link to the draft pull request
 the run opened, or `null`.
 
+### A person's own triggers
+
+A member makes no trigger with the admin API. In a pod session they started, the harness
+may propose one when the turn published an artifact after the session read live data, and
+the owner's **Turn on** (`session.proposal.accept`, Decision 1111;
+[reruns](../user/reruns.md)) makes it:
+
+- **The person's own principal**, `svc:<team>/own-<handle>`, made once per team and reused,
+  sponsored by them, with the session's profile among its profiles. Its spend lands on the
+  sponsor's person budget, then the profile's, the team's and the platform's (§4); it is
+  disabled when they leave the team's group, as any sponsored principal is. Its secret is
+  never shown: nothing signs in as it but the plane's triggers. It is listed with the team's
+  principals, and audited `principal.create` with `via: proposal`.
+- **The trigger**, the team's row under that principal: the session's profile and agent, its
+  visibility, `review: required`, `notify` the owner, `concurrency` 1, the schedule and
+  prompt the harness drafted as the owner left them, and `terms` with `approvals: deny`,
+  `budget_micros` 1 000 000 unless the owner changed it, and `allow` (§3). Audited
+  `trigger.put` with `via: proposal`, the session and the principal. A team admin changes
+  or deletes it like any other.
+- **An `edit` grant** for the principal on the artifact, where the owner holds it alone, so
+  each run publishes its next version; a team's artifact is the principal's team's already.
+
+A team admin turns this off for their team with **Members may schedule a report** on the
+team's *Limits* tab (`members_may_schedule`, on by default, under the platform setting of
+the same name, which may only narrow it); off, no session of the team proposes one, and the
+triggers already made keep running. A person holds at most five such triggers per team. On a
+gitops plane Turn on makes nothing: the owner is handed the `Trigger` resource, with no
+principal, to commit. A "never for this report" is kept per person and artifact.
+
 ## 3. Unattended session terms
 
 `session.create`, and so every trigger and A2A task, accepts `terms`, validated before the
@@ -288,6 +317,7 @@ session exists and re-sent on every activation:
 | `max_turns` | 1–500 | the agent's own | ends the session `done` with `budget_exhausted`; with this or `wall_clock_seconds` set, every limit of the session stops it rather than asking |
 | `wall_clock_seconds` | 60–86 400 | the agent's own | same, counted in working time: a turn's time, not the time the session is awake |
 | `approvals` | `wait` or `deny` — there is **no** `auto` | `wait` | `wait` leaves the approval for a person; `deny` answers no. A trigger that needs no approvals runs a profile whose bundle sets those tools to `auto`. With neither limit above set, a spent budget asks the person attached, as on a laptop, and `deny` answers that no too |
+| `allow` | at most 16 per-tool rules, written as in a configuration file (`publish_artifact`, `shell(curl)`, `mcp(crm.list_deals)`) | none | what a run may do unasked under `approvals: deny`, read as the trigger's own layer beside the profile's rules: a profile's `ask` or `deny` of the same tool still holds, so a run that needs it stops there. The `Trigger` resource spells it `allow` too |
 
 A session whose origin is a trigger or A2A and that nobody has marked reviewed is in the
 review queue (`needs_review` on `sessions.list` and `admin.sessions.list`);
