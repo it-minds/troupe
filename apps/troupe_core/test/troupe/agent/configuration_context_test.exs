@@ -83,6 +83,61 @@ defmodule Troupe.Agent.ConfigurationContextTest do
     assert sections(sid) |> Enum.filter(&("configuration" in &1)) |> length() == 1
   end
 
+  # Issue #1207: a pod session's GitHub repositories, each where its clone is, said in the
+  # same section when they move, and folded so a restart does not say them again.
+  test "the root is told the repositories it holds, and again when one is attached or taken off",
+       context do
+    %{session: session, fake: fake} =
+      start_session(context, steps: [{:text, "one"}, {:text, "two"}, {:text, "three"}])
+
+    sid = session.id
+    Troupe.subscribe(sid)
+    widgets = %{"repository" => "example-org/widgets", "path" => ".", "ref" => "main"}
+    gadgets = %{"repository" => "example-org/gadgets", "path" => "example-org/gadgets", "ref" => nil}
+
+    :ok =
+      Troupe.set_repositories(sid, %{
+        "action" => "attached",
+        "repository" => "example-org/widgets",
+        "path" => ".",
+        "repositories" => [widgets]
+      })
+
+    turn(sid, "first")
+
+    :ok =
+      Troupe.set_repositories(
+        sid,
+        %{
+          "action" => "attached",
+          "repository" => "example-org/gadgets",
+          "path" => "example-org/gadgets",
+          "by_name" => "Ada",
+          "repositories" => [widgets, gadgets]
+        },
+        Troupe.Protocol.Event.Actor.user("ada-subject", "Ada")
+      )
+
+    assert Troupe.repositories(sid) == [widgets, gadgets]
+    turn(sid, "second")
+    turn(sid, "third")
+
+    [first, second, third] = Fake.requests(fake)
+    told = turn_context(first, length(first.messages) - 1)
+    assert told =~ "The GitHub repositories this session holds, each a clone in the workspace:"
+    assert told =~ "- example-org/widgets: at the workspace's root, branch main"
+
+    again = turn_context(second, length(second.messages) - 1)
+    assert again =~ "example-org/gadgets was attached by Ada."
+    assert again =~ "- example-org/gadgets: in example-org/gadgets/, its default branch"
+    assert again =~ "name it as repository where there is more than one"
+    refute turn_context(third, length(third.messages) - 1) =~ "GitHub repositories"
+
+    [changed | _] = events_of_type(sid, :session_repository_changed) |> Enum.reverse()
+    assert changed.actor.subject == "ada-subject"
+    assert changed.data["repositories"] == [widgets, gadgets]
+  end
+
   defp resume(context, sid, fake, bundle) do
     {:ok, _} =
       Troupe.resume(sid,

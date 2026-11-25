@@ -187,6 +187,25 @@ defmodule Troupe.Agent.Server do
   end
 
   @doc """
+  Say that the GitHub repositories the session holds moved, as its pod cloned or took one
+  away: `change` is `session_repository_changed`'s data (`action`, `repository`, `path`,
+  `repositories`, the whole list as it now is, and `by_name` or `reason`), which this
+  agent writes under `actor` and its turn context says from its next call.
+  """
+  @spec set_repositories(pid(), map(), Event.Actor.t() | nil) :: :ok
+  def set_repositories(pid, change, actor \\ nil) do
+    send(pid, {:repositories, change, actor})
+    :ok
+  end
+
+  @doc """
+  The GitHub repositories this agent was last told the session holds (each `repository`,
+  `path`, `ref`), or `nil` where it never was.
+  """
+  @spec repositories(pid()) :: [map()] | nil
+  def repositories(pid), do: :gen_statem.call(pid, :repositories, 5_000)
+
+  @doc """
   The goal this agent carries. Asked of the agent rather than read from the log, so a
   `session.goal.set` the agent has not written yet is still in its mailbox ahead of this
   call and is answered.
@@ -487,6 +506,11 @@ defmodule Troupe.Agent.Server do
   # that says so is the same after a restart and is not sent twice.
   defp fold_event(%Event{type: "config_upgraded", data: data}, state),
     do: %{state | configuration: Map.take(data, ["from", "to", "reason", "by_name"])}
+
+  # The repositories the session holds moved: the whole list as it now is, and the change,
+  # kept so the turn context that says so is the same after a restart.
+  defp fold_event(%Event{type: "session_repository_changed", data: data}, state),
+    do: %{state | repositories: repositories_said(data)}
 
   # The number the next child takes (Decision 688), a head of its own for the same reason.
   defp fold_event(%Event{type: "delegation_started", data: data}, state),
@@ -1288,6 +1312,13 @@ defmodule Troupe.Agent.Server do
     {:keep_state, put_goal(state, text, actor, command_id)}
   end
 
+  # Taken in every state, as the goal is: a clone the pod made while the agent worked is
+  # there for its next call to say.
+  defp common(:info, {:repositories, change, actor}, _state_name, state) do
+    log(state, :session_repository_changed, change, actor)
+    {:keep_state, %{state | repositories: repositories_said(change)}}
+  end
+
   defp common(:info, {:loop, loop_id}, _state_name, state), do: {:keep_state, %{state | loop: loop_id}}
 
   # A cancel says who asked; the state it arrives in carries it out as it always did.
@@ -1306,6 +1337,11 @@ defmodule Troupe.Agent.Server do
 
   defp common({:call, from}, :goal, _state_name, state) do
     {:keep_state_and_data, [{:reply, from, state.goal}]}
+  end
+
+  defp common({:call, from}, :repositories, _state_name, state) do
+    held = state.repositories && state.repositories["repositories"]
+    {:keep_state_and_data, [{:reply, from, held}]}
   end
 
   defp common({:call, from}, :definitions, _state_name, state) do
@@ -2052,17 +2088,72 @@ defmodule Troupe.Agent.Server do
   # move (its `config_upgraded` is written after the tree is up), or by the last
   # `config_upgraded` folded. A session that never moved sends nothing.
   defp configuration_section(%State{agent_path: ["root"]} = state) do
-    case configuration_moved(state) do
-      %{"from" => from, "to" => to} = moved when not is_nil(to) ->
-        "<configuration>\nYour configuration moved from v#{from} to v#{to} (#{why_moved(moved)}); " <>
-          "tools, skills and servers are the new version's.\n</configuration>"
+    lines =
+      Enum.reject(
+        [bundle_line(configuration_moved(state)), repositories_lines(state.repositories)],
+        &(&1 == "")
+      )
 
-      _ ->
-        ""
-    end
+    if lines == [], do: "", else: "<configuration>\n" <> Enum.join(lines, "\n") <> "\n</configuration>"
   end
 
   defp configuration_section(_state), do: ""
+
+  defp bundle_line(%{"from" => from, "to" => to} = moved) when not is_nil(to),
+    do:
+      "Your configuration moved from v#{from} to v#{to} (#{why_moved(moved)}); " <>
+        "tools, skills and servers are the new version's."
+
+  defp bundle_line(_moved), do: ""
+
+  # What the session holds on GitHub, each repository where its clone is, and what moved
+  # last: said when it changes, as the rest of the section is.
+  defp repositories_lines(nil), do: ""
+
+  defp repositories_lines(%{"repositories" => held} = said) do
+    moved = repository_moved(said)
+
+    case held do
+      [] ->
+        moved <> "This session holds no GitHub repository now."
+
+      held ->
+        each =
+          Enum.map_join(held, "\n", fn entry ->
+            "- #{entry["repository"]}: #{where(entry["path"])}" <>
+              if(entry["ref"], do: ", branch #{entry["ref"]}", else: ", its default branch")
+          end)
+
+        moved <>
+          "The GitHub repositories this session holds, each a clone in the workspace:\n" <>
+          each <>
+          "\ngit_push, pr_open, pr_comment and pr_checks act on one of them: name it as " <>
+          "repository where there is more than one."
+    end
+  end
+
+  defp where(path) when path in [nil, "."], do: "at the workspace's root"
+  defp where(path), do: "in #{path}/"
+
+  defp repository_moved(%{"action" => "attached", "repository" => name} = said),
+    do: "#{name} was attached#{moved_by(said)}. "
+
+  defp repository_moved(%{"action" => "detached", "repository" => name} = said),
+    do: "#{name} was taken off#{moved_by(said)}; its directory is gone. "
+
+  defp repository_moved(%{"action" => "failed", "repository" => name, "reason" => reason}),
+    do: "#{name} could not be cloned (#{reason}). "
+
+  defp repository_moved(_said), do: ""
+
+  defp moved_by(%{"by_name" => name}) when is_binary(name) and name != "", do: " by #{name}"
+  defp moved_by(_said), do: ""
+
+  defp repositories_said(data) do
+    data
+    |> Map.take(["action", "repository", "reason", "by_name", "repositories"])
+    |> Map.update("repositories", [], &(&1 || []))
+  end
 
   defp configuration_moved(%State{bundle: %{upgraded_from: from} = bundle})
        when not is_nil(from) do

@@ -442,6 +442,43 @@ defmodule Troupe do
     )
   end
 
+  @doc """
+  Say that the GitHub repositories a pod session holds moved: the root agent writes
+  `session_repository_changed` with `change` under `actor`, and its next call is told.
+  """
+  @spec set_repositories(String.t(), map(), Troupe.Protocol.Event.Actor.t() | nil) ::
+          :ok | {:error, :no_session}
+  def set_repositories(session_id, change, actor \\ nil) when is_map(change) do
+    with_root(session_id, &Agent.set_repositories(&1, change, actor))
+  end
+
+  @doc """
+  The GitHub repositories the session last said it holds, each `{repository, path, ref}`,
+  or `nil` where it never said: asked of its root agent, which folded them from the log,
+  or read from the events where the tree is not up, as `goal/1` is.
+  """
+  @spec repositories(String.t()) :: [map()] | nil
+  def repositories(session_id) do
+    case with_root(session_id, &Agent.repositories/1) do
+      {:error, :no_session} -> repositories_in_log(session_id)
+      said -> said
+    end
+  end
+
+  defp repositories_in_log(session_id) do
+    root = Session.root_path()
+
+    session_id
+    |> events()
+    |> Enum.reduce(nil, fn
+      %{type: "session_repository_changed", agent: ^root, data: data}, _held ->
+        data["repositories"] || []
+
+      _event, held ->
+        held
+    end)
+  end
+
   @doc "Clear the session's goal; the root agent writes `goal_cleared` if it had one."
   @spec clear_goal(String.t(), Troupe.Protocol.Event.Actor.t() | nil, keyword()) ::
           :ok | {:error, :no_session}

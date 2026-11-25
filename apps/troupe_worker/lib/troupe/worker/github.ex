@@ -55,6 +55,7 @@ defmodule Troupe.Worker.GitHub do
   alias Troupe.Worker.GitCredentials
   alias Troupe.Worker.GitHub.{API, Secrets, Tree}
   alias Troupe.Worker.Plane.Link
+  alias Troupe.Protocol.Words
 
   require Logger
 
@@ -87,14 +88,28 @@ defmodule Troupe.Worker.GitHub do
 
   # -- which sessions have the tools --------------------------------------------------
 
-  @doc "Hold a session's repository for its activation; `nil` for a session with none."
-  @spec hold(String.t(), map() | nil) :: :ok
-  def hold(session_id, %{} = repository) do
-    if :ets.whereis(@table) != :undefined, do: :ets.insert(@table, {session_id, repository})
+  @doc """
+  Hold the repositories a session has for its activation, each `{owner, name, ref, path}`;
+  `nil` or none for a session with none.
+  """
+  @spec hold(String.t(), [map()] | nil) :: :ok
+  def hold(session_id, [_ | _] = repositories) do
+    if :ets.whereis(@table) != :undefined, do: :ets.insert(@table, {session_id, repositories})
     :ok
   end
 
-  def hold(session_id, nil), do: forget(session_id)
+  def hold(session_id, _none), do: forget(session_id)
+
+  @doc "The repositories a session holds here, as `hold/2` was last given them."
+  @spec holding(String.t()) :: [map()]
+  def holding(session_id) do
+    with tid when tid != :undefined <- :ets.whereis(@table),
+         [{^session_id, repositories}] <- :ets.lookup(@table, session_id) do
+      repositories
+    else
+      _ -> []
+    end
+  end
 
   @doc "The session has gone, or its activation failed."
   @spec forget(String.t()) :: :ok
@@ -103,17 +118,81 @@ defmodule Troupe.Worker.GitHub do
     :ok
   end
 
-  @doc "Whether a session has the fix loop's tools: it was created with a repository."
+  @doc "Whether a session has the fix loop's tools: it holds a repository."
   @spec available?(String.t() | nil) :: boolean()
   def available?(nil), do: false
-  def available?(session_id), do: match?({:ok, _}, repository(session_id))
+  def available?(session_id), do: holding(session_id) != []
 
-  defp repository(session_id) do
-    with tid when tid != :undefined <- :ets.whereis(@table),
-         [{^session_id, repository}] <- :ets.lookup(@table, session_id) do
-      {:ok, repository}
-    else
-      _ -> {:error, "this session was not created with a GitHub repository"}
+  @doc """
+  The repository a tool acts on: the one `opts` names as `:repository` (`owner/name`, in
+  any case), or the session's only one. Several and none named is refused, naming them.
+  Answers the entry and `opts` naming it, which the plane's record and token are asked by.
+  """
+  @spec held(String.t(), keyword()) :: {:ok, map(), keyword()} | {:error, String.t()}
+  def held(session_id, opts) do
+    named = Keyword.get(opts, :repository)
+
+    case {holding(session_id), named} do
+      {[], _named} ->
+        {:error, "this session holds no GitHub repository"}
+
+      {[only], nil} ->
+        {:ok, only, Keyword.put(opts, :repository, full(only))}
+
+      {several, nil} ->
+        {:error,
+         "this session holds #{Words.and_list(Enum.map(several, &full/1))}: name the " <>
+           "repository to act on as repository"}
+
+      {entries, named} ->
+        case Enum.find(entries, &(String.downcase(full(&1)) == String.downcase(named))) do
+          nil ->
+            {:error,
+             "this session holds no repository #{named}; it holds " <>
+               Words.and_list(Enum.map(entries, &full/1))}
+
+          entry ->
+            {:ok, entry, Keyword.put(opts, :repository, full(entry))}
+        end
+    end
+  end
+
+  @doc "The four tools' `repository` argument, as each one's schema has it."
+  @spec repository_property() :: map()
+  def repository_property do
+    %{
+      "type" => "string",
+      "description" =>
+        "The repository to act on, owner/name, as the configuration section names the " <>
+          "session's repositories. Needed only where the session holds more than one."
+    }
+  end
+
+  @doc "The options a tool's arguments name a repository with, for `held/2`."
+  @spec named(map()) :: keyword()
+  def named(%{"repository" => name}) when is_binary(name) and name != "", do: [repository: name]
+  def named(_args), do: []
+
+  @doc "A repository's `owner/name`."
+  @spec full(map()) :: String.t()
+  def full(%{"owner" => owner, "name" => name}), do: "#{owner}/#{name}"
+
+  @doc "Where a repository's clone is in the workspace at `root`."
+  @spec in_workspace(Path.t(), map()) :: Path.t()
+  def in_workspace(root, %{"path" => path}) when is_binary(path) and path not in ["", "."],
+    do: Path.join(root, path)
+
+  def in_workspace(root, _entry), do: root
+
+  @doc """
+  Run `fun` unless a push, a pull request or a CI read on the session's repository is
+  going: `{:error, :busy}` then, without waiting, which is how taking one off is refused.
+  """
+  @spec unless_busy(String.t(), map(), (-> term())) :: term() | {:error, :busy}
+  def unless_busy(session_id, entry, fun) do
+    case :global.trans({{__MODULE__, {session_id, full(entry)}}, self()}, fun, [node()], 0) do
+      :aborted -> {:error, :busy}
+      result -> result
     end
   end
 
@@ -127,7 +206,12 @@ defmodule Troupe.Worker.GitHub do
   def record(session_id, changes \\ %{}, opts \\ []) do
     link = Keyword.get(opts, :link, Link)
 
-    case Link.request(link, "github.record", Map.put(changes, "session_id", session_id)) do
+    params =
+      changes
+      |> Map.put("session_id", session_id)
+      |> then(&if(opts[:repository], do: Map.put(&1, "repository", opts[:repository]), else: &1))
+
+    case Link.request(link, "github.record", params) do
       {:ok, %{} = answer} -> {:ok, Map.update(answer, "github", %{}, &(&1 || %{}))}
       {:error, %Troupe.Protocol.Error{} = error} -> {:error, refusal(error.message, error.data)}
       {:error, %{"message" => message} = error} -> {:error, refusal(message, error["data"])}
@@ -144,10 +228,15 @@ defmodule Troupe.Worker.GitHub do
   """
   @spec push(String.t(), Path.t(), String.t(), String.t() | nil, keyword()) ::
           {:ok, map()} | {:error, String.t()}
-  def push(session_id, root, message, branch, opts \\ []) do
-    one_at_a_time(session_id, fn ->
-      with {:ok, _repository} <- repository(session_id),
-           {:ok, %{"github" => record} = answer} <- record(session_id, %{}, opts),
+  def push(session_id, workspace, message, branch, opts \\ []) do
+    with {:ok, entry, opts} <- held(session_id, opts) do
+      root = in_workspace(workspace, entry)
+      one_at_a_time(session_id, entry, fn -> push_one(session_id, root, message, branch, opts) end)
+    end
+  end
+
+  defp push_one(session_id, root, message, branch, opts) do
+      with {:ok, %{"github" => record} = answer} <- record(session_id, %{}, opts),
            {:ok, message} <- commit_message(message, session_id, answer["requested_by"]),
            :ok <- open_for_pushes(record),
            {:ok, record} <- with_base(session_id, record, root, opts),
@@ -184,10 +273,10 @@ defmodule Troupe.Worker.GitHub do
            files: length(changes),
            url: commit["html_url"],
            verified: get_in(commit, ["verification", "verified"]) == true,
-           pull_request: record["pull_request"]
+           pull_request: record["pull_request"],
+           repository: credential["repository"]
          }}
       end
-    end)
   end
 
   # The trailers are the plane's: who the session's commits are made for comes from the
@@ -605,15 +694,16 @@ defmodule Troupe.Worker.GitHub do
   @spec open_pull_request(String.t(), String.t(), String.t() | nil, keyword()) ::
           {:ok, map()} | {:error, String.t()}
   def open_pull_request(session_id, title, body, opts \\ []) do
-    one_at_a_time(session_id, fn ->
-      with {:ok, _repository} <- repository(session_id),
-           {:ok, title} <- title(title),
-           {:ok, credential} <- credential(session_id, opts),
-           :ok <- granted(credential, "pull_requests", "write", "open a pull request"),
-           {:ok, %{"github" => record}} <- record(session_id, %{}, opts),
-           :ok <- may_open(record, credential),
-           do: open(session_id, credential, title, body, record, opts)
-    end)
+    with {:ok, entry, opts} <- held(session_id, opts) do
+      one_at_a_time(session_id, entry, fn ->
+        with {:ok, title} <- title(title),
+             {:ok, credential} <- credential(session_id, opts),
+             :ok <- granted(credential, "pull_requests", "write", "open a pull request"),
+             {:ok, %{"github" => record}} <- record(session_id, %{}, opts),
+             :ok <- may_open(record, credential),
+             do: open(session_id, credential, title, body, record, opts)
+      end)
+    end
   end
 
   defp open(_session_id, _credential, _title, _body, %{"pull_request" => %{} = pull}, _opts),
@@ -699,7 +789,7 @@ defmodule Troupe.Worker.GitHub do
   @doc "Comment on the session's own pull request. Answers the comment's URL."
   @spec comment(String.t(), String.t(), keyword()) :: {:ok, String.t()} | {:error, String.t()}
   def comment(session_id, body, opts \\ []) do
-    with {:ok, _repository} <- repository(session_id),
+    with {:ok, _entry, opts} <- held(session_id, opts),
          {:ok, body} <- comment_body(body),
          {:ok, credential} <- credential(session_id, opts),
          :ok <- granted(credential, "pull_requests", "write", "comment"),
@@ -736,13 +826,17 @@ defmodule Troupe.Worker.GitHub do
   def checks(session_id, opts \\ []) do
     deadline = System.monotonic_time(:millisecond) + Keyword.get(opts, :wait_ms, 0)
 
-    with {:ok, _repository} <- repository(session_id),
-         {:ok, credential} <- credential(session_id, opts),
-         :ok <- reads_ci(credential) |> cannot_read(),
-         {:ok, %{"github" => record}} <- record(session_id, %{}, opts),
-         {:ok, commit} <- last_push(record),
-         {:ok, ci} <- wait_for_ci(credential, commit, record, deadline),
-         do: conclude(session_id, credential, record, commit, ci, opts)
+    with {:ok, entry, opts} <- held(session_id, opts) do
+      # Under the repository's lock, as a push is, so it is not taken off mid-read.
+      one_at_a_time(session_id, entry, fn ->
+        with {:ok, credential} <- credential(session_id, opts),
+             :ok <- reads_ci(credential) |> cannot_read(),
+             {:ok, %{"github" => record}} <- record(session_id, %{}, opts),
+             {:ok, commit} <- last_push(record),
+             {:ok, ci} <- wait_for_ci(credential, commit, record, deadline),
+             do: conclude(session_id, credential, record, commit, ci, opts)
+      end)
+    end
   end
 
   defp last_push(%{"commit" => commit}) when is_binary(commit), do: {:ok, commit}
@@ -841,7 +935,7 @@ defmodule Troupe.Worker.GitHub do
     end
 
     # The token that could push goes, at GitHub too; the next one the plane mints cannot.
-    GitCredentials.forget(session_id, access: :write)
+    GitCredentials.forget(session_id, access: :write, repository: credential["repository"])
     Logger.info("troupe worker: #{session_id} stopped: #{record["stopped"]["reason"]}")
     :ok
   end
@@ -1066,10 +1160,11 @@ defmodule Troupe.Worker.GitHub do
   defp refusal(_message, %{reason: reason}) when is_binary(reason), do: reason
   defp refusal(message, _data), do: "the plane refused: #{message}"
 
-  # One push or pull request of a session at a time, so two calls in one turn cannot both
-  # be its first push or both open its pull request.
-  defp one_at_a_time(session_id, fun),
-    do: :global.trans({{__MODULE__, session_id}, self()}, fun, [node()])
+  # One push, pull request or CI read on a session's repository at a time, so two calls in
+  # one turn cannot both be its first push or both open its pull request; each repository
+  # has its own, as it has its own branch and record.
+  defp one_at_a_time(session_id, entry, fun),
+    do: :global.trans({{__MODULE__, {session_id, full(entry)}}, self()}, fun, [node()])
 
   defp poll_ms, do: Application.get_env(:troupe_worker, :github_poll_ms, 15_000)
   defp grace_ms, do: Application.get_env(:troupe_worker, :github_ci_grace_ms, 120_000)

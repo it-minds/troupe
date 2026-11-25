@@ -184,6 +184,7 @@
     "events/session_dormant.json",
     "events/session_forked.json",
     "events/session_invited.json",
+    "events/session_repository_changed.json",
     "events/session_resumed.json",
     "events/session_tainted.json",
     "events/session_uninvited.json",

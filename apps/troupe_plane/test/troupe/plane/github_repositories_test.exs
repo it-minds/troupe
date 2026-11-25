@@ -391,6 +391,16 @@ defmodule Troupe.Plane.GitHubRepositoriesTest do
 
       assert [%{"github" => %{"base" => ^base}}, %{"github" => %{"base" => ^other}}] =
                row.repositories
+
+      # The caps are each repository's: a push gadgets spends is not widgets'.
+      profile(context.fake, %{"maxPushes" => 1})
+      push = %{"branch" => "troupe/fix", "commit" => base, "tree" => other}
+      on = fn name, change -> GitHub.record(session, Map.put(change, "repository", name), "w") end
+
+      assert {:ok, _} = on.("example-org/gadgets", %{"push" => push})
+      assert {:error, capped} = on.("example-org/gadgets", %{"push" => %{push | "commit" => other}})
+      assert capped == "this run has made 1 pushes, as many as its cap of 1 allows"
+      assert {:ok, %{github: %{"pushes" => 1}}} = on.("example-org/widgets", %{"push" => push})
     end
   end
 

@@ -32,6 +32,7 @@ defmodule Troupe.Worker.Session.Clone do
   alias Troupe.Reaper
   alias Troupe.Worker.{GitCredentials, GitHub}
   alias Troupe.Worker.GitHub.Tree
+  alias Troupe.Worker.Session.Repositories
 
   require Logger
 
@@ -42,13 +43,17 @@ defmodule Troupe.Worker.Session.Clone do
   @helper ~S|!f() { if [ "$1" = get ]; then printf 'username=%s\npassword=%s\n' "$TROUPE_GIT_USERNAME" "$TROUPE_GIT_TOKEN"; fi; }; f|
 
   @doc """
-  Clone the session's repository into `root` if this activation found nothing there:
-  `tree` is what `Restore.workspace/2` answered, and `opts` the activation's, where the
-  plane put `:repository`. `:ok` when there is nothing to do.
+  Clone the session's repository at the workspace's root into `root` if this activation
+  found nothing there: `tree` is what `Restore.workspace/2` answered, and `opts` the
+  activation's, where the plane put `:repositories`. `:ok` when there is nothing to do.
+  The session's other repositories are each cloned into a directory of their own once the
+  tree is up (`into/4`).
   """
   @spec ensure(String.t(), Path.t(), map(), keyword()) :: :ok | {:error, term()}
   def ensure(session_id, root, tree, opts) do
-    case {Keyword.get(opts, :repository), tree} do
+    at_root = Enum.find(Repositories.of_opts(opts), &(&1["path"] in [nil, "."]))
+
+    case {at_root, tree} do
       {%{} = repository, %{restored: false}} ->
         if empty?(root), do: clone(session_id, root, repository, opts), else: :ok
 
@@ -57,10 +62,32 @@ defmodule Troupe.Worker.Session.Clone do
     end
   end
 
+  @doc """
+  Clone one of the session's repositories into its own directory of the workspace at
+  `root`, `<owner>/<name>`, unless it is there already: attached while the session ran,
+  or at an activation that found the directory missing. Answers `{:ok, :cloned}`,
+  `{:ok, :there}`, or why it could not.
+  """
+  @spec into(String.t(), Path.t(), map(), keyword()) ::
+          {:ok, :cloned | :there} | {:error, term()}
+  def into(session_id, root, %{"path" => path} = repository, opts)
+      when is_binary(path) and path not in ["", "."] do
+    dir = GitHub.in_workspace(root, repository)
+
+    if empty?(dir) do
+      with :ok <- clone(session_id, dir, repository, opts), do: {:ok, :cloned}
+    else
+      {:ok, :there}
+    end
+  end
+
+  def into(_session_id, _root, _repository, _opts), do: {:ok, :there}
+
   defp empty?(root), do: File.ls(root) in [{:ok, []}, {:error, :enoent}]
 
   defp clone(session_id, root, repository, opts) do
     named = "#{repository["owner"]}/#{repository["name"]}"
+    opts = Keyword.put(opts, :repository, named)
 
     with {:ok, credential} <- GitCredentials.credential(session_id, opts),
          :ok <- run(root, credential) do

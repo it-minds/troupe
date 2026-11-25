@@ -598,6 +598,21 @@ defmodule Troupe.Protocol.Schema do
       },
       "session_dormant" => %{"last_seq" => required(:integer)},
       "session_activated" => %{"epoch" => required(:string), "pod" => optional(:string)},
+      # A pod session's GitHub repositories moved (`session.repository.add` and `.remove`,
+      # or a clone at activation): `action` `attached`, `detached` or `failed` (with
+      # `reason`), the `repository` (`owner/name`) and its `path` in the workspace, who did
+      # it, and `repositories`, the whole list as it now is (`repository`, `path`, `ref`).
+      # Durable, because the root is told in its turn context's `configuration`.
+      "session_repository_changed" => %{
+        "action" => required(:string),
+        "repository" => required(:string),
+        "path" => optional(:string),
+        "ref" => optional(:string),
+        "by" => optional(:string),
+        "by_name" => optional(:string),
+        "reason" => optional(:string),
+        "repositories" => required(:array)
+      },
       # A wake past what the agent could not read (`session.repair`): the event `event`, its
       # `seq`, written `at`, is skipped by the agent's replay from here on, as `by` asked.
       # Appended, never a rewrite, so the chain stays whole.
