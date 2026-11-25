@@ -82,6 +82,9 @@ defmodule Troupe.UI.TUI.NewSessionPage do
       # `/new --only-me`: on the platform, its owner's and the people they invite until it
       # is shared, on the team's profile and budget all the same.
       only_me: Keyword.get(opts, :only_me, false),
+      # `/new --repo owner/name[@ref]`: the GitHub repositories a session on the platform
+      # starts on, said on the sentence and sent with the create (root #1207).
+      repositories: Keyword.get(opts, :repositories, []),
       # The team HQ had selected, which the plane charges and opens the session to.
       team: Keyword.get(opts, :team),
       # Where more than one of the person's teams may use a profile: the team picked for
@@ -256,11 +259,17 @@ defmodule Troupe.UI.TUI.NewSessionPage do
     local_down = where == :local and not page.daemon_up
     no_plane = page.origin == nil and page.where == :platform
     not_allowed = where == :platform and profile == nil and name != nil and page.profiles != []
+    # `/new --repo`: a profile with no spec.github takes none, and none takes past its cap.
+    repos_refused =
+      if where == :platform, do: Client.repositories_refused(profile, page.repositories)
 
     why =
       cond do
         page.said ->
           {:warn, page.said}
+
+        repos_refused ->
+          {:warn, repos_refused}
 
         page.pending ->
           {:plain, starting(page.pending)}
@@ -326,7 +335,12 @@ defmodule Troupe.UI.TUI.NewSessionPage do
       team_candidates: candidates,
       team_choice: team_choice,
       team: team,
-      blocked: if(where == :local, do: local_down, else: profile == nil or at_ceiling)
+      repositories: if(where == :platform, do: page.repositories, else: []),
+      blocked:
+        if(where == :local,
+          do: local_down,
+          else: profile == nil or at_ceiling or repos_refused != nil
+        )
     }
   end
 
@@ -731,7 +745,8 @@ defmodule Troupe.UI.TUI.NewSessionPage do
            prompt: r.cleaned,
            title: title,
            team: r.team || page.team,
-           visibility: NewSession.visibility(page.only_me)
+           visibility: NewSession.visibility(page.only_me),
+           repositories: r.repositories
          }}
     end
   end
@@ -1028,11 +1043,17 @@ defmodule Troupe.UI.TUI.NewSessionPage do
       ),
       Span.new(middle_word),
       middle,
-      Span.new(" as "),
+      Span.new(on_repositories(r.repositories) <> " as "),
       chip.(2, r.agent_label, nil)
       | who_spans(r, chip)
     ])
   end
+
+  # What `--repo` named, after the profile: the first and how many more.
+  defp on_repositories([]), do: ""
+
+  defp on_repositories(repos),
+    do: " on " <> Client.repositories_summary(Enum.map(repos, &Client.repository_name/1))
 
   # Whose it is: a chip where more than one of the person's teams may use the profile, the
   # sentence's end as it was where one may.
