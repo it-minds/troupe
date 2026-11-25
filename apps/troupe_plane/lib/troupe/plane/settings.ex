@@ -265,6 +265,22 @@ defmodule Troupe.Plane.Settings do
         "A ceiling as well as a default: a team may shorten its retention and not lengthen it, which is the direction a retention policy has to be enforceable in. Erasure is irreversible.",
       effect: :immediate
     },
+    # How long a throwaway session lasts once it goes quiet (#1209). The organisation's; a
+    # team neither narrows nor widens it.
+    %Setting{
+      key: "throwaway_erase_after_hours",
+      label: "Erase a throwaway session after",
+      unit: :hours,
+      group: :sessions,
+      type: :integer,
+      fallback: 24,
+      summary:
+        "How many hours after it last worked a throwaway session is erased, from 1 to 168.",
+      consequence:
+        "Checked every ten minutes. A session awake, waiting on an approval or a question, kept at the top or waiting for a review is not erased until it is none of those. " <>
+          "Erasure is irreversible; each one is in the audit trail as system:lifespan. Normal and persistent sessions are never erased by it.",
+      effect: :immediate
+    },
     # What an agent may write back above its person's own memory (#55): a proposal for a
     # team's or the organisation's, which an administrator accepts or declines.
     %Setting{
@@ -1040,6 +1056,15 @@ defmodule Troupe.Plane.Settings do
       {off, _parsed} when off in ["", "off"] -> {:ok, 0}
       {_text, {days, ""}} when days >= 0 -> {:ok, days}
       _other -> {:error, {:invalid, "must be a whole number of days, or 0 or off to keep everything"}}
+    end
+  end
+
+  # Hours, at least one and at most a week: a throwaway session that outlived a week was not
+  # thrown away, and one erased within the hour would be gone before its answer was read.
+  defp parse(%Setting{unit: :hours}, value) do
+    case Integer.parse(String.trim(value)) do
+      {hours, ""} when hours in 1..168 -> {:ok, hours}
+      _other -> {:error, {:invalid, "must be a whole number of hours from 1 to 168"}}
     end
   end
 

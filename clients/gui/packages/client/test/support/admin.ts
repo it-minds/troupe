@@ -622,6 +622,14 @@ const SETTINGS: Setting[] = [
   },
   { key: "managed_mcp_servers_only", group: "sessions", type: "boolean", fallback: false, summary: "Whether a session may use only the MCP servers its bundle names.", consequence: "On, a person's own servers are not offered to sessions here." },
   { key: "default_bundle_channel", group: "sessions", type: "string", fallback: "stable", summary: "The channel a profile follows when it names none.", consequence: "Profiles that name one keep theirs." },
+  {
+    key: "throwaway_erase_after_hours",
+    group: "sessions",
+    type: "integer",
+    fallback: 24,
+    summary: "How many hours after it last worked a throwaway session is erased, from 1 to 168.",
+    consequence: "Checked every ten minutes. Erasure is irreversible; each one is in the audit trail as system:lifespan.",
+  },
   { key: "artifacts_enabled", group: "artifacts", type: "boolean", fallback: true, summary: "Whether people and their agents may publish artifacts, and open them.", consequence: "Off, nothing is published and no artifact opens; none is deleted." },
   {
     key: "artifacts_publish_organisation",
@@ -726,6 +734,7 @@ const NAMING: Record<string, { label: string; unit: string; choices?: Array<{ va
   client_enforced: { label: "What machines may not go past", unit: "text" },
   managed_mcp_servers_only: { label: "Only the profile's MCP servers", unit: "switch" },
   default_bundle_channel: { label: "Channel a new profile follows", unit: "text" },
+  throwaway_erase_after_hours: { label: "Erase a throwaway session after", unit: "hours" },
   artifacts_enabled: { label: "Artifacts may be published", unit: "switch" },
   artifacts_publish_organisation: {
     label: "Who may publish to the whole organisation",

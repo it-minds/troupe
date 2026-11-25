@@ -306,9 +306,13 @@ defmodule Troupe.Plane.Sessions do
   @spec dormant(String.t(), map()) :: {:ok, Session.t()} | {:error, :parked | term()}
   def dormant(session_id, attrs \\ %{}) do
     unless_parked(session_id, fn ->
-      put_fields(session_id, Map.merge(attrs, %{state: "dormant"}), clear: [:worker_id])
+      put_fields(session_id, Map.merge(attrs, asleep()), clear: [:worker_id])
     end)
   end
+
+  # Asleep from now, and active until now: what a throwaway session's window is counted from,
+  # since a pod writes the row's `last_active_at` only as it places or wakes the session.
+  defp asleep, do: %{state: "dormant", last_active_at: DateTime.utc_now()}
 
   @doc """
   `dormant/2` for a session the plane puts to sleep itself, only while it is still
@@ -323,7 +327,7 @@ defmodule Troupe.Plane.Sessions do
   def dormant_on(session_id, worker_id) do
     unless_parked(session_id, fn ->
       case Repo.one(from(s in Session, where: s.id == ^session_id, select: {s.state, s.worker_id})) do
-        {"active", ^worker_id} -> put_fields(session_id, %{state: "dormant"}, clear: [:worker_id])
+        {"active", ^worker_id} -> put_fields(session_id, asleep(), clear: [:worker_id])
         _moved -> {:error, :moved}
       end
     end)

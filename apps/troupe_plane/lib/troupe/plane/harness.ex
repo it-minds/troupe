@@ -53,7 +53,7 @@ defmodule Troupe.Plane.Harness do
   alias Troupe.Plane.Identity.User
   alias Troupe.Plane.Memory.InEffect
   alias Troupe.Plane.Provision
-  alias Troupe.Plane.Sessions.{ACL, Session, Share}
+  alias Troupe.Plane.Sessions.{ACL, Lifespan, Session, Share}
   alias Troupe.Plane.Settings
   alias Troupe.Plane.Settings.Ladder
   alias Troupe.Plane.{Tokens, Triggers}
@@ -4444,6 +4444,7 @@ defmodule Troupe.Plane.Harness do
   defp session_rows(sessions, user) do
     teams = Sessions.team_names(sessions)
     current = current_versions(sessions)
+    hours = Lifespan.hours()
 
     sessions
     |> Enum.map(fn session ->
@@ -4451,6 +4452,9 @@ defmodule Troupe.Plane.Harness do
       |> session_row(user)
       |> Map.put("team", teams[session.team_id])
       |> Map.put("bundle_current", current[session.profile])
+      # When a throwaway session is erased if nothing keeps it, `null` for any other: what a
+      # client says as "goes in 18 h". Later, never sooner, while it is awake or waits.
+      |> Map.put("erases_at", Lifespan.erases_at(session, hours))
     end)
     |> Names.decorate(@owner_name)
   end
