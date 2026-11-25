@@ -30,11 +30,22 @@ defmodule Troupe.Worker.Proposals do
   @doc "Keep the owner's never for `kind` and `key`, said in `session_id`."
   @spec never(String.t(), String.t(), String.t()) :: :ok | {:error, String.t()}
   def never(session_id, kind, key) do
-    case request("session.proposal.never", %{"session_id" => session_id, "kind" => kind, "key" => key}) do
-      {:ok, _kept} -> :ok
-      {:error, %{"data" => %{"reason" => reason}}} when is_binary(reason) -> {:error, reason}
-      {:error, %Troupe.Protocol.Error{data: %{reason: reason}}} when is_binary(reason) -> {:error, reason}
-      {:error, _unreachable} -> {:error, "the plane could not be reached from this pod; try again later"}
+    case request("session.proposal.never", %{
+           "session_id" => session_id,
+           "kind" => kind,
+           "key" => key
+         }) do
+      {:ok, _kept} ->
+        :ok
+
+      {:error, %{"data" => %{"reason" => reason}}} when is_binary(reason) ->
+        {:error, reason}
+
+      {:error, %Troupe.Protocol.Error{data: %{reason: reason}}} when is_binary(reason) ->
+        {:error, reason}
+
+      {:error, _unreachable} ->
+        {:error, "the plane could not be reached from this pod; try again later"}
     end
   end
 

@@ -48,7 +48,7 @@ defmodule Troupe.Gateway.Dispatch do
   alias Troupe.Protocol.Digest
   alias Troupe.Protocol.Error
   alias Troupe.Protocol.Event
-  alias Troupe.Session.{ClientTools, Log}
+  alias Troupe.Session.{ClientTools, Log, Proposals}
   alias Troupe.Session.MCP, as: LocalMCP
   alias Troupe.Sessions.{Index, Title, Unseen}
   alias Troupe.Todo.Edit
@@ -1217,7 +1217,7 @@ defmodule Troupe.Gateway.Dispatch do
          {:ok, decision} <- fetch(params, "decision"),
          :ok <- proposal_owner(context),
          :ok <- activate(session_id, context) do
-      case Troupe.Session.Proposals.answer(session_id, id, decision, actor(context)) do
+      case Proposals.answer(session_id, id, decision, actor(context)) do
         :ok -> {:ok, %{"accepted" => true, "id" => id, "decision" => decision}}
         {:error, reason} -> {:error, Error.new(:invalid_params, %{reason: reason})}
       end

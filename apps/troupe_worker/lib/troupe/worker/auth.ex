@@ -47,6 +47,7 @@ defmodule Troupe.Worker.Auth do
     subscribe unsubscribe session.list session.events
     session.get commands.list commands.run
     input.send turn.cancel profile.switch approval.respond question.answer todo.edit
+    session.proposal.answer
     shell.run shell.cancel
     session.goal.set session.goal.get session.goal.clear
     session.loop.start session.loop.stop session.loop.get session.compact session.repair

@@ -20,7 +20,10 @@ defmodule Troupe.Session.ProposalRecordingsTest do
 
   if System.get_env("TROUPE_RECORD_PROPOSALS") do
     setup do
-      Troupe.Proposals.install(fn _sid, _p -> {:ok, %{"propose" => true, "mode" => "direct"}} end, fn _sid, _k, _key -> :ok end)
+      Troupe.Proposals.install(
+        fn _sid, _p -> {:ok, %{"propose" => true, "mode" => "direct"}} end,
+        fn _sid, _k, _key -> :ok end
+      )
 
       Troupe.Artifacts.install(fn params, _ctx ->
         {:ok,
@@ -38,7 +41,8 @@ defmodule Troupe.Session.ProposalRecordingsTest do
       end)
     end
 
-    test "open: a report built from a fetched page and a query, proposed and not answered", context do
+    test "open: a report built from a fetched page and a query, proposed and not answered",
+         context do
       sid = reported(context, "Every Monday, pull the numbers and publish the weekly report")
       record(sid, "open")
     end
@@ -49,7 +53,12 @@ defmodule Troupe.Session.ProposalRecordingsTest do
       :ok =
         Proposals.decided(sid, "proposal-1", %{
           "edited" => ["cron"],
-          "result" => %{"team" => "reports", "name" => "rerun-weekly-numbers", "url" => "https://plane.example.test/console/triggers?team=reports&trigger=rerun-weekly-numbers"},
+          "result" => %{
+            "team" => "reports",
+            "name" => "rerun-weekly-numbers",
+            "url" =>
+              "https://plane.example.test/console/triggers?team=reports&trigger=rerun-weekly-numbers"
+          },
           "by_name" => "Ada",
           "actor" => Event.Actor.user("ada@example.test", "Ada")
         })
@@ -60,7 +69,10 @@ defmodule Troupe.Session.ProposalRecordingsTest do
 
     test "never: the owner said never for this report", context do
       sid = reported(context, "Pull the numbers and publish the report")
-      :ok = Proposals.answer(sid, "proposal-1", "never", Event.Actor.user("ada@example.test", "Ada"))
+
+      :ok =
+        Proposals.answer(sid, "proposal-1", "never", Event.Actor.user("ada@example.test", "Ada"))
+
       await_event(sid, "proposal_answered")
       record(sid, "never")
     end
@@ -75,7 +87,12 @@ defmodule Troupe.Session.ProposalRecordingsTest do
             {:tools,
              [
                {"publish_artifact",
-                %{"title" => "Weekly numbers", "kind" => "html", "files" => ["index.html"], "visibility" => "private"}}
+                %{
+                  "title" => "Weekly numbers",
+                  "kind" => "html",
+                  "files" => ["index.html"],
+                  "visibility" => "private"
+                }}
              ]},
             {:text, "Published."}
           ]

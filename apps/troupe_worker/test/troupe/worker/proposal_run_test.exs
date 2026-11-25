@@ -24,7 +24,14 @@ defmodule Troupe.Worker.ProposalRunTest do
 
     Troupe.Artifacts.install(fn params, _ctx ->
       send(test, {:published, params})
-      {:ok, %{"id" => params["id"] || "art-weekly", "version" => 2, "title" => params["title"], "url" => "https://a.example.test/a/art-weekly/"}}
+
+      {:ok,
+       %{
+         "id" => params["id"] || "art-weekly",
+         "version" => 2,
+         "title" => params["title"],
+         "url" => "https://a.example.test/a/art-weekly/"
+       }}
     end)
 
     on_exit(fn -> Troupe.Worker.Artifacts.install() end)
@@ -43,7 +50,10 @@ defmodule Troupe.Worker.ProposalRunTest do
               }}
 
   defp run(context, terms) do
-    fake = start_supervised!({Fake, steps: [{:tools, [@republish]}, {:text, "Published."}], default: {:text, "done"}})
+    fake =
+      start_supervised!(
+        {Fake, steps: [{:tools, [@republish]}, {:text, "Published."}], default: {:text, "done"}}
+      )
 
     {:ok, _} =
       activate(context,
@@ -54,7 +64,11 @@ defmodule Troupe.Worker.ProposalRunTest do
         config_overrides: [auto_approve: false]
       )
 
-    eventually(fn -> Enum.any?(Troupe.replay_from(context.session_id, 0), &(&1.type == "turn_ended")) end, 15_000)
+    eventually(
+      fn -> Enum.any?(Troupe.replay_from(context.session_id, 0), &(&1.type == "turn_ended")) end,
+      15_000
+    )
+
     Troupe.replay_from(context.session_id, 0)
   end
 
@@ -72,29 +86,59 @@ defmodule Troupe.Worker.ProposalRunTest do
     events = run(context, approvals: :deny)
 
     refute_received {:published, _}
-    assert [%{data: %{"decision" => "deny", "tool" => "publish_artifact"}}] = Enum.filter(events, &(&1.type == "approval_decided"))
+
+    assert [%{data: %{"decision" => "deny", "tool" => "publish_artifact"}}] =
+             Enum.filter(events, &(&1.type == "approval_decided"))
   end
 
   test "the plane reads an open proposal from the session and its yes is one line", context do
-    Troupe.Proposals.install(fn _sid, _p -> {:ok, %{"propose" => true, "mode" => "direct"}} end, fn _sid, _k, _key -> :ok end)
+    Troupe.Proposals.install(
+      fn _sid, _p -> {:ok, %{"propose" => true, "mode" => "direct"}} end,
+      fn _sid, _k, _key -> :ok end
+    )
+
     on_exit(fn -> Troupe.Worker.Proposals.install() end)
 
     steps = [
       {:tools, [{"shell", %{"command" => "curl --version"}}]},
-      {:tools, [{"publish_artifact", %{"title" => "Weekly numbers", "kind" => "html", "files" => ["index.html"], "visibility" => "private"}}]},
+      {:tools,
+       [
+         {"publish_artifact",
+          %{
+            "title" => "Weekly numbers",
+            "kind" => "html",
+            "files" => ["index.html"],
+            "visibility" => "private"
+          }}
+       ]},
       {:text, "Published."}
     ]
 
     fake = start_supervised!({Fake, steps: steps, default: {:text, "done"}})
-    {:ok, _} = activate(context, fake: fake, prompt: "Pull the numbers and publish the report", terms: @managed)
 
-    eventually(fn -> Enum.any?(Troupe.replay_from(context.session_id, 0), &(&1.type == "proposal_made")) end, 15_000)
+    {:ok, _} =
+      activate(context,
+        fake: fake,
+        prompt: "Pull the numbers and publish the report",
+        terms: @managed
+      )
+
+    eventually(
+      fn ->
+        Enum.any?(Troupe.replay_from(context.session_id, 0), &(&1.type == "proposal_made"))
+      end,
+      15_000
+    )
 
     asked = %{"session_id" => context.session_id, "epoch" => 1, "id" => "proposal-1"}
-    assert {:ok, %{"proposal" => %{"id" => "proposal-1", "kind" => "trigger", "draft" => draft}}} = Commands.handle("session.proposal.get", asked)
+
+    assert {:ok, %{"proposal" => %{"id" => "proposal-1", "kind" => "trigger", "draft" => draft}}} =
+             Commands.handle("session.proposal.get", asked)
+
     assert draft["terms"]["allow"] == ["publish_artifact", "shell(curl)"]
 
-    assert {:error, %{message: "not_found"}} = Commands.handle("session.proposal.get", %{asked | "id" => "proposal-9"})
+    assert {:error, %{message: "not_found"}} =
+             Commands.handle("session.proposal.get", %{asked | "id" => "proposal-9"})
 
     yes = %{
       "session_id" => context.session_id,

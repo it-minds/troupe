@@ -26,10 +26,21 @@ defmodule Troupe.Session.Proposals.TriggerRule do
   """
 
   alias Troupe.Config.Permissions
-  alias Troupe.Protocol.{Event, Text}
+  alias Troupe.Protocol.{Event, Text, Words}
 
   # Commands whose output is somebody else's live data, as the line starts.
-  @live_commands ["curl", "wget", "psql", "sqlite3", "mysql", "gh", "kubectl get", "az", "aws", "bq"]
+  @live_commands [
+    "curl",
+    "wget",
+    "psql",
+    "sqlite3",
+    "mysql",
+    "gh",
+    "kubectl get",
+    "az",
+    "aws",
+    "bq"
+  ]
 
   @default_cron "0 6 * * 1"
   @budget_micros 1_000_000
@@ -86,7 +97,9 @@ defmodule Troupe.Session.Proposals.TriggerRule do
   end
 
   def fold(s, %Event{type: "trigger_fired"}), do: %{s | triggered: true}
-  def fold(s, %Event{type: "session_visibility_changed", data: data}), do: %{s | visibility: data["visibility"]}
+
+  def fold(s, %Event{type: "session_visibility_changed", data: data}),
+    do: %{s | visibility: data["visibility"]}
 
   def fold(s, %Event{type: "agent_started", agent: ["root"], data: data}),
     do: %{s | agent: data["profile"] || s.agent}
@@ -103,10 +116,17 @@ defmodule Troupe.Session.Proposals.TriggerRule do
     do: %{s | started: Map.put(s.started, id, %{name: name, args: data["args"] || %{}})}
 
   # The audience the person chose at the approval is the one the call ran with.
-  def fold(s, %Event{type: "approval_decided", data: %{"call_id" => id, "tool" => "publish_artifact"} = data}) do
+  def fold(s, %Event{
+        type: "approval_decided",
+        data: %{"call_id" => id, "tool" => "publish_artifact"} = data
+      }) do
     case {s.started[id], data["visibility"]} do
       {%{args: args} = call, visibility} when is_binary(visibility) ->
-        %{s | started: Map.put(s.started, id, %{call | args: Map.put(args, "visibility", visibility)})}
+        %{
+          s
+          | started:
+              Map.put(s.started, id, %{call | args: Map.put(args, "visibility", visibility)})
+        }
 
       _ ->
         s
@@ -190,8 +210,15 @@ defmodule Troupe.Session.Proposals.TriggerRule do
           "allow" => allow(s.reads)
         },
         "artifact" =>
-          %{"id" => artifact["id"], "title" => title, "version" => artifact["version"], "url" => artifact["url"]}
-          |> Map.merge(if(artifact["owner_team"], do: %{"owner_team" => artifact["owner_team"]}, else: %{}))
+          %{
+            "id" => artifact["id"],
+            "title" => title,
+            "version" => artifact["version"],
+            "url" => artifact["url"]
+          }
+          |> Map.merge(
+            if(artifact["owner_team"], do: %{"owner_team" => artifact["owner_team"]}, else: %{})
+          )
           |> Map.merge(if(is_binary(visibility), do: %{"visibility" => visibility}, else: %{}))
       }
     }
@@ -199,7 +226,9 @@ defmodule Troupe.Session.Proposals.TriggerRule do
 
   # -- what counts as live --------------------------------------------------------
 
-  defp read("web_fetch", %{"url" => url}) when is_binary(url), do: %{"tool" => "web_fetch", "source" => url}
+  defp read("web_fetch", %{"url" => url}) when is_binary(url),
+    do: %{"tool" => "web_fetch", "source" => url}
+
   defp read("web_fetch", _args), do: %{"tool" => "web_fetch", "source" => nil}
 
   defp read("mcp." <> name, _args), do: %{"tool" => "mcp", "source" => name}
@@ -235,12 +264,17 @@ defmodule Troupe.Session.Proposals.TriggerRule do
       |> Enum.group_by(& &1["tool"])
       |> Enum.sort_by(fn {tool, _} -> Enum.find_index(~w(web_fetch mcp shell), &(&1 == tool)) end)
       |> Enum.map(fn
-        {"web_fetch", list} -> Troupe.Protocol.Words.count(length(list), "page fetched", "pages fetched")
-        {"mcp", list} -> Troupe.Protocol.Words.count(length(list), "MCP tool", "MCP tools")
-        {"shell", list} -> Troupe.Protocol.Words.count(length(list), "query from the shell", "queries from the shell")
+        {"web_fetch", list} ->
+          Words.count(length(list), "page fetched", "pages fetched")
+
+        {"mcp", list} ->
+          Words.count(length(list), "MCP tool", "MCP tools")
+
+        {"shell", list} ->
+          Words.count(length(list), "query from the shell", "queries from the shell")
       end)
 
-    "It was built from live data (#{Troupe.Protocol.Words.and_list(counts)}), which a rerun reads again."
+    "It was built from live data (#{Words.and_list(counts)}), which a rerun reads again."
   end
 
   # -- the schedule ---------------------------------------------------------------
@@ -305,9 +339,13 @@ defmodule Troupe.Session.Proposals.TriggerRule do
 
     parts =
       [
-        reads |> Enum.filter(&(&1["tool"] == "web_fetch" and &1["source"])) |> Enum.map(& &1["source"]),
+        reads
+        |> Enum.filter(&(&1["tool"] == "web_fetch" and &1["source"]))
+        |> Enum.map(& &1["source"]),
         reads |> Enum.filter(&(&1["tool"] == "mcp")) |> Enum.map(&"the MCP tool #{&1["source"]}"),
-        reads |> Enum.filter(&(&1["tool"] == "shell")) |> Enum.map(&"`#{Text.cut(&1["source"], 200)}`")
+        reads
+        |> Enum.filter(&(&1["tool"] == "shell"))
+        |> Enum.map(&"`#{Text.cut(&1["source"], 200)}`")
       ]
       |> List.flatten()
 

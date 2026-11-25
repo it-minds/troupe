@@ -17,6 +17,7 @@ defmodule Troupe.Worker.Plane.Commands do
   alias Troupe.Protocol.Event
   alias Troupe.Protocol.SessionId
   alias Troupe.Session.Log
+  alias Troupe.Session.Proposals
   alias Troupe.Sessions.Fork
   alias Troupe.Sessions.Sealer
   alias Troupe.Sessions.Storage
@@ -368,7 +369,7 @@ defmodule Troupe.Worker.Plane.Commands do
 
     with :ok <- shaped(session_id),
          {:ok, _tree} <- running_at(session_id, params["epoch"]) do
-      case Enum.find(Troupe.Session.Proposals.open(session_id), &(&1["id"] == params["id"])) do
+      case Enum.find(Proposals.open(session_id), &(&1["id"] == params["id"])) do
         nil -> {:error, Error.new(:not_found, %{reason: "the session has no open proposal #{params["id"]}"})}
         proposal -> {:ok, %{"session_id" => session_id, "proposal" => proposal}}
       end
@@ -393,7 +394,7 @@ defmodule Troupe.Worker.Plane.Commands do
         "actor" => Event.Actor.user(params["by"], params["by_name"])
       }
 
-      case Troupe.Session.Proposals.decided(session_id, params["id"], yes) do
+      case Proposals.decided(session_id, params["id"], yes) do
         :ok -> {:ok, %{"session_id" => session_id, "recorded" => true}}
         {:error, reason} -> {:error, Error.new(:conflict, %{reason: reason})}
       end

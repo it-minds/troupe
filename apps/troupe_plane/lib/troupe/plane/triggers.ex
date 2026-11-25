@@ -31,7 +31,7 @@ defmodule Troupe.Plane.Triggers do
   alias Troupe.Plane.Identity.{Team, User}
   alias Troupe.Plane.Sessions.Session
   alias Troupe.Plane.Triggers.{Notify, Revision, Run, Template, Trigger}
-  alias Troupe.Protocol.{Canonical, Digest, Error, Origin, Principal}
+  alias Troupe.Protocol.{Canonical, Digest, Error, Origin, PermissionRule, Principal}
 
   require Logger
 
@@ -68,7 +68,7 @@ defmodule Troupe.Plane.Triggers do
 
   def allow_problem(rules) when is_list(rules) and length(rules) <= 16 do
     Enum.find_value(rules, fn rule ->
-      case Troupe.Protocol.PermissionRule.parse(rule) do
+      case PermissionRule.parse(rule) do
         {:ok, _rule} -> nil
         {:error, reason} -> reason
       end

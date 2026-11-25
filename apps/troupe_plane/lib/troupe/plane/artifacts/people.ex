@@ -155,7 +155,8 @@ defmodule Troupe.Plane.Artifacts.People do
   @spec revoke(Artifact.t(), String.t()) :: non_neg_integer()
   def revoke(%Artifact{id: id}, "svc:" <> _ = subject) do
     principals = from(p in ServicePrincipal, where: p.subject == ^subject, select: p.id)
-    {n, _} = Repo.delete_all(from(g in PrincipalGrant, where: g.artifact_id == ^id and g.principal_id in subquery(principals)))
+    granted = from(g in PrincipalGrant, where: g.artifact_id == ^id and g.principal_id in subquery(principals))
+    {n, _} = Repo.delete_all(granted)
     n
   end
 

@@ -110,7 +110,10 @@ defmodule Troupe.Session.Proposals do
     state =
       Enum.reduce(Log.replay_from(session_id, 0), state, fn event, state ->
         state = step(state, event)
-        if Checkpoint.rest?(event) and state.rule, do: %{state | rule: TriggerRule.rested(state.rule)}, else: state
+
+        if Checkpoint.rest?(event) and state.rule,
+          do: %{state | rule: TriggerRule.rested(state.rule)},
+          else: state
       end)
 
     {:ok, state}
@@ -120,22 +123,20 @@ defmodule Troupe.Session.Proposals do
   def handle_call(:open, _from, state), do: {:reply, Map.values(state.open), state}
   def handle_call(:reruns, _from, state), do: {:reply, state.reruns, state}
 
-  def handle_call({:answer, id, decision, actor}, _from, state) when decision in ["later", "never"] do
-    case closed(state, id) do
-      {:error, _} = refused ->
-        {:reply, refused, state}
-
-      {:ok, proposal} ->
-        with :ok <- keep_never(state.session_id, proposal, decision) do
-          {:reply, :ok, write_answer(state, id, %{"id" => id, "decision" => decision}, actor)}
-        else
-          {:error, reason} -> {:reply, {:error, reason}, state}
-        end
+  def handle_call({:answer, id, decision, actor}, _from, state)
+      when decision in ["later", "never"] do
+    with {:ok, proposal} <- closed(state, id),
+         :ok <- keep_never(state.session_id, proposal, decision) do
+      {:reply, :ok, write_answer(state, id, %{"id" => id, "decision" => decision}, actor)}
+    else
+      {:error, _reason} = refused -> {:reply, refused, state}
     end
   end
 
   def handle_call({:answer, _id, "accepted", _actor}, _from, state),
-    do: {:reply, {:error, "a yes is the plane's: session.proposal.accept makes what it drafted"}, state}
+    do:
+      {:reply, {:error, "a yes is the plane's: session.proposal.accept makes what it drafted"},
+       state}
 
   def handle_call({:answer, _id, _decision, _actor}, _from, state),
     do: {:reply, {:error, "the answer is later or never"}, state}
@@ -163,7 +164,10 @@ defmodule Troupe.Session.Proposals do
   end
 
   @impl GenServer
-  def handle_info({:troupe_event, _session_id, %Event{ephemeral?: false, seq: seq} = event}, state)
+  def handle_info(
+        {:troupe_event, _session_id, %Event{ephemeral?: false, seq: seq} = event},
+        state
+      )
       when is_integer(seq) do
     if seq <= state.last_seq do
       {:noreply, state}
@@ -178,14 +182,23 @@ defmodule Troupe.Session.Proposals do
 
   # -- the fold -----------------------------------------------------------------
 
-  defp step(%{rule: nil} = state, %Event{seq: seq}), do: %{state | last_seq: max(state.last_seq, seq || 0)}
+  defp step(%{rule: nil} = state, %Event{seq: seq}),
+    do: %{state | last_seq: max(state.last_seq, seq || 0)}
 
   defp step(state, %Event{} = event) do
-    state = %{state | rule: TriggerRule.fold(state.rule, event), last_seq: max(state.last_seq, event.seq || 0)}
+    state = %{
+      state
+      | rule: TriggerRule.fold(state.rule, event),
+        last_seq: max(state.last_seq, event.seq || 0)
+    }
+
     own(state, event)
   rescue
     error ->
-      Logger.warning("troupe: #{state.session_id} makes no proposals: #{Exception.message(error)} at seq #{event.seq}")
+      Logger.warning(
+        "troupe: #{state.session_id} makes no proposals: #{Exception.message(error)} at seq #{event.seq}"
+      )
+
       %{state | rule: nil, last_seq: max(state.last_seq, event.seq || 0)}
   end
 
@@ -204,8 +217,9 @@ defmodule Troupe.Session.Proposals do
     }
   end
 
-  defp own(state, %Event{type: "proposal_answered", data: %{"id" => id}}) when is_map_key(state.answered, id),
-    do: state
+  defp own(state, %Event{type: "proposal_answered", data: %{"id" => id}})
+       when is_map_key(state.answered, id),
+       do: state
 
   defp own(state, %Event{type: "proposal_answered", data: %{"id" => id} = data}) do
     proposal = state.open[id]
@@ -214,13 +228,26 @@ defmodule Troupe.Session.Proposals do
       case {data["decision"], proposal} do
         {"accepted", %{"kind" => "trigger", "draft" => draft}} ->
           name = get_in(data, ["result", "name"]) || draft["name"]
-          state.reruns ++ [%{"name" => name, "schedule" => draft["schedule"], "title" => get_in(draft, ["artifact", "title"])}]
+
+          state.reruns ++
+            [
+              %{
+                "name" => name,
+                "schedule" => draft["schedule"],
+                "title" => get_in(draft, ["artifact", "title"])
+              }
+            ]
 
         _ ->
           state.reruns
       end
 
-    %{state | open: Map.delete(state.open, id), answered: Map.put(state.answered, id, data["decision"]), reruns: reruns}
+    %{
+      state
+      | open: Map.delete(state.open, id),
+        answered: Map.put(state.answered, id, data["decision"]),
+        reruns: reruns
+    }
   end
 
   defp own(state, _event), do: state

@@ -22,10 +22,19 @@ defmodule Troupe.Gateway.ProposalAnswerTest do
     File.mkdir_p!(state_dir)
     File.write!(Path.join(workspace, "index.html"), "<h1>Numbers</h1>")
 
-    Troupe.Proposals.install(fn _sid, _proposal -> {:ok, %{"propose" => true, "mode" => "direct"}} end, fn _sid, _kind, _key -> :ok end)
+    Troupe.Proposals.install(
+      fn _sid, _proposal -> {:ok, %{"propose" => true, "mode" => "direct"}} end,
+      fn _sid, _kind, _key -> :ok end
+    )
 
     Troupe.Artifacts.install(fn params, _ctx ->
-      {:ok, %{"id" => "art-weekly", "version" => 1, "title" => params["title"], "url" => "https://a.example.test/a/art-weekly/"}}
+      {:ok,
+       %{
+         "id" => "art-weekly",
+         "version" => 1,
+         "title" => params["title"],
+         "url" => "https://a.example.test/a/art-weekly/"
+       }}
     end)
 
     on_exit(fn ->
@@ -40,7 +49,16 @@ defmodule Troupe.Gateway.ProposalAnswerTest do
   defp proposed(context) do
     steps = [
       {:tools, [{"shell", %{"command" => "curl --version"}}]},
-      {:tools, [{"publish_artifact", %{"title" => "Numbers", "kind" => "html", "files" => ["index.html"], "visibility" => "private"}}]},
+      {:tools,
+       [
+         {"publish_artifact",
+          %{
+            "title" => "Numbers",
+            "kind" => "html",
+            "files" => ["index.html"],
+            "visibility" => "private"
+          }}
+       ]},
       {:text, "Published."}
     ]
 
@@ -50,13 +68,22 @@ defmodule Troupe.Gateway.ProposalAnswerTest do
       Troupe.start_session(
         workspace: context.workspace,
         fake: fake,
-        config_overrides: [provider: "fake", model: "fake-model", auto_approve: true, state_dir: context.state_dir]
+        config_overrides: [
+          provider: "fake",
+          model: "fake-model",
+          auto_approve: true,
+          state_dir: context.state_dir
+        ]
       )
 
     on_exit(fn -> Troupe.stop_session(session.id) end)
     Troupe.subscribe(session.id)
     Troupe.send_input(session.id, "make the report")
-    assert_receive {:troupe_event, _, %Event{type: "proposal_made", data: %{"id" => "proposal-1"}}}, 10_000
+
+    assert_receive {:troupe_event, _,
+                    %Event{type: "proposal_made", data: %{"id" => "proposal-1"}}},
+                   10_000
+
     session
   end
 
@@ -64,37 +91,56 @@ defmodule Troupe.Gateway.ProposalAnswerTest do
     do:
       Dispatch.call(
         "session.proposal.answer",
-        %{"session_id" => session.id, "id" => "proposal-1", "decision" => decision, "command_id" => command_id},
+        %{
+          "session_id" => session.id,
+          "id" => "proposal-1",
+          "decision" => decision,
+          "command_id" => command_id
+        },
         context(scope)
       )
 
-  test "the owner's later is recorded once, under their name; a second answer is refused", context do
+  test "the owner's later is recorded once, under their name; a second answer is refused",
+       context do
     session = proposed(context)
 
-    assert {:ok, %{"accepted" => true, "decision" => "later"}} = answer(session, "later", :admin, "c-1")
-    assert_receive {:troupe_event, _, %Event{type: "proposal_answered", data: data, actor: actor}}, 5_000
+    assert {:ok, %{"accepted" => true, "decision" => "later"}} =
+             answer(session, "later", :admin, "c-1")
+
+    assert_receive {:troupe_event, _,
+                    %Event{type: "proposal_answered", data: data, actor: actor}},
+                   5_000
+
     assert data == %{"id" => "proposal-1", "decision" => "later"}
     assert actor.subject == "someone@example.test"
 
-    assert {:error, %{message: "invalid_params", data: %{reason: "the proposal proposal-1 was already answered: later"}}} =
+    assert {:error,
+            %{
+              message: "invalid_params",
+              data: %{reason: "the proposal proposal-1 was already answered: later"}
+            }} =
              answer(session, "never", :admin, "c-2")
   end
 
-  test "a collaborator holding control is refused with a sentence, and nothing is recorded", context do
+  test "a collaborator holding control is refused with a sentence, and nothing is recorded",
+       context do
     session = proposed(context)
 
     assert {:error, error} = answer(session, "never", :control, "c-3")
     assert error.message == "forbidden"
     assert error.data.reason == "only the session's owner answers what the harness proposes"
 
-    assert {:error, %{message: "forbidden", data: %{required_scope: "control"}}} = answer(session, "later", :observe, "c-4")
+    assert {:error, %{message: "forbidden", data: %{required_scope: "control"}}} =
+             answer(session, "later", :observe, "c-4")
+
     refute Enum.any?(Troupe.events(session.id), &(&1.type == "proposal_answered"))
   end
 
   test "a yes is not answered here: it is the plane's", context do
     session = proposed(context)
 
-    assert {:error, %{data: %{reason: "a yes is the plane's" <> _}}} = answer(session, "accepted", :admin, "c-5")
+    assert {:error, %{data: %{reason: "a yes is the plane's" <> _}}} =
+             answer(session, "accepted", :admin, "c-5")
   end
 
   defp context(scope) do
@@ -106,7 +152,11 @@ defmodule Troupe.Gateway.ProposalAnswerTest do
       end
 
     %Dispatch.Context{
-      principal: %{"subject" => "someone@example.test", "display_name" => "Someone", "kind" => "user"},
+      principal: %{
+        "subject" => "someone@example.test",
+        "display_name" => "Someone",
+        "kind" => "user"
+      },
       scopes: scopes,
       connection: self()
     }

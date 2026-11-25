@@ -78,7 +78,7 @@ defmodule Troupe.Agent.Server do
   alias Troupe.Protocol.Event
   alias Troupe.Protocol.Principal
   alias Troupe.Protocol.Words
-  alias Troupe.Session.{Approvals, Blobs, Log, Memory, Organisation, Questions, Shell}
+  alias Troupe.Session.{Approvals, Blobs, Log, Memory, Organisation, Proposals, Questions, Shell}
   alias Troupe.Session.MCP, as: SessionMCP
   alias Troupe.Sessions.Index
   alias Troupe.Tool.{Ctx, Result}
@@ -2225,7 +2225,7 @@ defmodule Troupe.Agent.Server do
   # A trigger the owner turned on from a proposal since the last turn: the root's
   # instructions say so from this turn, so it does not offer in prose what already reruns.
   defp take_reruns(%State{} = state) do
-    case Troupe.Session.Proposals.reruns(state.session_id) do
+    case Proposals.reruns(state.session_id) do
       same when same == state.reruns -> state
       reruns -> instructions_due(%{state | reruns: reruns})
     end

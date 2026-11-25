@@ -55,7 +55,10 @@ defmodule Troupe.Plane.Proposals do
   `%{"propose" => false, "reason" => ...}` saying why not.
   """
   @spec check(Session.t(), map()) :: map()
-  def check(%Session{} = session, %{"kind" => "trigger", "key" => "artifact:" <> artifact} = proposal) do
+  def check(
+        %Session{} = session,
+        %{"kind" => "trigger", "key" => "artifact:" <> artifact} = proposal
+      ) do
     with {:ok, team, owner} <- schedulable(session),
          :ok <- not_declined(owner, "trigger", proposal["key"]),
          :ok <- not_rerun(artifact),
@@ -69,7 +72,11 @@ defmodule Troupe.Plane.Proposals do
 
       case forbidden(session.profile, get_in(draft, ["terms", "allow"]) || []) do
         nil ->
-          %{"propose" => true, "mode" => if(Gitops.enabled?(), do: "gitops", else: "direct"), "draft" => added}
+          %{
+            "propose" => true,
+            "mode" => if(Gitops.enabled?(), do: "gitops", else: "direct"),
+            "draft" => added
+          }
 
         reason ->
           %{"propose" => true, "mode" => "unavailable", "reason" => reason, "draft" => added}
@@ -79,9 +86,11 @@ defmodule Troupe.Plane.Proposals do
     end
   end
 
-  def check(%Session{}, _proposal), do: %{"propose" => false, "reason" => "the plane knows no such proposal"}
+  def check(%Session{}, _proposal),
+    do: %{"propose" => false, "reason" => "the plane knows no such proposal"}
 
-  defp schedulable(%Session{kind: "private"}), do: {:no, "a session on a computer has no schedule here"}
+  defp schedulable(%Session{kind: "private"}),
+    do: {:no, "a session on a computer has no schedule here"}
 
   defp schedulable(%Session{origin: %{"kind" => kind}}) when kind != "user",
     do: {:no, "a session something other than a person started already recurs"}
@@ -90,8 +99,11 @@ defmodule Troupe.Plane.Proposals do
 
   defp schedulable(%Session{} = session) do
     with %Team{} = team <- Identity.fetch_team(session.team_id),
-         true <- Ladder.resolve(team).members_may_schedule || {:no, "#{team.name} does not let members schedule"},
-         %User{active: true, kind: kind} = owner when kind != "service" <- Identity.get_user(session.owner_subject) do
+         true <-
+           Ladder.resolve(team).members_may_schedule ||
+             {:no, "#{team.name} does not let members schedule"},
+         %User{active: true, kind: kind} = owner when kind != "service" <-
+           Identity.get_user(session.owner_subject) do
       {:ok, team, owner}
     else
       {:no, _} = no -> no
@@ -100,9 +112,11 @@ defmodule Troupe.Plane.Proposals do
   end
 
   defp not_declined(%User{id: id}, kind, key) do
-    if Repo.exists?(from(d in Decline, where: d.user_id == ^id and d.kind == ^kind and d.key == ^key)),
-      do: {:no, "the person said never for #{key}"},
-      else: :ok
+    if Repo.exists?(
+         from(d in Decline, where: d.user_id == ^id and d.kind == ^kind and d.key == ^key)
+       ),
+       do: {:no, "the person said never for #{key}"},
+       else: :ok
   end
 
   defp not_rerun(artifact) do
@@ -113,13 +127,21 @@ defmodule Troupe.Plane.Proposals do
 
   defp under_cap(team, owner) do
     case held(team, owner) do
-      n when n < @max_per_person -> :ok
-      n -> {:no, "#{owner.subject} holds #{n} triggers turned on in #{team.name}, the most there may be"}
+      n when n < @max_per_person ->
+        :ok
+
+      n ->
+        {:no,
+         "#{owner.subject} holds #{n} triggers turned on in #{team.name}, the most there may be"}
     end
   end
 
   defp held(%Team{id: team_id}, %User{id: user_id}),
-    do: Repo.aggregate(from(m in Made, where: m.team_id == ^team_id and m.user_id == ^user_id), :count)
+    do:
+      Repo.aggregate(
+        from(m in Made, where: m.team_id == ^team_id and m.user_id == ^user_id),
+        :count
+      )
 
   # The first tool the run would need that the profile, or one it extends, asks about or
   # denies, in a sentence; `nil` where it asks about none. A rule of the profile's beats
@@ -131,25 +153,32 @@ defmodule Troupe.Plane.Proposals do
         profile -> Extends.rules(profile)
       end
 
-    Enum.find_value(allow, fn wanted ->
-      with {:ok, want} <- PermissionRule.parse(wanted),
-           %{"action" => action, "rule" => text, "profile" => from} <-
-             Enum.find(rules, &(&1["action"] in ["ask", "deny"] and covers?(&1["rule"], want))) do
-        verb = if action == "deny", do: "denies", else: "asks before"
+    Enum.find_value(allow, &forbids(rules, &1))
+  end
 
-        "the profile #{from} #{verb} #{text}, which a run needs and nobody is there to answer; " <>
-          "an administrator of the profile can allow it, or a team admin can make the trigger by hand"
-      else
-        _ -> nil
-      end
-    end)
+  defp forbids(rules, wanted) do
+    with {:ok, want} <- PermissionRule.parse(wanted),
+         %{"action" => action, "rule" => text, "profile" => from} <-
+           Enum.find(rules, &(&1["action"] in ["ask", "deny"] and covers?(&1["rule"], want))) do
+      verb = if action == "deny", do: "denies", else: "asks before"
+
+      "the profile #{from} #{verb} #{text}, which a run needs and nobody is there to answer; " <>
+        "an administrator of the profile can allow it, or a team admin can make the trigger by hand"
+    else
+      _ -> nil
+    end
   end
 
   defp covers?(text, want) do
     case PermissionRule.parse(text) do
-      {:ok, %{tool: tool, pattern: nil}} -> tool == want.tool
-      {:ok, %{tool: tool, pattern: pattern}} -> tool == want.tool and overlaps?(pattern, want.pattern)
-      _ -> false
+      {:ok, %{tool: tool, pattern: nil}} ->
+        tool == want.tool
+
+      {:ok, %{tool: tool, pattern: pattern}} ->
+        tool == want.tool and overlaps?(pattern, want.pattern)
+
+      _ ->
+        false
     end
   end
 
@@ -169,12 +198,25 @@ defmodule Troupe.Plane.Proposals do
       %User{id: id} = owner when is_binary(id) ->
         Repo.insert_all(
           Decline,
-          [%{user_id: id, kind: kind, key: key, session_id: session.id, inserted_at: DateTime.utc_now()}],
+          [
+            %{
+              user_id: id,
+              kind: kind,
+              key: key,
+              session_id: session.id,
+              inserted_at: DateTime.utc_now()
+            }
+          ],
           on_conflict: :nothing,
           conflict_target: [:user_id, :kind, :key]
         )
 
-        {:ok, _} = Audit.record(owner.subject, "proposal.never", key, %{"kind" => kind, "session" => session.id})
+        {:ok, _} =
+          Audit.record(owner.subject, "proposal.never", key, %{
+            "kind" => kind,
+            "session" => session.id
+          })
+
         :ok
 
       _nobody ->
@@ -182,7 +224,8 @@ defmodule Troupe.Plane.Proposals do
     end
   end
 
-  def never(_session, _kind, _key), do: {:error, Error.new(:invalid_params, %{reason: "kind and key are text"})}
+  def never(_session, _kind, _key),
+    do: {:error, Error.new(:invalid_params, %{reason: "kind and key are text"})}
 
   # -- yes ------------------------------------------------------------------------
 
@@ -203,31 +246,49 @@ defmodule Troupe.Plane.Proposals do
     end
   end
 
-  def accept(_user, _session, _id, _edits), do: {:error, Error.new(:invalid_params, %{missing: "id"})}
+  def accept(_user, _session, _id, _edits),
+    do: {:error, Error.new(:invalid_params, %{missing: "id"})}
 
   defp running(%Session{worker_id: nil}),
-    do: {:error, Error.new(:conflict, %{reason: "the session is asleep; open it again and turn this on from there"})}
+    do:
+      {:error,
+       Error.new(:conflict, %{
+         reason: "the session is asleep; open it again and turn this on from there"
+       })}
 
   defp running(%Session{worker_id: worker_id}) do
     case Fleet.get_worker(worker_id) do
-      nil -> {:error, Error.new(:conflict, %{reason: "the session is asleep; open it again and turn this on from there"})}
-      worker -> {:ok, worker}
+      nil ->
+        {:error,
+         Error.new(:conflict, %{
+           reason: "the session is asleep; open it again and turn this on from there"
+         })}
+
+      worker ->
+        {:ok, worker}
     end
   end
 
   defp held_by_pod(worker, session, id) do
-    case Router.push(worker, "session.proposal.get", %{"session_id" => session.id, "epoch" => session.epoch, "id" => id}, 10_000) do
+    case Router.push(
+           worker,
+           "session.proposal.get",
+           %{"session_id" => session.id, "epoch" => session.epoch, "id" => id},
+           10_000
+         ) do
       {:ok, %{"proposal" => %{"kind" => "trigger", "draft" => %{}} = proposal}} ->
         {:ok, proposal}
 
       {:ok, _other} ->
-        {:error, Error.new(:not_found, %{id: id, reason: "the session has no open proposal #{id}"})}
+        {:error,
+         Error.new(:not_found, %{id: id, reason: "the session has no open proposal #{id}"})}
 
       {:error, %{"data" => %{"reason" => reason}}} ->
         {:error, Error.new(:not_found, %{id: id, reason: reason})}
 
       {:error, _unreachable} ->
-        {:error, Error.new(:unavailable, %{reason: "the session's pod could not be reached; try again"})}
+        {:error,
+         Error.new(:unavailable, %{reason: "the session's pod could not be reached; try again"})}
     end
   end
 
@@ -238,7 +299,8 @@ defmodule Troupe.Plane.Proposals do
         {:error, Error.new(:forbidden, %{reason: reason})}
 
       %{"propose" => true} ->
-        with {:ok, team, owner} <- schedulable(session), do: {:ok, team, %{owner | display_name: owner.display_name || user.display_name}}
+        with {:ok, team, owner} <- schedulable(session),
+             do: {:ok, team, %{owner | display_name: owner.display_name || user.display_name}}
 
       %{"reason" => reason} ->
         {:error, Error.new(:forbidden, %{reason: reason})}
@@ -265,32 +327,49 @@ defmodule Troupe.Plane.Proposals do
         {:ok, put_in(draft, ["source", "cron"], cron), if(same?, do: [], else: ["cron"])}
 
       {:error, reason} ->
-        {:error, Error.new(:invalid_params, %{field: "cron", reason: "the schedule is not readable: #{reason}"})}
+        {:error,
+         Error.new(:invalid_params, %{
+           field: "cron",
+           reason: "the schedule is not readable: #{reason}"
+         })}
     end
   end
 
-  defp edit_cron(_draft, _other), do: {:error, Error.new(:invalid_params, %{field: "cron", reason: "cron is text"})}
+  defp edit_cron(_draft, _other),
+    do: {:error, Error.new(:invalid_params, %{field: "cron", reason: "cron is text"})}
 
   defp edit_prompt(draft, nil), do: {:ok, draft, []}
 
   defp edit_prompt(draft, prompt) when is_binary(prompt) and byte_size(prompt) in 1..65_536 do
-    {:ok, Map.put(draft, "prompt_template", prompt), if(prompt == draft["prompt_template"], do: [], else: ["prompt_template"])}
+    {:ok, Map.put(draft, "prompt_template", prompt),
+     if(prompt == draft["prompt_template"], do: [], else: ["prompt_template"])}
   end
 
   defp edit_prompt(_draft, _other),
-    do: {:error, Error.new(:invalid_params, %{field: "prompt_template", reason: "the prompt is text of 1 to 65536 bytes"})}
+    do:
+      {:error,
+       Error.new(:invalid_params, %{
+         field: "prompt_template",
+         reason: "the prompt is text of 1 to 65536 bytes"
+       })}
 
   defp edit_budget(draft, nil), do: {:ok, draft, []}
 
-  defp edit_budget(draft, micros) when is_integer(micros) and micros >= 1 and micros <= @max_budget_micros do
+  defp edit_budget(draft, micros)
+       when is_integer(micros) and micros >= 1 and micros <= @max_budget_micros do
     same? = get_in(draft, ["terms", "budget_micros"]) == micros
-    {:ok, put_in(draft, ["terms", "budget_micros"], micros), if(same?, do: [], else: ["budget_micros"])}
+
+    {:ok, put_in(draft, ["terms", "budget_micros"], micros),
+     if(same?, do: [], else: ["budget_micros"])}
   end
 
   defp edit_budget(_draft, _other),
     do:
       {:error,
-       Error.new(:invalid_params, %{field: "budget_micros", reason: "a run's budget is 1 to #{@max_budget_micros} micros"})}
+       Error.new(:invalid_params, %{
+         field: "budget_micros",
+         reason: "a run's budget is 1 to #{@max_budget_micros} micros"
+       })}
 
   # -- made ---------------------------------------------------------------------------
 
@@ -368,56 +447,69 @@ defmodule Troupe.Plane.Proposals do
   # made once and reused, with the session's profile among its own. Its secret is never
   # shown: nothing signs in as it but the plane's triggers.
   defp own_principal(team, owner, profile) do
-    name = own_name(owner.subject)
-    subject = ServicePrincipal.subject(team.name, name)
+    subject = ServicePrincipal.subject(team.name, own_name(owner.subject))
 
     case Principals.get(subject) do
       nil ->
-        attrs = %{
-          "name" => name,
-          "description" => "#{owner.display_name || owner.subject}'s own, for the triggers they turned on from their sessions",
-          "profiles" => [profile],
-          "sponsor" => owner.subject
-        }
-
-        case Principals.create(team, attrs, owner.subject) do
-          {:ok, principal, _secret} ->
-            {:ok, _} =
-              Audit.record(owner.subject, "principal.create", principal.subject, %{
-                "team" => team.name,
-                "profiles" => principal.profiles,
-                "sponsor" => principal.sponsor_subject,
-                "via" => "proposal"
-              })
-
-            {:ok, principal}
-
-          {:error, reason} ->
-            {:error, Error.new(:conflict, %{reason: "your own principal in #{team.name} could not be made: #{inspect(reason)}"})}
-        end
+        make_own(team, owner, profile)
 
       %ServicePrincipal{sponsor_subject: sponsor} = principal when sponsor == owner.subject ->
-        cond do
-          not ServicePrincipal.enabled?(principal) ->
-            {:error,
-             Error.new(:forbidden, %{
-               reason: "your own principal in #{team.name}, #{subject}, is turned off; a team admin can turn it on again"
-             })}
-
-          profile in principal.profiles ->
-            {:ok, principal}
-
-          true ->
-            case Principals.add_profile(principal, profile) do
-              {:ok, principal} -> {:ok, principal}
-              {:error, reason} -> {:error, Error.new(:conflict, %{reason: "your own principal in #{team.name} cannot use #{profile}: #{inspect(reason)}"})}
-            end
-        end
+        reuse_own(principal, team, profile)
 
       _somebody_else ->
-        {:error, Error.new(:conflict, %{reason: "the principal #{subject} is somebody else's; a team admin can rename it"})}
+        {:error,
+         Error.new(:conflict, %{
+           reason: "the principal #{subject} is somebody else's; a team admin can rename it"
+         })}
     end
   end
+
+  defp make_own(team, owner, profile) do
+    attrs = %{
+      "name" => own_name(owner.subject),
+      "description" =>
+        "#{owner.display_name || owner.subject}'s own, for the triggers they turned on from their sessions",
+      "profiles" => [profile],
+      "sponsor" => owner.subject
+    }
+
+    case Principals.create(team, attrs, owner.subject) do
+      {:ok, principal, _secret} ->
+        {:ok, _} =
+          Audit.record(owner.subject, "principal.create", principal.subject, %{
+            "team" => team.name,
+            "profiles" => principal.profiles,
+            "sponsor" => principal.sponsor_subject,
+            "via" => "proposal"
+          })
+
+        {:ok, principal}
+
+      {:error, reason} ->
+        {:error, own_refusal(team, "could not be made: #{inspect(reason)}")}
+    end
+  end
+
+  defp reuse_own(principal, team, profile) do
+    cond do
+      not ServicePrincipal.enabled?(principal) ->
+        {:error,
+         Error.new(:forbidden, %{
+           reason:
+             "your own principal in #{team.name}, #{principal.subject}, is turned off; a team admin can turn it on again"
+         })}
+
+      profile in principal.profiles ->
+        {:ok, principal}
+
+      true ->
+        with {:error, reason} <- Principals.add_profile(principal, profile),
+             do: {:error, own_refusal(team, "cannot use #{profile}: #{inspect(reason)}")}
+    end
+  end
+
+  defp own_refusal(team, why),
+    do: Error.new(:conflict, %{reason: "your own principal in #{team.name} #{why}"})
 
   defp own_name(subject) do
     handle =
@@ -466,9 +558,12 @@ defmodule Troupe.Plane.Proposals do
   end
 
   defp free_name(team, name) do
-    Enum.find(Stream.concat([name], Stream.map(2..99, &"#{String.slice(name, 0, 59)}-#{&1}")), fn candidate ->
-      is_nil(Triggers.get(team, candidate))
-    end) || name
+    Enum.find(
+      Stream.concat([name], Stream.map(2..99, &"#{String.slice(name, 0, 59)}-#{&1}")),
+      fn candidate ->
+        is_nil(Triggers.get(team, candidate))
+      end
+    ) || name
   end
 
   # A run publishes the next version as the principal: a team's artifact is the team's,
@@ -487,7 +582,11 @@ defmodule Troupe.Plane.Proposals do
         :ok
 
       nil ->
-        {:error, Error.new(:not_found, %{id: artifact_id, reason: "the artifact the proposal reruns is gone"})}
+        {:error,
+         Error.new(:not_found, %{
+           id: artifact_id,
+           reason: "the artifact the proposal reruns is gone"
+         })}
     end
   end
 

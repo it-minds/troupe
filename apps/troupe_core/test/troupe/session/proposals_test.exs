@@ -8,6 +8,7 @@ defmodule Troupe.Session.ProposalsTest do
 
   use Troupe.SessionCase, async: false
 
+  alias Troupe.Protocol.Event.Actor
   alias Troupe.Session.{Checkpoint, Proposals}
 
   setup do
@@ -45,7 +46,12 @@ defmodule Troupe.Session.ProposalsTest do
   end
 
   @publish {"publish_artifact",
-            %{"title" => "Weekly numbers", "kind" => "html", "files" => ["index.html"], "visibility" => "team:reports"}}
+            %{
+              "title" => "Weekly numbers",
+              "kind" => "html",
+              "files" => ["index.html"],
+              "visibility" => "team:reports"
+            }}
 
   defp reporting(context, steps) do
     File.write!(Path.join(context.workspace, "index.html"), "<h1>Numbers</h1>")
@@ -68,7 +74,15 @@ defmodule Troupe.Session.ProposalsTest do
 
   test "a publish after a live read is proposed once, at the turn's end, as the host drafted it",
        %{install: install} = context do
-    install.({:ok, %{"propose" => true, "mode" => "direct", "draft" => %{"terms" => %{"budget_micros" => 500_000}}}})
+    install.(
+      {:ok,
+       %{
+         "propose" => true,
+         "mode" => "direct",
+         "draft" => %{"terms" => %{"budget_micros" => 500_000}}
+       }}
+    )
+
     session = reporting(context, live_then_publish() ++ [{:tools, [@publish]}, {:text, "Again."}])
 
     turn(session, "Pull the numbers every Monday and publish the report")
@@ -103,7 +117,8 @@ defmodule Troupe.Session.ProposalsTest do
     assert [_one] = events_of_type(session.id, "proposal_made")
   end
 
-  test "nothing without a live read, nor where the host says not to", %{install: install} = context do
+  test "nothing without a live read, nor where the host says not to",
+       %{install: install} = context do
     install.({:ok, %{"propose" => true, "mode" => "direct"}})
     session = reporting(context, [{:tools, [@publish]}, {:text, "Published."}])
     turn(session, "publish it")
@@ -125,7 +140,9 @@ defmodule Troupe.Session.ProposalsTest do
 
     assert Troupe.Registry.proposals(session.id) |> GenServer.whereis() == nil
     assert events_of_type(session.id, "proposal_made") == []
-    assert {:error, "this session makes no proposals"} = Proposals.answer(session.id, "proposal-1", "later")
+
+    assert {:error, "this session makes no proposals"} =
+             Proposals.answer(session.id, "proposal-1", "later")
   end
 
   test "later and never are recorded once, the first answer winning; never is kept by the host",
@@ -135,10 +152,16 @@ defmodule Troupe.Session.ProposalsTest do
     turn(session, "publish it")
     await_event(session.id, "proposal_made", 5_000)
 
-    actor = Troupe.Protocol.Event.Actor.user("ada@example.test", "Ada")
-    assert {:error, "a yes is the plane's" <> _} = Proposals.answer(session.id, "proposal-1", "accepted", actor)
-    assert {:error, "the answer is later or never"} = Proposals.answer(session.id, "proposal-1", "maybe", actor)
-    assert {:error, "there is no proposal proposal-9 in this session"} = Proposals.answer(session.id, "proposal-9", "later", actor)
+    actor = Actor.user("ada@example.test", "Ada")
+
+    assert {:error, "a yes is the plane's" <> _} =
+             Proposals.answer(session.id, "proposal-1", "accepted", actor)
+
+    assert {:error, "the answer is later or never"} =
+             Proposals.answer(session.id, "proposal-1", "maybe", actor)
+
+    assert {:error, "there is no proposal proposal-9 in this session"} =
+             Proposals.answer(session.id, "proposal-9", "later", actor)
 
     assert :ok = Proposals.answer(session.id, "proposal-1", "never", actor)
     assert_received {:never, sid, "trigger", "artifact:art-weekly"}
@@ -158,15 +181,20 @@ defmodule Troupe.Session.ProposalsTest do
   end
 
   test "a never the host could not keep leaves the proposal open, saying why", context do
-    Troupe.Proposals.install(fn _sid, _p -> {:ok, %{"propose" => true, "mode" => "direct"}} end, fn _sid, _kind, _key ->
-      {:error, "the plane could not be reached from this pod; try again later"}
-    end)
+    Troupe.Proposals.install(
+      fn _sid, _p -> {:ok, %{"propose" => true, "mode" => "direct"}} end,
+      fn _sid, _kind, _key ->
+        {:error, "the plane could not be reached from this pod; try again later"}
+      end
+    )
 
     session = reporting(context, live_then_publish())
     turn(session, "publish it")
     await_event(session.id, "proposal_made", 5_000)
 
-    assert {:error, "not kept: the plane could not be reached" <> _} = Proposals.answer(session.id, "proposal-1", "never")
+    assert {:error, "not kept: the plane could not be reached" <> _} =
+             Proposals.answer(session.id, "proposal-1", "never")
+
     assert [%{"id" => "proposal-1"}] = Proposals.open(session.id)
     assert :ok = Proposals.answer(session.id, "proposal-1", "later")
   end
@@ -180,14 +208,20 @@ defmodule Troupe.Session.ProposalsTest do
 
     yes = %{
       "edited" => ["cron"],
-      "result" => %{"team" => "reports", "name" => "rerun-weekly-numbers", "url" => "/console/triggers"},
+      "result" => %{
+        "team" => "reports",
+        "name" => "rerun-weekly-numbers",
+        "url" => "/console/triggers"
+      },
       "by_name" => "Ada",
-      "actor" => Troupe.Protocol.Event.Actor.user("ada@example.test", "Ada")
+      "actor" => Actor.user("ada@example.test", "Ada")
     }
 
     assert :ok = Proposals.decided(session.id, "proposal-1", yes)
     assert :ok = Proposals.decided(session.id, "proposal-1", yes)
-    assert {:error, "the proposal proposal-1 was already answered: accepted"} = Proposals.answer(session.id, "proposal-1", "later")
+
+    assert {:error, "the proposal proposal-1 was already answered: accepted"} =
+             Proposals.answer(session.id, "proposal-1", "later")
 
     answered = await_event(session.id, "proposal_answered", 5_000)
     assert answered.data["decision"] == "accepted"
@@ -195,7 +229,13 @@ defmodule Troupe.Session.ProposalsTest do
     assert answered.data["edited"] == ["cron"]
     assert [_one] = events_of_type(session.id, "proposal_answered")
 
-    assert [%{"name" => "rerun-weekly-numbers", "schedule" => "every week", "title" => "Weekly numbers"}] =
+    assert [
+             %{
+               "name" => "rerun-weekly-numbers",
+               "schedule" => "every week",
+               "title" => "Weekly numbers"
+             }
+           ] =
              Proposals.reruns(session.id)
 
     # The root's next turn reads its instructions again, the trigger among what is open.
