@@ -11,7 +11,10 @@ defmodule Troupe.Plane.Repo.Migrations.SessionLifespan do
   read while the old pods still serve, and after a `helm rollback`. A later release drops
   it once no plane that names it can be running.
 
-  Additive only, so a plane from before it ignores the column and a rollback keeps working.
+  Triggers and their revisions gain the same column, for the lifespan a trigger asks its
+  runs' sessions to have.
+
+  Additive only, so a plane from before it ignores the columns and a rollback keeps working.
   """
 
   use Ecto.Migration
@@ -27,13 +30,27 @@ defmodule Troupe.Plane.Repo.Migrations.SessionLifespan do
       )
     )
 
-    # What the plane's sweep asks every ten minutes: the throwaway sessions asleep, oldest
-    # first. Partial, because nearly every row is normal and never asked about.
+    # What the plane's sweep asks every ten minutes: the throwaway sessions, oldest first.
+    # Partial, because nearly every row is normal and never asked about.
     create(
       index(:sessions, [:last_active_at],
-        where: "lifespan = 'throwaway' AND state = 'dormant'",
-        name: :sessions_throwaway_dormant
+        where: "lifespan = 'throwaway'",
+        name: :sessions_throwaway
       )
     )
+
+    # A trigger may ask how long its runs' sessions last, and a revision keeps what it
+    # asked; every trigger and revision from before it is normal.
+    for table <- [:triggers, :trigger_revisions] do
+      alter table(table) do
+        add(:lifespan, :string, null: false, default: "normal")
+      end
+
+      create(
+        constraint(table, :"#{table}_lifespan_word",
+          check: "lifespan IN ('throwaway', 'normal', 'persistent')"
+        )
+      )
+    end
   end
 end

@@ -217,6 +217,7 @@ repository holds the triggers' definitions as well ([triggers-from-a-repository.
 | `prompt_template` | ≤ 64 KiB, with `{{event.issue.key}}`, `{{trigger.name}}`, `{{run.fired_at}}` placeholders; a missing path renders empty, nothing is escaped | `""` |
 | `terms` | §3 | `{}` |
 | `visibility` | `private` or `team` | `team` |
+| `lifespan` | how long each run's session lasts: `throwaway` (erased a set time after it goes quiet, never before it is reviewed), `normal` or `persistent` ([How long a session lasts](../user/sessions.md#how-long-a-session-lasts)); a trigger from a repository has no such field yet, and its runs are normal | `normal` |
 | `review` | `required` or `none` | `required` |
 | `notify` | subjects granted `collaborator` on every run's session | `[]` |
 | `notify_url` | an absolute `http` or `https` URL posted the run's outcome when it ends, never its content; not loopback (`localhost` included), unspecified, link-local, multicast, a cloud metadata address (`fd00:ec2::254`, `100.100.100.200`) or in `100.64.0.0/10`, by address, in any IPv6 spelling of one, or by a name that resolves there (Decision 866), and a host the policy's egress allows, checked when saved and again at send, and posted to the address the second check passed, following no redirect | none |
@@ -291,7 +292,9 @@ session exists and re-sent on every activation:
 
 A session whose origin is a trigger or A2A and that nobody has marked reviewed is in the
 review queue (`needs_review` on `sessions.list` and `admin.sessions.list`);
-`session.review` clears it, audited. A person's own sessions are never in it.
+`session.review` clears it, audited. A person's own sessions are never in it. A throwaway run (a
+trigger's `lifespan`) is not erased while it is in the queue: the plane's sweep takes it only
+once somebody has reviewed it.
 
 ## 4. Budgets
 

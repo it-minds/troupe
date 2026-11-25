@@ -597,6 +597,39 @@ defmodule Troupe.Plane.TriggersTest do
     end
   end
 
+  describe "how long a run's session lasts (#1209)" do
+    test "is normal unless the trigger asks, and a run's session is made so", context do
+      _pod = FakePod.enrol(context.port, "dev-token", "troupe-w-dev-0")
+      usual = trigger!(context, %{"name" => "usual"})
+      assert usual.lifespan == "normal"
+
+      quick = trigger!(context, %{"name" => "quick", "lifespan" => "throwaway"})
+      assert quick.lifespan == "throwaway"
+      assert Triggers.trigger_json(quick)["lifespan"] == "throwaway"
+
+      assert {:ok, fired} = Triggers.fire(quick, "webhook", "hook:quick", %{}, "hatchet")
+      assert_receive {:pushed, "session.activate", %{"lifespan" => "throwaway"}}, 5_000
+      assert Sessions.get(fired.session.id).lifespan == "throwaway"
+
+      assert {:error, _} =
+               Triggers.put(context.team, %{"name" => "quick", "lifespan" => "forever"}, "root")
+    end
+
+    test "a normal trigger's document is what it was, and asking another lifespan is a new revision",
+         context do
+      trigger = trigger!(context, %{"name" => "kept"})
+      refute Map.has_key?(Revision.document(trigger), "lifespan")
+      [%Revision{revision: 1, hash: hash}] = Triggers.revisions(trigger)
+
+      {:ok, quick} = Triggers.put(context.team, %{"name" => "kept", "lifespan" => "throwaway"}, "root")
+      assert [%Revision{revision: 2, lifespan: "throwaway"}, %Revision{revision: 1, hash: ^hash}] =
+               Triggers.revisions(quick)
+
+      {:ok, back} = Triggers.put(context.team, %{"name" => "kept", "lifespan" => "normal"}, "root")
+      assert Revision.hash(back) == hash
+    end
+  end
+
   describe "reviewing" do
     test "marks the session and its run, for anybody who can see it", context do
       _pod = FakePod.enrol(context.port, "dev-token", "troupe-w-dev-0")

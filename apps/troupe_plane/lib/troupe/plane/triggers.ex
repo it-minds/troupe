@@ -47,7 +47,7 @@ defmodule Troupe.Plane.Triggers do
   # the two together, because a schema that named other things (it once said `kind`,
   # `schedule` and `prompt`) is a tool a model follows into a trigger that does nothing.
   @put_keys ~w(name principal profile agent enabled source prompt_template terms) ++
-              ~w(visibility review notify notify_url concurrency)
+              ~w(visibility lifespan review notify notify_url concurrency)
 
   @doc "How large a run's event may be, encoded."
   @spec max_event_bytes() :: pos_integer()
@@ -1006,6 +1006,9 @@ defmodule Troupe.Plane.Triggers do
       "title" => title(trigger, run),
       "prompt" => prompt(revision, run, values),
       "visibility" => revision.visibility,
+      # How long the run's session lasts; a throwaway one waits for its review before the
+      # plane's sweep may erase it.
+      "lifespan" => revision.lifespan,
       "terms" => revision.terms,
       "origin" =>
         Origin.trigger(
@@ -1368,6 +1371,7 @@ defmodule Troupe.Plane.Triggers do
       "prompt_template" => trigger.prompt_template,
       "terms" => trigger.terms,
       "visibility" => trigger.visibility,
+      "lifespan" => trigger.lifespan,
       "review" => trigger.review,
       "notify" => trigger.notify,
       "notify_url" => trigger.notify_url,
