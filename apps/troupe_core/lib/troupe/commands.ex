@@ -295,7 +295,7 @@ defmodule Troupe.Commands do
   def builtins do
     [
       entry("new", "session", "Start a fresh session here, without leaving the client",
-        usage: "/new [--private | --remote PROFILE | --only-me | --branch]",
+        usage: "/new [--private | --remote PROFILE | --only-me | --branch] [--throwaway | --persistent]",
         args: [arg("flags", false, "text")],
         detail:
           "Opens the new-session screen and the session takes the screen; the one you " <>
@@ -309,7 +309,8 @@ defmodule Troupe.Commands do
             "line; Tab reaches the recent sessions, where Enter or 1-3 sets the chips " <>
             "like one. --private and --remote PROFILE set the chips; --only-me starts it " <>
             "on the platform as yours alone until you invite people (with --remote " <>
-            "PROFILE too), on the team's profile all the same; and --branch forks the one on screen at once: a session of its own that starts " <>
+            "PROFILE too), on the team's profile all the same; --throwaway or --persistent " <>
+            "says how long it lasts, with any of those (/lifespan); and --branch forks the one on screen at once: a session of its own that starts " <>
             "from this conversation as it stands.",
         example: "/new --branch"
       ),
@@ -440,6 +441,16 @@ defmodule Troupe.Commands do
             "open it, and the invitations stay as they were. /share alone says whose it is.",
         example: "/share team"
       ),
+      entry("lifespan", "session", "Say how long this session lasts, or change it",
+        usage: "/lifespan [throwaway | normal | persistent]",
+        args: [arg("lifespan", false, "text")],
+        detail:
+          "Its owner's to do. Throwaway is erased a day after it goes quiet, unless it is " <>
+            "awake, waits on you or is kept at the top; normal stays until you erase it; " <>
+            "persistent is kept until you erase it, and nothing else clears it away. " <>
+            "/lifespan alone says which this session is.",
+        example: "/lifespan persistent"
+      ),
       entry("bundle", "session", "Say which configuration this session runs on, or update it",
         usage: "/bundle [update]",
         args: [arg("verb", false, "text")],
@@ -490,8 +501,8 @@ defmodule Troupe.Commands do
         usage: "/keep [off]",
         args: [arg("off", false, "text")],
         detail:
-          "Its owner's to do. Kept, it is listed first, for everyone who sees it, and the " <>
-            "platform does not clear it away when it is old. /keep off lets it go from the top.",
+          "Its owner's to do. Kept, it is listed first, for everyone who sees it; how long " <>
+            "it lasts is /lifespan's. /keep off lets it go from the top.",
         example: "/keep"
       ),
       entry("sessions", "navigate", "Your sessions, newest first",

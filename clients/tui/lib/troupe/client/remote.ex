@@ -327,6 +327,39 @@ defmodule Troupe.Client.Remote do
     end
   end
 
+  # How long a pod session lasts, at the plane, whose row its sweep reads (root #1209);
+  # changed, the log's `session_lifespan_changed` follows where a pod holds it.
+  @impl true
+  def lifespan(sid, verb) do
+    case attachment(sid) do
+      %{plane_url: plane} when is_binary(plane) -> lifespan_on(plane, sid, verb)
+      _ -> {:error, message(:not_attached)}
+    end
+  end
+
+  defp lifespan_on(plane, sid, :status) do
+    case call(plane, "session.get", %{session_id: sid}) do
+      {:ok, %{} = row} -> {:ok, Troupe.Client.Lifespan.status(row)}
+      {:error, reason} -> {:error, refusal(reason)}
+    end
+  end
+
+  defp lifespan_on(plane, sid, {:set, word}) do
+    case call(plane, "session.lifespan.set", %{session_id: sid, lifespan: word}) do
+      {:ok, %{} = row} ->
+        {:ok, Troupe.Client.Lifespan.set(row["lifespan"] || word, row["erases_at"])}
+
+      {:error, %{message: "forbidden"} = error} ->
+        {:error, Troupe.Client.Lifespan.forbidden(error[:data])}
+
+      {:error, %{code: -32_601}} ->
+        {:error, Troupe.Client.Lifespan.not_known()}
+
+      {:error, reason} ->
+        {:error, refusal(reason)}
+    end
+  end
+
   # Which configuration a pod session runs on, at the plane, which holds the pin (root
   # #1177); raised, the log's `config_upgraded` follows where a pod holds it.
   @impl true
@@ -727,6 +760,8 @@ defmodule Troupe.Client.Remote do
         # --only-me`) is its owner's and the people they invite, on the team's profile all
         # the same. Never a sealed session, which is this computer's daemon's.
         visibility: params[:visibility] || "team",
+        # How long it lasts, where it is not normal (root #1209).
+        lifespan: if(params[:lifespan] in ["throwaway", "persistent"], do: params[:lifespan]),
         prompt: params[:prompt] || "",
         command_id: RPC.command_id()
       })
@@ -1249,6 +1284,10 @@ defmodule Troupe.Client.Remote do
       # and this person's part in it, which together say "only you".
       visibility: session["visibility"],
       your_role: session["your_role"],
+      # How long it lasts, and when a throwaway one goes (root #1209); normal from a plane
+      # from before lifespans.
+      lifespan: Troupe.Client.Lifespan.of(session),
+      erases_at: session["erases_at"],
       # A plane cannot say how this machine's copy of a private session stands, only that
       # it is waiting to be erased (root Decision 756).
       sync: if(session["state"] == "erasure_pending", do: "erasure_pending"),

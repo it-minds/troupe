@@ -416,6 +416,7 @@ defmodule Troupe.CLI.Runner do
       worktree: if(args.worktree, do: "always", else: "never"),
       config: CLI.session_config(args),
       private: args.private,
+      lifespan: Map.get(args, :lifespan),
       refresh_brief: not args.headless
     }
   end

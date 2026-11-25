@@ -82,6 +82,9 @@ defmodule Troupe.UI.TUI.NewSessionPage do
       # `/new --only-me`: on the platform, its owner's and the people they invite until it
       # is shared, on the team's profile and budget all the same.
       only_me: Keyword.get(opts, :only_me, false),
+      # `/new --throwaway` or `--persistent` (root #1209): how long it lasts, said at the
+      # sentence's end and sent with the create; nil is normal, and sends nothing.
+      lifespan: Keyword.get(opts, :lifespan),
       # The team HQ had selected, which the plane charges and opens the session to.
       team: Keyword.get(opts, :team),
       # Where more than one of the person's teams may use a profile: the team picked for
@@ -720,7 +723,8 @@ defmodule Troupe.UI.TUI.NewSessionPage do
            prompt: r.cleaned,
            title: title,
            worktree: "never",
-           private: page.private
+           private: page.private,
+           lifespan: page.lifespan
          }}
 
       :platform ->
@@ -731,7 +735,8 @@ defmodule Troupe.UI.TUI.NewSessionPage do
            prompt: r.cleaned,
            title: title,
            team: r.team || page.team,
-           visibility: NewSession.visibility(page.only_me)
+           visibility: NewSession.visibility(page.only_me),
+           lifespan: page.lifespan
          }}
     end
   end
@@ -1030,9 +1035,13 @@ defmodule Troupe.UI.TUI.NewSessionPage do
       middle,
       Span.new(" as "),
       chip.(2, r.agent_label, nil)
-      | who_spans(r, chip)
+      | who_spans(r, chip) ++ lasts_spans(page.lifespan)
     ])
   end
+
+  # How long it lasts, where `/new` said: the picker's word and what it means.
+  defp lasts_spans(nil), do: []
+  defp lasts_spans(lifespan), do: [Span.new(" · " <> NewSession.lifespan_words(lifespan))]
 
   # Whose it is: a chip where more than one of the person's teams may use the profile, the
   # sentence's end as it was where one may.

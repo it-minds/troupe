@@ -620,6 +620,11 @@ defmodule Troupe.Remote.Translate do
       "session_visibility_changed" ->
         {[emit.(:remote_note, %{text: visibility_changed(data)})], memory}
 
+      # How long the session lasts, changed by its owner (root #1209): a line.
+      "session_lifespan_changed" ->
+        {[emit.(:remote_note, %{text: Troupe.Client.Lifespan.set(to_string(data["to"]), nil)})],
+         memory}
+
       # A saved `AI!` or `AI?` comment started a branch of this session (root Decision 844):
       # the branch's session, its agent, and the comments, as the daemon wrote them.
       "watch_triggered" ->

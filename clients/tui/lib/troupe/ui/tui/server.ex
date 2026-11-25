@@ -1301,7 +1301,7 @@ defmodule Troupe.UI.TUI.Server do
   # 698); this is only which of them the TUI implements, and the suite holds the two
   # equal, so a command added to the table without a clause here fails a test rather
   # than being dispatched as an agent.
-  @builtins ~w(new cancel dismiss merge discard compact goal loop steer invite uninvite share bundle sessions archive
+  @builtins ~w(new cancel dismiss merge discard compact goal loop steer invite uninvite share lifespan bundle sessions archive
                unarchive rename keep back hq observer files
                scratch upload save publish artifacts profiles profile copy memory context watch settings
                models mcp
@@ -1728,6 +1728,15 @@ defmodule Troupe.UI.TUI.Server do
   defp builtin("share", args, state, _target) do
     case Client.share_args(args) do
       {:ok, verb} -> notice_of(Client.share(state.session_id, verb))
+      {:error, sentence} -> {:error, sentence}
+    end
+  end
+
+  # How long a session lasts (root #1209): alone it says, a word makes it throwaway, normal
+  # or persistent; on the daemon for one here, at the plane for one there.
+  defp builtin("lifespan", args, state, _target) do
+    case Client.lifespan_args(args) do
+      {:ok, verb} -> notice_of(Client.lifespan(state.session_id, verb))
       {:error, sentence} -> {:error, sentence}
     end
   end
@@ -2520,33 +2529,40 @@ defmodule Troupe.UI.TUI.Server do
   # The screen is prompt-first: the message box, then the settings as
   # one sentence of chips. `--private` and `--remote PROFILE` pre-set the chips, and
   # `--only-me` puts it on the platform as its owner's until they invite people; `--branch`
-  # forks what is on screen at once, as it always did.
-  @new_usage "/new [--private | --remote PROFILE | --only-me | --branch]"
+  # forks what is on screen at once, as it always did. `--throwaway` and `--persistent` say
+  # how long it lasts (root #1209), with any of the others but `--branch`.
+  @new_usage "/new [--private | --remote PROFILE | --only-me | --branch] [--throwaway | --persistent]"
 
   defp new_session(state, args) do
     case new_kind(String.split(args)) do
-      {:ok, :branch} ->
+      {:ok, :branch, nil} ->
         open_kind(state, :branch, nil)
 
-      {:ok, :local} ->
-        open_new_page(state, [])
+      {:ok, :local, lifespan} ->
+        open_new_page(state, lasting([], lifespan))
 
-      {:ok, :private} ->
-        open_new_page(state, private: true)
+      {:ok, :private, lifespan} ->
+        open_new_page(state, lasting([private: true], lifespan))
 
-      {:ok, {:remote, profile}} ->
-        open_new_page(state, where: :platform, profile: profile)
+      {:ok, {:remote, profile}, lifespan} ->
+        open_new_page(state, lasting([where: :platform, profile: profile], lifespan))
 
-      {:ok, :only_me} ->
-        open_new_page(state, where: :platform, only_me: true)
+      {:ok, :only_me, lifespan} ->
+        open_new_page(state, lasting([where: :platform, only_me: true], lifespan))
 
-      {:ok, {:only_me, profile}} ->
-        open_new_page(state, where: :platform, profile: profile, only_me: true)
+      {:ok, {:only_me, profile}, lifespan} ->
+        open_new_page(
+          state,
+          lasting([where: :platform, profile: profile, only_me: true], lifespan)
+        )
 
-      :usage ->
+      _usage ->
         notice(state, "usage: " <> @new_usage)
     end
   end
+
+  defp lasting(opts, nil), do: opts
+  defp lasting(opts, lifespan), do: Keyword.put(opts, :lifespan, lifespan)
 
   # The agent on screen is this computer's: the page starts a session here as it, and never
   # sends it to the plane, whose profile has a default of its own.
@@ -2678,14 +2694,45 @@ defmodule Troupe.UI.TUI.Server do
     end
   end
 
-  defp new_kind([]), do: {:ok, :local}
-  defp new_kind(["--private"]), do: {:ok, :private}
-  defp new_kind(["--branch"]), do: {:ok, :branch}
-  defp new_kind(["--remote", profile]), do: {:ok, {:remote, profile}}
-  defp new_kind(["--only-me"]), do: {:ok, :only_me}
-  defp new_kind(["--remote", profile, "--only-me"]), do: {:ok, {:only_me, profile}}
-  defp new_kind(["--only-me", "--remote", profile]), do: {:ok, {:only_me, profile}}
-  defp new_kind(_words), do: :usage
+  # `/new`'s flags, in any order, each at most once: `{:ok, kind, lifespan}`, or `:usage` for
+  # a word it does not take, one said twice, or two that cannot go together (a sealed
+  # session on the platform, a fork with anything else).
+  defp new_kind(words), do: new_flags(words, %{})
+
+  defp new_flags([], flags), do: new_shape(flags)
+
+  defp new_flags(["--remote", profile | rest], flags) when not is_map_key(flags, :remote) do
+    if String.starts_with?(profile, "--"),
+      do: :usage,
+      else: new_flags(rest, Map.put(flags, :remote, profile))
+  end
+
+  defp new_flags([word | rest], flags) do
+    case new_flag(word) do
+      {key, value} when not is_map_key(flags, key) -> new_flags(rest, Map.put(flags, key, value))
+      _twice_or_unknown -> :usage
+    end
+  end
+
+  defp new_flag("--private"), do: {:private, true}
+  defp new_flag("--branch"), do: {:branch, true}
+  defp new_flag("--only-me"), do: {:only_me, true}
+  defp new_flag("--throwaway"), do: {:lifespan, "throwaway"}
+  defp new_flag("--persistent"), do: {:lifespan, "persistent"}
+  defp new_flag(_word), do: nil
+
+  defp new_shape(%{branch: true} = flags) when map_size(flags) == 1, do: {:ok, :branch, nil}
+  defp new_shape(%{branch: true}), do: :usage
+  defp new_shape(%{private: true} = flags) when is_map_key(flags, :remote), do: :usage
+  defp new_shape(%{private: true, only_me: true}), do: :usage
+  defp new_shape(%{private: true} = flags), do: {:ok, :private, flags[:lifespan]}
+
+  defp new_shape(%{only_me: true, remote: profile} = flags),
+    do: {:ok, {:only_me, profile}, flags[:lifespan]}
+
+  defp new_shape(%{only_me: true} = flags), do: {:ok, :only_me, flags[:lifespan]}
+  defp new_shape(%{remote: profile} = flags), do: {:ok, {:remote, profile}, flags[:lifespan]}
+  defp new_shape(flags), do: {:ok, :local, flags[:lifespan]}
 
   # Here: the session on screen's directory, or with a plane's on screen the one this
   # window was opened in, which is also the directory the picker lists. A branch is a fork
