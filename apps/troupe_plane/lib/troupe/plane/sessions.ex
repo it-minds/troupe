@@ -556,6 +556,31 @@ defmodule Troupe.Plane.Sessions do
   end
 
   @doc """
+  Change the repositories a session holds: `change` is given the list as it is under the
+  row's lock and answers the new one, or `{:error, reason}` to leave it. `repository` and
+  `github` are written as its first entry's (`Session.holding/1`).
+  """
+  @spec put_repositories(String.t(), ([map()] -> {:ok, [map()]} | {:error, term()})) ::
+          {:ok, Session.t()} | {:error, term()}
+  def put_repositories(session_id, change) do
+    Repo.transaction(fn ->
+      case Repo.one(from(s in Session, where: s.id == ^session_id, lock: "FOR UPDATE")) do
+        nil ->
+          Repo.rollback(:not_found)
+
+        session ->
+          with {:ok, entries} <- change.(Session.repositories(session)),
+               {:ok, updated} <-
+                 session |> Session.changeset(Session.holding(entries)) |> Repo.update() do
+            updated
+          else
+            {:error, reason} -> Repo.rollback(reason)
+          end
+      end
+    end)
+  end
+
+  @doc """
   Pin a session, exempting it from retention, or unpin it.
 
   Recorded with who did it and when, because a pin is a decision somebody made about

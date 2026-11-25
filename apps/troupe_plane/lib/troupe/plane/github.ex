@@ -940,6 +940,141 @@ defmodule Troupe.Plane.GitHub do
   def repository(_other, _profile, _team),
     do: {:error, "a repository is owner/name, or {owner, name, ref}"}
 
+  @doc """
+  Read `session.create`'s `repositories` for a session of `team` on `profile`: a list, each
+  as `repository/3` reads one. Answers the entries the row keeps, the first at the
+  workspace's root (`path: "."`) and each after it in `<owner>/<name>`, or why the list
+  will not do: the profile has no `spec.github`, the list holds more than its
+  `maxRepositories`, names one twice, or one fails `repository/3`, named.
+  """
+  @spec repositories(term(), String.t() | nil, Team.t() | nil) ::
+          {:ok, [map()]} | {:error, String.t()}
+  def repositories([], _profile, _team), do: {:ok, []}
+
+  def repositories(list, profile, team) when is_list(list) do
+    with {:ok, cap} <- holds(profile),
+         :ok <- within(length(list), cap, profile) do
+      list
+      |> Enum.reduce_while({:ok, []}, fn given, {:ok, read} ->
+        case repository(given, profile, team) do
+          {:ok, repository} -> {:cont, {:ok, read ++ [repository]}}
+          {:error, reason} -> {:halt, {:error, "#{label(given)}: #{reason}"}}
+        end
+      end)
+      |> then(fn
+        {:ok, read} -> once_each(read)
+        error -> error
+      end)
+      |> then(fn
+        {:ok, read} -> {:ok, read |> Enum.with_index() |> Enum.map(&placed/1)}
+        error -> error
+      end)
+    end
+  end
+
+  def repositories(_other, _profile, _team),
+    do: {:error, "repositories is a list, each owner/name or {owner, name, ref}"}
+
+  @doc """
+  Check `given` as a repository a session on `profile` of `team` may attach now, beside
+  `held`, its entries: the profile has `spec.github`, the session holds fewer than its
+  `maxRepositories` and not this one, and `repository/3` passes. Answers the entry, in
+  `<owner>/<name>`.
+  """
+  @spec attachable(term(), [map()], String.t() | nil, Team.t() | nil) ::
+          {:ok, map()} | {:error, String.t()}
+  def attachable(given, held, profile, team) do
+    with {:ok, cap} <- holds(profile),
+         :ok <- within(length(held) + 1, cap, profile),
+         {:ok, repository} <- repository(given, profile, team),
+         {:ok, _all} <- once_each(held ++ [repository]) do
+      {:ok, placed({repository, 1})}
+    end
+  end
+
+  defp holds(profile) do
+    case Policy.max_repositories(profile) do
+      nil ->
+        {:error,
+         "the profile #{profile || "(none)"} has no spec.github, so its sessions hold no " <>
+           "GitHub repository beyond the one they were created on"}
+
+      cap ->
+        {:ok, cap}
+    end
+  end
+
+  defp within(count, cap, profile) when count > cap,
+    do:
+      {:error,
+       "a session on the profile #{profile} holds at most " <>
+         "#{Words.count(cap, "repository", "repositories")} (spec.github.maxRepositories)"}
+
+  defp within(_count, _cap, _profile), do: :ok
+
+  defp once_each(entries) do
+    entries
+    |> Enum.group_by(&String.downcase(full(&1)))
+    |> Enum.find(fn {_name, same} -> length(same) > 1 end)
+    |> case do
+      nil -> {:ok, entries}
+      {_name, [one | _]} -> {:error, "the session holds #{full(one)} already"}
+    end
+  end
+
+  # The first repository a session is created on is cloned at the workspace's root, as the
+  # one repository always was, so its instruction files, agents and skills are found where
+  # a repository's are; every one after it is a directory of its own, `<owner>/<name>`.
+  defp placed({repository, 0}), do: Map.put(repository, "path", ".")
+  defp placed({repository, _n}), do: Map.put(repository, "path", full(repository))
+
+  defp label(given) when is_binary(given), do: given
+  defp label(%{} = given), do: "#{given["owner"] || given[:owner]}/#{given["name"] || given[:name]}"
+  defp label(given), do: inspect(given)
+
+  @doc "A repository's `owner/name`."
+  @spec full(map()) :: String.t()
+  def full(%{"owner" => owner, "name" => name}), do: "#{owner}/#{name}"
+
+  @doc """
+  The entry of a session's repositories a pod's call is about: the one named, as
+  `owner/name` in any case, or with none named, the session's only one. Several and none
+  named is refused, naming them, as is a name the session does not hold.
+  """
+  @spec held(Session.t(), term()) :: {:ok, map()} | {:error, term()}
+  def held(%Session{} = session, named) do
+    case {Session.repositories(session), named} do
+      {[], _named} ->
+        {:error, :no_repository}
+
+      {[only], nil} ->
+        {:ok, only}
+
+      {several, nil} ->
+        {:error,
+         "this session holds #{Words.and_list(Enum.map(several, &full/1))}: name the repository"}
+
+      {entries, named} when is_binary(named) ->
+        case Enum.find(entries, &(String.downcase(full(&1)) == String.downcase(named))) do
+          nil ->
+            {:error,
+             "this session holds no repository #{named}; it holds " <>
+               Words.and_list(Enum.map(entries, &full/1))}
+
+          entry ->
+            {:ok, entry}
+        end
+
+      {_entries, _other} ->
+        {:error, "a repository is named owner/name"}
+    end
+  end
+
+  # The session as one repository of it is: what minting a token and keeping a record for
+  # that one repository read, as they read a session's one repository before the list.
+  defp as_one(%Session{} = session, entry),
+    do: %{session | repository: Map.take(entry, ["owner", "name", "ref"]), github: entry["github"]}
+
   defp only_repository_keys(given) do
     case Map.keys(given) -- ~w(owner name ref) do
       [] -> :ok
@@ -1036,14 +1171,26 @@ defmodule Troupe.Plane.GitHub do
   caps allow. The checks `repository/3` made at creation are made again, since the App,
   its installations, the team's repositories and the profile may all have changed since;
   a write token also needs the profile to declare the API's host.
+
+  A session holding several repositories names the one with `repository:` (`owner/name`),
+  and its token is for that one alone, its caps counted on that one's record; one holding
+  a single repository may leave it out. The answer carries the entry's `path` in the
+  workspace.
   """
   @spec credential(Session.t(), keyword()) :: {:ok, map()} | {:error, term()}
   def credential(session, opts \\ [])
 
-  def credential(
-        %Session{repository: %{"owner" => owner, "name" => name} = repository} = session,
-        opts
-      ) do
+  def credential(%Session{} = session, opts) do
+    with {:ok, entry} <- held(session, Keyword.get(opts, :repository)),
+         {:ok, credential} <- credential_for(as_one(session, entry), opts) do
+      {:ok, Map.put(credential, "path", entry["path"] || ".")}
+    end
+  end
+
+  defp credential_for(
+         %Session{repository: %{"owner" => owner, "name" => name} = repository} = session,
+         opts
+       ) do
     access = Keyword.get(opts, :access, :read)
 
     with {:ok, app} <- configured(),
@@ -1076,8 +1223,6 @@ defmodule Troupe.Plane.GitHub do
        )}
     end
   end
-
-  def credential(%Session{}, _opts), do: {:error, :no_repository}
 
   # The clone's is read-only whatever the profile says. The fix loop's is the profile's
   # grant, and only where it grants something to write with; once three red rounds or its
@@ -1387,7 +1532,9 @@ defmodule Troupe.Plane.GitHub do
 
   @doc """
   Record a step of a session's fix loop, as the pod that holds it reports it, and answer
-  the record as it now is: `{github, stopped_now}`.
+  the record as it now is: `{github, stopped_now}`. The record is one repository's: the
+  one `changes` names as `repository` (`owner/name`), or the session's only one, as
+  `held/2` reads it, so each repository has its own branch, pushes and caps.
 
   `changes` has one or more of:
 
@@ -1413,25 +1560,38 @@ defmodule Troupe.Plane.GitHub do
   """
   @spec record(Session.t(), map(), String.t()) ::
           {:ok, %{github: map(), stopped_now: boolean()}} | {:error, term()}
-  def record(%Session{repository: %{}} = session, changes, actor) when is_map(changes) do
+  def record(%Session{} = session, changes, actor) when is_map(changes) do
+    {named, changes} = Map.pop(changes, "repository")
+
     Repo.transaction(fn ->
       locked =
         Repo.one!(from(s in Session, where: s.id == ^session.id, lock: "FOR UPDATE"))
 
       now = DateTime.utc_now() |> DateTime.truncate(:second) |> DateTime.to_iso8601()
 
-      case apply_changes(locked.github || %{}, changes, locked, now) do
-        {:ok, github, steps} -> keep(locked, github, steps, actor)
+      with {:ok, entry} <- held(locked, named),
+           one = as_one(locked, entry),
+           {:ok, github, steps} <- apply_changes(one.github || %{}, changes, one, now) do
+        keep(locked, entry, github, steps, actor)
+      else
         {:error, reason} -> Repo.rollback(reason)
       end
     end)
   end
 
-  def record(%Session{}, _changes, _actor), do: {:error, :no_repository}
+  # The record is the entry's in the session's list, and the row's `github` the first
+  # entry's, both written at once (`Session.holding/1`).
+  defp keep(session, entry, github, steps, actor) do
+    if github != (entry["github"] || %{}) do
+      entries =
+        Enum.map(Session.repositories(session), fn held ->
+          if full(held) == full(entry), do: Map.put(held, "github", github), else: held
+        end)
 
-  defp keep(session, github, steps, actor) do
-    if github != (session.github || %{}), do: session |> change(github: github) |> Repo.update!()
-    Enum.each(steps, &audit(&1, session, actor))
+      session |> change(Session.holding(entries)) |> Repo.update!()
+    end
+
+    Enum.each(steps, &audit(&1, as_one(session, entry), actor))
     %{github: github, stopped_now: Enum.any?(steps, &match?({:stopped, _}, &1))}
   end
 
