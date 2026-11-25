@@ -812,17 +812,29 @@ is linked at and sealed under the person's own key with the token a client hande
 that cannot yet — no token, or no plane answering — makes the session anyway and says
 `false`, and seals it from its first event once a client links it with a token.
 
+`lifespan`, beside `private`: how long the session lasts (Decision 1110), `throwaway`,
+`normal` (absent) or `persistent`; another word is `invalid_params`, field `lifespan`,
+before the session exists. Recorded in its `session_created`, kept in a file beside its
+log, `lifespan`, as a pin is, and answered in the create's answer and in every listing. A
+throwaway local session is erased by the daemon once it has been asleep
+`throwaway_erase_after_hours` (its configuration, 24 by default) since it last worked, with
+no approval or question open and not pinned; a private one is registered with the word and
+the plane erases it. A plane's `session.create` takes the same field. Servers that know it
+say `lifespans: true` at `initialize`, and a client sends it only to one that does.
+
 #### `session.list`
 ```json
 {"filter": {"state": ["active", "dormant"], "workspace": "/home/me/project",
-            "parent": "s-3a", "archived": true}}
+            "parent": "s-3a", "archived": true, "lifespan": "throwaway"}}
 ```
 → `{"sessions": [{"id", "workspace", "branch", "parent", "profile", "state", "status",
 "failed", "pending_approvals", "pending_questions", "unseen", "tokens", "cost", "created_at",
-"last_active_at", "pinned", "archived", "title", "kind", "sync", "device", "remote"}]}`
+"last_active_at", "pinned", "archived", "title", "kind", "sync", "device", "remote",
+"lifespan", "erases_at"}]}`
 
 The list is the sessions not archived; `"archived": true` lists the archived ones instead
-(Decision 1023).
+(Decision 1023). `filter.lifespan` (a word or a list) selects the sessions that last so;
+`erases_at` is when a throwaway one is erased if nothing keeps it, `null` for any other.
 
 `filter.parent` selects the branches of one session.
 
@@ -896,6 +908,8 @@ at rest: the session is `dormant` afterwards, as one that went to sleep is.
 #### `session.pin` / `session.unpin` → `{"session_id", "pinned"}`; a pinned session is kept at the top of the list, and that is all a pin does: what keeps a session from being cleared away is its `lifespan` (`session.lifespan.set`), though a throwaway session is not erased while it is pinned. The daemon marks the session pinned in its listing, running or dormant, and keeps the mark in a file beside the session's log, so it outlives the session's going dormant and the daemon's stopping. A session it has no log of is `not_found`.
 
 #### `session.title.set` → `{"session_id", "title"}`; `{command_id, session_id, title}` names a session, running or dormant, as `session.create`'s `title` does: trimmed, at most 200 bytes (`invalid_params`, field `title`), and an empty one takes the name off, `title` then `null`. A daemon keeps it in a file beside the session's log, as it keeps a pin. A session it has no log of is `not_found`. A pod session's is the plane's `session.title.set`, and a worker refuses it as it refuses a pin.
+
+#### `session.lifespan.set` → `{"session_id", "lifespan", "erases_at"}`; `{command_id, session_id, lifespan}` says how long a session lasts, running or dormant, `throwaway`, `normal` or `persistent` (`invalid_params`, field `lifespan`, for another word). A daemon keeps it in a file beside the session's log, as it keeps a pin, and a running session's log gets `session_lifespan_changed`; asked for what it already is, it writes nothing. A private session's is told to the plane first, whose sweep erases it, and `unavailable` where the plane could not be told, nothing changed. A session it has no log of is `not_found`. A pod session's is the plane's `session.lifespan.set`, and a worker refuses it as it refuses a pin.
 
 #### `session.erase` → `{"session_id", "erased", "state"}`; irreversible.
 
@@ -2914,7 +2928,7 @@ is asked again, under the same id, and an answer that arrived in the meantime �
 | --- | --- |
 | `observe` | `initialize`, `client.mode`, `subscribe`, `unsubscribe`, `session.list`, `session.get`, `session.invites`, `session.read_sealed`, `session.goal.get`, `session.loop.get`, `blob.get`, `fs.list`, `fs.read`, `scratch.list`, `agents.list`, `agents.get`, `agents.validate`, `commands.list`, `workflows.list`, `context.get`, `mcp.status`, `mcp.list`, `skills.list`, `skills.discover`, `workspace.recent`, `workspace.search`, `worktree.list`, `watch.get`, `presence.set`, `identity.get`, `config.get`, `setup.get`, `me.memory.status`, `artifact.list`, `artifact.get`, `artifact.open`, `artifact.read`, `profile.get` |
 | `control` | everything in `observe`, plus `input.send`, `commands.run`, `turn.cancel`, `profile.switch`, `session.goal.set`, `session.goal.clear`, `session.loop.start`, `session.loop.stop`, `session.compact`, `session.repair`, `approval.respond`, `question.answer`, `todo.edit`, `fs.upload`, `tools.register`, `tools.unregister`, `memory.get`, `memory.decline`, `onboard.decline`, `me.memory`, `me.memory.put`, `me.memory.history`, `me.memory.rollback`, `memory.in_effect`, `admin.memory.get`, `admin.memory.preview`, `admin.memory.put`, `artifact.publish`, `artifact.share`, `artifact.unshare`, `artifact.comment`, `artifact.comment.delete`, `artifact.comment.edit`, `artifact.rollback`, `artifact.pin`, `artifact.keep`; and `shell.run` and `shell.cancel`, which also need the session's owner or `admin` (Decision 813) |
-| `admin` | everything in `control`, plus `session.create`, `session.archive`, `session.unarchive`, `session.pin`, `session.unpin`, `session.title.set`, `session.erase`, `session.claim`, `session.invite`, `session.uninvite`, `session.fork`, `worktree.remove`, `worktree.merge`, `worktree.discard`, `memory.forget`, `onboard.plan`, `onboard.apply`, `watch.set`, `identity.link`, `identity.unlink`, `identity.sign_out`, `identity.accept_plane_key`, `config.models`, `config.set`, `config.import`, `config.organisation`, `config.memory`, `setup.answer`, `mcp.add`, `mcp.remove`, `mcp.check`, `mcp.secret`, `mcp.sign_in`, `mcp.sign_out`, `mcp.tools`, `mcp.call`, `skills.add`, `skills.remove`, `agents.put`, `agents.delete`, `daemon.stop`, `remote.offer`, `remote.withdraw` |
+| `admin` | everything in `control`, plus `session.create`, `session.archive`, `session.unarchive`, `session.pin`, `session.unpin`, `session.title.set`, `session.lifespan.set`, `session.erase`, `session.claim`, `session.invite`, `session.uninvite`, `session.fork`, `worktree.remove`, `worktree.merge`, `worktree.discard`, `memory.forget`, `onboard.plan`, `onboard.apply`, `watch.set`, `identity.link`, `identity.unlink`, `identity.sign_out`, `identity.accept_plane_key`, `config.models`, `config.set`, `config.import`, `config.organisation`, `config.memory`, `setup.answer`, `mcp.add`, `mcp.remove`, `mcp.check`, `mcp.secret`, `mcp.sign_in`, `mcp.sign_out`, `mcp.tools`, `mcp.call`, `skills.add`, `skills.remove`, `agents.put`, `agents.delete`, `daemon.stop`, `remote.offer`, `remote.withdraw` |
 
 Locally, the socket's permissions authenticate the user and the connection gets all
 three, and so does the loopback TCP token; a daemon mints no narrower token.
@@ -2989,7 +3003,7 @@ keeps the whole table.
 
 **Archiving, pinning, erasing and forking a pod session are the plane's.** The plane holds
 the session's row, its key, its placement and its retention, so a worker refuses
-`session.archive`, `session.unarchive`, `session.pin`, `session.unpin`, `session.title.set`,
+`session.archive`, `session.unarchive`, `session.pin`, `session.unpin`, `session.title.set`, `session.lifespan.set`,
 `session.erase` and `session.fork` to a token for one session with `forbidden`, `data.method` naming it and
 `data.reason` of `done through the plane`. A client archives, unarchives, pins, unpins, renames and
 erases a pod session with the plane's methods of the same names, each `{session_id}`

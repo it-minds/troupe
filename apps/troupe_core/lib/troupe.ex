@@ -21,7 +21,7 @@ defmodule Troupe do
   alias Troupe.Onboard.Notice
   alias Troupe.Protocol.{Event, Origin}
   alias Troupe.Session.{Approvals, Blobs, Checkpoint, Log, Questions, Watcher}
-  alias Troupe.Sessions.{Archive, Fork, Index, Pin, Title, Unseen}
+  alias Troupe.Sessions.{Archive, Fork, Index, Lifespan, Pin, Title, Unseen}
 
   require Logger
 
@@ -1049,6 +1049,35 @@ defmodule Troupe do
     with :ok <- Pin.put(session_id, pinned?, state_dirs()) do
       Index.update(session_id, %{pinned: pinned?})
     end
+  end
+
+  @doc """
+  Say how long a session lasts, running or dormant (`Troupe.Sessions.Lifespan`): the mark
+  beside its log, which the daemon's sweep and every listing read, and for a running one a
+  `session_lifespan_changed` line by `actor`, so whoever reads it hears. A dormant session's
+  log is not opened for it. Asked for what it already is, it writes nothing.
+  """
+  @spec lifespan_session(String.t(), String.t(), String.t() | nil) ::
+          :ok | {:error, :not_found | :invalid | String.t()}
+  def lifespan_session(session_id, lifespan, actor) do
+    from = Lifespan.of(session_id, state_dirs())
+
+    with :ok <- Lifespan.put(session_id, lifespan, state_dirs()) do
+      if from != lifespan do
+        Index.update(session_id, %{lifespan: lifespan})
+        said_lifespan(session_id, from, lifespan, actor)
+      end
+
+      :ok
+    end
+  end
+
+  defp said_lifespan(session_id, from, to, actor) do
+    data = %{"from" => from, "to" => to, "actor" => actor || linked_owner() || "local"}
+    Log.append(session_id, Session.root_path(), :session_lifespan_changed, data)
+  catch
+    # Not running: the mark is the record, as a dormant pod session's row is.
+    :exit, _ -> :ok
   end
 
   @doc """

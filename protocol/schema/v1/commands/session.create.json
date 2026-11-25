@@ -9,6 +9,9 @@
     "config": {
       "type": "object"
     },
+    "lifespan": {
+      "type": "string"
+    },
     "parent": {
       "type": "string"
     },

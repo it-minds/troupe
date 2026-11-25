@@ -13,7 +13,7 @@ import { castingTiming } from "../src/views/StartSession";
 import { FakeDaemon } from "../../../packages/client/test/support/daemon.js";
 import { startHarness } from "../../../packages/client/test/support/harness.js";
 import type { Harness } from "../../../packages/client/test/support/harness.js";
-import { button, render, says, seesButton, startOnTheList, type, waitFor } from "./support";
+import { button, hereIn, render, says, seesButton, startOnTheList, type, waitFor } from "./support";
 
 Element.prototype.scrollIntoView = function scrollIntoView() {};
 globalThis.WebSocket = NodeWebSocket as unknown as typeof WebSocket;
@@ -115,6 +115,20 @@ describe("the new-session screen", () => {
     await waitFor(() => lifespans(s), "the lifespan choice");
     await startWith(s, "Tidy the ledger");
     expect(h.plane.createdLifespan).toEqual([null]);
+  });
+
+  it("on this computer, offers it where the daemon knows lifespans and sends it there", async () => {
+    await signedIn();
+    const s = await openStart();
+    await hereIn(s, "/home/alice/project");
+    await waitFor(() => lifespans(s), "the lifespan choice");
+    choice(s, "Persistent")!.click();
+    await waitFor(() => lifespans(s)!.querySelector(".ns-who")?.textContent === "Kept until you erase it.", "the persistent sentence");
+    type(ask(s), "Build the quarterly report");
+    await waitFor(() => s.querySelector<HTMLButtonElement>("button.ns-start:not([disabled])"), "Start, ready");
+    ctrlEnter(ask(s));
+    await waitFor(() => daemon.createdLifespan.length === 1, "the create");
+    expect(daemon.createdLifespan).toEqual(["persistent"]);
   });
 
   it("offers no choice on a plane that does not know lifespans", async () => {

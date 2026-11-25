@@ -56,7 +56,7 @@ sentence as you start it, or later from the session's ⋯ (`/lifespan` in the te
 Only a session's owner changes its lifespan. A fork is normal unless you ask otherwise,
 whatever the session it came from. A session on your computer that is throwaway is erased
 by the daemon in the same way, after the same window (`throwaway_erase_after_hours` in its
-[configuration](configuration-settings.md)); a private one is erased by the plane, which
+[configuration](configuration.md)); a private one is erased by the plane, which
 holds its key.
 
 ## Raising a session to the current configuration

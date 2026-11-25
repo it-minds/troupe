@@ -23,6 +23,7 @@ defmodule Troupe.Plane.Memory.Proposals do
   alias Troupe.Plane.Control.Router
   alias Troupe.Plane.Identity.{Team, User}
   alias Troupe.Plane.Memory.Proposal
+  alias Troupe.Protocol.Lifespan
 
   @pending_per_person 20
   @shown_days 7
@@ -59,11 +60,7 @@ defmodule Troupe.Plane.Memory.Proposals do
   memory is still the session's to write.
   """
   @spec throwaway_reason() :: String.t()
-  def throwaway_reason,
-    do:
-      "this session is throwaway, and a throwaway session proposes nothing for a team's or " <>
-        "the organisation's memory: it is erased a while after it goes quiet, and its " <>
-        "proposal with it; " <> @instead <> ", or ask the person to keep the session"
+  def throwaway_reason, do: Lifespan.no_proposals()
 
   # A session that will be erased proposes nothing above its person's memory. A session
   # the plane has no row of (one on a computer that is not private) is its daemon's to say.

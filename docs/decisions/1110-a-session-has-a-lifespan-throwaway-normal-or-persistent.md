@@ -10,6 +10,9 @@ paths:
   - apps/troupe_plane/lib/troupe/plane/sessions.ex
   - apps/troupe_plane/lib/troupe/plane/harness.ex
   - apps/troupe_plane/lib/troupe/plane/memory/proposals.ex
+  - apps/troupe_plane/lib/troupe/plane/sessions/lifespan.ex
+  - apps/troupe_core/lib/troupe/sessions/lifespan.ex
+  - clients/gui/packages/client/src/lifespan.ts
 gist: "lifespan throwaway|normal|persistent (default normal, every old row normal); session.lifespan.set owner only, audited, pod logs session_lifespan_changed; pin = list order only; throwaway proposes no team memory"
 ---
 

@@ -67,7 +67,7 @@ defmodule Troupe.Worker.Auth do
   # control channel (`Troupe.Worker.Plane.Commands`), which this guard is not on. A fork
   # is a new row, key and placement too, so it is the plane's `session.fork` (Decision 812).
   @plane_methods ~w(session.archive session.unarchive session.pin session.unpin session.erase session.fork
-                    session.title.set)
+                    session.title.set session.lifespan.set)
 
   @enforce_keys [:worker_id]
   defstruct [:worker_id, :issuer, jwks: %{"keys" => []}, acl: %{}, revoked: MapSet.new()]

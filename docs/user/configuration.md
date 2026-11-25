@@ -328,6 +328,7 @@ a key by, in the desktop app and the TUI alike.
 | `trusted_workspaces` | list of strings |  | user file only |  | Workspaces whose own files may set the keys marked trusted. A path trusts everything under it. |
 | `state_dir` | string |  | user; project if trusted |  | Where session logs go, with their blobs and the outputs kept from them. Unset: the platform's state directory. |
 | `fake_script` | string |  | user; project if trusted |  | With `provider: fake`, the file of scripted answers. |
+| `throwaway_erase_after_hours` | integer ≥ 1 | `24` | user file only |  | How many hours after it last worked a throwaway session on this computer is erased, from 1 to 168 (more is 168). The daemon looks every ten minutes while it runs; a private session is the plane's to erase. |
 
 ### Clients
 

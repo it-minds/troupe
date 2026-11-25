@@ -831,7 +831,9 @@ defmodule Troupe.Protocol.Schema do
         "parent" => optional(:string),
         "workflow" => optional(:string),
         "private" => optional(:boolean),
-        "title" => optional(:string)
+        "title" => optional(:string),
+        # How long it lasts: `throwaway`, `normal` (absent) or `persistent`.
+        "lifespan" => optional(:string)
       },
       "session.archive" => %{
         "command_id" => required(:string),

@@ -23,6 +23,20 @@ defmodule Troupe.Protocol.Lifespan do
   @spec word?(term()) :: boolean()
   def word?(word), do: word in @words
 
+  @doc """
+  The sentence a throwaway session's proposal for a team's or the organisation's memory is
+  refused with, on a plane and a daemon alike, for its agent to relay: its erasure would take
+  the proposal out of an administrator's queue unread. The person's own memory is still its
+  to write.
+  """
+  @spec no_proposals() :: String.t()
+  def no_proposals,
+    do:
+      "this session is throwaway, and a throwaway session proposes nothing for a team's or " <>
+        "the organisation's memory: it is erased a while after it goes quiet, and its proposal " <>
+        "with it; nothing was proposed. Remember it for this repository instead, or in the " <>
+        "person's own memory (level me), or ask the person to keep the session"
+
   @doc "How many hours after it last worked a throwaway session is erased, by default."
   @spec default_hours() :: pos_integer()
   def default_hours, do: @default_hours
