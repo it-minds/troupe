@@ -792,6 +792,9 @@ defmodule Troupe.Plane.Control.Connection do
         {:error, {:off, profile}} ->
           {:error, Error.new(:forbidden, %{reason: Memory.Proposals.off_reason(profile)}), state}
 
+        {:error, :throwaway} ->
+          {:error, Error.new(:forbidden, %{reason: Memory.Proposals.throwaway_reason()}), state}
+
         {:error, reason} ->
           {:error, Error.new(:invalid_params, %{reason: own_reason(reason)}), state}
       end

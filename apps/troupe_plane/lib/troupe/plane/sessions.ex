@@ -556,10 +556,23 @@ defmodule Troupe.Plane.Sessions do
   end
 
   @doc """
-  Pin a session, exempting it from retention, or unpin it.
+  How long a session lasts: `throwaway`, `normal` or `persistent` (`Session.lifespans/0`).
+  Its owner's to change; the harness checks that, and audits it.
+  """
+  @spec set_lifespan(String.t(), String.t()) :: {:ok, Session.t()} | {:error, term()}
+  def set_lifespan(session_id, lifespan) do
+    case Repo.get(Session, session_id) do
+      nil -> {:error, :not_found}
+      session -> session |> Session.changeset(%{lifespan: lifespan}) |> Repo.update()
+    end
+  end
 
-  Recorded with who did it and when, because a pin is a decision somebody made about
-  somebody else's storage bill and a team admin is entitled to see whose.
+  @doc """
+  Keep a session at the top of the list, or let it go from there: the list's order and
+  nothing more. What keeps a session from being cleared away is its lifespan.
+
+  Recorded with who did it and when, because a pin is a decision somebody made about how
+  everybody's list reads and a team admin is entitled to see whose.
   """
   @spec pin(String.t(), boolean(), String.t()) :: {:ok, Session.t()} | {:error, term()}
   def pin(session_id, pinned?, actor) do
@@ -650,7 +663,7 @@ defmodule Troupe.Plane.Sessions do
   end
 
   defp insert_private(subject, session_id, params) do
-    create(%{
+    %{
       id: session_id,
       owner_subject: subject,
       kind: "private",
@@ -663,7 +676,16 @@ defmodule Troupe.Plane.Sessions do
       head_hash: params["head_hash"],
       object_bytes: params["object_bytes"] || 0,
       workspace_bytes: params["workspace_bytes"] || 0
-    })
+    }
+    |> Map.merge(registered_lifespan(params["lifespan"]))
+    |> create()
+  end
+
+  # How long its owner's machine says it lasts, where the word is one: a throwaway private
+  # session is erased by this plane's sweep, which destroys its key. Any other word, or
+  # none, makes a normal one, as a daemon from before lifespans registers.
+  defp registered_lifespan(lifespan) do
+    if lifespan in Session.lifespans(), do: %{lifespan: lifespan}, else: %{}
   end
 
   # A seal carries the epoch the device believes it holds. The device that lost a claim
@@ -1081,6 +1103,9 @@ defmodule Troupe.Plane.Sessions do
 
       {:kind, kind}, acc ->
         from(s in acc, where: s.kind == ^kind)
+
+      {:lifespan, lifespans}, acc ->
+        from(s in acc, where: s.lifespan in ^List.wrap(lifespans))
 
       {:state, states}, acc ->
         from(s in acc, where: s.state in ^List.wrap(states))

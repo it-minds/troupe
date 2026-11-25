@@ -5774,6 +5774,7 @@ defmodule Troupe.Plane.Admin do
       profile: session.profile,
       state: session.state,
       visibility: session.visibility,
+      lifespan: session.lifespan,
       epoch: session.epoch,
       last_seq: session.last_seq,
       object_bytes: session.object_bytes,

@@ -53,6 +53,29 @@ defmodule Troupe.Plane.Memory.Proposals do
       "proposals to a team's or the organisation's memory are switched off for the sessions " <>
         "of the profile #{profile} (its memoryProposals is false); " <> @instead
 
+  @doc """
+  The sentence a proposal from a throwaway session is refused with. Its erasure would take
+  the proposal out of the administrator's queue unread, so none is kept; the person's own
+  memory is still the session's to write.
+  """
+  @spec throwaway_reason() :: String.t()
+  def throwaway_reason,
+    do:
+      "this session is throwaway, and a throwaway session proposes nothing for a team's or " <>
+        "the organisation's memory: it is erased a while after it goes quiet, and its " <>
+        "proposal with it; " <> @instead <> ", or ask the person to keep the session"
+
+  # A session that will be erased proposes nothing above its person's memory. A session
+  # the plane has no row of (one on a computer that is not private) is its daemon's to say.
+  defp lasting(nil), do: :ok
+
+  defp lasting(session_id) do
+    case Sessions.get(session_id) do
+      %{lifespan: "throwaway"} -> {:error, :throwaway}
+      _lasting_or_unknown -> :ok
+    end
+  end
+
   # Whether a pod's session on `profile` may propose: no where its profile in effect says
   # `memoryProposals: false`, its own or a profile's it extends, which a child cannot undo.
   defp profile_allows(nil), do: :ok
@@ -74,12 +97,13 @@ defmodule Troupe.Plane.Memory.Proposals do
   """
   @spec propose(User.t(), String.t(), Team.t() | nil, term(), keyword()) ::
           {:ok, Proposal.t()}
-          | {:error, :off | {:off, String.t()} | :no_person | String.t()}
+          | {:error, :off | {:off, String.t()} | :throwaway | :no_person | String.t()}
   def propose(user, scope, team, entry, opts \\ [])
 
   def propose(%User{id: id} = user, scope, team, entry, opts) when is_binary(id) do
     with :ok <- if(enabled?(), do: :ok, else: {:error, :off}),
          :ok <- profile_allows(opts[:profile]),
+         :ok <- lasting(opts[:session]),
          :ok <- level(scope, team),
          {:ok, entry} <- Memory.entry_text(entry),
          {:ok, topic} <- Memory.topic_text(opts[:topic]),

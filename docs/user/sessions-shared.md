@@ -127,8 +127,9 @@ The owner also names a session and keeps it at the top, for everybody it is list
 `/rename <name>` in either client, or **Rename** under a row's ⋯ in the desktop app's list or
 the session's ⋯, renames it; there the title becomes a field, Enter keeps what is typed, an
 empty one takes the name off, and Esc leaves it. `/keep`, or **Keep at the top** in the same
-two menus, lists it first with the mark **Kept**, and the plane does not clear a kept team
-session away under its retention; `/keep off` or **Let go from the top** puts it back.
+two menus, lists it first with the mark **Kept**; `/keep off` or **Let go from the top** puts
+it back. Keeping it at the top is the list's order and nothing more: how long a session
+lasts is its lifespan ([How long a session lasts](sessions.md#how-long-a-session-lasts)).
 Anybody who may steer a session changes its task list: the desktop app's Tasks pane, in
 the backstage, completes or cancels a task still open and adds one, as `/todo` does in the
 terminal; the agent is told what changed.

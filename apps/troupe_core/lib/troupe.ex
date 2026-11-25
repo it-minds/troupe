@@ -329,6 +329,9 @@ defmodule Troupe do
     # subagents included, so the log says why a subagent the bundle has was never here.
     |> put_present("agent_rule", bundle && bundle[:agent_rule])
     |> put_present("origin", Keyword.get(session_opts, :origin))
+    # How long it lasts, where whoever started it said; absent is normal, as every log
+    # from before lifespans is.
+    |> put_present("lifespan", lasting(Keyword.get(session_opts, :lifespan)))
     # Who it belongs to. A worker is told; a daemon works it out from the link, and a
     # daemon nobody has linked leaves the field out rather than writing a username that
     # means nothing anywhere else.
@@ -337,6 +340,8 @@ defmodule Troupe do
     # one view reads it back from the listing; the log is where it survives dormancy.
     |> put_present("parent", Keyword.get(session_opts, :parent))
   end
+
+  defp lasting(lifespan), do: if(Troupe.Protocol.Lifespan.word?(lifespan), do: lifespan)
 
   # The owner a worker is told, or the linked person, with their name where the link
   # carries one that is more than the subject again, so a client shows a person by name.
