@@ -361,6 +361,8 @@ defmodule Troupe.Worker.Session.Restore do
   """
   @spec start(Context.t(), Path.t(), keyword()) :: {:ok, map()} | {:error, term()}
   def start(%Context{} = context, root, opts \\ []) do
+    {allow, terms} = Keyword.pop(Keyword.get(opts, :terms) || [], :allow)
+
     overrides =
       opts
       |> Keyword.get(:config_overrides, [])
@@ -382,9 +384,11 @@ defmodule Troupe.Worker.Session.Restore do
       # A client attached to a remote session has no other way to know that `shell` wrote
       # something, so this is not optional here.
       |> Keyword.put_new(:fs_events, true)
-      |> Keyword.merge(contract(Keyword.get(opts, :terms, [])))
+      |> Keyword.merge(contract(terms))
       |> Keyword.merge(personal_tools(Keyword.get(opts, :personal_tools), context.profile))
-      |> Keyword.merge(profile_rules(Keyword.get(opts, :permission_rules)))
+      |> Keyword.merge(
+        rules(profile_rules(Keyword.get(opts, :permission_rules)), trigger_rules(allow, Keyword.get(opts, :origin)))
+      )
       |> Keyword.merge(plane_memory(Keyword.get(opts, :memory)))
 
     Troupe.resume(context.session_id,
@@ -466,6 +470,27 @@ defmodule Troupe.Worker.Session.Restore do
     do: [permissions: Enum.flat_map(rules, &profile_rule/1)]
 
   defp profile_rules(_none), do: []
+
+  # What a trigger's terms allow its runs (`terms.allow`): each a rule as a file writes it,
+  # a layer of its own named for the trigger, beside the profile's and never instead of
+  # them, so a profile's `ask` or `deny` of the same tool still holds over it.
+  defp trigger_rules([_ | _] = texts, origin) do
+    trigger = (is_map(origin) && origin["trigger"]) || "of this session"
+
+    case Permissions.from(%{"allow" => texts}, :trigger, trigger) do
+      [] -> []
+      read -> [permissions: read]
+    end
+  end
+
+  defp trigger_rules(_none, _origin), do: []
+
+  defp rules(profile, trigger) do
+    case List.wrap(profile[:permissions]) ++ List.wrap(trigger[:permissions]) do
+      [] -> []
+      rules -> [permissions: rules]
+    end
+  end
 
   defp profile_rule(%{"action" => action, "rule" => text, "profile" => profile}) do
     case Permissions.from(%{action => [text]}, :profile, profile) do

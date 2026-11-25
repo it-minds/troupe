@@ -254,6 +254,12 @@ defmodule Troupe.Plane.Admin.API do
       description: "Whether members may pin a session against eviction."
     },
     %Argument{
+      name: "members_may_schedule",
+      type: :boolean,
+      description:
+        "Whether a member may turn on a trigger the harness proposed in one of their sessions, run as their own principal and on their budget. False makes no such proposal."
+    },
+    %Argument{
       name: "remote_offering_allowed",
       type: :boolean,
       description:
@@ -484,6 +490,12 @@ defmodule Troupe.Plane.Admin.API do
           type: :string,
           values: ~w(wait deny),
           description: "wait leaves an approval for a person; deny answers no. There is no auto."
+        },
+        %Argument{
+          name: "allow",
+          type: :array,
+          description:
+            "Per-tool rules its runs need unasked, as a configuration file writes them: publish_artifact, shell(curl), mcp(crm.list_deals). At most 16. A profile's ask or deny of the same tool still holds."
         }
       ]
     },

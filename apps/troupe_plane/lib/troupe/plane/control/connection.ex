@@ -810,6 +810,36 @@ defmodule Troupe.Plane.Control.Connection do
     end
   end
 
+  # Whether a session on this pod may propose something to its owner, as its root comes to
+  # rest (`Troupe.Plane.Proposals.check/2`): the team, the owner and what they said before
+  # are read off the session's row, as for its memory, so a pod asks only about a session
+  # it holds. The draft is read and not kept: what is kept is the owner's yes, later.
+  defp dispatch("session.proposal.check", params, state) do
+    with %Session{} = session <- session_of(params["session_id"], state.worker),
+         :ok <- at_epoch(session, params["epoch"]),
+         %{} = proposal <- params["proposal"] do
+      {:ok, Troupe.Plane.Proposals.check(session, proposal), state}
+    else
+      :stale_epoch -> {:error, Error.new(:conflict, %{reason: "stale epoch"}), state}
+      nil -> {:error, Error.new(:not_found, %{session_id: params["session_id"]}), state}
+      _unshaped -> {:error, Error.new(:invalid_params, %{reason: "proposal is an object"}), state}
+    end
+  end
+
+  # The owner's never for a proposal of a session on this pod, kept for them.
+  defp dispatch("session.proposal.never", params, state) do
+    with %Session{} = session <- session_of(params["session_id"], state.worker),
+         :ok <- at_epoch(session, params["epoch"]) do
+      case Troupe.Plane.Proposals.never(session, params["kind"], params["key"]) do
+        :ok -> {:ok, %{"kept" => true}, state}
+        {:error, %Error{} = error} -> {:error, error, state}
+      end
+    else
+      :stale_epoch -> {:error, Error.new(:conflict, %{reason: "stale epoch"}), state}
+      nil -> {:error, Error.new(:not_found, %{session_id: params["session_id"]}), state}
+    end
+  end
+
   # An agent of a session on this pod publishing an artifact (`publish_artifact`) for the
   # session's owner. As for the owner's memory, whose it is is read off the session row, so
   # a pod publishes only for the person whose session it holds, counted against the

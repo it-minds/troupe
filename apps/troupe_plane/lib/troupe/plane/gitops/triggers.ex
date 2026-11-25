@@ -84,7 +84,8 @@ defmodule Troupe.Plane.Gitops.Triggers do
     {"budgetMicros", "budget_micros"},
     {"maxTurns", "max_turns"},
     {"wallClockSeconds", "wall_clock_seconds"},
-    {"approvals", "approvals"}
+    {"approvals", "approvals"},
+    {"allow", "allow"}
   ]
 
   # What an audit diff is taken over: what `admin.trigger.put`'s is, and the notification
@@ -410,11 +411,12 @@ defmodule Troupe.Plane.Gitops.Triggers do
   @doc """
   A trigger as its resource: the document, and nothing the plane keeps of its own — not
   the key, not when it last fired, not who made it. An empty field is left out, which
-  reads back as the same empty default.
+  reads back as the same empty default. A trigger drafted for a person to commit has no
+  principal yet, and its resource names none.
   """
   @spec manifest(Trigger.t()) :: map()
   def manifest(%Trigger{} = trigger) do
-    principal = Principals.fetch(trigger.principal_id)
+    principal = trigger.principal_id && Principals.fetch(trigger.principal_id)
 
     spec =
       @fields

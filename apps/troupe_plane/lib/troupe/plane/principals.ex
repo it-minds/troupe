@@ -284,6 +284,21 @@ defmodule Troupe.Plane.Principals do
   end
 
   @doc """
+  Let `principal` use `profile` too, checked against its team's grants as at creation.
+  What a person's own principal needs when they turn on a trigger on another profile.
+  """
+  @spec add_profile(ServicePrincipal.t(), String.t()) :: {:ok, ServicePrincipal.t()} | {:error, term()}
+  def add_profile(%ServicePrincipal{} = principal, profile) when is_binary(profile) do
+    team = Identity.fetch_team(principal.team_id)
+
+    with :ok <- check_profiles(team, [profile]) do
+      principal
+      |> Ecto.Changeset.change(profiles: Enum.uniq(principal.profiles ++ [profile]))
+      |> Repo.update()
+    end
+  end
+
+  @doc """
   Stop every principal a departing person sponsors, and say why.
 
   Called from the SCIM path when a user is deactivated. The principals are disabled

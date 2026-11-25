@@ -110,6 +110,8 @@ defmodule Troupe.Worker.Connections do
       Artifacts.install()
       # And how a session's turn asks whether the memory it holds is in force.
       MemoryRead.install()
+      # And whether a session may propose something to its owner, and where their never goes.
+      Troupe.Worker.Proposals.install()
     end
 
     {:ok, %{}}
