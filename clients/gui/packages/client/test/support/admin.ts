@@ -503,6 +503,9 @@ export interface FakeSession {
   workspace_bytes: number;
   pinned: boolean;
   pinned_by: string | null;
+  /** How long it lasts (troupe #1209); normal where a test says nothing. */
+  lifespan?: "throwaway" | "normal" | "persistent";
+  erases_at?: string | null;
   last_active_at: string;
   parent: string | null;
   origin: "user" | "trigger";
@@ -3145,6 +3148,8 @@ export class FakeAdmin {
       workspace_bytes: s.workspace_bytes,
       pinned: s.pinned,
       pinned_by: s.pinned_by,
+      lifespan: s.lifespan ?? "normal",
+      erases_at: s.erases_at ?? null,
       last_active_at: s.last_active_at,
       repository: s.repository ?? null,
       github: s.github ?? null,

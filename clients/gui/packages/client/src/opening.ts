@@ -126,6 +126,7 @@ export function fromCheckpoint(checkpoint: DurableEvent, base: TranscriptState =
     loop: loopOf(facts["loop"]),
     scratch: scratchOf(facts["scratch"], checkpoint.ts),
     ...(text(facts["visibility"]) ? { visibility: text(facts["visibility"]) } : {}),
+    ...(text(facts["lifespan"]) ? { lifespan: text(facts["lifespan"]) } : {}),
     earlier: history,
   };
   // The waiting ones are drawn as the events that asked them are, and only here: the

@@ -130,6 +130,10 @@ export interface SessionRow {
   kind?: "team" | "private" | string;
   /** The device that sealed a private session last. */
   device?: string | null;
+  /** How long it lasts: `throwaway`, `normal` or `persistent` (troupe #1209). Absent from an older plane, which makes every session normal. */
+  lifespan?: string | null;
+  /** When a throwaway session is erased if nothing keeps it; null for any other. */
+  erases_at?: string | null;
   epoch: number;
   title: string | null;
   /** The agent it was created as or last switched to; null for the profile's default. Absent from an older plane. */
@@ -230,6 +234,8 @@ export interface SessionsFilter {
   needs_review?: boolean;
   /** True lists only the archived sessions; omitted or false, only those not archived. */
   archived?: boolean;
+  /** Only the sessions of this lifespan; a plane from before lifespans ignores it. */
+  lifespan?: "throwaway" | "normal" | "persistent";
   limit?: number;
 }
 
@@ -242,6 +248,8 @@ export interface CreateSessionParams {
   /** One of `profiles.list`'s `agents`; refused with the list if it is not. */
   agent?: string;
   visibility?: string;
+  /** How long it lasts; absent is normal. Send it only to a plane whose `initialize` says `lifespans`. */
+  lifespan?: "throwaway" | "normal" | "persistent";
   terms?: { budget_micros?: number; max_turns?: number; wall_clock_seconds?: number; approvals?: "wait" | "deny" };
   origin?: { kind?: string; [k: string]: unknown };
 }
@@ -539,6 +547,19 @@ export class PlaneClient {
    */
   setSessionVisibility(planeToken: string, sessionId: string, visibility: "team" | "private"): Promise<SessionRow> {
     return this.rpc<SessionRow>(planeToken, "session.visibility.set", { session_id: sessionId, visibility });
+  }
+
+  /**
+   * How long a session lasts, changed by its owner (troupe #1209); the answer is its row.
+   * Its owner's alone: anybody else is refused `forbidden`. A pod session's and a private one's.
+   */
+  setSessionLifespan(planeToken: string, sessionId: string, lifespan: "throwaway" | "normal" | "persistent"): Promise<SessionRow> {
+    return this.rpc<SessionRow>(planeToken, "session.lifespan.set", { session_id: sessionId, lifespan });
+  }
+
+  /** Erase a session, irreversibly: its owner's, or an administrator's. `erased` is false while its key is not destroyed yet. */
+  eraseSession(planeToken: string, sessionId: string): Promise<{ session_id: string; erased: boolean; state: string }> {
+    return this.rpc(planeToken, "session.erase", { session_id: sessionId });
   }
 
   /**

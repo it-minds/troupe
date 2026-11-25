@@ -39,6 +39,8 @@ interface Row {
   bundle_version: number;
   /** A raise kept while its agent works, landed when the agent is done (troupe #1177). */
   bundle_raise_to: number | null;
+  /** How long it lasts (troupe #1209): a throwaway one is said to go a day after it was made. */
+  lifespan: "throwaway" | "normal" | "persistent";
 }
 
 /** The agent a session given none runs as: `build` where the profile offers it, else its first; none where it offers none. */
@@ -105,6 +107,8 @@ export interface PlaneOptions {
   clientVersions?: Record<string, { recommended?: string | null; minimum?: string | null; blocked?: string[] }>;
   /** A plane from before the policy: no `initialize` over `/rpc`, no `me.client_versions`. */
   beforePolicy?: boolean;
+  /** A plane from before lifespans (troupe #1209): its `initialize` says no `lifespans`, and its rows carry none. */
+  beforeLifespans?: boolean;
   /** The administrative half, `admin.*`. None is a plane whose admin methods are not found. */
   admin?: FakeAdmin;
   /** A plane from before a person's watch (`/v1/relay/watch`): `remote.list` is asked instead. */
@@ -639,10 +643,14 @@ export class FakePlane {
    * `s-p-<n>`, apart from the fake daemon's `s-l-<n>`, so a list holding both shows each.
    * `prompt` is its first turn.
    */
-  seed(owner: string, params: { id?: string; profile?: string; title?: string; agent?: string | null; origin?: Row["origin"]; prompt?: string; visibility?: string } = {}): Row {
+  seed(
+    owner: string,
+    params: { id?: string; profile?: string; title?: string; agent?: string | null; origin?: Row["origin"]; prompt?: string; visibility?: string; lifespan?: Row["lifespan"] } = {},
+  ): Row {
     const id = params.id ?? `s-p-${++this.counter}`;
     const row: Row = { ...this.blankRow(id, owner, params.profile ?? "dev", params.title ?? null), agent: params.agent ?? null };
     if (params.visibility) row.visibility = params.visibility;
+    if (params.lifespan) row.lifespan = params.lifespan;
     if (params.origin) row.origin = params.origin;
     this.rows.set(id, row);
     this.activate(row, params.prompt);
@@ -704,6 +712,10 @@ export class FakePlane {
 
   /** The visibility each create was made with, in order, the plane's default where it named none. */
   readonly createdVisibility: string[] = [];
+  /** The lifespan each `session.create` asked for, `null` where it named none (troupe #1209). */
+  readonly createdLifespan: Array<string | null> = [];
+  /** The sessions erased through `session.erase`, in order. */
+  readonly erased: string[] = [];
 
   /** Whether a person sees a session: its owner, one invited into it, or anyone where it is the team's. */
   private sees(row: Row, subject: string): boolean {
@@ -743,6 +755,7 @@ export class FakePlane {
       created_at: Date.now() + this.counter,
       bundle_version: this.bundleCurrent.get(profile) ?? 3,
       bundle_raise_to: null,
+      lifespan: "normal",
     };
   }
 
@@ -1349,12 +1362,20 @@ export class FakePlane {
       case "initialize": {
         if (this.opts.beforePolicy) return { error: { code: -32601, message: "method_not_found", data: { method } } };
         const info = (params["client_info"] ?? {}) as { name?: unknown; version?: unknown; platform?: unknown };
-        this.initialized.push(info);
+        // Recorded as the plane records a client: only one that says what it is.
+        if (params["client_info"]) this.initialized.push(info);
         const component = COMPONENTS[String(info.name)];
         const version = typeof info.version === "string" ? info.version : null;
         const principal = this.rpc(subject, name, "me", {});
         const hello = (clientUpdate: unknown) => ({
-          result: { protocol_version: "1", server_info: { name: "troupe-plane", version: "test" }, principal: "result" in principal ? principal.result : null, client_update: clientUpdate },
+          result: {
+            protocol_version: "1",
+            server_info: { name: "troupe-plane", version: "test" },
+            principal: "result" in principal ? principal.result : null,
+            client_update: clientUpdate,
+            // What this plane takes that one before it did not (troupe #1209).
+            ...(this.opts.beforeLifespans ? {} : { capabilities: { lifespans: true } }),
+          },
         });
         if (!component) return hello(null);
         const p = policy(component);
@@ -1487,6 +1508,13 @@ export class FakePlane {
         // The plane's default: a create naming none is its owner's and the people invited by name.
         const visibility = typeof params["visibility"] === "string" ? params["visibility"] : "private";
         this.createdVisibility.push(visibility);
+        // How long it lasts, absent normal; another word refused before anything exists.
+        const asked = params["lifespan"];
+        if (asked !== undefined && asked !== "throwaway" && asked !== "normal" && asked !== "persistent") {
+          return { error: { code: -32602, message: "invalid_params", data: { field: "lifespan", reason: "lifespan is throwaway, normal or persistent" } } };
+        }
+        const lifespan = this.opts.beforeLifespans ? "normal" : ((asked as Row["lifespan"] | undefined) ?? "normal");
+        this.createdLifespan.push(asked === undefined ? null : String(asked));
         const room = this.opts.room?.[profile];
         if (room && typeof room.max_sessions === "number" && room.active >= room.max_sessions) {
           const reason = `${profile} allows ${room.max_sessions} session(s) at once, and they are running`;
@@ -1495,12 +1523,12 @@ export class FakePlane {
         if (room && room.active >= room.capacity) {
           // No room, and more coming: the session exists, waits, and holds its prompt.
           const id = `s-p-${++this.counter}`;
-          const row: Row = { ...this.blankRow(id, subject, profile, title ?? null), agent, visibility, state: "pending" };
+          const row: Row = { ...this.blankRow(id, subject, profile, title ?? null), agent, visibility, lifespan, state: "pending" };
           this.rows.set(id, row);
           if (prompt) this.heldPrompts.set(id, prompt);
           return { result: { session_id: id, epoch: 1, state: "pending", mode: "waiting", reason: `waiting for a free place on ${profile}`, retry_after_ms: this.retryAfterMs } };
         }
-        const row = this.seed(subject, { profile, ...(title === undefined ? {} : { title }), agent, visibility, ...(prompt ? { prompt } : {}) });
+        const row = this.seed(subject, { profile, ...(title === undefined ? {} : { title }), agent, visibility, lifespan, ...(prompt ? { prompt } : {}) });
         if (room) room.active += 1;
         return { result: this.attachment(row, subject, name, "owner", "activate") };
       }
@@ -1953,6 +1981,37 @@ export class FakePlane {
         return { result: this.sessionJson(row, subject) };
       }
 
+      // How long it lasts, by its owner alone (troupe #1209): the row, and the log's line the
+      // pod writes, which every client attached hears. A plane from before has no method.
+      case "session.lifespan.set": {
+        if (this.opts.beforeLifespans) return { error: { code: -32601, message: "method_not_found", data: { method } } };
+        const row = this.rows.get(String(params["session_id"] ?? ""));
+        if (!row) return { error: { code: -32005, message: "not_found" } };
+        if (row.owner !== subject) return { error: { code: -32004, message: "forbidden", data: { required_role: "owner", reason: "only the session's owner says how long it lasts" } } };
+        const to = params["lifespan"];
+        if (to !== "throwaway" && to !== "normal" && to !== "persistent") {
+          return { error: { code: -32602, message: "invalid_params", data: { field: "lifespan", reason: "lifespan is throwaway, normal or persistent" } } };
+        }
+        if (row.lifespan !== to) {
+          const from = row.lifespan;
+          row.lifespan = to;
+          const name = this.nameOf(subject);
+          const actor = { kind: "user", subject, ...(name ? { display_name: name } : {}) };
+          this.opts.worker.sessions.get(row.id)?.log.append("session_lifespan_changed", { from, to, actor: subject }, actor);
+        }
+        return { result: this.sessionJson(row, subject) };
+      }
+
+      // Erased by its owner: gone from every list, as the plane's erasure leaves it.
+      case "session.erase": {
+        const row = this.rows.get(String(params["session_id"] ?? ""));
+        if (!row) return { error: { code: -32005, message: "not_found" } };
+        if (row.owner !== subject) return { error: { code: -32004, message: "forbidden", data: { required_role: "owner" } } };
+        this.rows.delete(row.id);
+        this.erased.push(row.id);
+        return { result: { session_id: row.id, erased: true, state: "erased", head_hash: null } };
+      }
+
       // Given to its team or taken back, by its owner alone (troupe #1169): the row, and the
       // log's line the pod writes, which every client attached hears.
       case "session.visibility.set": {
@@ -2054,6 +2113,7 @@ export class FakePlane {
       ...(ownerName ? { owner_name: ownerName } : {}),
       profile: row.profile,
       visibility: row.visibility,
+      ...(this.opts.beforeLifespans ? {} : { lifespan: row.lifespan, erases_at: row.lifespan === "throwaway" ? new Date(row.created_at + 24 * 3_600_000).toISOString() : null }),
       team: this.teamsOf(row.owner)[0] ?? null,
       state: row.state,
       epoch: row.epoch,

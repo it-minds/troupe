@@ -37,6 +37,8 @@ import {
   fullHouseSentence,
   pickLine,
   messageTokens,
+  LIFESPAN_CHOICES,
+  lifespanChoice,
   ONLY_ME_TICK,
   onlyMeSentence,
   platformVisibility,
@@ -48,8 +50,8 @@ import {
   tokensSentence,
   whoCanOpen,
 } from "@troupe/client";
-import type { AgentRow, Attachment, AuthSession, DaemonClient, FleetRow, NewSessionWhere, ProfileOffering, SessionKind } from "@troupe/client";
-import { useProfiles } from "../hooks";
+import type { AgentRow, Attachment, AuthSession, DaemonClient, FleetRow, Lifespan, NewSessionWhere, ProfileOffering, SessionKind } from "@troupe/client";
+import { useLifespans, useProfiles } from "../hooks";
 import { prefs } from "../shell";
 import { useChooseFolder } from "./ChooseFolder";
 import { Mask } from "./brand";
@@ -123,6 +125,10 @@ export function StartSession({
   // On the platform: the session is its owner's alone until they invite people, on the
   // team's profile and budget all the same. Off, it is the team's from its first second.
   const [onlyMe, setOnlyMe] = useState(false);
+  // How long it lasts (troupe #1209): normal unless chosen, and offered only where the
+  // server it starts on says it knows lifespans, since an older one makes it normal anyway.
+  const [lifespan, setLifespan] = useState<Lifespan>("normal");
+  const lifespans = useLifespans(auth, daemon);
   const [open, setOpen] = useState<Picker | null>(null);
   const [ceilingSaid, setCeilingSaid] = useState<Record<string, string>>({});
   const [casting, setCasting] = useState<Casting | null>(null);
@@ -185,6 +191,9 @@ export function StartSession({
   // Each tick says only where it applies: a sealed session is this computer's, only-me the platform's.
   const whoTeams = team ? [team] : (prof?.teams ?? myTeams);
   const who = whoCanOpen(where, { teams: whoTeams, private: local && privately, onlyMe: !local && onlyMe });
+  // What the create sends of how long it lasts: nothing where its server would not know it.
+  const canLast = lifespans(local ? (privately ? "private" : "local") : "team");
+  const lasting: Lifespan | null = canLast ? lifespan : null;
 
   let why = "";
   let warn = false;
@@ -318,9 +327,17 @@ export function StartSession({
         setOpen("team");
         setStartOnTeam(true);
       };
-      void castOnPlatform(auth!, prof, { agent: as ?? platformDefault, title: startedTitle, prompt: cleaned, team: forTeam, onlyMe }, set, alive, (reason) => setCeilingSaid((c) => ({ ...c, [prof.name]: reason })), askTeam);
+      void castOnPlatform(
+        auth!,
+        prof,
+        { agent: as ?? platformDefault, title: startedTitle, prompt: cleaned, team: forTeam, onlyMe, lifespan: lasting },
+        set,
+        alive,
+        (reason) => setCeilingSaid((c) => ({ ...c, [prof.name]: reason })),
+        askTeam,
+      );
     } else if (daemon) {
-      void castHere(daemon, { workspace: folder.trim(), agent: as, worktree, watch, privately, title: startedTitle, prompt: cleaned }, set);
+      void castHere(daemon, { workspace: folder.trim(), agent: as, worktree, watch, privately, title: startedTitle, prompt: cleaned, lifespan: lasting }, set);
     }
   };
 
@@ -544,6 +561,18 @@ export function StartSession({
               <p className="ns-who">
                 {onlyMeSentence(onlyMe, team ? [team] : teamChoice ? null : whoTeams)}
               </p>
+            </div>
+          )}
+
+          {canLast && (
+            <div className="ns-only-me ns-lifespan" role="radiogroup" aria-label="How long it lasts">
+              {LIFESPAN_CHOICES.map((c) => (
+                <label key={c.value} className="inline ns-small">
+                  <input type="radio" name="ns-lifespan" value={c.value} checked={lifespan === c.value} onChange={() => setLifespan(c.value)} />
+                  {c.label}
+                </label>
+              ))}
+              <p className="ns-who">{lifespanChoice(lifespan).sentence}.</p>
             </div>
           )}
 
@@ -858,7 +887,7 @@ const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms
 async function castOnPlatform(
   auth: AuthSession,
   prof: ProfileOffering,
-  ask: { agent: string | null; title: string; prompt: string; team: string | null; onlyMe: boolean },
+  ask: { agent: string | null; title: string; prompt: string; team: string | null; onlyMe: boolean; lifespan: Lifespan | null },
   set: SetCasting,
   alive: () => boolean,
   onCeiling: (reason: string) => void,
@@ -877,6 +906,8 @@ async function castOnPlatform(
         ...(ask.agent ? { agent: ask.agent } : {}),
         ...(ask.title ? { title: ask.title } : {}),
         ...(ask.prompt ? { prompt: ask.prompt } : {}),
+        // Only where the plane said it knows the word, and only where it is not normal.
+        ...(ask.lifespan && ask.lifespan !== "normal" ? { lifespan: ask.lifespan } : {}),
       }),
     );
   } catch (e) {
@@ -909,7 +940,16 @@ async function castOnPlatform(
 /** A start on this computer: the daemon's create, which answers once the session is made. */
 async function castHere(
   daemon: DaemonClient,
-  ask: { workspace: string; agent: string | null; worktree: "auto" | "never" | "always"; watch: boolean; privately: boolean; title: string; prompt: string },
+  ask: {
+    workspace: string;
+    agent: string | null;
+    worktree: "auto" | "never" | "always";
+    watch: boolean;
+    privately: boolean;
+    title: string;
+    prompt: string;
+    lifespan: Lifespan | null;
+  },
   set: SetCasting,
 ): Promise<void> {
   try {
@@ -923,6 +963,7 @@ async function castHere(
       ...(ask.title ? { title: ask.title } : {}),
       config: { watch: ask.watch },
       ...(ask.privately ? { private: true } : {}),
+      ...(ask.lifespan && ask.lifespan !== "normal" ? { lifespan: ask.lifespan } : {}),
     });
     set({ id: created.session_id, kind: ask.privately ? "private" : "local", workspace: created.workspace ?? ask.workspace, done: 2 });
   } catch (e) {

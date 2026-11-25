@@ -15,8 +15,8 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { JSX } from "react";
-import { archiveRefusal, claimable, claimRefusal, filterRows, markRefusal, mayArchive } from "@troupe/client";
-import type { FleetRow, SessionKind } from "@troupe/client";
+import { archiveRefusal, claimable, claimRefusal, filterRows, LIFESPAN_CHOICES, lifespanItem, lifespanMark, lifespanOf, lifespanRefusal, markRefusal, mayArchive } from "@troupe/client";
+import type { FleetRow, Lifespan, SessionKind } from "@troupe/client";
 import type { Archived, Marks } from "../hooks";
 import { useNarrow } from "../narrow";
 import { NavSheet } from "../sheet";
@@ -33,6 +33,7 @@ export function Sessions({
   onClaim,
   archived,
   marks,
+  lifespans,
 }: {
   rows: FleetRow[];
   loading: boolean;
@@ -46,6 +47,8 @@ export function Sessions({
   archived?: Archived | undefined;
   /** Rename a session and keep it at the top, from its row's ⋯: its owner's alone. */
   marks?: Marks | undefined;
+  /** Whether a row's server takes a lifespan, so its ⋯ offers to change it (troupe #1209). */
+  lifespans?: ((kind: SessionKind) => boolean) | undefined;
 }): JSX.Element {
   const [claimError, setClaimError] = useState<string | null>(null);
   const claim = onClaim
@@ -104,6 +107,19 @@ export function Sessions({
               setMarkError(`It was not ${on ? "kept at the top" : "let go from the top"}. ${markRefusal(e, on ? "keep" : "let go")}.`);
             }
           },
+          ...(lifespans
+            ? {
+                relive: async (row: FleetRow, to: Lifespan): Promise<void> => {
+                  setMarkError(null);
+                  try {
+                    await marks.relive(row, to);
+                  } catch (e) {
+                    setMarkError(lifespanRefusal(e));
+                  }
+                },
+                lives: lifespans,
+              }
+            : {}),
         }
       : undefined;
   const listed = showArchived && archived ? archived.rows.filter((r) => r.archived) : rows;
@@ -318,8 +334,18 @@ function Rows({
   onClaim?: ((id: string) => Promise<void>) | undefined;
   /** Archive a session (`true`) or put an archived one back, from the row's ⋯: offered on the rows the person owns. Never rejects. */
   onArchive?: ((row: FleetRow, on: boolean) => Promise<void>) | undefined;
-  /** Rename it or keep it at the top, from the row's ⋯: offered on the rows the person owns. Never rejects. */
-  mark?: { rename: (row: FleetRow, title: string) => Promise<void>; keep: (row: FleetRow, on: boolean) => Promise<void> } | undefined;
+  /**
+   * Rename it, keep it at the top, and say how long it lasts where its server knows
+   * lifespans, from the row's ⋯: offered on the rows the person owns. Never rejects.
+   */
+  mark?:
+    | {
+        rename: (row: FleetRow, title: string) => Promise<void>;
+        keep: (row: FleetRow, on: boolean) => Promise<void>;
+        relive?: (row: FleetRow, to: Lifespan) => Promise<void>;
+        lives?: (kind: SessionKind) => boolean;
+      }
+    | undefined;
 }): JSX.Element {
   // The row whose name is a field, one at a time.
   const [renaming, setRenaming] = useState<string | null>(null);
@@ -330,6 +356,8 @@ function Rows({
         const claim = onClaim && claimable(r);
         const archive = onArchive && mayArchive(r) ? onArchive : undefined;
         const marked = mark && !r.archived && mayArchive(r) ? mark : undefined;
+        const relive = marked?.relive && marked.lives?.(r.kind) ? marked.relive : undefined;
+        const lasts = lifespanMark(r);
         if (marked && renaming === r.id) {
           return (
             <li key={r.id} className="markable">
@@ -355,6 +383,11 @@ function Rows({
                     Kept
                   </span>
                 )}
+                {lasts && (
+                  <span className="micro lasts" title={lasts === "persistent" ? "Kept until its owner erases it" : "Erased a while after it goes quiet, unless somebody keeps it"}>
+                    {lasts}
+                  </span>
+                )}
                 <Unread row={r} />
                 <Where kind={r.kind} row={r} />
                 {r.kind === "remote" && r.remote && r.remote.state !== "online" && (
@@ -372,6 +405,7 @@ function Rows({
                 row={r}
                 onRename={marked ? () => setRenaming(r.id) : undefined}
                 onKeep={marked ? (on) => void marked.keep(r, on) : undefined}
+                onRelive={relive ? (to) => void relive(r, to) : undefined}
                 onArchive={archive ? (on) => void archive(r, on) : undefined}
               />
             )}
@@ -413,11 +447,14 @@ function RowMenu({
   row,
   onRename,
   onKeep,
+  onRelive,
   onArchive,
 }: {
   row: FleetRow;
   onRename?: (() => void) | undefined;
   onKeep?: ((on: boolean) => void) | undefined;
+  /** Make it one of the other two lifespans. */
+  onRelive?: ((to: Lifespan) => void) | undefined;
   onArchive?: ((on: boolean) => void) | undefined;
 }): JSX.Element {
   const [open, setOpen] = useState(false);
@@ -460,6 +497,13 @@ function RowMenu({
             <span className="d">{row.pinned ? "Back among the rest, by when it was last active" : "Listed first, for everyone who sees it"}</span>
           </button>
         )}
+        {onRelive &&
+          LIFESPAN_CHOICES.filter((c) => c.value !== lifespanOf(row.lifespan)).map((c) => (
+            <button key={c.value} type="button" className="item" onClick={then(() => onRelive(c.value))}>
+              <span className="t">{lifespanItem(c.value)}</span>
+              <span className="d">{c.sentence}</span>
+            </button>
+          ))}
         {onArchive && (
           <button type="button" className="item" onClick={then(() => onArchive(!row.archived))}>
             <span className="t">{archiveItem(Boolean(row.archived)).title}</span>

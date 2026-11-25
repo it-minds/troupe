@@ -16,6 +16,7 @@ import {
   isDurable,
   onThisComputer,
   PlaneSource,
+  planeKnowsLifespans,
   planeOpener,
   raiseKept,
   RemoteSource,
@@ -38,6 +39,7 @@ import type {
   FleetRow,
   FleetSnapshot,
   GateAnswer,
+  Lifespan,
   OfferAnswer,
   OfferState,
   OnboardingSuggested,
@@ -186,6 +188,10 @@ export interface Marks {
    * raise kept for when it is done, which the row says from then on.
    */
   raise: (row: FleetRow) => Promise<void>;
+  /** How long it lasts, where it runs (`session.lifespan.set`, troupe #1209). Rejects with the refusal. */
+  relive: (row: FleetRow, lifespan: Lifespan) => Promise<void>;
+  /** Erase it now, where it runs (`session.erase`): a throwaway session's head offers it. Irreversible. */
+  erase: (row: FleetRow) => Promise<void>;
 }
 
 /**
@@ -264,7 +270,53 @@ export function useMarks(store: FleetStore, auth: AuthSession | null, daemon: Da
     },
     [store, auth],
   );
-  return useMemo(() => ({ rename, keep, share, raise }), [rename, keep, share, raise]);
+  // How long it lasts: its daemon's for a session on this computer, the plane's for a pod
+  // one. Nothing pushes the change to a list, so the answer goes on the row at once.
+  const relive = useCallback(
+    async (row: FleetRow, lifespan: Lifespan) => {
+      const erasesAt = await where<string | null>(
+        row,
+        async (d) => (await d.setSessionLifespan(row.id, lifespan)).erases_at ?? null,
+        async (a, token) => (await a.plane.setSessionLifespan(token, row.id, lifespan)).erases_at ?? null,
+      );
+      store.patch(row.id, { lifespan, erasesAt });
+      await store.refreshAfterChange();
+    },
+    [store, where],
+  );
+  // Erased where it runs, and out of the list at once: an erased session is listed nowhere.
+  const erase = useCallback(
+    async (row: FleetRow) => {
+      await where<unknown>(
+        row,
+        (d) => d.eraseSession(row.id),
+        (a, token) => a.plane.eraseSession(token, row.id),
+      );
+      store.drop(row.id);
+      await store.refreshAfterChange();
+    },
+    [store, where],
+  );
+  return useMemo(() => ({ rename, keep, share, raise, relive, erase }), [rename, keep, share, raise, relive, erase]);
+}
+
+/**
+ * Whether a row's server takes a lifespan (troupe #1209): the plane's from its `initialize`,
+ * asked once a sign-in, and this computer's daemon's from its own. An older server makes
+ * every session normal whatever it is asked, so nothing offers the choice there.
+ */
+export function useLifespans(auth: AuthSession | null, daemon: DaemonClient | null): (kind: SessionKind | null | undefined) => boolean {
+  const [plane, setPlane] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    setPlane(false);
+    if (auth) void planeKnowsLifespans(auth).then((yes) => alive && setPlane(yes));
+    return () => {
+      alive = false;
+    };
+  }, [auth]);
+  const here = daemon?.supportsLifespans ?? false;
+  return useCallback((kind) => (kind === "team" ? plane : kind === "local" || kind === "private" ? here : false), [plane, here]);
 }
 
 /** Who sessions on this computer are recorded as, and what to call them. */

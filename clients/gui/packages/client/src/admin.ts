@@ -38,6 +38,10 @@ export interface AdminSessionRow {
   workspace_bytes: number | null;
   pinned: boolean | null;
   pinned_by: string | null;
+  /** How long it lasts (troupe #1209); absent from an older plane, whose every session is normal. */
+  lifespan?: string | null;
+  /** When a throwaway one is erased if nothing keeps it; null for any other. */
+  erases_at?: string | null;
   last_active_at: string | null;
   /** The GitHub repository it was created with, which its pod cloned; null for none. */
   repository?: { owner: string; name: string; ref?: string | null } | null;

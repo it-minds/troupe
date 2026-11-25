@@ -24,6 +24,8 @@ import type { MemoryDocument, MemoryPreview, MemorySaved } from "./admin.js";
 import { renderEntries } from "./entries.js";
 import type { MemoryEntry, MemoryInEffect } from "./entries.js";
 import type { Invitee, InviteRole, Person, SealedRead } from "./invites.js";
+import { knowsLifespans, lifespanOf } from "./lifespan.js";
+import type { Lifespan } from "./lifespan.js";
 import type { MemoryBrief } from "./memory.js";
 import type { OwnPlane } from "./own.js";
 import type { OnboardApplied, OnboardPlan } from "./onboard.js";
@@ -110,6 +112,10 @@ export interface DaemonSessionRow {
   unseen?: FleetRow["unseen"];
   /** How the root's last turn failed (`agent_failed`, Decision 727); absent from a daemon before 0.7.1. */
   failed?: { reason: string; detail?: string | null } | null;
+  /** How long it lasts (troupe #1209); absent from a daemon before lifespans, whose every session is normal. */
+  lifespan?: string | null;
+  /** When a throwaway session on this computer is erased if nothing keeps it; null for any other. */
+  erases_at?: string | null;
   [k: string]: unknown;
 }
 
@@ -364,6 +370,8 @@ export interface CreateLocalParams {
   parent?: string;
   /** What the person calls it: trimmed, at most 200 bytes. Absent, it lists by its workspace. */
   title?: string;
+  /** How long it lasts; absent is normal. Sent only to a daemon whose `initialize` says `lifespans`. */
+  lifespan?: Lifespan;
 }
 
 export interface DaemonHooks {
@@ -818,6 +826,16 @@ export class DaemonClient implements OwnPlane {
   /** Name a session on this computer, or take its name off with an empty title (`session.title.set`). */
   setSessionTitle(sessionId: string, title: string): Promise<{ session_id: string; title: string | null }> {
     return this.command("session.title.set", { session_id: sessionId, title });
+  }
+
+  /** How long a session on this computer lasts (`session.lifespan.set`); the mark is a file beside its log, as a pin's is. */
+  setSessionLifespan(sessionId: string, lifespan: Lifespan): Promise<{ session_id: string; lifespan: Lifespan; erases_at: string | null }> {
+    return this.command("session.lifespan.set", { session_id: sessionId, lifespan });
+  }
+
+  /** Whether this daemon takes `lifespan` at `session.create` and `session.lifespan.set`, from its own `initialize`. */
+  get supportsLifespans(): boolean {
+    return knowsLifespans(this.capabilities);
   }
 
   /** Keep a session at the top of the session list (`session.pin`), or let it go; the mark outlives the session's sleep. */
@@ -1436,6 +1454,8 @@ export function rowFromDaemon(row: DaemonSessionRow, source = "daemon"): FleetRo
     lastActiveAt: row.last_active_at ?? null,
     pinned: Boolean(row.pinned),
     archived: row.archived === true,
+    lifespan: lifespanOf(row.lifespan),
+    erasesAt: row.erases_at ?? null,
     // Everything on this machine is the user's own; there is no ACL to be a viewer on.
     yourRole: "owner",
     origin: null,
