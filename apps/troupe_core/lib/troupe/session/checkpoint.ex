@@ -331,6 +331,18 @@ defmodule Troupe.Session.Checkpoint do
        when type in ["question_answered", "budget_ask_answered", "tool_failures_ask_answered"],
        do: %{f | "open_questions" => close(f["open_questions"], [data["call_id"]])}
 
+  # What the harness offered the owner and nobody has answered: never waited for, so in
+  # neither list above, and here only so a client attaching late can still show it. A log
+  # that never had a proposal has no such fact, as the facts of a session written before
+  # there were proposals have none: absent is an empty list.
+  defp facts(f, %Event{type: "proposal_made", seq: seq, data: data}) do
+    open = f |> Map.get("open_proposals", []) |> Enum.reject(&(&1["id"] == data["id"]))
+    Map.put(f, "open_proposals", open ++ [%{"id" => data["id"], "seq" => seq, "agent" => ["root"], "data" => data}])
+  end
+
+  defp facts(f, %Event{type: "proposal_answered", data: data}),
+    do: Map.put(f, "open_proposals", f |> Map.get("open_proposals", []) |> Enum.reject(&(&1["id"] == data["id"])))
+
   # A call that ended takes what it waited on with it: a cancel closes each call it stops
   # so, and so does a tool that timed out waiting; and a delegation waited for is over.
   defp facts(f, %Event{type: "tool_call_completed", data: data}) do

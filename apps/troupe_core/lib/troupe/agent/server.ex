@@ -2178,7 +2178,8 @@ defmodule Troupe.Agent.Server do
       # next turn, and this one is not held up for it.
       starting: SessionMCP.starting_stores(state.session_id),
       artifact: artifact,
-      where: where
+      where: where,
+      reruns: state.reruns
     }
 
     %{text: Instructions.Harness.text(open), open: Instructions.Harness.json(open)}
@@ -2218,7 +2219,16 @@ defmodule Troupe.Agent.Server do
       end
 
     if root?, do: :ok = Troupe.Session.PlaneMemory.read(state.session_id, state.config.plane_memory)
-    state
+    if root?, do: take_reruns(state), else: state
+  end
+
+  # A trigger the owner turned on from a proposal since the last turn: the root's
+  # instructions say so from this turn, so it does not offer in prose what already reruns.
+  defp take_reruns(%State{} = state) do
+    case Troupe.Session.Proposals.reruns(state.session_id) do
+      same when same == state.reruns -> state
+      reruns -> instructions_due(%{state | reruns: reruns})
+    end
   end
 
   defp environment_section(state) do
