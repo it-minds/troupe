@@ -92,7 +92,7 @@ defmodule Troupe.Client.Proposal do
   def accepted(answer),
     do:
       "Turned on: the trigger #{answer["name"]} of #{answer["team"]} reruns it as you; " <>
-        "a team admin changes or stops it on the console's Triggers page."
+        "a team's administrator changes or stops it on the console's Configure → Triggers."
 
   @doc "Why a session on this computer has nothing proposed."
   @spec not_here() :: String.t()
