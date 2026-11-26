@@ -75,11 +75,29 @@ export class SessionLog {
     return { checkpoint, from: checkpoint ? Number(checkpoint.data["through"]) : 0 };
   }
 
-  /** `session.events`: up to `limit` events before `before`, oldest first, and whether there are earlier ones. */
+  /**
+   * `session.events`: about `limit` events before `before`, oldest first, and whether there
+   * are earlier ones, beginning where a turn does as the servers cut it: after the root's
+   * rest or at seq 1, the first rest in the last `limit` events where they begin mid-turn,
+   * the rest before a turn longer than the page (up to 5,000 events).
+   */
   page(before: number, limit = 500): { events: LoggedEvent[]; more: boolean } {
     const below = this.events.filter((e) => e.seq < before);
-    const events = below.slice(Math.max(below.length - limit, 0));
-    return { events, more: below.length > events.length };
+    const rest = (e: LoggedEvent | undefined): boolean =>
+      e !== undefined &&
+      e.agent.length === 1 &&
+      e.agent[0] === "root" &&
+      (["turn_ended", "cancelled", "agent_done"].includes(e.type) || (e.type === "agent_restarted" && e.data["interrupted"] === true));
+    let start = Math.max(below.length - limit, 0);
+    if (start > 0 && !rest(below[start - 1])) {
+      const inPage = below.slice(start, -1).findIndex(rest);
+      if (inPage >= 0) start += inPage + 1;
+      else {
+        const floor = Math.max(below.length - 5000, 0);
+        while (start > floor && !rest(below[start - 1])) start--;
+      }
+    }
+    return { events: below.slice(start), more: start > 0 };
   }
 
   listen(l: Listener): () => void {

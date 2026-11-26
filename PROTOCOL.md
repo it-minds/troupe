@@ -598,6 +598,7 @@ chain and sealed with the rest, never edited, and a log before it is never dropp
 | `through` | the seq `facts` stand for: the root's rest. Every event after it folds on top |
 | `compacted`, `previous` | the seq of the root `compacted` it follows; the seq of the checkpoint before it, or `null` |
 | `summary` | the summary as that compaction wrote it, so a reader can show it without the larger `compacted` |
+| `compacted_at` | when that `compacted` was written, so a reader says when the summary was made; absent from a checkpoint written before it carried this, where a reader takes the checkpoint's own `ts` |
 | `facts` | `agent` (the root's), `profile`, `bundle_version`, `kind`, `visibility`, `workspace`, `owner`, `owner_name`, `started_at` (when `session_created` was written); `lifespan`, only once the log has said one (`session_created`, `session_lifespan_changed`); `goal`; `loop` (the latest: `loop_id`, `goal`, `max_iterations`, `max_failures`, `iteration`, `outcome`, `running`, `reason`); `todos` (the root's items); `done` (the root's `reason` and `limit`, or `null`) and `limits` (ceilings by `turns`, `input`, `output`, `wall`); `error` (the root's last `llm_error` `reason` and `seq`, until its next reply); `usage` (the four disjoint figures, every reply's and every summariser's), `cost_micros`, `unpriced` and `turns` (the root's turns that ended with a `turn`); `calls` and `turns_cost_micros` (those turns' model calls and priced money, summed as each `turn` says them, a subagent's joining when its report reaches one; absent from a checkpoint written before they were folded, which a reader takes as 0); `context` (`used`, the root's last prompt; its window is never in the log); `open_approvals` and `open_questions` (each `{call_id, seq, agent, actor, data}`, `data` as the request said it); `open_proposals` (each `{id, seq, agent, data}`, `data` as `proposal_made` said it; absent where the session never had one); `running` (delegations whose child has not ended: `call_id`, `agent`, `child_path`, `wait`, `seq`, `ts` when it began); `agents` (by path: `profile`, `done`); `scratch` (by name: `version`, `kind`, `title`); `taint` (as `session_tainted` says it) |
 
 The facts are a fold of the log and nothing else: no title, pin or archive, no presence or
@@ -1470,7 +1471,12 @@ be linking has a much larger problem than the label.
 #### `session.events`
 `{"session_id", "before", "limit"}` → `{"events": [...], "more": true}`: up to `limit` durable
 events before the seq `before`, oldest first, and whether there are earlier ones; how a
-reader that started from a [checkpoint](#checkpoints) pages back. `limit` is 1 to 500, and
+reader that started from a [checkpoint](#checkpoints) pages back. A page begins where a
+turn does, after the root's rest or at seq 1, so it never holds a reply without the line it
+answers: where the last `limit` events begin mid-turn the page starts after the first rest
+in them, and where they hold none but their last (a turn longer than `limit`) it reaches
+back to the rest that turn began after, up to 5,000 events. The next page is asked before
+its first seq. `limit` is 1 to 500, and
 500 when absent; `before` is a seq from 1 (`invalid_params` otherwise). Scope `observe`, a
 read that wakes nothing, served by a daemon, a pod and a relayed connection (the
 `checkpoints` capability). A session that is not there is `not_found`.
