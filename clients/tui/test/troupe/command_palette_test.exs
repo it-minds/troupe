@@ -37,7 +37,9 @@ defmodule Troupe.CommandPaletteTest do
 
   test "/ on an empty line opens a sectioned palette with a description per command" do
     {sid, _, _} = start_session!(script: [])
-    {pid, session} = start_tui(sid)
+    # Tall enough for the Session section, which grows with each command a session takes,
+    # and still too short for every section at once.
+    {pid, session} = start_tui(sid, height: 46)
     eventually(fn -> user_state(pid).commands != [] end)
 
     press(pid, "/")

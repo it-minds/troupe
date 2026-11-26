@@ -18,8 +18,24 @@ export type {
   SessionsFilter,
   CreateSessionParams,
   ProfileOffering,
+  RepositoryName,
+  RepositoryRecord,
+  SessionRepository,
   WorkerPod,
 } from "./plane.js";
+export {
+  listedRepositories,
+  readRepository,
+  repositoriesLeft,
+  repositoriesOf,
+  repositoriesSummary,
+  repositoryChangedText,
+  repositoryName,
+  repositoryParam,
+  repositoryRefusal,
+  repositoryWhere,
+  repositoryWork,
+} from "./repositories.js";
 export { FUNCTIONS_HEADING, UNPRICED_SENTENCE, accessWords, actsAsWords, askWords, budgetWords, capacityWords, keyWords, limitSentences, missingWords, profileSentence, profileSummary, roomWords, ruleAccessWords, ruleText, teamBudgetWords, toolLines, unpricedWords, whoseWords } from "./profile.js";
 export type { ProfileView, ProfileViewAgent, ProfileViewAllowance, ProfileViewFunction, ProfileViewGitHub, ProfileViewHarnessTool, ProfileViewLimits, ProfileViewMissing, ProfileViewModel, ProfileViewRule, ProfileViewServer, ProfileViewServerAbout, ProfileViewSkill, RuleAccess, ServerAccess, UnpricedCalls } from "./profile.js";
 export {

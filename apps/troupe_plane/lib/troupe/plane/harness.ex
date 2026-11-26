@@ -88,6 +88,10 @@ defmodule Troupe.Plane.Harness do
   # its workspace and stop (`Troupe.Worker.Session.Manager.go_dormant/2`).
   @archive_ms 120_000
 
+  # How long attaching a repository waits for the pod: a clone, which the pod gives five
+  # minutes, and the answer.
+  @clone_ms 310_000
+
   # What a session reserves against its team's budget before it starts. A slice rather
   # than the whole budget, so one session cannot lock a team out; the ledger records
   # what was actually spent and the reservation is released at dormancy. A session whose
@@ -171,6 +175,10 @@ defmodule Troupe.Plane.Harness do
     "session.lifespan.set" => :control,
     # Raised to its channel's current bundle version: its owner's, as archiving is.
     "session.bundle.raise" => :control,
+    # A GitHub repository attached to a running or dormant session, or taken off: its
+    # owner's, as a raise is.
+    "session.repository.add" => :control,
+    "session.repository.remove" => :control,
     "session.erase" => :control,
     "session.archive" => :control,
     "session.unarchive" => :control,
@@ -745,6 +753,9 @@ defmodule Troupe.Plane.Harness do
           "active_sessions" => room.active_sessions,
           "healthy_pods" => Enum.count(room.placeable, & &1.healthy),
           "max_sessions" => ceiling_of(row),
+          # How many GitHub repositories a session here may hold, or null where the profile
+          # has no spec.github and a new session is offered none.
+          "max_repositories" => GitHub.Policy.max_repositories(profile),
           "teams" => ProfileView.team_names(user, profile)
         }
         |> Map.merge(offering_json(profile, entitlements_of(user, profile)))
@@ -914,10 +925,10 @@ defmodule Troupe.Plane.Harness do
          {:ok, origin} <- origin_for(params["origin"]),
          answerable = answerable_for(%{origin: origin, owner_subject: user.subject}),
          {:ok, terms} <- terms_for(params["terms"], team, answerable, profile),
-         {:ok, repository} <- repository_for(params["repository"], profile, team),
+         {:ok, held} <- repositories_for(params, profile, team),
          {:ok, lifespan} <- lifespan_param(params["lifespan"], :create),
          {:ok, session_id} <- session_id_for(params["session_id"]),
-         params = Map.put(params, "repository", repository),
+         params = Map.put(params, "repositories", held),
          params = Map.put(params, "lifespan", lifespan),
          params = Map.put(params, "agent", agent),
          {:ok, session} <- create_row(session_id, user, team, profile, params, terms, origin),
@@ -960,8 +971,9 @@ defmodule Troupe.Plane.Harness do
           # A sibling is as visible as its parent and no more. A private session that
           # could spawn a team-visible one would be a way to publish its own work.
           "visibility" => parent.visibility,
-          # And it works on its parent's repository, checked again as a create checks one.
-          "repository" => parent.repository,
+          # And it works on its parent's repositories, checked again as a create checks them.
+          "repository" => lineage(parent, :one),
+          "repositories" => lineage(parent, :several),
           "origin" =>
             Origin.agent(
               parent: parent.id,
@@ -1008,8 +1020,9 @@ defmodule Troupe.Plane.Harness do
           # Normal unless asked: a fork is the way to keep what a throwaway session found,
           # and a persistent parent's fork is a new session that has not asked to stay.
           "lifespan" => params["lifespan"],
-          # The parent's repository, checked again against the profile the fork starts on.
-          "repository" => parent.repository,
+          # The parent's repositories, checked again against the profile the fork starts on.
+          "repository" => lineage(parent, :one),
+          "repositories" => lineage(parent, :several),
           "fork" => %{
             "parent" => parent.id,
             "parent_team" => team_name(parent),
@@ -1594,6 +1607,174 @@ defmodule Troupe.Plane.Harness do
       raise_to(session, team, channel, target, user)
     end
   end
+
+  # A repository attached to a pod session, by its owner or a holder of the owner role as a
+  # raise is, never by somebody who only steers it: checked as a create checks one, and
+  # against the profile's `spec.github` and its cap. Written to the row before the pod is
+  # told, so the token the pod asks for is one the row grants; the pod holding the session
+  # clones it into `<owner>/<name>` without a restart and tells the agent. A session no pod
+  # holds clones it at its next wake. A pod that could not clone it has it taken off the
+  # row again, and the refusal says why.
+  defp handle("session.repository.add", params, %{user: user}) do
+    with {:ok, session} <- visible(params["session_id"], user),
+         :ok <- must_administer(user, session),
+         :ok <- holds_repositories(session),
+         {:ok, entry} <- attachable(params["repository"], session),
+         [entry] = attached([entry], user.subject),
+         {:ok, updated} <- change_repositories(session, &{:ok, &1 ++ [entry]}),
+         {:ok, now} <- tell_pod(updated, "session.repository.add", entry, user) do
+      {:ok, _audit} =
+        Audit.record(user.subject, "session.repository.add", session.id, %{
+          "repository" => GitHub.full(entry),
+          "ref" => entry["ref"],
+          "path" => entry["path"]
+        })
+
+      {:ok, session_json(now, user)}
+    end
+  end
+
+  # One taken off, by the same people: its directory deleted on the pod and its tokens
+  # revoked there, refused while a push or a CI read on it is going (`busy`). The one the
+  # session was created on goes only while another remains, since it is the workspace's
+  # root and the session's first record.
+  defp handle("session.repository.remove", params, %{user: user}) do
+    with {:ok, session} <- visible(params["session_id"], user),
+         :ok <- must_administer(user, session),
+         :ok <- holds_repositories(session),
+         {:ok, entry} <- detachable(params["repository"], session),
+         {:ok, _told} <- tell_pod(session, "session.repository.remove", entry, user),
+         {:ok, now} <-
+           change_repositories(session, fn entries ->
+             {:ok, Enum.reject(entries, &(GitHub.full(&1) == GitHub.full(entry)))}
+           end) do
+      {:ok, _audit} =
+        Audit.record(user.subject, "session.repository.remove", session.id, %{
+          "repository" => GitHub.full(entry),
+          "path" => entry["path"]
+        })
+
+      {:ok, session_json(now, user)}
+    end
+  end
+
+  # A session on a computer holds no repository of the plane's, and one nothing starts
+  # again has nowhere to clone one.
+  defp holds_repositories(%Session{kind: "private"}),
+    do:
+      {:error,
+       Error.new(:conflict, %{
+         reason: "a session on a computer works in its own folder, not in a plane's clone"
+       })}
+
+  defp holds_repositories(%Session{state: state}) when state in ["read_only", "erasure_pending"],
+    do:
+      {:error,
+       Error.new(:conflict, %{
+         reason: "this session is read-only; nothing starts it again",
+         state: state
+       })}
+
+  defp holds_repositories(%Session{}), do: :ok
+
+  defp attachable(given, session) do
+    held = Session.repositories(session)
+
+    case GitHub.attachable(given, held, session.profile, GitHub.Policy.team_of(session)) do
+      {:ok, entry} -> {:ok, entry}
+      {:error, reason} -> invalid(reason, field: "repository")
+    end
+  end
+
+  defp detachable(named, session) when is_binary(named) do
+    entries = Session.repositories(session)
+
+    case GitHub.held(session, named) do
+      {:ok, %{"path" => "."} = entry} when length(entries) > 1 ->
+        {:ok, entry}
+
+      {:ok, %{"path" => "."}} when entries != [] ->
+        {:error,
+         Error.new(:conflict, %{
+           reason:
+             "#{named} is the repository this session was created on, at the workspace's " <>
+               "root; it is taken off only while another remains"
+         })}
+
+      {:ok, entry} ->
+        {:ok, entry}
+
+      {:error, reason} ->
+        invalid(GitHub.explain(reason), field: "repository")
+    end
+  end
+
+  defp detachable(_named, _session), do: invalid("a repository is owner/name", field: "repository")
+
+  defp change_repositories(session, change) do
+    case Sessions.put_repositories(session.id, change) do
+      {:ok, updated} -> {:ok, updated}
+      {:error, :not_found} -> {:error, Error.new(:not_found, %{session_id: session.id})}
+      {:error, reason} -> {:error, Error.new(:internal_error, %{reason: inspect(reason)})}
+    end
+  end
+
+  # The pod holding the session is told, and waited for: a clone takes as long as git
+  # takes. One no pod holds is told nothing; its next activation carries the list.
+  defp tell_pod(%Session{state: "active", worker_id: worker_id} = session, method, entry, user)
+       when is_binary(worker_id) do
+    params = %{
+      "session_id" => session.id,
+      "epoch" => session.epoch,
+      "repository" => Map.delete(entry, "github"),
+      "by" => user.subject,
+      "by_name" => Map.get(user, :display_name)
+    }
+
+    with {:ok, worker} <- worker_of(session) do
+      case Router.push(worker, method, params, @clone_ms) do
+        {:ok, _answer} -> {:ok, Sessions.get(session.id)}
+        {:error, reason} -> pod_refused(session, method, entry, reason)
+      end
+    end
+  end
+
+  defp tell_pod(session, _method, _entry, _user), do: {:ok, session}
+
+  defp pod_refused(session, "session.repository.add", entry, reason) do
+    {:ok, _row} =
+      Sessions.put_repositories(session.id, fn entries ->
+        {:ok, Enum.reject(entries, &(GitHub.full(&1) == GitHub.full(entry)))}
+      end)
+
+    {:error,
+     Error.new(:unavailable, %{
+       reason: "the pod could not clone #{GitHub.full(entry)}: #{pod_reason(reason)}",
+       repository: GitHub.full(entry)
+     })}
+  end
+
+  defp pod_refused(_session, _method, entry, %Error{data: %{"reason" => "busy"} = data}) do
+    {:error,
+     Error.new(:conflict, %{
+       reason: "busy",
+       detail: data["detail"] || "#{GitHub.full(entry)} has a push or a CI read going",
+       repository: GitHub.full(entry)
+     })}
+  end
+
+  defp pod_refused(_session, _method, entry, reason) do
+    {:error,
+     Error.new(:unavailable, %{
+       reason: "the pod did not take #{GitHub.full(entry)} off: #{pod_reason(reason)}",
+       repository: GitHub.full(entry)
+     })}
+  end
+
+  defp pod_reason(%Error{data: %{"detail" => detail}}) when is_binary(detail), do: detail
+  defp pod_reason(%Error{data: %{"reason" => reason}}) when is_binary(reason), do: reason
+  defp pod_reason(%Error{message: message}), do: message
+  defp pod_reason(reason), do: inspect(reason)
 
   defp pin(params, %{user: user}, pinned?) do
     with {:ok, session} <- visible(params["session_id"], user),
@@ -2957,15 +3138,35 @@ defmodule Troupe.Plane.Harness do
   defp slice_of(%{terms: %{"budget_micros" => slice}}) when is_integer(slice), do: slice
   defp slice_of(_session), do: @default_slice_micros
 
-  # The GitHub repository the session clones, checked against the plane's App and the
+  # The GitHub repositories the session clones, checked against the plane's App and the
   # team's own list now, before there is a row: an owner it has no installation for, a
   # repository the team does not list, or a Git host the profile does not declare, would
-  # otherwise surface as a pod that could not clone.
-  defp repository_for(given, profile, team) do
-    case GitHub.repository(given, profile, team) do
-      {:ok, repository} -> {:ok, repository}
+  # otherwise surface as a pod that could not clone. `repositories` is the list, held to
+  # the profile's `spec.github` and its cap; `repository` alone is the one a session was
+  # always created on, which a profile with no `spec.github` still clones; never both.
+  defp repositories_for(%{"repository" => one, "repositories" => many}, _profile, _team)
+       when not is_nil(one) and not is_nil(many),
+       do: invalid("send repository or repositories, not both", field: "repositories")
+
+  defp repositories_for(%{"repositories" => many}, profile, team) when not is_nil(many) do
+    case GitHub.repositories(many, profile, team) do
+      {:ok, held} -> {:ok, held}
+      {:error, reason} -> invalid(reason, field: "repositories")
+    end
+  end
+
+  defp repositories_for(params, profile, team) do
+    case GitHub.repository(params["repository"], profile, team) do
+      {:ok, nil} -> {:ok, []}
+      {:ok, repository} -> {:ok, [Map.put(repository, "path", ".")]}
       {:error, reason} -> invalid(reason, field: "repository")
     end
+  end
+
+  # What a session's list says of who put each repository there and when.
+  defp attached(entries, subject) do
+    at = DateTime.utc_now() |> DateTime.truncate(:second) |> DateTime.to_iso8601()
+    Enum.map(entries, &Map.merge(&1, %{"attached_by" => subject, "attached_at" => at}))
   end
 
   # Ours unless the caller brought one: the A2A facade names a session after its task.
@@ -3000,7 +3201,6 @@ defmodule Troupe.Plane.Harness do
       title: params["title"],
       agent: params["agent"],
       workspace_source: params["source"],
-      repository: params["repository"],
       terms: terms,
       origin: origin,
       parent_session_id: get_in(params, ["fork", "parent"]),
@@ -3012,6 +3212,13 @@ defmodule Troupe.Plane.Harness do
       bundle_version: version,
       bundle_channel: version && profile_channel(profile)
     }
+
+    attrs =
+      params
+      |> Map.get("repositories", [])
+      |> attached(user.subject)
+      |> Session.holding()
+      |> Map.merge(attrs)
 
     case Sessions.create(attrs) do
       {:ok, session} ->
@@ -3483,6 +3690,8 @@ defmodule Troupe.Plane.Harness do
       "role" => role,
       # Whose it is, which a client opening it marks it with: the team's or its owner's.
       "visibility" => session.visibility,
+      # What it works on, so a client that opens it can say so before reading its row.
+      "repositories" => Enum.map(Session.repositories(session), &repository_json/1),
       "token" => token,
       "expires_at" => expires_at
     }
@@ -3929,10 +4138,52 @@ defmodule Troupe.Plane.Harness do
   # pod clones on the first, and on every one it gets a new token when it next needs one
   # rather than keeping the last activation's. The repository only, never a credential:
   # that the pod asks for.
-  defp repository_params(%Session{repository: %{} = repository}),
-    do: %{"repository" => repository}
+  #
+  # Every repository the session holds as `repositories`, each with the directory it is
+  # in, who attached it and when; `repository` beside it is the first, for a pod from
+  # before the list.
+  defp repository_params(%Session{} = session) do
+    case Session.repositories(session) do
+      [] ->
+        %{}
 
-  defp repository_params(_session), do: %{}
+      entries ->
+        %{
+          "repository" => session.repository,
+          "repositories" => Enum.map(entries, &Map.delete(&1, "github"))
+        }
+    end
+  end
+
+  # What a sibling and a fork start on: the parent's one repository as `repository`, which
+  # a profile with no `spec.github` still clones, or its several as `repositories`, which a
+  # create holds to the new profile's `spec.github` and cap.
+  defp lineage(parent, which) do
+    named = Enum.map(Session.repositories(parent), &Map.take(&1, ["owner", "name", "ref"]))
+
+    case {named, which} do
+      {[one], :one} -> one
+      {[_, _ | _] = several, :several} -> several
+      _none -> nil
+    end
+  end
+
+  # A repository as a client reads it: where it is, who attached it, and what the session
+  # did there (its branch, last commit and draft pull request).
+  defp repository_json(entry) do
+    %{
+      "owner" => entry["owner"],
+      "name" => entry["name"],
+      "ref" => entry["ref"],
+      "path" => entry["path"] || ".",
+      "attached_by" => entry["attached_by"],
+      "attached_at" => entry["attached_at"],
+      "github" => blank_github(entry["github"])
+    }
+  end
+
+  defp blank_github(record) when record in [nil, %{}], do: nil
+  defp blank_github(record), do: record
 
   # The terms and origin a pod is handed on activation, from the row, and how long the
   # session lasts, which its first `session_created` records and a later change does not
@@ -4322,7 +4573,10 @@ defmodule Troupe.Plane.Harness do
       "id" => resolved.id,
       "budget_micros" => resolved.budget_micros,
       "members_may_control" => resolved.members_may_control,
-      "idle_timeout_seconds" => resolved.idle_timeout_seconds
+      "idle_timeout_seconds" => resolved.idle_timeout_seconds,
+      # The GitHub repositories its sessions may name, `owner/name` or `owner/*`: what a
+      # new session's chooser offers.
+      "repositories" => get_in(team.github || %{}, ["repositories"]) || []
     }
   end
 
@@ -4519,6 +4773,8 @@ defmodule Troupe.Plane.Harness do
       # What it did there, as its pod reported it: the branch, the last commit, the draft
       # pull request and its CI rounds. Never what the session wrote.
       "github" => session.github,
+      # Every repository it holds, the one above first, each with its own record.
+      "repositories" => Enum.map(Session.repositories(session), &repository_json/1),
       "reviewed_by" => session.reviewed_by,
       "reviewed_at" => session.reviewed_at && DateTime.to_iso8601(session.reviewed_at),
       "your_role" => role_name(Sessions.role_for(user, session))

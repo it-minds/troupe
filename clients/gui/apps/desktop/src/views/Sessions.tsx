@@ -15,7 +15,20 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { JSX } from "react";
-import { archiveRefusal, claimable, claimRefusal, filterRows, LIFESPAN_CHOICES, lifespanItem, lifespanMark, lifespanOf, lifespanRefusal, markRefusal, mayArchive } from "@troupe/client";
+import {
+  archiveRefusal,
+  claimable,
+  claimRefusal,
+  filterRows,
+  LIFESPAN_CHOICES,
+  lifespanItem,
+  lifespanMark,
+  lifespanOf,
+  lifespanRefusal,
+  markRefusal,
+  mayArchive,
+  repositoriesSummary,
+} from "@troupe/client";
 import type { FleetRow, Lifespan, SessionKind } from "@troupe/client";
 import type { Archived, Marks } from "../hooks";
 import { useNarrow } from "../narrow";
@@ -374,6 +387,11 @@ function Rows({
                 <span className="title">{r.title ?? r.id}</span>
                 <span className="sub">
                   {r.profile && <span>{r.profile}</span>}
+                  {r.repositories && r.repositories.length > 0 && (
+                    <span className="mono" title={r.repositories.join(", ")}>
+                      {repositoriesSummary(r.repositories)}
+                    </span>
+                  )}
                   <Cost micros={r.costMicros} />
                 </span>
               </span>

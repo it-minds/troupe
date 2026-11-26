@@ -1301,7 +1301,7 @@ defmodule Troupe.UI.TUI.Server do
   # 698); this is only which of them the TUI implements, and the suite holds the two
   # equal, so a command added to the table without a clause here fails a test rather
   # than being dispatched as an agent.
-  @builtins ~w(new cancel dismiss merge discard compact goal loop steer invite uninvite share lifespan bundle sessions archive
+  @builtins ~w(new cancel dismiss merge discard compact goal loop steer invite uninvite share lifespan bundle repo sessions archive
                unarchive rename keep back hq observer files
                scratch upload save publish artifacts profiles profile copy memory context watch settings
                models mcp
@@ -1746,6 +1746,16 @@ defmodule Troupe.UI.TUI.Server do
   defp builtin("bundle", args, state, _target) do
     case Client.bundle_args(args) do
       {:ok, verb} -> notice_of(Client.bundle(state.session_id, verb))
+      {:error, sentence} -> {:error, sentence}
+    end
+  end
+
+  # The GitHub repositories a session on the platform holds (root #1207): alone it lists
+  # them, `add owner/name[@ref]` attaches one, `remove owner/name` takes one off; the log's
+  # note and the status line follow.
+  defp builtin("repo", args, state, _target) do
+    case Client.repo_args(args) do
+      {:ok, verb} -> notice_of(Client.repositories(state.session_id, verb))
       {:error, sentence} -> {:error, sentence}
     end
   end
@@ -2530,30 +2540,53 @@ defmodule Troupe.UI.TUI.Server do
   # one sentence of chips. `--private` and `--remote PROFILE` pre-set the chips, and
   # `--only-me` puts it on the platform as its owner's until they invite people; `--branch`
   # forks what is on screen at once, as it always did. `--throwaway` and `--persistent` say
-  # how long it lasts (root #1209), with any of the others but `--branch`.
-  @new_usage "/new [--private | --remote PROFILE | --only-me | --branch] [--throwaway | --persistent]"
+  # how long it lasts (root #1209), with any of the others but `--branch`. `--repo` names a
+  # GitHub repository the session on the platform starts on, as often as it is given.
+  @new_usage "/new [--private | --remote PROFILE | --only-me | --branch] [--throwaway | --persistent] [--repo OWNER/NAME[@REF]]..."
 
   defp new_session(state, args) do
-    case new_kind(String.split(args)) do
-      {:ok, :branch, nil} ->
+    case new_repositories(String.split(args)) do
+      {:ok, [], words} ->
+        new_session(state, new_kind(words), [])
+
+      {:ok, repos, words} ->
+        new_session(state, new_kind(words), where: :platform, repositories: repos)
+
+      {:error, why} ->
+        notice(state, why)
+    end
+  end
+
+  defp new_session(state, kind, repos) do
+    case kind do
+      {:ok, :branch, nil} when repos == [] ->
         open_kind(state, :branch, nil)
 
       {:ok, :local, lifespan} ->
-        open_new_page(state, lasting([], lifespan))
+        open_new_page(state, lasting(repos, lifespan))
 
-      {:ok, :private, lifespan} ->
+      {:ok, :private, lifespan} when repos == [] ->
         open_new_page(state, lasting([private: true], lifespan))
 
       {:ok, {:remote, profile}, lifespan} ->
-        open_new_page(state, lasting([where: :platform, profile: profile], lifespan))
+        open_new_page(
+          state,
+          lasting(Keyword.merge(repos, where: :platform, profile: profile), lifespan)
+        )
 
       {:ok, :only_me, lifespan} ->
-        open_new_page(state, lasting([where: :platform, only_me: true], lifespan))
+        open_new_page(
+          state,
+          lasting(Keyword.merge(repos, where: :platform, only_me: true), lifespan)
+        )
 
       {:ok, {:only_me, profile}, lifespan} ->
         open_new_page(
           state,
-          lasting([where: :platform, profile: profile, only_me: true], lifespan)
+          lasting(
+            Keyword.merge(repos, where: :platform, profile: profile, only_me: true),
+            lifespan
+          )
         )
 
       _usage ->
@@ -2563,6 +2596,24 @@ defmodule Troupe.UI.TUI.Server do
 
   defp lasting(opts, nil), do: opts
   defp lasting(opts, lifespan), do: Keyword.put(opts, :lifespan, lifespan)
+
+  # `--repo owner/name[@ref]`, as often as it is given (root #1207): the GitHub
+  # repositories a session on the platform starts on, taken out before the rest is read.
+  defp new_repositories(words, repos \\ [], rest \\ [])
+
+  defp new_repositories(["--repo", given | words], repos, rest) do
+    case Client.read_repository(given) do
+      {:ok, repository} -> new_repositories(words, repos ++ [repository], rest)
+      :error -> {:error, Client.not_a_repository(given)}
+    end
+  end
+
+  defp new_repositories(["--repo"], _repos, _rest), do: {:error, "usage: " <> @new_usage}
+
+  defp new_repositories([word | words], repos, rest),
+    do: new_repositories(words, repos, rest ++ [word])
+
+  defp new_repositories([], repos, rest), do: {:ok, repos, rest}
 
   # The agent on screen is this computer's: the page starts a session here as it, and never
   # sends it to the plane, whose profile has a default of its own.

@@ -14,6 +14,10 @@ defmodule Troupe.CLI.RunTarget do
   or with `--only-me` its owner's until they invite people; a run on this computer is only
   its owner's anyway.
 
+  `--repo owner/name[@ref]`, as often as it is given, puts the run on the platform too, on
+  those GitHub repositories (root #1207); a profile with no `spec.github` takes none, and a
+  run on this computer none at all.
+
   A full profile makes the run wait for the next free place, as the plane makes every
   create on it wait; the wait is printed one line at a time, as the plane says when to ask
   again. At the administrator's ceiling the plane refuses, and the run fails with its
@@ -22,7 +26,7 @@ defmodule Troupe.CLI.RunTarget do
 
   alias Troupe.CLI
   alias Troupe.Client
-  alias Troupe.Client.{Profiles, Remote}
+  alias Troupe.Client.{Profiles, Remote, Repositories}
   alias Troupe.Protocol.Words
   alias Troupe.UI.NewSession
 
@@ -35,16 +39,24 @@ defmodule Troupe.CLI.RunTarget do
     names = %{profiles: Enum.map(rows, & &1["name"]), agents: agent_names(args.workspace, rows)}
     tokens = NewSession.tokens(task, names)
     cleaned = NewSession.clean(task, names)
-    where = tokens[:where] || if(args.profile || tokens[:profile], do: :platform, else: :local)
+
+    where =
+      tokens[:where] ||
+        if(args.profile || tokens[:profile] || repos?(args), do: :platform, else: :local)
+
     title = args.title || NewSession.title(cleaned)
 
-    case where do
-      :local ->
+    case {where, repos?(args)} do
+      {:local, true} ->
+        {:error,
+         "--repo is for a run on the platform: a run on this computer works in its own folder"}
+
+      {:local, false} ->
         params = Troupe.CLI.Runner.run_params(%{args | task: cleaned})
         agent = tokens[:agent] || args.agent
         {{:local, args.workspace}, Map.merge(params, %{profile: agent, title: blank(title)})}
 
-      :platform ->
+      {:platform, _repos?} ->
         on_platform(plane, rows, args, tokens, cleaned, title, io)
     end
   end
@@ -56,12 +68,20 @@ defmodule Troupe.CLI.RunTarget do
     profile =
       tokens[:profile] || args.profile || elem(NewSession.auto_pick(rows, last_used(origin)), 0)
 
+    repositories = read_repositories(args)
+
     cond do
       is_nil(profile) ->
         {:error, "there is no profile you may start a session on"}
 
       rows != [] and not Enum.any?(rows, &(&1["name"] == profile)) ->
         {:error, Profiles.refusal(:not_found, profile)}
+
+      match?({:error, _}, repositories) ->
+        repositories
+
+      why = Repositories.refused(Enum.find(rows, &(&1["name"] == profile)), elem(repositories, 1)) ->
+        {:error, why}
 
       true ->
         agent = tokens[:agent] || if(args.agent_given, do: args.agent)
@@ -80,9 +100,25 @@ defmodule Troupe.CLI.RunTarget do
            lifespan: Map.get(args, :lifespan),
            title: blank(title),
            prompt: cleaned,
+           # `--repo`: the GitHub repositories it starts on, which the plane checks again.
+           repositories: elem(repositories, 1),
            on_wait: fn answer -> waiting(io, profile, answer) end
          }}
     end
+  end
+
+  defp repos?(args), do: Map.get(args, :repositories, []) != []
+
+  # Each `--repo` read as `/new --repo` reads one, or the first that is not one.
+  defp read_repositories(args) do
+    args
+    |> Map.get(:repositories, [])
+    |> Enum.reduce_while({:ok, []}, fn given, {:ok, read} ->
+      case Repositories.read(given) do
+        {:ok, repository} -> {:cont, {:ok, read ++ [repository]}}
+        :error -> {:halt, {:error, Repositories.not_one(given)}}
+      end
+    end)
   end
 
   # One line a wait, in the curtain line's words, with when the plane says to ask again.
@@ -100,7 +136,7 @@ defmodule Troupe.CLI.RunTarget do
   # The plane is asked only where the run may go there: `--profile`, or a task that could
   # name a profile or the platform. Under Local only it is never asked.
   defp plane_for(args, task) do
-    if args.profile || String.contains?(task, ["@", "/platform"]),
+    if args.profile || repos?(args) || String.contains?(task, ["@", "/platform"]),
       do: Profiles.plane(nil),
       else: {:error, :not_asked}
   end

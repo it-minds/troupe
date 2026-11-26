@@ -572,6 +572,32 @@ defmodule Troupe.Plane.Sessions do
   end
 
   @doc """
+  Change the repositories a session holds: `change` is given the list as it is under the
+  row's lock and answers the new one, or `{:error, reason}` to leave it. `repository` and
+  `github` are written as its first entry's (`Session.holding/1`).
+  """
+  @spec put_repositories(String.t(), ([map()] -> {:ok, [map()]} | {:error, term()})) ::
+          {:ok, Session.t()} | {:error, term()}
+  def put_repositories(session_id, change) do
+    Repo.transaction(fn ->
+      locked = Repo.one(from(s in Session, where: s.id == ^session_id, lock: "FOR UPDATE"))
+
+      case changed_repositories(locked, change) do
+        {:ok, updated} -> updated
+        {:error, reason} -> Repo.rollback(reason)
+      end
+    end)
+  end
+
+  defp changed_repositories(nil, _change), do: {:error, :not_found}
+
+  defp changed_repositories(session, change) do
+    with {:ok, entries} <- change.(Session.repositories(session)) do
+      session |> Session.changeset(Session.holding(entries)) |> Repo.update()
+    end
+  end
+
+  @doc """
   Keep a session at the top of the list, or let it go from there: the list's order and
   nothing more. What keeps a session from being cleared away is its lifespan.
 

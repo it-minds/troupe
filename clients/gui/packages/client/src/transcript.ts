@@ -7,6 +7,7 @@
 // under load without changing what the transcript says.
 
 import { upgradedText } from "./bundle.js";
+import { repositoryChangedText } from "./repositories.js";
 import { named } from "./people.js";
 import { when } from "./remote.js";
 import { foldScratch, scratchDocumentOf } from "./scratch.js";
@@ -1067,6 +1068,8 @@ function systemText(d: DurableEvent): string {
       return "session went to sleep";
     case "session_activated":
       return "session woke on the platform";
+    case "session_repository_changed":
+      return repositoryChangedText(d.data);
     case "session_resumed":
       return d.data["moved"] ? "session resumed on another device" : "session resumed";
     case "fs_changed":
@@ -1276,6 +1279,7 @@ const SYSTEM_TYPES = new Set([
   "llm_error",
   "session_dormant",
   "session_activated",
+  "session_repository_changed",
   "session_resumed",
   "fs_changed",
   "session_tainted",

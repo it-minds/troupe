@@ -929,6 +929,7 @@ export function App(): JSX.Element {
                   if (on) setWhere({ screen: "sessions" });
                 }}
                 onGo={(screen) => setWhere({ screen })}
+                sides={sides}
                 onAgents={(agent) => setWhere({ screen: "agents", ...workspaceOf(row), ...(agent ? { agent } : {}) })}
                 onProfile={planeAuth ? (profile) => setWhere({ screen: "profiles", profile }) : undefined}
                 onStarted={(id, kind, workspace) => {

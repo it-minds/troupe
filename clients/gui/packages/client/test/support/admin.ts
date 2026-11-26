@@ -512,6 +512,8 @@ export interface FakeSession {
   reviewed: boolean;
   repository?: { owner: string; name: string; ref?: string | null } | null;
   github?: Record<string, unknown> | null;
+  /** Every repository it holds, the one above first (troupe #1207); absent, the plane's answer has none. */
+  repositories?: Array<{ owner: string; name: string; ref: string | null; path: string; github: Record<string, unknown> | null }>;
 }
 
 interface Setting {
@@ -3153,6 +3155,7 @@ export class FakeAdmin {
       last_active_at: s.last_active_at,
       repository: s.repository ?? null,
       github: s.github ?? null,
+      ...(s.repositories ? { repositories: s.repositories } : {}),
       memory: this.memoryStanding.get(s.id) ?? null,
     };
   }
@@ -4400,6 +4403,17 @@ export function exampleAdmin(): FakeAdmin {
         // Pushed its branch and opened no pull request yet.
         repository: { owner: "example-org", name: "gadgets", ref: "main" },
         github: { branch: "troupe/session-s-7f3a9c23", commit: "9e8d7c6b5a4f3e2d1c0b9a8f7e6d5c4b3a2f1e0d", pushes: 1 },
+        // And a second one its owner attached since, pushed to on its own branch (troupe #1207).
+        repositories: [
+          { owner: "example-org", name: "gadgets", ref: "main", path: ".", github: { branch: "troupe/session-s-7f3a9c23", commit: "9e8d7c6b5a4f3e2d1c0b9a8f7e6d5c4b3a2f1e0d", pushes: 1 } },
+          {
+            owner: "example-org",
+            name: "docs",
+            ref: null,
+            path: "example-org/docs",
+            github: { branch: "troupe/session-s-7f3a9c23", commit: "0b9a8f7e6d5c4b3a2f1e0d9e8d7c6b5a4f3e2d1c", pushes: 1 },
+          },
+        ],
       }),
       session("s-7f3a9c24", "svc:core/nightly", "core", "dev", {
         origin: "trigger",

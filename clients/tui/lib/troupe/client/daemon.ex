@@ -1047,6 +1047,10 @@ defmodule Troupe.Client.Daemon do
     end
   end
 
+  # A session on this computer works in its own folder, not in a plane's clone (root #1207).
+  @impl true
+  def repositories(_sid, _verb), do: {:error, Troupe.Client.Repositories.not_here()}
+
   @impl true
   def keep(sid, kept?) do
     params = %{session_id: sid, command_id: Troupe.Remote.RPC.command_id()}

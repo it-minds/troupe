@@ -45,6 +45,9 @@ const plane = await FakePlane.start({
   // LISTS_ONE_TEAM=1 has the listing name only the first, so the plane's refusal asks instead.
   ...(process.env["TEAMS"] ? { teams: process.env["TEAMS"].split(",") } : {}),
   ...(process.env["LISTS_ONE_TEAM"] ? { listsOneTeam: true } : {}),
+  // The plane's GitHub App: the team lists two repositories and every one of example-org's
+  // docs owner, and a session on dev holds up to three; ux has no spec.github (#1207).
+  github: { repositories: ["example-org/widgets", "example-org/gadgets", "example-docs/*"], profiles: { dev: 3 } },
   // UNPRICED=dev: some of the dev profile's calls this month had no price, which its page says.
   ...(process.env["UNPRICED"] ? { profileSpecs: exampleProfiles().map((p) => (p.name === process.env["UNPRICED"] ? { ...p, unpriced: { calls: 14, tokens: 182_400 } } : p)) } : {}),
   // The person's memory and artifacts are the ones the daemon below keeps, so the app shows
@@ -57,6 +60,8 @@ const plane = await FakePlane.start({
 const stopped = plane.seed("alice@example.com", { title: "Weekly licence audit", profile: "dev", origin: { kind: "trigger", trigger: "weekly" } });
 plane.fail(stopped.id, "tool_failures");
 const rewrite = plane.seed("alice@example.com", { title: "Rewrite the placement loop", profile: "dev" });
+// It works on a clone of widgets at its root; Alice attaches gadgets from its Backstage (#1207).
+rewrite.repositories = [{ owner: "example-org", name: "widgets", ref: null, path: ".", attached_by: "alice@example.com", attached_at: new Date().toISOString(), github: null }];
 // WAKE_FULL=1: that session is asleep on a full dev profile, so opening it waits for a
 // place (#1149), and the plane gives it one every twenty seconds it has waited.
 if (process.env["WAKE_FULL"]) {
@@ -216,7 +221,7 @@ daemon.askTool(notes.id, "write_file", { path: "plan.md" });
 // answer with a table, a nested list and fenced code, a diff and a csv; and the same turn
 // played live whenever something is sent there, so its reasoning streams and the curtain
 // line says what runs.
-const parser = daemon.seed("/home/ada/parser");
+const parser = daemon.seed("/home/ada/parser", { scripted: true });
 const PARSER_ANSWER = [
   "## Fixed",
   "",
@@ -322,19 +327,6 @@ parser.log.listen((e) => {
 longSession(daemon.seed("/home/ada/long").log, 1000);
 const compacted = daemon.seed("/home/ada/compacted");
 longSession(compacted.log, 1000, { compactAt: 950 });
-// What is sent there is taken as a turn and answered, so a line sent while Earlier reads
-// the part before the checkpoint has somewhere to land.
-const heard = new Map<string, string>();
-compacted.log.listen((e) => {
-  if (e.type === "input_queued") heard.set(String(e.data["command_id"]), String(e.data["text"] ?? ""));
-  if (e.type !== "input_accepted") return;
-  const text = heard.get(String(e.data["command_id"])) ?? "";
-  setTimeout(() => {
-    compacted.log.append("user_input", { source: "user", text }, e.actor);
-    compacted.log.append("llm_response", { message: { role: "assistant", content: [{ type: "text", text: `Heard: ${text}` }] } });
-    compacted.log.append("turn_ended", {});
-  }, 0);
-});
 // The agents manager (troupe #503) with every layer to show: the built-ins, the
 // repository's own reviewer, whose shell runs without asking, and a bundle's.
 daemon.agents.files.push(

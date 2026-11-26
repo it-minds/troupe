@@ -46,7 +46,7 @@ defmodule Troupe.Worker.Session.Manager do
   alias Troupe.Worker.Cache
   alias Troupe.Worker.Connections
   alias Troupe.Worker.{GitCredentials, GitHub}
-  alias Troupe.Worker.Session.{Clone, Restore, Workspace}
+  alias Troupe.Worker.Session.{Clone, Repositories, Restore, Workspace}
   alias Troupe.Worker.Sessions
   alias Troupe.Worker.Usage
 
@@ -380,6 +380,10 @@ defmodule Troupe.Worker.Session.Manager do
 
       record_upgrade(context.session_id, Keyword.get(opts, :bundle))
 
+      # The repositories beside the one at the root, cloned where their directories are
+      # missing and taken away where the list no longer has them, and the root told.
+      :ok = Repositories.settle(context.session_id, root, Repositories.of_opts(opts))
+
       # Watched, because the tree can stop under this process as well as by its hand.
       ref = Process.monitor(session.pid)
 
@@ -416,8 +420,8 @@ defmodule Troupe.Worker.Session.Manager do
     # A token a previous activation here held is not this one's: the next use asks the
     # plane for a new one, which is how an activation refreshes it.
     GitCredentials.forget(context.session_id)
-    # A session created with a repository has the fix loop's tools, and one without has none.
-    GitHub.hold(context.session_id, Keyword.get(state.opts, :repository))
+    # A session holding a repository has the fix loop's tools, and one without has none.
+    GitHub.hold(context.session_id, Repositories.of_opts(state.opts))
 
     try do
       with {:ok, log} <- Restore.events(context, root),

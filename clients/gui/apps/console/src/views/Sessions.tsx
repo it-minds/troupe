@@ -14,8 +14,8 @@
 
 import { useState } from "react";
 import type { JSX } from "react";
-import { bytes, lifespanMark, lifespanOf, nameOrSubject } from "@troupe/client";
-import type { AdminSessionRow, SessionErasePreview, SessionErased, SessionGitHub } from "@troupe/client";
+import { bytes, lifespanMark, lifespanOf, nameOrSubject, repositoriesOf, repositoryName } from "@troupe/client";
+import type { AdminSessionRow, SessionErasePreview, SessionErased, SessionGitHub, SessionRepository } from "@troupe/client";
 import { recorded, useConsole, useLoad } from "../console";
 import { href } from "../route";
 import { AuditNote, Empty, Field, Loaded, Preview, Status, count, sessionState, when } from "./bits";
@@ -222,7 +222,7 @@ function SessionRow({ session: s, busy, onErase }: { session: AdminSessionRow; b
       <td>{s.pinned ? (s.pinned_by ? `pinned by ${s.pinned_by}` : "pinned") : <span className="muted">no</span>}</td>
       <td>{lifespanMark({ lifespan: lifespanOf(s.lifespan), erasesAt: s.erases_at ?? null }) ?? <span className="muted">normal</span>}</td>
       <td>
-        <OnGitHub github={s.github ?? null} />
+        <OnGitHub repositories={repositoriesOf(s)} />
       </td>
       <td>{when(s.last_active_at)}</td>
       <td className="row-actions">
@@ -237,11 +237,34 @@ function SessionRow({ session: s, busy, onErase }: { session: AdminSessionRow; b
 }
 
 /** What erasing one session takes, read from the plane first, then typed by its id. */
-// What the session did on GitHub, as its pod reported it: its draft pull request as a link,
-// or its branch and last commit before it has opened one, and that it stopped after its
-// red CI rounds and left the draft for a person.
-function OnGitHub({ github }: { github: SessionGitHub | null }): JSX.Element {
-  if (!github?.branch) return <span className="muted">—</span>;
+// What the session did on GitHub, per repository it holds (troupe #1207): the first, and
+// every other one under "+N more", opened in place.
+function OnGitHub({ repositories }: { repositories: SessionRepository[] }): JSX.Element {
+  const [first, ...rest] = repositories;
+  if (!first) return <span className="muted">—</span>;
+  const one = (r: SessionRepository): JSX.Element => (
+    <span>
+      <span className="mono">{repositoryName(r)}</span> <OnRepository github={(r.github ?? null) as SessionGitHub | null} />
+    </span>
+  );
+  if (rest.length === 0) return one(first);
+  return (
+    <details>
+      <summary>
+        {one(first)} <span className="muted">+{rest.length} more</span>
+      </summary>
+      {rest.map((r) => (
+        <div key={repositoryName(r)}>{one(r)}</div>
+      ))}
+    </details>
+  );
+}
+
+// What the session did on one repository, as its pod reported it: its draft pull request as
+// a link, or its branch and last commit before it has opened one, and that it stopped after
+// its red CI rounds and left the draft for a person.
+function OnRepository({ github }: { github: SessionGitHub | null }): JSX.Element {
+  if (!github?.branch) return <span className="muted">nothing pushed</span>;
   const pr = github.pull_request;
   return (
     <span>

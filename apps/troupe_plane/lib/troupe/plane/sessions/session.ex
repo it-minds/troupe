@@ -78,6 +78,12 @@ defmodule Troupe.Plane.Sessions.Session do
     # branch, its last commit, its draft pull request and the CI rounds on it. Metadata the
     # pod reports, never anything the session wrote.
     field(:github, :map)
+    # Every repository the session holds, the one it was created on first and each one its
+    # owner attached since: `{owner, name, ref, path, github, attached_by, attached_at}`,
+    # `path` its directory in the workspace (`.` for one cloned at the root) and `github`
+    # what the session did there. `repository` and `github` above are the first entry's,
+    # written with it, for a client and a pod from before the list (`repositories/1`).
+    field(:repositories, {:array, :map}, default: [])
     field(:bundle_version, :integer)
     # The channel `bundle_version` is a version of, so a pin names one document.
     field(:bundle_channel, :string)
@@ -181,6 +187,7 @@ defmodule Troupe.Plane.Sessions.Session do
     :workspace_source,
     :repository,
     :github,
+    :repositories,
     :bundle_version,
     :bundle_channel,
     :bundle_raise_to,
@@ -214,6 +221,36 @@ defmodule Troupe.Plane.Sessions.Session do
     :reviewed_by,
     :reviewed_at
   ]
+
+  @doc """
+  Every repository the session holds, first the one it was created on. A row a plane from
+  before the list wrote has its one repository at the workspace's root, with its record.
+  """
+  @spec repositories(t()) :: [map()]
+  def repositories(%__MODULE__{repositories: [_ | _] = repositories}), do: repositories
+
+  def repositories(%__MODULE__{repository: %{} = repository, github: github}),
+    do: [Map.merge(repository, %{"path" => ".", "github" => github || %{}})]
+
+  def repositories(%__MODULE__{}), do: []
+
+  @doc """
+  The columns that say what a session holds, from its list: `repositories`, and
+  `repository` and `github` as its first entry's (or none).
+  """
+  @spec holding([map()]) :: map()
+  def holding([]), do: %{repositories: [], repository: nil, github: nil}
+
+  def holding([first | _] = repositories) do
+    %{
+      repositories: repositories,
+      repository: Map.take(first, ["owner", "name", "ref"]),
+      github: blank_record(first["github"])
+    }
+  end
+
+  defp blank_record(record) when record == %{}, do: nil
+  defp blank_record(record), do: record
 
   @spec changeset(t() | Ecto.Changeset.t(), map()) :: Ecto.Changeset.t()
   def changeset(session, attrs) do

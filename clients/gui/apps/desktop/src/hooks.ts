@@ -20,6 +20,8 @@ import {
   planeOpener,
   raiseKept,
   RemoteSource,
+  repositoriesOf,
+  repositoryName,
   ServerOffer,
   SessionAttachment,
   StartQuestions,
@@ -46,10 +48,12 @@ import type {
   Principal,
   ProfileOffering,
   ProfileSwitch,
+  RepositoryName,
   SessionKind,
   SessionView,
   StartAnswer,
   StartState,
+  Team,
   TranscriptState,
   TroupeEvent,
 } from "@troupe/client";
@@ -192,6 +196,11 @@ export interface Marks {
   relive: (row: FleetRow, lifespan: Lifespan) => Promise<void>;
   /** Erase it now, where it runs (`session.erase`): a throwaway session's head offers it. Irreversible. */
   erase: (row: FleetRow) => Promise<void>;
+  /**
+   * Attach a GitHub repository to a pod session, or take one off, at the plane (troupe
+   * #1207); the answer's list goes on the row at once. Rejects with the refusal.
+   */
+  repository: (row: FleetRow, change: { attach: RepositoryName } | { takeOff: string }) => Promise<void>;
 }
 
 /**
@@ -270,6 +279,19 @@ export function useMarks(store: FleetStore, auth: AuthSession | null, daemon: Da
     },
     [store, auth],
   );
+  const repository = useCallback(
+    async (row: FleetRow, change: { attach: RepositoryName } | { takeOff: string }) => {
+      if (row.kind !== "team" || !auth) throw new Error("Only a session on the platform works on a GitHub repository");
+      const token = await auth.token();
+      const answered =
+        "attach" in change ? await auth.plane.addSessionRepository(token, row.id, change.attach) : await auth.plane.removeSessionRepository(token, row.id, change.takeOff);
+      const raw = (row.raw && typeof row.raw === "object" ? row.raw : {}) as Record<string, unknown>;
+      const held = repositoriesOf(answered);
+      store.patch(row.id, { repositories: held.map(repositoryName), raw: { ...raw, repositories: held } });
+      await store.refreshAfterChange();
+    },
+    [store, auth],
+  );
   // How long it lasts: its daemon's for a session on this computer, the plane's for a pod
   // one. Nothing pushes the change to a list, so the answer goes on the row at once.
   const relive = useCallback(
@@ -297,7 +319,7 @@ export function useMarks(store: FleetStore, auth: AuthSession | null, daemon: Da
     },
     [store, where],
   );
-  return useMemo(() => ({ rename, keep, share, raise, relive, erase }), [rename, keep, share, raise, relive, erase]);
+  return useMemo(() => ({ rename, keep, share, raise, repository, relive, erase }), [rename, keep, share, raise, repository, relive, erase]);
 }
 
 /**
@@ -673,6 +695,27 @@ export function useProfiles(auth: AuthSession | null): { profiles: ProfileOfferi
   }, [auth]);
 
   return { profiles, error };
+}
+
+/**
+ * The person's teams as the plane lists them (`teams.list`), for what each lets its sessions
+ * name on GitHub (troupe #1207). Empty while asked and signed out; a plane that cannot say
+ * leaves it empty, and the chooser says the team lists none.
+ */
+export function useTeams(auth: AuthSession | null): Team[] {
+  const [teams, setTeams] = useState<Team[]>([]);
+  useEffect(() => {
+    if (!auth) return;
+    let live = true;
+    auth
+      .withToken((plane, token) => plane.listTeams(token))
+      .then((r) => live && setTeams(r.teams ?? []))
+      .catch(() => undefined);
+    return () => {
+      live = false;
+    };
+  }, [auth]);
+  return teams;
 }
 
 export interface SessionHandle {

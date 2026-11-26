@@ -49,6 +49,7 @@ defmodule Troupe.CLI do
           team: String.t() | nil,
           only_me: boolean(),
           lifespan: String.t() | nil,
+          repositories: [String.t()],
           title: String.t() | nil,
           task: String.t() | nil,
           headless: boolean(),
@@ -140,6 +141,7 @@ defmodule Troupe.CLI do
     only_me: :boolean,
     throwaway: :boolean,
     persistent: :boolean,
+    repo: :keep,
     title: :string
   ]
 
@@ -172,17 +174,29 @@ defmodule Troupe.CLI do
        ["run", "task", "--headless", "--throwaway"],
        ["run", "task", "--profile", "dev", "--persistent"]
      ]},
-    {~s(troupe run [AGENT] "task" --profile NAME [--team TEAM] [--only-me] [--title "TITLE"] [--headless]),
+    {~s(troupe run [AGENT] "task" --profile NAME [--team TEAM] [--only-me] [--repo OWNER/NAME[@REF]]... [--title "TITLE"] [--headless]),
      "the task on the platform, on that plane profile, as the TUI's /new would start it; " <>
        "a full profile is waited on, a line a wait; @profile #agent /local /platform in " <>
        "the task set those and are taken out of it; --team names whose session it is where " <>
        "more than one of your teams may use the profile; everyone on the team can open it, " <>
-       "or with --only-me only you until you invite people",
+       "or with --only-me only you until you invite people; each --repo is a GitHub " <>
+       "repository the team lists that the session starts on, the first at its " <>
+       "workspace's root and each other in OWNER/NAME",
      [
        ["run", "task", "--profile", "dev", "--headless"],
        ["run", "task", "--title", "Called"],
        ["run", "task", "--profile", "dev", "--team", "core"],
-       ["run", "task", "--profile", "dev", "--only-me"]
+       ["run", "task", "--profile", "dev", "--only-me"],
+       [
+         "run",
+         "task",
+         "--profile",
+         "dev",
+         "--repo",
+         "example-org/widgets",
+         "--repo",
+         "example-org/docs@main"
+       ]
      ]},
     {"troupe resume [SESSION_ID | latest] [--private]",
      "no id: the newest session here, picker open; latest, or --private for the newest private one: " <>
@@ -480,6 +494,9 @@ defmodule Troupe.CLI do
       # `troupe run --throwaway` or `--persistent` (root #1209): how long it lasts; nil is
       # normal, and the create says nothing of it.
       lifespan: lifespan_of(opts),
+      # `troupe run --repo owner/name[@ref]`, as often as it is given: the GitHub
+      # repositories a run on the platform starts on.
+      repositories: Keyword.get_values(opts, :repo),
       title: Keyword.get(opts, :title),
       task: nil,
       headless: Keyword.get(opts, :headless, false),

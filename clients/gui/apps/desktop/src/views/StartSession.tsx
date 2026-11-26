@@ -43,6 +43,9 @@ import {
   onlyMeSentence,
   platformVisibility,
   profileRoom,
+  repositoriesSummary,
+  repositoryName,
+  repositoryParam,
   stripTokens,
   teamQuestion,
   teamsToChoose,
@@ -51,13 +54,15 @@ import {
   whoCanOpen,
 } from "@troupe/client";
 import type { AgentRow, Attachment, AuthSession, DaemonClient, FleetRow, Lifespan, NewSessionWhere, ProfileOffering, SessionKind } from "@troupe/client";
-import { useLifespans, useProfiles } from "../hooks";
+import { useLifespans, useProfiles, useTeams } from "../hooks";
 import { prefs } from "../shell";
 import { useChooseFolder } from "./ChooseFolder";
 import { Mask } from "./brand";
+import { RepositoryChooser, teamRepositories } from "./Repositories";
+import type { ChosenRepository } from "./Repositories";
 
 type DaemonStatus = "unsupported" | "searching" | "absent" | "connected" | "error";
-type Picker = "where" | "folder" | "profile" | "agent" | "team";
+type Picker = "where" | "folder" | "profile" | "repository" | "agent" | "team";
 
 /** The pref the last profile chosen is kept under, which the auto-pick starts from before any session exists. */
 const LAST_PROFILE = "newSession.profile";
@@ -110,6 +115,7 @@ export function StartSession({
   const quip = firstLine("start_screen", seed);
   const curtain = firstLine("curtain_up", seed);
   const { profiles, error: profilesError } = useProfiles(auth);
+  const teamRows = useTeams(auth);
   const localReady = daemon !== null && daemonStatus === "connected";
 
   const [text, setText] = useState("");
@@ -137,6 +143,8 @@ export function StartSession({
   const [teamPicks, setTeamPicks] = useState<Record<string, string>>({});
   const [teamsAsked, setTeamsAsked] = useState<Record<string, string[]>>({});
   const [startOnTeam, setStartOnTeam] = useState(false);
+  // The GitHub repositories it starts on, where its profile allows GitHub (troupe #1207).
+  const [repos, setRepos] = useState<ChosenRepository[]>([]);
   const recentFolders = useRecentFolders(daemon);
 
   const me = auth?.me?.subject ?? null;
@@ -194,6 +202,11 @@ export function StartSession({
   // What the create sends of how long it lasts: nothing where its server would not know it.
   const canLast = lifespans(local ? (privately ? "private" : "local") : "team");
   const lasting: Lifespan | null = canLast ? lifespan : null;
+  // Offered only on a profile with `spec.github`, from what the session's team lists; a
+  // profile without it says null and the sentence has no repository in it.
+  const maxRepos = !local && typeof prof?.max_repositories === "number" ? prof.max_repositories : null;
+  const listedRepos = maxRepos === null ? [] : teamRepositories(teamRows, team ?? (whoTeams.length === 1 ? whoTeams[0]! : null));
+  const sentRepos = maxRepos === null ? [] : repos.slice(0, maxRepos);
 
   let why = "";
   let warn = false;
@@ -330,7 +343,7 @@ export function StartSession({
       void castOnPlatform(
         auth!,
         prof,
-        { agent: as ?? platformDefault, title: startedTitle, prompt: cleaned, team: forTeam, onlyMe, lifespan: lasting },
+        { agent: as ?? platformDefault, title: startedTitle, prompt: cleaned, team: forTeam, onlyMe, repositories: sentRepos, lifespan: lasting },
         set,
         alive,
         (reason) => setCeilingSaid((c) => ({ ...c, [prof.name]: reason })),
@@ -428,6 +441,14 @@ export function StartSession({
                 <Chip label="Which profile" mono expanded={shownPicker === "profile"} onClick={() => toggle("profile")} tone={full || atCeiling ? "queued" : undefined}>
                   {prof?.name ?? "no profile"}
                 </Chip>{" "}
+                {maxRepos !== null && (
+                  <>
+                    on{" "}
+                    <Chip label="Which repositories" mono expanded={shownPicker === "repository"} onClick={() => toggle("repository")}>
+                      {repositoriesSummary(sentRepos.map(repositoryName)) || "no repository"}
+                    </Chip>{" "}
+                  </>
+                )}
               </>
             )}
             as{" "}
@@ -522,6 +543,12 @@ export function StartSession({
                   What {prof.name} can reach
                 </button>
               )}
+            </PickerPanel>
+          )}
+
+          {shownPicker === "repository" && maxRepos !== null && (
+            <PickerPanel title="WHAT IT WORKS ON" hint="OWNER/NAME@BRANCH">
+              <RepositoryChooser listed={listedRepos} chosen={sentRepos} max={maxRepos} onChange={setRepos} />
             </PickerPanel>
           )}
 
@@ -887,7 +914,15 @@ const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms
 async function castOnPlatform(
   auth: AuthSession,
   prof: ProfileOffering,
-  ask: { agent: string | null; title: string; prompt: string; team: string | null; onlyMe: boolean; lifespan: Lifespan | null },
+  ask: {
+    agent: string | null;
+    title: string;
+    prompt: string;
+    team: string | null;
+    onlyMe: boolean;
+    repositories: ChosenRepository[];
+    lifespan: Lifespan | null;
+  },
   set: SetCasting,
   alive: () => boolean,
   onCeiling: (reason: string) => void,
@@ -908,6 +943,8 @@ async function castOnPlatform(
         ...(ask.prompt ? { prompt: ask.prompt } : {}),
         // Only where the plane said it knows the word, and only where it is not normal.
         ...(ask.lifespan && ask.lifespan !== "normal" ? { lifespan: ask.lifespan } : {}),
+        // The first is cloned at the workspace's root, each other in its own directory.
+        ...(ask.repositories.length > 0 ? { repositories: ask.repositories.map(repositoryParam) } : {}),
       }),
     );
   } catch (e) {
@@ -974,6 +1011,8 @@ async function castHere(
 /** A refusal in one line, starting as a sentence does: the plane's or the daemon's own where it gave one. */
 function refusal(e: unknown): string {
   const said = errorText(e);
+  // A sentence that starts with a repository's `owner/name` keeps the name as it is.
+  if (/^\S+\/\S+:/.test(said)) return said;
   return said.charAt(0).toUpperCase() + said.slice(1);
 }
 

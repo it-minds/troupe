@@ -625,6 +625,10 @@ defmodule Troupe.Remote.Translate do
         {[emit.(:remote_note, %{text: Troupe.Client.Lifespan.set(to_string(data["to"]), nil)})],
          memory}
 
+      # A repository attached, taken off, or one whose clone failed (root #1207).
+      "session_repository_changed" ->
+        {[emit.(:remote_note, %{text: Troupe.Client.Repositories.changed(data)})], memory}
+
       # A saved `AI!` or `AI?` comment started a branch of this session (root Decision 844):
       # the branch's session, its agent, and the comments, as the daemon wrote them.
       "watch_triggered" ->

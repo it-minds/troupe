@@ -74,6 +74,8 @@ export interface Team {
   budget_micros?: number;
   members_may_control?: boolean;
   idle_timeout_seconds?: number;
+  /** The GitHub repositories its sessions may name, `owner/name` or `owner/*` (troupe #1207); absent from an older plane. */
+  repositories?: string[];
   [k: string]: unknown;
 }
 
@@ -177,8 +179,40 @@ export interface SessionRow {
   bundle_channel?: string | null;
   bundle_current?: number | null;
   bundle_raise_to?: number | null;
+  /**
+   * Every GitHub repository it holds, the one it was created on first (troupe #1207); absent
+   * from an older plane, which says the one in `repository`.
+   */
+  repositories?: SessionRepository[];
   [k: string]: unknown;
 }
+
+/** What a session did on one repository, as its pod reported it: metadata only. */
+export interface RepositoryRecord {
+  branch?: string | null;
+  commit?: string | null;
+  pushes?: number | null;
+  pull_request?: { number: number; url: string } | null;
+  stopped?: { at: string; reason: string } | null;
+  [k: string]: unknown;
+}
+
+/**
+ * One GitHub repository a pod session holds: where its clone is in the workspace (`.` for
+ * the root, `owner/name` for every other), who attached it, and what the session did there.
+ */
+export interface SessionRepository {
+  owner: string;
+  name: string;
+  ref?: string | null;
+  path?: string;
+  attached_by?: string | null;
+  attached_at?: string | null;
+  github?: RepositoryRecord | null;
+}
+
+/** A repository as `session.create` and `session.repository.add` take one. */
+export type RepositoryName = string | { owner: string; name: string; ref?: string | null };
 
 export interface WorkerPod {
   pod: string;
@@ -222,6 +256,11 @@ export interface ProfileOffering {
   max_sessions?: number | null;
   /** The caller's teams that may use it, by name: whom a session there is open to. */
   teams?: string[];
+  /**
+   * How many GitHub repositories a session here may hold; null where the profile has no
+   * `spec.github` and a new session is offered none (troupe #1207). Absent from an older plane.
+   */
+  max_repositories?: number | null;
   [k: string]: unknown;
 }
 
@@ -252,6 +291,8 @@ export interface CreateSessionParams {
   lifespan?: "throwaway" | "normal" | "persistent";
   terms?: { budget_micros?: number; max_turns?: number; wall_clock_seconds?: number; approvals?: "wait" | "deny" };
   origin?: { kind?: string; [k: string]: unknown };
+  /** The GitHub repositories it starts on, the first cloned at the workspace's root (troupe #1207). */
+  repositories?: RepositoryName[];
 }
 
 const trimSlash = (s: string) => s.replace(/\/+$/, "");
@@ -569,6 +610,28 @@ export class PlaneClient {
    */
   raiseSessionBundle(planeToken: string, sessionId: string): Promise<SessionRow> {
     return this.rpc<SessionRow>(planeToken, "session.bundle.raise", { session_id: sessionId });
+  }
+
+  /** The person's teams, each with what it lets its sessions do: its GitHub `repositories` among them. */
+  listTeams(planeToken: string): Promise<{ teams: Team[] }> {
+    return this.rpc<{ teams: Team[] }>(planeToken, "teams.list");
+  }
+
+  /**
+   * Attach a GitHub repository to a pod session (troupe #1207); the answer is its row. Its
+   * owner's alone. Its pod clones it into `owner/name` without a restart, or at the next
+   * wake of a session that sleeps.
+   */
+  addSessionRepository(planeToken: string, sessionId: string, repository: RepositoryName): Promise<SessionRow> {
+    return this.rpc<SessionRow>(planeToken, "session.repository.add", { session_id: sessionId, repository });
+  }
+
+  /**
+   * Take a repository off a pod session: its directory goes and its tokens are revoked. Its
+   * owner's alone; refused `conflict` with `reason: "busy"` while a push on it is going.
+   */
+  removeSessionRepository(planeToken: string, sessionId: string, repository: string): Promise<SessionRow> {
+    return this.rpc<SessionRow>(planeToken, "session.repository.remove", { session_id: sessionId, repository });
   }
 
   /**
