@@ -629,6 +629,10 @@ defmodule Troupe.Gateway.Connection do
       "watch" => true,
       "remote" => false,
       "private_sessions" => private_sessions?(),
+      # `session.create` takes `lifespan` and `session.lifespan.set` changes it (#1209): a
+      # throwaway session here is erased by this daemon's sweep. Not a pod's, whose
+      # sessions' lifespans are the plane's, nor a relayed connection's.
+      "lifespans" => true,
       # `approval.respond` takes `allow_always`: the person's own rule for the tool, written
       # into their file on this computer. Not a pod's (its rules are its worker profile's)
       # nor a relayed connection's (the laptop's file is the laptop's person's).

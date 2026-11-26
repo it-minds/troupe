@@ -79,6 +79,25 @@ describe("what is a person's own", () => {
     expect(methods.filter((m) => m.startsWith("admin.") && m !== "admin.teams.list")).toEqual([]);
   });
 
+  it("says how long each of a person's own sessions lasts, and lets them change it (troupe #1209)", async () => {
+    const quick = fake.plane.seed(PEOPLE.carol.subject, { id: "s-carol-3", title: "Which port?", profile: "ux", lifespan: "throwaway" });
+    await signedInAs(fake, PEOPLE.carol);
+    visit("#/sessions");
+    unmount = render(<App />).unmount;
+
+    const sessions = () => document.querySelector<HTMLElement>('[aria-label="Your sessions"]');
+    await sees("How long it lasts", sessions);
+    await sees("throwaway · goes in", sessions);
+    (await seesButton("Make it persistent", sessions()!)).click();
+    await waitFor(() => quick.lifespan === "persistent", "the plane told");
+    await seesButton("Make it normal", sessions()!);
+    expect(sessions()!.textContent).not.toContain("throwaway · goes in");
+
+    fake.plane.refuseNext("session.lifespan.set", { code: -32004, message: "forbidden", data: { required_role: "owner" } });
+    (await seesButton("Make it throwaway", sessions()!)).click();
+    await sees("How long it lasts was not changed: only the session's owner says how long it lasts.", sessions);
+  });
+
   it("lets a person give their own session to the team and take it back, saying whose it is (troupe #1169)", async () => {
     const sketch = fake.plane.seed(PEOPLE.carol.subject, { id: "s-carol-2", title: "Sketch the retry budget", profile: "ux", visibility: "private" });
     await signedInAs(fake, PEOPLE.carol);

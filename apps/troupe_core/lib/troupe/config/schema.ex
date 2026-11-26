@@ -612,6 +612,15 @@ defmodule Troupe.Config.Schema do
         spec("fake_script", :string, "With `provider: fake`, the file of scripted answers.",
           scope: :trusted,
           field: :fake_script
+        ),
+        spec(
+          "throwaway_erase_after_hours",
+          {:integer, 1},
+          "How many hours after it last worked a throwaway session on this computer is erased, from 1 to 168 (more is 168). " <>
+            "The daemon looks every ten minutes while it runs; a private session is the plane's to erase.",
+          default: 24,
+          scope: :user,
+          field: :throwaway_erase_after_hours
         )
       ]),
       # What a client reads and the daemon does not act on: stored, served and announced

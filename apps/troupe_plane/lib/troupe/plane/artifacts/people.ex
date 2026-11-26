@@ -20,9 +20,9 @@ defmodule Troupe.Plane.Artifacts.People do
 
   import Ecto.Query
 
-  alias Troupe.Plane.Artifacts.{Artifact, Person}
-  alias Troupe.Plane.{Audit, Identity, Repo}
-  alias Troupe.Plane.Identity.User
+  alias Troupe.Plane.Artifacts.{Artifact, Person, PrincipalGrant}
+  alias Troupe.Plane.{Audit, Identity, Principals, Repo}
+  alias Troupe.Plane.Identity.{ServicePrincipal, User}
   alias Troupe.Protocol.Error
 
   @roles ~w(view comment edit)
@@ -42,8 +42,40 @@ defmodule Troupe.Plane.Artifacts.People do
   Share `artifact` with the person `subject` at `role`, by its owner `owner`; naming them
   again changes their role. `not_found` for nobody of that subject, and `invalid_params` for
   the owner themselves or a role that is not one.
+
+  A team's service principal (`svc:<team>/<name>`) is named as a person is, so a trigger's
+  runs, which are its principal's, may publish the next version of an artifact its owner
+  holds alone: the principal must be enabled and of a team the owner is in.
   """
   @spec grant(Artifact.t(), User.t(), String.t(), term()) :: {:ok, map()} | {:error, Error.t()}
+  def grant(%Artifact{} = artifact, %User{} = owner, "svc:" <> _ = subject, role) do
+    with {:ok, role} <- role(role),
+         {:ok, principal} <- principal(subject, owner) do
+      now = DateTime.utc_now()
+
+      Repo.insert_all(
+        PrincipalGrant,
+        [
+          %{
+            artifact_id: artifact.id,
+            principal_id: principal.id,
+            role: role,
+            granted_by: owner.subject,
+            inserted_at: now,
+            updated_at: now
+          }
+        ],
+        on_conflict: [set: [role: role, granted_by: owner.subject, updated_at: now]],
+        conflict_target: [:artifact_id, :principal_id]
+      )
+
+      {:ok, _event} =
+        Audit.record(owner.subject, "artifact.share", artifact.id, %{"person" => subject, "role" => role})
+
+      {:ok, %{"id" => artifact.id, "person" => principal_json(principal, role, owner.subject, now)}}
+    end
+  end
+
   def grant(%Artifact{} = artifact, %User{} = owner, subject, role) when is_binary(subject) do
     with {:ok, role} <- role(role),
          {:ok, person} <- person(subject),
@@ -96,8 +128,38 @@ defmodule Troupe.Plane.Artifacts.People do
 
   defp not_self(_person, _owner), do: :ok
 
+  # An enabled principal of a team the owner is in: a team's credential the owner could have
+  # been, and never one of another team's, which nothing of the owner's is for.
+  defp principal(subject, owner) do
+    with %ServicePrincipal{} = principal <- Principals.get(subject),
+         true <- ServicePrincipal.enabled?(principal),
+         true <- principal.team_id in Enum.map(Identity.teams_for(owner), & &1.id) do
+      {:ok, principal}
+    else
+      _none ->
+        {:error, Error.new(:not_found, %{person: subject, reason: "no principal of that name is in a team of yours"})}
+    end
+  end
+
+  defp principal_json(principal, role, by, at),
+    do: %{
+      "subject" => principal.subject,
+      "display_name" => principal.subject,
+      "email" => nil,
+      "role" => role,
+      "granted_by" => by,
+      "granted_at" => at
+    }
+
   @doc "Take `subject`'s grant on `artifact` away: how many there were (0 or 1)."
   @spec revoke(Artifact.t(), String.t()) :: non_neg_integer()
+  def revoke(%Artifact{id: id}, "svc:" <> _ = subject) do
+    principals = from(p in ServicePrincipal, where: p.subject == ^subject, select: p.id)
+    granted = from(g in PrincipalGrant, where: g.artifact_id == ^id and g.principal_id in subquery(principals))
+    {n, _} = Repo.delete_all(granted)
+    n
+  end
+
   def revoke(%Artifact{id: id}, subject) when is_binary(subject) do
     users = from(u in User, where: u.subject == ^subject, select: u.id)
     {n, _} = Repo.delete_all(from(p in Person, where: p.artifact_id == ^id and p.user_id in subquery(users)))
@@ -108,6 +170,9 @@ defmodule Troupe.Plane.Artifacts.People do
   @spec granted_to(User.t()) :: Ecto.Query.t()
   def granted_to(%User{id: id}) when is_binary(id),
     do: from(p in Person, where: p.user_id == ^id, select: p.artifact_id)
+
+  def granted_to(%User{kind: "service", principal: %ServicePrincipal{id: id}}),
+    do: from(g in PrincipalGrant, where: g.principal_id == ^id, select: g.artifact_id)
 
   def granted_to(_user), do: from(p in Person, where: false, select: p.artifact_id)
 
@@ -121,15 +186,28 @@ defmodule Troupe.Plane.Artifacts.People do
     |> Map.new()
   end
 
+  def roles(ids, %User{kind: "service", principal: %ServicePrincipal{id: id}}) do
+    from(g in PrincipalGrant, where: g.principal_id == ^id and g.artifact_id in ^ids, select: {g.artifact_id, g.role})
+    |> Repo.all()
+    |> Map.new()
+  end
+
   def roles(_ids, _user), do: %{}
 
   @doc "Who `artifact` is shared with by name, by name, with their roles: for its owners."
   @spec list(Artifact.t()) :: [map()]
   def list(%Artifact{id: id}) do
-    from(p in Person, where: p.artifact_id == ^id, preload: :user)
-    |> Repo.all()
-    |> Enum.map(&json(&1.user, &1.role, &1.granted_by, &1.updated_at))
-    |> Enum.sort_by(&String.downcase(&1["display_name"] || &1["subject"]))
+    people =
+      from(p in Person, where: p.artifact_id == ^id, preload: :user)
+      |> Repo.all()
+      |> Enum.map(&json(&1.user, &1.role, &1.granted_by, &1.updated_at))
+
+    principals =
+      from(g in PrincipalGrant, where: g.artifact_id == ^id, preload: :principal)
+      |> Repo.all()
+      |> Enum.map(&principal_json(&1.principal, &1.role, &1.granted_by, &1.updated_at))
+
+    Enum.sort_by(people ++ principals, &String.downcase(&1["display_name"] || &1["subject"]))
   end
 
   defp json(%User{} = user, role, by, at),

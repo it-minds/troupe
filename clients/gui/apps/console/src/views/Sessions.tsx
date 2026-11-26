@@ -14,7 +14,7 @@
 
 import { useState } from "react";
 import type { JSX } from "react";
-import { bytes, nameOrSubject, repositoriesOf, repositoryName } from "@troupe/client";
+import { bytes, lifespanMark, lifespanOf, nameOrSubject, repositoriesOf, repositoryName } from "@troupe/client";
 import type { AdminSessionRow, SessionErasePreview, SessionErased, SessionGitHub, SessionRepository } from "@troupe/client";
 import { recorded, useConsole, useLoad } from "../console";
 import { href } from "../route";
@@ -160,6 +160,7 @@ export function Sessions({ query: initial = "" }: { query?: string } = {}): JSX.
                       <th className="num">Objects</th>
                       <th className="num">Workspace</th>
                       <th>Pinned</th>
+                      <th>Lasts</th>
                       <th>On GitHub</th>
                       <th>Last active</th>
                       <th className="row-actions" aria-label="Actions" />
@@ -219,6 +220,7 @@ function SessionRow({ session: s, busy, onErase }: { session: AdminSessionRow; b
       <td className="num">{bytes(s.object_bytes)}</td>
       <td className="num">{bytes(s.workspace_bytes)}</td>
       <td>{s.pinned ? (s.pinned_by ? `pinned by ${s.pinned_by}` : "pinned") : <span className="muted">no</span>}</td>
+      <td>{lifespanMark({ lifespan: lifespanOf(s.lifespan), erasesAt: s.erases_at ?? null }) ?? <span className="muted">normal</span>}</td>
       <td>
         <OnGitHub repositories={repositoriesOf(s)} />
       </td>

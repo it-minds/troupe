@@ -33,6 +33,7 @@ defmodule Troupe.Instructions.Harness do
   """
   @type open :: %{
           optional(:starting) => [String.t()],
+          optional(:reruns) => [map()],
           file_tools: [String.t()],
           artifact: :open | :none | {:closed, String.t()},
           where: :local | :pod
@@ -45,7 +46,24 @@ defmodule Troupe.Instructions.Harness do
   @doc "The paragraph and what is open in this session after it: the harness layer's text."
   @spec text(open()) :: String.t()
   def text(%{} = open) do
-    Enum.join([@paragraph, "Open in this session:", store_line(open), artifact_line(open), workspace_line(open)], "\n")
+    Enum.join(
+      [@paragraph, "Open in this session:", store_line(open), artifact_line(open), workspace_line(open)] ++
+        rerun_lines(Map.get(open, :reruns, [])),
+      "\n"
+    )
+  end
+
+  # A trigger the person turned on from a proposal here: said, so the agent does not offer
+  # in prose to schedule what already reruns.
+  defp rerun_lines([]), do: []
+
+  defp rerun_lines(reruns) do
+    [
+      "Already scheduled from this session, so do not offer to schedule it again:"
+      | Enum.map(reruns, fn rerun ->
+          "- the trigger `#{rerun["name"]}` reruns \"#{rerun["title"]}\" #{rerun["schedule"]}, each run a new version of it"
+        end)
+    ]
   end
 
   @doc """
@@ -63,7 +81,11 @@ defmodule Troupe.Instructions.Harness do
 
     %{"file_tools" => tools, "artifact" => artifact, "where" => to_string(where)}
     |> Map.merge(starting_json(Map.get(open, :starting, [])))
+    |> Map.merge(reruns_json(Map.get(open, :reruns, [])))
   end
+
+  defp reruns_json([]), do: %{}
+  defp reruns_json(reruns), do: %{"reruns" => Enum.map(reruns, & &1["name"])}
 
   defp starting_json([]), do: %{}
   defp starting_json(servers), do: %{"starting" => servers}

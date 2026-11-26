@@ -15,6 +15,9 @@
     "kind": {
       "type": "string"
     },
+    "lifespan": {
+      "type": "string"
+    },
     "origin": {
       "type": "object"
     },

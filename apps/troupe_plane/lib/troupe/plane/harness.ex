@@ -53,7 +53,7 @@ defmodule Troupe.Plane.Harness do
   alias Troupe.Plane.Identity.User
   alias Troupe.Plane.Memory.InEffect
   alias Troupe.Plane.Provision
-  alias Troupe.Plane.Sessions.{ACL, Session, Share}
+  alias Troupe.Plane.Sessions.{ACL, Lifespan, Session, Share}
   alias Troupe.Plane.Settings
   alias Troupe.Plane.Settings.Ladder
   alias Troupe.Plane.{Tokens, Triggers}
@@ -113,7 +113,7 @@ defmodule Troupe.Plane.Harness do
   # An origin is a label, not a payload.
   @max_origin_bytes 4_096
 
-  @term_keys ~w(budget_micros max_turns wall_clock_seconds approvals)
+  @term_keys ~w(budget_micros max_turns wall_clock_seconds approvals allow)
 
   @typedoc """
   Who is calling, and through which door.
@@ -171,6 +171,11 @@ defmodule Troupe.Plane.Harness do
     "session.title.set" => :control,
     # Given to its team after it started, or taken back: its owner's alone.
     "session.visibility.set" => :control,
+    # How long it lasts, throwaway, normal or persistent: its owner's alone too.
+    "session.lifespan.set" => :control,
+    # A yes to what the harness proposed in it, which makes a trigger for its owner: its
+    # owner's alone, as giving it to the team is.
+    "session.proposal.accept" => :control,
     # Raised to its channel's current bundle version: its owner's, as archiving is.
     "session.bundle.raise" => :control,
     # A GitHub repository attached to a running or dormant session, or taken off: its
@@ -406,7 +411,11 @@ defmodule Troupe.Plane.Harness do
          "server_info" => %{"name" => "troupe-plane", "version" => Build.version()},
          "principal" => me,
          "client_update" => client_update,
-         "policy" => %{"revision" => policy_revision()}
+         "policy" => %{"revision" => policy_revision()},
+         # What this plane takes that one before it did not, so a client offers it only
+         # here: `lifespans`, `session.create`'s `lifespan` and `session.lifespan.set`. A
+         # plane from before them makes every session normal, whatever it was asked.
+         "capabilities" => %{"lifespans" => true}
        }}
     end
   end
@@ -574,6 +583,7 @@ defmodule Troupe.Plane.Harness do
       case Memory.Proposals.propose(user, scope, team, params["append"], opts) do
         {:ok, proposal} -> {:ok, Memory.Proposals.json(proposal)}
         {:error, :off} -> {:error, Error.new(:forbidden, %{reason: Memory.Proposals.off_reason()})}
+        {:error, :throwaway} -> {:error, Error.new(:forbidden, %{reason: Memory.Proposals.throwaway_reason()})}
         {:error, :no_person} -> own_memory(nil)
         {:error, reason} -> invalid(reason)
       end
@@ -827,6 +837,7 @@ defmodule Troupe.Plane.Harness do
       []
       |> put_option(:profile, params["profile"])
       |> put_option(:kind, params["kind"])
+      |> put_option(:lifespan, params["lifespan"])
       |> put_option(:state, params["state"])
       |> put_option(:status, params["status"])
       |> put_option(:origin, params["origin"])
@@ -918,8 +929,10 @@ defmodule Troupe.Plane.Harness do
          answerable = answerable_for(%{origin: origin, owner_subject: user.subject}),
          {:ok, terms} <- terms_for(params["terms"], team, answerable, profile),
          {:ok, held} <- repositories_for(params, profile, team),
+         {:ok, lifespan} <- lifespan_param(params["lifespan"], :create),
          {:ok, session_id} <- session_id_for(params["session_id"]),
          params = Map.put(params, "repositories", held),
+         params = Map.put(params, "lifespan", lifespan),
          params = Map.put(params, "agent", agent),
          {:ok, session} <- create_row(session_id, user, team, profile, params, terms, origin),
          {:ok, _budget} <- reserve_budget(team, session),
@@ -1007,6 +1020,9 @@ defmodule Troupe.Plane.Harness do
           # As visible as its parent and no more, except an import, which is a private
           # session becoming a team one and says so by being asked for.
           "visibility" => if(reason == "import", do: "team", else: parent.visibility),
+          # Normal unless asked: a fork is the way to keep what a throwaway session found,
+          # and a persistent parent's fork is a new session that has not asked to stay.
+          "lifespan" => params["lifespan"],
           # The parent's repositories, checked again against the profile the fork starts on.
           "repository" => lineage(parent, :one),
           "repositories" => lineage(parent, :several),
@@ -1567,6 +1583,30 @@ defmodule Troupe.Plane.Harness do
     end
   end
 
+  # How long it lasts, changed after it started: the owner's alone, as its visibility is,
+  # an administrator's part being to erase it instead. A private session's too, whose row
+  # is what this plane's sweep reads. The pod holding it is told, for the log's line.
+  defp handle("session.lifespan.set", params, %{user: user} = context) do
+    with {:ok, session} <- existing(params["session_id"]),
+         :ok <- owner_alone(session, user, context, "says how long it lasts"),
+         {:ok, lifespan} <- lifespan_param(params["lifespan"], :set),
+         {:ok, updated} <- relive(session, lifespan, user) do
+      {:ok, session_json(updated, user)}
+    end
+  end
+
+  # The owner's yes to a trigger the harness proposed in their pod session: made as the
+  # team's row under the owner's own principal, from the draft the pod holds, with what the
+  # owner changed of its schedule, prompt and budget (`Troupe.Plane.Proposals`). Anybody
+  # else is refused as giving the session to the team is.
+  defp handle("session.proposal.accept", params, %{user: user} = context) do
+    with {:ok, session} <- owned_pod_session(params["session_id"], user, context, "turns on what the harness proposes in it"),
+         {:ok, id} <- proposal_id(params["id"]),
+         {:ok, edits} <- proposal_edits(params["edits"]) do
+      Troupe.Plane.Proposals.accept(user, session, id, edits)
+    end
+  end
+
   # Raised to its channel's current bundle version, by its owner or a holder of the owner
   # role, as archiving is: it changes the session for everybody attached. Never lowered,
   # and never to another version than the current one. The raise is kept on the row until
@@ -1789,9 +1829,9 @@ defmodule Troupe.Plane.Harness do
 
   # The owner's pod session. Anybody else who may see it, a platform administrator among
   # them, is refused saying whose it is to change; to anybody who may not, it is not there.
-  defp owned_pod_session(session_id, user, context) do
+  defp owned_pod_session(session_id, user, context, what \\ "gives it to the team or takes it back") do
     with {:ok, session} <- existing(session_id),
-         :ok <- owner_alone(session, user, context) do
+         :ok <- owner_alone(session, user, context, what) do
       if session.kind == "private",
         do:
           {:error,
@@ -1812,22 +1852,79 @@ defmodule Troupe.Plane.Harness do
     end
   end
 
-  defp owner_alone(%Session{owner_subject: subject}, %User{subject: subject}, _context), do: :ok
+  defp owner_alone(%Session{owner_subject: subject}, %User{subject: subject}, _context, _what), do: :ok
 
-  defp owner_alone(session, user, context) do
+  defp owner_alone(session, user, context, what) do
     if Map.get(context, :platform_admin?, false) or Sessions.role_for(user, session) do
       {:error,
        Error.new(:forbidden, %{
          required_role: "owner",
-         reason: "only the session's owner gives it to the team or takes it back"
+         reason: "only the session's owner #{what}"
        })}
     else
       {:error, Error.new(:not_found, %{session_id: session.id})}
     end
   end
 
+  defp proposal_id(id) when is_binary(id) and id != "", do: {:ok, id}
+  defp proposal_id(_other), do: invalid("id is the proposal's, such as proposal-1")
+
+  defp proposal_edits(nil), do: {:ok, %{}}
+  defp proposal_edits(%{} = edits), do: {:ok, Map.take(edits, ~w(cron prompt_template budget_micros))}
+  defp proposal_edits(_other), do: invalid("edits is an object of cron, prompt_template and budget_micros")
+
   defp visibility_param(visibility) when visibility in ["team", "private"], do: {:ok, visibility}
   defp visibility_param(_other), do: invalid("visibility is team or private")
+
+  # How long a session lasts, at its creation (absent is normal) and when its owner changes it.
+  defp lifespan_param(nil, :create), do: {:ok, "normal"}
+
+  defp lifespan_param(lifespan, _when) do
+    if lifespan in Session.lifespans(),
+      do: {:ok, lifespan},
+      else: invalid("lifespan is throwaway, normal or persistent", field: "lifespan")
+  end
+
+  # Already so: the row, and nothing written.
+  defp relive(%Session{lifespan: lifespan} = session, lifespan, _user), do: {:ok, session}
+
+  defp relive(session, lifespan, user) do
+    case Sessions.set_lifespan(session.id, lifespan) do
+      {:ok, updated} ->
+        {:ok, _audit} =
+          Audit.record(user.subject, "session.lifespan.set", session.id, %{
+            "from" => session.lifespan,
+            "to" => lifespan
+          })
+
+        tell_pod_lifespan(updated, session.lifespan, user)
+        {:ok, updated}
+
+      {:error, reason} ->
+        {:error, Error.new(:internal_error, %{reason: inspect(reason)})}
+    end
+  end
+
+  # Best effort, as the visibility's push is: a dormant session or a private one has no pod
+  # here, and its row is the record.
+  defp tell_pod_lifespan(%Session{worker_id: nil}, _from, _user), do: :ok
+
+  defp tell_pod_lifespan(session, from, user) do
+    case Fleet.get_worker(session.worker_id) do
+      nil ->
+        :ok
+
+      worker ->
+        Router.push(worker, "lifespan.changed", %{
+          "session_id" => session.id,
+          "from" => from,
+          "to" => session.lifespan,
+          "actor" => user.subject
+        })
+
+        :ok
+    end
+  end
 
   defp give_or_take(%Session{visibility: visibility} = session, visibility, _user),
     do: {:ok, session}
@@ -2218,8 +2315,12 @@ defmodule Troupe.Plane.Harness do
          :ok <- in_range(terms, "budget_micros", 1, nil),
          :ok <- in_range(terms, "max_turns", 1, 500),
          :ok <- in_range(terms, "wall_clock_seconds", 60, 86_400),
-         :ok <- one_of(terms, "approvals", ~w(wait deny)) do
+         :ok <- one_of(terms, "approvals", ~w(wait deny)),
+         nil <- Triggers.allow_problem(terms["allow"]) do
       cap_budget(Map.put_new(terms, "approvals", "wait"), team, subject, profile)
+    else
+      reason when is_binary(reason) -> invalid(reason, field: "terms.allow")
+      refused -> refused
     end
   end
 
@@ -3145,6 +3246,7 @@ defmodule Troupe.Plane.Harness do
       team_id: team.id,
       profile: profile,
       visibility: Map.get(params, "visibility", "private"),
+      lifespan: params["lifespan"],
       state: "active",
       epoch: 1,
       title: params["title"],
@@ -4136,9 +4238,11 @@ defmodule Troupe.Plane.Harness do
   defp blank_github(record) when record in [nil, %{}], do: nil
   defp blank_github(record), do: record
 
-  # The terms and origin a pod is handed on activation, from the row.
+  # The terms and origin a pod is handed on activation, from the row, and how long the
+  # session lasts, which its first `session_created` records and a later change does not
+  # rewrite: the log has `session_lifespan_changed` for that, and the row is the word.
   defp session_terms(session) do
-    %{"terms" => session.terms, "origin" => session.origin}
+    %{"terms" => session.terms, "origin" => session.origin, "lifespan" => session.lifespan}
     |> Map.reject(fn {_key, value} -> is_nil(value) end)
     |> Map.put("managed", managed_switches())
   end
@@ -4661,6 +4765,7 @@ defmodule Troupe.Plane.Harness do
   defp session_rows(sessions, user) do
     teams = Sessions.team_names(sessions)
     current = current_versions(sessions)
+    hours = Lifespan.hours()
 
     sessions
     |> Enum.map(fn session ->
@@ -4668,6 +4773,9 @@ defmodule Troupe.Plane.Harness do
       |> session_row(user)
       |> Map.put("team", teams[session.team_id])
       |> Map.put("bundle_current", current[session.profile])
+      # When a throwaway session is erased if nothing keeps it, `null` for any other: what a
+      # client says as "goes in 18 h". Later, never sooner, while it is awake or waits.
+      |> Map.put("erases_at", Lifespan.erases_at(session, hours))
     end)
     |> Names.decorate(@owner_name)
   end
@@ -4691,6 +4799,8 @@ defmodule Troupe.Plane.Harness do
       "kind" => session.kind,
       "device" => session.device,
       "visibility" => session.visibility,
+      # How long it lasts: `throwaway`, `normal` or `persistent`.
+      "lifespan" => session.lifespan,
       # Which configuration this session is pinned to, a version of `bundle_channel`. It
       # does not move when a new version is published: its owner raises it to the current
       # one (`bundle_current`, beside it), or it moves when its version is retired. A

@@ -327,6 +327,86 @@ defmodule Troupe.Client.Remote do
     end
   end
 
+  # How long a pod session lasts, at the plane, whose row its sweep reads (root #1209);
+  # changed, the log's `session_lifespan_changed` follows where a pod holds it.
+  @impl true
+  def lifespan(sid, verb) do
+    case attachment(sid) do
+      %{plane_url: plane} when is_binary(plane) -> lifespan_on(plane, sid, verb)
+      _ -> {:error, message(:not_attached)}
+    end
+  end
+
+  defp lifespan_on(plane, sid, :status) do
+    case call(plane, "session.get", %{session_id: sid}) do
+      {:ok, %{} = row} -> {:ok, Troupe.Client.Lifespan.status(row)}
+      {:error, reason} -> {:error, refusal(reason)}
+    end
+  end
+
+  defp lifespan_on(plane, sid, {:set, word}) do
+    case call(plane, "session.lifespan.set", %{session_id: sid, lifespan: word}) do
+      {:ok, %{} = row} ->
+        {:ok, Troupe.Client.Lifespan.set(row["lifespan"] || word, row["erases_at"])}
+
+      {:error, %{message: "forbidden"} = error} ->
+        {:error, Troupe.Client.Lifespan.forbidden(error[:data])}
+
+      {:error, %{code: -32_601}} ->
+        {:error, Troupe.Client.Lifespan.not_known()}
+
+      {:error, reason} ->
+        {:error, refusal(reason)}
+    end
+  end
+
+  # What the harness proposed in a pod session (root #1208): the open one as its log said
+  # it; a yes at the plane, as this person, which tells the pod; a no to the session.
+  @impl true
+  def proposal(sid, verb) do
+    case {verb, Worker.open_proposal(sid)} do
+      {:status, open} -> {:ok, Troupe.Client.Proposal.status(open)}
+      {_verb, nil} -> {:error, Troupe.Client.Proposal.status(nil)}
+      {:yes, open} -> accept(sid, open)
+      {no, open} -> answer_proposal(sid, open["id"], Atom.to_string(no))
+    end
+  end
+
+  defp accept(sid, open) do
+    case attachment(sid) do
+      %{plane_url: plane} when is_binary(plane) ->
+        case call(plane, "session.proposal.accept", %{session_id: sid, id: open["id"], edits: %{}}) do
+          {:ok, %{} = answer} ->
+            {:ok, Troupe.Client.Proposal.accepted(answer)}
+
+          {:error, %{code: -32_601}} ->
+            {:error, "this plane does not turn on a proposed trigger yet"}
+
+          {:error, %{data: %{"reason" => said}}} when is_binary(said) ->
+            {:error, said}
+
+          {:error, reason} ->
+            {:error, refusal(reason)}
+        end
+
+      _ ->
+        {:error, message(:not_attached)}
+    end
+  end
+
+  defp answer_proposal(sid, id, decision) do
+    said =
+      if decision == "never",
+        do: "not proposed again for this report",
+        else: "not now: not asked again in this session"
+
+    case Worker.answer_proposal(sid, id, decision) do
+      {:error, %{data: %{"reason" => reason}}} when is_binary(reason) -> {:error, reason}
+      {:error, reason} -> {:error, refusal(reason)}
+      _answered -> {:ok, said}
+    end
+  end
+
   # Which configuration a pod session runs on, at the plane, which holds the pin (root
   # #1177); raised, the log's `config_upgraded` follows where a pod holds it.
   @impl true
@@ -771,6 +851,8 @@ defmodule Troupe.Client.Remote do
         # --only-me`) is its owner's and the people they invite, on the team's profile all
         # the same. Never a sealed session, which is this computer's daemon's.
         visibility: params[:visibility] || "team",
+        # How long it lasts, where it is not normal (root #1209).
+        lifespan: if(params[:lifespan] in ["throwaway", "persistent"], do: params[:lifespan]),
         # The GitHub repositories it starts on (`/new --repo`, `troupe run --repo`), each
         # `owner/name` or `{owner, name, ref}`; with none the plane is sent none.
         repositories: repositories_param(params[:repositories]),
@@ -1311,6 +1393,10 @@ defmodule Troupe.Client.Remote do
       # and this person's part in it, which together say "only you".
       visibility: session["visibility"],
       your_role: session["your_role"],
+      # How long it lasts, and when a throwaway one goes (root #1209); normal from a plane
+      # from before lifespans.
+      lifespan: Troupe.Client.Lifespan.of(session),
+      erases_at: session["erases_at"],
       # A plane cannot say how this machine's copy of a private session stands, only that
       # it is waiting to be erased (root Decision 756).
       sync: if(session["state"] == "erasure_pending", do: "erasure_pending"),

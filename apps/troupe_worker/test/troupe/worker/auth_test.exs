@@ -80,6 +80,7 @@ defmodule Troupe.Worker.AuthTest do
     "session.pin",
     "session.unpin",
     "session.title.set",
+    "session.lifespan.set",
     "session.erase",
     "session.fork"
   ]

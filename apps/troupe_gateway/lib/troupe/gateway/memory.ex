@@ -376,25 +376,37 @@ defmodule Troupe.Gateway.Memory do
   Where `remember` with `level: "team"` or `"organisation"` sends its proposal on this
   machine (`Troupe.UserMemory.propose/4`): the plane's `me.memory.propose`, as this daemon's
   person, naming the session and the agent so the decision can be told to it, and the team
-  where the agent named one. A session under Local only sends nothing, and says so.
+  where the agent named one. A session under Local only sends nothing, and says so; nor does a
+  throwaway one, which says why (#1209).
   """
   @spec propose(String.t(), Troupe.Tool.Ctx.t(), String.t(), map()) ::
           {:ok, map()} | {:error, :signed_out | String.t()}
   def propose(entry, ctx, level, opts) do
-    if LocalOnly.session?(ctx.session_id) do
-      {:error, local_only()}
-    else
-      params =
-        %{"scope" => level, "append" => entry, "session" => ctx.session_id, "agent" => agent(ctx)}
-        |> Map.merge(Map.reject(Map.take(opts, ["topic", "team"]), fn {_key, value} -> is_nil(value) end))
+    cond do
+      LocalOnly.session?(ctx.session_id) ->
+        {:error, local_only()}
 
-      with {:ok, _url} <- signed_in(),
-           {:ok, kept} <- plane_call("me.memory.propose", params) do
-        {:ok, Map.take(kept, ~w(id topic team entry state))}
-      else
-        {:error, :signed_out} -> {:error, :signed_out}
-        {:error, reason} -> {:error, sentence(reason)}
-      end
+      # A throwaway session on this computer, which this daemon erases; a private one's row
+      # at the plane says so too, and the plane refuses it in the same words.
+      Troupe.Sessions.Lifespan.of(ctx.session_id) == "throwaway" ->
+        {:error, Troupe.Protocol.Lifespan.no_proposals()}
+
+      true ->
+        send_proposal(entry, ctx, level, opts)
+    end
+  end
+
+  defp send_proposal(entry, ctx, level, opts) do
+    params =
+      %{"scope" => level, "append" => entry, "session" => ctx.session_id, "agent" => agent(ctx)}
+      |> Map.merge(Map.reject(Map.take(opts, ["topic", "team"]), fn {_key, value} -> is_nil(value) end))
+
+    with {:ok, _url} <- signed_in(),
+         {:ok, kept} <- plane_call("me.memory.propose", params) do
+      {:ok, Map.take(kept, ~w(id topic team entry state))}
+    else
+      {:error, :signed_out} -> {:error, :signed_out}
+      {:error, reason} -> {:error, sentence(reason)}
     end
   end
 

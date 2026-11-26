@@ -99,10 +99,12 @@ export function fromCheckpoint(checkpoint: DurableEvent, base: TranscriptState =
   const waiting = [
     ...(Array.isArray(facts["open_approvals"]) ? facts["open_approvals"] : []).map((a) => asked("approval_requested", a, checkpoint.ts)),
     ...(Array.isArray(facts["open_questions"]) ? facts["open_questions"] : []).map((q) => asked("question_asked", q, checkpoint.ts)),
+    // What the harness offered the owner and nobody answered (troupe #1208), drawn as it was.
+    ...(Array.isArray(facts["open_proposals"]) ? facts["open_proposals"] : []).map((p) => asked("proposal_made", p, checkpoint.ts)),
   ]
     .filter((e): e is DurableEvent => e !== null)
     .sort((a, b) => a.seq - b.seq);
-  const history: EarlierState = { through, from: through + 1, more: through > 0, events: [], drawn: 0, late: [], seeded: waiting.map((e) => String(e.data["call_id"] ?? "")) };
+  const history: EarlierState = { through, from: through + 1, more: through > 0, events: [], drawn: 0, late: [], seeded: waiting.map((e) => String(e.data["call_id"] ?? e.data["id"] ?? "")) };
   const start: TranscriptState = {
     ...emptyTranscript,
     pending: base.pending,
@@ -126,6 +128,7 @@ export function fromCheckpoint(checkpoint: DurableEvent, base: TranscriptState =
     loop: loopOf(facts["loop"]),
     scratch: scratchOf(facts["scratch"], checkpoint.ts),
     ...(text(facts["visibility"]) ? { visibility: text(facts["visibility"]) } : {}),
+    ...(text(facts["lifespan"]) ? { lifespan: text(facts["lifespan"]) } : {}),
     earlier: history,
   };
   // The waiting ones are drawn as the events that asked them are, and only here: the
@@ -147,7 +150,7 @@ export function withEarlier(state: TranscriptState, page: readonly DurableEvent[
   const events = [...fresh, ...earlier.events];
   const seeded = new Set(earlier.seeded);
   const drawn = foldMany(emptyTranscript, [...events, ...earlier.late]).entries.filter(
-    (en) => !((en.kind === "approval" || en.kind === "question") && seeded.has(en.callId)),
+    (en) => !(((en.kind === "approval" || en.kind === "question") && seeded.has(en.callId)) || (en.kind === "proposal" && seeded.has(en.id))),
   );
   return {
     ...state,

@@ -46,6 +46,9 @@ defmodule Troupe.Plane.Triggers.Revision do
     field(:prompt_template, :string, default: "")
     field(:terms, :map, default: %{})
     field(:visibility, :string, default: "team")
+    # How long the sessions it makes last: `normal` unless the trigger asked `throwaway` or
+    # `persistent`. A throwaway run is not erased before it is reviewed.
+    field(:lifespan, :string, default: "normal")
     field(:review, :string, default: "required")
     field(:notify, {:array, :string}, default: [])
     field(:concurrency, :integer, default: 1)
@@ -73,8 +76,16 @@ defmodule Troupe.Plane.Triggers.Revision do
   """
   @spec document(Trigger.t() | t()) :: map()
   def document(%{} = struct) do
-    Map.new(@document, fn field -> {Atom.to_string(field), Map.fetch!(struct, field)} end)
+    @document
+    |> Map.new(fn field -> {Atom.to_string(field), Map.fetch!(struct, field)} end)
+    |> lasting(Map.get(struct, :lifespan))
   end
+
+  # How long its runs' sessions last (#1209), in the document only where it is not normal:
+  # every trigger from before it is normal, and a document that gained the field would
+  # hash differently and make a new revision of every one of them at its next put.
+  defp lasting(document, lifespan) when lifespan in [nil, "normal"], do: document
+  defp lasting(document, lifespan), do: Map.put(document, "lifespan", lifespan)
 
   @doc """
   The `sha256:` hash of a trigger's or a revision's document.
@@ -92,7 +103,7 @@ defmodule Troupe.Plane.Triggers.Revision do
     revision
     |> cast(
       attrs,
-      [:trigger_id, :revision, :hash, :reconstructed, :created_by | @document]
+      [:trigger_id, :revision, :hash, :reconstructed, :created_by, :lifespan | @document]
     )
     |> validate_required([:trigger_id, :revision, :hash, :profile, :principal_id])
     |> unique_constraint([:trigger_id, :revision])

@@ -82,7 +82,7 @@ defmodule Troupe.Gateway.Private do
   alias Troupe.KMS
   alias Troupe.ObjectStore.Signed
   alias Troupe.Protocol.Event
-  alias Troupe.Sessions.{Context, Sealer}
+  alias Troupe.Sessions.{Context, Lifespan, Sealer}
 
   require Logger
 
@@ -643,6 +643,9 @@ defmodule Troupe.Gateway.Private do
     params =
       %{"session_id" => session_id, "device" => device(opts), "title" => opts[:title]}
       |> then(&if(opts[:epoch], do: Map.put(&1, "epoch", opts[:epoch]), else: &1))
+      # How long it lasts, which the plane keeps on the row its first registration makes
+      # and its sweep reads: a throwaway private session is erased there (#1209).
+      |> Map.put("lifespan", Lifespan.of(session_id))
 
     Plane.call("session.register", params, plane)
   end

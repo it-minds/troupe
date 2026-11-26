@@ -71,6 +71,8 @@ import type { Load } from "../console";
 import { href } from "../route";
 import { Empty, Loaded } from "./bits";
 import { CopySessionLink } from "./SessionLink";
+import { ProposalItem } from "./Proposal";
+import type { ProposalActions } from "./Proposal";
 
 interface RemoteRow {
   id: string;
@@ -401,7 +403,7 @@ export function RemoteSession({ id, pod }: { id: string; pod?: { mode: "read" | 
   const attachment = useRef<SessionAttachment | null>(null);
 
   // Whose a pod session is, as its row says, until its log says its owner changed it (troupe #1169).
-  const [podRow, setPodRow] = useState<{ visibility: string; team: string | null } | null>(null);
+  const [podRow, setPodRow] = useState<{ visibility: string; team: string | null; owner?: string } | null>(null);
 
   useEffect(() => {
     if (!pod) return;
@@ -412,7 +414,7 @@ export function RemoteSession({ id, pod }: { id: string; pod?: { mode: "read" | 
       .catch(() => undefined);
     auth
       .withToken((plane, token) => plane.getSession(token, id))
-      .then((r) => live && setPodRow({ visibility: r.visibility, team: r.team ?? null }))
+      .then((r) => live && setPodRow({ visibility: r.visibility, team: r.team ?? null, owner: r.owner }))
       .catch(() => undefined);
     return () => {
       live = false;
@@ -533,8 +535,25 @@ export function RemoteSession({ id, pod }: { id: string; pod?: { mode: "read" | 
       e.kind === "tool" ||
       e.kind === "earlier" ||
       (e.kind === "approval" && e.decision !== undefined) ||
-      (e.kind === "question" && e.answer !== undefined),
+      (e.kind === "question" && e.answer !== undefined) ||
+      e.kind === "proposal",
   );
+  // What the harness proposes is the pod session's owner's to answer (troupe #1208): a yes
+  // to the plane as them, a no to the session.
+  const owner = Boolean(pod) && podRow?.owner === me.subject;
+  const proposals: ProposalActions | undefined =
+    owner && steer
+      ? {
+          accept: async (proposal, edits) => {
+            await auth.withToken((plane, token) => plane.acceptProposal(token, id, proposal, edits));
+          },
+          answer: async (proposal, decision) => {
+            const a = attachment.current;
+            if (!a) throw new Error("the session is not open yet");
+            await a.view.answerProposal(proposal, decision);
+          },
+        }
+      : undefined;
   const folder = row?.workspace ?? null;
 
   return (
@@ -605,6 +624,8 @@ export function RemoteSession({ id, pod }: { id: string; pod?: { mode: "read" | 
                   <li key={e.seq} className="decision answered">
                     Asked: {e.question} · answered: {e.answer}
                   </li>
+                ) : e.kind === "proposal" ? (
+                  <ProposalItem key={`proposal-${e.id}`} entry={e} mine={owner} actions={proposals} />
                 ) : null,
               )}
               {state.streaming !== "" && <li className="agent streaming">{state.streaming}</li>}

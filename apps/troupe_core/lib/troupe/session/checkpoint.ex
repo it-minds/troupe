@@ -186,6 +186,11 @@ defmodule Troupe.Session.Checkpoint do
 
   # -- the facts ----------------------------------------------------------------
 
+  # How long the session lasts, once its log has said: absent is normal, and a fact only a
+  # log that says it carries, so a checkpoint written before lifespans folds as it did.
+  defp lasting(f, lifespan) when is_binary(lifespan), do: Map.put(f, "lifespan", lifespan)
+  defp lasting(f, _none), do: f
+
   # When the session began is when it was created: a fork carries its parent's creation
   # with the rest of its history, and says when it was forked in `session_forked`.
   defp facts(f, %Event{type: "session_created", ts: ts, data: data}) do
@@ -199,10 +204,13 @@ defmodule Troupe.Session.Checkpoint do
       "owner_name" => data["owner_name"],
       "bundle_version" => data["bundle_version"] || f["bundle_version"]
     })
+    |> lasting(data["lifespan"])
   end
 
   defp facts(f, %Event{type: "session_visibility_changed", data: data}),
     do: %{f | "visibility" => data["visibility"]}
+
+  defp facts(f, %Event{type: "session_lifespan_changed", data: data}), do: lasting(f, data["to"])
 
   defp facts(f, %Event{type: "config_upgraded", data: data}),
     do: %{f | "bundle_version" => data["to"] || f["bundle_version"]}
@@ -332,6 +340,18 @@ defmodule Troupe.Session.Checkpoint do
   defp facts(f, %Event{type: type, data: data})
        when type in ["question_answered", "budget_ask_answered", "tool_failures_ask_answered"],
        do: %{f | "open_questions" => close(f["open_questions"], [data["call_id"]])}
+
+  # What the harness offered the owner and nobody has answered: never waited for, so in
+  # neither list above, and here only so a client attaching late can still show it. A log
+  # that never had a proposal has no such fact, as the facts of a session written before
+  # there were proposals have none: absent is an empty list.
+  defp facts(f, %Event{type: "proposal_made", seq: seq, data: data}) do
+    open = f |> Map.get("open_proposals", []) |> Enum.reject(&(&1["id"] == data["id"]))
+    Map.put(f, "open_proposals", open ++ [%{"id" => data["id"], "seq" => seq, "agent" => ["root"], "data" => data}])
+  end
+
+  defp facts(f, %Event{type: "proposal_answered", data: data}),
+    do: Map.put(f, "open_proposals", f |> Map.get("open_proposals", []) |> Enum.reject(&(&1["id"] == data["id"])))
 
   # A call that ended takes what it waited on with it: a cancel closes each call it stops
   # so, and so does a tool that timed out waiting; and a delegation waited for is over.

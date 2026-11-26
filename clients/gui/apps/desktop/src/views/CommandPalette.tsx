@@ -30,7 +30,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { JSX } from "react";
-import type { AgentLayer, AgentRow, CommandEntry } from "@troupe/client";
+import type { AgentLayer, AgentRow, CommandEntry, Lifespan } from "@troupe/client";
 import { ErrorCodes, TroupeRpcError, errorText } from "@troupe/client";
 import { copyText } from "../clipboard";
 import type { SessionHandle } from "../hooks";
@@ -106,6 +106,11 @@ export interface PaletteActions {
    * back (troupe #1169); `null` asks whose it is. A sentence back is a notice.
    */
   share?: ((to: "team" | "private" | null) => Promise<string | undefined>) | undefined;
+  /**
+   * `/lifespan throwaway|normal|persistent`: how long this session lasts, its owner's to
+   * change (troupe #1209); `null` asks what it is. A sentence back is a notice.
+   */
+  lifespan?: ((to: Lifespan | null) => Promise<string | undefined>) | undefined;
 }
 
 interface RunContext extends PaletteActions {
@@ -210,6 +215,12 @@ const RUNNERS: Record<string, (ctx: RunContext, args: string) => Promise<string 
     if (args === "team") return share("team");
     if (args === "me") return share("private");
     return `unknown /share ${args}; use /share team, /share me or /share alone`;
+  },
+  lifespan: ({ lifespan }, args) => {
+    if (!lifespan) return "this session's lifespan cannot be changed from here";
+    if (args === "") return lifespan(null);
+    if (args === "throwaway" || args === "normal" || args === "persistent") return lifespan(args);
+    return `unknown /lifespan ${args}; use /lifespan throwaway, normal or persistent, or /lifespan alone`;
   },
 };
 

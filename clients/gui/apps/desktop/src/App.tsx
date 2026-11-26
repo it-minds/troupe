@@ -14,7 +14,7 @@ import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "rea
 import type { JSX } from "react";
 import { PlaneOwn, appLink, awaitingYou, onThisComputer, planeAddress } from "@troupe/client";
 import type { AuthSession, FleetRow, OwnPlane, SessionKind } from "@troupe/client";
-import { useAdmin, useArchived, useDaemon, useFleet, useMarks } from "./hooks";
+import { useAdmin, useArchived, useDaemon, useFleet, useLifespans, useMarks } from "./hooks";
 import { useUpdates } from "./updates";
 import { UpdateBanner } from "./views/Update";
 import { Agents } from "./views/Agents";
@@ -253,6 +253,7 @@ export function App(): JSX.Element {
   const { snapshot, store, refresh } = useFleet(planeAuth, daemon.client);
   const archived = useArchived(store, planeAuth, daemon.client);
   const marks = useMarks(store, planeAuth, daemon.client);
+  const lifespans = useLifespans(planeAuth, daemon.client);
   // Not known while the daemon is still being found, or has not answered its first list.
   const daemonUnheard = daemon.status === "searching" || (daemon.client !== null && !snapshot.sources["daemon"]);
   rowsNow.current = daemonUnheard ? null : snapshot.rows;
@@ -798,6 +799,7 @@ export function App(): JSX.Element {
               onClaim={claim}
               archived={archived}
               marks={marks}
+              lifespans={lifespans}
             />
           )}
 
