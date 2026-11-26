@@ -76,7 +76,7 @@ export const COMMANDS: CommandEntry[] = [
     args: [arg("off", false, "text")],
     availability: "always",
     source: "builtin",
-    detail: "Its owner's to do. Kept, it is listed first, for everyone who sees it, and the platform does not clear it away when it is old. /keep off lets it go from the top.",
+    detail: "Its owner's to do. Kept, it is listed first, for everyone who sees it; how long it lasts is /lifespan's. /keep off lets it go from the top.",
     example: "/keep",
   },
   {
@@ -91,6 +91,19 @@ export const COMMANDS: CommandEntry[] = [
     detail:
       "Its owner's to do, for a session on the platform. /share team gives it to the team it runs for: everyone on the team can open it, and steer it where the team allows. /share me takes it back: only you and the people you invited can open it, and the invitations stay as they were. /share alone says whose it is.",
     example: "/share team",
+  },
+  {
+    name: "lifespan",
+    aliases: [],
+    section: "session",
+    summary: "Say how long this session lasts, or change it",
+    usage: "/lifespan [throwaway | normal | persistent]",
+    args: [arg("lifespan", false, "text")],
+    availability: "always",
+    source: "builtin",
+    detail:
+      "Its owner's to do. Throwaway is erased a day after it goes quiet, unless it is awake, waits on you or is kept at the top; normal stays until you erase it; persistent is kept until you erase it, and nothing else clears it away. /lifespan alone says which this session is.",
+    example: "/lifespan persistent",
   },
   {
     name: "cancel",

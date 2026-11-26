@@ -186,6 +186,11 @@ defmodule Troupe.Session.Checkpoint do
 
   # -- the facts ----------------------------------------------------------------
 
+  # How long the session lasts, once its log has said: absent is normal, and a fact only a
+  # log that says it carries, so a checkpoint written before lifespans folds as it did.
+  defp lasting(f, lifespan) when is_binary(lifespan), do: Map.put(f, "lifespan", lifespan)
+  defp lasting(f, _none), do: f
+
   # When the session began is when it was created: a fork carries its parent's creation
   # with the rest of its history, and says when it was forked in `session_forked`.
   defp facts(f, %Event{type: "session_created", ts: ts, data: data}) do
@@ -199,10 +204,13 @@ defmodule Troupe.Session.Checkpoint do
       "owner_name" => data["owner_name"],
       "bundle_version" => data["bundle_version"] || f["bundle_version"]
     })
+    |> lasting(data["lifespan"])
   end
 
   defp facts(f, %Event{type: "session_visibility_changed", data: data}),
     do: %{f | "visibility" => data["visibility"]}
+
+  defp facts(f, %Event{type: "session_lifespan_changed", data: data}), do: lasting(f, data["to"])
 
   defp facts(f, %Event{type: "config_upgraded", data: data}),
     do: %{f | "bundle_version" => data["to"] || f["bundle_version"]}

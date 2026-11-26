@@ -395,6 +395,12 @@ export interface TranscriptState {
    */
   visibility?: string | undefined;
   /**
+   * How long the session lasts (troupe #1209), from `session_created` and then
+   * `session_lifespan_changed`: `throwaway`, `normal` or `persistent`; undefined until the
+   * log says, when the session's row is the word.
+   */
+  lifespan?: string | undefined;
+  /**
    * A laptop's session steered through the plane, while its laptop is away and once it is
    * back (troupe #932): `offer_paused` says why it went (`stopped`, its daemon said it was
    * stopping; `offline`, it went without a word, asleep or out of reach) and since when,
@@ -1026,6 +1032,18 @@ function visibilityChangedText(d: DurableEvent): string {
   return d.data["visibility"] === "team"
     ? `${who} gave this session to the team: everyone on it can open it`
     : `${who} took this session back from the team: only they and the people invited can open it`;
+}
+
+/** How long the session lasts, changed, as one line: what it is now and what that means. */
+function lifespanChangedText(d: DurableEvent): string {
+  switch (d.data["to"]) {
+    case "throwaway":
+      return "This session is throwaway now: it is erased a while after it goes quiet";
+    case "persistent":
+      return "This session is persistent now: it is kept until its owner erases it";
+    default:
+      return "This session is normal now: it stays until its owner erases it";
+  }
 }
 
 function systemText(d: DurableEvent): string {
@@ -1788,6 +1806,12 @@ function foldOne(state: TranscriptState, e: TroupeEvent, options: FoldOptions = 
       return { ...next, visibility, entries: [...state.entries, { kind: "system", ...base, type: d.type, text: visibilityChangedText(d) }] };
     }
 
+    // Its owner changed how long it lasts (troupe #1209): one line, and the word for the head.
+    case "session_lifespan_changed": {
+      const lifespan = str(d.data["to"]) || undefined;
+      return { ...next, lifespan, entries: [...state.entries, { kind: "system", ...base, type: d.type, text: lifespanChangedText(d) }] };
+    }
+
     // A reply the output cap cut, or one with nothing in it (troupe-remote Decision 659).
     case "truncated":
       return { ...next, entries: [...state.entries, { kind: "system", ...base, type: d.type, text: truncatedText(d) }] };
@@ -1917,6 +1941,7 @@ function foldOne(state: TranscriptState, e: TroupeEvent, options: FoldOptions = 
         ...next,
         profile: str(d.data["profile"]) || next.profile,
         bundleVersion: str(d.data["bundle_version"]) || next.bundleVersion,
+        lifespan: str(d.data["lifespan"]) || next.lifespan,
         entries: [...state.entries, { kind: "system", ...base, type: d.type, text: systemText(d) }],
       };
 

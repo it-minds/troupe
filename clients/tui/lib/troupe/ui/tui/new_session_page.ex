@@ -82,6 +82,9 @@ defmodule Troupe.UI.TUI.NewSessionPage do
       # `/new --only-me`: on the platform, its owner's and the people they invite until it
       # is shared, on the team's profile and budget all the same.
       only_me: Keyword.get(opts, :only_me, false),
+      # `/new --throwaway` or `--persistent` (root #1209): how long it lasts, said at the
+      # sentence's end and sent with the create; nil is normal, and sends nothing.
+      lifespan: Keyword.get(opts, :lifespan),
       # `/new --repo owner/name[@ref]`: the GitHub repositories a session on the platform
       # starts on, said on the sentence and sent with the create (root #1207).
       repositories: Keyword.get(opts, :repositories, []),
@@ -734,7 +737,8 @@ defmodule Troupe.UI.TUI.NewSessionPage do
            prompt: r.cleaned,
            title: title,
            worktree: "never",
-           private: page.private
+           private: page.private,
+           lifespan: page.lifespan
          }}
 
       :platform ->
@@ -746,6 +750,7 @@ defmodule Troupe.UI.TUI.NewSessionPage do
            title: title,
            team: r.team || page.team,
            visibility: NewSession.visibility(page.only_me),
+           lifespan: page.lifespan,
            repositories: r.repositories
          }}
     end
@@ -1045,9 +1050,13 @@ defmodule Troupe.UI.TUI.NewSessionPage do
       middle,
       Span.new(on_repositories(r.repositories) <> " as "),
       chip.(2, r.agent_label, nil)
-      | who_spans(r, chip)
+      | who_spans(r, chip) ++ lasts_spans(page.lifespan)
     ])
   end
+
+  # How long it lasts, where `/new` said: the picker's word and what it means.
+  defp lasts_spans(nil), do: []
+  defp lasts_spans(lifespan), do: [Span.new(" · " <> NewSession.lifespan_words(lifespan))]
 
   # What `--repo` named, after the profile: the first and how many more.
   defp on_repositories([]), do: ""

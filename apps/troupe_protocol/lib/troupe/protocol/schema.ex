@@ -55,7 +55,10 @@ defmodule Troupe.Protocol.Schema do
         "agent_rule" => optional(:object),
         "origin" => optional(:object),
         # The session this one was made as a branch of, when a client said so.
-        "parent" => optional(:string)
+        "parent" => optional(:string),
+        # How long it lasts, where whoever made it said: `throwaway`, `normal` or
+        # `persistent`; absent is normal.
+        "lifespan" => optional(:string)
       },
       # The child's first event, and the only place the lineage is written down in the log.
       # `parent` carries the id, the seq forked at and the parent's head hash there, so a
@@ -713,6 +716,13 @@ defmodule Troupe.Protocol.Schema do
         "by" => required(:string),
         "by_name" => optional(:string)
       },
+      # How long the session lasts, changed by its owner after it started: what it was,
+      # what it is now, and who said so.
+      "session_lifespan_changed" => %{
+        "from" => optional(:string),
+        "to" => required(:string),
+        "actor" => required(:string)
+      },
       # A comment written on an artifact this session published, from the plane: the
       # artifact, who wrote it and what. Somebody else's words, never input to an agent.
       "artifact_commented" => %{
@@ -864,7 +874,9 @@ defmodule Troupe.Protocol.Schema do
         "parent" => optional(:string),
         "workflow" => optional(:string),
         "private" => optional(:boolean),
-        "title" => optional(:string)
+        "title" => optional(:string),
+        # How long it lasts: `throwaway`, `normal` (absent) or `persistent`.
+        "lifespan" => optional(:string)
       },
       "session.archive" => %{
         "command_id" => required(:string),
@@ -928,6 +940,13 @@ defmodule Troupe.Protocol.Schema do
       "session.visibility.set" => %{
         "session_id" => required(:string),
         "visibility" => required(:string)
+      },
+      # How long a session lasts (`throwaway`, `normal` or `persistent`), changed by its
+      # owner: the plane's for a session it has a row of, a daemon's for one on its computer.
+      "session.lifespan.set" => %{
+        "command_id" => optional(:string),
+        "session_id" => required(:string),
+        "lifespan" => required(:string)
       },
       # A pod session raised to its channel's current bundle version by its owner: the
       # plane's, which the clients ask directly.

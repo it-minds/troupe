@@ -30,6 +30,7 @@ defmodule Troupe.Plane.Triggers.Trigger do
 
   alias Troupe.Plane.GitHub.Issue
   alias Troupe.Plane.Triggers.{Cron, Notify, Source}
+  alias Troupe.Protocol.Lifespan
 
   @primary_key {:id, :binary_id, autogenerate: true}
   @foreign_key_type :binary_id
@@ -56,6 +57,9 @@ defmodule Troupe.Plane.Triggers.Trigger do
     field(:prompt_template, :string, default: "")
     field(:terms, :map, default: %{})
     field(:visibility, :string, default: "team")
+    # How long the sessions its runs make last (#1209): `normal` unless asked. A throwaway
+    # run is not erased before somebody has reviewed it.
+    field(:lifespan, :string, default: "normal")
     field(:review, :string, default: "required")
     field(:notify, {:array, :string}, default: [])
     field(:notify_url, :string)
@@ -98,6 +102,7 @@ defmodule Troupe.Plane.Triggers.Trigger do
     :prompt_template,
     :terms,
     :visibility,
+    :lifespan,
     :review,
     :notify,
     :notify_url,
@@ -151,6 +156,9 @@ defmodule Troupe.Plane.Triggers.Trigger do
       message: "is lowercase letters, digits and dashes"
     )
     |> validate_inclusion(:visibility, @visibilities)
+    |> validate_inclusion(:lifespan, Lifespan.words(),
+      message: "is throwaway, normal or persistent"
+    )
     |> validate_inclusion(:review, @reviews)
     |> validate_number(:concurrency, greater_than: 0, less_than_or_equal_to: 100)
     |> validate_length(:prompt_template, max: 65_536)

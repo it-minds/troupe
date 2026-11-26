@@ -57,6 +57,12 @@ import {
   remoteWhen,
   updateLine,
   versionOf,
+  LIFESPAN_CHOICES,
+  lifespanItem,
+  lifespanMark,
+  lifespanOf,
+  lifespanRefusal,
+  throwawaySentence,
 } from "@troupe/client";
 import type {
   Artifact,
@@ -66,6 +72,7 @@ import type {
   DaemonClient,
   Entry,
   FleetRow,
+  Lifespan,
   LoopInfo,
   OwnPlane,
   ScratchDocument,
@@ -74,7 +81,7 @@ import type {
   SessionView,
   TranscriptState,
 } from "@troupe/client";
-import { useSessionView, useStartQuestions, useTeams } from "../hooks";
+import { useLifespans, useSessionView, useStartQuestions, useTeams } from "../hooks";
 import { useNarrow } from "../narrow";
 import type { Marks, SessionHandle } from "../hooks";
 import { curtainLine, curtainUp, DEFAULT_DETAIL, isDetail, layout, waitingOn, waitingWords } from "../frames";
@@ -325,6 +332,44 @@ export function Session({
           }
         }
       : undefined;
+  // How long it lasts (troupe #1209): the answer to a change made here until the log says
+  // it too, then the log's word, else the row's. Its owner changes it from the ⋯, where the
+  // server knows lifespans; a throwaway one's head offers Erase now and Keep it.
+  const lifespans = useLifespans(auth, daemon);
+  const [lived, setLived] = useState<{ lifespan: Lifespan; seen: string | undefined } | null>(null);
+  const [lifespanError, setLifespanError] = useState<string | null>(null);
+  useEffect(() => {
+    setLived(null);
+    setLifespanError(null);
+  }, [sessionId]);
+  const lifespan: Lifespan = lived && view.state.lifespan === lived.seen ? lived.lifespan : lifespanOf(view.state.lifespan ?? row?.lifespan);
+  const relive =
+    marking && lifespans(marking.row.kind)
+      ? async (to: Lifespan): Promise<string | null> => {
+          setLifespanError(null);
+          try {
+            await marking.marks.relive(marking.row, to);
+            setLived({ lifespan: to, seen: view.state.lifespan });
+            return null;
+          } catch (e) {
+            const why = lifespanRefusal(e);
+            setLifespanError(why);
+            return why;
+          }
+        }
+      : undefined;
+  const eraseNow =
+    marking && lifespan === "throwaway"
+      ? async (): Promise<void> => {
+          setLifespanError(null);
+          try {
+            await marking.marks.erase(marking.row);
+            onBack();
+          } catch (e) {
+            setLifespanError(`It was not erased: ${errorText(e)}.`);
+          }
+        }
+      : undefined;
   // Which configuration a pod session runs on (troupe #1177): the log's version once it
   // names one, else the row's, beside the version its channel would start a session on now.
   // Its owner updates it from the panel; a raise kept while the agent works says so there.
@@ -527,6 +572,14 @@ export function Session({
               },
             }
           : {}),
+        lifespan: async (to: Lifespan | null) => {
+          const mark = lifespanMark({ lifespan, erasesAt: row?.erasesAt ?? null }) ?? "normal";
+          if (to === null) return `this session is ${mark}`;
+          if (!relive) return "only its owner says how long this session lasts, where its server knows lifespans";
+          if (lifespan === to) return `this session is ${to} already`;
+          const why = await relive(to);
+          return why ?? `this session is ${to} now`;
+        },
       }}
     />
   ) : null;
@@ -546,6 +599,7 @@ export function Session({
         agent={current}
         onBack={onBack}
         renaming={rename && renaming ? { onRename: async (title) => void (await rename(title)), onDone: () => setRenaming(false) } : null}
+        lasts={lifespan === "persistent" ? "persistent" : null}
         invites={row ? <InviteControl auth={auth} daemon={daemon} row={row} /> : null}
         remoteLine={row?.kind === "remote" ? <RemoteLine row={row} /> : null}
         menu={
@@ -566,6 +620,7 @@ export function Session({
             onRename={rename ? () => setRenaming(true) : undefined}
             onKeep={keep ? (on) => void keep(on) : undefined}
             sharing={share && (visibility === "team" || visibility === "private") ? { visibility, team, onShare: (to) => void share(to) } : undefined}
+            living={relive ? { lifespan, onRelive: (to) => void relive(to) } : undefined}
             whose={whose}
             remote={
               row && daemon && auth && (row.kind === "local" || row.kind === "private") ? (
@@ -603,6 +658,14 @@ export function Session({
       {shareError && (
         <div className="banner error" role="alert">
           <p>{shareError}</p>
+        </div>
+      )}
+      {lifespan === "throwaway" && !row?.archived && (
+        <Throwaway erasesAt={row?.erasesAt ?? null} onErase={eraseNow} onKeep={relive ? () => void relive("normal") : undefined} />
+      )}
+      {lifespanError && (
+        <div className="banner error" role="alert">
+          <p>{lifespanError}</p>
         </div>
       )}
       {raiseError && (
@@ -956,6 +1019,7 @@ function Header({
   agent,
   onBack,
   renaming,
+  lasts,
   invites,
   remoteLine,
   menu,
@@ -969,6 +1033,8 @@ function Header({
   onBack: () => void;
   /** The title as a field while it is being renamed, from the ⋯ or /rename; null otherwise. */
   renaming?: { onRename: (title: string) => Promise<void>; onDone: () => void } | null;
+  /** `persistent`, the head's mark of a session kept until erased; null otherwise, a throwaway one's line under the head saying it whole. */
+  lasts?: string | null;
   /** Whom it is shared with by name, and for its owner the invitation (troupe #765). */
   invites?: JSX.Element | null;
   /** Whose laptop a relayed session is on. */
@@ -1002,6 +1068,13 @@ function Header({
             {/* How a private session's sealing stands here, as its row in the list says. */}
             <Sync state={row.sync} device={row.device} />
           </>
+        )}
+        {/* Before the profile and the agent, which the composer says too, so a narrow head
+            clips those and not this. */}
+        {lasts && (
+          <span className="tag lasts" title={lasts === "persistent" ? "Kept until its owner erases it" : "Erased a while after it goes quiet, unless somebody keeps it"}>
+            {lasts}
+          </span>
         )}
         {row?.kind === "team" && row.profile && (
           <span className="tag" title="The plane profile this session runs on; a session keeps the one it started with">
@@ -1047,6 +1120,50 @@ function Header({
   );
 }
 
+/**
+ * A throwaway session's line under the head (troupe #1209): when it goes, and to its owner
+ * Erase now, asked once more since it cannot be undone, and Keep it, which makes it normal.
+ */
+function Throwaway({
+  erasesAt,
+  onErase,
+  onKeep,
+}: {
+  erasesAt: string | null;
+  onErase?: (() => Promise<void>) | undefined;
+  onKeep?: (() => void) | undefined;
+}): JSX.Element {
+  const [asking, setAsking] = useState(false);
+  return (
+    <div className="banner throwaway" role="status">
+      <p>{asking ? "Erase it now? Its log, its workspace and its key go, and it cannot be undone." : throwawaySentence(erasesAt)}</p>
+      {asking && onErase ? (
+        <>
+          <button type="button" className="link" onClick={() => void onErase()}>
+            Erase it
+          </button>
+          <button type="button" className="link" onClick={() => setAsking(false)}>
+            Cancel
+          </button>
+        </>
+      ) : (
+        <>
+          {onErase && (
+            <button type="button" className="link" onClick={() => setAsking(true)}>
+              Erase now
+            </button>
+          )}
+          {onKeep && (
+            <button type="button" className="link" onClick={onKeep}>
+              Keep it
+            </button>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
 /** What `/share` alone says of a pod session: whose it is, and to its owner what changes it. */
 function whoseLine(visibility: string | undefined, team: string | null, owner: boolean): string {
   if (visibility === "team") return `given to ${teamWords(team)}: everyone on it can open it, and steer it where the team allows${owner ? "; /share me takes it back" : ""}`;
@@ -1082,6 +1199,7 @@ function SessionMenu({
   onRename,
   onKeep,
   sharing,
+  living,
   whose,
   remote,
 }: {
@@ -1104,6 +1222,8 @@ function SessionMenu({
   onKeep?: ((on: boolean) => void) | undefined;
   /** Give a pod session to its team or take it back: its owner's alone. */
   sharing?: { visibility: "team" | "private"; team: string | null; onShare: (to: "team" | "private") => void } | undefined;
+  /** How long it lasts, and the change to either of the other two: its owner's alone. */
+  living?: { lifespan: Lifespan; onRelive: (to: Lifespan) => void } | undefined;
   /** Whose a pod session is, as the head marks it. */
   whose?: string | null;
   /** Steering from another device: this computer's offer. */
@@ -1176,6 +1296,13 @@ function SessionMenu({
             <span className="d">{sharing.visibility === "team" ? TAKE_BACK_LINE : giveLine(sharing.team)}</span>
           </button>
         )}
+        {living &&
+          LIFESPAN_CHOICES.filter((c) => c.value !== living.lifespan).map((c) => (
+            <button key={c.value} type="button" className="item" onClick={then(() => living.onRelive(c.value))}>
+              <span className="t">{lifespanItem(c.value)}</span>
+              <span className="d">{c.sentence}</span>
+            </button>
+          ))}
         {onArchive && (
           <button type="button" className="item" onClick={then(() => onArchive(!row?.archived))}>
             <span className="t">{archiveItem(Boolean(row?.archived)).title}</span>

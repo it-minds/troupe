@@ -133,6 +133,20 @@ export type { CallEvidence, CallWhere } from "./calls.js";
 export { foldScratch, scratchDocumentOf, scratchVersion } from "./scratch.js";
 export { ago, bytes, countWords, durationWords, errorText, moneyWords, sessionStateWords } from "./words.js";
 export { TAKE_BACK_LINE, giveLine, sessionWhose, teamWords, visibilityRefusal, whoseSentence } from "./visibility.js";
+export {
+  LIFESPANS,
+  LIFESPAN_CHOICES,
+  knowsLifespans,
+  lifespanChoice,
+  lifespanItem,
+  lifespanMark,
+  lifespanOf,
+  lifespanRefusal,
+  planeKnowsLifespans,
+  throwawaySentence,
+  untilWords,
+} from "./lifespan.js";
+export type { Lifespan, PlaneAsker } from "./lifespan.js";
 export { SCHEDULE_CHOICES, WEEKDAYS, answeredLine, cronOf, cronProblem, editsOf, othersLine, proposalOf, proposalRefusal, runsLine, scheduleOf, scheduleWords } from "./proposals.js";
 export type { ProposalDecision, ProposalResult, ProposalState, ScheduleChoice, ScheduleEvery, TriggerDraft } from "./proposals.js";
 export { behind, configurationLine, owedLine, raiseKept, raiseRefusal, updateLine, upgradedText, versionOf } from "./bundle.js";

@@ -304,6 +304,9 @@ defmodule Troupe.Session do
          bundle: bundle,
          kind: Keyword.get(opts, :kind, :local),
          origin: Keyword.get(opts, :origin),
+         # How long it lasts, `throwaway`, `normal` or `persistent`, as the plane or the
+         # client said at its creation; recorded in `session_created`, absent for normal.
+         lifespan: Keyword.get(opts, :lifespan),
          # A pod is told whose session this is; a daemon is not, and works it out from
          # whoever has linked their identity to it.
          owner: Keyword.get(opts, :owner),

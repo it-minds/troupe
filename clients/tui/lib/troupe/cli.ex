@@ -48,6 +48,7 @@ defmodule Troupe.CLI do
           profile: String.t() | nil,
           team: String.t() | nil,
           only_me: boolean(),
+          lifespan: String.t() | nil,
           repositories: [String.t()],
           title: String.t() | nil,
           task: String.t() | nil,
@@ -138,6 +139,8 @@ defmodule Troupe.CLI do
     profile: :string,
     team: :string,
     only_me: :boolean,
+    throwaway: :boolean,
+    persistent: :boolean,
     repo: :keep,
     title: :string
   ]
@@ -163,6 +166,14 @@ defmodule Troupe.CLI do
     {~s(troupe run [AGENT] "task" [--headless] [--worktree] [--auto-approve] [--full-send] [--private] [--workspace DIR]),
      "one task: in the TUI, or with --headless printed line by line until the agent rests",
      [["run", "task"], ["run", "plan", "task", "--headless", "--workspace", "."]]},
+    {~s(troupe run [AGENT] "task" [--throwaway | --persistent] ...),
+     "how long the run's session lasts, here or on the platform: --throwaway erases it a " <>
+       "day after it goes quiet, which suits a question asked once; --persistent keeps it " <>
+       "until you erase it; neither is normal, which stays until you erase it",
+     [
+       ["run", "task", "--headless", "--throwaway"],
+       ["run", "task", "--profile", "dev", "--persistent"]
+     ]},
     {~s(troupe run [AGENT] "task" --profile NAME [--team TEAM] [--only-me] [--repo OWNER/NAME[@REF]]... [--title "TITLE"] [--headless]),
      "the task on the platform, on that plane profile, as the TUI's /new would start it; " <>
        "a full profile is waited on, a line a wait; @profile #agent /local /platform in " <>
@@ -480,6 +491,9 @@ defmodule Troupe.CLI do
       # `troupe run --only-me`: on the platform, its owner's and the people they invite
       # until it is shared, rather than the team's.
       only_me: Keyword.get(opts, :only_me, false),
+      # `troupe run --throwaway` or `--persistent` (root #1209): how long it lasts; nil is
+      # normal, and the create says nothing of it.
+      lifespan: lifespan_of(opts),
       # `troupe run --repo owner/name[@ref]`, as often as it is given: the GitHub
       # repositories a run on the platform starts on.
       repositories: Keyword.get_values(opts, :repo),
@@ -543,6 +557,9 @@ defmodule Troupe.CLI do
       invalid != [] ->
         {:error, "unknown option: #{Enum.map_join(invalid, ", ", &elem(&1, 0))}"}
 
+      opts[:throwaway] && opts[:persistent] ->
+        {:error, "--throwaway or --persistent: a session lasts one way, not both"}
+
       opts[:version] ->
         {:ok, %{base | mode: :version}}
 
@@ -555,6 +572,14 @@ defmodule Troupe.CLI do
 
       true ->
         parse_rest(rest, base)
+    end
+  end
+
+  defp lifespan_of(opts) do
+    cond do
+      opts[:throwaway] -> "throwaway"
+      opts[:persistent] -> "persistent"
+      true -> nil
     end
   end
 

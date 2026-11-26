@@ -729,15 +729,20 @@ defmodule Troupe.UI.TUI.View do
   Where a private session is kept and how its sealing stands, `private · synced`, in the
   desktop app's words (`@troupe/client`'s `syncWords`); `only you` for a pod session of the
   person's own the team cannot open (`@troupe/client`'s `onlyYou`), never "private", which
-  is a sealed session's word; empty for any other session.
+  is a sealed session's word; empty for any other session. Then how long it lasts, where it
+  is not normal (root #1209): `throwaway · goes in 18 h`, `persistent`.
   """
   @spec kept(map()) :: String.t()
   def kept(entry) do
-    case {Map.get(entry, :kind), Map.get(entry, :sync)} do
-      {"private", nil} -> "private"
-      {"private", sync} -> "private · " <> elem(sync_words(sync, Map.get(entry, :device)), 0)
-      _other -> if only_you?(entry), do: only_you(), else: ""
-    end
+    whose =
+      case {Map.get(entry, :kind), Map.get(entry, :sync)} do
+        {"private", nil} -> "private"
+        {"private", sync} -> "private · " <> elem(sync_words(sync, Map.get(entry, :device)), 0)
+        _other -> if only_you?(entry), do: only_you(), else: ""
+      end
+
+    lasts = Client.lifespan_mark(Map.get(entry, :lifespan), Map.get(entry, :erases_at))
+    [whose, lasts] |> Enum.reject(&(&1 == "")) |> Enum.join(" · ")
   end
 
   @doc "The mark of a pod session only its owner and the people they invite can open."

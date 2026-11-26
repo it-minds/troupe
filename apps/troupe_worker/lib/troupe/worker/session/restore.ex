@@ -401,6 +401,7 @@ defmodule Troupe.Worker.Session.Restore do
       bundle: Keyword.get(opts, :bundle),
       kind: :team,
       origin: Keyword.get(opts, :origin),
+      lifespan: Keyword.get(opts, :lifespan),
       fake: Keyword.get(opts, :fake),
       config_overrides: overrides,
       config_sources: sources(context.profile)

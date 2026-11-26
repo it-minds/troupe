@@ -49,6 +49,7 @@ defmodule Troupe.Session.CheckpointTest do
     :warning,
     :error,
     :visibility,
+    :lifespan,
     :loop,
     :taint,
     :switch,
@@ -90,6 +91,28 @@ defmodule Troupe.Session.CheckpointTest do
     whole = log |> Checkpoint.fold_all() |> Checkpoint.facts()
     assert_from(log, first, whole)
     assert_from(log, second, whole)
+  end
+
+  test "the facts say how long the session lasts once its log has said, and follow a change" do
+    created = %Event{
+      type: "session_created",
+      seq: 1,
+      agent: ["root"],
+      data: %{"profile" => "build", "lifespan" => "throwaway"}
+    }
+
+    changed = %Event{
+      type: "session_lifespan_changed",
+      seq: 2,
+      agent: ["root"],
+      data: %{"from" => "throwaway", "to" => "normal", "actor" => "user:a"}
+    }
+
+    assert Checkpoint.fold_all([created]) |> Checkpoint.facts() |> Map.get("lifespan") == "throwaway"
+    assert Checkpoint.fold_all([created, changed]) |> Checkpoint.facts() |> Map.get("lifespan") == "normal"
+
+    before = %{created | data: %{"profile" => "build"}}
+    refute Checkpoint.fold_all([before]) |> Checkpoint.facts() |> Map.has_key?("lifespan")
   end
 
   test "the facts count the model calls and the money of the root's ended turns" do
@@ -395,6 +418,13 @@ defmodule Troupe.Session.CheckpointTest do
   defp events(:visibility, n, _agent, _call),
     do:
       ev("session_visibility_changed", ["root"], %{"visibility" => pick(["team", "private"], n)})
+
+  defp events(:lifespan, n, _agent, _call),
+    do:
+      ev("session_lifespan_changed", ["root"], %{
+        "to" => pick(["throwaway", "normal", "persistent"], n),
+        "actor" => "user:a"
+      })
 
   defp events(:loop, n, _agent, _call) do
     id = "loop-#{rem(n, 2)}"

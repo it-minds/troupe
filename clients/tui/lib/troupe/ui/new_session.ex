@@ -196,6 +196,15 @@ defmodule Troupe.UI.NewSession do
   def visibility(true), do: "private"
   def visibility(false), do: "team"
 
+  @doc """
+  How long it lasts, as the sentence ends where `/new --throwaway` or `--persistent` said:
+  the picker's word and what it means, the desktop app's `LIFESPAN_CHOICES` (root #1209).
+  """
+  @spec lifespan_words(String.t()) :: String.t()
+  def lifespan_words("throwaway"), do: "throwaway: erased a day after it goes quiet"
+  def lifespan_words("persistent"), do: "persistent: kept until you erase it"
+  def lifespan_words(_normal), do: "normal: stays until you erase it"
+
   @doc ~S|"Set from your message: /local @dev #plan.", or nil with no token.|
   @spec tokens_sentence(tokens()) :: String.t() | nil
   def tokens_sentence(tokens) do

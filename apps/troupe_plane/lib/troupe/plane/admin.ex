@@ -5779,6 +5779,9 @@ defmodule Troupe.Plane.Admin do
       profile: session.profile,
       state: session.state,
       visibility: session.visibility,
+      lifespan: session.lifespan,
+      # When a throwaway one is erased if nothing keeps it; nil for any other.
+      erases_at: Sessions.Lifespan.erases_at(session, Sessions.Lifespan.hours()),
       epoch: session.epoch,
       last_seq: session.last_seq,
       object_bytes: session.object_bytes,

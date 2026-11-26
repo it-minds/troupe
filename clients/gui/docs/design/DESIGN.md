@@ -217,7 +217,10 @@ pink-violet-cyan stripe, then one sentence of chips, "Runs [on the platform] wit
 [build] · everyone on core can open it", each opening its picker beneath; a line under it
 says why the profile was picked or what is blocked (a full profile in the queued amber,
 "On this computer" off until the daemon answers); CALLED, the title from the first line;
-*Start*, *Start empty* or *Queue it*; *Start like last time*; then the casting steps. One
+*Start*, *Start empty* or *Queue it*; *Start like last time*; then the casting steps. Under
+the sentence, beside the only-me tick, how long it lasts: **Throwaway**, **Normal** (chosen)
+or **Persistent**, each a consequence ("Erased a day after it goes quiet", "Kept until you
+erase it"), shown only where the server says it knows lifespans. One
 quip per load is decoration beside the plain lines. What follows is the longer design of
 ownership, tools and output, not all of which the screen asks yet.
 
@@ -303,6 +306,8 @@ Plain language, sentence case, active verbs. Name things the way the reader does
 | "Replay failed: corrupt event at seq 412" | "The agent could not start from this session's log: … Wake it anyway" (it skips what it cannot read), and in the transcript "An event from 14:02 could not be read and was skipped" |
 
 **"Private" means a sealed session and nothing else.** A session on a team's profile that only its owner and the people they invite can open is started with the tick "Only me, until I invite people" and marked "only you" in the list and the head.
+
+**How long a session lasts is Throwaway, Normal or Persistent.** A throwaway one is marked "throwaway · goes in 18 h" in the list, and under its head a line in the queued amber says when it goes and offers *Erase now* (asked once more) and *Keep it*, which makes it normal; a persistent one is marked "persistent"; a normal one is marked nothing. The ⋯ says "Make it throwaway", "Make it normal", "Make it persistent". Never "Kept" for persistent: Kept is the pin's mark, and keeping a session at the top is the list's order and nothing else.
 
 **A proposal is asked as its question.** What the harness offers a session's owner (troupe #1208) is a `proposal` in the protocol and never a noun on the screen: the card's headline is the question ("Rerun this report every week?"), its buttons Turn on, Not now and Never for this report, and the line after it says what was done ("You turned on a rerun of “Weekly numbers”, every Monday at 06:00 UTC."). It wears an offer's cyan edge, never amber: nothing waits on it.
 

@@ -656,6 +656,11 @@ defmodule Troupe.Remote.Translate do
       "session_visibility_changed" ->
         {[emit.(:remote_note, %{text: visibility_changed(data)})], memory}
 
+      # How long the session lasts, changed by its owner (root #1209): a line.
+      "session_lifespan_changed" ->
+        {[emit.(:remote_note, %{text: Troupe.Client.Lifespan.set(to_string(data["to"]), nil)})],
+         memory}
+
       # What the harness offers the session's owner (root #1208): a line naming the question
       # and how to answer it, `/proposal`; nothing waits for it. The report's title is kept
       # for the answer's line.
@@ -669,6 +674,7 @@ defmodule Troupe.Remote.Translate do
       "proposal_answered" ->
         title = Map.get(Map.get(memory, :proposals, %{}), data["id"])
         {[emit.(:remote_note, %{text: Troupe.Client.Proposal.answered(data, title)})], memory}
+
       # A repository attached, taken off, or one whose clone failed (root #1207).
       "session_repository_changed" ->
         {[emit.(:remote_note, %{text: Troupe.Client.Repositories.changed(data)})], memory}

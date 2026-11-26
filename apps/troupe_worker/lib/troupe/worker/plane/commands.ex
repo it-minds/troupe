@@ -15,6 +15,7 @@ defmodule Troupe.Worker.Plane.Commands do
   alias Troupe.ObjectStore
   alias Troupe.Protocol.Error
   alias Troupe.Protocol.Event
+  alias Troupe.Protocol.Lifespan
   alias Troupe.Protocol.SessionId
   alias Troupe.Session.Log
   alias Troupe.Session.Proposals
@@ -85,6 +86,8 @@ defmodule Troupe.Worker.Plane.Commands do
             # a credential: that the pod asks for.
             repositories: Repositories.of_activation(params),
             origin: params["origin"],
+            # How long it lasts, which a new session's `session_created` records.
+            lifespan: params["lifespan"],
             usage_seq: params["usage_seq"]
           ],
           &match?({_key, nil}, &1)
@@ -381,6 +384,29 @@ defmodule Troupe.Worker.Plane.Commands do
           |> put_present("by_name", params["by_name"])
 
         {:ok, seq} = Log.append(session_id, [], "session_visibility_changed", data)
+        {:ok, %{"session_id" => session_id, "recorded" => true, "seq" => seq}}
+    end
+  end
+
+  # How long the session lasts, changed by its owner at the plane, whose row is the word on
+  # it and what its sweep reads. The pod's part is the log's line, so everybody attached
+  # hears it and a checkpoint folds it; best effort, as the visibility's is.
+  defp dispatch("lifespan.changed", params) do
+    session_id = params["session_id"]
+
+    case {Lifespan.word?(params["to"]), Sessions.whereis(session_id)} do
+      {false, _tree} ->
+        {:error, Error.new(:invalid_params, %{field: "to"})}
+
+      {true, nil} ->
+        {:ok, %{"session_id" => session_id, "recorded" => false, "reason" => "dormant"}}
+
+      {true, _tree} ->
+        data =
+          %{"to" => params["to"], "actor" => params["actor"]}
+          |> put_present("from", if(Lifespan.word?(params["from"]), do: params["from"]))
+
+        {:ok, seq} = Log.append(session_id, [], "session_lifespan_changed", data)
         {:ok, %{"session_id" => session_id, "recorded" => true, "seq" => seq}}
     end
   end

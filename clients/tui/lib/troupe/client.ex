@@ -168,6 +168,8 @@ defmodule Troupe.Client do
               {:ok, String.t()} | {:error, String.t()}
   @callback bundle(session_id(), Troupe.Client.Bundle.verb()) ::
               {:ok, String.t()} | {:error, String.t()}
+  @callback lifespan(session_id(), Troupe.Client.Lifespan.verb()) ::
+              {:ok, String.t()} | {:error, String.t()}
   @callback repositories(session_id(), Troupe.Client.Repositories.verb()) ::
               {:ok, String.t()} | {:error, String.t()}
   @callback archive(session_id(), boolean()) :: {:ok, String.t()} | {:error, String.t()}
@@ -599,6 +601,23 @@ defmodule Troupe.Client do
   @doc "What `/share` names after the command: nothing, `team` or `me`."
   @spec share_args(String.t()) :: {:ok, Troupe.Client.Share.verb()} | {:error, String.t()}
   defdelegate share_args(text), to: Troupe.Client.Share, as: :parse
+
+  @doc """
+  How long a session lasts (root #1209): `:status` says, `{:set, word}` makes it
+  `throwaway`, `normal` or `persistent`, which only its owner may do; on the daemon for a
+  session on this computer, at the plane for one there. Answers the sentence to show.
+  """
+  @spec lifespan(session_id(), Troupe.Client.Lifespan.verb()) ::
+          {:ok, String.t()} | {:error, String.t()}
+  def lifespan(sid, verb), do: impl(sid).lifespan(sid, verb)
+
+  @doc "What `/lifespan` names after the command: nothing, or one of the three words."
+  @spec lifespan_args(String.t()) :: {:ok, Troupe.Client.Lifespan.verb()} | {:error, String.t()}
+  defdelegate lifespan_args(text), to: Troupe.Client.Lifespan, as: :parse
+
+  @doc "A row's lifespan mark: `throwaway · goes in 18 h`, `persistent`, or empty for normal."
+  @spec lifespan_mark(String.t() | nil, String.t() | nil) :: String.t()
+  def lifespan_mark(lifespan, erases_at), do: Troupe.Client.Lifespan.mark(lifespan, erases_at)
 
   @doc """
   Which configuration a session on the platform runs on (root #1177): `:status` says its

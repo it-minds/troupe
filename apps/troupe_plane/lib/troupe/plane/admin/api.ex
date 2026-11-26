@@ -506,6 +506,13 @@ defmodule Troupe.Plane.Admin.API do
       description: "Who may see its sessions. team where absent."
     },
     %Argument{
+      name: "lifespan",
+      type: :string,
+      values: ~w(throwaway normal persistent),
+      description:
+        "How long its sessions last. normal where absent. throwaway erases a run's session a set time after it goes quiet (the setting throwaway_erase_after_hours), never before somebody has reviewed it; persistent keeps it until it is erased by hand."
+    },
+    %Argument{
       name: "review",
       type: :string,
       values: ~w(required none),

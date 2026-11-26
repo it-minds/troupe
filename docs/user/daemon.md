@@ -149,6 +149,7 @@ has one clock, and the three modules that keep them (`Troupe.Session.ClientTools
 | a session sleeps, watched | idle or waiting on a person, with somebody following it but not reading it — a `fleet` subscriber, watch mode | `TROUPE_SESSION_IDLE_MINUTES` (`:troupe_core, :session_idle_ms`) | 30 min |
 | a session sleeps, unwatched | the same, with nobody watching it | `TROUPE_SESSION_DETACHED_MINUTES` (`:troupe_core, :detached_idle_ms`) | 2 min |
 | the daemon exits | no client connected, no session awake and none offered for steering from another device; never for one started at login ([above](#start-at-login)) | `TROUPE_DAEMON_IDLE_MINUTES` (`:troupe_daemon, :idle_shutdown_ms`) | 10 min |
+| a throwaway session is erased | asleep that long since it last worked, with no approval or question open and not kept at the top; looked for soon after the daemon starts and every ten minutes while it runs, so a daemon that was not running erases it at its next start. A normal or persistent session never is, and a private one is the plane's to erase ([How long a session lasts](sessions.md#how-long-a-session-lasts)) | `throwaway_erase_after_hours` ([configuration](configuration.md)) | 24 h |
 
 `troupe-daemon stop` does not wait for the last rung: it asks the daemon running here to
 stop between turns, as `troupe update` does, waits while a turn is at work and until

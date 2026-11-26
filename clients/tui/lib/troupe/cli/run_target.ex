@@ -96,6 +96,8 @@ defmodule Troupe.CLI.RunTarget do
            # The team's, as /new's screen starts it, or `--only-me`: its owner's and the
            # people they invite, on the team's profile all the same.
            visibility: NewSession.visibility(Map.get(args, :only_me, false) == true),
+           # `--throwaway` or `--persistent`: how long it lasts; nil says nothing of it.
+           lifespan: Map.get(args, :lifespan),
            title: blank(title),
            prompt: cleaned,
            # `--repo`: the GitHub repositories it starts on, which the plane checks again.

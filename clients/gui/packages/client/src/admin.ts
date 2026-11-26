@@ -39,6 +39,10 @@ export interface AdminSessionRow {
   workspace_bytes: number | null;
   pinned: boolean | null;
   pinned_by: string | null;
+  /** How long it lasts (troupe #1209); absent from an older plane, whose every session is normal. */
+  lifespan?: string | null;
+  /** When a throwaway one is erased if nothing keeps it; null for any other. */
+  erases_at?: string | null;
   last_active_at: string | null;
   /** The GitHub repository it was created with, which its pod cloned; null for none. */
   repository?: { owner: string; name: string; ref?: string | null } | null;
@@ -938,7 +942,7 @@ export interface TriggerRun {
  * How a person reads and types a setting's value. Not the value's own unit: a `dollars`
  * value is millionths of a dollar and a `minutes` one seconds, on the wire both ways.
  */
-export type SettingUnit = "days" | "days_or_off" | "minutes" | "seconds" | "dollars" | "bytes" | "count" | "switch" | "text" | "choice" | "url";
+export type SettingUnit = "days" | "days_or_off" | "hours" | "minutes" | "seconds" | "dollars" | "bytes" | "count" | "switch" | "text" | "choice" | "url";
 
 /** A setting's name and unit, as `admin.settings.list` and `admin.setting.effective` carry them; absent from a plane from before them. */
 export interface SettingNaming {

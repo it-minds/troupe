@@ -944,6 +944,15 @@
         "null"
       ]
     },
+    "throwaway_erase_after_hours": {
+      "description": "How many hours after it last worked a throwaway session on this computer is erased, from 1 to 168 (more is 168). The daemon looks every ten minutes while it runs; a private session is the plane's to erase. Read only from the user's config.yaml.",
+      "default": 24,
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 1
+    },
     "mouse": {
       "description": "The terminal UI captures the mouse: a click activates a window and the wheel scrolls. Off keeps the terminal's own click-and-drag selection; `troupe --no-mouse` turns it off for one run.",
       "default": true,
