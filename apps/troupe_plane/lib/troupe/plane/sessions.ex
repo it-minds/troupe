@@ -564,20 +564,21 @@ defmodule Troupe.Plane.Sessions do
           {:ok, Session.t()} | {:error, term()}
   def put_repositories(session_id, change) do
     Repo.transaction(fn ->
-      case Repo.one(from(s in Session, where: s.id == ^session_id, lock: "FOR UPDATE")) do
-        nil ->
-          Repo.rollback(:not_found)
+      locked = Repo.one(from(s in Session, where: s.id == ^session_id, lock: "FOR UPDATE"))
 
-        session ->
-          with {:ok, entries} <- change.(Session.repositories(session)),
-               {:ok, updated} <-
-                 session |> Session.changeset(Session.holding(entries)) |> Repo.update() do
-            updated
-          else
-            {:error, reason} -> Repo.rollback(reason)
-          end
+      case changed_repositories(locked, change) do
+        {:ok, updated} -> updated
+        {:error, reason} -> Repo.rollback(reason)
       end
     end)
+  end
+
+  defp changed_repositories(nil, _change), do: {:error, :not_found}
+
+  defp changed_repositories(session, change) do
+    with {:ok, entries} <- change.(Session.repositories(session)) do
+      session |> Session.changeset(Session.holding(entries)) |> Repo.update()
+    end
   end
 
   @doc """

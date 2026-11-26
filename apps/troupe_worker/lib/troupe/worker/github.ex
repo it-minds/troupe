@@ -52,10 +52,10 @@ defmodule Troupe.Worker.GitHub do
 
   use GenServer
 
+  alias Troupe.Protocol.Words
   alias Troupe.Worker.GitCredentials
   alias Troupe.Worker.GitHub.{API, Secrets, Tree}
   alias Troupe.Worker.Plane.Link
-  alias Troupe.Protocol.Words
 
   require Logger
 
@@ -695,15 +695,17 @@ defmodule Troupe.Worker.GitHub do
           {:ok, map()} | {:error, String.t()}
   def open_pull_request(session_id, title, body, opts \\ []) do
     with {:ok, entry, opts} <- held(session_id, opts) do
-      one_at_a_time(session_id, entry, fn ->
-        with {:ok, title} <- title(title),
-             {:ok, credential} <- credential(session_id, opts),
-             :ok <- granted(credential, "pull_requests", "write", "open a pull request"),
-             {:ok, %{"github" => record}} <- record(session_id, %{}, opts),
-             :ok <- may_open(record, credential),
-             do: open(session_id, credential, title, body, record, opts)
-      end)
+      one_at_a_time(session_id, entry, fn -> open_one(session_id, title, body, opts) end)
     end
+  end
+
+  defp open_one(session_id, title, body, opts) do
+    with {:ok, title} <- title(title),
+         {:ok, credential} <- credential(session_id, opts),
+         :ok <- granted(credential, "pull_requests", "write", "open a pull request"),
+         {:ok, %{"github" => record}} <- record(session_id, %{}, opts),
+         :ok <- may_open(record, credential),
+         do: open(session_id, credential, title, body, record, opts)
   end
 
   defp open(_session_id, _credential, _title, _body, %{"pull_request" => %{} = pull}, _opts),
@@ -828,15 +830,17 @@ defmodule Troupe.Worker.GitHub do
 
     with {:ok, entry, opts} <- held(session_id, opts) do
       # Under the repository's lock, as a push is, so it is not taken off mid-read.
-      one_at_a_time(session_id, entry, fn ->
-        with {:ok, credential} <- credential(session_id, opts),
-             :ok <- reads_ci(credential) |> cannot_read(),
-             {:ok, %{"github" => record}} <- record(session_id, %{}, opts),
-             {:ok, commit} <- last_push(record),
-             {:ok, ci} <- wait_for_ci(credential, commit, record, deadline),
-             do: conclude(session_id, credential, record, commit, ci, opts)
-      end)
+      one_at_a_time(session_id, entry, fn -> checks_one(session_id, deadline, opts) end)
     end
+  end
+
+  defp checks_one(session_id, deadline, opts) do
+    with {:ok, credential} <- credential(session_id, opts),
+         :ok <- reads_ci(credential) |> cannot_read(),
+         {:ok, %{"github" => record}} <- record(session_id, %{}, opts),
+         {:ok, commit} <- last_push(record),
+         {:ok, ci} <- wait_for_ci(credential, commit, record, deadline),
+         do: conclude(session_id, credential, record, commit, ci, opts)
   end
 
   defp last_push(%{"commit" => commit}) when is_binary(commit), do: {:ok, commit}

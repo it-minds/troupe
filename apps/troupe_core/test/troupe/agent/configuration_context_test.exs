@@ -8,6 +8,7 @@ defmodule Troupe.Agent.ConfigurationContextTest do
   use Troupe.SessionCase, async: true
 
   alias Troupe.LLM.{Fake, Message, Text}
+  alias Troupe.Protocol.Event.Actor
   alias Troupe.Session.Log
 
   @moved %{
@@ -115,7 +116,7 @@ defmodule Troupe.Agent.ConfigurationContextTest do
           "by_name" => "Ada",
           "repositories" => [widgets, gadgets]
         },
-        Troupe.Protocol.Event.Actor.user("ada-subject", "Ada")
+        Actor.user("ada-subject", "Ada")
       )
 
     assert Troupe.repositories(sid) == [widgets, gadgets]

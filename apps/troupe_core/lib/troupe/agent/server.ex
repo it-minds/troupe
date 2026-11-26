@@ -2118,11 +2118,7 @@ defmodule Troupe.Agent.Server do
         moved <> "This session holds no GitHub repository now."
 
       held ->
-        each =
-          Enum.map_join(held, "\n", fn entry ->
-            "- #{entry["repository"]}: #{where(entry["path"])}" <>
-              if(entry["ref"], do: ", branch #{entry["ref"]}", else: ", its default branch")
-          end)
+        each = Enum.map_join(held, "\n", &held_line/1)
 
         moved <>
           "The GitHub repositories this session holds, each a clone in the workspace:\n" <>
@@ -2130,6 +2126,11 @@ defmodule Troupe.Agent.Server do
           "\ngit_push, pr_open, pr_comment and pr_checks act on one of them: name it as " <>
           "repository where there is more than one."
     end
+  end
+
+  defp held_line(entry) do
+    branch = if entry["ref"], do: ", branch #{entry["ref"]}", else: ", its default branch"
+    "- #{entry["repository"]}: #{where(entry["path"])}" <> branch
   end
 
   defp where(path) when path in [nil, "."], do: "at the workspace's root"

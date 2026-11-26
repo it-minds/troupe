@@ -67,6 +67,7 @@ defmodule Troupe.Plane.Admin do
   alias Troupe.Plane.Identity.ServicePrincipal
   alias Troupe.Plane.{KMSCheck, Names, OIDC, Principals, Provision, Reach, Sessions, Settings, Triggers}
   alias Troupe.Plane.SCIM.Connector
+  alias Troupe.Plane.Sessions.Session
   alias Troupe.Plane.Settings.Ladder
   alias Troupe.Plane.Triggers.{Notify, Revision, Trigger}
   alias Troupe.Protocol.{AgentDefinition, AgentRule}
@@ -5789,7 +5790,7 @@ defmodule Troupe.Plane.Admin do
       github: session.github,
       # Every repository it holds, the one above first, each with its own record there.
       repositories:
-        Enum.map(Troupe.Plane.Sessions.Session.repositories(session), fn entry ->
+        Enum.map(Session.repositories(session), fn entry ->
           Map.take(entry, ["owner", "name", "ref", "path", "attached_by", "attached_at", "github"])
         end)
     }

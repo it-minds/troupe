@@ -953,22 +953,10 @@ defmodule Troupe.Plane.GitHub do
 
   def repositories(list, profile, team) when is_list(list) do
     with {:ok, cap} <- holds(profile),
-         :ok <- within(length(list), cap, profile) do
-      list
-      |> Enum.reduce_while({:ok, []}, fn given, {:ok, read} ->
-        case repository(given, profile, team) do
-          {:ok, repository} -> {:cont, {:ok, read ++ [repository]}}
-          {:error, reason} -> {:halt, {:error, "#{label(given)}: #{reason}"}}
-        end
-      end)
-      |> then(fn
-        {:ok, read} -> once_each(read)
-        error -> error
-      end)
-      |> then(fn
-        {:ok, read} -> {:ok, read |> Enum.with_index() |> Enum.map(&placed/1)}
-        error -> error
-      end)
+         :ok <- within(length(list), cap, profile),
+         {:ok, read} <- each_repository(list, profile, team),
+         {:ok, read} <- once_each(read) do
+      {:ok, read |> Enum.with_index() |> Enum.map(&placed/1)}
     end
   end
 
@@ -990,6 +978,16 @@ defmodule Troupe.Plane.GitHub do
          {:ok, _all} <- once_each(held ++ [repository]) do
       {:ok, placed({repository, 1})}
     end
+  end
+
+  # Each read as `repository/3` reads one, the first that will not do named in its refusal.
+  defp each_repository(list, profile, team) do
+    Enum.reduce_while(list, {:ok, []}, fn given, {:ok, read} ->
+      case repository(given, profile, team) do
+        {:ok, repository} -> {:cont, {:ok, read ++ [repository]}}
+        {:error, reason} -> {:halt, {:error, "#{label(given)}: #{reason}"}}
+      end
+    end)
   end
 
   defp holds(profile) do
@@ -1583,16 +1581,16 @@ defmodule Troupe.Plane.GitHub do
   # entry's, both written at once (`Session.holding/1`).
   defp keep(session, entry, github, steps, actor) do
     if github != (entry["github"] || %{}) do
-      entries =
-        Enum.map(Session.repositories(session), fn held ->
-          if full(held) == full(entry), do: Map.put(held, "github", github), else: held
-        end)
-
+      entries = Enum.map(Session.repositories(session), &with_record(&1, entry, github))
       session |> change(Session.holding(entries)) |> Repo.update!()
     end
 
     Enum.each(steps, &audit(&1, as_one(session, entry), actor))
     %{github: github, stopped_now: Enum.any?(steps, &match?({:stopped, _}, &1))}
+  end
+
+  defp with_record(held, entry, github) do
+    if full(held) == full(entry), do: Map.put(held, "github", github), else: held
   end
 
   @doc "Whether a session's record says its pushes are closed."
