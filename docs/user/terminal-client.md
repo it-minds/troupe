@@ -109,8 +109,10 @@ approvals and keys. What is different:
 * **`/files` and `/upload`** work against the worker's checkout over the session's mount,
   and refresh themselves when the worker says files changed.
 * **A long session opens at its last compaction.** The window starts with that
-  compaction's summary, under *Earlier*, and what happened after it. PgUp or Home at the
-  top of the window loads the history above it, a page at a time.
+  compaction's summary, under *Earlier*, and what happened after it. PgUp, Home or the
+  mouse wheel at the top of the window loads the history above it, a page at a time. The
+  side box's session calls and money count the whole session, the part before the summary
+  too.
 
 TLS is verified against your operating system's trust store. For a deployment behind a
 private CA, `TROUPE_CA_FILE=/path/to/ca.pem` adds it to the trust store, never in place of

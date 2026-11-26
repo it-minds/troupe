@@ -44,6 +44,8 @@ defmodule Troupe.Session.Checkpoint do
     "cost_micros" => 0,
     "unpriced" => 0,
     "turns" => 0,
+    "calls" => 0,
+    "turns_cost_micros" => 0,
     "context" => %{"used" => nil},
     "open_approvals" => [],
     "open_questions" => [],
@@ -344,13 +346,16 @@ defmodule Troupe.Session.Checkpoint do
     }
   end
 
-  defp facts(f, %Event{type: "delegation_started", seq: seq, data: data}) do
+  # When it began rides along, so a reader starting after it can say how long the child
+  # ran once its end arrives.
+  defp facts(f, %Event{type: "delegation_started", seq: seq, ts: ts, data: data}) do
     entry = %{
       "call_id" => data["call_id"],
       "agent" => data["agent"],
       "child_path" => data["child_path"],
       "wait" => data["wait"] != false,
-      "seq" => seq
+      "seq" => seq,
+      "ts" => ts
     }
 
     %{f | "running" => Enum.reject(f["running"], &(&1["call_id"] == data["call_id"])) ++ [entry]}
@@ -401,11 +406,19 @@ defmodule Troupe.Session.Checkpoint do
   defp end_running(f, path),
     do: %{f | "running" => Enum.reject(f["running"], &(&1["child_path"] == path))}
 
-  # A root turn's end counts a turn, and what of it nobody priced.
+  # A root turn's end counts a turn, its model calls, the money of those priced and what of
+  # it nobody priced: the session's spend as its turns add it up, a subagent's calls joining
+  # when its report reaches one, where `cost_micros` counts each call as it is answered. A
+  # checkpoint written before these two were folded has neither, which a reader takes as 0.
   defp turn(f, ["root"], data) do
     case data["turn"] do
       %{} = turn ->
-        %{f | "turns" => f["turns"] + 1, "unpriced" => f["unpriced"] + count(turn["unpriced"])}
+        Map.merge(f, %{
+          "turns" => f["turns"] + 1,
+          "unpriced" => f["unpriced"] + count(turn["unpriced"]),
+          "calls" => count(f["calls"]) + count(turn["calls"]),
+          "turns_cost_micros" => count(f["turns_cost_micros"]) + count(turn["cost_micros"])
+        })
 
       _ ->
         f
