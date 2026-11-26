@@ -83,7 +83,7 @@ import { ApprovalPanel, DecisionRecord } from "./Approval";
 import type { Audiences } from "./Approval";
 import { AnswerRecord, QuestionPanel } from "./Question";
 import { CommandPalette } from "./CommandPalette";
-import type { PaletteScreen } from "./CommandPalette";
+import type { PaletteScreen, Sides } from "./CommandPalette";
 import { Files } from "./Files";
 import { PodConfig } from "./PodConfig";
 import { Publish } from "./Publish";
@@ -128,6 +128,7 @@ export function Session({
   onArchive,
   marks,
   onGo,
+  sides,
   onAgents,
   onStarted,
   onProfile,
@@ -150,6 +151,8 @@ export function Session({
   marks?: Marks | undefined;
   /** Leave for another screen, for the palette's Navigate and Setup commands. */
   onGo?: (screen: PaletteScreen) => void;
+  /** The sides this install has, so the palette lists only the commands of those. */
+  sides: Sides;
   /** Open the agents manager on this session's workspace, at one agent if named: a session on this computer's. */
   onAgents?: ((agent?: string) => void) | undefined;
   /** Open a session the agent picker started, as the start screen opens one it made. */
@@ -414,6 +417,7 @@ export function Session({
       onClose={() => setPalette(null)}
       actions={{
         go: (screen) => (screen === "sessions" ? onBack() : onGo?.(screen)),
+        sides,
         showFiles: () => {
           showBackstage(true);
           setPane("files");
