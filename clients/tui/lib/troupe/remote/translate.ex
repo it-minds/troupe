@@ -86,8 +86,9 @@ defmodule Troupe.Remote.Translate do
   The checkpoint a subscription started from (`subscribe {from: "checkpoint"}`), as the
   local events a window folds in place of the history before it: the window's opening,
   the summary as the block the transcript starts with (`:earlier`, which also carries the
-  facts the window keeps: usage, goal, the root's tasks, a running loop), the root at rest
-  as the event at `through` left it, and each approval and question still open, as the
+  facts the window keeps: usage, what the root's turns cost, goal, the root's tasks, a
+  running loop), each child a delegation still runs, named with when it began, the root at
+  rest as the event at `through` left it, and each approval and question still open, as the
   events that asked them. Each carries `through` as its seq, an open ask the seq it was
   asked at, so the journal's cursor is where the replay resumes and two asks are never
   taken for one. `:unknown` for a shape this client does not read, which
@@ -113,6 +114,7 @@ defmodule Troupe.Remote.Translate do
         at: at,
         before: through + 1,
         usage: usage(facts["usage"]),
+        cost: turns_spent(facts),
         goal: if(is_binary(facts["goal"]), do: facts["goal"]),
         todos: todos(%{"items" => facts["todos"] || []}),
         loop: running_loop(facts["loop"])
@@ -120,6 +122,8 @@ defmodule Troupe.Remote.Translate do
 
     named =
       if is_binary(facts["agent"]), do: [emit.(:agent_named, %{name: facts["agent"]})], else: []
+
+    named = named ++ running_children(session_id, facts, at, through)
 
     {rest, memory} = at_rest(emit, agent, facts["done"], memory)
 
@@ -158,6 +162,37 @@ defmodule Troupe.Remote.Translate do
     do: %{id: loop["loop_id"], iteration: loop["iteration"] || 0, max: loop["max_iterations"]}
 
   defp running_loop(_loop), do: nil
+
+  # What the root's ended turns cost up to `through`, as the side box adds them up. A
+  # checkpoint written before the core counted calls has none of it, and the tail's turns
+  # count from nothing.
+  defp turns_spent(%{"calls" => calls} = facts) when is_integer(calls),
+    do: %{
+      calls: int(calls),
+      cost_micros: int(facts["turns_cost_micros"]),
+      unpriced: int(facts["unpriced"])
+    }
+
+  defp turns_spent(_facts), do: %{calls: 0, cost_micros: 0, unpriced: 0}
+
+  # Each child a delegation still runs at `through`, as the agent it runs and when it began:
+  # its row is there before the tail's first word of it, and its end closes it.
+  defp running_children(session_id, facts, at, through) do
+    for %{"child_path" => [_ | _] = child} = running <- facts["running"] || [],
+        name = get_in(facts, ["agents", Enum.join(child, "/"), "profile"]) || running["agent"],
+        is_binary(name) do
+      began = if is_binary(running["ts"]), do: ts(%{"ts" => running["ts"]})
+
+      durable_event(
+        session_id,
+        Enum.join(child, "/"),
+        :agent_named,
+        at,
+        %{name: name, started_at: began},
+        through
+      )
+    end
+  end
 
   @doc "An ephemeral event (`llm_delta`, `agent_state`, `progress`, `presence`) as a transient local event."
   @spec ephemeral(String.t(), map(), memory()) :: {[Event.t()], memory()}

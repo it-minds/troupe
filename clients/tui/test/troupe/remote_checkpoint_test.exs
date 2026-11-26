@@ -78,7 +78,7 @@ defmodule Troupe.RemoteCheckpointTest do
 
     # At the top, PgUp asks for the page before the checkpoint.
     press(pid, "page_up")
-    eventually(fn -> user_state(pid).model.earlier.before == 26 end)
+    eventually(fn -> earlier(pid).before == 26 end)
     assert pages(remote) == [46]
 
     # The row the reader was on, the summary's header, is still the one at the top, with
@@ -91,11 +91,11 @@ defmodule Troupe.RemoteCheckpointTest do
     for before <- [6, 1] do
       press(pid, "home")
       press(pid, "home")
-      eventually(fn -> user_state(pid).model.earlier.before == before end)
+      eventually(fn -> earlier(pid).before == before end)
     end
 
     assert pages(remote) == [46, 26, 6]
-    assert user_state(pid).model.earlier.more == false
+    assert earlier(pid).more == false
 
     press(pid, "home")
     press(pid, "page_up")
@@ -110,6 +110,61 @@ defmodule Troupe.RemoteCheckpointTest do
 
     assert history == whole_history()
     assert [{:earlier, _} | ^after_summary] = tail
+
+    GenServer.stop(pid, :normal)
+  end
+
+  # The side box's session totals (#1196): the calls and money of the turns before the
+  # checkpoint and those after it, what the session cost from seq 1.
+  test "the side box counts the calls and money of the whole session, not the tail's alone" do
+    {remote, url} = start_remote!(sessions: [fixture()], capabilities: @checkpoints)
+    sid = attach!(connect!(remote, url), "s-cp")
+    eventually(fn -> held(sid) |> Enum.member?(51) end)
+
+    {pid, screen} = start_tui(sid, width: 120)
+    eventually(fn -> user_state(pid).model.windows["root"] != nil end)
+    press(pid, "1")
+
+    whole = whole_window()
+    last = whole.last_turn
+    assert whole.cost.calls > last.calls
+    session = "#{whole.cost.calls} calls · #{Model.cost(whole)}"
+
+    assert screen_text(pid, screen) =~ "│  " <> session
+    assert user_state(pid).model.windows["root"].cost == whole.cost
+
+    GenServer.stop(pid, :normal)
+  end
+
+  # The wheel at the top (#1196): a notch up with the pane at its top pages back as PgUp
+  # does, and a second notch while the page is on its way asks nothing more.
+  test "the wheel at the top pages the history in once" do
+    {remote, url} =
+      start_remote!(sessions: [fixture()], capabilities: @checkpoints, events_page: 20)
+
+    sid = attach!(connect!(remote, url), "s-cp")
+    eventually(fn -> held(sid) |> Enum.member?(51) end)
+
+    {pid, _screen} = start_tui(sid, height: 16)
+    eventually(fn -> user_state(pid).model.windows["root"] != nil end)
+    press(pid, "1")
+
+    # Short of the top the wheel scrolls and asks nothing.
+    press(pid, "end")
+    assert View.pane_geometry(user_state(pid)).offset > 0
+    wheel(pid, :up)
+    _ = user_state(pid)
+    assert pages(remote) == []
+
+    # Two notches at the top: the first asks, and the second either finds the page on its
+    # way or, once it landed, a view kept on its row below it, which it scrolls.
+    press(pid, "home")
+    wheel(pid, :up)
+    wheel(pid, :up)
+    eventually(fn -> earlier(pid).before == 26 end)
+    _ = user_state(pid)
+    assert pages(remote) == [46]
+    assert {:user, "sixth"} in transcript(pid)
 
     GenServer.stop(pid, :normal)
   end
@@ -142,7 +197,7 @@ defmodule Troupe.RemoteCheckpointTest do
     assert text =~ "summary two"
     assert text =~ "while away"
     refute text =~ "sixth"
-    assert user_state(pid).model.earlier.before == @through + 1
+    assert earlier(pid).before == @through + 1
 
     GenServer.stop(pid, :normal)
   end
@@ -168,7 +223,7 @@ defmodule Troupe.RemoteCheckpointTest do
     expected = Model.rebuild("s-cp", "remote", events).windows["root"].agents["root"].transcript
     model = Model.rebuild(sid, "remote", Client.events(sid))
     assert model.windows["root"].agents["root"].transcript == expected
-    assert model.earlier == nil
+    assert Model.earlier(model, "root") == nil
   end
 
   test "a checkpoint in a shape this client does not read is replayed past from seq 1" do
@@ -184,7 +239,7 @@ defmodule Troupe.RemoteCheckpointTest do
 
     assert [%{"from" => "checkpoint"}, %{"from_seq" => 0}] = subscribes(remote)
     assert held(sid) |> Enum.min() == 1
-    assert Model.rebuild(sid, "remote", Client.events(sid)).earlier == nil
+    assert sid |> Model.rebuild("remote", Client.events(sid)) |> Model.earlier("root") == nil
   end
 
   # Live events and a page: the page goes above the summary, whatever arrived meanwhile
@@ -208,15 +263,16 @@ defmodule Troupe.RemoteCheckpointTest do
     model =
       "s-1"
       |> Model.rebuild("/w", seed ++ tail)
-      |> Model.loading_earlier()
+      |> Model.loading_earlier("root")
       |> then(&Enum.reduce(live, &1, fn e, m -> Model.apply(m, e) end))
-      |> Model.prepend(page, false, 1)
+      |> Model.prepend("root", page, false, 1)
 
     transcript = model.windows["root"].agents["root"].transcript
     assert List.last(transcript) == {:user, "arrived meanwhile"}
     {history, [{:earlier, _} | _]} = Enum.split_while(transcript, &(not match?({:earlier, _}, &1)))
     assert {:user, "first"} in history
-    assert model.earlier == %{model.earlier | before: 1, more: false, loading: false}
+    earlier = Model.earlier(model, "root")
+    assert earlier == %{earlier | before: 1, more: false, loading: false}
   end
 
   defp fixture(fields \\ []) do
@@ -244,10 +300,24 @@ defmodule Troupe.RemoteCheckpointTest do
     Model.rebuild("s-cp", "remote", events).windows["root"].agents["root"].transcript
   end
 
+  # The root window the fold of the whole log draws.
+  defp whole_window do
+    {events, _} =
+      Enum.flat_map_reduce(
+        recorded(),
+        Translate.memory(:remote, "code"),
+        &Translate.durable("s-cp", &1, &2)
+      )
+
+    Model.rebuild("s-cp", "remote", events).windows["root"]
+  end
+
   defp held(sid),
     do: sid |> Client.events() |> Enum.map(& &1.seq) |> Enum.reject(&is_nil/1) |> Enum.uniq()
 
   defp transcript(pid), do: user_state(pid).model.windows["root"].agents["root"].transcript
+
+  defp earlier(pid), do: Model.earlier(user_state(pid).model, "root")
 
   # The first line drawn at the top of the pane's view.
   defp top_line(pid) do
