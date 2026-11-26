@@ -19,6 +19,8 @@ import {
   planeOpener,
   raiseKept,
   RemoteSource,
+  repositoriesOf,
+  repositoryName,
   ServerOffer,
   SessionAttachment,
   StartQuestions,
@@ -44,10 +46,12 @@ import type {
   Principal,
   ProfileOffering,
   ProfileSwitch,
+  RepositoryName,
   SessionKind,
   SessionView,
   StartAnswer,
   StartState,
+  Team,
   TranscriptState,
   TroupeEvent,
 } from "@troupe/client";
@@ -186,6 +190,11 @@ export interface Marks {
    * raise kept for when it is done, which the row says from then on.
    */
   raise: (row: FleetRow) => Promise<void>;
+  /**
+   * Attach a GitHub repository to a pod session, or take one off, at the plane (troupe
+   * #1207); the answer's list goes on the row at once. Rejects with the refusal.
+   */
+  repository: (row: FleetRow, change: { attach: RepositoryName } | { takeOff: string }) => Promise<void>;
 }
 
 /**
@@ -264,7 +273,20 @@ export function useMarks(store: FleetStore, auth: AuthSession | null, daemon: Da
     },
     [store, auth],
   );
-  return useMemo(() => ({ rename, keep, share, raise }), [rename, keep, share, raise]);
+  const repository = useCallback(
+    async (row: FleetRow, change: { attach: RepositoryName } | { takeOff: string }) => {
+      if (row.kind !== "team" || !auth) throw new Error("Only a session on the platform works on a GitHub repository");
+      const token = await auth.token();
+      const answered =
+        "attach" in change ? await auth.plane.addSessionRepository(token, row.id, change.attach) : await auth.plane.removeSessionRepository(token, row.id, change.takeOff);
+      const raw = (row.raw && typeof row.raw === "object" ? row.raw : {}) as Record<string, unknown>;
+      const held = repositoriesOf(answered);
+      store.patch(row.id, { repositories: held.map(repositoryName), raw: { ...raw, repositories: held } });
+      await store.refreshAfterChange();
+    },
+    [store, auth],
+  );
+  return useMemo(() => ({ rename, keep, share, raise, repository }), [rename, keep, share, raise, repository]);
 }
 
 /** Who sessions on this computer are recorded as, and what to call them. */
@@ -621,6 +643,27 @@ export function useProfiles(auth: AuthSession | null): { profiles: ProfileOfferi
   }, [auth]);
 
   return { profiles, error };
+}
+
+/**
+ * The person's teams as the plane lists them (`teams.list`), for what each lets its sessions
+ * name on GitHub (troupe #1207). Empty while asked and signed out; a plane that cannot say
+ * leaves it empty, and the chooser says the team lists none.
+ */
+export function useTeams(auth: AuthSession | null): Team[] {
+  const [teams, setTeams] = useState<Team[]>([]);
+  useEffect(() => {
+    if (!auth) return;
+    let live = true;
+    auth
+      .withToken((plane, token) => plane.listTeams(token))
+      .then((r) => live && setTeams(r.teams ?? []))
+      .catch(() => undefined);
+    return () => {
+      live = false;
+    };
+  }, [auth]);
+  return teams;
 }
 
 export interface SessionHandle {

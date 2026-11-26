@@ -353,6 +353,16 @@ spec:
                         before it leaves the issue for a person, who asks again with the
                         label, the command or the console's fix this. The lower of this and
                         the team's holds; one where neither is set.
+                    maxRepositories:
+                      type: integer
+                      minimum: 1
+                      maximum: 10
+                      description: >-
+                        GitHub repositories one session may hold, the ones it was created
+                        on and the ones its owner attached since, each cloned into its own
+                        directory with its own token and its own caps. Three where absent.
+                        A profile without spec.github offers none at creation and attaches
+                        none.
                 configBundleChannel: {type: string, default: stable}
                 storage:
                   type: object

@@ -48,6 +48,7 @@ defmodule Troupe.CLI do
           profile: String.t() | nil,
           team: String.t() | nil,
           only_me: boolean(),
+          repositories: [String.t()],
           title: String.t() | nil,
           task: String.t() | nil,
           headless: boolean(),
@@ -137,6 +138,7 @@ defmodule Troupe.CLI do
     profile: :string,
     team: :string,
     only_me: :boolean,
+    repo: :keep,
     title: :string
   ]
 
@@ -161,17 +163,29 @@ defmodule Troupe.CLI do
     {~s(troupe run [AGENT] "task" [--headless] [--worktree] [--auto-approve] [--full-send] [--private] [--workspace DIR]),
      "one task: in the TUI, or with --headless printed line by line until the agent rests",
      [["run", "task"], ["run", "plan", "task", "--headless", "--workspace", "."]]},
-    {~s(troupe run [AGENT] "task" --profile NAME [--team TEAM] [--only-me] [--title "TITLE"] [--headless]),
+    {~s(troupe run [AGENT] "task" --profile NAME [--team TEAM] [--only-me] [--repo OWNER/NAME[@REF]]... [--title "TITLE"] [--headless]),
      "the task on the platform, on that plane profile, as the TUI's /new would start it; " <>
        "a full profile is waited on, a line a wait; @profile #agent /local /platform in " <>
        "the task set those and are taken out of it; --team names whose session it is where " <>
        "more than one of your teams may use the profile; everyone on the team can open it, " <>
-       "or with --only-me only you until you invite people",
+       "or with --only-me only you until you invite people; each --repo is a GitHub " <>
+       "repository the team lists that the session starts on, the first at its " <>
+       "workspace's root and each other in OWNER/NAME",
      [
        ["run", "task", "--profile", "dev", "--headless"],
        ["run", "task", "--title", "Called"],
        ["run", "task", "--profile", "dev", "--team", "core"],
-       ["run", "task", "--profile", "dev", "--only-me"]
+       ["run", "task", "--profile", "dev", "--only-me"],
+       [
+         "run",
+         "task",
+         "--profile",
+         "dev",
+         "--repo",
+         "example-org/widgets",
+         "--repo",
+         "example-org/docs@main"
+       ]
      ]},
     {"troupe resume [SESSION_ID | latest] [--private]",
      "no id: the newest session here, picker open; latest, or --private for the newest private one: " <>
@@ -466,6 +480,9 @@ defmodule Troupe.CLI do
       # `troupe run --only-me`: on the platform, its owner's and the people they invite
       # until it is shared, rather than the team's.
       only_me: Keyword.get(opts, :only_me, false),
+      # `troupe run --repo owner/name[@ref]`, as often as it is given: the GitHub
+      # repositories a run on the platform starts on.
+      repositories: Keyword.get_values(opts, :repo),
       title: Keyword.get(opts, :title),
       task: nil,
       headless: Keyword.get(opts, :headless, false),

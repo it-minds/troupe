@@ -1583,6 +1583,6 @@ defmodule Troupe.Plane.AdminTest do
   # `memory` is whether its last turn read the memory in force, a word and no text.
   defp expected_session_keys do
     ~w(archived archived_by epoch github id last_active_at last_seq memory object_bytes owner pinned pinned_by pod profile)a ++
-      ~w(repository state visibility workspace_bytes)a
+      ~w(repositories repository state visibility workspace_bytes)a
   end
 end

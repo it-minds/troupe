@@ -38,6 +38,9 @@ import {
   severalSteer,
   rootState,
   scratchVersion,
+  repositoriesOf,
+  repositoryParam,
+  repositoryRefusal,
   sessionWhose,
   settleLoop,
   stoppedSentence,
@@ -66,11 +69,12 @@ import type {
   LoopInfo,
   OwnPlane,
   ScratchDocument,
+  SessionRepository,
   SessionKind,
   SessionView,
   TranscriptState,
 } from "@troupe/client";
-import { useSessionView, useStartQuestions } from "../hooks";
+import { useSessionView, useStartQuestions, useTeams } from "../hooks";
 import { useNarrow } from "../narrow";
 import type { Marks, SessionHandle } from "../hooks";
 import { curtainLine, curtainUp, DEFAULT_DETAIL, isDetail, layout, waitingOn, waitingWords } from "../frames";
@@ -82,6 +86,8 @@ import { AgentSwitch, sessionAgents } from "./AgentSwitch";
 import { ApprovalPanel, DecisionRecord } from "./Approval";
 import type { Audiences } from "./Approval";
 import { AnswerRecord, QuestionPanel } from "./Question";
+import { SessionRepositories, teamRepositories } from "./Repositories";
+import type { ChosenRepository } from "./Repositories";
 import { CommandPalette } from "./CommandPalette";
 import type { PaletteScreen, Sides } from "./CommandPalette";
 import { Files } from "./Files";
@@ -329,6 +335,37 @@ export function Session({
                   }
                 }
               : undefined,
+        }
+      : undefined;
+  // The GitHub repositories a pod session holds (troupe #1207), as its row says them; its
+  // owner attaches one from what the team lists, and takes one off.
+  const teamRows = useTeams(row?.kind === "team" ? auth : null);
+  const repositories: RepositoriesPanel | undefined =
+    row?.kind === "team"
+      ? {
+          held: repositoriesOf(row.raw),
+          listed: teamRepositories(teamRows, team),
+          owner: row.yourRole === "owner" && marking !== undefined,
+          onAttach: marking
+            ? async (r: ChosenRepository) => {
+                try {
+                  await marking.marks.repository(marking.row, { attach: repositoryParam(r) });
+                  return null;
+                } catch (e) {
+                  return repositoryRefusal(e, true);
+                }
+              }
+            : undefined,
+          onTakeOff: marking
+            ? async (name: string) => {
+                try {
+                  await marking.marks.repository(marking.row, { takeOff: name });
+                  return null;
+                } catch (e) {
+                  return repositoryRefusal(e, false);
+                }
+              }
+            : undefined,
         }
       : undefined;
   // Onboarding, then the brief, as the session's start found them due (Decision 835), and
@@ -667,6 +704,7 @@ export function Session({
             daemon={daemon}
             row={row}
             configuration={configuration}
+            repositories={repositories}
             onEditTodo={!readOnly && view.view ? (action, params) => view.view!.editTodo(action, params) : undefined}
             self={self}
             selfName={named(auth?.me?.display_name, auth?.me?.subject)}
@@ -1987,6 +2025,15 @@ function useScratchText(view: SessionView | null, doc: ScratchDocument | undefin
   return read && read.name === name ? read : { content: null, error: null };
 }
 
+/** A pod session's repositories as Backstage says them, with Attach and Take off for its owner. */
+interface RepositoriesPanel {
+  held: SessionRepository[];
+  listed: string[];
+  owner: boolean;
+  onAttach?: ((r: ChosenRepository) => Promise<string | null>) | undefined;
+  onTakeOff?: ((name: string) => Promise<string | null>) | undefined;
+}
+
 /** A pod session's configuration as the panel says it, with Update for its owner. */
 interface Configuration {
   version: number;
@@ -2002,6 +2049,7 @@ function Backstage({
   daemon,
   row,
   configuration,
+  repositories,
   onEditTodo,
   self,
   selfName,
@@ -2017,6 +2065,8 @@ function Backstage({
   row: FleetRow | undefined;
   /** A pod session's bundle version and its channel's current one; absent elsewhere. */
   configuration?: Configuration | undefined;
+  /** A pod session's GitHub repositories; absent elsewhere. */
+  repositories?: RepositoriesPanel | undefined;
   /** Change the task list (`todo.edit`); absent where the person may only read the session. */
   onEditTodo?: TodoEdit | undefined;
   self: string | undefined;
@@ -2204,6 +2254,16 @@ function Backstage({
           )}
         </dl>
       </section>
+
+      {repositories && (
+        <SessionRepositories
+          repositories={repositories.held}
+          listed={repositories.listed}
+          owner={repositories.owner}
+          onAttach={repositories.onAttach}
+          onTakeOff={repositories.onTakeOff}
+        />
+      )}
     </aside>
   );
 }

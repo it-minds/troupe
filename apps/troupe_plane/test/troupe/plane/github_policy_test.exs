@@ -80,6 +80,8 @@ defmodule Troupe.Plane.GitHubPolicyTest do
         {%{"maxPushes" => 0}, "github.maxPushes is a whole number from 1 to 1000"},
         {%{"maxRuns" => "3"}, "github.maxRuns is a whole number from 1 to 1000"},
         {%{"maxAttempts" => 1001}, "github.maxAttempts is a whole number from 1 to 1000"},
+        {%{"maxRepositories" => 11}, "github.maxRepositories is a whole number from 1 to 10"},
+        {%{"maxRepositories" => 0}, "github.maxRepositories is a whole number from 1 to 10"},
         {%{"autonomy" => "merge"}, "not autonomy"}
       ]
 
@@ -95,11 +97,13 @@ defmodule Troupe.Plane.GitHubPolicyTest do
                  "denyPaths" => ["secrets/", "*.tfstate"],
                  "maxPushes" => 5,
                  "maxRuns" => 2,
-                 "maxAttempts" => 4
+                 "maxAttempts" => 4,
+                 "maxRepositories" => 5
                })
 
       # The lower of the profile's and the team's holds, and one where neither says.
       assert GitHub.Policy.max_attempts("dev", context.team.id) == 4
+      assert GitHub.Policy.max_repositories("dev") == 5
 
       {:ok, _} =
         Identity.update_team(context.team, %{
@@ -150,7 +154,8 @@ defmodule Troupe.Plane.GitHubPolicyTest do
             "denyPaths" => ["secrets/"],
             "maxPushes" => 3,
             "maxRuns" => 2,
-            "maxAttempts" => 2
+            "maxAttempts" => 2,
+            "maxRepositories" => 2
           }
         }
       }
@@ -162,7 +167,8 @@ defmodule Troupe.Plane.GitHubPolicyTest do
             "denyPaths" => ["*.tfstate"],
             "maxPushes" => 10,
             "maxRuns" => 1,
-            "maxAttempts" => 5
+            "maxAttempts" => 5,
+            "maxRepositories" => 6
           }
         }
       }
@@ -176,7 +182,8 @@ defmodule Troupe.Plane.GitHubPolicyTest do
                "denyPaths" => ["secrets/", "*.tfstate"],
                "maxPushes" => 3,
                "maxRuns" => 1,
-               "maxAttempts" => 2
+               "maxAttempts" => 2,
+               "maxRepositories" => 2
              }
     end
   end

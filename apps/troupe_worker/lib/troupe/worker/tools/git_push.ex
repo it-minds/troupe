@@ -35,6 +35,7 @@ defmodule Troupe.Worker.Tools.GitPush do
     %{
       "type" => "object",
       "properties" => %{
+        "repository" => GitHub.repository_property(),
         "message" => %{
           "type" => "string",
           "description" => "The commit message: what this push changes and why."
@@ -58,7 +59,9 @@ defmodule Troupe.Worker.Tools.GitPush do
 
   @impl Troupe.Tool
   def run(args, ctx) do
-    case GitHub.push(ctx.session_id, ctx.workspace.root_real, args["message"], args["branch"]) do
+    root = ctx.workspace.root_real
+
+    case GitHub.push(ctx.session_id, root, args["message"], args["branch"], GitHub.named(args)) do
       {:ok, pushed} ->
         verified = if pushed.verified, do: ", signed by GitHub", else: ""
 

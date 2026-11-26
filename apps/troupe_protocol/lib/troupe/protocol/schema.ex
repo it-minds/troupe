@@ -598,6 +598,21 @@ defmodule Troupe.Protocol.Schema do
       },
       "session_dormant" => %{"last_seq" => required(:integer)},
       "session_activated" => %{"epoch" => required(:string), "pod" => optional(:string)},
+      # A pod session's GitHub repositories moved (`session.repository.add` and `.remove`,
+      # or a clone at activation): `action` `attached`, `detached` or `failed` (with
+      # `reason`), the `repository` (`owner/name`) and its `path` in the workspace, who did
+      # it, and `repositories`, the whole list as it now is (`repository`, `path`, `ref`).
+      # Durable, because the root is told in its turn context's `configuration`.
+      "session_repository_changed" => %{
+        "action" => required(:string),
+        "repository" => required(:string),
+        "path" => optional(:string),
+        "ref" => optional(:string),
+        "by" => optional(:string),
+        "by_name" => optional(:string),
+        "reason" => optional(:string),
+        "repositories" => required(:array)
+      },
       # A wake past what the agent could not read (`session.repair`): the event `event`, its
       # `seq`, written `at`, is skipped by the agent's replay from here on, as `by` asked.
       # Appended, never a rewrite, so the chain stays whole.
@@ -872,6 +887,17 @@ defmodule Troupe.Protocol.Schema do
       # A pod session raised to its channel's current bundle version by its owner: the
       # plane's, which the clients ask directly.
       "session.bundle.raise" => %{"session_id" => required(:string)},
+      # A GitHub repository attached to a pod session by its owner, cloned by its pod into
+      # `<owner>/<name>` without a restart, or one taken off: the plane's, which the clients
+      # ask directly. `repository` is `owner/name`, or `{owner, name, ref}` to attach.
+      "session.repository.add" => %{
+        "session_id" => required(:string),
+        "repository" => required(:any)
+      },
+      "session.repository.remove" => %{
+        "session_id" => required(:string),
+        "repository" => required(:string)
+      },
       # Somebody's private session shared with this machine's person, read from the plane's
       # sealed copy with the keys in their own slot, after `after_seq`.
       "session.read_sealed" => %{

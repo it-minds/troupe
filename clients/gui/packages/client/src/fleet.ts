@@ -16,6 +16,7 @@ import type { Invitation } from "./invites.js";
 import { named } from "./people.js";
 import type { PlaneClient, SessionRow, SessionsFilter } from "./plane.js";
 import { watchRemote } from "./remote.js";
+import { repositoriesOf, repositoryName } from "./repositories.js";
 import { ErrorCodes } from "./types.js";
 import type { Unseen } from "./types.js";
 import { errorText } from "./words.js";
@@ -232,6 +233,8 @@ export interface FleetRow {
   remote?: RemoteOffer | null;
   /** The invitation this person holds into it, where somebody invited them by name (troupe #765). */
   invitation?: Invitation | null;
+  /** The GitHub repositories a pod session holds, `owner/name`, the one it was created on first (troupe #1207); absent from a daemon's rows. */
+  repositories?: string[];
   /** The source's own row, for anything a view needs that this shape does not carry. */
   raw: unknown;
 }
@@ -287,6 +290,7 @@ export function rowFromPlane(row: SessionRow, source = "plane"): FleetRow {
     reviewedBy: row.reviewed_by ?? null,
     sync: kind === "private" && row.state === "erasure_pending" ? "erasure_pending" : null,
     failed: row.failed_reason ? { reason: row.failed_reason, detail: null } : null,
+    repositories: repositoriesOf(row).map(repositoryName),
     raw: row,
   };
 }

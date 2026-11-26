@@ -166,6 +166,8 @@ defmodule Troupe.Client do
               {:ok, String.t()} | {:error, String.t()}
   @callback bundle(session_id(), Troupe.Client.Bundle.verb()) ::
               {:ok, String.t()} | {:error, String.t()}
+  @callback repositories(session_id(), Troupe.Client.Repositories.verb()) ::
+              {:ok, String.t()} | {:error, String.t()}
   @callback archive(session_id(), boolean()) :: {:ok, String.t()} | {:error, String.t()}
   @callback rename(session_id(), String.t()) :: {:ok, String.t()} | {:error, String.t()}
   @callback keep(session_id(), boolean()) :: {:ok, String.t()} | {:error, String.t()}
@@ -609,6 +611,43 @@ defmodule Troupe.Client do
   @doc "What `/bundle` names after the command: nothing or `update`."
   @spec bundle_args(String.t()) :: {:ok, Troupe.Client.Bundle.verb()} | {:error, String.t()}
   defdelegate bundle_args(text), to: Troupe.Client.Bundle, as: :parse
+
+  @doc """
+  The GitHub repositories a session on the platform holds (root #1207): `:list` says each
+  one, where its clone is and what was done there; `{:add, repository}` attaches one, which
+  its pod clones without a restart; `{:remove, "owner/name"}` takes one off. Attaching and
+  taking off are its owner's. A session on this computer holds none. Answers the sentence.
+  """
+  @spec repositories(session_id(), Troupe.Client.Repositories.verb()) ::
+          {:ok, String.t()} | {:error, String.t()}
+  def repositories(sid, verb), do: impl(sid).repositories(sid, verb)
+
+  @doc "What `/repo` names after the command: nothing, `add owner/name[@ref]` or `remove owner/name`."
+  @spec repo_args(String.t()) :: {:ok, Troupe.Client.Repositories.verb()} | {:error, String.t()}
+  defdelegate repo_args(text), to: Troupe.Client.Repositories, as: :parse
+
+  @doc "A repository as `--repo` names one, `owner/name[@ref]`, read; `:error` for anything else."
+  @spec read_repository(String.t()) :: {:ok, map()} | :error
+  defdelegate read_repository(text), to: Troupe.Client.Repositories, as: :read
+
+  @doc "Why something `--repo` named is not a repository."
+  @spec not_a_repository(String.t()) :: String.t()
+  defdelegate not_a_repository(text), to: Troupe.Client.Repositories, as: :not_one
+
+  @doc "Repositories by `owner/name` in a few words: the first, and how many more."
+  @spec repositories_summary([String.t()]) :: String.t()
+  defdelegate repositories_summary(names), to: Troupe.Client.Repositories, as: :summary
+
+  @doc "A repository's `owner/name`."
+  @spec repository_name(map()) :: String.t()
+  defdelegate repository_name(repository), to: Troupe.Client.Repositories, as: :name
+
+  @doc """
+  Why a new session on `profile` (a `profiles.list` row) cannot take the repositories asked
+  for, or `nil`: a profile with no `spec.github` takes none, and none takes past its cap.
+  """
+  @spec repositories_refused(map() | nil, [map()]) :: String.t() | nil
+  defdelegate repositories_refused(profile, asked), to: Troupe.Client.Repositories, as: :refused
 
   @doc """
   Archive a session (`true`) or bring it back (`false`), which only its owner may do: an
