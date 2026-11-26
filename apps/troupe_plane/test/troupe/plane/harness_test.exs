@@ -588,6 +588,33 @@ defmodule Troupe.Plane.HarnessTest do
 
       refute unpinned["pinned"]
     end
+
+    test "a team that does not allow pins refuses one, naming the setting, and still unpins" do
+      team = team_with_grant("engineering", "dev", name: "engineering")
+      owner = person("ada@example.test", ["engineering"])
+      session = session!("s-nopin", owner, team, visibility: "private")
+
+      assert {:ok, _} = Harness.call("session.pin", %{"session_id" => session.id}, context(owner))
+
+      {:ok, off} = Identity.update_team(team, %{pins_allowed: false})
+
+      assert {:ok, unpinned} =
+               Harness.call("session.unpin", %{"session_id" => session.id}, context(owner))
+
+      refute unpinned["pinned"]
+
+      assert {:error, error} =
+               Harness.call("session.pin", %{"session_id" => session.id}, context(owner))
+
+      assert error.message == "forbidden"
+      assert error.data.reason =~ "pins_allowed"
+      refute Sessions.get(session.id).pinned
+
+      {:ok, _} = Identity.update_team(off, %{pins_allowed: true})
+
+      assert {:ok, %{"pinned" => true}} =
+               Harness.call("session.pin", %{"session_id" => session.id}, context(owner))
+    end
   end
 
   describe "titles" do
