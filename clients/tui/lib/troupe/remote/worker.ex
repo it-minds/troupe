@@ -263,8 +263,10 @@ defmodule Troupe.Remote.Worker do
   @doc """
   A page of the session's history before `before`, for a window opened from a checkpoint:
   `session.events`, translated as the stream is but with a memory of its own, since the
-  page comes before everything the stream's memory has seen. Answers the page's events,
-  whether the server has earlier ones, and the lowest seq in it.
+  page comes before everything the stream's memory has seen. A branch shown inside another
+  session's screen answers its page under that screen's session and window, as it
+  publishes the stream. Answers the page's events, whether the server has earlier ones,
+  and the lowest seq in it.
   """
   @spec earlier(String.t(), pos_integer()) ::
           {:ok, %{events: [Troupe.Event.t()], more: boolean(), first: pos_integer() | nil}}
@@ -272,9 +274,11 @@ defmodule Troupe.Remote.Worker do
   def earlier(session_id, before) do
     with {:ok, %{"events" => events} = page} when is_list(events) <-
            call(session_id, {:rpc, "session.events", %{before: before, limit: @page}}),
-         {:ok, memory} <- call(session_id, :page_memory) do
+         {:ok, memory, as} <- call(session_id, :page_memory) do
       {translated, _memory} =
         Enum.flat_map_reduce(events, memory, &Translate.durable(session_id, &1, &2))
+
+      translated = Enum.map(translated, &paged_as(&1, as))
 
       first =
         events |> Enum.map(&Translate.seq/1) |> Enum.reject(&is_nil/1) |> Enum.min(fn -> nil end)
@@ -464,7 +468,8 @@ defmodule Troupe.Remote.Worker do
   # session's window is called.
   def handle_call(:page_memory, _from, %{memory: memory} = state),
     do:
-      {:reply, {:ok, Translate.me(Translate.memory(memory.isolation, memory.profile), memory.me)},
+      {:reply,
+       {:ok, Translate.me(Translate.memory(memory.isolation, memory.profile), memory.me), state.as},
        state}
 
   def handle_call(:attachment, _from, state) do
@@ -1842,6 +1847,13 @@ defmodule Troupe.Remote.Worker do
     remember_call(state, event)
     %{event | session_id: sid, agent_path: Branch.rewrite(event.agent_path, window)}
   end
+
+  # A page of a branch's history, spelled as the parent's screen spells the branch; the
+  # page's own opening of the window stays in it, since the page is folded on its own.
+  defp paged_as(event, nil), do: event
+
+  defp paged_as(%Troupe.Event{} = event, {sid, window}),
+    do: %{event | session_id: sid, agent_path: Branch.rewrite(event.agent_path, window)}
 
   # An approval or a question a branch asks, the budget's included, is answered through the
   # parent's session id, so the client finds its way back to this session by the call id.

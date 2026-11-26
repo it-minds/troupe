@@ -13,12 +13,14 @@ defmodule Troupe.Session.ProposalRecordingsTest do
   use Troupe.SessionCase, async: false
 
   alias Troupe.Protocol.Event
-  alias Troupe.Session.{Checkpoint, Log, Proposals}
+  alias Troupe.Session.Checkpoint
   alias Troupe.Session.Proposals.TriggerRule
 
   @into Path.expand(Path.join([File.cwd!(), "..", "..", "test", "fixtures", "proposals"]))
 
   if System.get_env("TROUPE_RECORD_PROPOSALS") do
+    alias Troupe.Session.{Log, Proposals}
+
     setup do
       Troupe.Proposals.install(
         fn _sid, _p -> {:ok, %{"propose" => true, "mode" => "direct"}} end,

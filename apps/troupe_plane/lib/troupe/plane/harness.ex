@@ -1768,11 +1768,37 @@ defmodule Troupe.Plane.Harness do
 
   defp pin(params, %{user: user}, pinned?) do
     with {:ok, session} <- visible(params["session_id"], user),
-         :ok <- must_administer(user, session) do
+         :ok <- must_administer(user, session),
+         :ok <- pins_allowed(session, pinned?) do
       case Sessions.pin(session.id, pinned?, user.subject) do
         {:ok, updated} -> {:ok, session_json(updated, user)}
         {:error, reason} -> {:error, Error.new(:internal_error, %{reason: inspect(reason)})}
       end
+    end
+  end
+
+  # Pinning is bounded by the team's setting, resolved through the ladder so that a platform
+  # that has turned pins off has turned them off for every team. Taking a pin off is always
+  # allowed: one made before the setting went off must be removable. A platform
+  # administrator is held to the same rule, as the share refusals hold them.
+  defp pins_allowed(_session, false), do: :ok
+
+  defp pins_allowed(session, true) do
+    case team_of(session) do
+      nil ->
+        :ok
+
+      team ->
+        if Ladder.resolve(team).pins_allowed do
+          :ok
+        else
+          {:error,
+           Error.new(:forbidden, %{
+             reason:
+               "this team does not allow pinning a session (the setting pins_allowed is off); " <>
+                 "a session already pinned can still be unpinned"
+           })}
+        end
     end
   end
 
