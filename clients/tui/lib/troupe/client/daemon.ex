@@ -1016,6 +1016,9 @@ defmodule Troupe.Client.Daemon do
   @impl true
   def bundle(_sid, _verb), do: {:error, Troupe.Client.Bundle.not_here()}
 
+  # Nothing on this computer schedules, so nothing is proposed here (root #1208).
+  @impl true
+  def proposal(_sid, _verb), do: {:error, Troupe.Client.Proposal.not_here()}
   # A session on this computer works in its own folder, not in a plane's clone (root #1207).
   @impl true
   def repositories(_sid, _verb), do: {:error, Troupe.Client.Repositories.not_here()}

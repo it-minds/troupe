@@ -113,7 +113,7 @@ defmodule Troupe.Plane.Harness do
   # An origin is a label, not a payload.
   @max_origin_bytes 4_096
 
-  @term_keys ~w(budget_micros max_turns wall_clock_seconds approvals)
+  @term_keys ~w(budget_micros max_turns wall_clock_seconds approvals allow)
 
   @typedoc """
   Who is calling, and through which door.
@@ -171,6 +171,9 @@ defmodule Troupe.Plane.Harness do
     "session.title.set" => :control,
     # Given to its team after it started, or taken back: its owner's alone.
     "session.visibility.set" => :control,
+    # A yes to what the harness proposed in it, which makes a trigger for its owner: its
+    # owner's alone, as giving it to the team is.
+    "session.proposal.accept" => :control,
     # Raised to its channel's current bundle version: its owner's, as archiving is.
     "session.bundle.raise" => :control,
     # A GitHub repository attached to a running or dormant session, or taken off: its
@@ -1567,6 +1570,18 @@ defmodule Troupe.Plane.Harness do
     end
   end
 
+  # The owner's yes to a trigger the harness proposed in their pod session: made as the
+  # team's row under the owner's own principal, from the draft the pod holds, with what the
+  # owner changed of its schedule, prompt and budget (`Troupe.Plane.Proposals`). Anybody
+  # else is refused as giving the session to the team is.
+  defp handle("session.proposal.accept", params, %{user: user} = context) do
+    with {:ok, session} <- owned_pod_session(params["session_id"], user, context, "turns on what the harness proposes in it"),
+         {:ok, id} <- proposal_id(params["id"]),
+         {:ok, edits} <- proposal_edits(params["edits"]) do
+      Troupe.Plane.Proposals.accept(user, session, id, edits)
+    end
+  end
+
   # Raised to its channel's current bundle version, by its owner or a holder of the owner
   # role, as archiving is: it changes the session for everybody attached. Never lowered,
   # and never to another version than the current one. The raise is kept on the row until
@@ -1789,9 +1804,9 @@ defmodule Troupe.Plane.Harness do
 
   # The owner's pod session. Anybody else who may see it, a platform administrator among
   # them, is refused saying whose it is to change; to anybody who may not, it is not there.
-  defp owned_pod_session(session_id, user, context) do
+  defp owned_pod_session(session_id, user, context, what \\ "gives it to the team or takes it back") do
     with {:ok, session} <- existing(session_id),
-         :ok <- owner_alone(session, user, context) do
+         :ok <- owner_alone(session, user, context, what) do
       if session.kind == "private",
         do:
           {:error,
@@ -1812,19 +1827,26 @@ defmodule Troupe.Plane.Harness do
     end
   end
 
-  defp owner_alone(%Session{owner_subject: subject}, %User{subject: subject}, _context), do: :ok
+  defp owner_alone(%Session{owner_subject: subject}, %User{subject: subject}, _context, _what), do: :ok
 
-  defp owner_alone(session, user, context) do
+  defp owner_alone(session, user, context, what) do
     if Map.get(context, :platform_admin?, false) or Sessions.role_for(user, session) do
       {:error,
        Error.new(:forbidden, %{
          required_role: "owner",
-         reason: "only the session's owner gives it to the team or takes it back"
+         reason: "only the session's owner #{what}"
        })}
     else
       {:error, Error.new(:not_found, %{session_id: session.id})}
     end
   end
+
+  defp proposal_id(id) when is_binary(id) and id != "", do: {:ok, id}
+  defp proposal_id(_other), do: invalid("id is the proposal's, such as proposal-1")
+
+  defp proposal_edits(nil), do: {:ok, %{}}
+  defp proposal_edits(%{} = edits), do: {:ok, Map.take(edits, ~w(cron prompt_template budget_micros))}
+  defp proposal_edits(_other), do: invalid("edits is an object of cron, prompt_template and budget_micros")
 
   defp visibility_param(visibility) when visibility in ["team", "private"], do: {:ok, visibility}
   defp visibility_param(_other), do: invalid("visibility is team or private")
@@ -2218,8 +2240,12 @@ defmodule Troupe.Plane.Harness do
          :ok <- in_range(terms, "budget_micros", 1, nil),
          :ok <- in_range(terms, "max_turns", 1, 500),
          :ok <- in_range(terms, "wall_clock_seconds", 60, 86_400),
-         :ok <- one_of(terms, "approvals", ~w(wait deny)) do
+         :ok <- one_of(terms, "approvals", ~w(wait deny)),
+         nil <- Triggers.allow_problem(terms["allow"]) do
       cap_budget(Map.put_new(terms, "approvals", "wait"), team, subject, profile)
+    else
+      reason when is_binary(reason) -> invalid(reason, field: "terms.allow")
+      refused -> refused
     end
   end
 

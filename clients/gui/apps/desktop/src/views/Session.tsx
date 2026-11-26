@@ -86,6 +86,8 @@ import { AgentSwitch, sessionAgents } from "./AgentSwitch";
 import { ApprovalPanel, DecisionRecord } from "./Approval";
 import type { Audiences } from "./Approval";
 import { AnswerRecord, QuestionPanel } from "./Question";
+import { ProposalCard } from "./Proposal";
+import type { ProposalActions } from "./Proposal";
 import { SessionRepositories, teamRepositories } from "./Repositories";
 import type { ChosenRepository } from "./Repositories";
 import { CommandPalette } from "./CommandPalette";
@@ -209,6 +211,20 @@ export function Session({
   // A relayed session shared to observe is read here as a viewer's is.
   const readOnly = row?.state === "read_only" || row?.yourRole === "viewer" || row?.yourRole === "observe";
   const dormant = row?.state === "dormant";
+  // What the harness proposes is the owner's to answer (troupe #1208): a yes to the plane as
+  // them, a no to the session. The same object from one draw to the next, so no turn is
+  // drawn anew for it.
+  const owner = kind === "team" && self !== undefined && (row?.owner === self || row?.yourRole === "owner");
+  const answering = view.view;
+  const proposalActions = useMemo<ProposalActions | undefined>(() => {
+    if (!owner || !auth || !answering) return undefined;
+    return {
+      accept: async (id, edits) => {
+        await auth.plane.acceptProposal(await auth.token(), sessionId, id, edits);
+      },
+      answer: (id, decision) => answering.answerProposal(id, decision),
+    };
+  }, [owner, auth, answering, sessionId]);
   // A root that ended so the harness drops what is sent to it (a spent budget, a refusal):
   // the composer gives way to the sentence that says so. One that finished keeps it, since
   // a message resumes it.
@@ -627,6 +643,8 @@ export function Session({
             onSave={saveReady}
             onRetry={readOnly ? undefined : (stopped ?? retry)}
             onPublish={publishReply}
+            onProposal={readOnly ? undefined : proposalActions}
+            owner={owner}
             earlier={view.earlier}
             onEarlier={view.loadEarlier}
           />
@@ -1342,6 +1360,8 @@ function Stream({
   onSave,
   onRetry,
   onPublish,
+  onProposal,
+  owner,
   earlier,
   onEarlier,
 }: {
@@ -1372,6 +1392,10 @@ function Stream({
   onRetry?: ((text: string) => Promise<void>) | string | undefined;
   /** Open the publish dialog with a reply as its file; absent with no daemon to publish through. */
   onPublish?: ((text: string) => void) | undefined;
+  /** What the session's owner may do with what the harness proposed. */
+  onProposal?: ProposalActions | undefined;
+  /** Whether this person is the session's owner. */
+  owner?: boolean | undefined;
 }): JSX.Element {
   // The turns a click on their strip opened (or shut, at `everything`), by key. Another
   // level draws every turn again, all of them as it says.
@@ -1497,6 +1521,8 @@ function Stream({
             onSave={onSave}
             onRetry={onRetry}
             onPublish={onPublish}
+            onProposal={onProposal}
+            owner={owner}
             onToggle={toggle}
           />
         );
@@ -1696,6 +1722,10 @@ type EntryProps = {
   reply?: TurnReply | undefined;
   onRetry?: ((text: string) => Promise<void>) | string | undefined;
   onPublish?: ((text: string) => void) | undefined;
+  /** What the session's owner may do with what the harness proposed; absent for anybody else. */
+  onProposal?: ProposalActions | undefined;
+  /** Whether this person is the session's owner, who alone answers a proposal. */
+  owner?: boolean | undefined;
 };
 
 /**
@@ -1718,7 +1748,9 @@ function sameEntry(a: EntryProps, b: EntryProps): boolean {
     a.reply?.answer === b.reply?.answer &&
     a.reply?.prompt === b.reply?.prompt &&
     a.onRetry === b.onRetry &&
-    a.onPublish === b.onPublish
+    a.onPublish === b.onPublish &&
+    a.onProposal === b.onProposal &&
+    a.owner === b.owner
   );
 }
 
@@ -1735,6 +1767,8 @@ const StreamEntry = memo(function StreamEntry({
   reply,
   onRetry,
   onPublish,
+  onProposal,
+  owner = false,
 }: EntryProps): JSX.Element | null {
   const { entry, level } = drawn;
   switch (entry.kind) {
@@ -1853,6 +1887,11 @@ const StreamEntry = memo(function StreamEntry({
 
     case "question":
       return entry.answer === undefined ? null : <AnswerRecord entry={entry} self={self} several={several} />;
+
+    // What the harness offers the owner, where the turn that earned it ended: theirs to
+    // answer, and a line for everybody else.
+    case "proposal":
+      return <ProposalCard entry={entry} mine={owner} actions={onProposal} />;
 
     // What the turn cost, under it, in the client library's words (issue #389). A
     // subagent's says whose it is, as its answers do.

@@ -763,6 +763,12 @@ export class FakePlane {
    */
   readonly bundleCurrent = new Map<string, number>();
 
+  /** Whether this plays a plane whose triggers are a repository's, for a yes to a proposal (troupe #1208). */
+  proposalsGitops = false;
+
+  /** Each yes to a proposal this plane took: the session, the proposal and the edits sent. */
+  readonly proposalsAccepted: Array<{ session: string; id: string; edits: Record<string, unknown> }> = [];
+
   /** A laptop's session, offered by `owner` and shared as `shares` says, its laptop online. */
   relay(
     owner: string,
@@ -1982,6 +1988,32 @@ export class FakePlane {
           this.opts.worker.sessions.get(row.id)?.log.append("session_visibility_changed", { visibility: to, by: subject, ...(name ? { by_name: name } : {}) }, actor);
         }
         return { result: this.sessionJson(row, subject) };
+      }
+
+      // The owner's yes to a trigger the harness proposed (troupe #1208): what the plane made,
+      // and the log's line the pod writes. `proposalsGitops` plays a plane whose triggers are a
+      // repository's, which hands over the resource and makes nothing.
+      case "session.proposal.accept": {
+        const row = this.rows.get(String(params["session_id"] ?? ""));
+        if (!row) return { error: { code: -32005, message: "not_found" } };
+        if (row.owner !== subject) return { error: { code: -32004, message: "forbidden", data: { required_role: "owner", reason: "only the session's owner turns on what the harness proposes in it" } } };
+        const proposal = String(params["id"] ?? "");
+        const draft = this.opts.worker.proposalDraft(row.id, proposal);
+        if (!draft) return { error: { code: -32005, message: "not_found", data: { id: proposal, reason: `the session has no open proposal ${proposal}` } } };
+        const edits = (params["edits"] ?? {}) as Record<string, unknown>;
+        if (typeof edits["cron"] === "string" && edits["cron"].trim().split(/\s+/).length !== 5) {
+          return { error: { code: -32602, message: "invalid_params", data: { field: "cron", reason: "the schedule is not readable: expected five fields" } } };
+        }
+        const edited = ["cron", "prompt_template", "budget_micros"].filter((f) => edits[f] !== undefined);
+        const name = String(draft["name"] ?? "rerun-report");
+        const team = this.teamsOf(row.owner)[0] ?? "eng";
+        const result: Record<string, unknown> = this.proposalsGitops
+          ? { yaml: `apiVersion: troupe.dev/v1alpha1\nkind: Trigger\nmetadata:\n  name: ${team}.${name}\nspec:\n  profile: ${row.profile}\n`, path: `triggers/${team}/${name}.yaml` }
+          : { team, name, url: `${this.baseUrl}/console#/triggers/${team}/${name}`, artifact_url: (draft["artifact"] as Record<string, unknown> | undefined)?.["url"] ?? null, cron: typeof edits["cron"] === "string" ? edits["cron"] : (draft["source"] as Record<string, unknown> | undefined)?.["cron"] };
+        const nameOf = this.nameOf(subject);
+        this.opts.worker.decideProposal(row.id, proposal, result, edited, { kind: "user", subject, ...(nameOf ? { display_name: nameOf } : {}) });
+        this.proposalsAccepted.push({ session: row.id, id: proposal, edits });
+        return { result: { ...result, edited } };
       }
 
       // Raised to its channel's current version by its owner (troupe #1177): at once when its

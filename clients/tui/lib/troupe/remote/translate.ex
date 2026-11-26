@@ -129,7 +129,8 @@ defmodule Troupe.Remote.Translate do
 
     {open, memory} =
       (Enum.map(facts["open_approvals"] || [], &{"approval_requested", &1}) ++
-         Enum.map(facts["open_questions"] || [], &{"question_asked", &1}))
+         Enum.map(facts["open_questions"] || [], &{"question_asked", &1}) ++
+         Enum.map(facts["open_proposals"] || [], &{"proposal_made", &1}))
       |> Enum.sort_by(fn {_type, ask} -> ask["seq"] || 0 end)
       |> Enum.flat_map_reduce(memory, fn {type, ask}, memory ->
         asked = %{
@@ -655,6 +656,19 @@ defmodule Troupe.Remote.Translate do
       "session_visibility_changed" ->
         {[emit.(:remote_note, %{text: visibility_changed(data)})], memory}
 
+      # What the harness offers the session's owner (root #1208): a line naming the question
+      # and how to answer it, `/proposal`; nothing waits for it. The report's title is kept
+      # for the answer's line.
+      "proposal_made" ->
+        title = get_in(data, ["draft", "artifact", "title"])
+        titles = Map.put(Map.get(memory, :proposals, %{}), data["id"], title)
+
+        {[emit.(:remote_note, %{text: Troupe.Client.Proposal.made(data)})],
+         Map.put(memory, :proposals, titles)}
+
+      "proposal_answered" ->
+        title = Map.get(Map.get(memory, :proposals, %{}), data["id"])
+        {[emit.(:remote_note, %{text: Troupe.Client.Proposal.answered(data, title)})], memory}
       # A repository attached, taken off, or one whose clone failed (root #1207).
       "session_repository_changed" ->
         {[emit.(:remote_note, %{text: Troupe.Client.Repositories.changed(data)})], memory}

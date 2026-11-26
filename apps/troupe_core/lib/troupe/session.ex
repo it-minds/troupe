@@ -194,7 +194,10 @@ defmodule Troupe.Session do
           {Troupe.Session.Summary, session_id: session_id},
           # A projection too, which writes: one `checkpoint` after each root compaction, at
           # the root's next rest. Last, so its crash restarts nothing else.
-          {Troupe.Session.Checkpoints, session_id: session_id}
+          {Troupe.Session.Checkpoints, session_id: session_id},
+          # And one more, which writes too: what the harness offers the owner, at the root's
+          # rest and never during a turn; started only where the host can check a proposal.
+          {Troupe.Session.Proposals, session_id: session_id}
         ]
 
     Supervisor.init(children,

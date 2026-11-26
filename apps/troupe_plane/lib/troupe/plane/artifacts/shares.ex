@@ -271,6 +271,10 @@ defmodule Troupe.Plane.Artifacts.Shares do
   def shared_with(%User{id: id} = user) when is_binary(id),
     do: from([u, s] in live_uses(id), select: s.artifact_id, union: ^People.granted_to(user))
 
+  # A team's principal opens no link, having nobody to sign in through one; an owner may
+  # name it, as a person is named.
+  def shared_with(%User{} = user), do: People.granted_to(user)
+
   @doc "The role a link gives `user` on `artifact` now: `edit`, `view` or `nil`."
   @spec role(Artifact.t(), User.t()) :: String.t() | nil
   def role(%Artifact{id: id}, user), do: Map.get(roles([id], user), id)
@@ -290,6 +294,8 @@ defmodule Troupe.Plane.Artifacts.Shares do
       Map.update(acc, id, role, &People.stronger(&1, role))
     end)
   end
+
+  def roles(ids, %User{kind: "service"} = user), do: People.roles(ids, user)
 
   def roles(_ids, _user), do: %{}
 

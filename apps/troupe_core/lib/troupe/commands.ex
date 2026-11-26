@@ -443,6 +443,18 @@ defmodule Troupe.Commands do
             "open it, and the invitations stay as they were. /share alone says whose it is.",
         example: "/share team"
       ),
+      entry("proposal", "session", "Answer what Troupe proposed in this session",
+        usage: "/proposal [yes | later | never]",
+        args: [arg("answer", false, "text")],
+        availability: "tui",
+        detail:
+          "For a session on the platform, its owner's to answer. When a report built from " <>
+            "live data is published, Troupe may propose to rerun it on a schedule. /proposal " <>
+            "alone says what is open; /proposal yes turns the rerun on as you, on your " <>
+            "budget, with the schedule and prompt it drafted; /proposal later leaves it for " <>
+            "this session; /proposal never stops it being proposed for that report again.",
+        example: "/proposal yes"
+      ),
       entry("bundle", "session", "Say which configuration this session runs on, or update it",
         usage: "/bundle [update]",
         args: [arg("verb", false, "text")],

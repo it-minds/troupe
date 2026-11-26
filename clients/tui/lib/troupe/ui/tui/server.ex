@@ -1305,7 +1305,7 @@ defmodule Troupe.UI.TUI.Server do
   # 698); this is only which of them the TUI implements, and the suite holds the two
   # equal, so a command added to the table without a clause here fails a test rather
   # than being dispatched as an agent.
-  @builtins ~w(new cancel dismiss merge discard compact goal loop steer invite uninvite share bundle repo sessions archive
+  @builtins ~w(new cancel dismiss merge discard compact goal loop steer invite uninvite share proposal bundle repo sessions archive
                unarchive rename keep back hq observer files
                scratch upload save publish artifacts profiles profile copy memory context watch settings
                models mcp
@@ -1732,6 +1732,15 @@ defmodule Troupe.UI.TUI.Server do
   defp builtin("share", args, state, _target) do
     case Client.share_args(args) do
       {:ok, verb} -> notice_of(Client.share(state.session_id, verb))
+      {:error, sentence} -> {:error, sentence}
+    end
+  end
+
+  # What the harness proposed in a session on the platform (root #1208): alone it says what
+  # is open, `yes` turns it on, `later` and `never` say no; the log's line follows.
+  defp builtin("proposal", args, state, _target) do
+    case Client.proposal_args(args) do
+      {:ok, verb} -> notice_of(Client.proposal(state.session_id, verb))
       {:error, sentence} -> {:error, sentence}
     end
   end

@@ -1090,6 +1090,55 @@ defmodule Troupe.FakeRemote do
     end
   end
 
+  # The owner's yes to what the harness proposed (root #1208): what the plane made, and the
+  # log's line the pod writes, pushed to whoever is attached.
+  defp dispatch(state, :plane, "session.proposal.accept", %{"session_id" => id} = params, _pid) do
+    me = state.principal["sub"]
+
+    case Map.fetch(state.sessions, id) do
+      {:ok, %{owner: ^me}} ->
+        made = %{"team" => "eng", "name" => "rerun-weekly-numbers", "url" => nil}
+
+        {event, state} =
+          append(
+            state,
+            id,
+            "proposal_answered",
+            %{
+              "id" => params["id"],
+              "decision" => "accepted",
+              "result" => made,
+              "by_name" => state.principal["name"]
+            },
+            []
+          )
+
+        push(state, id, notification(id, event))
+        {{:ok, Map.put(made, "edited", [])}, state}
+
+      {:ok, _theirs} ->
+        {{:error, -32_004, "forbidden", %{"required_role" => "owner"}}, state}
+
+      :error ->
+        {{:error, -32_005, "no such session"}, state}
+    end
+  end
+
+  # The owner's no to what the harness proposed: the log's line, pushed to whoever is attached.
+  defp dispatch(state, :worker, "session.proposal.answer", %{"session_id" => id} = params, _pid) do
+    {event, state} =
+      append(
+        state,
+        id,
+        "proposal_answered",
+        %{"id" => params["id"], "decision" => params["decision"]},
+        []
+      )
+
+    push(state, id, notification(id, event))
+    {{:ok, %{"accepted" => true}}, state}
+  end
+
   # Raised to its channel's current version, the owner's alone (root #1177): at once with the
   # log's `config_upgraded`, pushed to whoever is attached; kept while its agent works.
   defp dispatch(state, :plane, "session.bundle.raise", %{"session_id" => id}, _pid) do

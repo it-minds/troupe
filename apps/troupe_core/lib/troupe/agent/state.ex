@@ -133,6 +133,10 @@ defmodule Troupe.Agent.State do
     # Local only (`Troupe.LocalOnly`): said once, and again only after it left it and came
     # back. Not replayed.
     local_only_said: false,
+    # The triggers the owner turned on from this session's proposals, as the root's
+    # instructions last said them (`Troupe.Session.Proposals.reruns/1`): another one makes
+    # the next turn read its instructions again. Not replayed.
+    reruns: [],
     # The MCP servers' and the person's clients' tools as this turn's first model call
     # found them (Decision 871), offered for the rest of the turn, so a server that comes
     # back with another list, a sign-in or a person's tools leaving change the tools at the

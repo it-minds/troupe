@@ -309,6 +309,7 @@ export interface FakeTeam {
   cache_eviction_days: number | null;
   erase_after_days: number | null;
   pins_allowed: boolean | null;
+  members_may_schedule?: boolean | null;
   volume_storage_class: string | null;
   volume_size: string | null;
   allow_unenforced_workers: boolean;
@@ -585,6 +586,7 @@ const SETTINGS: Setting[] = [
   { key: "default_erase_after_days", group: "team_defaults", type: "integer", fallback: 365, summary: "How long a session is kept before it is erased.", consequence: "No team may keep sessions longer." },
   { key: "pins_allowed", group: "team_defaults", type: "boolean", fallback: true, summary: "Whether a session may be pinned against eviction.", consequence: "Off here and no team may turn it on, whatever their own setting says." },
   { key: "members_may_control", group: "team_defaults", type: "boolean", fallback: true, summary: "Whether a team's members may drive each other's sessions.", consequence: "Off here and no team may turn it on." },
+  { key: "members_may_schedule", group: "team_defaults", type: "boolean", fallback: true, summary: "Whether teams may let a member turn on a trigger the harness proposed in their session.", consequence: "Off here and no team may turn it on, and no session proposes one." },
   {
     key: "client_release_url",
     group: "releases",
@@ -702,6 +704,7 @@ const NAMING: Record<string, { label: string; unit: string; choices?: Array<{ va
   default_erase_after_days: { label: "Erase a session after", unit: "days" },
   pins_allowed: { label: "Members may pin a session", unit: "switch" },
   members_may_control: { label: "Members may steer a team session", unit: "switch" },
+  members_may_schedule: { label: "Members may schedule a report", unit: "switch" },
   client_release_url: { label: "Where machines get releases", unit: "url" },
   client_provider: {
     label: "Provider for people's machines",
@@ -833,6 +836,7 @@ const LADDERED: Record<string, Laddered> = {
   default_erase_after_days: { field: "erase_after_days", narrower: "lower", deployed: 365 },
   pins_allowed: { field: "pins_allowed", narrower: "off", deployed: true },
   members_may_control: { field: "members_may_control", narrower: "off", deployed: true },
+  members_may_schedule: { field: "members_may_schedule", narrower: "off", deployed: true },
 };
 
 const TEAM_KEYS = [
@@ -843,6 +847,7 @@ const TEAM_KEYS = [
   "erase_after_days",
   "members_may_control",
   "pins_allowed",
+  "members_may_schedule",
   "volume_size",
   "volume_storage_class",
   "allow_unenforced_workers",
@@ -881,7 +886,7 @@ function readTeamGitHub(current: TeamGitHubFake, sent: unknown): { github: TeamG
   }
   return { github };
 }
-const BOOLEAN_KEYS = ["members_may_control", "pins_allowed", "allow_unenforced_workers", "remote_offering_allowed"];
+const BOOLEAN_KEYS = ["members_may_control", "pins_allowed", "members_may_schedule", "allow_unenforced_workers", "remote_offering_allowed"];
 
 /** A team's name, as `Identity.Team` holds it to. */
 const TEAM_NAME = /^[a-z0-9]([a-z0-9-]{0,56}[a-z0-9])?$/;
@@ -896,6 +901,7 @@ const NEW_TEAM: Partial<FakeTeam> = {
   cache_eviction_days: 7,
   erase_after_days: 365,
   pins_allowed: true,
+  members_may_schedule: true,
   members_may_control: false,
   volume_size: "10Gi",
 };
@@ -4137,6 +4143,7 @@ function limitRefusal(field: string, asked: unknown, ceiling: unknown): string {
   if (field === "erase_after_days") return `The platform allows at most ${days(ceiling)} before a session is erased; ${days(asked)} is more than that.`;
   if (field === "pins_allowed") return "The platform does not let members pin a session; a team may not turn it on.";
   if (field === "members_may_control") return "The platform does not let members steer a team session; a team may not turn it on.";
+  if (field === "members_may_schedule") return "The platform does not let members turn on a proposed trigger; a team may not turn it on.";
   return `The platform allows at most ${String(ceiling)} for ${field}; ${String(asked)} is more than that.`;
 }
 
@@ -4240,6 +4247,7 @@ export function exampleAdmin(): FakeAdmin {
         cache_eviction_days: 5,
         erase_after_days: 90,
         pins_allowed: true,
+        members_may_schedule: true,
         members_may_control: true,
         volume_size: "20Gi",
         volume_storage_class: "fast-ssd",

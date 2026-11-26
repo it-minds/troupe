@@ -41,7 +41,7 @@ defmodule Troupe.Worker.Connections do
   alias Troupe.KMS
   alias Troupe.KMS.Policy
   alias Troupe.MCP.Server
-  alias Troupe.Worker.{Artifacts, MemoryRead, UserMemory}
+  alias Troupe.Worker.{Artifacts, MemoryRead, Proposals, UserMemory}
   alias Troupe.Worker.Plane.Link
 
   require Logger
@@ -110,6 +110,8 @@ defmodule Troupe.Worker.Connections do
       Artifacts.install()
       # And how a session's turn asks whether the memory it holds is in force.
       MemoryRead.install()
+      # And whether a session may propose something to its owner, and where their never goes.
+      Proposals.install()
     end
 
     {:ok, %{}}

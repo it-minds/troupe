@@ -125,6 +125,14 @@ spec:
                     approvals:
                       type: string
                       enum: [wait, deny]
+                    allow:
+                      type: array
+                      maxItems: 16
+                      description: >-
+                        Per-tool rules its runs need unasked, as a configuration file
+                        writes them (publish_artifact, shell(curl)); a profile's ask or
+                        deny of the same tool still holds.
+                      items: {type: string}
                 visibility:
                   type: string
                   enum: [private, team]

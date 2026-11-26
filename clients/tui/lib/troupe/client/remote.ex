@@ -327,6 +327,53 @@ defmodule Troupe.Client.Remote do
     end
   end
 
+  # What the harness proposed in a pod session (root #1208): the open one as its log said
+  # it; a yes at the plane, as this person, which tells the pod; a no to the session.
+  @impl true
+  def proposal(sid, verb) do
+    case {verb, Worker.open_proposal(sid)} do
+      {:status, open} -> {:ok, Troupe.Client.Proposal.status(open)}
+      {_verb, nil} -> {:error, Troupe.Client.Proposal.status(nil)}
+      {:yes, open} -> accept(sid, open)
+      {no, open} -> answer_proposal(sid, open["id"], Atom.to_string(no))
+    end
+  end
+
+  defp accept(sid, open) do
+    case attachment(sid) do
+      %{plane_url: plane} when is_binary(plane) ->
+        case call(plane, "session.proposal.accept", %{session_id: sid, id: open["id"], edits: %{}}) do
+          {:ok, %{} = answer} ->
+            {:ok, Troupe.Client.Proposal.accepted(answer)}
+
+          {:error, %{code: -32_601}} ->
+            {:error, "this plane does not turn on a proposed trigger yet"}
+
+          {:error, %{data: %{"reason" => said}}} when is_binary(said) ->
+            {:error, said}
+
+          {:error, reason} ->
+            {:error, refusal(reason)}
+        end
+
+      _ ->
+        {:error, message(:not_attached)}
+    end
+  end
+
+  defp answer_proposal(sid, id, decision) do
+    said =
+      if decision == "never",
+        do: "not proposed again for this report",
+        else: "not now: not asked again in this session"
+
+    case Worker.answer_proposal(sid, id, decision) do
+      {:error, %{data: %{"reason" => reason}}} when is_binary(reason) -> {:error, reason}
+      {:error, reason} -> {:error, refusal(reason)}
+      _answered -> {:ok, said}
+    end
+  end
+
   # Which configuration a pod session runs on, at the plane, which holds the pin (root
   # #1177); raised, the log's `config_upgraded` follows where a pod holds it.
   @impl true

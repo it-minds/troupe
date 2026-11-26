@@ -462,6 +462,8 @@ export interface AdminTeam extends TeamSpend {
   cache_eviction_days: number | null;
   erase_after_days: number | null;
   pins_allowed: boolean | null;
+  /** Whether a member may turn on a trigger the harness proposed (troupe #1208); absent from an older plane. */
+  members_may_schedule?: boolean | null;
   volume_storage_class: string | null;
   volume_size: string | null;
   /** A platform admin's to set; whether the team may be granted a profile nothing is enforced on. */

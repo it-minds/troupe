@@ -1,0 +1,31 @@
+{
+  "$id": "https://troupe.dev/schema/v1/events/proposal_answered.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "properties": {
+    "by_name": {
+      "type": "string"
+    },
+    "decision": {
+      "type": "string"
+    },
+    "edited": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "id": {
+      "type": "string"
+    },
+    "result": {
+      "type": "object"
+    }
+  },
+  "required": [
+    "decision",
+    "id"
+  ],
+  "title": "proposal_answered",
+  "type": "object"
+}

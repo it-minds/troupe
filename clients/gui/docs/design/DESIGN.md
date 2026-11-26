@@ -304,6 +304,8 @@ Plain language, sentence case, active verbs. Name things the way the reader does
 
 **"Private" means a sealed session and nothing else.** A session on a team's profile that only its owner and the people they invite can open is started with the tick "Only me, until I invite people" and marked "only you" in the list and the head.
 
+**A proposal is asked as its question.** What the harness offers a session's owner (troupe #1208) is a `proposal` in the protocol and never a noun on the screen: the card's headline is the question ("Rerun this report every week?"), its buttons Turn on, Not now and Never for this report, and the line after it says what was done ("You turned on a rerun of “Weekly numbers”, every Monday at 06:00 UTC."). It wears an offer's cyan edge, never amber: nothing waits on it.
+
 Errors say what happened and what to do next. Empty screens invite. Waiting times are given as honest ranges ("about twenty seconds"), never as fake progress.
 
 ---

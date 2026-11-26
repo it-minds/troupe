@@ -311,7 +311,7 @@ defmodule Troupe.Sessions.Fork do
     facts = data["facts"] || %{}
 
     facts =
-      Enum.reduce(["open_approvals", "open_questions", "running", "error"], facts, fn key, facts ->
+      Enum.reduce(["open_approvals", "open_questions", "open_proposals", "running", "error"], facts, fn key, facts ->
         case facts do
           %{^key => list} when is_list(list) -> Map.put(facts, key, Enum.map(list, &shift(&1, "seq")))
           %{^key => %{} = one} -> Map.put(facts, key, shift(one, "seq"))
