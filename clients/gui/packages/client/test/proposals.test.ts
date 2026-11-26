@@ -94,8 +94,21 @@ describe("the schedule and the card's words", () => {
   });
 
   it("sends only what the owner changed, and says what it runs as and costs", () => {
-    const made = recorded("open").find((e) => e.type === "proposal_made")!;
-    const draft = (made.data["draft"] as ProposalState["draft"]);
+    // A draft as the harness writes one, here rather than read from a recording, so this
+    // runs where the recordings are not (the GUI image sees clients/gui alone).
+    const draft: ProposalState["draft"] = {
+      name: "rerun-weekly-numbers",
+      schedule: "every Monday",
+      source: { kind: "schedule", cron: "0 6 * * 1", tz: "UTC" },
+      prompt_template: "Pull the numbers and publish the weekly report.",
+      profile: "build",
+      agent: "build",
+      visibility: "private",
+      review: "required",
+      notify: [],
+      terms: { budget_micros: 1_000_000, approvals: "deny", allow: ["publish_artifact", "shell(curl)"] },
+      artifact: { id: "art-weeklynumbers01", title: "Weekly numbers", version: 1 },
+    };
     assert.deepEqual(editsOf(draft, draft.source.cron, draft.prompt_template, 1_000_000), {});
     assert.deepEqual(editsOf(draft, "0 7 * * 1-5", draft.prompt_template, 2_000_000), { cron: "0 7 * * 1-5", budget_micros: 2_000_000 });
     assert.equal(runsLine(draft), "Runs as you, on build, up to $1.00 a run; each run is a new version of “Weekly numbers”, and you are asked to review it.");
