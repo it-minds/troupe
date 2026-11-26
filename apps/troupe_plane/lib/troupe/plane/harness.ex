@@ -3305,6 +3305,7 @@ defmodule Troupe.Plane.Harness do
       |> Map.merge(bundle_params(session))
       |> Map.merge(memory_params(session, team))
       |> Map.merge(session_terms(session))
+      |> Map.merge(idle_params(team))
       |> Map.merge(fork_params(session))
       |> Map.merge(repository_params(session))
       |> then(fn params -> if prompt, do: Map.put(params, "prompt", prompt), else: params end)
@@ -3654,6 +3655,7 @@ defmodule Troupe.Plane.Harness do
       |> Map.merge(bundle_params(session))
       |> Map.merge(memory_params(session, team_of(session)))
       |> Map.merge(session_terms(session))
+      |> Map.merge(idle_params(team_of(session)))
       |> Map.merge(repository_params(session))
 
     case Router.push(worker, "session.activate", params) do
@@ -4243,6 +4245,20 @@ defmodule Troupe.Plane.Harness do
     %{"terms" => session.terms, "origin" => session.origin, "lifespan" => session.lifespan}
     |> Map.reject(fn {_key, value} -> is_nil(value) end)
     |> Map.put("managed", managed_switches())
+  end
+
+  # How long the session rests with nothing to do before its pod puts it to sleep: the
+  # team's idle timeout as the ladder resolves it under the platform's, the number a
+  # client is told. Read at every activation, as the platform's switches are, so a team
+  # that changes it reaches a session awake now at its next wake.
+  defp idle_params(team) do
+    case Ladder.effective("default_idle_timeout_seconds", team) do
+      %{value: seconds} when is_integer(seconds) and seconds > 0 ->
+        %{"idle_timeout_seconds" => seconds}
+
+      _none ->
+        %{}
+    end
   end
 
   # The platform's two switches, re-read at every activation rather than pinned at

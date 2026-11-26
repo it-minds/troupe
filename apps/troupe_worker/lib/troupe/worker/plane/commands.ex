@@ -85,6 +85,9 @@ defmodule Troupe.Worker.Plane.Commands do
             # workspace, which an activation clones where they are not there. Names, never
             # a credential: that the pod asks for.
             repositories: Repositories.of_activation(params),
+            # How long the session rests with nothing to do before it sleeps: the team's
+            # idle timeout, as clients are told it. None, and the pod keeps its own.
+            dormant_after_ms: idle_ms(params["idle_timeout_seconds"]),
             origin: params["origin"],
             # How long it lasts, which a new session's `session_created` records.
             lifespan: params["lifespan"],
@@ -1076,6 +1079,16 @@ defmodule Troupe.Worker.Plane.Commands do
   end
 
   defp terms_of(_terms), do: nil
+
+  # The idle timeout in seconds, as the team's setting is kept, and in milliseconds inside.
+  # The setting is a positive number of seconds; one longer than a timer can wait is held at
+  # the longest it can, and anything that is not a positive whole number is no timeout.
+  @longest_idle_seconds div(4_294_967_295, 1000)
+
+  defp idle_ms(seconds) when is_integer(seconds) and seconds > 0,
+    do: min(seconds, @longest_idle_seconds) * 1000
+
+  defp idle_ms(_seconds), do: nil
 
   defp allowed([_ | _] = rules), do: Enum.filter(rules, &is_binary/1)
   defp allowed(_none), do: nil

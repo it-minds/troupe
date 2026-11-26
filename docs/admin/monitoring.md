@@ -86,7 +86,7 @@ Phoenix's own; nothing in a deployment attaches to them.
 | Scale-down | after 2 min wanting fewer pods: the pods above the new count drained, turns given up to 5 min, the count lowered once they hold no active session |
 | Pod stop | a worker stopped without a drain drains itself: turns get 150 s, then every session is put to sleep inside the grace period |
 | Worker disk | caches evicted above 70 %, checked every 30 s |
-| Dormancy | a session sleeps after 10 min idle on the pod; sealed every 60 s and at a turn's end |
+| Dormancy | a session sleeps on the pod after its team's idle timeout (30 min unless the team or the platform sets another); sealed every 60 s and at a turn's end |
 | Caches | ledger sums 60 s per node; settings 5 s; provider JWKS until a bad signature |
 
 **A drain** (a scale-down, an upgrade, or `admin.pod.drain`) stops placing on the pod, lets
