@@ -212,7 +212,7 @@ daemon.askTool(notes.id, "write_file", { path: "plan.md" });
 // answer with a table, a nested list and fenced code, a diff and a csv; and the same turn
 // played live whenever something is sent there, so its reasoning streams and the curtain
 // line says what runs.
-const parser = daemon.seed("/home/ada/parser");
+const parser = daemon.seed("/home/ada/parser", { scripted: true });
 const PARSER_ANSWER = [
   "## Fixed",
   "",
@@ -318,19 +318,6 @@ parser.log.listen((e) => {
 longSession(daemon.seed("/home/ada/long").log, 1000);
 const compacted = daemon.seed("/home/ada/compacted");
 longSession(compacted.log, 1000, { compactAt: 950 });
-// What is sent there is taken as a turn and answered, so a line sent while Earlier reads
-// the part before the checkpoint has somewhere to land.
-const heard = new Map<string, string>();
-compacted.log.listen((e) => {
-  if (e.type === "input_queued") heard.set(String(e.data["command_id"]), String(e.data["text"] ?? ""));
-  if (e.type !== "input_accepted") return;
-  const text = heard.get(String(e.data["command_id"])) ?? "";
-  setTimeout(() => {
-    compacted.log.append("user_input", { source: "user", text }, e.actor);
-    compacted.log.append("llm_response", { message: { role: "assistant", content: [{ type: "text", text: `Heard: ${text}` }] } });
-    compacted.log.append("turn_ended", {});
-  }, 0);
-});
 // The agents manager (troupe #503) with every layer to show: the built-ins, the
 // repository's own reviewer, whose shell runs without asking, and a bundle's.
 daemon.agents.files.push(

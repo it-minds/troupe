@@ -73,6 +73,11 @@ interface Session {
    */
   unreadable?: { seq: number; detail: string } | null;
   /**
+   * A session whose turns a walk's script writes, step by step, so `input.send` writes the
+   * line's `input_queued` and `input_accepted` and leaves the turn to the script.
+   */
+  scripted?: boolean;
+  /**
    * The head `seq` as of the last moment a client was reading the session, the daemon's
    * `seen` mark: `unseen` counts what came after it. Null for a session nobody ever read.
    */
@@ -1196,6 +1201,15 @@ evoked where nothing is set and there was a sign-in. */
     this.ephemeral(session, "context_status", { window_tokens: 200_000, used_tokens: 10 });
   }
 
+  /** A line sent to a session that is open: the input, the fake model's answer, and the turn's end. */
+  private nextTurn(session: Session, text: string, commandId: string): void {
+    const actor = { kind: "user", subject: this.principal.subject };
+    session.log.append("user_input", { command_id: commandId, text, source: "user" }, actor);
+    session.log.append("llm_response", { message: { role: "assistant", content: [{ type: "text", text: `You said: ${text}` }] }, stop_reason: "end_turn", model: "fake" });
+    this.ephemeral(session, "context_status", { window_tokens: 200_000, used_tokens: 10 });
+    session.log.append("turn_ended", {});
+  }
+
   /** Give a session a task list, as the agent's `todo_write` does. */
   todos(sessionId: string, items: Array<{ id: string; content: string; status: string }>): LoggedEvent {
     const session = this.sessions.get(sessionId)!;
@@ -1662,7 +1676,13 @@ evoked where nothing is set and there was a sign-in. */
         const actor = { kind: "user", subject: this.principal.subject };
         session.log.append("input_queued", { command_id: commandId, author: this.principal.subject, text: params["text"] }, actor);
         session.log.append("input_accepted", { command_id: commandId, author: this.principal.subject }, actor);
-        return reply(ws, id, { accepted: true });
+        // The line is the session's next user turn and the fake model answers it as it
+        // answers a first prompt, so a transcript shows what a person sent and that the
+        // session replied.
+        reply(ws, id, { accepted: true });
+        if (session.scripted) return;
+        this.nextTurn(session, String(params["text"] ?? ""), commandId);
+        return;
       }
 
       // A person's change to the task list, as the harness applies it: the list again, and
