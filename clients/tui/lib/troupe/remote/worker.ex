@@ -404,6 +404,10 @@ defmodule Troupe.Remote.Worker do
       # What the harness proposed and nobody answered yet (root #1208), oldest first, each
       # `proposal_made`'s data: what `/proposal` answers.
       proposals: [],
+      # The GitHub repositories a pod session holds, by `owner/name`, as the plane said at
+      # the open and the log's `session_repository_changed` says since (root #1207); nil
+      # where nobody said.
+      repositories: Keyword.get(opts, :repositories),
       agent: nil,
       # Events of this client's own waiting for the window to open (`post/3`), each
       # `{type, data}`.
@@ -1445,7 +1449,8 @@ defmodule Troupe.Remote.Worker do
       | memory: memory,
         agent: state.agent || Translate.root_of(params),
         visibility: given(params) || state.visibility,
-        proposals: proposed(state.proposals, params)
+        proposals: proposed(state.proposals, params),
+        repositories: held(params) || state.repositories
     }
 
     state =
@@ -1464,7 +1469,7 @@ defmodule Troupe.Remote.Worker do
           %{state | cursor: max(state.cursor, Translate.seq(params) || state.cursor)}
       end
 
-    if given(params), do: publish_status(state)
+    if given(params) || held(params), do: publish_status(state)
     write_notes(state)
   end
 
@@ -1482,6 +1487,12 @@ defmodule Troupe.Remote.Worker do
     do: Enum.reject(open, &(&1["id"] == id))
 
   defp proposed(open, _params), do: open
+  # The repositories it holds now, as its log says each time one moves.
+  defp held(%{"type" => "session_repository_changed", "data" => %{"repositories" => list}})
+       when is_list(list),
+       do: for(%{"repository" => full} <- list, is_binary(full), do: full)
+
+  defp held(_params), do: nil
 
   # The client's own lines go into the window once there is one, stamped after whatever
   # opened it: written earlier, they would sort ahead of the session's first events, which
@@ -1717,6 +1728,7 @@ defmodule Troupe.Remote.Worker do
       |> Map.put(:always_allow?, state.capabilities["approval_allow_always"] == true)
       |> Map.put(:attach_artifact?, state.capabilities["fs_upload_artifact"] == true)
       |> Map.put(:only_me?, only_me?(state))
+      |> Map.put(:repositories, state.repositories || [])
     )
   end
 

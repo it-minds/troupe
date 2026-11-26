@@ -150,7 +150,7 @@ spec:
 Those four are all a profile may grant: `contents` and `pull_requests` read or write,
 `checks` and `statuses` read; anything else is refused by name when the profile is saved.
 Absent, a session on the profile clones and does no more. The fix loop's token is minted
-with exactly these, narrowed to the session's repository; a profile that grants nothing to
+with exactly these, narrowed to the one repository it acts on; a profile that grants nothing to
 write with, or does not declare the API's host, gets no such token, and the tool that asked
 says why. The plane reads the grant at every token it mints, so a change needs no restart.
 
@@ -162,17 +162,45 @@ administrators list the repositories its sessions and triggers may name, one per
 `admin.team.update` with `{"github": {"repositories": [...]}}`. A team that lists none names
 none ([§7](#7-how-far-a-run-may-go)).
 
-`session.create` on the plane takes `repository`, as `"example-org/widgets"` or as
-`{"owner": "example-org", "name": "widgets", "ref": "main"}`. It is refused, with
-`invalid_params` and `field: "repository"`, when the plane has no App, the App is not
-installed for that owner here, the session's team does not list it, or the profile does not
-declare the Git host. The session's row and its listing carry it.
+`session.create` on the plane takes `repositories`, a list of `"example-org/widgets"` or
+`{"owner": "example-org", "name": "widgets", "ref": "main"}`; the new-session screens of
+the desktop app and the terminal (`/new --repo example-org/widgets@main`, repeatable, and
+`troupe run --repo`) send it, offering the team's list once the profile allows GitHub. A
+profile allows it with `spec.github` (an empty `github: {}` is enough to clone and do no
+more), and holds a session to `spec.github.maxRepositories`, three where absent, at most
+ten. Each is refused, with `invalid_params`, `field: "repositories"` and a sentence that
+names it, when the plane has no App, the App is not installed for that owner here, the
+session's team does not list it, the profile does not declare the Git host, has no
+`spec.github`, or the list is longer than its cap. `repository`, one of them, is what a
+client from before the list sends, and a profile without `spec.github` still clones it;
+both at once is refused. The session's row and its listing carry `repositories`, each with
+its directory, who attached it and what was done there, and `repository`, the first.
 
-The pod clones it shallow, one branch (the one asked for, or the default), no tags. A clone
-that fails (the installation does not include the repository, GitHub refuses the App) fails
-the session's start with GitHub's reason. Its token is a GitHub installation token for that
-one repository, `contents: read`, which GitHub ends after an hour; a pod asks for it over
-the control channel, only for a session it holds, and gets a new one at each activation.
+The session's owner attaches another while it runs (`session.repository.add`, the desktop
+app's **Attach a repository**, the terminal's `/repo add`), checked as at creation and held
+to the same cap, and takes one off (`session.repository.remove`, **Take off**, `/repo
+remove`); somebody who only steers the session may do neither. Both are in the audit trail
+as `session.repository.add` and `.remove`.
+
+The pod clones each shallow, one branch (the one asked for, or the default), no tags: the
+first at the workspace's root, as a single repository always was, so its instruction files,
+agents and skills are found there; every other one in its own directory,
+`<owner>/<name>`, which the root clone leaves out of what it stages. One attached while the
+session runs is cloned there and then, without a restart; one attached while it sleeps, at
+its next activation. A clone that fails at the start fails the session's start with
+GitHub's reason; one attached later that fails is refused with it, and the session goes on
+as it was. The agent is told in its turn context which repositories it has, where each clone
+is and its branch, and told again when one is attached or taken off. Taking one off deletes
+its directory and revokes its tokens, and is refused while a push, a pull request or a CI
+read on it is going; the first goes only while another remains, and loses its `.git`, its
+files staying the session's.
+
+Each repository's token is a GitHub installation token for that one repository,
+`contents: read`, which GitHub ends after an hour; a pod asks for it over the control
+channel, only for a session it holds and a repository the row has, and gets a new one at
+each activation. A session's clones stay with its workspace while it sleeps and come back
+with it, as one clone always did: they are cloned again only where the workspace came back
+without them.
 
 **The token never reaches the session.** The pod's own git takes the clone's through a
 credential helper on its command line; the fix loop's is used by the pod itself, outside the
@@ -180,7 +208,8 @@ sandbox, in the request it sends GitHub. The workspace's `.git/config` names the
 no credential, and the agent's `shell` has a token neither in its environment, nor in a
 file, nor through a helper, so a `git fetch` or `git push` from the shell cannot
 authenticate. No log names a token; the audit trail has a `github.token` entry for each,
-naming the session, the repository, the permissions and when it expires.
+one per repository, naming the session, the repository, the permissions and when it
+expires.
 
 <a id="9-how-far-a-run-may-go"></a>
 
@@ -203,6 +232,7 @@ spec:
     maxPushes: 10                 # pushes a run may make
     maxRuns: 3                    # runs on a repository at once, across its triggers
     maxAttempts: 2                # runs a sweep starts on one issue that may end without a fix
+    maxRepositories: 3            # repositories one session may hold (the default; 1 to 10)
 ```
 
 **A team** (its own administrators'), on its console page's **GitHub** tab, or
@@ -212,7 +242,11 @@ spec:
 {"github": {"repositories": ["example-org/widgets", "example-org/docs"], "max_pushes": 5, "max_runs": 2, "max_attempts": 1}}
 ```
 
-What each does:
+What each does, for each repository a session holds on its own: `git_push`, `pr_open`,
+`pr_comment` and `pr_checks` take the repository they act on (`repository`, `owner/name`),
+the only one where a session holds one, and are refused naming the choices where it holds
+several and names none; each repository has its own token, branch, pull request, record and
+caps.
 
 - **Repositories, per team.** A session, a trigger and every token are for a repository its
   team lists, checked when the session or the trigger is made and again at each token, so a
@@ -235,7 +269,7 @@ What each does:
   take one the agent staged or committed out of git's index with `git rm --cached`. A file
   already on GitHub that the push does not change is not asked about. Content is not
   scanned for secrets; GitHub's secret scanning and push protection are the place for that.
-- **A cap of pushes.** The lower of the profile's `maxPushes` and the team's `max_pushes`.
+- **A cap of pushes.** The lower of the profile's `maxPushes` and the team's `max_pushes`, on each repository a session holds.
   A run that asks for one more stops as three red CI rounds stop it: the plane records why,
   every token it mints after cannot push, the bot says so on the draft, and the agent is
   told to comment what it tried and stop.

@@ -3091,7 +3091,7 @@ defmodule Troupe.UI.TUI.View do
 
   defp remote_note(%{model: %{remote: %{} = remote}}) do
     mine = if remote[:only_me?], do: " · " <> only_you(), else: ""
-    state = " · remote (#{remote[:state] || "?"})" <> mine
+    state = " · remote (#{remote[:state] || "?"})" <> mine <> on_github(remote[:repositories])
 
     case remote[:reason] do
       reason when is_binary(reason) -> state <> " · #{reason}"
@@ -3100,6 +3100,10 @@ defmodule Troupe.UI.TUI.View do
   end
 
   defp remote_note(_state), do: ""
+
+  # The GitHub repositories a pod session holds (root #1207): the first, and how many more.
+  defp on_github([_ | _] = names), do: " · on " <> Troupe.Client.repositories_summary(names)
+  defp on_github(_none), do: ""
 
   # The reason input is off, when it is: a read-only session, a viewer token, or
   # a connection that is coming back.

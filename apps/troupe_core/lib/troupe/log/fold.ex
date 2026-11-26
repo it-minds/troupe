@@ -70,7 +70,7 @@ defmodule Troupe.Log.Fold do
       delegation_started
       approval_requested approval_decided
       session_created session_dormant session_activated config_upgraded
-      session_tainted user_shell
+      session_tainted user_shell session_repository_changed
     )
   end
 
@@ -209,6 +209,13 @@ defmodule Troupe.Log.Fold do
   end
 
   defp agent_fold(agent, %Event{type: "goal_cleared"}), do: Map.delete(agent, "goal")
+
+  # The repositories a pod session holds, by name and directory: present only once a log
+  # says so, as the goal is, so a log without one folds to the map it always did.
+  defp agent_fold(agent, %Event{type: "session_repository_changed", data: data}) do
+    held = for entry <- data["repositories"] || [], do: Map.take(entry, ["repository", "path"])
+    Map.put(agent, "repositories", held)
+  end
 
   # A cancel ends the turn it stopped, and what the next one costs is counted from nothing
   # (Decision 769). Present only once there has been one, as the goal is, so a log without

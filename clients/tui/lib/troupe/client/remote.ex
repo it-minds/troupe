@@ -14,7 +14,7 @@ defmodule Troupe.Client.Remote do
 
   @behaviour Troupe.Client
 
-  alias Troupe.Client.Events
+  alias Troupe.Client.{Events, Repositories}
   alias Troupe.Config
   alias Troupe.Protocol.ClientUpdate
   alias Troupe.Remote.{Capability, Credentials, Discovery, Journal, Plane, RPC, Tokens, Worker}
@@ -414,6 +414,50 @@ defmodule Troupe.Client.Remote do
     end
   end
 
+  # The GitHub repositories a pod session holds, at the plane, which keeps the list and
+  # tells the pod (root #1207); the log's `session_repository_changed` follows.
+  @impl true
+  def repositories(sid, verb) do
+    case attachment(sid) do
+      %{plane_url: plane} when is_binary(plane) -> repositories_on(plane, sid, verb)
+      _ -> {:error, message(:not_attached)}
+    end
+  end
+
+  defp repositories_on(plane, sid, :list) do
+    case call(plane, "session.get", %{session_id: sid}) do
+      {:ok, %{} = row} -> {:ok, Repositories.list(row)}
+      {:error, reason} -> {:error, refusal(reason)}
+    end
+  end
+
+  defp repositories_on(plane, sid, {:add, repository}) do
+    params = %{session_id: sid, repository: Repositories.param(repository)}
+
+    # A clone takes as long as git takes; the plane waits for the pod as long.
+    case Plane.call(plane, "session.repository.add", params, 320_000) do
+      {:ok, %{} = row} -> {:ok, Repositories.added(row, Repositories.name(repository))}
+      {:error, reason} -> {:error, repository_refusal(reason)}
+    end
+  end
+
+  defp repositories_on(plane, sid, {:remove, full}) do
+    case call(plane, "session.repository.remove", %{session_id: sid, repository: full}) do
+      {:ok, %{}} -> {:ok, Repositories.removed(full)}
+      {:error, reason} -> {:error, repository_refusal(reason)}
+    end
+  end
+
+  defp repository_refusal(%{message: "forbidden"} = error), do: Repositories.forbidden(error[:data])
+  defp repository_refusal(%{code: -32_601}), do: Repositories.too_old()
+
+  defp repository_refusal(%{data: %{"reason" => "busy", "detail" => detail}})
+       when is_binary(detail),
+       do: detail
+
+  defp repository_refusal(%{data: %{"reason" => said}}) when is_binary(said), do: said
+  defp repository_refusal(reason), do: refusal(reason)
+
   defp share_on(plane, sid, :status) do
     case call(plane, "session.get", %{session_id: sid}) do
       {:ok, %{} = row} -> {:ok, Troupe.Client.Share.status(row)}
@@ -774,6 +818,9 @@ defmodule Troupe.Client.Remote do
         # --only-me`) is its owner's and the people they invite, on the team's profile all
         # the same. Never a sealed session, which is this computer's daemon's.
         visibility: params[:visibility] || "team",
+        # The GitHub repositories it starts on (`/new --repo`, `troupe run --repo`), each
+        # `owner/name` or `{owner, name, ref}`; with none the plane is sent none.
+        repositories: repositories_param(params[:repositories]),
         prompt: params[:prompt] || "",
         command_id: RPC.command_id()
       })
@@ -787,6 +834,7 @@ defmodule Troupe.Client.Remote do
         profile: params[:profile],
         team: params[:team],
         only_me: body[:visibility] == "private",
+        repositories: repository_names(result["repositories"]),
         title: params[:title] || params[:prompt]
       })
     else
@@ -873,7 +921,10 @@ defmodule Troupe.Client.Remote do
           # Whose it is, where the plane says (root #1169), which `/share` and the log's
           # `session_visibility_changed` then change.
           visibility: result["visibility"],
-          owner?: result["role"] == "owner"
+          owner?: result["role"] == "owner",
+          # What it works on, as the plane said, which the log's `session_repository_changed`
+          # then changes.
+          repositories: repository_names(result["repositories"])
         })
 
       {:error, reason} ->
@@ -1097,7 +1148,8 @@ defmodule Troupe.Client.Remote do
          only_me: info[:only_me] == true,
          title: info[:title],
          visibility: info[:visibility],
-         owner?: info[:owner?] == true
+         owner?: info[:owner?] == true,
+         repositories: info[:repositories]
        ]}
 
     case DynamicSupervisor.start_child(Troupe.Remote.Sessions, spec) do
@@ -1170,6 +1222,16 @@ defmodule Troupe.Client.Remote do
   defp message(:logged_out), do: "not signed in; run troupe login <plane-url>"
   defp message(reason) when is_binary(reason), do: reason
   defp message(reason), do: inspect(reason)
+
+  defp repositories_param([_ | _] = list), do: Enum.map(list, &Repositories.param/1)
+  defp repositories_param(_none), do: nil
+
+  # A session row's or an open's repositories by `owner/name`; `nil` where it said none,
+  # as a plane from before the list does.
+  defp repository_names(list) when is_list(list),
+    do: for(%{"owner" => _, "name" => _} = entry <- list, do: Repositories.name(entry))
+
+  defp repository_names(_none), do: nil
 
   defp params(map) do
     map

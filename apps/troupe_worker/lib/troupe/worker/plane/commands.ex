@@ -26,7 +26,7 @@ defmodule Troupe.Worker.Plane.Commands do
   alias Troupe.Worker.Drain
   alias Troupe.Worker.MCP
   alias Troupe.Worker.Plane.Link
-  alias Troupe.Worker.Session.{Manager, Reader, Restore, Workspace}
+  alias Troupe.Worker.Session.{Manager, Reader, Repositories, Restore, Workspace}
   alias Troupe.Worker.Sessions
 
   require Logger
@@ -80,9 +80,10 @@ defmodule Troupe.Worker.Plane.Commands do
             # The organisation's, the team's and the profile's memory documents, which the
             # session reads as instructions before every file.
             memory: params["memory"],
-            # The GitHub repository a session was created with, which its first
-            # activation clones. A name, never a credential: that the pod asks for.
-            repository: params["repository"],
+            # The GitHub repositories the session holds, each with its directory in the
+            # workspace, which an activation clones where they are not there. Names, never
+            # a credential: that the pod asks for.
+            repositories: Repositories.of_activation(params),
             origin: params["origin"],
             usage_seq: params["usage_seq"]
           ],
@@ -176,6 +177,28 @@ defmodule Troupe.Worker.Plane.Commands do
   # per-tool rules, memory): at once when its agents are at rest, `restarted`; otherwise the
   # raise is kept for the root's next rest, `pending` with the status it is in. Never the
   # sleep-and-wake path, which would cut a turn and might move the session to another pod.
+  # A repository the session's owner attached, cloned into its own directory of the running
+  # session's workspace, or one they took off, deleted with its tokens: without a restart,
+  # the root told either way (`Troupe.Worker.Session.Repositories`). A clone that fails is
+  # refused with git's reason, the token taken out; a repository with a push, a pull request
+  # or a CI read going is refused as `busy`.
+  defp dispatch("session.repository." <> verb, params) when verb in ["add", "remove"] do
+    session_id = params["session_id"]
+
+    with :ok <- shaped(session_id),
+         {:ok, _tree} <- running_at(session_id, params["epoch"]),
+         {:ok, manager} <- manager_of(session_id),
+         {:ok, entry} <- repository_param(params["repository"]) do
+      root = Manager.status(manager).workspace
+      by = {params["by"], params["by_name"]}
+
+      case verb do
+        "add" -> attached(Repositories.attach(session_id, root, entry, by), session_id, entry)
+        "remove" -> detached(Repositories.detach(session_id, root, entry, by), session_id, entry)
+      end
+    end
+  end
+
   defp dispatch("session.restart", params) do
     session_id = params["session_id"]
 
@@ -699,6 +722,37 @@ defmodule Troupe.Worker.Plane.Commands do
 
   # Up here, and at the epoch the plane names: a pod the session has since moved on from
   # takes nothing for it.
+  # A repository as the plane names one to a pod: its owner, its name, and the directory
+  # the plane chose for it, `<owner>/<name>` or the root, and never one that climbs out.
+  defp repository_param(%{"owner" => owner, "name" => name, "path" => path} = entry)
+       when is_binary(owner) and is_binary(name) and is_binary(path) do
+    if path == "." or path == "#{owner}/#{name}",
+      do: {:ok, entry},
+      else: {:error, Error.new(:invalid_params, %{reason: "a repository's path is owner/name"})}
+  end
+
+  defp repository_param(_other),
+    do: {:error, Error.new(:invalid_params, %{reason: "a repository is {owner, name, ref, path}"})}
+
+  defp attached(:ok, session_id, entry),
+    do: {:ok, %{"session_id" => session_id, "cloned" => true, "path" => entry["path"]}}
+
+  defp attached({:error, reason}, _session_id, _entry),
+    do: {:error, Error.new(:unavailable, %{reason: reason})}
+
+  defp detached(:ok, session_id, entry),
+    do: {:ok, %{"session_id" => session_id, "removed" => true, "path" => entry["path"]}}
+
+  defp detached({:error, :busy}, _session_id, entry),
+    do:
+      {:error,
+       Error.new(:conflict, %{
+         reason: "busy",
+         detail:
+           "#{entry["owner"]}/#{entry["name"]} has a push, a pull request or a CI read going; " <>
+             "take it off when that is done"
+       })}
+
   defp running_at(session_id, epoch) do
     with {:ok, tree} <- not_found(Sessions.running(session_id)),
          :ok <- same_epoch(session_id, epoch) do

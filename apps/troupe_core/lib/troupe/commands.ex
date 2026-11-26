@@ -295,7 +295,7 @@ defmodule Troupe.Commands do
   def builtins do
     [
       entry("new", "session", "Start a fresh session here, without leaving the client",
-        usage: "/new [--private | --remote PROFILE | --only-me | --branch]",
+        usage: "/new [--private | --remote PROFILE | --only-me | --branch] [--repo OWNER/NAME[@REF]]...",
         args: [arg("flags", false, "text")],
         detail:
           "Opens the new-session screen and the session takes the screen; the one you " <>
@@ -310,7 +310,10 @@ defmodule Troupe.Commands do
             "like one. --private and --remote PROFILE set the chips; --only-me starts it " <>
             "on the platform as yours alone until you invite people (with --remote " <>
             "PROFILE too), on the team's profile all the same; and --branch forks the one on screen at once: a session of its own that starts " <>
-            "from this conversation as it stands.",
+            "from this conversation as it stands. --repo OWNER/NAME[@REF], as often as " <>
+            "you like, starts it on the platform on those GitHub repositories, which the " <>
+            "team lists and the profile allows: the first at the workspace's root, each " <>
+            "other in OWNER/NAME.",
         example: "/new --branch"
       ),
       entry("cancel", "session", "Stop the agent mid-turn",
@@ -463,6 +466,19 @@ defmodule Troupe.Commands do
             "the agent is done otherwise; the conversation stays, and tools, skills and " <>
             "servers are the new version's.",
         example: "/bundle update"
+      ),
+      entry("repo", "session", "List this session's GitHub repositories, or attach or take one off",
+        usage: "/repo [add OWNER/NAME[@REF] | remove OWNER/NAME]",
+        args: [arg("verb", false, "text")],
+        availability: "tui",
+        detail:
+          "For a session on the platform: each repository it holds, where its clone is, " <>
+            "and its branch and draft pull request. /repo add attaches one the team lists, " <>
+            "which its pod clones into OWNER/NAME without a restart, within the profile's " <>
+            "cap; /repo remove takes one off, its directory deleted and its tokens revoked, " <>
+            "refused while a push on it is going. Both are its owner's to do, and the agent " <>
+            "is told.",
+        example: "/repo add example-org/docs@main"
       ),
       entry(
         "archive",

@@ -38,7 +38,12 @@ defmodule Troupe.Plane.GitHub.Policy do
   @max_repositories 500
   @max_cap 1_000
 
-  @profile_keys ~w(allowPublic denyPaths maxPushes maxRuns maxAttempts)
+  # How many repositories one session may hold where its profile does not say, and the
+  # most a profile may let it: each is a clone on the pod's disk and a token at every use.
+  @default_held 3
+  @most_held 10
+
+  @profile_keys ~w(allowPublic denyPaths maxPushes maxRuns maxAttempts maxRepositories)
   @team_keys ~w(repositories max_pushes max_runs max_attempts)
 
   # How many runs on one issue may stop before a sweep leaves it for a person, where neither
@@ -73,8 +78,20 @@ defmodule Troupe.Plane.GitHub.Policy do
       Troupe.PushPaths.problems(github["denyPaths"]) ++
       cap_problems("github.maxPushes", github["maxPushes"]) ++
       cap_problems("github.maxRuns", github["maxRuns"]) ++
-      cap_problems("github.maxAttempts", github["maxAttempts"])
+      cap_problems("github.maxAttempts", github["maxAttempts"]) ++
+      held_problems(github["maxRepositories"])
   end
+
+  defp held_problems(nil), do: []
+
+  defp held_problems(value)
+       when is_integer(value) and value >= 1 and value <= @most_held,
+       do: []
+
+  defp held_problems(value),
+    do: [
+      "github.maxRepositories is a whole number from 1 to #{@most_held}, not #{inspect(value)}"
+    ]
 
   @doc """
   A team's `github` as `admin.team.update` sends it, read: `repositories`, `max_pushes`,
@@ -217,6 +234,23 @@ defmodule Troupe.Plane.GitHub.Policy do
     case max_pushes(session) do
       nil -> false
       cap -> ((record || %{})["pushes"] || 0) >= cap
+    end
+  end
+
+  # -- repositories a session holds -----------------------------------------------------------
+
+  @doc """
+  How many repositories a session on `profile` may hold, `spec.github.maxRepositories` or
+  three; `nil` for a profile with no `spec.github`, whose sessions are offered none and
+  attach none (one created with `repository` alone keeps that one, as before the list).
+  """
+  @spec max_repositories(String.t() | nil) :: pos_integer() | nil
+  def max_repositories(nil), do: nil
+
+  def max_repositories(profile) do
+    case Fleet.get_profile(profile) do
+      %{spec: %{"github" => %{} = github}} -> github["maxRepositories"] || @default_held
+      _ -> nil
     end
   end
 

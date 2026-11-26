@@ -700,7 +700,8 @@ defmodule Troupe.Worker.GitHubFixLoopTest do
     File.write!(Path.join(ws, "FIX.md"), "one\n")
     assert {:ok, _} = GitHub.push(id, ws, "One", "troupe/capped")
     assert {:ok, %{opened: true}} = GitHub.open_pull_request(id, "Capped", nil)
-    {:ok, before} = GitCredentials.credential(id, access: :write)
+    {:ok, before} =
+      GitCredentials.credential(id, access: :write, repository: "example-org/widgets")
     assert before["policy"]["max_pushes"] == 2
     File.write!(Path.join(ws, "FIX.md"), "two\n")
     assert {:ok, _} = GitHub.push(id, ws, "Two", nil)
@@ -784,6 +785,10 @@ defmodule Troupe.Worker.GitHubFixLoopTest do
            ]},
           {:tools,
            [
+             {"git_push", %{"branch" => "troupe/fix-9", "message" => "Add the deploy keys"}}
+           ]},
+          {:tools,
+           [
              {"shell",
               %{
                 "command" =>
@@ -796,8 +801,15 @@ defmodule Troupe.Worker.GitHubFixLoopTest do
         ]
       )
 
-    [written, push, shell, open] = run(context.session_id, issue, 4)
+    [written, elsewhere, push, shell, open] = run(context.session_id, issue, 5)
     assert written["content"] =~ "written"
+
+    # The fork is no repository of the session's, and is refused as one, naming what it holds.
+    refute elsewhere["ok"]
+
+    assert elsewhere["content"] ==
+             "this session holds no repository example-org/widgets-fork; it holds " <>
+               "example-org/widgets"
 
     # Refused for the repository being public, and for the file, both said.
     refute push["ok"]
@@ -1100,7 +1112,7 @@ defmodule Troupe.Worker.GitHubFixLoopTest do
 
   test "only a session created with a repository has the tools", context do
     other = Troupe.Session.generate_id()
-    GitHub.hold(context.session_id, @repository)
+    GitHub.hold(context.session_id, [Map.put(@repository, "path", ".")])
     GitHub.hold(other, nil)
 
     assert {:ok, Troupe.Worker.Tools.GitPush} = Troupe.Tools.fetch("git_push", context.session_id)

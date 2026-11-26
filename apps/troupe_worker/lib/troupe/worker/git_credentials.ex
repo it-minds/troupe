@@ -2,9 +2,10 @@ defmodule Troupe.Worker.GitCredentials do
   @moduledoc """
   A session's GitHub installation token, for the git the pod runs for that session.
 
-  The plane mints it with the plane's GitHub App, narrowed to the one repository the
-  session was created with, and answers it over the control channel (`git.credential`)
-  only for a session this pod holds. It is the session's the way a person's key-manager
+  The plane mints it with the plane's GitHub App, narrowed to one repository the session
+  holds (`repository:`, `owner/name`, where it holds several), and answers it over the
+  control channel (`git.credential`) only for a session this pod holds. Each repository's
+  is held apart from the others'. It is the session's the way a person's key-manager
   token is (`Troupe.Worker.Connections`): asked for when it is needed, held in this pod's
   memory for the activation, never on disk, never in the session's environment, its
   workspace or its log.
@@ -63,20 +64,24 @@ defmodule Troupe.Worker.GitCredentials do
   def credential(session_id, opts \\ []) do
     now = Keyword.get(opts, :now, System.system_time(:second))
     access = Keyword.get(opts, :access, :read)
+    repository = Keyword.get(opts, :repository)
 
-    case lookup({session_id, access}) do
+    case lookup({session_id, repository, access}) do
       {:ok, %{"expires_at" => expires_at} = held} ->
-        if usable?(expires_at, now), do: {:ok, held}, else: ask(session_id, access, opts)
+        if usable?(expires_at, now),
+          do: {:ok, held},
+          else: ask(session_id, repository, access, opts)
 
       :none ->
-        ask(session_id, access, opts)
+        ask(session_id, repository, access, opts)
     end
   end
 
   @doc """
   Drop a session's tokens, and revoke them at GitHub: its activation starts, or the
   session has gone dormant or stopped. `access:` drops only that one, which is how the fix
-  loop gives up a token whose permissions the plane has narrowed since.
+  loop gives up a token whose permissions the plane has narrowed since; `repository:`
+  (`owner/name`) only that repository's, which is how one taken off the session loses its.
 
   A dropped token is revoked rather than left to run out its hour: each is sent to
   GitHub's `DELETE /installation/token` at the API URL the plane put in it, after this
@@ -87,21 +92,23 @@ defmodule Troupe.Worker.GitCredentials do
   @spec forget(String.t(), keyword()) :: :ok
   def forget(session_id, opts \\ []) do
     if :ets.whereis(@table) != :undefined do
-      dropped =
-        case Keyword.fetch(opts, :access) do
-          {:ok, access} ->
-            :ets.take(@table, {session_id, access})
-
-          :error ->
-            held = :ets.match_object(@table, {{session_id, :_}, :_})
-            :ets.match_delete(@table, {{session_id, :_}, :_})
-            held
-        end
+      pattern = {{session_id, repository_pattern(opts), Keyword.get(opts, :access, :_)}, :_}
+      dropped = :ets.match_object(@table, pattern)
+      :ets.match_delete(@table, pattern)
 
       revoke(session_id, dropped)
     end
 
     :ok
+  end
+
+  # One repository's tokens where `repository:` names it, every one of the session's where
+  # nothing does.
+  defp repository_pattern(opts) do
+    case Keyword.fetch(opts, :repository) do
+      {:ok, name} when is_binary(name) -> name
+      _every -> :_
+    end
   end
 
   defp revoke(_session_id, []), do: :ok
@@ -110,7 +117,7 @@ defmodule Troupe.Worker.GitCredentials do
     now = System.system_time(:second)
 
     live =
-      for {{_id, access}, held} <- dropped,
+      for {{_id, _repository, access}, held} <- dropped,
           unexpired?(held["expires_at"], now),
           do: {access, held}
 
@@ -146,7 +153,7 @@ defmodule Troupe.Worker.GitCredentials do
       _table ->
         @table
         |> :ets.tab2list()
-        |> Enum.map(fn {{id, _access}, _} -> id end)
+        |> Enum.map(fn {{id, _repository, _access}, _} -> id end)
         |> Enum.uniq()
         |> Enum.sort()
     end
@@ -176,18 +183,18 @@ defmodule Troupe.Worker.GitCredentials do
     end
   end
 
-  defp ask(session_id, access, opts) do
+  defp ask(session_id, repository, access, opts) do
     link = Keyword.get(opts, :link, Link)
 
     params =
-      if access == :write,
-        do: %{"session_id" => session_id, "access" => "write"},
-        else: %{"session_id" => session_id}
+      %{"session_id" => session_id}
+      |> then(&if(access == :write, do: Map.put(&1, "access", "write"), else: &1))
+      |> then(&if(repository, do: Map.put(&1, "repository", repository), else: &1))
 
     case Link.request(link, "git.credential", params) do
       {:ok, %{"token" => token} = credential} when is_binary(token) ->
         if :ets.whereis(@table) != :undefined,
-          do: :ets.insert(@table, {{session_id, access}, credential})
+          do: :ets.insert(@table, {{session_id, repository, access}, credential})
 
         {:ok, credential}
 

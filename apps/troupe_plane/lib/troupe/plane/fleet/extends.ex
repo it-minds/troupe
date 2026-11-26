@@ -18,7 +18,7 @@ defmodule Troupe.Plane.Fleet.Extends do
   | `max_sessions`, `budget_micros` | **narrow only**: the lower of the two, where either sets one; a child's budget above its parent's is refused where it is written |
   | `personalTools`, `repositoryOverridesBundle`, `memoryProposals`, `github.allowPublic` | **restrict only**: a parent's `forbid` or `false` holds whatever the child says, and a child that says otherwise is told so in `problems`; otherwise the child's, or the parent's |
   | `github.denyPaths` | **added**, as the egress lists are |
-  | `github.maxPushes`, `github.maxRuns`, `github.maxAttempts`, `llm.maxTokens` | **narrow only**, as `max_sessions` is, and a child that says more is told so in `problems` |
+  | `github.maxPushes`, `github.maxRuns`, `github.maxAttempts`, `github.maxRepositories`, `llm.maxTokens` | **narrow only**, as `max_sessions` is, and a child that says more is told so in `problems` |
   | `permissions.deny`, `permissions.ask`, `permissions.allow` | **added**: a child adds rules and drops none of its parent's; each profile's are its own scope on the pods (`rules/1`), so the strictest holds and no child loosens a parent's `deny` or `ask` |
   | `agents.allow`, `agents.deny` | **narrow only**: the child's `allow` is cut to the parent's where the parent has one (an empty cut stands), its `deny` is added, and a denied name leaves the `allow`, so a child never offers an agent its parent said is not there |
   | `image`, `size_class`, `provisioner`, every `llm` field but `secretRef` and `maxTokens`, `storage.storageClassName`, `configBundleChannel`, and any other spec field | **replaced** where the child sets it, the parent's where it does not |
@@ -85,7 +85,8 @@ defmodule Troupe.Plane.Fleet.Extends do
          "denyPaths" => :added,
          "maxPushes" => :narrow,
          "maxRuns" => :narrow,
-         "maxAttempts" => :narrow
+         "maxAttempts" => :narrow,
+         "maxRepositories" => :narrow
        }},
     # Per-tool rules: a child's are added to its parent's, and on the pods each profile's
     # are a scope of their own, the strictest holding (`rules/1`).
