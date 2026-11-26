@@ -10,7 +10,18 @@ defmodule Troupe.Plane.BundlesTest do
 
   use Troupe.Plane.DataCase, async: false
 
-  alias Troupe.Plane.{Admin, Bundles, FakePod, Fleet, Harness, Identity, Memory, Provision, Sessions}
+  alias Troupe.Plane.{
+    Admin,
+    Bundles,
+    FakePod,
+    Fleet,
+    Harness,
+    Identity,
+    Memory,
+    Provision,
+    Sessions,
+    Settings
+  }
   alias Troupe.Plane.Control.{Connections, Listener}
   alias Troupe.Plane.Fleet.Bundle
 
@@ -470,6 +481,33 @@ defmodule Troupe.Plane.BundlesTest do
       {:ok, _} = Fleet.put_profile(%{name: "dev", spec: spec})
 
       assert pushed(pod, later, user)["personal_tools"] == "forbid"
+    end
+
+    # The team's idle timeout rides the same way, as the ladder resolves it, which is what
+    # a client is told: a change reaches a session at its next wake, and a team row wider
+    # than the platform now allows goes out at the platform's.
+    test "the push carries the team's idle timeout as clients are told it", context do
+      # The stored setting goes with the test's transaction; what this node remembers of it
+      # must go too.
+      on_exit(&Settings.invalidate/0)
+
+      {:ok, v1} = Bundles.publish("stable", %{"agents" => ["build"]}, announce: false)
+      pod = fake_pod(context.port, "dev-token", "troupe-w-dev-0")
+      user = granted_user()
+      first = dormant_session(user, "dev", v1.version)
+      second = dormant_session(user, "dev", v1.version)
+      third = dormant_session(user, "dev", v1.version)
+
+      team = Identity.get_team("engineering")
+      {:ok, team} = Identity.update_team(team, %{idle_timeout_seconds: 600})
+      assert pushed(pod, first, user)["idle_timeout_seconds"] == 600
+
+      {:ok, _} = Identity.update_team(team, %{idle_timeout_seconds: 120})
+      assert pushed(pod, second, user)["idle_timeout_seconds"] == 120
+
+      {:ok, _} = Settings.put("default_idle_timeout_seconds", "60", "root@example.test")
+      Settings.invalidate()
+      assert pushed(pod, third, user)["idle_timeout_seconds"] == 60
     end
 
     # Issue #55: the memory documents a session reads ride the same way, the organisation's,

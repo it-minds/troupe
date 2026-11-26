@@ -204,7 +204,7 @@ as they empty (Decision 726):
 2. The plane places new sessions on a pod on the current revision while one has room. Once
    a pod behind holds no active session, the plane drains it, one pod per profile at a
    time, highest ordinal first. A pod whose sessions stay busy is left alone until they go
-   dormant (ten minutes idle, unless somebody is reading).
+   dormant (after their team's idle timeout with nothing to do).
 3. When the pod is draining and holds nothing, the plane records it, with the revision it
    ran, in the profile's `troupe.dev/drained` annotation.
 4. The operator deletes a pod that is behind, recorded at the revision it still runs, and

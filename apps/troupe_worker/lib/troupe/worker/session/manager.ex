@@ -52,6 +52,9 @@ defmodule Troupe.Worker.Session.Manager do
 
   require Logger
 
+  # How long a session rests with nothing to do before it sleeps, where the activation
+  # names no `:dormant_after_ms`: the plane sends the team's idle timeout with every
+  # activation, so this is for a plane from before it did, and for a pod with no plane.
   # Long enough that a person who stepped away finds their session where they left it,
   # short enough that a pod full of abandoned sessions empties itself.
   @dormant_after_ms 10 * 60 * 1000
@@ -1048,6 +1051,7 @@ defmodule Troupe.Worker.Session.Manager do
       pid: state.session_pid,
       sealer: state.sealer,
       activated_at: state.activated_at,
+      dormant_after_ms: state.dormant_after_ms,
       restored: state.restored,
       error: state.error
     }
