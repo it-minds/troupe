@@ -95,7 +95,9 @@ export function fromCheckpoint(checkpoint: DurableEvent, base: TranscriptState =
   for (const [path, a] of Object.entries(obj(facts["agents"]) ?? {})) {
     if (obj(a)?.["done"]) agentState[path.split("/").slice(1).join("/")] = "done";
   }
-  const earlier: Entry = { kind: "earlier", seq: through, agent: ["root"], summary: typeof data["summary"] === "string" ? data["summary"] : "", at: checkpoint.ts };
+  // When the summary was made: the compaction's time, or the checkpoint's own where one written before it carried that says none.
+  const made = text(data["compacted_at"]) ?? checkpoint.ts;
+  const earlier: Entry = { kind: "earlier", seq: through, agent: ["root"], summary: typeof data["summary"] === "string" ? data["summary"] : "", at: made };
   const waiting = [
     ...(Array.isArray(facts["open_approvals"]) ? facts["open_approvals"] : []).map((a) => asked("approval_requested", a, checkpoint.ts)),
     ...(Array.isArray(facts["open_questions"]) ? facts["open_questions"] : []).map((q) => asked("question_asked", q, checkpoint.ts)),

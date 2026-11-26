@@ -133,6 +133,32 @@ defmodule Troupe.Session.CheckpointTest do
     assert [%{"ts" => "2026-11-23T10:00:03Z", "seq" => 3}] = facts["running"]
   end
 
+  test "a checkpoint carries the time of the compaction it follows, beside its own" do
+    log = [{:input, 0}, {:compact, 1}, {:input, 2}, {:rest, 3}] |> render() |> with_checkpoints()
+
+    [compacted] = Enum.filter(log, &(&1.type == "compacted"))
+    [checkpoint] = Enum.filter(log, &(&1.type == "checkpoint"))
+    assert checkpoint.data["compacted_at"] == compacted.ts
+    assert checkpoint.ts != compacted.ts
+  end
+
+  test "one written before it carried that is read as it is, and the next carries its own" do
+    [old | _] = "manual" |> recorded() |> Enum.filter(&(&1.type == "checkpoint"))
+    refute Map.has_key?(old.data, "compacted_at")
+    assert {:ok, start} = Checkpoint.from_checkpoint(old)
+    refute Map.has_key?(Checkpoint.data(start), "compacted_at")
+
+    through = old.data["through"]
+    compacted = disk(%{ev("compacted", ["root"], %{"summary" => "again"}) | seq: through + 2})
+    rest = disk(%{ev("turn_ended", ["root"], %{}) | seq: through + 3})
+    fold = Checkpoint.fold_all([old, compacted, rest], start)
+
+    assert Checkpoint.owed?(fold)
+    assert Checkpoint.data(fold)["compacted_at"] == compacted.ts
+    assert {:ok, again} = Checkpoint.from_checkpoint(%Event{old | data: Checkpoint.data(fold)})
+    assert Checkpoint.data(again)["compacted_at"] == compacted.ts
+  end
+
   test "a checkpoint in a shape this build does not read is not started from" do
     event = %Event{type: "checkpoint", seq: 9, data: %{"shape" => "session/0", "through" => 8}}
     assert {:error, :unknown_shape} = Checkpoint.from_checkpoint(event)

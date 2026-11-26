@@ -338,6 +338,8 @@ defmodule Troupe.Protocol.Schema do
         "compacted" => required(:integer),
         "previous" => required({:nullable, :integer}),
         "summary" => optional(:string),
+        # When that compaction was written. Absent from a checkpoint written before it.
+        "compacted_at" => optional(:string),
         "facts" => required(:object)
       },
       "budget_exhausted" => %{"limit" => required(:string)},

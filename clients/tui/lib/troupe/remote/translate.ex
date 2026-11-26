@@ -108,10 +108,14 @@ defmodule Troupe.Remote.Translate do
     {spawned, memory} = ensure_branch(session_id, agent, %{"ts" => started}, memory)
     emit = &durable_event(session_id, agent, &1, at, &2, through)
 
+    # When the summary was made: the compaction's time, or the checkpoint's own where one
+    # written before it carried that says none.
+    made = if is_binary(data["compacted_at"]), do: ts(%{"ts" => data["compacted_at"]}), else: at
+
     earlier =
       emit.(:earlier, %{
         summary: to_string(data["summary"] || ""),
-        at: at,
+        at: made,
         before: through + 1,
         usage: usage(facts["usage"]),
         cost: turns_spent(facts),

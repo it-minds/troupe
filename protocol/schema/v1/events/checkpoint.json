@@ -6,6 +6,9 @@
     "compacted": {
       "type": "integer"
     },
+    "compacted_at": {
+      "type": "string"
+    },
     "facts": {
       "type": "object"
     },

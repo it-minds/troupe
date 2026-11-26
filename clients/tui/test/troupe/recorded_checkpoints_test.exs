@@ -198,6 +198,28 @@ defmodule Troupe.RecordedCheckpointsTest do
     assert Translate.checkpoint("s-1", unknown, Translate.memory()) == :unknown
   end
 
+  test "the summary block says when the compaction was written, or the checkpoint where it says none" do
+    checkpoint = "manual" |> recorded() |> Enum.filter(&(&1["type"] == "checkpoint")) |> List.last()
+    # The recording's compaction and rest fall in one millisecond; an hour before says which.
+    made = "2026-11-23T14:27:09.668Z"
+
+    at = fn checkpoint ->
+      {:ok, seed, _memory} = Translate.checkpoint("s-1", checkpoint, Translate.memory())
+      [window] = "s-1" |> Model.rebuild("/w", seed) |> Model.windows()
+      [{:earlier, %{at: at}} | _] = window.agents["root"].transcript
+      at
+    end
+
+    millis = fn ts -> ts |> DateTime.from_iso8601() |> elem(1) |> DateTime.to_unix(:millisecond) end
+
+    carried = put_in(checkpoint, ["data", "compacted_at"], made)
+    assert at.(carried) == millis.(made)
+
+    # One written before it carried that, as the recordings are.
+    refute Map.has_key?(checkpoint["data"], "compacted_at")
+    assert at.(checkpoint) == millis.(checkpoint["ts"])
+  end
+
   test "a checkpoint draws nothing in the window" do
     log = recorded("manual")
     without = Enum.reject(log, &(&1["type"] == "checkpoint"))

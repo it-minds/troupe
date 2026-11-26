@@ -26,20 +26,21 @@ export function longTurn(log: SessionLog, n: number, subject = "local:ada"): voi
  */
 export function longSession(log: SessionLog, turns: number, opts: { compactAt?: number; subject?: string } = {}): void {
   log.append("agent_started", { profile: "build" });
-  let compacted: number | null = null;
+  let compacted: { seq: number; ts: string } | null = null;
   for (let n = 0; n < turns; n++) {
     longTurn(log, n, opts.subject);
     if (opts.compactAt === n + 1) {
-      compacted = log.append("compacted", { summary: "", reason: "manual", folded_through: log.headSeq }).seq;
+      compacted = log.append("compacted", { summary: "", reason: "manual", folded_through: log.headSeq });
     }
     if (compacted !== null && opts.compactAt === n) {
       const through = log.headSeq;
       log.append("checkpoint", {
         shape: "session/1",
         through,
-        compacted,
+        compacted: compacted.seq,
         previous: null,
         summary: SUMMARY,
+        compacted_at: compacted.ts,
         facts: {
           agent: "build",
           profile: "build",

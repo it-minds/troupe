@@ -234,7 +234,7 @@ export type Entry =
   | { kind: "system"; seq: number; agent: string[]; type: string; text: string }
   /**
    * Where a transcript opened from a checkpoint begins (troupe #1182): what the compaction
-   * said of everything before it, and when it was written. `seq` is the checkpoint's
+   * said of everything before it, and when that compaction was written. `seq` is the checkpoint's
    * `through`; what came before is drawn above it as it is paged in.
    */
   | { kind: "earlier"; seq: number; agent: string[]; summary: string; at: string | undefined };

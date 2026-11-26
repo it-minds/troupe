@@ -77,8 +77,9 @@ defmodule Troupe.Session.Checkpoint do
 
   defstruct facts: @empty_facts,
             seq: 0,
-            # The latest root `compacted`, its seq and summary.
+            # The latest root `compacted`, its seq, time and summary.
             compacted: nil,
+            compacted_at: nil,
             summary: nil,
             # The latest `checkpoint`: its seq, and the compaction it follows.
             checkpoint: nil,
@@ -111,6 +112,7 @@ defmodule Troupe.Session.Checkpoint do
        facts: data["facts"],
        seq: data["through"],
        compacted: data["compacted"],
+       compacted_at: data["compacted_at"],
        summary: data["summary"],
        checkpoint: data["previous"],
        covered: nil,
@@ -134,7 +136,12 @@ defmodule Troupe.Session.Checkpoint do
   def owed?(%__MODULE__{compacted: compacted, covered: compacted}), do: false
   def owed?(%__MODULE__{rest: rest}), do: rest
 
-  @doc "The `checkpoint` event's data for the fold so far, standing for its last seq."
+  @doc """
+  The `checkpoint` event's data for the fold so far, standing for its last seq. With
+  `compacted_at`, the time of the compaction it follows, so a reader can say when the
+  summary was made rather than when the root next rested; a checkpoint written before it
+  was carried has none, and a reader takes the checkpoint's own time.
+  """
   @spec data(t()) :: map()
   def data(%__MODULE__{} = state) do
     %{
@@ -145,6 +152,7 @@ defmodule Troupe.Session.Checkpoint do
       "summary" => state.summary,
       "facts" => state.facts
     }
+    |> then(&if(state.compacted_at, do: Map.put(&1, "compacted_at", state.compacted_at), else: &1))
   end
 
   @doc "Whether this event is the root coming to rest."
@@ -167,8 +175,8 @@ defmodule Troupe.Session.Checkpoint do
 
   # -- what the writer keeps ----------------------------------------------------
 
-  defp meta(state, %Event{type: "compacted", agent: ["root"], seq: seq, data: data}),
-    do: %{state | compacted: seq, summary: data["summary"], rest: false}
+  defp meta(state, %Event{type: "compacted", agent: ["root"], seq: seq, ts: ts, data: data}),
+    do: %{state | compacted: seq, compacted_at: ts, summary: data["summary"], rest: false}
 
   defp meta(state, %Event{type: "checkpoint", seq: seq, data: data}),
     do: %{state | checkpoint: seq, covered: data["compacted"]}

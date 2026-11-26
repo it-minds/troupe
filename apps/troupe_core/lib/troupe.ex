@@ -1020,15 +1020,61 @@ defmodule Troupe do
     found || find_checkpoint(session_id, from + 1, window * 2)
   end
 
+  # The most events one page of history carries when a single turn is longer than the page
+  # asked for: ten of the largest page, so an answer stays a bounded read and frame. A turn
+  # longer still is answered in pieces this long, cut where the count falls.
+  @turn_cap 5_000
+
   @doc """
-  Up to `limit` durable events before `before`, oldest first, and whether there are more
-  before those: a page of history for a reader that started from a checkpoint. Read only
-  from the page's first event to `before`.
+  A page of history for a reader that started from a checkpoint: about `limit` durable
+  events before `before`, oldest first, and whether there are more before those.
+
+  The page begins where a turn begins, after the root's rest (`Checkpoint.rest?/1`) or at
+  the session's start, so it never holds a reply without the line it answers, and the next
+  page, asked before its first seq, ends at that rest. Where the last `limit` events begin
+  mid-turn, the page starts after the first rest in them; where they hold none but their
+  last (a turn longer than the page), it reaches back to the rest before that turn, up to
+  #{@turn_cap} events. Read only from the event before the page's first to `before`.
   """
   @spec events_before(String.t(), pos_integer(), pos_integer()) :: {[Event.t()], boolean()}
   def events_before(session_id, before, limit) do
-    from = max(before - 1 - limit, 0)
-    {events_between(session_id, from, before), from > 0}
+    lowest = max(before - limit, 1)
+    # The page's raw events, and the one just before them, which says whether they begin a turn.
+    {head, page} =
+      session_id
+      |> events_between(max(lowest - 2, 0), before)
+      |> Enum.split_with(&(&1.seq < lowest))
+
+    if lowest == 1 or Enum.any?(head, &Checkpoint.rest?/1) do
+      {page, lowest > 1}
+    else
+      case page |> Enum.drop(-1) |> Enum.find_index(&Checkpoint.rest?/1) do
+        nil -> whole_turn(session_id, page, lowest, limit)
+        index -> {Enum.drop(page, index + 1), true}
+      end
+    end
+  end
+
+  # A page with no rest in it but its last: reach back a window at a time, each twice the
+  # last, to the rest the turn began after, the session's start, or the cap.
+  defp whole_turn(session_id, page, lowest, window) do
+    room = @turn_cap - length(page)
+    from = max(lowest - 1 - min(window, room), 0)
+    earlier = events_between(session_id, from, lowest)
+
+    case earlier |> Enum.reverse() |> Enum.find_index(&Checkpoint.rest?/1) do
+      nil when from == 0 ->
+        {earlier ++ page, false}
+
+      nil when room <= window ->
+        {earlier ++ page, true}
+
+      nil ->
+        whole_turn(session_id, earlier ++ page, from + 1, window * 2)
+
+      index ->
+        {Enum.take(earlier, -index) ++ page, true}
+    end
   end
 
   @doc "Durable events after `from_seq` and before `before`, read no further than `before`."
