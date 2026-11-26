@@ -216,3 +216,29 @@ test("the fake admin's settings and clients agree with the screens that read the
     admin.seen.filter((s) => s.subject === "alice@example.com").map((s) => `${s.component} ${s.version}`),
   );
 });
+
+// A line sent to a daemon's session is written as the person's input, and the fake model
+// answers it and ends the turn, so a walk and a test see what was sent and that the
+// session replied, as they do for a pod's session.
+test("the fake daemon writes a sent line as user_input, answers it and ends the turn", async () => {
+  const daemon = new FakeDaemon({ osUser: "ada" });
+  await daemon.start();
+  const client = new DaemonClient({ transport: "ws", port: daemon.port, token: daemon.token });
+  try {
+    const session = daemon.seed("/home/ada/project");
+    const view = await client.open(session.id, {});
+    await view.send("map the retry path");
+    for (let i = 0; i < 100 && !session.log.events.some((e) => e.type === "turn_ended"); i++) await sleep(10);
+
+    const types = session.log.events.map((e) => e.type);
+    const sent = session.log.events.find((e) => e.type === "user_input");
+    assert.equal(sent?.data["text"], "map the retry path");
+    assert.equal(sent?.data["source"], "user");
+    assert.ok(types.indexOf("llm_response") > types.indexOf("user_input"), types.join(","));
+    assert.ok(types.indexOf("turn_ended") > types.indexOf("llm_response"), types.join(","));
+    assert.equal(types.filter((t) => t === "user_input").length, 1, "the line is written once");
+  } finally {
+    client.disconnect();
+    await daemon.stop();
+  }
+});
