@@ -386,6 +386,8 @@ defmodule Troupe.Config.Permissions do
   @spec scope(rule()) :: String.t()
   # A worker profile's rules are its name's, not a file's.
   def scope(%{layer: :profile, source: profile}), do: "the profile #{profile}"
+  # A trigger's terms allow what its runs need, named by the trigger that runs them.
+  def scope(%{layer: :trigger, source: trigger}), do: "the terms of the trigger #{trigger}"
 
   def scope(%{layer: layer, source: source}) do
     shown = if source, do: " (#{Troupe.Paths.display(source)})", else: ""
@@ -419,6 +421,7 @@ defmodule Troupe.Config.Permissions do
   end
 
   defp source(%{layer: :profile, source: profile}), do: profile
+  defp source(%{layer: :trigger, source: trigger}), do: trigger
   defp source(%{source: nil}), do: nil
   defp source(%{source: path}), do: Troupe.Paths.display(path)
 end

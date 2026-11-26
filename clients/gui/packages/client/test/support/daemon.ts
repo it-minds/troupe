@@ -90,6 +90,8 @@ interface Session {
   archived?: boolean;
   /** Kept at the top of the list (`session.pin`), as `session.list` says it. */
   pinned?: boolean;
+  /** How long it lasts (troupe #1209), as `session.list` says it; normal where nothing set it. */
+  lifespan?: "throwaway" | "normal" | "persistent";
   /** The task list, as the last `todo_updated` in its log left it. */
   todos?: Array<{ id: string; content: string; status: string }>;
   /** How a private session's sealing stands here, as `session.list` says it. */
@@ -569,6 +571,8 @@ export class FakeDaemon {
   readonly planeTokens: string[] = [];
   /** The private sessions `session.create` was asked for, by id. */
   readonly privateSessions = new Set<string>();
+  /** The lifespan each `session.create` asked for, `null` where it named none (troupe #1209). */
+  readonly createdLifespan: Array<string | null> = [];
   /** The sessions `session.claim` took over, oldest first. */
   readonly claims: string[] = [];
   /**
@@ -775,7 +779,7 @@ evoked where nothing is set and there was a sign-in. */
     this.token = opts.token ?? "daemon-token";
     // A daemon writes a person's lasting rule from an approval and fetches an artifact into a
     // session's workspace from its plane (troupe #920).
-    this.capabilities = opts.capabilities ?? { blobs: true, tools: true, approval_allow_always: true, fs_upload_artifact: true, checkpoints: true };
+    this.capabilities = opts.capabilities ?? { blobs: true, tools: true, approval_allow_always: true, fs_upload_artifact: true, checkpoints: true, lifespans: true };
     this.osUser = opts.osUser ?? "ada";
     this.modelSettings = opts.modelSettings ?? true;
     this.overrides = opts.overrides ?? [];
@@ -1446,6 +1450,11 @@ evoked where nothing is set and there was a sign-in. */
         if (title && new TextEncoder().encode(title).length > 200) {
           return reply(ws, id, null, { code: -32602, message: "invalid_params", data: { field: "title", reason: "a title is at most 200 bytes" } });
         }
+        const lifespan = params["lifespan"];
+        if (lifespan !== undefined && lifespan !== "throwaway" && lifespan !== "normal" && lifespan !== "persistent") {
+          return reply(ws, id, null, { code: -32602, message: "invalid_params", data: { field: "lifespan", reason: "lifespan is throwaway, normal or persistent" } });
+        }
+        this.createdLifespan.push(lifespan === undefined ? null : String(lifespan));
         const created = this.seed(workspace, {
           watch: Boolean(config.watch),
           parent,
@@ -1454,6 +1463,7 @@ evoked where nothing is set and there was a sign-in. */
           ...(asked ? { kind: "private" as const, sync: this.planeToken !== null ? ("current" as const) : ("paused" as const) } : {}),
         });
         if (asked) this.privateSessions.add(created.id);
+        if (lifespan === "throwaway" || lifespan === "persistent") created.lifespan = lifespan;
         if (profile === "librarian") {
           const prompt = typeof params["prompt"] === "string" ? params["prompt"] : null;
           this.librarians.push({ sessionId: created.id, workspace, parent, prompt, worktree: typeof params["worktree"] === "string" ? params["worktree"] : null });
@@ -1488,6 +1498,24 @@ evoked where nothing is set and there was a sign-in. */
         }
         session.title = title || null;
         return reply(ws, id, { session_id: session.id, title: session.title });
+      }
+
+      // How long it lasts (troupe #1209), running or dormant: the mark beside its log, and a
+      // line in the log, which every client attached hears.
+      case "session.lifespan.set": {
+        const session = this.sessions.get(String(params["session_id"] ?? ""));
+        if (!session) return reply(ws, id, null, { code: -32005, message: "not_found" });
+        const to = params["lifespan"];
+        if (to !== "throwaway" && to !== "normal" && to !== "persistent") {
+          return reply(ws, id, null, { code: -32602, message: "invalid_params", data: { field: "lifespan", reason: "lifespan is throwaway, normal or persistent" } });
+        }
+        const from = session.lifespan ?? "normal";
+        if (from !== to) {
+          session.lifespan = to;
+          session.log.append("session_lifespan_changed", { from, to, actor: this.linked?.subject ?? "local:me" }, { kind: "user", subject: "local:me" });
+        }
+        const row = this.rowOf(session);
+        return reply(ws, id, { session_id: session.id, lifespan: to, erases_at: row["erases_at"] ?? null });
       }
 
       // Kept at the top of the list, running or dormant; the mark outlives both.
@@ -3315,6 +3343,8 @@ evoked where nothing is set and there was a sign-in. */
       created_at: s.createdAt,
       last_active_at: s.lastActiveAt,
       pinned: Boolean(s.pinned),
+      lifespan: s.lifespan ?? "normal",
+      erases_at: s.lifespan === "throwaway" ? new Date(Date.parse(s.lastActiveAt ?? new Date().toISOString()) + 24 * 3_600_000).toISOString() : null,
       archived: Boolean(s.archived),
       title: s.title ?? null,
       kind: s.kind ?? "local",

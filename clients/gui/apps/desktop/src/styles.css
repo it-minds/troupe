@@ -429,6 +429,12 @@ label code {
   color: var(--error-fg);
   background: var(--error-bg);
 }
+/* A throwaway session (troupe #1209): it will go by itself, the queued amber of something
+   that happens later unless somebody acts; Erase now and Keep it beside the sentence. */
+.banner.throwaway {
+  color: var(--queued-fg);
+  background: var(--queued-bg);
+}
 /* What the machine did while nobody was reading: its own cyan. */
 .banner.away {
   color: var(--running-fg);
@@ -4331,6 +4337,17 @@ details.advanced > summary {
 .ns-only-me > label {
   padding: 0 var(--space-5);
 }
+/* How long it lasts: its three words side by side, and what the chosen one means under them. */
+.ns-lifespan {
+  flex-direction: row;
+  flex-wrap: wrap;
+}
+.ns-lifespan > label {
+  padding-right: 0;
+}
+.ns-lifespan > .ns-who {
+  flex-basis: 100%;
+}
 .ns-who {
   margin: 0;
   padding: 0 var(--space-5) var(--space-3);
@@ -7445,4 +7462,126 @@ details.under-hood[open] > summary::before {
   display: flex;
   flex-direction: column;
   gap: var(--space-1);
+}
+
+/* -- a proposal ---------------------------------------------------------------- */
+
+/* What the harness offers the session's owner (troupe #1208): a card in the stream where
+   the turn that earned it ended, with an offer's parts and its quiet edge. Nothing waits
+   on it, so it is never sticky and wears none of the reserved colour; Turn on is its one
+   filled button, in the cyan every other screen fills it with. */
+.proposal {
+  align-self: stretch;
+  max-width: var(--measure-reading);
+  padding: var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  background: var(--bg-raised);
+  border: var(--bw-hairline) solid var(--border-strong);
+  border-top: var(--bw-heavy) solid var(--running-solid);
+  box-shadow: var(--sh-raise);
+}
+.proposal > header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+.proposal > header .mask {
+  color: var(--running-fg);
+}
+.proposal h2 {
+  flex: 1 1 180px;
+  min-width: 0;
+  color: var(--text-primary);
+}
+.proposal .panel-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+.proposal .consequence {
+  margin: 0;
+  font: var(--t-body);
+  line-height: 1.6;
+  color: var(--text-secondary);
+}
+.proposal-schedule {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  align-items: center;
+}
+.proposal-schedule select,
+.proposal-schedule input {
+  flex: 1 1 140px;
+  min-height: var(--touch-target);
+}
+.proposal-prompt > summary {
+  cursor: pointer;
+  font: var(--t-note);
+  color: var(--text-secondary);
+  padding: var(--space-2) 0;
+  display: list-item;
+}
+.proposal-prompt textarea {
+  width: 100%;
+  font: var(--t-code-small);
+}
+.proposal-budget {
+  display: flex;
+  flex-direction: row;
+  letter-spacing: 0;
+  text-transform: none;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  font: var(--t-note);
+  color: var(--text-secondary);
+}
+.proposal-budget input {
+  width: 8ch;
+  min-height: var(--touch-target);
+}
+.proposal .answers {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+.proposal .answers .allow,
+.proposal .answers .deny {
+  flex: 1 1 140px;
+  max-width: 220px;
+  min-height: var(--touch-target);
+}
+.proposal .answers .allow {
+  background: var(--running-solid);
+  color: var(--text-inverse);
+  border-color: transparent;
+  font-weight: 800;
+  box-shadow: 4px 4px 0 var(--bg-shadow);
+}
+.proposal .answers .deny {
+  font-weight: 600;
+}
+.proposal .answers .scoped {
+  flex: 1 1 100%;
+  min-height: var(--touch-target);
+  border-color: var(--border-hairline);
+  color: var(--text-secondary);
+  font: var(--t-note);
+}
+.proposal .also.error {
+  margin: 0;
+  font: var(--t-micro);
+  color: var(--error-fg);
+}
+.proposal-yaml {
+  max-width: var(--measure-reading);
+  overflow-x: auto;
+  font: var(--t-code-small);
+  background: var(--bg-sunken);
+  border: var(--bw-hairline) solid var(--border-hairline);
+  padding: var(--space-3);
 }

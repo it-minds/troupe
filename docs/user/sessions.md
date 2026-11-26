@@ -34,6 +34,31 @@ On the platform, *Only me, until I invite people* (`/new --only-me`, `troupe run
 [invite people](sessions-shared.md#starting-it-as-only-you). What a profile gives the session is on [profiles](profiles.md), and the terminal's screen
 for it on [a new session](terminal-screen.md#a-new-session).
 
+## How long a session lasts
+
+A session is **Normal** unless you say otherwise: it sleeps when nothing runs, wakes when
+you use it, and stays until you erase it. Two other lifespans are chosen in the same
+sentence as you start it, or later from the session's ⋯ (`/lifespan` in the terminal):
+
+- **Throwaway**, for a short question: erased a day after it goes quiet, which is
+  24 hours after it last worked by default (your administrator sets 1 to 168). Its row says
+  when, *throwaway · goes in 18 h*. It is not erased while it is awake, while it waits on
+  an approval or a question, while it is kept at the top, or before somebody has reviewed
+  a trigger's run. Erasing takes the whole session: its log, its workspace, its key and its
+  invitations; what it cost and the audit stay. It may publish an artifact, which outlives
+  it, and remember things in your own memory, but it proposes nothing for a team's or the
+  organisation's memory. The head offers **Erase now**, and **Keep it**, which makes it
+  normal. `/new --throwaway` and `troupe run --throwaway` start one.
+- **Persistent**, for a report you build over days: kept until you erase it, and never
+  cleared away by anything else. It still sleeps, and costs nothing asleep. `/new
+  --persistent` starts one.
+
+Only a session's owner changes its lifespan. A fork is normal unless you ask otherwise,
+whatever the session it came from. A session on your computer that is throwaway is erased
+by the daemon in the same way, after the same window (`throwaway_erase_after_hours` in its
+[configuration](configuration.md)); a private one is erased by the plane, which
+holds its key.
+
 ## Raising a session to the current configuration
 
 A session on the platform runs on the bundle version its profile's channel had when it

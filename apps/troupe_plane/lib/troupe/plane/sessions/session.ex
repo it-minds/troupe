@@ -32,6 +32,9 @@ defmodule Troupe.Plane.Sessions.Session do
   # all. Not the same question as `visibility`, which is who else may see it.
   @kinds ~w(team private)
   @visibilities ~w(private team)
+  # How long it lasts, which is neither of those: a team, only-me or private session can
+  # each be any of the three.
+  @lifespans Troupe.Protocol.Lifespan.words()
   # What the worker reports the session is doing. `state` above is the plane's word on
   # whether a tree exists; `status` is the worker's on what the tree is up to.
   @statuses ~w(idle thinking acting waiting done interrupted)
@@ -88,7 +91,11 @@ defmodule Troupe.Plane.Sessions.Session do
     # yet: the version, and who asked. Cleared when a pod starts the session on it.
     field(:bundle_raise_to, :integer)
     field(:bundle_raise_by, :string)
-    field(:retention_class, :string)
+    # How long it lasts: `throwaway` is erased by the plane's sweep a set time after it last
+    # worked, asleep with nothing waiting (`Troupe.Plane.Sessions.Lifespan`); `normal` is
+    # cleared away only by its owner or an administrator; `persistent` is never cleared away
+    # by any sweep, and sleeps as any session does. Its owner's alone to change.
+    field(:lifespan, :string, default: "normal")
     field(:pinned, :boolean, default: false)
     field(:pinned_by, :string)
     field(:pinned_at, :utc_datetime_usec)
@@ -153,6 +160,10 @@ defmodule Troupe.Plane.Sessions.Session do
   @spec kinds() :: [String.t()]
   def kinds, do: @kinds
 
+  @doc "How long a session may last: `throwaway`, `normal` or `persistent`."
+  @spec lifespans() :: [String.t()]
+  def lifespans, do: @lifespans
+
   @doc "The kinds of thing that start a session."
   @spec origins() :: [String.t()]
   def origins, do: @origins
@@ -181,7 +192,7 @@ defmodule Troupe.Plane.Sessions.Session do
     :bundle_channel,
     :bundle_raise_to,
     :bundle_raise_by,
-    :retention_class,
+    :lifespan,
     :pinned,
     :pinned_by,
     :pinned_at,
@@ -249,6 +260,7 @@ defmodule Troupe.Plane.Sessions.Session do
     |> validate_inclusion(:kind, @kinds)
     |> validate_inclusion(:state, @states)
     |> validate_inclusion(:visibility, @visibilities)
+    |> validate_inclusion(:lifespan, @lifespans)
     |> validate_inclusion(:fork_reason, @fork_reasons)
     |> validate_lineage()
     |> validate_shape()
@@ -258,6 +270,7 @@ defmodule Troupe.Plane.Sessions.Session do
     |> validate_number(:cost_micros, greater_than_or_equal_to: 0)
     |> validate_number(:usage_seq, greater_than_or_equal_to: 0)
     |> check_constraint(:kind, name: :sessions_kind_shape)
+    |> check_constraint(:lifespan, name: :sessions_lifespan_word)
   end
 
   # A fork says all three things or none of them. Half a lineage — a parent with no point,

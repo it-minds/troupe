@@ -15,8 +15,10 @@ defmodule Troupe.Worker.Plane.Commands do
   alias Troupe.ObjectStore
   alias Troupe.Protocol.Error
   alias Troupe.Protocol.Event
+  alias Troupe.Protocol.Lifespan
   alias Troupe.Protocol.SessionId
   alias Troupe.Session.Log
+  alias Troupe.Session.Proposals
   alias Troupe.Sessions.Fork
   alias Troupe.Sessions.Sealer
   alias Troupe.Sessions.Storage
@@ -84,6 +86,8 @@ defmodule Troupe.Worker.Plane.Commands do
             # a credential: that the pod asks for.
             repositories: Repositories.of_activation(params),
             origin: params["origin"],
+            # How long it lasts, which a new session's `session_created` records.
+            lifespan: params["lifespan"],
             usage_seq: params["usage_seq"]
           ],
           &match?({_key, nil}, &1)
@@ -381,6 +385,71 @@ defmodule Troupe.Worker.Plane.Commands do
 
         {:ok, seq} = Log.append(session_id, [], "session_visibility_changed", data)
         {:ok, %{"session_id" => session_id, "recorded" => true, "seq" => seq}}
+    end
+  end
+
+  # How long the session lasts, changed by its owner at the plane, whose row is the word on
+  # it and what its sweep reads. The pod's part is the log's line, so everybody attached
+  # hears it and a checkpoint folds it; best effort, as the visibility's is.
+  defp dispatch("lifespan.changed", params) do
+    session_id = params["session_id"]
+
+    case {Lifespan.word?(params["to"]), Sessions.whereis(session_id)} do
+      {false, _tree} ->
+        {:error, Error.new(:invalid_params, %{field: "to"})}
+
+      {true, nil} ->
+        {:ok, %{"session_id" => session_id, "recorded" => false, "reason" => "dormant"}}
+
+      {true, _tree} ->
+        data =
+          %{"to" => params["to"], "actor" => params["actor"]}
+          |> put_present("from", if(Lifespan.word?(params["from"]), do: params["from"]))
+
+        {:ok, seq} = Log.append(session_id, [], "session_lifespan_changed", data)
+        {:ok, %{"session_id" => session_id, "recorded" => true, "seq" => seq}}
+    end
+  end
+
+  # An open proposal of a session here, as its log holds it: what the plane makes on its
+  # owner's yes, so the trigger is what the harness drafted from what the session did.
+  defp dispatch("session.proposal.get", params) do
+    session_id = params["session_id"]
+
+    with :ok <- shaped(session_id),
+         {:ok, _tree} <- running_at(session_id, params["epoch"]) do
+      case Enum.find(Proposals.open(session_id), &(&1["id"] == params["id"])) do
+        nil -> {:error, Error.new(:not_found, %{reason: "the session has no open proposal #{params["id"]}"})}
+        proposal -> {:ok, %{"session_id" => session_id, "proposal" => proposal}}
+      end
+    else
+      {:error, _error} = refused -> refused
+    end
+  end
+
+  # What the plane made on the owner's yes to a proposal of a session here: its line in the
+  # log, `proposal_answered`, once, under the owner's name. Best effort, as a share's news
+  # is: a session not up here keeps the proposal open, and the plane answered the owner.
+  defp dispatch("session.proposal.decided", params) do
+    session_id = params["session_id"]
+
+    with :ok <- shaped(session_id),
+         {:ok, _tree} <- running_at(session_id, params["epoch"]),
+         "accepted" <- params["decision"] do
+      yes = %{
+        "result" => params["result"],
+        "edited" => params["edited"],
+        "by_name" => params["by_name"],
+        "actor" => Event.Actor.user(params["by"], params["by_name"])
+      }
+
+      case Proposals.decided(session_id, params["id"], yes) do
+        :ok -> {:ok, %{"session_id" => session_id, "recorded" => true}}
+        {:error, reason} -> {:error, Error.new(:conflict, %{reason: reason})}
+      end
+    else
+      {:error, _error} = refused -> refused
+      _other -> {:error, Error.new(:invalid_params, %{reason: "the plane decides only a yes"})}
     end
   end
 
@@ -990,12 +1059,14 @@ defmodule Troupe.Worker.Plane.Commands do
   # The session's terms, as config overrides. Seconds on the wire because that is how
   # a person writes a schedule; milliseconds inside because that is what the budget
   # counts. `approvals` is `wait` unless it says `deny`: there is no `auto` a trigger
-  # can ask for.
+  # can ask for. `allow` is the per-tool rules a trigger's runs need to do their work
+  # unasked, named one by one, which the session reads as the trigger's own layer.
   defp terms_of(%{} = terms) do
     [
       max_turns: positive(terms["max_turns"]),
       wall_clock_ms: terms["wall_clock_seconds"] |> positive() |> then(&(&1 && &1 * 1000)),
-      approvals: if(terms["approvals"] == "deny", do: :deny)
+      approvals: if(terms["approvals"] == "deny", do: :deny),
+      allow: allowed(terms["allow"])
     ]
     |> Enum.reject(&match?({_key, nil}, &1))
     |> case do
@@ -1005,6 +1076,9 @@ defmodule Troupe.Worker.Plane.Commands do
   end
 
   defp terms_of(_terms), do: nil
+
+  defp allowed([_ | _] = rules), do: Enum.filter(rules, &is_binary/1)
+  defp allowed(_none), do: nil
 
   # The platform's switches ride in with the terms, because the terms are already the
   # channel for "configuration this session did not choose" and a second one would be a

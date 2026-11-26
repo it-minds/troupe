@@ -242,6 +242,19 @@ defmodule Troupe.Remote.Worker do
   @spec visibility(String.t(), String.t()) :: :ok | {:error, term()}
   def visibility(session_id, visibility), do: call(session_id, {:visibility, visibility})
 
+  @doc "The latest proposal of the harness's nobody answered yet, as `proposal_made` said it, or nil."
+  @spec open_proposal(String.t()) :: map() | nil
+  def open_proposal(session_id) do
+    case call(session_id, :open_proposal) do
+      {:error, _} -> nil
+      proposal -> proposal
+    end
+  end
+
+  @doc "The owner's `later` or `never` to the proposal `id`."
+  @spec answer_proposal(String.t(), String.t(), String.t()) :: :ok | {:error, term()}
+  def answer_proposal(session_id, id, decision), do: call(session_id, {:proposal, id, decision})
+
   @spec blob(String.t(), String.t(), non_neg_integer(), non_neg_integer()) ::
           {:ok, term()} | {:error, term()}
   def blob(session_id, blob, offset \\ 0, length \\ 1_000_000),
@@ -392,6 +405,9 @@ defmodule Troupe.Remote.Worker do
       # #1169): `team` or `private`, nil where nobody said; and whether it is this person's.
       visibility: Keyword.get(opts, :visibility),
       owner?: Keyword.get(opts, :owner?, false),
+      # What the harness proposed and nobody answered yet (root #1208), oldest first, each
+      # `proposal_made`'s data: what `/proposal` answers.
+      proposals: [],
       # The GitHub repositories a pod session holds, by `owner/name`, as the plane said at
       # the open and the log's `session_repository_changed` says since (root #1207); nil
       # where nobody said.
@@ -557,6 +573,16 @@ defmodule Troupe.Remote.Worker do
         command_id: RPC.command_id()
       })
     )
+  end
+
+  def handle_call(:open_proposal, _from, state), do: {:reply, List.last(state.proposals), state}
+
+  def handle_call({:proposal, id, decision}, from, state) do
+    activating(state, from, "session.proposal.answer", %{
+      id: id,
+      decision: decision,
+      command_id: RPC.command_id()
+    })
   end
 
   def handle_call({:answer, call_id, text}, from, state) do
@@ -1191,7 +1217,13 @@ defmodule Troupe.Remote.Worker do
         state = %{
           state
           | cursor: max(state.cursor, checkpoint["data"]["through"]),
-            visibility: if(is_binary(visibility), do: visibility, else: state.visibility)
+            visibility: if(is_binary(visibility), do: visibility, else: state.visibility),
+            proposals:
+              for(
+                p <- get_in(checkpoint, ["data", "facts", "open_proposals"]) || [],
+                is_map(p["data"]),
+                do: p["data"]
+              )
         }
 
         publish_status(state)
@@ -1422,6 +1454,7 @@ defmodule Troupe.Remote.Worker do
       | memory: memory,
         agent: state.agent || Translate.root_of(params),
         visibility: given(params) || state.visibility,
+        proposals: proposed(state.proposals, params),
         repositories: held(params) || state.repositories
     }
 
@@ -1451,6 +1484,14 @@ defmodule Troupe.Remote.Worker do
   defp given(%{"type" => "session_visibility_changed", "data" => %{"visibility" => v}}), do: v
   defp given(_params), do: nil
 
+  # What the harness proposed and nobody answered yet, as the log says.
+  defp proposed(open, %{"type" => "proposal_made", "data" => %{"id" => id} = data}),
+    do: Enum.reject(open, &(&1["id"] == id)) ++ [data]
+
+  defp proposed(open, %{"type" => "proposal_answered", "data" => %{"id" => id}}),
+    do: Enum.reject(open, &(&1["id"] == id))
+
+  defp proposed(open, _params), do: open
   # The repositories it holds now, as its log says each time one moves.
   defp held(%{"type" => "session_repository_changed", "data" => %{"repositories" => list}})
        when is_list(list),

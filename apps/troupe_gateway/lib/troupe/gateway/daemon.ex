@@ -21,7 +21,8 @@ defmodule Troupe.Gateway.Daemon do
       ├── Loopback      a WebSocket on 127.0.0.1, which is the only door a browser has
       ├── Idle          shuts the daemon down after a quiet period
       ├── Memory        the organisation's memory, asked for again while a token is held
-      └── Policy        the plane's word on this machine, asked for again while a token is held
+      ├── Policy        the plane's word on this machine, asked for again while a token is held
+      └── Lifespan      erases the throwaway sessions here whose window has passed
 
   `Troupe.Sessions` and the session trees themselves live in `troupe_core`'s own
   supervision tree, so the daemon can restart its listener without disturbing a
@@ -35,6 +36,7 @@ defmodule Troupe.Gateway.Daemon do
     Commands,
     Connections,
     Idle,
+    Lifespan,
     Listener,
     LocalOnly,
     Loopback,
@@ -111,7 +113,10 @@ defmodule Troupe.Gateway.Daemon do
       # organisation's memory, asked for again every few minutes while a token is held,
       # and the plane's version policy and organisation's document, every half minute.
       {Memory, Keyword.get(opts, :memory, [])},
-      {Policy, Keyword.get(opts, :policy, [])}
+      {Policy, Keyword.get(opts, :policy, [])},
+      # The throwaway sessions on this computer whose window has passed, erased every ten
+      # minutes; it serves nobody, so a restart of it restarts nothing a client uses.
+      {Lifespan, Keyword.get(opts, :lifespan, [])}
     ]
 
     # rest_for_one: the Listener hands sockets to Connections and the Idle watcher

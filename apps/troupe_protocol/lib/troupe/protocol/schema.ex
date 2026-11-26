@@ -55,7 +55,10 @@ defmodule Troupe.Protocol.Schema do
         "agent_rule" => optional(:object),
         "origin" => optional(:object),
         # The session this one was made as a branch of, when a client said so.
-        "parent" => optional(:string)
+        "parent" => optional(:string),
+        # How long it lasts, where whoever made it said: `throwaway`, `normal` or
+        # `persistent`; absent is normal.
+        "lifespan" => optional(:string)
       },
       # The child's first event, and the only place the lineage is written down in the log.
       # `parent` carries the id, the seq forked at and the parent's head hash there, so a
@@ -715,6 +718,13 @@ defmodule Troupe.Protocol.Schema do
         "by" => required(:string),
         "by_name" => optional(:string)
       },
+      # How long the session lasts, changed by its owner after it started: what it was,
+      # what it is now, and who said so.
+      "session_lifespan_changed" => %{
+        "from" => optional(:string),
+        "to" => required(:string),
+        "actor" => required(:string)
+      },
       # A comment written on an artifact this session published, from the plane: the
       # artifact, who wrote it and what. Somebody else's words, never input to an agent.
       "artifact_commented" => %{
@@ -740,6 +750,34 @@ defmodule Troupe.Protocol.Schema do
         "tools" => required({:array, :string}),
         "actor" => required(:string),
         "display_name" => optional(:string)
+      },
+      # Something the harness offers the session's owner, written at the root's rest and
+      # never during a turn; nothing waits for it. `kind` says what (`trigger`, a schedule
+      # that reruns what the session published), `key` what "the same thing" is
+      # (`artifact:<id>`), `title` the question, `why` the one sentence naming what
+      # prompted it, `draft` what a yes makes, as the owner may edit it, `options` the
+      # answers (`accepted`, `later`, `never`), `mode` `direct` (a yes makes it), `gitops`
+      # (a yes hands over the resource to commit) or `unavailable` with `reason`.
+      "proposal_made" => %{
+        "id" => required(:string),
+        "kind" => required(:string),
+        "key" => required(:string),
+        "title" => required(:string),
+        "why" => required(:string),
+        "draft" => required(:object),
+        "options" => required({:array, :string}),
+        "mode" => required(:string),
+        "reason" => optional(:string)
+      },
+      # The owner's answer to a proposal, once: `decision` (`accepted`, `later`, `never`),
+      # the draft's fields they changed (`edited`), and what a yes made (`result`: for a
+      # trigger `{team, name, url}`, or `yaml` on a gitops plane).
+      "proposal_answered" => %{
+        "id" => required(:string),
+        "decision" => required(:string),
+        "edited" => optional({:array, :string}),
+        "result" => optional(:object),
+        "by_name" => optional(:string)
       }
     }
   end
@@ -838,7 +876,9 @@ defmodule Troupe.Protocol.Schema do
         "parent" => optional(:string),
         "workflow" => optional(:string),
         "private" => optional(:boolean),
-        "title" => optional(:string)
+        "title" => optional(:string),
+        # How long it lasts: `throwaway`, `normal` (absent) or `persistent`.
+        "lifespan" => optional(:string)
       },
       "session.archive" => %{
         "command_id" => required(:string),
@@ -853,6 +893,23 @@ defmodule Troupe.Protocol.Schema do
         "session_id" => required(:string),
         "call_id" => required(:string),
         "text" => required(:string)
+      },
+      # The owner's no to a proposal the harness made in a pod session: `later` (not in this
+      # session) or `never` (not for its `key` again, kept on the plane). A yes is the
+      # plane's `session.proposal.accept`.
+      "session.proposal.answer" => %{
+        "command_id" => required(:string),
+        "session_id" => required(:string),
+        "id" => required(:string),
+        "decision" => required(:string)
+      },
+      # The owner's yes to a pod session's proposal: the plane's, which the clients ask
+      # directly with the person's own token. `edits` are the draft's fields as the owner
+      # changed them (`cron`, `prompt_template`, `budget_micros`).
+      "session.proposal.accept" => %{
+        "session_id" => required(:string),
+        "id" => required(:string),
+        "edits" => optional(:object)
       },
       "session.pin" => %{"command_id" => required(:string), "session_id" => required(:string)},
       "session.title.set" => %{
@@ -885,6 +942,13 @@ defmodule Troupe.Protocol.Schema do
       "session.visibility.set" => %{
         "session_id" => required(:string),
         "visibility" => required(:string)
+      },
+      # How long a session lasts (`throwaway`, `normal` or `persistent`), changed by its
+      # owner: the plane's for a session it has a row of, a daemon's for one on its computer.
+      "session.lifespan.set" => %{
+        "command_id" => optional(:string),
+        "session_id" => required(:string),
+        "lifespan" => required(:string)
       },
       # A pod session raised to its channel's current bundle version by its owner: the
       # plane's, which the clients ask directly.

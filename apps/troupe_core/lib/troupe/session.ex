@@ -194,7 +194,10 @@ defmodule Troupe.Session do
           {Troupe.Session.Summary, session_id: session_id},
           # A projection too, which writes: one `checkpoint` after each root compaction, at
           # the root's next rest. Last, so its crash restarts nothing else.
-          {Troupe.Session.Checkpoints, session_id: session_id}
+          {Troupe.Session.Checkpoints, session_id: session_id},
+          # And one more, which writes too: what the harness offers the owner, at the root's
+          # rest and never during a turn; started only where the host can check a proposal.
+          {Troupe.Session.Proposals, session_id: session_id}
         ]
 
     Supervisor.init(children,
@@ -301,6 +304,9 @@ defmodule Troupe.Session do
          bundle: bundle,
          kind: Keyword.get(opts, :kind, :local),
          origin: Keyword.get(opts, :origin),
+         # How long it lasts, `throwaway`, `normal` or `persistent`, as the plane or the
+         # client said at its creation; recorded in `session_created`, absent for normal.
+         lifespan: Keyword.get(opts, :lifespan),
          # A pod is told whose session this is; a daemon is not, and works it out from
          # whoever has linked their identity to it.
          owner: Keyword.get(opts, :owner),

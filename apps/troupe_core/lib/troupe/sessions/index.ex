@@ -42,7 +42,7 @@ defmodule Troupe.Sessions.Index do
   alias Troupe.{Config, Events, Paths, Registry, Session}
   alias Troupe.Protocol.Event
   alias Troupe.Session.{Approvals, Log, Questions, Summary, Watcher}
-  alias Troupe.Sessions.{Archive, Pin, Title, Unseen}
+  alias Troupe.Sessions.{Archive, Lifespan, Pin, Title, Unseen}
 
   @type meta :: %{
           id: String.t(),
@@ -65,6 +65,7 @@ defmodule Troupe.Sessions.Index do
           pinned: boolean(),
           archived: boolean(),
           title: String.t() | nil,
+          lifespan: String.t(),
           state_dir: Path.t() | nil
         }
 
@@ -121,9 +122,10 @@ defmodule Troupe.Sessions.Index do
   Every session this daemon knows about, newest first.
 
   `filter` may carry `"state"` (a list of state strings), `"workspace"`, `"parent"`
-  (a session id: the sessions made as branches of that one) and `"archived"` (`true` for
+  (a session id: the sessions made as branches of that one), `"archived"` (`true` for
   the archived ones alone, `false` for the others; absent, both, which is what lookups by
-  id and the daemon's own passes want: the session list asks for `false` itself).
+  id and the daemon's own passes want: the session list asks for `false` itself), and
+  `"lifespan"` (a word or a list of them: the sessions that last so).
   """
   @spec list(map()) :: [meta()]
   def list(filter \\ %{}), do: GenServer.call(__MODULE__, {:list, filter}, 15_000)
@@ -289,6 +291,7 @@ defmodule Troupe.Sessions.Index do
       |> Map.put_new(:pinned, false)
       |> Map.put_new(:archived, false)
       |> Map.put_new(:title, nil)
+      |> Map.put_new(:lifespan, "normal")
       |> Map.put_new(:created_at, timestamp())
       |> Map.put(:last_active_at, timestamp())
       # Idle from the moment it exists: a session created and never spoken to is the
@@ -672,19 +675,30 @@ defmodule Troupe.Sessions.Index do
         |> waiting()
         |> Map.put(:unseen, (listed && Map.get(listed, :unseen)) || unseen(session_id))
         |> Map.put(:failed, listed && Map.get(listed, :failed))
-        |> Map.put(
-          :pinned,
-          if(listed, do: Map.get(listed, :pinned, false), else: pinned(session_id))
-        )
-        |> Map.put(
-          :archived,
-          if(listed, do: Map.get(listed, :archived, false), else: archived(session_id))
-        )
-        |> Map.put(:title, if(listed, do: Map.get(listed, :title), else: titled(session_id)))
+        |> Map.merge(marks(session_id, listed))
 
       :error ->
         nil
     end
+  end
+
+  # The marks beside the log: the listing's scan has read them already, else read now.
+  defp marks(_session_id, %{} = listed) do
+    %{
+      pinned: Map.get(listed, :pinned, false),
+      archived: Map.get(listed, :archived, false),
+      title: Map.get(listed, :title),
+      lifespan: Map.get(listed, :lifespan, "normal")
+    }
+  end
+
+  defp marks(session_id, nil) do
+    %{
+      pinned: pinned(session_id),
+      archived: archived(session_id),
+      title: titled(session_id),
+      lifespan: lasting(session_id)
+    }
   end
 
   defp unseen(session_id) do
@@ -715,6 +729,13 @@ defmodule Troupe.Sessions.Index do
     :exit, _ -> nil
   end
 
+  # How long it lasts, beside the log, which a session changed while dormant woke with.
+  defp lasting(session_id) do
+    session_id |> Log.path() |> Path.dirname() |> Lifespan.read()
+  catch
+    :exit, _ -> "normal"
+  end
+
   defp put_asked(meta, summary) do
     meta
     |> Map.put(:pending_approvals, summary |> Map.get("approvals", []) |> length())
@@ -739,7 +760,7 @@ defmodule Troupe.Sessions.Index do
 
     disk
     |> Map.merge(view.live, fn _id, from_disk, live ->
-      Map.merge(live, Map.take(from_disk, [:unseen, :failed, :pinned, :archived, :title]))
+      Map.merge(live, Map.take(from_disk, [:unseen, :failed, :pinned, :archived, :title, :lifespan]))
     end)
     |> Map.values()
     |> Enum.sort_by(& &1.last_active_at, :desc)
@@ -758,6 +779,9 @@ defmodule Troupe.Sessions.Index do
     end)
     |> filter_by(filter, "archived", fn session, archived? ->
       Map.get(session, :archived, false) == (archived? == true)
+    end)
+    |> filter_by(filter, "lifespan", fn session, lifespans ->
+      Map.get(session, :lifespan, "normal") in List.wrap(lifespans)
     end)
   end
 
@@ -830,6 +854,7 @@ defmodule Troupe.Sessions.Index do
     pinned = Pin.pinned?(dir)
     archived = Archive.archived?(dir)
     title = Title.read(dir)
+    lifespan = Lifespan.read(dir)
 
     Enum.map(
       rows,
@@ -838,7 +863,8 @@ defmodule Troupe.Sessions.Index do
         | unseen: Unseen.unseen_now(&1.id, &1.unseen),
           pinned: pinned,
           archived: archived,
-          title: title
+          title: title,
+          lifespan: lifespan
       }
     )
   end
@@ -894,6 +920,7 @@ defmodule Troupe.Sessions.Index do
           pinned: false,
           archived: false,
           title: nil,
+          lifespan: "normal",
           state_dir: root
         }
 

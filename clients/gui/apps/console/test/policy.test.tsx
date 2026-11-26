@@ -81,6 +81,7 @@ describe("a setting in its unit", () => {
     await sees("$500.00", budget);
     await sees("30 min", () => row("default_idle_timeout_seconds"));
     await sees("180 days", () => row("default_erase_after_days"));
+    await sees("24 hours", () => row("throwaway_erase_after_hours"));
     await sees("monthly, from the 1st (UTC)", () => row("default_budget_period"));
     await sees("on", () => row("pins_allowed"));
   });
@@ -111,6 +112,16 @@ describe("a setting in its unit", () => {
     await sees("Budget for the platform", note);
     await sees("$500.00 → $750.00", note);
     expect(fake.admin.stored.get("platform_budget_micros")).toBe(750_000_000);
+  });
+
+  it("asks for hours in hours, and previews the change in them", async () => {
+    await open("#/policy");
+    button("Change", await waitFor(() => row("throwaway_erase_after_hours"), "the setting"))!.click();
+    const hours = await waitFor(() => field("Erase a throwaway session after"), "the hours field");
+    await sees("In hours.", () => row("throwaway_erase_after_hours"));
+    type(hours, "6");
+    button("Preview", row("throwaway_erase_after_hours")!)!.click();
+    await sees("Erase a throwaway session after: 6 hours", () => row("throwaway_erase_after_hours"));
   });
 
   it("asks for a switch as on or off, and a choice by its words", async () => {

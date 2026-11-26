@@ -361,6 +361,8 @@ defmodule Troupe.FakeRemote do
       device: Keyword.get(fields, :device),
       archived: Keyword.get(fields, :archived, false),
       visibility: Keyword.get(fields, :visibility, "private"),
+      # How long it lasts (root #1209): a seeded one is normal.
+      lifespan: Keyword.get(fields, :lifespan, "normal"),
       # The bundle version it is pinned to and its channel's current one (root #1177); a
       # session whose agent is working (`busy`) has a raise kept rather than taken.
       bundle_version: Keyword.get(fields, :bundle_version, 3),
@@ -1081,6 +1083,90 @@ defmodule Troupe.FakeRemote do
 
       {:ok, %{owner: ^me}} ->
         {{:error, -32_602, "invalid_params", %{"reason" => "visibility is team or private"}}, state}
+
+      {:ok, _theirs} ->
+        {{:error, -32_004, "forbidden", %{"required_role" => "owner"}}, state}
+
+      :error ->
+        {{:error, -32_005, "no such session"}, state}
+    end
+  end
+
+  # The owner's yes to what the harness proposed (root #1208): what the plane made, and the
+  # log's line the pod writes, pushed to whoever is attached.
+  defp dispatch(state, :plane, "session.proposal.accept", %{"session_id" => id} = params, _pid) do
+    me = state.principal["sub"]
+
+    case Map.fetch(state.sessions, id) do
+      {:ok, %{owner: ^me}} ->
+        made = %{"team" => "eng", "name" => "rerun-weekly-numbers", "url" => nil}
+
+        {event, state} =
+          append(
+            state,
+            id,
+            "proposal_answered",
+            %{
+              "id" => params["id"],
+              "decision" => "accepted",
+              "result" => made,
+              "by_name" => state.principal["name"]
+            },
+            []
+          )
+
+        push(state, id, notification(id, event))
+        {{:ok, Map.put(made, "edited", [])}, state}
+
+      {:ok, _theirs} ->
+        {{:error, -32_004, "forbidden", %{"required_role" => "owner"}}, state}
+
+      :error ->
+        {{:error, -32_005, "no such session"}, state}
+    end
+  end
+
+  # The owner's no to what the harness proposed: the log's line, pushed to whoever is attached.
+  defp dispatch(state, :worker, "session.proposal.answer", %{"session_id" => id} = params, _pid) do
+    {event, state} =
+      append(
+        state,
+        id,
+        "proposal_answered",
+        %{"id" => params["id"], "decision" => params["decision"]},
+        []
+      )
+
+    push(state, id, notification(id, event))
+    {{:ok, %{"accepted" => true}}, state}
+  end
+
+  # How long it lasts, the owner's alone (root #1209): the row answered as `session.get`
+  # answers it, and the log's line, which the pod writes, pushed to whoever is attached.
+  defp dispatch(state, :plane, "session.lifespan.set", %{"session_id" => id} = params, _pid) do
+    me = state.principal["sub"]
+    to = params["lifespan"]
+
+    case Map.fetch(state.sessions, id) do
+      {:ok, %{owner: ^me} = session} when to in ["throwaway", "normal", "persistent"] ->
+        from = Map.get(session, :lifespan, "normal")
+        session = Map.put(session, :lifespan, to)
+        state = put_in(state.sessions[id], session)
+
+        {event, state} =
+          append(
+            state,
+            id,
+            "session_lifespan_changed",
+            %{"from" => from, "to" => to, "actor" => me},
+            []
+          )
+
+        push(state, id, notification(id, event))
+        {{:ok, pod_row(session, me)}, state}
+
+      {:ok, %{owner: ^me}} ->
+        {{:error, -32_602, "invalid_params", %{"field" => "lifespan"}}, state}
 
       {:ok, _theirs} ->
         {{:error, -32_004, "forbidden", %{"required_role" => "owner"}}, state}
@@ -2170,6 +2256,8 @@ defmodule Troupe.FakeRemote do
       "cost" => session.cost,
       "updated_at" => session.updated_at,
       "visibility" => Map.get(session, :visibility, "team"),
+      "lifespan" => Map.get(session, :lifespan, "normal"),
+      "erases_at" => if(Map.get(session, :lifespan) == "throwaway", do: "2099-01-01T00:00:00Z"),
       "archived" => Map.get(session, :archived, false)
     }
   end
@@ -2389,6 +2477,8 @@ defmodule Troupe.FakeRemote do
       "kind" => Map.get(session, :kind, "team"),
       # Who may open a pod session: a seeded one is the team's.
       "visibility" => Map.get(session, :visibility, "team"),
+      "lifespan" => Map.get(session, :lifespan, "normal"),
+      "erases_at" => if(Map.get(session, :lifespan) == "throwaway", do: "2099-01-01T00:00:00Z"),
       "device" => Map.get(session, :device),
       "archived" => Map.get(session, :archived, false)
     }
@@ -2478,6 +2568,8 @@ defmodule Troupe.FakeRemote do
     |> Map.merge(%{
       "repositories" => repository_rows(Map.get(session, :repositories, [])),
       "visibility" => Map.get(session, :visibility, "private"),
+      "lifespan" => Map.get(session, :lifespan, "normal"),
+      "erases_at" => if(Map.get(session, :lifespan) == "throwaway", do: "2099-01-01T00:00:00Z"),
       "team" => session.team,
       "your_role" => if(session.owner == me, do: "owner", else: "collaborator"),
       "bundle_version" => Map.get(session, :bundle_version, 3),
