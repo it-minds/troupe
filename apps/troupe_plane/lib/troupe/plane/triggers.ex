@@ -31,7 +31,7 @@ defmodule Troupe.Plane.Triggers do
   alias Troupe.Plane.Identity.{Team, User}
   alias Troupe.Plane.Sessions.Session
   alias Troupe.Plane.Triggers.{Notify, Revision, Run, Template, Trigger}
-  alias Troupe.Protocol.{Canonical, Digest, Error, Origin, Principal}
+  alias Troupe.Protocol.{Canonical, Digest, Error, Origin, PermissionRule, Principal}
 
   require Logger
 
@@ -40,7 +40,7 @@ defmodule Troupe.Plane.Triggers do
   # a place to hide instructions.
   @max_event_bytes 16_384
 
-  @term_keys ~w(budget_micros max_turns wall_clock_seconds approvals)
+  @term_keys ~w(budget_micros max_turns wall_clock_seconds approvals allow)
 
   # What `put/3` reads of what it is given: the document's fields, and the principal by
   # subject. `admin.trigger.put`'s schema declares these and the team, and a test holds
@@ -56,6 +56,27 @@ defmodule Troupe.Plane.Triggers do
   @doc "The keys a trigger's `terms` may have, which `session.create` will check again."
   @spec term_keys() :: [String.t()]
   def term_keys, do: @term_keys
+
+  @doc """
+  What is wrong with a trigger's `terms.allow`, or `nil`: a list of at most
+  16 per-tool rules as a configuration file writes them (`publish_artifact`,
+  `shell(curl)`, `mcp(crm.list_deals)`), which its runs read as the trigger's own layer
+  beside the profile's, so a profile's `ask` or `deny` still holds over each.
+  """
+  @spec allow_problem(term()) :: String.t() | nil
+  def allow_problem(nil), do: nil
+
+  def allow_problem(rules) when is_list(rules) and length(rules) <= 16 do
+    Enum.find_value(rules, fn rule ->
+      case PermissionRule.parse(rule) do
+        {:ok, _rule} -> nil
+        {:error, reason} -> reason
+      end
+    end)
+  end
+
+  def allow_problem(rules) when is_list(rules), do: "allow takes at most 16 rules"
+  def allow_problem(_other), do: "allow is a list of rules, such as [\"publish_artifact\", \"shell(curl)\"]"
 
   @doc "The attributes `put/3` reads."
   @spec put_keys() :: [String.t()]
@@ -1419,7 +1440,10 @@ defmodule Troupe.Plane.Triggers do
   defp check_terms(%{} = terms) do
     case Map.keys(terms) -- @term_keys do
       [] ->
-        :ok
+        case allow_problem(terms["allow"]) do
+          nil -> :ok
+          reason -> {:error, Error.new(:invalid_params, %{field: "terms.allow", reason: reason})}
+        end
 
       unknown ->
         reason = "terms takes #{Enum.join(@term_keys, ", ")}"

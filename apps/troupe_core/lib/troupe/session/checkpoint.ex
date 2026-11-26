@@ -44,6 +44,8 @@ defmodule Troupe.Session.Checkpoint do
     "cost_micros" => 0,
     "unpriced" => 0,
     "turns" => 0,
+    "calls" => 0,
+    "turns_cost_micros" => 0,
     "context" => %{"used" => nil},
     "open_approvals" => [],
     "open_questions" => [],
@@ -339,6 +341,18 @@ defmodule Troupe.Session.Checkpoint do
        when type in ["question_answered", "budget_ask_answered", "tool_failures_ask_answered"],
        do: %{f | "open_questions" => close(f["open_questions"], [data["call_id"]])}
 
+  # What the harness offered the owner and nobody has answered: never waited for, so in
+  # neither list above, and here only so a client attaching late can still show it. A log
+  # that never had a proposal has no such fact, as the facts of a session written before
+  # there were proposals have none: absent is an empty list.
+  defp facts(f, %Event{type: "proposal_made", seq: seq, data: data}) do
+    open = f |> Map.get("open_proposals", []) |> Enum.reject(&(&1["id"] == data["id"]))
+    Map.put(f, "open_proposals", open ++ [%{"id" => data["id"], "seq" => seq, "agent" => ["root"], "data" => data}])
+  end
+
+  defp facts(f, %Event{type: "proposal_answered", data: data}),
+    do: Map.put(f, "open_proposals", f |> Map.get("open_proposals", []) |> Enum.reject(&(&1["id"] == data["id"])))
+
   # A call that ended takes what it waited on with it: a cancel closes each call it stops
   # so, and so does a tool that timed out waiting; and a delegation waited for is over.
   defp facts(f, %Event{type: "tool_call_completed", data: data}) do
@@ -352,13 +366,16 @@ defmodule Troupe.Session.Checkpoint do
     }
   end
 
-  defp facts(f, %Event{type: "delegation_started", seq: seq, data: data}) do
+  # When it began rides along, so a reader starting after it can say how long the child
+  # ran once its end arrives.
+  defp facts(f, %Event{type: "delegation_started", seq: seq, ts: ts, data: data}) do
     entry = %{
       "call_id" => data["call_id"],
       "agent" => data["agent"],
       "child_path" => data["child_path"],
       "wait" => data["wait"] != false,
-      "seq" => seq
+      "seq" => seq,
+      "ts" => ts
     }
 
     %{f | "running" => Enum.reject(f["running"], &(&1["call_id"] == data["call_id"])) ++ [entry]}
@@ -409,11 +426,19 @@ defmodule Troupe.Session.Checkpoint do
   defp end_running(f, path),
     do: %{f | "running" => Enum.reject(f["running"], &(&1["child_path"] == path))}
 
-  # A root turn's end counts a turn, and what of it nobody priced.
+  # A root turn's end counts a turn, its model calls, the money of those priced and what of
+  # it nobody priced: the session's spend as its turns add it up, a subagent's calls joining
+  # when its report reaches one, where `cost_micros` counts each call as it is answered. A
+  # checkpoint written before these two were folded has neither, which a reader takes as 0.
   defp turn(f, ["root"], data) do
     case data["turn"] do
       %{} = turn ->
-        %{f | "turns" => f["turns"] + 1, "unpriced" => f["unpriced"] + count(turn["unpriced"])}
+        Map.merge(f, %{
+          "turns" => f["turns"] + 1,
+          "unpriced" => f["unpriced"] + count(turn["unpriced"]),
+          "calls" => count(f["calls"]) + count(turn["calls"]),
+          "turns_cost_micros" => count(f["turns_cost_micros"]) + count(turn["cost_micros"])
+        })
 
       _ ->
         f

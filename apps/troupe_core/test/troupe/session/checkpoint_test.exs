@@ -115,6 +115,47 @@ defmodule Troupe.Session.CheckpointTest do
     refute Checkpoint.fold_all([before]) |> Checkpoint.facts() |> Map.has_key?("lifespan")
   end
 
+  test "the facts count the model calls and the money of the root's ended turns" do
+    log =
+      [{:input, 0}, {:rest, 4}, {:input, 1}, {:cancel, 6}, {:input, 2}, {:rest, 7}]
+      |> render()
+      |> with_checkpoints()
+
+    facts = log |> Checkpoint.fold_all() |> Checkpoint.facts()
+    # 2 + 1 + 2 calls; 400 + 100 + 200 micro-dollars; a subagent's own cancel counts nothing.
+    assert {facts["calls"], facts["turns_cost_micros"]} == {5, 700}
+
+    child = ev("cancelled", ["root", "general#1"], %{"turn" => turn_spend(1)})
+    assert (log ++ [%{child | seq: 99}]) |> Checkpoint.fold_all() |> Checkpoint.facts() == facts
+  end
+
+  test "a checkpoint written before calls were counted starts them from 0" do
+    old = Checkpoint.data(Checkpoint.new())
+    old = %{old | "facts" => Map.drop(old["facts"], ["calls", "turns_cost_micros"])}
+    checkpoint = %Event{type: "checkpoint", agent: ["root"], seq: 1, data: old}
+
+    {:ok, start} = Checkpoint.from_checkpoint(checkpoint)
+    tail = [%{events(:rest, 4, nil, nil) | seq: 2}]
+    facts = tail |> Checkpoint.fold_all(start) |> Checkpoint.facts()
+    assert {facts["calls"], facts["turns_cost_micros"], facts["turns"]} == {2, 400, 1}
+  end
+
+  test "a delegation still running says when it began" do
+    started = %{
+      ev("delegation_started", ["root"], %{
+        "call_id" => "c1",
+        "agent" => "general",
+        "child_path" => ["root", "general#1"],
+        "wait" => false
+      })
+      | seq: 3,
+        ts: "2026-11-23T10:00:03Z"
+    }
+
+    facts = [started] |> Checkpoint.fold_all() |> Checkpoint.facts()
+    assert [%{"ts" => "2026-11-23T10:00:03Z", "seq" => 3}] = facts["running"]
+  end
+
   test "a checkpoint in a shape this build does not read is not started from" do
     event = %Event{type: "checkpoint", seq: 9, data: %{"shape" => "session/0", "through" => 8}}
     assert {:error, :unknown_shape} = Checkpoint.from_checkpoint(event)
@@ -252,6 +293,9 @@ defmodule Troupe.Session.CheckpointTest do
 
   defp ev(type, agent, data), do: %Event{type: type, agent: agent, data: data}
 
+  defp turn_spend(n),
+    do: %{"calls" => 1 + rem(n, 3), "cost_micros" => rem(n, 5) * 100, "unpriced" => rem(n, 2)}
+
   defp events(:input, n, _agent, _call),
     do: [
       ev("input_accepted", ["root"], %{"command_id" => "in-#{n}"}),
@@ -349,10 +393,10 @@ defmodule Troupe.Session.CheckpointTest do
   end
 
   defp events(:rest, n, _agent, _call),
-    do: ev("turn_ended", ["root"], %{"turn" => %{"calls" => 1, "unpriced" => rem(n, 2)}})
+    do: ev("turn_ended", ["root"], %{"turn" => turn_spend(n)})
 
   defp events(:cancel, n, agent, _call),
-    do: ev("cancelled", agent, %{"turn" => %{"calls" => 1, "unpriced" => rem(n, 2)}})
+    do: ev("cancelled", agent, %{"turn" => turn_spend(n)})
 
   defp events(:scratch, n, _agent, _call),
     do:

@@ -164,6 +164,8 @@ defmodule Troupe.Client do
   @callback invites(session_id(), invite_verb()) :: {:ok, String.t()} | {:error, term()}
   @callback share(session_id(), Troupe.Client.Share.verb()) ::
               {:ok, String.t()} | {:error, String.t()}
+  @callback proposal(session_id(), Troupe.Client.Proposal.verb()) ::
+              {:ok, String.t()} | {:error, String.t()}
   @callback bundle(session_id(), Troupe.Client.Bundle.verb()) ::
               {:ok, String.t()} | {:error, String.t()}
   @callback lifespan(session_id(), Troupe.Client.Lifespan.verb()) ::
@@ -626,6 +628,19 @@ defmodule Troupe.Client do
   @spec bundle(session_id(), Troupe.Client.Bundle.verb()) ::
           {:ok, String.t()} | {:error, String.t()}
   def bundle(sid, verb), do: impl(sid).bundle(sid, verb)
+
+  @doc """
+  What the harness proposed in a session on the platform (root #1208): `:status` says what
+  is open, `:yes` turns it on at the plane as this person, `:later` and `:never` say no to the
+  session. The owner's alone. Answers the sentence to show.
+  """
+  @spec proposal(session_id(), Troupe.Client.Proposal.verb()) ::
+          {:ok, String.t()} | {:error, String.t()}
+  def proposal(sid, verb), do: impl(sid).proposal(sid, verb)
+
+  @doc "What `/proposal` names after the command: nothing, `yes`, `later` or `never`."
+  @spec proposal_args(String.t()) :: {:ok, Troupe.Client.Proposal.verb()} | {:error, String.t()}
+  defdelegate proposal_args(text), to: Troupe.Client.Proposal, as: :parse
 
   @doc "What `/bundle` names after the command: nothing or `update`."
   @spec bundle_args(String.t()) :: {:ok, Troupe.Client.Bundle.verb()} | {:error, String.t()}

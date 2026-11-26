@@ -626,14 +626,14 @@ defmodule Troupe.UI.TUI.Server do
 
   # A page of history asked for at the top of the pane (`earlier_at_top/1`), drawn above
   # what is there; one asked before the screen changed what it holds is dropped.
-  def handle_info({:earlier, sid, before, answer}, %{session_id: sid} = state) do
-    case {state.model.earlier, answer} do
+  def handle_info({:earlier, sid, path, before, answer}, %{session_id: sid} = state) do
+    case {Model.earlier(state.model, path), answer} do
       {%{before: ^before, loading: true}, {:ok, page}} ->
-        state = keep_place(state, &Model.prepend(&1, page.events, page.more, page.first))
+        state = keep_place(state, &Model.prepend(&1, path, page.events, page.more, page.first))
         {:noreply, schedule_tick(%{state | dirty: true}), render?: false}
 
       {%{before: ^before, loading: true}, {:error, reason}} ->
-        state = %{state | model: Model.earlier_failed(state.model)}
+        state = %{state | model: Model.earlier_failed(state.model, path)}
         state = notice(state, "the earlier events did not load: " <> to_message(reason))
         {:noreply, schedule_tick(%{state | dirty: true}), render?: false}
 
@@ -1076,11 +1076,15 @@ defmodule Troupe.UI.TUI.Server do
   end
 
   # The wheel scrolls whatever is under focus: the pane's transcript, the observer's
-  # cursor, or the settings help. Three rows per notch, like a terminal.
+  # cursor, or the settings help. Three rows per notch, like a terminal. A notch up with
+  # the pane already at its top pages the history in as PgUp does.
   def handle_event(%Mouse{kind: kind}, state) when kind in ["scroll_up", "scroll_down"] do
     step = if kind == "scroll_up", do: -3, else: 3
 
     case state.focus do
+      {:window, _} when step < 0 ->
+        {:noreply, state |> earlier_at_top() |> scroll_by(step)}
+
       {:window, _} ->
         {:noreply, scroll_by(state, step)}
 
@@ -1301,7 +1305,7 @@ defmodule Troupe.UI.TUI.Server do
   # 698); this is only which of them the TUI implements, and the suite holds the two
   # equal, so a command added to the table without a clause here fails a test rather
   # than being dispatched as an agent.
-  @builtins ~w(new cancel dismiss merge discard compact goal loop steer invite uninvite share lifespan bundle repo sessions archive
+  @builtins ~w(new cancel dismiss merge discard compact goal loop steer invite uninvite share lifespan proposal bundle repo sessions archive
                unarchive rename keep back hq observer files
                scratch upload save publish artifacts profiles profile copy memory context watch settings
                models mcp
@@ -1737,6 +1741,15 @@ defmodule Troupe.UI.TUI.Server do
   defp builtin("lifespan", args, state, _target) do
     case Client.lifespan_args(args) do
       {:ok, verb} -> notice_of(Client.lifespan(state.session_id, verb))
+      {:error, sentence} -> {:error, sentence}
+    end
+  end
+
+  # What the harness proposed in a session on the platform (root #1208): alone it says what
+  # is open, `yes` turns it on, `later` and `never` say no; the log's line follows.
+  defp builtin("proposal", args, state, _target) do
+    case Client.proposal_args(args) do
+      {:ok, verb} -> notice_of(Client.proposal(state.session_id, verb))
       {:error, sentence} -> {:error, sentence}
     end
   end
@@ -5029,21 +5042,25 @@ defmodule Troupe.UI.TUI.Server do
 
   ## Pane scrolling
 
-  # The view sits at its top and the session has history this screen has not folded:
-  # the page is asked for off the screen's process, and the title says so until it lands.
-  defp earlier_at_top(%{model: %{earlier: %{more: true, loading: false, before: before}}} = state) do
-    case View.pane_geometry(state) do
-      %{offset: 0} ->
-        server = self()
-        sid = state.session_id
+  # The view sits at its top and the window's session has history this screen has not
+  # folded: the page is asked for off the screen's process, of the branch's own session
+  # for a branch's window, and the title says so until it lands. One on its way asks
+  # nothing more.
+  defp earlier_at_top(%{focus: {:window, path}} = state) do
+    with %{more: true, loading: false, before: before, session_id: of} <-
+           Model.earlier(state.model, path),
+         %{offset: 0} <- View.pane_geometry(state) do
+      server = self()
+      sid = state.session_id
 
-        {:ok, _task} =
-          Task.start(fn -> send(server, {:earlier, sid, before, Client.earlier(sid, before)}) end)
+      {:ok, _task} =
+        Task.start(fn ->
+          send(server, {:earlier, sid, path, before, Client.earlier(of, before)})
+        end)
 
-        %{state | model: Model.loading_earlier(state.model), dirty: true}
-
-      _ ->
-        state
+      %{state | model: Model.loading_earlier(state.model, path), dirty: true}
+    else
+      _ -> state
     end
   end
 

@@ -80,6 +80,13 @@ plane.seed("alice@example.com", { title: "Draft the pricing memo", profile: "dev
 // offers Erase now and Keep it; either is changed from its ⋯.
 plane.seed("alice@example.com", { title: "Which port does the gateway listen on?", profile: "dev", lifespan: "throwaway" });
 plane.seed("alice@example.com", { title: "Quarterly cost report", profile: "dev", lifespan: "persistent" });
+// A report built from a fetched page and published, which the harness proposes to rerun
+// every Monday (#1208): the card to answer. `report: daily` in any team session makes
+// another; `report: unavailable` one its profile would stop. PROPOSALS_GITOPS=1 plays a
+// plane whose triggers are a repository's, whose yes hands over the file.
+const numbers = plane.seed("alice@example.com", { title: "Weekly numbers", profile: "dev", visibility: "private" });
+await worker.seedReport(numbers.id, "alice@example.com", "every Monday");
+plane.proposalsGitops = Boolean(process.env["PROPOSALS_GITOPS"]);
 // The people the identity record names, as SCIM or a sign-in left them (troupe #931).
 plane.names.set("alice@example.com", "Alice Example");
 plane.names.set("bob@example.com", "Bob Example");

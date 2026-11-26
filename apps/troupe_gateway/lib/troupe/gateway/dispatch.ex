@@ -49,7 +49,7 @@ defmodule Troupe.Gateway.Dispatch do
   alias Troupe.Protocol.Digest
   alias Troupe.Protocol.Error
   alias Troupe.Protocol.Event
-  alias Troupe.Session.{ClientTools, Log}
+  alias Troupe.Session.{ClientTools, Log, Proposals}
   alias Troupe.Session.MCP, as: LocalMCP
   alias Troupe.Sessions.{Index, Title, Unseen}
   alias Troupe.Sessions.Lifespan, as: Lasting
@@ -156,6 +156,9 @@ defmodule Troupe.Gateway.Dispatch do
     "session.repair" => :control,
     "approval.respond" => :control,
     "question.answer" => :control,
+    # A no to what the harness proposed: `control`, and on top of it the owner, which the
+    # handler asks, as `shell.run` does.
+    "session.proposal.answer" => :control,
     "todo.edit" => :control,
     # Presence says who is here, which every attached client is entitled to say and to
     # hear. It changes nothing, so it needs no more than a seat.
@@ -1206,6 +1209,22 @@ defmodule Troupe.Gateway.Dispatch do
          :ok <- activate(session_id, context) do
       Troupe.answer(session_id, call_id, Map.get(params, "text") || "", actor(context))
       {:ok, %{"accepted" => true}}
+    end
+  end
+
+  # The owner's no to what the harness proposed: `later`, or `never` for its key, which the
+  # host keeps. Brings a dormant session back, as an answer to a question does, since its
+  # tree holds the proposal. A yes is the plane's (`session.proposal.accept`).
+  defp handle("session.proposal.answer", params, context) do
+    with {:ok, session_id} <- fetch(params, "session_id"),
+         {:ok, id} <- fetch(params, "id"),
+         {:ok, decision} <- fetch(params, "decision"),
+         :ok <- proposal_owner(context),
+         :ok <- activate(session_id, context) do
+      case Proposals.answer(session_id, id, decision, actor(context)) do
+        :ok -> {:ok, %{"accepted" => true, "id" => id, "decision" => decision}}
+        {:error, reason} -> {:error, Error.new(:invalid_params, %{reason: reason})}
+      end
     end
   end
 
@@ -2760,6 +2779,19 @@ defmodule Troupe.Gateway.Dispatch do
          Error.new(:forbidden, %{
            required_scope: "admin",
            reason: "only the session's owner can run commands on it"
+         })}
+  end
+
+  # What the harness proposes is the owner's to answer: a yes spends their budget, and a no
+  # is kept as theirs.
+  defp proposal_owner(%Context{scopes: scopes}) do
+    if :admin in scopes,
+      do: :ok,
+      else:
+        {:error,
+         Error.new(:forbidden, %{
+           required_scope: "admin",
+           reason: "only the session's owner answers what the harness proposes"
          })}
   end
 

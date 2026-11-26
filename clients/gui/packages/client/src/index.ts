@@ -147,6 +147,8 @@ export {
   untilWords,
 } from "./lifespan.js";
 export type { Lifespan, PlaneAsker } from "./lifespan.js";
+export { SCHEDULE_CHOICES, WEEKDAYS, answeredLine, cronOf, cronProblem, editsOf, othersLine, proposalOf, proposalRefusal, runsLine, scheduleOf, scheduleWords } from "./proposals.js";
+export type { ProposalDecision, ProposalResult, ProposalState, ScheduleChoice, ScheduleEvery, TriggerDraft } from "./proposals.js";
 export { behind, configurationLine, owedLine, raiseKept, raiseRefusal, updateLine, upgradedText, versionOf } from "./bundle.js";
 export type {
   Entry,

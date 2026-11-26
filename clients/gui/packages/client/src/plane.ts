@@ -8,6 +8,7 @@ import type { OwnMemory, OwnMemoryPreview, OwnMemorySaved } from "./instructions
 import type { Invitation, Invitee, InviteRole, Person } from "./invites.js";
 import type { PlaneDocument } from "./own.js";
 import type { ProfileView } from "./profile.js";
+import type { ProposalResult } from "./proposals.js";
 import type { RemoteListRow } from "./remote.js";
 import type { JsonRpcError, JsonRpcResponse } from "./types.js";
 
@@ -601,6 +602,17 @@ export class PlaneClient {
   /** Erase a session, irreversibly: its owner's, or an administrator's. `erased` is false while its key is not destroyed yet. */
   eraseSession(planeToken: string, sessionId: string): Promise<{ session_id: string; erased: boolean; state: string }> {
     return this.rpc(planeToken, "session.erase", { session_id: sessionId });
+  }
+
+  /**
+   * The owner's yes to a trigger the harness proposed in their pod session (troupe #1208),
+   * with what they changed of its schedule, prompt and budget: the plane makes it, under
+   * their own principal, and tells the session, which writes `proposal_answered`. The
+   * answer is what was made, `{team, name, url, artifact_url}`, or on a gitops plane the
+   * `Trigger` resource to commit, `{yaml, path}`. Its owner's alone.
+   */
+  acceptProposal(planeToken: string, sessionId: string, id: string, edits: Record<string, unknown>): Promise<ProposalResult & { edited?: string[] }> {
+    return this.rpc<ProposalResult & { edited?: string[] }>(planeToken, "session.proposal.accept", { session_id: sessionId, id, edits });
   }
 
   /**

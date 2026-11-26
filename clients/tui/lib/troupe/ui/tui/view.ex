@@ -2655,13 +2655,22 @@ defmodule Troupe.UI.TUI.View do
       if(new > 0, do: " · #{new} new", else: "") <> loading_earlier(state) <> " "
   end
 
-  # A page of the history before the checkpoint the session opened from is on its way.
-  defp loading_earlier(%{model: %{earlier: %{loading: true}}}), do: " · loading earlier…"
-  defp loading_earlier(_state), do: ""
+  # A page of the history before the checkpoint the window opened from is on its way.
+  defp loading_earlier(state) do
+    case viewed_earlier(state) do
+      %{loading: true} -> " · loading earlier…"
+      _ -> ""
+    end
+  end
 
-  # The view is at its top and the session has history this screen has not drawn.
-  defp earlier_above?(%{offset: 0}, %{model: %{earlier: %{more: true, loading: false}}}), do: true
+  # The view is at its top and the window has history this screen has not drawn.
+  defp earlier_above?(%{offset: 0}, state),
+    do: match?(%{more: true, loading: false}, viewed_earlier(state))
+
   defp earlier_above?(_g, _state), do: false
+
+  defp viewed_earlier(%{focus: {:window, path}, model: model}), do: Model.earlier(model, path)
+  defp viewed_earlier(_state), do: nil
 
   # Context keys on the bottom border: the widest phrasing that fits, and only the keys
   # that do something right now. `End` stays in every form — once you have scrolled up it

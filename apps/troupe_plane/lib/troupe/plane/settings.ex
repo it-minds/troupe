@@ -214,6 +214,20 @@ defmodule Troupe.Plane.Settings do
       effect: :immediate
     },
     %Setting{
+      key: "members_may_schedule",
+      label: "Members may schedule a report",
+      unit: :switch,
+      group: :team_defaults,
+      type: :boolean,
+      app_key: :members_may_schedule,
+      fallback: true,
+      summary:
+        "Whether teams may let a member turn on a trigger the harness proposed in their session, run as their own principal on their budget.",
+      consequence:
+        "Off here and no team may turn it on, and no session proposes one. A trigger already turned on keeps running.",
+      effect: :immediate
+    },
+    %Setting{
       key: "members_may_control",
       label: "Members may steer a team session",
       unit: :switch,

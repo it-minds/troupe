@@ -1362,7 +1362,7 @@ defmodule Troupe.Plane.Admin do
   @team_keys ~w(budget_micros budget_period idle_timeout_seconds cache_eviction_days) ++
                ~w(erase_after_days members_may_control pins_allowed volume_size) ++
                ~w(volume_storage_class allow_unenforced_workers github remote_offering_allowed) ++
-               ~w(artifact_quota_bytes)
+               ~w(artifact_quota_bytes members_may_schedule)
 
   @doc "The fields of a team `admin.team.update` sets, as its schema declares them."
   @spec team_keys() :: [String.t()]
@@ -1621,6 +1621,9 @@ defmodule Troupe.Plane.Admin do
 
   defp limit_refusal(:pins_allowed, _asked, _ceiling),
     do: "The platform does not let members pin a session; a team may not turn it on."
+
+  defp limit_refusal(:members_may_schedule, _asked, _ceiling),
+    do: "The platform does not let members turn on a proposed trigger; a team may not turn it on."
 
   defp limit_refusal(:members_may_control, _asked, _ceiling),
     do: "The platform does not let members steer a team session; a team may not turn it on."
@@ -5684,6 +5687,7 @@ defmodule Troupe.Plane.Admin do
       cache_eviction_days: team.cache_eviction_days,
       erase_after_days: team.erase_after_days,
       pins_allowed: team.pins_allowed,
+      members_may_schedule: team.members_may_schedule,
       volume_storage_class: team.volume_storage_class,
       volume_size: team.volume_size,
       allow_unenforced_workers: team.allow_unenforced_workers,
@@ -5872,6 +5876,7 @@ defmodule Troupe.Plane.Admin do
       :cache_eviction_days,
       :erase_after_days,
       :pins_allowed,
+      :members_may_schedule,
       :volume_storage_class,
       :volume_size,
       :github,

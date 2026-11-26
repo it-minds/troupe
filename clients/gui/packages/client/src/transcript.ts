@@ -9,6 +9,7 @@
 import { upgradedText } from "./bundle.js";
 import { repositoryChangedText } from "./repositories.js";
 import { named } from "./people.js";
+import { type ProposalDecision, type ProposalResult, type ProposalState, proposalOf } from "./proposals.js";
 import { when } from "./remote.js";
 import { foldScratch, scratchDocumentOf } from "./scratch.js";
 import type { DurableEvent, LlmDeltaData, LoopInfo, ScratchDocument, TroupeEvent } from "./types.js";
@@ -232,6 +233,12 @@ export type Entry =
   | { kind: "file"; seq: number; agent: string[]; path: string; size: number; hash: string; title: string | undefined; localPath: string | undefined }
   /** Lifecycle: started, switched, compacted, done, cancelled, dormant, resumed, errors. */
   | { kind: "system"; seq: number; agent: string[]; type: string; text: string }
+  /**
+   * Something the harness offers the session's owner (troupe #1208): a card while it is
+   * open, which only the owner answers, and its answer's line once it is not. Nothing waits
+   * for it.
+   */
+  | ({ kind: "proposal"; seq: number; agent: string[] } & ProposalState)
   /**
    * Where a transcript opened from a checkpoint begins (troupe #1182): what the compaction
    * said of everything before it, and when it was written. `seq` is the checkpoint's
@@ -1761,6 +1768,39 @@ function foldOne(state: TranscriptState, e: TroupeEvent, options: FoldOptions = 
 
     // Its owner gave the session to its team, or took it back (troupe #1169): one line, and
     // whose it is now for the head's mark.
+    // What the harness offers the owner, at the root's rest: a card, once, whatever replays it.
+    case "proposal_made": {
+      const proposal = proposalOf(d.data);
+      if (!proposal || state.entries.some((e) => e.kind === "proposal" && e.id === proposal.id)) return next;
+      return { ...next, entries: [...state.entries, { kind: "proposal", ...base, ...proposal }] };
+    }
+
+    // The owner's answer, once: the card becomes its line.
+    case "proposal_answered": {
+      const id = str(d.data["id"]);
+      const decision = str(d.data["decision"]) as ProposalDecision;
+      const person = d.actor?.kind === "user" ? d.actor : undefined;
+      const by = person?.subject;
+      const byName = typeof d.data["by_name"] === "string" ? d.data["by_name"] : person ? nameOf(person).authorName : undefined;
+      const result = d.data["result"] && typeof d.data["result"] === "object" ? (d.data["result"] as ProposalResult) : undefined;
+      const edited = Array.isArray(d.data["edited"]) ? d.data["edited"].filter((f): f is string => typeof f === "string") : undefined;
+      return {
+        ...next,
+        entries: state.entries.map((en) =>
+          en.kind === "proposal" && en.id === id && en.decision === undefined
+            ? {
+                ...en,
+                decision,
+                ...(result ? { result } : {}),
+                ...(edited ? { edited } : {}),
+                ...(typeof by === "string" && by !== "" ? { answeredBy: by } : {}),
+                ...(byName ? { answeredByName: byName } : {}),
+              }
+            : en,
+        ),
+      };
+    }
+
     case "session_visibility_changed": {
       const visibility = str(d.data["visibility"]) || undefined;
       return { ...next, visibility, entries: [...state.entries, { kind: "system", ...base, type: d.type, text: visibilityChangedText(d) }] };

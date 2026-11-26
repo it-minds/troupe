@@ -315,7 +315,7 @@ defmodule Troupe.Plane.GitopsTriggersTest do
             "spec.source cron is not readable",
             "spec.visibility is invalid",
             "spec.concurrency must be greater than 0",
-            "spec.terms takes budgetMicros, maxTurns, wallClockSeconds, approvals, not max_turns",
+            "spec.terms takes budgetMicros, maxTurns, wallClockSeconds, approvals, allow, not max_turns",
             "spec.notifyUrl is an absolute http or https URL",
             "spec.prompt is not a field of a Trigger"
           ] do
@@ -665,12 +665,12 @@ defmodule Troupe.Plane.GitopsTriggersTest do
       spec = schema["properties"]["spec"]
       assert Enum.sort(Map.keys(spec["properties"])) == Enum.sort(GitopsTriggers.spec_keys())
 
-      # Spelt as fields are here, and the same four `session.create` checks.
+      # Spelt as fields are here, and the same five `session.create` checks.
       assert Enum.sort(Map.keys(spec["properties"]["terms"]["properties"])) ==
-               ~w(approvals budgetMicros maxTurns wallClockSeconds)
+               ~w(allow approvals budgetMicros maxTurns wallClockSeconds)
 
       assert Enum.sort(Triggers.term_keys()) ==
-               ~w(approvals budget_micros max_turns wall_clock_seconds)
+               ~w(allow approvals budget_micros max_turns wall_clock_seconds)
 
       # Nothing a person writes is dropped before the plane can say it is wrong.
       assert spec["x-kubernetes-preserve-unknown-fields"]
