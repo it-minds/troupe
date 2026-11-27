@@ -90,8 +90,11 @@ describe("what is a person's own", () => {
     await sees("throwaway · goes in", sessions);
     (await seesButton("Make it persistent", sessions()!)).click();
     await waitFor(() => quick.lifespan === "persistent", "the plane told");
-    await seesButton("Make it normal", sessions()!);
+    // The row is read again after the plane's yes: wait for the button only the new state
+    // shows ("Make it normal" is there in both), then the mark has changed with it.
+    await seesButton("Make it throwaway", sessions()!);
     expect(sessions()!.textContent).not.toContain("throwaway · goes in");
+    expect(sessions()!.textContent).toContain("persistent");
 
     fake.plane.refuseNext("session.lifespan.set", { code: -32004, message: "forbidden", data: { required_role: "owner" } });
     (await seesButton("Make it throwaway", sessions()!)).click();
