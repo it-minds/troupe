@@ -39,6 +39,10 @@ interface Row {
   bundle_version: number;
   /** A raise kept while its agent works, landed when the agent is done (troupe #1177). */
   bundle_raise_to: number | null;
+  /** How long it lasts (troupe #1209): a throwaway one is said to go a day after it was made. */
+  lifespan: "throwaway" | "normal" | "persistent";
+  /** The GitHub repositories it holds, the one it was created on first (troupe #1207). */
+  repositories: Array<{ owner: string; name: string; ref: string | null; path: string; attached_by: string; attached_at: string; github: null }>;
 }
 
 /** The agent a session given none runs as: `build` where the profile offers it, else its first; none where it offers none. */
@@ -83,6 +87,13 @@ export interface PlaneOptions {
   /** The teams every person signed in here is in, which `team:<name>` artifacts are for. */
   teams?: string[];
   /**
+   * GitHub, as the plane's App and its profiles set it (troupe #1207): the repositories the
+   * person's teams list, `owner/name` or `owner/*`, and how many a session holds on each
+   * profile with `spec.github`. A profile not named has none, and is offered none. None at
+   * all is a plane with no App: every profile offers none.
+   */
+  github?: { repositories: string[]; profiles: Record<string, number> };
+  /**
    * The teams of particular people, by subject, where membership differs between them: a
    * person named here is in these teams and no other, and anybody else in `teams`.
    */
@@ -105,6 +116,8 @@ export interface PlaneOptions {
   clientVersions?: Record<string, { recommended?: string | null; minimum?: string | null; blocked?: string[] }>;
   /** A plane from before the policy: no `initialize` over `/rpc`, no `me.client_versions`. */
   beforePolicy?: boolean;
+  /** A plane from before lifespans (troupe #1209): its `initialize` says no `lifespans`, and its rows carry none. */
+  beforeLifespans?: boolean;
   /** The administrative half, `admin.*`. None is a plane whose admin methods are not found. */
   admin?: FakeAdmin;
   /** A plane from before a person's watch (`/v1/relay/watch`): `remote.list` is asked instead. */
@@ -639,10 +652,14 @@ export class FakePlane {
    * `s-p-<n>`, apart from the fake daemon's `s-l-<n>`, so a list holding both shows each.
    * `prompt` is its first turn.
    */
-  seed(owner: string, params: { id?: string; profile?: string; title?: string; agent?: string | null; origin?: Row["origin"]; prompt?: string; visibility?: string } = {}): Row {
+  seed(
+    owner: string,
+    params: { id?: string; profile?: string; title?: string; agent?: string | null; origin?: Row["origin"]; prompt?: string; visibility?: string; lifespan?: Row["lifespan"] } = {},
+  ): Row {
     const id = params.id ?? `s-p-${++this.counter}`;
     const row: Row = { ...this.blankRow(id, owner, params.profile ?? "dev", params.title ?? null), agent: params.agent ?? null };
     if (params.visibility) row.visibility = params.visibility;
+    if (params.lifespan) row.lifespan = params.lifespan;
     if (params.origin) row.origin = params.origin;
     this.rows.set(id, row);
     this.activate(row, params.prompt);
@@ -704,6 +721,10 @@ export class FakePlane {
 
   /** The visibility each create was made with, in order, the plane's default where it named none. */
   readonly createdVisibility: string[] = [];
+  /** The lifespan each `session.create` asked for, `null` where it named none (troupe #1209). */
+  readonly createdLifespan: Array<string | null> = [];
+  /** The sessions erased through `session.erase`, in order. */
+  readonly erased: string[] = [];
 
   /** Whether a person sees a session: its owner, one invited into it, or anyone where it is the team's. */
   private sees(row: Row, subject: string): boolean {
@@ -743,6 +764,8 @@ export class FakePlane {
       created_at: Date.now() + this.counter,
       bundle_version: this.bundleCurrent.get(profile) ?? 3,
       bundle_raise_to: null,
+      lifespan: "normal",
+      repositories: [],
     };
   }
 
@@ -752,6 +775,12 @@ export class FakePlane {
    * deployment publishes a newer one by setting it, which leaves running sessions behind.
    */
   readonly bundleCurrent = new Map<string, number>();
+
+  /** Whether this plays a plane whose triggers are a repository's, for a yes to a proposal (troupe #1208). */
+  proposalsGitops = false;
+
+  /** Each yes to a proposal this plane took: the session, the proposal and the edits sent. */
+  readonly proposalsAccepted: Array<{ session: string; id: string; edits: Record<string, unknown> }> = [];
 
   /** A laptop's session, offered by `owner` and shared as `shares` says, its laptop online. */
   relay(
@@ -1349,12 +1378,20 @@ export class FakePlane {
       case "initialize": {
         if (this.opts.beforePolicy) return { error: { code: -32601, message: "method_not_found", data: { method } } };
         const info = (params["client_info"] ?? {}) as { name?: unknown; version?: unknown; platform?: unknown };
-        this.initialized.push(info);
+        // Recorded as the plane records a client: only one that says what it is.
+        if (params["client_info"]) this.initialized.push(info);
         const component = COMPONENTS[String(info.name)];
         const version = typeof info.version === "string" ? info.version : null;
         const principal = this.rpc(subject, name, "me", {});
         const hello = (clientUpdate: unknown) => ({
-          result: { protocol_version: "1", server_info: { name: "troupe-plane", version: "test" }, principal: "result" in principal ? principal.result : null, client_update: clientUpdate },
+          result: {
+            protocol_version: "1",
+            server_info: { name: "troupe-plane", version: "test" },
+            principal: "result" in principal ? principal.result : null,
+            client_update: clientUpdate,
+            // What this plane takes that one before it did not (troupe #1209).
+            ...(this.opts.beforeLifespans ? {} : { capabilities: { lifespans: true } }),
+          },
         });
         if (!component) return hello(null);
         const p = policy(component);
@@ -1386,7 +1423,7 @@ export class FakePlane {
             subject,
             display_name: name,
             kind: "user",
-            teams: [{ name: "core", id: "t-1", budget_micros: 1_000_000 }],
+            teams: [{ name: "core", id: "t-1", budget_micros: 1_000_000, repositories: this.opts.github?.repositories ?? [] }],
             profiles,
             platform_admin: this.opts.admin?.role(subject) === "platform_admin",
           },
@@ -1398,7 +1435,7 @@ export class FakePlane {
         return { result: this.opts.clientDefaults ?? GATEWAY_DEFAULTS };
 
       case "teams.list":
-        return { result: { teams: [{ name: "core", id: "t-1", budget_micros: 1_000_000 }] } };
+        return { result: { teams: [{ name: "core", id: "t-1", budget_micros: 1_000_000, repositories: this.opts.github?.repositories ?? [] }] } };
 
       case "profiles.list":
         return {
@@ -1414,6 +1451,7 @@ export class FakePlane {
               active_sessions: this.roomOf(p).active,
               healthy_pods: 1,
               max_sessions: this.roomOf(p).max_sessions ?? null,
+              max_repositories: this.opts.github?.profiles[p] ?? null,
               teams: this.opts.listsOneTeam ? this.teamsOf(subject).slice(0, 1) : this.teamsOf(subject),
               channel: "stable",
               bundle_version: "3",
@@ -1487,6 +1525,15 @@ export class FakePlane {
         // The plane's default: a create naming none is its owner's and the people invited by name.
         const visibility = typeof params["visibility"] === "string" ? params["visibility"] : "private";
         this.createdVisibility.push(visibility);
+        // How long it lasts, absent normal; another word refused before anything exists.
+        const asked = params["lifespan"];
+        if (asked !== undefined && asked !== "throwaway" && asked !== "normal" && asked !== "persistent") {
+          return { error: { code: -32602, message: "invalid_params", data: { field: "lifespan", reason: "lifespan is throwaway, normal or persistent" } } };
+        }
+        const lifespan = this.opts.beforeLifespans ? "normal" : ((asked as Row["lifespan"] | undefined) ?? "normal");
+        this.createdLifespan.push(asked === undefined ? null : String(asked));
+        const held = this.repositoriesFor(profile, params, subject);
+        if ("error" in held) return held;
         const room = this.opts.room?.[profile];
         if (room && typeof room.max_sessions === "number" && room.active >= room.max_sessions) {
           const reason = `${profile} allows ${room.max_sessions} session(s) at once, and they are running`;
@@ -1495,12 +1542,13 @@ export class FakePlane {
         if (room && room.active >= room.capacity) {
           // No room, and more coming: the session exists, waits, and holds its prompt.
           const id = `s-p-${++this.counter}`;
-          const row: Row = { ...this.blankRow(id, subject, profile, title ?? null), agent, visibility, state: "pending" };
+          const row: Row = { ...this.blankRow(id, subject, profile, title ?? null), agent, visibility, lifespan, state: "pending", repositories: held.repositories };
           this.rows.set(id, row);
           if (prompt) this.heldPrompts.set(id, prompt);
           return { result: { session_id: id, epoch: 1, state: "pending", mode: "waiting", reason: `waiting for a free place on ${profile}`, retry_after_ms: this.retryAfterMs } };
         }
-        const row = this.seed(subject, { profile, ...(title === undefined ? {} : { title }), agent, visibility, ...(prompt ? { prompt } : {}) });
+        const row = this.seed(subject, { profile, ...(title === undefined ? {} : { title }), agent, visibility, lifespan, ...(prompt ? { prompt } : {}) });
+        row.repositories = held.repositories;
         if (room) room.active += 1;
         return { result: this.attachment(row, subject, name, "owner", "activate") };
       }
@@ -1953,6 +2001,37 @@ export class FakePlane {
         return { result: this.sessionJson(row, subject) };
       }
 
+      // How long it lasts, by its owner alone (troupe #1209): the row, and the log's line the
+      // pod writes, which every client attached hears. A plane from before has no method.
+      case "session.lifespan.set": {
+        if (this.opts.beforeLifespans) return { error: { code: -32601, message: "method_not_found", data: { method } } };
+        const row = this.rows.get(String(params["session_id"] ?? ""));
+        if (!row) return { error: { code: -32005, message: "not_found" } };
+        if (row.owner !== subject) return { error: { code: -32004, message: "forbidden", data: { required_role: "owner", reason: "only the session's owner says how long it lasts" } } };
+        const to = params["lifespan"];
+        if (to !== "throwaway" && to !== "normal" && to !== "persistent") {
+          return { error: { code: -32602, message: "invalid_params", data: { field: "lifespan", reason: "lifespan is throwaway, normal or persistent" } } };
+        }
+        if (row.lifespan !== to) {
+          const from = row.lifespan;
+          row.lifespan = to;
+          const name = this.nameOf(subject);
+          const actor = { kind: "user", subject, ...(name ? { display_name: name } : {}) };
+          this.opts.worker.sessions.get(row.id)?.log.append("session_lifespan_changed", { from, to, actor: subject }, actor);
+        }
+        return { result: this.sessionJson(row, subject) };
+      }
+
+      // Erased by its owner: gone from every list, as the plane's erasure leaves it.
+      case "session.erase": {
+        const row = this.rows.get(String(params["session_id"] ?? ""));
+        if (!row) return { error: { code: -32005, message: "not_found" } };
+        if (row.owner !== subject) return { error: { code: -32004, message: "forbidden", data: { required_role: "owner" } } };
+        this.rows.delete(row.id);
+        this.erased.push(row.id);
+        return { result: { session_id: row.id, erased: true, state: "erased", head_hash: null } };
+      }
+
       // Given to its team or taken back, by its owner alone (troupe #1169): the row, and the
       // log's line the pod writes, which every client attached hears.
       case "session.visibility.set": {
@@ -1968,6 +2047,32 @@ export class FakePlane {
           this.opts.worker.sessions.get(row.id)?.log.append("session_visibility_changed", { visibility: to, by: subject, ...(name ? { by_name: name } : {}) }, actor);
         }
         return { result: this.sessionJson(row, subject) };
+      }
+
+      // The owner's yes to a trigger the harness proposed (troupe #1208): what the plane made,
+      // and the log's line the pod writes. `proposalsGitops` plays a plane whose triggers are a
+      // repository's, which hands over the resource and makes nothing.
+      case "session.proposal.accept": {
+        const row = this.rows.get(String(params["session_id"] ?? ""));
+        if (!row) return { error: { code: -32005, message: "not_found" } };
+        if (row.owner !== subject) return { error: { code: -32004, message: "forbidden", data: { required_role: "owner", reason: "only the session's owner turns on what the harness proposes in it" } } };
+        const proposal = String(params["id"] ?? "");
+        const draft = this.opts.worker.proposalDraft(row.id, proposal);
+        if (!draft) return { error: { code: -32005, message: "not_found", data: { id: proposal, reason: `the session has no open proposal ${proposal}` } } };
+        const edits = (params["edits"] ?? {}) as Record<string, unknown>;
+        if (typeof edits["cron"] === "string" && edits["cron"].trim().split(/\s+/).length !== 5) {
+          return { error: { code: -32602, message: "invalid_params", data: { field: "cron", reason: "the schedule is not readable: expected five fields" } } };
+        }
+        const edited = ["cron", "prompt_template", "budget_micros"].filter((f) => edits[f] !== undefined);
+        const name = String(draft["name"] ?? "rerun-report");
+        const team = this.teamsOf(row.owner)[0] ?? "eng";
+        const result: Record<string, unknown> = this.proposalsGitops
+          ? { yaml: `apiVersion: troupe.dev/v1alpha1\nkind: Trigger\nmetadata:\n  name: ${team}.${name}\nspec:\n  profile: ${row.profile}\n`, path: `triggers/${team}/${name}.yaml` }
+          : { team, name, url: `${this.baseUrl}/console#/triggers/${team}/${name}`, artifact_url: (draft["artifact"] as Record<string, unknown> | undefined)?.["url"] ?? null, cron: typeof edits["cron"] === "string" ? edits["cron"] : (draft["source"] as Record<string, unknown> | undefined)?.["cron"] };
+        const nameOf = this.nameOf(subject);
+        this.opts.worker.decideProposal(row.id, proposal, result, edited, { kind: "user", subject, ...(nameOf ? { display_name: nameOf } : {}) });
+        this.proposalsAccepted.push({ session: row.id, id: proposal, edits });
+        return { result: { ...result, edited } };
       }
 
       // Raised to its channel's current version by its owner (troupe #1177): at once when its
@@ -1991,6 +2096,38 @@ export class FakePlane {
           };
         }
         this.raise(row, subject, current);
+        return { result: this.sessionJson(row, subject) };
+      }
+
+      // A repository attached by the session's owner, or taken off (troupe #1207): checked as
+      // a create checks one, cloned at once here, and said in the log as the pod says it.
+      case "session.repository.add":
+      case "session.repository.remove": {
+        const row = this.rows.get(String(params["session_id"] ?? ""));
+        if (!row) return { error: { code: -32005, message: "not_found" } };
+        if (row.owner !== subject) return { error: { code: -32004, message: "forbidden", data: { required_role: "owner" } } };
+        const named = this.repositoryNamed(params["repository"]);
+        if (!named) return { error: { code: -32602, message: "invalid_params", data: { field: "repository", reason: "a repository is owner/name, or {owner, name, ref}" } } };
+        const full = `${named.owner}/${named.name}`;
+        const at = row.repositories.findIndex((r) => `${r.owner}/${r.name}`.toLowerCase() === full.toLowerCase());
+        if (method === "session.repository.remove") {
+          if (at < 0) return { error: { code: -32602, message: "invalid_params", data: { field: "repository", reason: `this session holds no repository ${full}` } } };
+          if (row.repositories[at]!.path === "." && row.repositories.length === 1) {
+            return { error: { code: -32006, message: "conflict", data: { reason: `${full} is the repository this session was created on, at the workspace's root; it is taken off only while another remains` } } };
+          }
+          const [gone] = row.repositories.splice(at, 1);
+          this.sayRepository(row, subject, "detached", gone!);
+          return { result: this.sessionJson(row, subject) };
+        }
+        const max = this.opts.github?.profiles[row.profile];
+        if (max === undefined) return { error: { code: -32602, message: "invalid_params", data: { field: "repository", reason: `the profile ${row.profile} has no spec.github, so its sessions hold no GitHub repository beyond the one they were created on` } } };
+        if (at >= 0) return { error: { code: -32602, message: "invalid_params", data: { field: "repository", reason: `the session holds ${full} already` } } };
+        if (row.repositories.length + 1 > max) return { error: { code: -32602, message: "invalid_params", data: { field: "repository", reason: `a session on the profile ${row.profile} holds at most ${max} ${max === 1 ? "repository" : "repositories"} (spec.github.maxRepositories)` } } };
+        const unlisted = this.unlisted(full);
+        if (unlisted) return { error: { code: -32602, message: "invalid_params", data: { field: "repository", reason: unlisted } } };
+        const entry = { ...named, path: full, attached_by: subject, attached_at: new Date().toISOString(), github: null };
+        row.repositories.push(entry);
+        this.sayRepository(row, subject, "attached", entry);
         return { result: this.sessionJson(row, subject) };
       }
 
@@ -2045,6 +2182,68 @@ export class FakePlane {
     if (row?.bundle_raise_to) this.raise(row, row.owner, row.bundle_raise_to);
   }
 
+  /** `session.create`'s `repositories`, checked as the plane checks them, or its refusal. */
+  private repositoriesFor(profile: string, params: Record<string, unknown>, subject: string): { repositories: Row["repositories"] } | { error: { code: number; message: string; data: Record<string, unknown> } } {
+    const given = params["repositories"];
+    if (given === undefined || given === null) return { repositories: [] };
+    const refuse = (reason: string) => ({ error: { code: -32602, message: "invalid_params", data: { field: "repositories", reason } } });
+    if (params["repository"] !== undefined && params["repository"] !== null) return refuse("send repository or repositories, not both");
+    if (!Array.isArray(given)) return refuse("repositories is a list, each owner/name or {owner, name, ref}");
+    const max = this.opts.github?.profiles[profile];
+    if (max === undefined) return refuse(`the profile ${profile} has no spec.github, so its sessions hold no GitHub repository beyond the one they were created on`);
+    if (given.length > max) return refuse(`a session on the profile ${profile} holds at most ${max} ${max === 1 ? "repository" : "repositories"} (spec.github.maxRepositories)`);
+    const at = new Date().toISOString();
+    const out: Row["repositories"] = [];
+    for (const g of given) {
+      const named = this.repositoryNamed(g);
+      if (!named) return refuse("a repository is owner/name, or {owner, name, ref}");
+      const full = `${named.owner}/${named.name}`;
+      const unlisted = this.unlisted(full);
+      if (unlisted) return refuse(`${full}: ${unlisted}`);
+      if (out.some((r) => `${r.owner}/${r.name}`.toLowerCase() === full.toLowerCase())) return refuse(`the session holds ${full} already`);
+      out.push({ ...named, path: out.length === 0 ? "." : full, attached_by: subject, attached_at: at, github: null });
+    }
+    return { repositories: out };
+  }
+
+  private repositoryNamed(given: unknown): { owner: string; name: string; ref: string | null } | null {
+    if (typeof given === "string") {
+      const [owner, name, ...rest] = given.split("/");
+      return owner && name && rest.length === 0 ? { owner, name, ref: null } : null;
+    }
+    const g = given as { owner?: unknown; name?: unknown; ref?: unknown } | null;
+    if (typeof g?.owner !== "string" || typeof g?.name !== "string") return null;
+    return { owner: g.owner, name: g.name, ref: typeof g.ref === "string" && g.ref ? g.ref : null };
+  }
+
+  /** Why the person's team may not name it, as the plane says it, or null where it lists it. */
+  private unlisted(full: string): string | null {
+    const listed = this.opts.github?.repositories ?? [];
+    const owner = full.split("/")[0]!.toLowerCase();
+    if (listed.some((l) => l.toLowerCase() === full.toLowerCase() || l.toLowerCase() === `${owner}/*`)) return null;
+    return listed.length === 0
+      ? `the team core lists no GitHub repositories, so its sessions name none: a team admin adds ${full} to the team's github.repositories`
+      : `the team core does not list ${full} among the GitHub repositories its sessions may name: a team admin adds it to the team's github.repositories`;
+  }
+
+  /** The log's `session_repository_changed`, as the pod writes it with the list as it now is. */
+  private sayRepository(row: Row, subject: string, action: string, entry: Row["repositories"][number]): void {
+    const name = this.nameOf(subject);
+    const actor = { kind: "user", subject, ...(name ? { display_name: name } : {}) };
+    this.opts.worker.sessions.get(row.id)?.log.append(
+      "session_repository_changed",
+      {
+        action,
+        repository: `${entry.owner}/${entry.name}`,
+        path: entry.path,
+        by: subject,
+        ...(name ? { by_name: name } : {}),
+        repositories: row.repositories.map((r) => ({ repository: `${r.owner}/${r.name}`, path: r.path, ref: r.ref })),
+      },
+      actor,
+    );
+  }
+
   private sessionJson(row: Row, subject: string): unknown {
     const session = this.opts.worker.sessions.get(row.id);
     const ownerName = this.nameOf(row.owner);
@@ -2054,6 +2253,7 @@ export class FakePlane {
       ...(ownerName ? { owner_name: ownerName } : {}),
       profile: row.profile,
       visibility: row.visibility,
+      ...(this.opts.beforeLifespans ? {} : { lifespan: row.lifespan, erases_at: row.lifespan === "throwaway" ? new Date(row.created_at + 24 * 3_600_000).toISOString() : null }),
       team: this.teamsOf(row.owner)[0] ?? null,
       state: row.state,
       epoch: row.epoch,
@@ -2082,6 +2282,7 @@ export class FakePlane {
       bundle_channel: "stable",
       bundle_current: this.bundleCurrent.get(row.profile) ?? 3,
       bundle_raise_to: row.bundle_raise_to,
+      repositories: row.repositories,
     };
   }
 }

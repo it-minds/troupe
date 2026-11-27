@@ -110,6 +110,11 @@ defmodule Troupe.Agent.State do
     # (`config_upgraded`: `from`, `to`, `reason`, `by_name`), which the root's turn context
     # says once. Folded, so a restart after it still knows what it said.
     configuration: nil,
+    # The GitHub repositories a pod session holds, as its last `session_repository_changed`
+    # said (`repositories`, each `{repository, path, ref}`, and the change: `action`,
+    # `repository`, `by_name`), which the root's turn context says. Folded; `nil` for a
+    # session that never held one this way.
+    repositories: nil,
     # The `/loop` whose iterations this agent takes (Decision 679), as the loop process
     # last said. Not folded: that process says it again whenever either of them restarts.
     loop: nil,
@@ -128,6 +133,10 @@ defmodule Troupe.Agent.State do
     # Local only (`Troupe.LocalOnly`): said once, and again only after it left it and came
     # back. Not replayed.
     local_only_said: false,
+    # The triggers the owner turned on from this session's proposals, as the root's
+    # instructions last said them (`Troupe.Session.Proposals.reruns/1`): another one makes
+    # the next turn read its instructions again. Not replayed.
+    reruns: [],
     # The MCP servers' and the person's clients' tools as this turn's first model call
     # found them (Decision 871), offered for the rest of the turn, so a server that comes
     # back with another list, a sign-in or a person's tools leaving change the tools at the
@@ -283,6 +292,7 @@ defmodule Troupe.Agent.State do
           prompt_todos: [Troupe.Todo.t()],
           goal: String.t() | nil,
           configuration: map() | nil,
+          repositories: map() | nil,
           loop: String.t() | nil,
           cancelled_by: Troupe.Protocol.Event.Actor.t() | nil,
           turn_tools: [Troupe.Tool.handle()] | nil,

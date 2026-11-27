@@ -336,6 +336,21 @@ export class SessionView {
     });
   }
 
+  /**
+   * `session.proposal.answer`: the owner's no to what the harness proposed (troupe #1208),
+   * `later` (not again in this session) or `never` (not for this again). A yes is the
+   * plane's (`PlaneClient.acceptProposal`). First answer wins; anybody but the owner is
+   * refused.
+   */
+  async answerProposal(id: string, decision: "later" | "never"): Promise<void> {
+    await this.conn.call("session.proposal.answer", {
+      command_id: this.conn.nextCommandId(),
+      session_id: this.sessionId,
+      id,
+      decision,
+    });
+  }
+
   /** `turn.cancel`. Valid from any state. */
   async cancel(): Promise<void> {
     await this.conn.call("turn.cancel", { command_id: this.conn.nextCommandId(), session_id: this.sessionId });

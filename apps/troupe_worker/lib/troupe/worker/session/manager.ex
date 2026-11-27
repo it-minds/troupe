@@ -46,12 +46,15 @@ defmodule Troupe.Worker.Session.Manager do
   alias Troupe.Worker.Cache
   alias Troupe.Worker.Connections
   alias Troupe.Worker.{GitCredentials, GitHub}
-  alias Troupe.Worker.Session.{Clone, Restore, Workspace}
+  alias Troupe.Worker.Session.{Clone, Repositories, Restore, Workspace}
   alias Troupe.Worker.Sessions
   alias Troupe.Worker.Usage
 
   require Logger
 
+  # How long a session rests with nothing to do before it sleeps, where the activation
+  # names no `:dormant_after_ms`: the plane sends the team's idle timeout with every
+  # activation, so this is for a plane from before it did, and for a pod with no plane.
   # Long enough that a person who stepped away finds their session where they left it,
   # short enough that a pod full of abandoned sessions empties itself.
   @dormant_after_ms 10 * 60 * 1000
@@ -380,6 +383,10 @@ defmodule Troupe.Worker.Session.Manager do
 
       record_upgrade(context.session_id, Keyword.get(opts, :bundle))
 
+      # The repositories beside the one at the root, cloned where their directories are
+      # missing and taken away where the list no longer has them, and the root told.
+      :ok = Repositories.settle(context.session_id, root, Repositories.of_opts(opts))
+
       # Watched, because the tree can stop under this process as well as by its hand.
       ref = Process.monitor(session.pid)
 
@@ -416,8 +423,8 @@ defmodule Troupe.Worker.Session.Manager do
     # A token a previous activation here held is not this one's: the next use asks the
     # plane for a new one, which is how an activation refreshes it.
     GitCredentials.forget(context.session_id)
-    # A session created with a repository has the fix loop's tools, and one without has none.
-    GitHub.hold(context.session_id, Keyword.get(state.opts, :repository))
+    # A session holding a repository has the fix loop's tools, and one without has none.
+    GitHub.hold(context.session_id, Repositories.of_opts(state.opts))
 
     try do
       with {:ok, log} <- Restore.events(context, root),
@@ -1044,6 +1051,7 @@ defmodule Troupe.Worker.Session.Manager do
       pid: state.session_pid,
       sealer: state.sealer,
       activated_at: state.activated_at,
+      dormant_after_ms: state.dormant_after_ms,
       restored: state.restored,
       error: state.error
     }

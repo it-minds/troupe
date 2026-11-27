@@ -91,17 +91,21 @@ defmodule Troupe.UI.TUI.Model do
   @type earlier_entry :: %{lines: [line()], at: integer() | nil}
 
   @typedoc """
-  What of the session's history this screen has not folded: the seq the next page is asked
-  before, whether the server has more, and whether a page is on its way; and what it has
-  paged in, the events and how many entries of each `{window, agent}` they drew. Nil for a
-  session opened from seq 1.
+  What of a window's session's history this screen has not folded: the session it is
+  asked of (a branch's own, for a branch's window), the seq the next page is asked before,
+  whether the server has more, and whether a page is on its way; what it has paged in, the
+  events and how many entries of each `{window, agent}` they drew; and the tail's call ends
+  that found no call to close, since the call began before the checkpoint, which close it
+  once a page brings it. One per window opened from a checkpoint.
   """
   @type earlier :: %{
+          session_id: String.t(),
           before: pos_integer(),
           more: boolean(),
           loading: boolean(),
           history: [Event.t()],
-          held: %{optional({String.t(), String.t()}) => non_neg_integer()}
+          held: %{optional({String.t(), String.t()}) => non_neg_integer()},
+          late: [Event.t()]
         }
 
   @typedoc """
@@ -260,8 +264,8 @@ defmodule Troupe.UI.TUI.Model do
             # Who else is attached to the session now, from presence (root #58): by
             # `{subject, via}`, so a person here and on another device are two.
             present: %{},
-            # The history before the checkpoint the session was opened from, when it was.
-            earlier: nil
+            # The history before the checkpoint each window was opened from, by window.
+            earlier: %{}
 
   @type t :: %__MODULE__{mcp: %{optional(String.t()) => map()}}
 
@@ -287,71 +291,78 @@ defmodule Troupe.UI.TUI.Model do
   @spec rebuild(String.t(), String.t(), [Event.t()]) :: t()
   def rebuild(sid, workspace, events), do: Enum.reduce(events, new(sid, workspace), &apply(&2, &1))
 
-  @doc "A page of the history before the checkpoint is on its way."
-  @spec loading_earlier(t()) :: t()
-  def loading_earlier(%__MODULE__{earlier: %{} = earlier} = m),
-    do: %{m | earlier: %{earlier | loading: true}}
+  @doc "What of a window's history is still to page in, or nil for a window opened from seq 1."
+  @spec earlier(t(), String.t()) :: earlier() | nil
+  def earlier(%__MODULE__{earlier: earlier}, path), do: Map.get(earlier, path)
 
-  def loading_earlier(m), do: m
+  @doc "A page of the history before a window's checkpoint is on its way."
+  @spec loading_earlier(t(), String.t()) :: t()
+  def loading_earlier(m, path), do: update_earlier(m, path, &%{&1 | loading: true})
 
   @doc "The page asked for did not come: the next PgUp at the top asks again."
-  @spec earlier_failed(t()) :: t()
-  def earlier_failed(%__MODULE__{earlier: %{} = earlier} = m),
-    do: %{m | earlier: %{earlier | loading: false}}
+  @spec earlier_failed(t(), String.t()) :: t()
+  def earlier_failed(m, path), do: update_earlier(m, path, &%{&1 | loading: false})
 
-  def earlier_failed(m), do: m
+  defp update_earlier(%__MODULE__{earlier: earlier} = m, path, fun) do
+    case Map.fetch(earlier, path) do
+      {:ok, e} -> %{m | earlier: Map.put(earlier, path, fun.(e))}
+      :error -> m
+    end
+  end
 
   @doc """
-  A page of the history before what the window holds, drawn above it.
+  A page of the history before what a window holds, drawn above it.
   The history paged in so far is folded again with the page ahead of it, so a call or a
   turn a page boundary cut in two is one entry, and each agent's history entries are
-  replaced by that fold's; an agent only the history knows joins its window. Everything
-  else stays as the fold since the checkpoint has it, which is the newer word on it.
-  `first` is the lowest seq in the page, from which the next page is asked; with none, or
-  `more` false, there is nothing further back.
+  replaced by that fold's; an agent only the history knows joins its window, and one the
+  tail never named takes the name the history gives it. A call the history leaves running
+  is closed by the tail's end of it, held since it arrived. Everything else stays as the
+  fold since the checkpoint has it, which is the newer word on it. `first` is the lowest
+  seq in the page, from which the next page is asked; with none, or `more` false, there is
+  nothing further back.
   """
-  @spec prepend(t(), [Event.t()], boolean(), pos_integer() | nil) :: t()
-  def prepend(%__MODULE__{earlier: %{} = earlier} = m, events, more, first) do
+  @spec prepend(t(), String.t(), [Event.t()], boolean(), pos_integer() | nil) :: t()
+  def prepend(%__MODULE__{} = m, path, events, more, first) do
+    case {earlier(m, path), Map.get(m.windows, path)} do
+      {%{} = earlier, %{} = w} -> prepend(m, w, earlier, events, more, first)
+      _ -> m
+    end
+  end
+
+  defp prepend(m, %{path: path} = w, earlier, events, more, first) do
     history = events ++ earlier.history
-    folded = rebuild(m.session_id, m.workspace, history)
+    folded = Enum.reduce(earlier.late, rebuild(m.session_id, m.workspace, history), &apply(&2, &1))
 
-    {windows, held} =
-      Enum.reduce(m.windows, {m.windows, earlier.held}, fn {path, w}, {windows, held} ->
-        case Map.get(folded.windows, path) do
-          nil ->
-            {windows, held}
+    {w, held} =
+      case Map.get(folded.windows, path) do
+        nil ->
+          {w, earlier.held}
 
-          older ->
-            agents = Map.merge(older.agents, w.agents, &above(&2, &3, Map.get(held, {path, &1}, 0)))
+        older ->
+          agents =
+            Map.merge(older.agents, w.agents, &above(&2, &3, Map.get(earlier.held, {path, &1}, 0)))
 
-            counts =
-              Map.new(older.agents, fn {a, agent} -> {{path, a}, length(agent.transcript)} end)
-
-            {Map.put(windows, path, %{w | agents: agents}), Map.merge(held, counts)}
-        end
-      end)
+          counts = Map.new(older.agents, fn {a, agent} -> {{path, a}, length(agent.transcript)} end)
+          {%{w | agents: agents}, Map.merge(earlier.held, counts)}
+      end
 
     before = if is_integer(first), do: min(first, earlier.before), else: earlier.before
     more = more == true and is_integer(first) and before > 1
 
-    %{
-      m
-      | windows: windows,
-        earlier: %{
-          earlier
-          | before: before,
-            more: more,
-            loading: false,
-            history: history,
-            held: held
-        }
+    earlier = %{
+      earlier
+      | before: before,
+        more: more,
+        loading: false,
+        history: history,
+        held: held
     }
+
+    %{m | windows: Map.put(m.windows, path, w), earlier: Map.put(m.earlier, path, earlier)}
   end
 
-  def prepend(m, _events, _more, _first), do: m
-
   # An agent's transcript with its history entries (the first `held`) replaced by the
-  # history's fold.
+  # history's fold, and what only the history says of it: its name and when it began.
   defp above(older, agent, held) do
     shift = length(older.transcript) - held
     open_from = if is_integer(agent.open_from), do: agent.open_from + shift
@@ -359,9 +370,32 @@ defmodule Troupe.UI.TUI.Model do
     %{
       agent
       | transcript: older.transcript ++ Enum.drop(agent.transcript, held),
-        open_from: open_from
+        open_from: open_from,
+        name: agent.name || older.name,
+        started_at: agent.started_at || older.started_at
     }
   end
+
+  # A call's end the tail brought for a call that began before the checkpoint, so it has
+  # nothing to close until the page that began it is folded.
+  defp held_late(%__MODULE__{} = m, %Event{type: :tool_call_completed, transient?: false} = e) do
+    window = root(e.agent_path)
+
+    with %{} = earlier <- earlier(m, window),
+         %{} = w <- Map.get(m.windows, window),
+         false <- has_call?(Map.get(w.agents, e.agent_path), e.data.call_id) do
+      %{m | earlier: Map.put(m.earlier, window, %{earlier | late: earlier.late ++ [e]})}
+    else
+      _ -> m
+    end
+  end
+
+  defp held_late(m, _e), do: m
+
+  defp has_call?(%{transcript: transcript}, id),
+    do: Enum.any?(transcript, &match?({:tool, %{id: ^id}}, &1))
+
+  defp has_call?(_agent, _id), do: false
 
   @doc """
   Whether this is a laptop's session steered from here through the plane (root #58): the
@@ -389,6 +423,7 @@ defmodule Troupe.UI.TUI.Model do
   @spec apply(t(), Event.t()) :: t()
   def apply(%__MODULE__{} = m, %Event{} = e) do
     root = root(e.agent_path)
+    m = held_late(m, e)
 
     case e.type do
       :branch_spawned ->
@@ -438,16 +473,24 @@ defmodule Troupe.UI.TUI.Model do
         order = if e.agent_path in m.order, do: m.order, else: m.order ++ [e.agent_path]
         %{m | windows: Map.put_new(m.windows, e.agent_path, window), order: order}
 
-      # The session was opened from a checkpoint: what came before it is the server's to
-      # page in, from the seq after the one its facts stand for.
+      # The window's session was opened from a checkpoint: what came before it is the
+      # server's to page in, from the seq after the one its facts stand for, and asked of
+      # the branch's own session where the window is a branch's.
       :earlier ->
         before = e.data.before
+        sid = get_in(m.windows, [root, :session_id]) || m.session_id
 
-        m = %{
-          m
-          | earlier: %{before: before, more: before > 1, loading: false, history: [], held: %{}}
+        earlier = %{
+          session_id: sid,
+          before: before,
+          more: before > 1,
+          loading: false,
+          history: [],
+          held: %{},
+          late: []
         }
 
+        m = %{m | earlier: Map.put(m.earlier, root, earlier)}
         update_window(m, root, fn w -> w |> apply_to_window(e) |> settle(e) end)
 
       :window_dismissed ->
@@ -684,8 +727,11 @@ defmodule Troupe.UI.TUI.Model do
 
       # A subagent is named by the agent it runs as it starts, so the window's side panel
       # says `explore#1 (explore)`, not the window's own agent.
+      # One a checkpoint names as still running also says when its delegation began.
       :agent_named when is_binary(d.name) ->
-        w |> ensure_agent(path) |> update_agent(path, &%{&1 | name: d.name})
+        w
+        |> ensure_agent(path)
+        |> update_agent(path, &%{&1 | name: d.name, started_at: &1.started_at || d[:started_at]})
 
       # A saved comment started a branch of this session (root Decision 844): said in the
       # session's own transcript, where the person would otherwise see nothing of it.
@@ -925,8 +971,9 @@ defmodule Troupe.UI.TUI.Model do
         update_agent(ensure_agent(w, path), path, fn a -> %{a | todos: d.items} end)
 
       # The summary the window starts from, as its first block, and what the window keeps
-      # of the session up to it, taken whole rather than drawn: what it used, its goal,
-      # the root's tasks and a loop still running.
+      # of the session up to it, taken whole rather than drawn: what it used, what its
+      # turns cost, its goal, the root's tasks and a loop still running. A journal written
+      # before the cost was carried has none, and the turns after it count from nothing.
       :earlier ->
         lines = d.summary |> sanitize() |> markdown() |> frame()
 
@@ -934,7 +981,12 @@ defmodule Troupe.UI.TUI.Model do
         |> ensure_agent(path)
         |> push(path, {:earlier, %{lines: lines, at: d.at}})
         |> update_agent(path, fn a -> %{a | usage: add(a.usage, d.usage), todos: d.todos} end)
-        |> Map.merge(%{usage: add(w.usage, d.usage), goal: d.goal, loop: d.loop})
+        |> Map.merge(%{
+          usage: add(w.usage, d.usage),
+          cost: spent(w.cost, Map.get(d, :cost, @no_spend)),
+          goal: d.goal,
+          loop: d.loop
+        })
 
       # Said once in the transcript, where it happened, and kept on the window for the
       # status line, which shows it for as long as it is set.

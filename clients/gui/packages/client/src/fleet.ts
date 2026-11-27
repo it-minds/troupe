@@ -13,9 +13,12 @@
 import { TroupeRpcError } from "./connection.js";
 import { invitationsFrom } from "./invites.js";
 import type { Invitation } from "./invites.js";
+import { lifespanOf } from "./lifespan.js";
+import type { Lifespan } from "./lifespan.js";
 import { named } from "./people.js";
 import type { PlaneClient, SessionRow, SessionsFilter } from "./plane.js";
 import { watchRemote } from "./remote.js";
+import { repositoriesOf, repositoryName } from "./repositories.js";
 import { ErrorCodes } from "./types.js";
 import type { Unseen } from "./types.js";
 import { errorText } from "./words.js";
@@ -206,6 +209,10 @@ export interface FleetRow {
    * people invited by name. Absent from a daemon's rows, whose kind says it.
    */
   visibility?: string | null;
+  /** How long it lasts (troupe #1209); `normal` from a source that does not say, which made it so. */
+  lifespan?: Lifespan;
+  /** When a throwaway session is erased if nothing keeps it, as the source says; null for any other. */
+  erasesAt?: string | null;
   yourRole: string | null;
   origin: { kind?: string; trigger?: string; [k: string]: unknown } | null;
   reviewedBy: string | null;
@@ -232,6 +239,8 @@ export interface FleetRow {
   remote?: RemoteOffer | null;
   /** The invitation this person holds into it, where somebody invited them by name (troupe #765). */
   invitation?: Invitation | null;
+  /** The GitHub repositories a pod session holds, `owner/name`, the one it was created on first (troupe #1207); absent from a daemon's rows. */
+  repositories?: string[];
   /** The source's own row, for anything a view needs that this shape does not carry. */
   raw: unknown;
 }
@@ -282,11 +291,14 @@ export function rowFromPlane(row: SessionRow, source = "plane"): FleetRow {
     pinned: Boolean(row.pinned),
     archived: row.archived === true,
     visibility: row.visibility ?? null,
+    lifespan: lifespanOf(row.lifespan),
+    erasesAt: row.erases_at ?? null,
     yourRole: row.your_role ?? null,
     origin: row.origin ?? null,
     reviewedBy: row.reviewed_by ?? null,
     sync: kind === "private" && row.state === "erasure_pending" ? "erasure_pending" : null,
     failed: row.failed_reason ? { reason: row.failed_reason, detail: null } : null,
+    repositories: repositoriesOf(row).map(repositoryName),
     raw: row,
   };
 }

@@ -84,6 +84,9 @@ defmodule Troupe.Plane.Application do
       # Every hour, the artifacts and old versions the retention settings say have run out
       # (#981); nothing while both are off. A `:global` singleton with a keeper, as above.
       Troupe.Plane.Artifacts.Retention.Sweep.Keeper,
+      # Every ten minutes, the throwaway sessions asleep past their window (#1209), erased
+      # as an erasure erases. A `:global` singleton with a keeper, as above.
+      Troupe.Plane.Sessions.Lifespan.Sweep.Keeper,
       # A release being mirrored into the object store, copied after `admin.releases.mirror`
       # has answered (`Releases`), and which copies are under way. Before the endpoint,
       # which is where that call arrives.

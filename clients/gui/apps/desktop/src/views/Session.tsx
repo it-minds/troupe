@@ -38,6 +38,9 @@ import {
   severalSteer,
   rootState,
   scratchVersion,
+  repositoriesOf,
+  repositoryParam,
+  repositoryRefusal,
   sessionWhose,
   settleLoop,
   stoppedSentence,
@@ -54,6 +57,12 @@ import {
   remoteWhen,
   updateLine,
   versionOf,
+  LIFESPAN_CHOICES,
+  lifespanItem,
+  lifespanMark,
+  lifespanOf,
+  lifespanRefusal,
+  throwawaySentence,
 } from "@troupe/client";
 import type {
   Artifact,
@@ -63,14 +72,16 @@ import type {
   DaemonClient,
   Entry,
   FleetRow,
+  Lifespan,
   LoopInfo,
   OwnPlane,
   ScratchDocument,
+  SessionRepository,
   SessionKind,
   SessionView,
   TranscriptState,
 } from "@troupe/client";
-import { useSessionView, useStartQuestions } from "../hooks";
+import { useLifespans, useSessionView, useStartQuestions, useTeams } from "../hooks";
 import { useNarrow } from "../narrow";
 import type { Marks, SessionHandle } from "../hooks";
 import { curtainLine, curtainUp, DEFAULT_DETAIL, isDetail, layout, waitingOn, waitingWords } from "../frames";
@@ -82,8 +93,12 @@ import { AgentSwitch, sessionAgents } from "./AgentSwitch";
 import { ApprovalPanel, DecisionRecord } from "./Approval";
 import type { Audiences } from "./Approval";
 import { AnswerRecord, QuestionPanel } from "./Question";
+import { ProposalCard } from "./Proposal";
+import type { ProposalActions } from "./Proposal";
+import { SessionRepositories, teamRepositories } from "./Repositories";
+import type { ChosenRepository } from "./Repositories";
 import { CommandPalette } from "./CommandPalette";
-import type { PaletteScreen } from "./CommandPalette";
+import type { PaletteScreen, Sides } from "./CommandPalette";
 import { Files } from "./Files";
 import { PodConfig } from "./PodConfig";
 import { Publish } from "./Publish";
@@ -128,6 +143,7 @@ export function Session({
   onArchive,
   marks,
   onGo,
+  sides,
   onAgents,
   onStarted,
   onProfile,
@@ -150,6 +166,8 @@ export function Session({
   marks?: Marks | undefined;
   /** Leave for another screen, for the palette's Navigate and Setup commands. */
   onGo?: (screen: PaletteScreen) => void;
+  /** The sides this install has, so the palette lists only the commands of those. */
+  sides: Sides;
   /** Open the agents manager on this session's workspace, at one agent if named: a session on this computer's. */
   onAgents?: ((agent?: string) => void) | undefined;
   /** Open a session the agent picker started, as the start screen opens one it made. */
@@ -200,6 +218,20 @@ export function Session({
   // A relayed session shared to observe is read here as a viewer's is.
   const readOnly = row?.state === "read_only" || row?.yourRole === "viewer" || row?.yourRole === "observe";
   const dormant = row?.state === "dormant";
+  // What the harness proposes is the owner's to answer (troupe #1208): a yes to the plane as
+  // them, a no to the session. The same object from one draw to the next, so no turn is
+  // drawn anew for it.
+  const owner = kind === "team" && self !== undefined && (row?.owner === self || row?.yourRole === "owner");
+  const answering = view.view;
+  const proposalActions = useMemo<ProposalActions | undefined>(() => {
+    if (!owner || !auth || !answering) return undefined;
+    return {
+      accept: async (id, edits) => {
+        await auth.plane.acceptProposal(await auth.token(), sessionId, id, edits);
+      },
+      answer: (id, decision) => answering.answerProposal(id, decision),
+    };
+  }, [owner, auth, answering, sessionId]);
   // A root that ended so the harness drops what is sent to it (a spent budget, a refusal):
   // the composer gives way to the sentence that says so. One that finished keeps it, since
   // a message resumes it.
@@ -300,6 +332,44 @@ export function Session({
           }
         }
       : undefined;
+  // How long it lasts (troupe #1209): the answer to a change made here until the log says
+  // it too, then the log's word, else the row's. Its owner changes it from the ⋯, where the
+  // server knows lifespans; a throwaway one's head offers Erase now and Keep it.
+  const lifespans = useLifespans(auth, daemon);
+  const [lived, setLived] = useState<{ lifespan: Lifespan; seen: string | undefined } | null>(null);
+  const [lifespanError, setLifespanError] = useState<string | null>(null);
+  useEffect(() => {
+    setLived(null);
+    setLifespanError(null);
+  }, [sessionId]);
+  const lifespan: Lifespan = lived && view.state.lifespan === lived.seen ? lived.lifespan : lifespanOf(view.state.lifespan ?? row?.lifespan);
+  const relive =
+    marking && lifespans(marking.row.kind)
+      ? async (to: Lifespan): Promise<string | null> => {
+          setLifespanError(null);
+          try {
+            await marking.marks.relive(marking.row, to);
+            setLived({ lifespan: to, seen: view.state.lifespan });
+            return null;
+          } catch (e) {
+            const why = lifespanRefusal(e);
+            setLifespanError(why);
+            return why;
+          }
+        }
+      : undefined;
+  const eraseNow =
+    marking && lifespan === "throwaway"
+      ? async (): Promise<void> => {
+          setLifespanError(null);
+          try {
+            await marking.marks.erase(marking.row);
+            onBack();
+          } catch (e) {
+            setLifespanError(`It was not erased: ${errorText(e)}.`);
+          }
+        }
+      : undefined;
   // Which configuration a pod session runs on (troupe #1177): the log's version once it
   // names one, else the row's, beside the version its channel would start a session on now.
   // Its owner updates it from the panel; a raise kept while the agent works says so there.
@@ -326,6 +396,37 @@ export function Session({
                   }
                 }
               : undefined,
+        }
+      : undefined;
+  // The GitHub repositories a pod session holds (troupe #1207), as its row says them; its
+  // owner attaches one from what the team lists, and takes one off.
+  const teamRows = useTeams(row?.kind === "team" ? auth : null);
+  const repositories: RepositoriesPanel | undefined =
+    row?.kind === "team"
+      ? {
+          held: repositoriesOf(row.raw),
+          listed: teamRepositories(teamRows, team),
+          owner: row.yourRole === "owner" && marking !== undefined,
+          onAttach: marking
+            ? async (r: ChosenRepository) => {
+                try {
+                  await marking.marks.repository(marking.row, { attach: repositoryParam(r) });
+                  return null;
+                } catch (e) {
+                  return repositoryRefusal(e, true);
+                }
+              }
+            : undefined,
+          onTakeOff: marking
+            ? async (name: string) => {
+                try {
+                  await marking.marks.repository(marking.row, { takeOff: name });
+                  return null;
+                } catch (e) {
+                  return repositoryRefusal(e, false);
+                }
+              }
+            : undefined,
         }
       : undefined;
   // Onboarding, then the brief, as the session's start found them due (Decision 835), and
@@ -414,6 +515,7 @@ export function Session({
       onClose={() => setPalette(null)}
       actions={{
         go: (screen) => (screen === "sessions" ? onBack() : onGo?.(screen)),
+        sides,
         showFiles: () => {
           showBackstage(true);
           setPane("files");
@@ -470,6 +572,14 @@ export function Session({
               },
             }
           : {}),
+        lifespan: async (to: Lifespan | null) => {
+          const mark = lifespanMark({ lifespan, erasesAt: row?.erasesAt ?? null }) ?? "normal";
+          if (to === null) return `this session is ${mark}`;
+          if (!relive) return "only its owner says how long this session lasts, where its server knows lifespans";
+          if (lifespan === to) return `this session is ${to} already`;
+          const why = await relive(to);
+          return why ?? `this session is ${to} now`;
+        },
       }}
     />
   ) : null;
@@ -489,6 +599,7 @@ export function Session({
         agent={current}
         onBack={onBack}
         renaming={rename && renaming ? { onRename: async (title) => void (await rename(title)), onDone: () => setRenaming(false) } : null}
+        lasts={lifespan === "persistent" ? "persistent" : null}
         invites={row ? <InviteControl auth={auth} daemon={daemon} row={row} /> : null}
         remoteLine={row?.kind === "remote" ? <RemoteLine row={row} /> : null}
         menu={
@@ -509,6 +620,7 @@ export function Session({
             onRename={rename ? () => setRenaming(true) : undefined}
             onKeep={keep ? (on) => void keep(on) : undefined}
             sharing={share && (visibility === "team" || visibility === "private") ? { visibility, team, onShare: (to) => void share(to) } : undefined}
+            living={relive ? { lifespan, onRelive: (to) => void relive(to) } : undefined}
             whose={whose}
             remote={
               row && daemon && auth && (row.kind === "local" || row.kind === "private") ? (
@@ -546,6 +658,14 @@ export function Session({
       {shareError && (
         <div className="banner error" role="alert">
           <p>{shareError}</p>
+        </div>
+      )}
+      {lifespan === "throwaway" && !row?.archived && (
+        <Throwaway erasesAt={row?.erasesAt ?? null} onErase={eraseNow} onKeep={relive ? () => void relive("normal") : undefined} />
+      )}
+      {lifespanError && (
+        <div className="banner error" role="alert">
+          <p>{lifespanError}</p>
         </div>
       )}
       {raiseError && (
@@ -586,6 +706,8 @@ export function Session({
             onSave={saveReady}
             onRetry={readOnly ? undefined : (stopped ?? retry)}
             onPublish={publishReply}
+            onProposal={readOnly ? undefined : proposalActions}
+            owner={owner}
             earlier={view.earlier}
             onEarlier={view.loadEarlier}
           />
@@ -663,6 +785,7 @@ export function Session({
             daemon={daemon}
             row={row}
             configuration={configuration}
+            repositories={repositories}
             onEditTodo={!readOnly && view.view ? (action, params) => view.view!.editTodo(action, params) : undefined}
             self={self}
             selfName={named(auth?.me?.display_name, auth?.me?.subject)}
@@ -896,6 +1019,7 @@ function Header({
   agent,
   onBack,
   renaming,
+  lasts,
   invites,
   remoteLine,
   menu,
@@ -909,6 +1033,8 @@ function Header({
   onBack: () => void;
   /** The title as a field while it is being renamed, from the ⋯ or /rename; null otherwise. */
   renaming?: { onRename: (title: string) => Promise<void>; onDone: () => void } | null;
+  /** `persistent`, the head's mark of a session kept until erased; null otherwise, a throwaway one's line under the head saying it whole. */
+  lasts?: string | null;
   /** Whom it is shared with by name, and for its owner the invitation (troupe #765). */
   invites?: JSX.Element | null;
   /** Whose laptop a relayed session is on. */
@@ -942,6 +1068,13 @@ function Header({
             {/* How a private session's sealing stands here, as its row in the list says. */}
             <Sync state={row.sync} device={row.device} />
           </>
+        )}
+        {/* Before the profile and the agent, which the composer says too, so a narrow head
+            clips those and not this. */}
+        {lasts && (
+          <span className="tag lasts" title={lasts === "persistent" ? "Kept until its owner erases it" : "Erased a while after it goes quiet, unless somebody keeps it"}>
+            {lasts}
+          </span>
         )}
         {row?.kind === "team" && row.profile && (
           <span className="tag" title="The plane profile this session runs on; a session keeps the one it started with">
@@ -987,6 +1120,50 @@ function Header({
   );
 }
 
+/**
+ * A throwaway session's line under the head (troupe #1209): when it goes, and to its owner
+ * Erase now, asked once more since it cannot be undone, and Keep it, which makes it normal.
+ */
+function Throwaway({
+  erasesAt,
+  onErase,
+  onKeep,
+}: {
+  erasesAt: string | null;
+  onErase?: (() => Promise<void>) | undefined;
+  onKeep?: (() => void) | undefined;
+}): JSX.Element {
+  const [asking, setAsking] = useState(false);
+  return (
+    <div className="banner throwaway" role="status">
+      <p>{asking ? "Erase it now? Its log, its workspace and its key go, and it cannot be undone." : throwawaySentence(erasesAt)}</p>
+      {asking && onErase ? (
+        <>
+          <button type="button" className="link" onClick={() => void onErase()}>
+            Erase it
+          </button>
+          <button type="button" className="link" onClick={() => setAsking(false)}>
+            Cancel
+          </button>
+        </>
+      ) : (
+        <>
+          {onErase && (
+            <button type="button" className="link" onClick={() => setAsking(true)}>
+              Erase now
+            </button>
+          )}
+          {onKeep && (
+            <button type="button" className="link" onClick={onKeep}>
+              Keep it
+            </button>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
 /** What `/share` alone says of a pod session: whose it is, and to its owner what changes it. */
 function whoseLine(visibility: string | undefined, team: string | null, owner: boolean): string {
   if (visibility === "team") return `given to ${teamWords(team)}: everyone on it can open it, and steer it where the team allows${owner ? "; /share me takes it back" : ""}`;
@@ -1022,6 +1199,7 @@ function SessionMenu({
   onRename,
   onKeep,
   sharing,
+  living,
   whose,
   remote,
 }: {
@@ -1044,6 +1222,8 @@ function SessionMenu({
   onKeep?: ((on: boolean) => void) | undefined;
   /** Give a pod session to its team or take it back: its owner's alone. */
   sharing?: { visibility: "team" | "private"; team: string | null; onShare: (to: "team" | "private") => void } | undefined;
+  /** How long it lasts, and the change to either of the other two: its owner's alone. */
+  living?: { lifespan: Lifespan; onRelive: (to: Lifespan) => void } | undefined;
   /** Whose a pod session is, as the head marks it. */
   whose?: string | null;
   /** Steering from another device: this computer's offer. */
@@ -1116,6 +1296,13 @@ function SessionMenu({
             <span className="d">{sharing.visibility === "team" ? TAKE_BACK_LINE : giveLine(sharing.team)}</span>
           </button>
         )}
+        {living &&
+          LIFESPAN_CHOICES.filter((c) => c.value !== living.lifespan).map((c) => (
+            <button key={c.value} type="button" className="item" onClick={then(() => living.onRelive(c.value))}>
+              <span className="t">{lifespanItem(c.value)}</span>
+              <span className="d">{c.sentence}</span>
+            </button>
+          ))}
         {onArchive && (
           <button type="button" className="item" onClick={then(() => onArchive(!row?.archived))}>
             <span className="t">{archiveItem(Boolean(row?.archived)).title}</span>
@@ -1300,6 +1487,8 @@ function Stream({
   onSave,
   onRetry,
   onPublish,
+  onProposal,
+  owner,
   earlier,
   onEarlier,
 }: {
@@ -1330,6 +1519,10 @@ function Stream({
   onRetry?: ((text: string) => Promise<void>) | string | undefined;
   /** Open the publish dialog with a reply as its file; absent with no daemon to publish through. */
   onPublish?: ((text: string) => void) | undefined;
+  /** What the session's owner may do with what the harness proposed. */
+  onProposal?: ProposalActions | undefined;
+  /** Whether this person is the session's owner. */
+  owner?: boolean | undefined;
 }): JSX.Element {
   // The turns a click on their strip opened (or shut, at `everything`), by key. Another
   // level draws every turn again, all of them as it says.
@@ -1455,6 +1648,8 @@ function Stream({
             onSave={onSave}
             onRetry={onRetry}
             onPublish={onPublish}
+            onProposal={onProposal}
+            owner={owner}
             onToggle={toggle}
           />
         );
@@ -1654,6 +1849,10 @@ type EntryProps = {
   reply?: TurnReply | undefined;
   onRetry?: ((text: string) => Promise<void>) | string | undefined;
   onPublish?: ((text: string) => void) | undefined;
+  /** What the session's owner may do with what the harness proposed; absent for anybody else. */
+  onProposal?: ProposalActions | undefined;
+  /** Whether this person is the session's owner, who alone answers a proposal. */
+  owner?: boolean | undefined;
 };
 
 /**
@@ -1676,7 +1875,9 @@ function sameEntry(a: EntryProps, b: EntryProps): boolean {
     a.reply?.answer === b.reply?.answer &&
     a.reply?.prompt === b.reply?.prompt &&
     a.onRetry === b.onRetry &&
-    a.onPublish === b.onPublish
+    a.onPublish === b.onPublish &&
+    a.onProposal === b.onProposal &&
+    a.owner === b.owner
   );
 }
 
@@ -1693,6 +1894,8 @@ const StreamEntry = memo(function StreamEntry({
   reply,
   onRetry,
   onPublish,
+  onProposal,
+  owner = false,
 }: EntryProps): JSX.Element | null {
   const { entry, level } = drawn;
   switch (entry.kind) {
@@ -1811,6 +2014,11 @@ const StreamEntry = memo(function StreamEntry({
 
     case "question":
       return entry.answer === undefined ? null : <AnswerRecord entry={entry} self={self} several={several} />;
+
+    // What the harness offers the owner, where the turn that earned it ended: theirs to
+    // answer, and a line for everybody else.
+    case "proposal":
+      return <ProposalCard entry={entry} mine={owner} actions={onProposal} />;
 
     // What the turn cost, under it, in the client library's words (issue #389). A
     // subagent's says whose it is, as its answers do.
@@ -1983,6 +2191,15 @@ function useScratchText(view: SessionView | null, doc: ScratchDocument | undefin
   return read && read.name === name ? read : { content: null, error: null };
 }
 
+/** A pod session's repositories as Backstage says them, with Attach and Take off for its owner. */
+interface RepositoriesPanel {
+  held: SessionRepository[];
+  listed: string[];
+  owner: boolean;
+  onAttach?: ((r: ChosenRepository) => Promise<string | null>) | undefined;
+  onTakeOff?: ((name: string) => Promise<string | null>) | undefined;
+}
+
 /** A pod session's configuration as the panel says it, with Update for its owner. */
 interface Configuration {
   version: number;
@@ -1998,6 +2215,7 @@ function Backstage({
   daemon,
   row,
   configuration,
+  repositories,
   onEditTodo,
   self,
   selfName,
@@ -2013,6 +2231,8 @@ function Backstage({
   row: FleetRow | undefined;
   /** A pod session's bundle version and its channel's current one; absent elsewhere. */
   configuration?: Configuration | undefined;
+  /** A pod session's GitHub repositories; absent elsewhere. */
+  repositories?: RepositoriesPanel | undefined;
   /** Change the task list (`todo.edit`); absent where the person may only read the session. */
   onEditTodo?: TodoEdit | undefined;
   self: string | undefined;
@@ -2200,6 +2420,16 @@ function Backstage({
           )}
         </dl>
       </section>
+
+      {repositories && (
+        <SessionRepositories
+          repositories={repositories.held}
+          listed={repositories.listed}
+          owner={repositories.owner}
+          onAttach={repositories.onAttach}
+          onTakeOff={repositories.onTakeOff}
+        />
+      )}
     </aside>
   );
 }

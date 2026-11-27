@@ -18,8 +18,24 @@ export type {
   SessionsFilter,
   CreateSessionParams,
   ProfileOffering,
+  RepositoryName,
+  RepositoryRecord,
+  SessionRepository,
   WorkerPod,
 } from "./plane.js";
+export {
+  listedRepositories,
+  readRepository,
+  repositoriesLeft,
+  repositoriesOf,
+  repositoriesSummary,
+  repositoryChangedText,
+  repositoryName,
+  repositoryParam,
+  repositoryRefusal,
+  repositoryWhere,
+  repositoryWork,
+} from "./repositories.js";
 export { FUNCTIONS_HEADING, UNPRICED_SENTENCE, accessWords, actsAsWords, askWords, budgetWords, capacityWords, keyWords, limitSentences, missingWords, profileSentence, profileSummary, roomWords, ruleAccessWords, ruleText, teamBudgetWords, toolLines, unpricedWords, whoseWords } from "./profile.js";
 export type { ProfileView, ProfileViewAgent, ProfileViewAllowance, ProfileViewFunction, ProfileViewGitHub, ProfileViewHarnessTool, ProfileViewLimits, ProfileViewMissing, ProfileViewModel, ProfileViewRule, ProfileViewServer, ProfileViewServerAbout, ProfileViewSkill, RuleAccess, ServerAccess, UnpricedCalls } from "./profile.js";
 export {
@@ -117,6 +133,22 @@ export type { CallEvidence, CallWhere } from "./calls.js";
 export { foldScratch, scratchDocumentOf, scratchVersion } from "./scratch.js";
 export { ago, bytes, countWords, durationWords, errorText, moneyWords, sessionStateWords } from "./words.js";
 export { TAKE_BACK_LINE, giveLine, sessionWhose, teamWords, visibilityRefusal, whoseSentence } from "./visibility.js";
+export {
+  LIFESPANS,
+  LIFESPAN_CHOICES,
+  knowsLifespans,
+  lifespanChoice,
+  lifespanItem,
+  lifespanMark,
+  lifespanOf,
+  lifespanRefusal,
+  planeKnowsLifespans,
+  throwawaySentence,
+  untilWords,
+} from "./lifespan.js";
+export type { Lifespan, PlaneAsker } from "./lifespan.js";
+export { SCHEDULE_CHOICES, WEEKDAYS, answeredLine, cronOf, cronProblem, editsOf, othersLine, proposalOf, proposalRefusal, runsLine, scheduleOf, scheduleWords } from "./proposals.js";
+export type { ProposalDecision, ProposalResult, ProposalState, ScheduleChoice, ScheduleEvery, TriggerDraft } from "./proposals.js";
 export { behind, configurationLine, owedLine, raiseKept, raiseRefusal, updateLine, upgradedText, versionOf } from "./bundle.js";
 export type {
   Entry,

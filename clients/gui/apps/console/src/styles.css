@@ -1663,6 +1663,50 @@ pre.manifest {
   gap: var(--space-2);
   margin-top: var(--space-2);
 }
+/* What the harness offers the owner (troupe #1208): an offer's quiet edge in the
+   transcript, none of the approval's waiting colour, since nothing waits on it. */
+.remote-session .proposal {
+  margin: var(--space-2) 0;
+  padding: var(--space-3) var(--space-4);
+  border: var(--bw-hairline) solid var(--border-strong);
+  border-left-width: var(--bw-marker);
+  border-left-color: var(--running-solid);
+  background: var(--bg-raised);
+  max-width: var(--measure-reading);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.remote-session .proposal h3 {
+  margin: 0;
+}
+.remote-session .proposal .consequence {
+  margin: 0;
+  color: var(--text-secondary);
+}
+.remote-session .proposal-schedule {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  align-items: center;
+}
+.remote-session .proposal-prompt textarea {
+  width: 100%;
+  font: var(--t-code);
+}
+.remote-session .proposal-budget input {
+  width: 8ch;
+}
+.remote-session .proposal .also.error {
+  margin: 0;
+  color: var(--error-fg);
+}
+.remote-session .proposal-yaml {
+  margin: var(--space-2) 0;
+  font: var(--t-code);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
 .remote-session .composer {
   display: flex;
   flex-wrap: wrap;

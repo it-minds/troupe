@@ -15,8 +15,10 @@ defmodule Troupe.Worker.Plane.Commands do
   alias Troupe.ObjectStore
   alias Troupe.Protocol.Error
   alias Troupe.Protocol.Event
+  alias Troupe.Protocol.Lifespan
   alias Troupe.Protocol.SessionId
   alias Troupe.Session.Log
+  alias Troupe.Session.Proposals
   alias Troupe.Sessions.Fork
   alias Troupe.Sessions.Sealer
   alias Troupe.Sessions.Storage
@@ -25,7 +27,7 @@ defmodule Troupe.Worker.Plane.Commands do
   alias Troupe.Worker.Drain
   alias Troupe.Worker.MCP
   alias Troupe.Worker.Plane.Link
-  alias Troupe.Worker.Session.{Manager, Reader, Restore, Workspace}
+  alias Troupe.Worker.Session.{Manager, Reader, Repositories, Restore, Workspace}
   alias Troupe.Worker.Sessions
 
   require Logger
@@ -79,10 +81,16 @@ defmodule Troupe.Worker.Plane.Commands do
             # The organisation's, the team's and the profile's memory documents, which the
             # session reads as instructions before every file.
             memory: params["memory"],
-            # The GitHub repository a session was created with, which its first
-            # activation clones. A name, never a credential: that the pod asks for.
-            repository: params["repository"],
+            # The GitHub repositories the session holds, each with its directory in the
+            # workspace, which an activation clones where they are not there. Names, never
+            # a credential: that the pod asks for.
+            repositories: Repositories.of_activation(params),
+            # How long the session rests with nothing to do before it sleeps: the team's
+            # idle timeout, as clients are told it. None, and the pod keeps its own.
+            dormant_after_ms: idle_ms(params["idle_timeout_seconds"]),
             origin: params["origin"],
+            # How long it lasts, which a new session's `session_created` records.
+            lifespan: params["lifespan"],
             usage_seq: params["usage_seq"]
           ],
           &match?({_key, nil}, &1)
@@ -175,6 +183,28 @@ defmodule Troupe.Worker.Plane.Commands do
   # per-tool rules, memory): at once when its agents are at rest, `restarted`; otherwise the
   # raise is kept for the root's next rest, `pending` with the status it is in. Never the
   # sleep-and-wake path, which would cut a turn and might move the session to another pod.
+  # A repository the session's owner attached, cloned into its own directory of the running
+  # session's workspace, or one they took off, deleted with its tokens: without a restart,
+  # the root told either way (`Troupe.Worker.Session.Repositories`). A clone that fails is
+  # refused with git's reason, the token taken out; a repository with a push, a pull request
+  # or a CI read going is refused as `busy`.
+  defp dispatch("session.repository." <> verb, params) when verb in ["add", "remove"] do
+    session_id = params["session_id"]
+
+    with :ok <- shaped(session_id),
+         {:ok, _tree} <- running_at(session_id, params["epoch"]),
+         {:ok, manager} <- manager_of(session_id),
+         {:ok, entry} <- repository_param(params["repository"]) do
+      root = Manager.status(manager).workspace
+      by = {params["by"], params["by_name"]}
+
+      case verb do
+        "add" -> attached(Repositories.attach(session_id, root, entry, by), session_id, entry)
+        "remove" -> detached(Repositories.detach(session_id, root, entry, by), session_id, entry)
+      end
+    end
+  end
+
   defp dispatch("session.restart", params) do
     session_id = params["session_id"]
 
@@ -358,6 +388,71 @@ defmodule Troupe.Worker.Plane.Commands do
 
         {:ok, seq} = Log.append(session_id, [], "session_visibility_changed", data)
         {:ok, %{"session_id" => session_id, "recorded" => true, "seq" => seq}}
+    end
+  end
+
+  # How long the session lasts, changed by its owner at the plane, whose row is the word on
+  # it and what its sweep reads. The pod's part is the log's line, so everybody attached
+  # hears it and a checkpoint folds it; best effort, as the visibility's is.
+  defp dispatch("lifespan.changed", params) do
+    session_id = params["session_id"]
+
+    case {Lifespan.word?(params["to"]), Sessions.whereis(session_id)} do
+      {false, _tree} ->
+        {:error, Error.new(:invalid_params, %{field: "to"})}
+
+      {true, nil} ->
+        {:ok, %{"session_id" => session_id, "recorded" => false, "reason" => "dormant"}}
+
+      {true, _tree} ->
+        data =
+          %{"to" => params["to"], "actor" => params["actor"]}
+          |> put_present("from", if(Lifespan.word?(params["from"]), do: params["from"]))
+
+        {:ok, seq} = Log.append(session_id, [], "session_lifespan_changed", data)
+        {:ok, %{"session_id" => session_id, "recorded" => true, "seq" => seq}}
+    end
+  end
+
+  # An open proposal of a session here, as its log holds it: what the plane makes on its
+  # owner's yes, so the trigger is what the harness drafted from what the session did.
+  defp dispatch("session.proposal.get", params) do
+    session_id = params["session_id"]
+
+    with :ok <- shaped(session_id),
+         {:ok, _tree} <- running_at(session_id, params["epoch"]) do
+      case Enum.find(Proposals.open(session_id), &(&1["id"] == params["id"])) do
+        nil -> {:error, Error.new(:not_found, %{reason: "the session has no open proposal #{params["id"]}"})}
+        proposal -> {:ok, %{"session_id" => session_id, "proposal" => proposal}}
+      end
+    else
+      {:error, _error} = refused -> refused
+    end
+  end
+
+  # What the plane made on the owner's yes to a proposal of a session here: its line in the
+  # log, `proposal_answered`, once, under the owner's name. Best effort, as a share's news
+  # is: a session not up here keeps the proposal open, and the plane answered the owner.
+  defp dispatch("session.proposal.decided", params) do
+    session_id = params["session_id"]
+
+    with :ok <- shaped(session_id),
+         {:ok, _tree} <- running_at(session_id, params["epoch"]),
+         "accepted" <- params["decision"] do
+      yes = %{
+        "result" => params["result"],
+        "edited" => params["edited"],
+        "by_name" => params["by_name"],
+        "actor" => Event.Actor.user(params["by"], params["by_name"])
+      }
+
+      case Proposals.decided(session_id, params["id"], yes) do
+        :ok -> {:ok, %{"session_id" => session_id, "recorded" => true}}
+        {:error, reason} -> {:error, Error.new(:conflict, %{reason: reason})}
+      end
+    else
+      {:error, _error} = refused -> refused
+      _other -> {:error, Error.new(:invalid_params, %{reason: "the plane decides only a yes"})}
     end
   end
 
@@ -656,6 +751,37 @@ defmodule Troupe.Worker.Plane.Commands do
 
   # Up here, and at the epoch the plane names: a pod the session has since moved on from
   # takes nothing for it.
+  # A repository as the plane names one to a pod: its owner, its name, and the directory
+  # the plane chose for it, `<owner>/<name>` or the root, and never one that climbs out.
+  defp repository_param(%{"owner" => owner, "name" => name, "path" => path} = entry)
+       when is_binary(owner) and is_binary(name) and is_binary(path) do
+    if path == "." or path == "#{owner}/#{name}",
+      do: {:ok, entry},
+      else: {:error, Error.new(:invalid_params, %{reason: "a repository's path is owner/name"})}
+  end
+
+  defp repository_param(_other),
+    do: {:error, Error.new(:invalid_params, %{reason: "a repository is {owner, name, ref, path}"})}
+
+  defp attached(:ok, session_id, entry),
+    do: {:ok, %{"session_id" => session_id, "cloned" => true, "path" => entry["path"]}}
+
+  defp attached({:error, reason}, _session_id, _entry),
+    do: {:error, Error.new(:unavailable, %{reason: reason})}
+
+  defp detached(:ok, session_id, entry),
+    do: {:ok, %{"session_id" => session_id, "removed" => true, "path" => entry["path"]}}
+
+  defp detached({:error, :busy}, _session_id, entry),
+    do:
+      {:error,
+       Error.new(:conflict, %{
+         reason: "busy",
+         detail:
+           "#{entry["owner"]}/#{entry["name"]} has a push, a pull request or a CI read going; " <>
+             "take it off when that is done"
+       })}
+
   defp running_at(session_id, epoch) do
     with {:ok, tree} <- not_found(Sessions.running(session_id)),
          :ok <- same_epoch(session_id, epoch) do
@@ -936,12 +1062,14 @@ defmodule Troupe.Worker.Plane.Commands do
   # The session's terms, as config overrides. Seconds on the wire because that is how
   # a person writes a schedule; milliseconds inside because that is what the budget
   # counts. `approvals` is `wait` unless it says `deny`: there is no `auto` a trigger
-  # can ask for.
+  # can ask for. `allow` is the per-tool rules a trigger's runs need to do their work
+  # unasked, named one by one, which the session reads as the trigger's own layer.
   defp terms_of(%{} = terms) do
     [
       max_turns: positive(terms["max_turns"]),
       wall_clock_ms: terms["wall_clock_seconds"] |> positive() |> then(&(&1 && &1 * 1000)),
-      approvals: if(terms["approvals"] == "deny", do: :deny)
+      approvals: if(terms["approvals"] == "deny", do: :deny),
+      allow: allowed(terms["allow"])
     ]
     |> Enum.reject(&match?({_key, nil}, &1))
     |> case do
@@ -951,6 +1079,19 @@ defmodule Troupe.Worker.Plane.Commands do
   end
 
   defp terms_of(_terms), do: nil
+
+  # The idle timeout in seconds, as the team's setting is kept, and in milliseconds inside.
+  # The setting is a positive number of seconds; one longer than a timer can wait is held at
+  # the longest it can, and anything that is not a positive whole number is no timeout.
+  @longest_idle_seconds div(4_294_967_295, 1000)
+
+  defp idle_ms(seconds) when is_integer(seconds) and seconds > 0,
+    do: min(seconds, @longest_idle_seconds) * 1000
+
+  defp idle_ms(_seconds), do: nil
+
+  defp allowed([_ | _] = rules), do: Enum.filter(rules, &is_binary/1)
+  defp allowed(_none), do: nil
 
   # The platform's switches ride in with the terms, because the terms are already the
   # channel for "configuration this session did not choose" and a second one would be a

@@ -14,7 +14,7 @@ defmodule Troupe.Client.Remote do
 
   @behaviour Troupe.Client
 
-  alias Troupe.Client.Events
+  alias Troupe.Client.{Events, Repositories}
   alias Troupe.Config
   alias Troupe.Protocol.ClientUpdate
   alias Troupe.Remote.{Capability, Credentials, Discovery, Journal, Plane, RPC, Tokens, Worker}
@@ -327,6 +327,86 @@ defmodule Troupe.Client.Remote do
     end
   end
 
+  # How long a pod session lasts, at the plane, whose row its sweep reads (root #1209);
+  # changed, the log's `session_lifespan_changed` follows where a pod holds it.
+  @impl true
+  def lifespan(sid, verb) do
+    case attachment(sid) do
+      %{plane_url: plane} when is_binary(plane) -> lifespan_on(plane, sid, verb)
+      _ -> {:error, message(:not_attached)}
+    end
+  end
+
+  defp lifespan_on(plane, sid, :status) do
+    case call(plane, "session.get", %{session_id: sid}) do
+      {:ok, %{} = row} -> {:ok, Troupe.Client.Lifespan.status(row)}
+      {:error, reason} -> {:error, refusal(reason)}
+    end
+  end
+
+  defp lifespan_on(plane, sid, {:set, word}) do
+    case call(plane, "session.lifespan.set", %{session_id: sid, lifespan: word}) do
+      {:ok, %{} = row} ->
+        {:ok, Troupe.Client.Lifespan.set(row["lifespan"] || word, row["erases_at"])}
+
+      {:error, %{message: "forbidden"} = error} ->
+        {:error, Troupe.Client.Lifespan.forbidden(error[:data])}
+
+      {:error, %{code: -32_601}} ->
+        {:error, Troupe.Client.Lifespan.not_known()}
+
+      {:error, reason} ->
+        {:error, refusal(reason)}
+    end
+  end
+
+  # What the harness proposed in a pod session (root #1208): the open one as its log said
+  # it; a yes at the plane, as this person, which tells the pod; a no to the session.
+  @impl true
+  def proposal(sid, verb) do
+    case {verb, Worker.open_proposal(sid)} do
+      {:status, open} -> {:ok, Troupe.Client.Proposal.status(open)}
+      {_verb, nil} -> {:error, Troupe.Client.Proposal.status(nil)}
+      {:yes, open} -> accept(sid, open)
+      {no, open} -> answer_proposal(sid, open["id"], Atom.to_string(no))
+    end
+  end
+
+  defp accept(sid, open) do
+    case attachment(sid) do
+      %{plane_url: plane} when is_binary(plane) ->
+        case call(plane, "session.proposal.accept", %{session_id: sid, id: open["id"], edits: %{}}) do
+          {:ok, %{} = answer} ->
+            {:ok, Troupe.Client.Proposal.accepted(answer)}
+
+          {:error, %{code: -32_601}} ->
+            {:error, "this plane does not turn on a proposed trigger yet"}
+
+          {:error, %{data: %{"reason" => said}}} when is_binary(said) ->
+            {:error, said}
+
+          {:error, reason} ->
+            {:error, refusal(reason)}
+        end
+
+      _ ->
+        {:error, message(:not_attached)}
+    end
+  end
+
+  defp answer_proposal(sid, id, decision) do
+    said =
+      if decision == "never",
+        do: "not proposed again for this report",
+        else: "not now: not asked again in this session"
+
+    case Worker.answer_proposal(sid, id, decision) do
+      {:error, %{data: %{"reason" => reason}}} when is_binary(reason) -> {:error, reason}
+      {:error, reason} -> {:error, refusal(reason)}
+      _answered -> {:ok, said}
+    end
+  end
+
   # Which configuration a pod session runs on, at the plane, which holds the pin (root
   # #1177); raised, the log's `config_upgraded` follows where a pod holds it.
   @impl true
@@ -366,6 +446,50 @@ defmodule Troupe.Client.Remote do
         {:error, refusal(reason)}
     end
   end
+
+  # The GitHub repositories a pod session holds, at the plane, which keeps the list and
+  # tells the pod (root #1207); the log's `session_repository_changed` follows.
+  @impl true
+  def repositories(sid, verb) do
+    case attachment(sid) do
+      %{plane_url: plane} when is_binary(plane) -> repositories_on(plane, sid, verb)
+      _ -> {:error, message(:not_attached)}
+    end
+  end
+
+  defp repositories_on(plane, sid, :list) do
+    case call(plane, "session.get", %{session_id: sid}) do
+      {:ok, %{} = row} -> {:ok, Repositories.list(row)}
+      {:error, reason} -> {:error, refusal(reason)}
+    end
+  end
+
+  defp repositories_on(plane, sid, {:add, repository}) do
+    params = %{session_id: sid, repository: Repositories.param(repository)}
+
+    # A clone takes as long as git takes; the plane waits for the pod as long.
+    case Plane.call(plane, "session.repository.add", params, 320_000) do
+      {:ok, %{} = row} -> {:ok, Repositories.added(row, Repositories.name(repository))}
+      {:error, reason} -> {:error, repository_refusal(reason)}
+    end
+  end
+
+  defp repositories_on(plane, sid, {:remove, full}) do
+    case call(plane, "session.repository.remove", %{session_id: sid, repository: full}) do
+      {:ok, %{}} -> {:ok, Repositories.removed(full)}
+      {:error, reason} -> {:error, repository_refusal(reason)}
+    end
+  end
+
+  defp repository_refusal(%{message: "forbidden"} = error), do: Repositories.forbidden(error[:data])
+  defp repository_refusal(%{code: -32_601}), do: Repositories.too_old()
+
+  defp repository_refusal(%{data: %{"reason" => "busy", "detail" => detail}})
+       when is_binary(detail),
+       do: detail
+
+  defp repository_refusal(%{data: %{"reason" => said}}) when is_binary(said), do: said
+  defp repository_refusal(reason), do: refusal(reason)
 
   defp share_on(plane, sid, :status) do
     case call(plane, "session.get", %{session_id: sid}) do
@@ -727,6 +851,11 @@ defmodule Troupe.Client.Remote do
         # --only-me`) is its owner's and the people they invite, on the team's profile all
         # the same. Never a sealed session, which is this computer's daemon's.
         visibility: params[:visibility] || "team",
+        # How long it lasts, where it is not normal (root #1209).
+        lifespan: if(params[:lifespan] in ["throwaway", "persistent"], do: params[:lifespan]),
+        # The GitHub repositories it starts on (`/new --repo`, `troupe run --repo`), each
+        # `owner/name` or `{owner, name, ref}`; with none the plane is sent none.
+        repositories: repositories_param(params[:repositories]),
         prompt: params[:prompt] || "",
         command_id: RPC.command_id()
       })
@@ -740,6 +869,7 @@ defmodule Troupe.Client.Remote do
         profile: params[:profile],
         team: params[:team],
         only_me: body[:visibility] == "private",
+        repositories: repository_names(result["repositories"]),
         title: params[:title] || params[:prompt]
       })
     else
@@ -826,7 +956,10 @@ defmodule Troupe.Client.Remote do
           # Whose it is, where the plane says (root #1169), which `/share` and the log's
           # `session_visibility_changed` then change.
           visibility: result["visibility"],
-          owner?: result["role"] == "owner"
+          owner?: result["role"] == "owner",
+          # What it works on, as the plane said, which the log's `session_repository_changed`
+          # then changes.
+          repositories: repository_names(result["repositories"])
         })
 
       {:error, reason} ->
@@ -1050,7 +1183,8 @@ defmodule Troupe.Client.Remote do
          only_me: info[:only_me] == true,
          title: info[:title],
          visibility: info[:visibility],
-         owner?: info[:owner?] == true
+         owner?: info[:owner?] == true,
+         repositories: info[:repositories]
        ]}
 
     case DynamicSupervisor.start_child(Troupe.Remote.Sessions, spec) do
@@ -1123,6 +1257,16 @@ defmodule Troupe.Client.Remote do
   defp message(:logged_out), do: "not signed in; run troupe login <plane-url>"
   defp message(reason) when is_binary(reason), do: reason
   defp message(reason), do: inspect(reason)
+
+  defp repositories_param([_ | _] = list), do: Enum.map(list, &Repositories.param/1)
+  defp repositories_param(_none), do: nil
+
+  # A session row's or an open's repositories by `owner/name`; `nil` where it said none,
+  # as a plane from before the list does.
+  defp repository_names(list) when is_list(list),
+    do: for(%{"owner" => _, "name" => _} = entry <- list, do: Repositories.name(entry))
+
+  defp repository_names(_none), do: nil
 
   defp params(map) do
     map
@@ -1249,6 +1393,10 @@ defmodule Troupe.Client.Remote do
       # and this person's part in it, which together say "only you".
       visibility: session["visibility"],
       your_role: session["your_role"],
+      # How long it lasts, and when a throwaway one goes (root #1209); normal from a plane
+      # from before lifespans.
+      lifespan: Troupe.Client.Lifespan.of(session),
+      erases_at: session["erases_at"],
       # A plane cannot say how this machine's copy of a private session stands, only that
       # it is waiting to be erased (root Decision 756).
       sync: if(session["state"] == "erasure_pending", do: "erasure_pending"),

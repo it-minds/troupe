@@ -167,6 +167,22 @@ describe("a transcript opened from a checkpoint", { skip: noRecordings }, () => 
     assert.equal(paged.earlier!.more, false);
   });
 
+  it("says the summary was made when the compaction was written, or when the checkpoint was where it says none", () => {
+    const log = recorded("checkpoints", "manual.jsonl");
+    const checkpoint = lastCheckpoint(log);
+    const compacted = log.find((e) => e.seq === checkpoint.data["compacted"])!;
+    assert.notEqual(compacted.ts, checkpoint.ts);
+    const at = (state: TranscriptState): string | undefined => {
+      const e = state.entries.find((x) => x.kind === "earlier");
+      return e?.kind === "earlier" ? e.at : undefined;
+    };
+
+    assert.equal(at(fromCheckpoint({ ...checkpoint, data: { ...checkpoint.data, compacted_at: compacted.ts } })), compacted.ts);
+    // A checkpoint written before it carried the compaction's time, as the recordings are.
+    assert.equal(checkpoint.data["compacted_at"], undefined);
+    assert.equal(at(fromCheckpoint(checkpoint)), checkpoint.ts);
+  });
+
   it("starts from the summary alone for facts in a shape it does not know", () => {
     const log = recorded("checkpoints", "manual.jsonl");
     const checkpoint = lastCheckpoint(log);

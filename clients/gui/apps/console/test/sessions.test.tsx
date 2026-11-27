@@ -78,6 +78,24 @@ describe("sessions", () => {
     await sees("—", () => row("s-7f3a9c21"));
   });
 
+  // A session holding several repositories (troupe #1207): the first in the row, every
+  // other one under "+N more", each with its own branch and last commit.
+  it("shows every repository a session holds, the first in the row and the rest under +N more", async () => {
+    await open("#/sessions");
+    await waitFor(() => row("s-7f3a9c23"), "the sessions");
+    const several = row("s-7f3a9c23")!;
+    await sees("example-org/gadgets", several);
+    await sees("+1 more", several);
+    const more = several.querySelector("details")!;
+    expect(more.querySelector("summary")!.textContent).not.toContain("example-org/docs");
+    await sees("example-org/docs", several);
+    await sees("0b9a8f7", several);
+    // One repository and nothing pushed says so, with no +N.
+    const one = row("s-7f3a9c24")!;
+    await sees("example-org/widgets", one);
+    expect(says("more", one)).toBe(false);
+  });
+
   it("shows a team admin their own team's sessions and none of another's", async () => {
     await open("#/sessions", PEOPLE.bob);
     await waitFor(() => row("s-4b81d003"), "the design team's sessions");

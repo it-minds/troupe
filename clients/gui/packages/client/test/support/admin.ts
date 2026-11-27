@@ -309,6 +309,7 @@ export interface FakeTeam {
   cache_eviction_days: number | null;
   erase_after_days: number | null;
   pins_allowed: boolean | null;
+  members_may_schedule?: boolean | null;
   volume_storage_class: string | null;
   volume_size: string | null;
   allow_unenforced_workers: boolean;
@@ -503,12 +504,17 @@ export interface FakeSession {
   workspace_bytes: number;
   pinned: boolean;
   pinned_by: string | null;
+  /** How long it lasts (troupe #1209); normal where a test says nothing. */
+  lifespan?: "throwaway" | "normal" | "persistent";
+  erases_at?: string | null;
   last_active_at: string;
   parent: string | null;
   origin: "user" | "trigger";
   reviewed: boolean;
   repository?: { owner: string; name: string; ref?: string | null } | null;
   github?: Record<string, unknown> | null;
+  /** Every repository it holds, the one above first (troupe #1207); absent, the plane's answer has none. */
+  repositories?: Array<{ owner: string; name: string; ref: string | null; path: string; github: Record<string, unknown> | null }>;
 }
 
 interface Setting {
@@ -583,6 +589,7 @@ const SETTINGS: Setting[] = [
   { key: "default_erase_after_days", group: "team_defaults", type: "integer", fallback: 365, summary: "How long a session is kept before it is erased.", consequence: "No team may keep sessions longer." },
   { key: "pins_allowed", group: "team_defaults", type: "boolean", fallback: true, summary: "Whether a session may be pinned against eviction.", consequence: "Off here and no team may turn it on, whatever their own setting says." },
   { key: "members_may_control", group: "team_defaults", type: "boolean", fallback: true, summary: "Whether a team's members may drive each other's sessions.", consequence: "Off here and no team may turn it on." },
+  { key: "members_may_schedule", group: "team_defaults", type: "boolean", fallback: true, summary: "Whether teams may let a member turn on a trigger the harness proposed in their session.", consequence: "Off here and no team may turn it on, and no session proposes one." },
   {
     key: "client_release_url",
     group: "releases",
@@ -622,6 +629,14 @@ const SETTINGS: Setting[] = [
   },
   { key: "managed_mcp_servers_only", group: "sessions", type: "boolean", fallback: false, summary: "Whether a session may use only the MCP servers its bundle names.", consequence: "On, a person's own servers are not offered to sessions here." },
   { key: "default_bundle_channel", group: "sessions", type: "string", fallback: "stable", summary: "The channel a profile follows when it names none.", consequence: "Profiles that name one keep theirs." },
+  {
+    key: "throwaway_erase_after_hours",
+    group: "sessions",
+    type: "integer",
+    fallback: 24,
+    summary: "How many hours after it last worked a throwaway session is erased, from 1 to 168.",
+    consequence: "Checked every ten minutes. Erasure is irreversible; each one is in the audit trail as system:lifespan.",
+  },
   { key: "artifacts_enabled", group: "artifacts", type: "boolean", fallback: true, summary: "Whether people and their agents may publish artifacts, and open them.", consequence: "Off, nothing is published and no artifact opens; none is deleted." },
   {
     key: "artifacts_publish_organisation",
@@ -700,6 +715,7 @@ const NAMING: Record<string, { label: string; unit: string; choices?: Array<{ va
   default_erase_after_days: { label: "Erase a session after", unit: "days" },
   pins_allowed: { label: "Members may pin a session", unit: "switch" },
   members_may_control: { label: "Members may steer a team session", unit: "switch" },
+  members_may_schedule: { label: "Members may schedule a report", unit: "switch" },
   client_release_url: { label: "Where machines get releases", unit: "url" },
   client_provider: {
     label: "Provider for people's machines",
@@ -726,6 +742,7 @@ const NAMING: Record<string, { label: string; unit: string; choices?: Array<{ va
   client_enforced: { label: "What machines may not go past", unit: "text" },
   managed_mcp_servers_only: { label: "Only the profile's MCP servers", unit: "switch" },
   default_bundle_channel: { label: "Channel a new profile follows", unit: "text" },
+  throwaway_erase_after_hours: { label: "Erase a throwaway session after", unit: "hours" },
   artifacts_enabled: { label: "Artifacts may be published", unit: "switch" },
   artifacts_publish_organisation: {
     label: "Who may publish to the whole organisation",
@@ -831,6 +848,7 @@ const LADDERED: Record<string, Laddered> = {
   default_erase_after_days: { field: "erase_after_days", narrower: "lower", deployed: 365 },
   pins_allowed: { field: "pins_allowed", narrower: "off", deployed: true },
   members_may_control: { field: "members_may_control", narrower: "off", deployed: true },
+  members_may_schedule: { field: "members_may_schedule", narrower: "off", deployed: true },
 };
 
 const TEAM_KEYS = [
@@ -841,6 +859,7 @@ const TEAM_KEYS = [
   "erase_after_days",
   "members_may_control",
   "pins_allowed",
+  "members_may_schedule",
   "volume_size",
   "volume_storage_class",
   "allow_unenforced_workers",
@@ -879,7 +898,7 @@ function readTeamGitHub(current: TeamGitHubFake, sent: unknown): { github: TeamG
   }
   return { github };
 }
-const BOOLEAN_KEYS = ["members_may_control", "pins_allowed", "allow_unenforced_workers", "remote_offering_allowed"];
+const BOOLEAN_KEYS = ["members_may_control", "pins_allowed", "members_may_schedule", "allow_unenforced_workers", "remote_offering_allowed"];
 
 /** A team's name, as `Identity.Team` holds it to. */
 const TEAM_NAME = /^[a-z0-9]([a-z0-9-]{0,56}[a-z0-9])?$/;
@@ -894,6 +913,7 @@ const NEW_TEAM: Partial<FakeTeam> = {
   cache_eviction_days: 7,
   erase_after_days: 365,
   pins_allowed: true,
+  members_may_schedule: true,
   members_may_control: false,
   volume_size: "10Gi",
 };
@@ -3136,9 +3156,12 @@ export class FakeAdmin {
       workspace_bytes: s.workspace_bytes,
       pinned: s.pinned,
       pinned_by: s.pinned_by,
+      lifespan: s.lifespan ?? "normal",
+      erases_at: s.erases_at ?? null,
       last_active_at: s.last_active_at,
       repository: s.repository ?? null,
       github: s.github ?? null,
+      ...(s.repositories ? { repositories: s.repositories } : {}),
       memory: this.memoryStanding.get(s.id) ?? null,
     };
   }
@@ -4134,6 +4157,7 @@ function limitRefusal(field: string, asked: unknown, ceiling: unknown): string {
   if (field === "erase_after_days") return `The platform allows at most ${days(ceiling)} before a session is erased; ${days(asked)} is more than that.`;
   if (field === "pins_allowed") return "The platform does not let members pin a session; a team may not turn it on.";
   if (field === "members_may_control") return "The platform does not let members steer a team session; a team may not turn it on.";
+  if (field === "members_may_schedule") return "The platform does not let members turn on a proposed trigger; a team may not turn it on.";
   return `The platform allows at most ${String(ceiling)} for ${field}; ${String(asked)} is more than that.`;
 }
 
@@ -4237,6 +4261,7 @@ export function exampleAdmin(): FakeAdmin {
         cache_eviction_days: 5,
         erase_after_days: 90,
         pins_allowed: true,
+        members_may_schedule: true,
         members_may_control: true,
         volume_size: "20Gi",
         volume_storage_class: "fast-ssd",
@@ -4386,6 +4411,17 @@ export function exampleAdmin(): FakeAdmin {
         // Pushed its branch and opened no pull request yet.
         repository: { owner: "example-org", name: "gadgets", ref: "main" },
         github: { branch: "troupe/session-s-7f3a9c23", commit: "9e8d7c6b5a4f3e2d1c0b9a8f7e6d5c4b3a2f1e0d", pushes: 1 },
+        // And a second one its owner attached since, pushed to on its own branch (troupe #1207).
+        repositories: [
+          { owner: "example-org", name: "gadgets", ref: "main", path: ".", github: { branch: "troupe/session-s-7f3a9c23", commit: "9e8d7c6b5a4f3e2d1c0b9a8f7e6d5c4b3a2f1e0d", pushes: 1 } },
+          {
+            owner: "example-org",
+            name: "docs",
+            ref: null,
+            path: "example-org/docs",
+            github: { branch: "troupe/session-s-7f3a9c23", commit: "0b9a8f7e6d5c4b3a2f1e0d9e8d7c6b5a4f3e2d1c", pushes: 1 },
+          },
+        ],
       }),
       session("s-7f3a9c24", "svc:core/nightly", "core", "dev", {
         origin: "trigger",

@@ -34,6 +34,9 @@ defmodule Troupe.Session.CheckpointsTest do
     assert checkpoint.data["compacted"] == compacted.seq
     assert checkpoint.data["previous"] == nil
     assert checkpoint.data["summary"] == compacted.data["summary"]
+    # When the summary was made, beside the checkpoint's own time at the rest after it.
+    assert checkpoint.data["compacted_at"] == compacted.ts
+    assert is_binary(checkpoint.ts) and checkpoint.seq > compacted.seq
 
     assert is_integer(compacted.data["folded_through"]) and
              compacted.data["folded_through"] < compacted.seq

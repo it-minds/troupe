@@ -626,14 +626,14 @@ defmodule Troupe.UI.TUI.Server do
 
   # A page of history asked for at the top of the pane (`earlier_at_top/1`), drawn above
   # what is there; one asked before the screen changed what it holds is dropped.
-  def handle_info({:earlier, sid, before, answer}, %{session_id: sid} = state) do
-    case {state.model.earlier, answer} do
+  def handle_info({:earlier, sid, path, before, answer}, %{session_id: sid} = state) do
+    case {Model.earlier(state.model, path), answer} do
       {%{before: ^before, loading: true}, {:ok, page}} ->
-        state = keep_place(state, &Model.prepend(&1, page.events, page.more, page.first))
+        state = keep_place(state, &Model.prepend(&1, path, page.events, page.more, page.first))
         {:noreply, schedule_tick(%{state | dirty: true}), render?: false}
 
       {%{before: ^before, loading: true}, {:error, reason}} ->
-        state = %{state | model: Model.earlier_failed(state.model)}
+        state = %{state | model: Model.earlier_failed(state.model, path)}
         state = notice(state, "the earlier events did not load: " <> to_message(reason))
         {:noreply, schedule_tick(%{state | dirty: true}), render?: false}
 
@@ -1076,11 +1076,15 @@ defmodule Troupe.UI.TUI.Server do
   end
 
   # The wheel scrolls whatever is under focus: the pane's transcript, the observer's
-  # cursor, or the settings help. Three rows per notch, like a terminal.
+  # cursor, or the settings help. Three rows per notch, like a terminal. A notch up with
+  # the pane already at its top pages the history in as PgUp does.
   def handle_event(%Mouse{kind: kind}, state) when kind in ["scroll_up", "scroll_down"] do
     step = if kind == "scroll_up", do: -3, else: 3
 
     case state.focus do
+      {:window, _} when step < 0 ->
+        {:noreply, state |> earlier_at_top() |> scroll_by(step)}
+
       {:window, _} ->
         {:noreply, scroll_by(state, step)}
 
@@ -1301,7 +1305,7 @@ defmodule Troupe.UI.TUI.Server do
   # 698); this is only which of them the TUI implements, and the suite holds the two
   # equal, so a command added to the table without a clause here fails a test rather
   # than being dispatched as an agent.
-  @builtins ~w(new cancel dismiss merge discard compact goal loop steer invite uninvite share bundle sessions archive
+  @builtins ~w(new cancel dismiss merge discard compact goal loop steer invite uninvite share lifespan proposal bundle repo sessions archive
                unarchive rename keep back hq observer files
                scratch upload save publish artifacts profiles profile copy memory context watch settings
                models mcp
@@ -1732,11 +1736,39 @@ defmodule Troupe.UI.TUI.Server do
     end
   end
 
+  # How long a session lasts (root #1209): alone it says, a word makes it throwaway, normal
+  # or persistent; on the daemon for one here, at the plane for one there.
+  defp builtin("lifespan", args, state, _target) do
+    case Client.lifespan_args(args) do
+      {:ok, verb} -> notice_of(Client.lifespan(state.session_id, verb))
+      {:error, sentence} -> {:error, sentence}
+    end
+  end
+
+  # What the harness proposed in a session on the platform (root #1208): alone it says what
+  # is open, `yes` turns it on, `later` and `never` say no; the log's line follows.
+  defp builtin("proposal", args, state, _target) do
+    case Client.proposal_args(args) do
+      {:ok, verb} -> notice_of(Client.proposal(state.session_id, verb))
+      {:error, sentence} -> {:error, sentence}
+    end
+  end
+
   # Which configuration a session on the platform runs on (root #1177): alone it says,
   # `update` raises it to its channel's current version; the log's note follows.
   defp builtin("bundle", args, state, _target) do
     case Client.bundle_args(args) do
       {:ok, verb} -> notice_of(Client.bundle(state.session_id, verb))
+      {:error, sentence} -> {:error, sentence}
+    end
+  end
+
+  # The GitHub repositories a session on the platform holds (root #1207): alone it lists
+  # them, `add owner/name[@ref]` attaches one, `remove owner/name` takes one off; the log's
+  # note and the status line follow.
+  defp builtin("repo", args, state, _target) do
+    case Client.repo_args(args) do
+      {:ok, verb} -> notice_of(Client.repositories(state.session_id, verb))
       {:error, sentence} -> {:error, sentence}
     end
   end
@@ -2520,33 +2552,81 @@ defmodule Troupe.UI.TUI.Server do
   # The screen is prompt-first: the message box, then the settings as
   # one sentence of chips. `--private` and `--remote PROFILE` pre-set the chips, and
   # `--only-me` puts it on the platform as its owner's until they invite people; `--branch`
-  # forks what is on screen at once, as it always did.
-  @new_usage "/new [--private | --remote PROFILE | --only-me | --branch]"
+  # forks what is on screen at once, as it always did. `--throwaway` and `--persistent` say
+  # how long it lasts (root #1209), with any of the others but `--branch`. `--repo` names a
+  # GitHub repository the session on the platform starts on, as often as it is given.
+  @new_usage "/new [--private | --remote PROFILE | --only-me | --branch] [--throwaway | --persistent] [--repo OWNER/NAME[@REF]]..."
 
   defp new_session(state, args) do
-    case new_kind(String.split(args)) do
-      {:ok, :branch} ->
+    case new_repositories(String.split(args)) do
+      {:ok, [], words} ->
+        new_session(state, new_kind(words), [])
+
+      {:ok, repos, words} ->
+        new_session(state, new_kind(words), where: :platform, repositories: repos)
+
+      {:error, why} ->
+        notice(state, why)
+    end
+  end
+
+  defp new_session(state, kind, repos) do
+    case kind do
+      {:ok, :branch, nil} when repos == [] ->
         open_kind(state, :branch, nil)
 
-      {:ok, :local} ->
-        open_new_page(state, [])
+      {:ok, :local, lifespan} ->
+        open_new_page(state, lasting(repos, lifespan))
 
-      {:ok, :private} ->
-        open_new_page(state, private: true)
+      {:ok, :private, lifespan} when repos == [] ->
+        open_new_page(state, lasting([private: true], lifespan))
 
-      {:ok, {:remote, profile}} ->
-        open_new_page(state, where: :platform, profile: profile)
+      {:ok, {:remote, profile}, lifespan} ->
+        open_new_page(
+          state,
+          lasting(Keyword.merge(repos, where: :platform, profile: profile), lifespan)
+        )
 
-      {:ok, :only_me} ->
-        open_new_page(state, where: :platform, only_me: true)
+      {:ok, :only_me, lifespan} ->
+        open_new_page(
+          state,
+          lasting(Keyword.merge(repos, where: :platform, only_me: true), lifespan)
+        )
 
-      {:ok, {:only_me, profile}} ->
-        open_new_page(state, where: :platform, profile: profile, only_me: true)
+      {:ok, {:only_me, profile}, lifespan} ->
+        open_new_page(
+          state,
+          lasting(
+            Keyword.merge(repos, where: :platform, profile: profile, only_me: true),
+            lifespan
+          )
+        )
 
-      :usage ->
+      _usage ->
         notice(state, "usage: " <> @new_usage)
     end
   end
+
+  defp lasting(opts, nil), do: opts
+  defp lasting(opts, lifespan), do: Keyword.put(opts, :lifespan, lifespan)
+
+  # `--repo owner/name[@ref]`, as often as it is given (root #1207): the GitHub
+  # repositories a session on the platform starts on, taken out before the rest is read.
+  defp new_repositories(words, repos \\ [], rest \\ [])
+
+  defp new_repositories(["--repo", given | words], repos, rest) do
+    case Client.read_repository(given) do
+      {:ok, repository} -> new_repositories(words, repos ++ [repository], rest)
+      :error -> {:error, Client.not_a_repository(given)}
+    end
+  end
+
+  defp new_repositories(["--repo"], _repos, _rest), do: {:error, "usage: " <> @new_usage}
+
+  defp new_repositories([word | words], repos, rest),
+    do: new_repositories(words, repos, rest ++ [word])
+
+  defp new_repositories([], repos, rest), do: {:ok, repos, rest}
 
   # The agent on screen is this computer's: the page starts a session here as it, and never
   # sends it to the plane, whose profile has a default of its own.
@@ -2678,14 +2758,45 @@ defmodule Troupe.UI.TUI.Server do
     end
   end
 
-  defp new_kind([]), do: {:ok, :local}
-  defp new_kind(["--private"]), do: {:ok, :private}
-  defp new_kind(["--branch"]), do: {:ok, :branch}
-  defp new_kind(["--remote", profile]), do: {:ok, {:remote, profile}}
-  defp new_kind(["--only-me"]), do: {:ok, :only_me}
-  defp new_kind(["--remote", profile, "--only-me"]), do: {:ok, {:only_me, profile}}
-  defp new_kind(["--only-me", "--remote", profile]), do: {:ok, {:only_me, profile}}
-  defp new_kind(_words), do: :usage
+  # `/new`'s flags, in any order, each at most once: `{:ok, kind, lifespan}`, or `:usage` for
+  # a word it does not take, one said twice, or two that cannot go together (a sealed
+  # session on the platform, a fork with anything else).
+  defp new_kind(words), do: new_flags(words, %{})
+
+  defp new_flags([], flags), do: new_shape(flags)
+
+  defp new_flags(["--remote", profile | rest], flags) when not is_map_key(flags, :remote) do
+    if String.starts_with?(profile, "--"),
+      do: :usage,
+      else: new_flags(rest, Map.put(flags, :remote, profile))
+  end
+
+  defp new_flags([word | rest], flags) do
+    case new_flag(word) do
+      {key, value} when not is_map_key(flags, key) -> new_flags(rest, Map.put(flags, key, value))
+      _twice_or_unknown -> :usage
+    end
+  end
+
+  defp new_flag("--private"), do: {:private, true}
+  defp new_flag("--branch"), do: {:branch, true}
+  defp new_flag("--only-me"), do: {:only_me, true}
+  defp new_flag("--throwaway"), do: {:lifespan, "throwaway"}
+  defp new_flag("--persistent"), do: {:lifespan, "persistent"}
+  defp new_flag(_word), do: nil
+
+  defp new_shape(%{branch: true} = flags) when map_size(flags) == 1, do: {:ok, :branch, nil}
+  defp new_shape(%{branch: true}), do: :usage
+  defp new_shape(%{private: true} = flags) when is_map_key(flags, :remote), do: :usage
+  defp new_shape(%{private: true, only_me: true}), do: :usage
+  defp new_shape(%{private: true} = flags), do: {:ok, :private, flags[:lifespan]}
+
+  defp new_shape(%{only_me: true, remote: profile} = flags),
+    do: {:ok, {:only_me, profile}, flags[:lifespan]}
+
+  defp new_shape(%{only_me: true} = flags), do: {:ok, :only_me, flags[:lifespan]}
+  defp new_shape(%{remote: profile} = flags), do: {:ok, {:remote, profile}, flags[:lifespan]}
+  defp new_shape(flags), do: {:ok, :local, flags[:lifespan]}
 
   # Here: the session on screen's directory, or with a plane's on screen the one this
   # window was opened in, which is also the directory the picker lists. A branch is a fork
@@ -4931,21 +5042,25 @@ defmodule Troupe.UI.TUI.Server do
 
   ## Pane scrolling
 
-  # The view sits at its top and the session has history this screen has not folded:
-  # the page is asked for off the screen's process, and the title says so until it lands.
-  defp earlier_at_top(%{model: %{earlier: %{more: true, loading: false, before: before}}} = state) do
-    case View.pane_geometry(state) do
-      %{offset: 0} ->
-        server = self()
-        sid = state.session_id
+  # The view sits at its top and the window's session has history this screen has not
+  # folded: the page is asked for off the screen's process, of the branch's own session
+  # for a branch's window, and the title says so until it lands. One on its way asks
+  # nothing more.
+  defp earlier_at_top(%{focus: {:window, path}} = state) do
+    with %{more: true, loading: false, before: before, session_id: of} <-
+           Model.earlier(state.model, path),
+         %{offset: 0} <- View.pane_geometry(state) do
+      server = self()
+      sid = state.session_id
 
-        {:ok, _task} =
-          Task.start(fn -> send(server, {:earlier, sid, before, Client.earlier(sid, before)}) end)
+      {:ok, _task} =
+        Task.start(fn ->
+          send(server, {:earlier, sid, path, before, Client.earlier(of, before)})
+        end)
 
-        %{state | model: Model.loading_earlier(state.model), dirty: true}
-
-      _ ->
-        state
+      %{state | model: Model.loading_earlier(state.model, path), dirty: true}
+    else
+      _ -> state
     end
   end
 

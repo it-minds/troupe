@@ -32,6 +32,9 @@ defmodule Troupe.Plane.Sessions.Session do
   # all. Not the same question as `visibility`, which is who else may see it.
   @kinds ~w(team private)
   @visibilities ~w(private team)
+  # How long it lasts, which is neither of those: a team, only-me or private session can
+  # each be any of the three.
+  @lifespans Troupe.Protocol.Lifespan.words()
   # What the worker reports the session is doing. `state` above is the plane's word on
   # whether a tree exists; `status` is the worker's on what the tree is up to.
   @statuses ~w(idle thinking acting waiting done interrupted)
@@ -75,6 +78,12 @@ defmodule Troupe.Plane.Sessions.Session do
     # branch, its last commit, its draft pull request and the CI rounds on it. Metadata the
     # pod reports, never anything the session wrote.
     field(:github, :map)
+    # Every repository the session holds, the one it was created on first and each one its
+    # owner attached since: `{owner, name, ref, path, github, attached_by, attached_at}`,
+    # `path` its directory in the workspace (`.` for one cloned at the root) and `github`
+    # what the session did there. `repository` and `github` above are the first entry's,
+    # written with it, for a client and a pod from before the list (`repositories/1`).
+    field(:repositories, {:array, :map}, default: [])
     field(:bundle_version, :integer)
     # The channel `bundle_version` is a version of, so a pin names one document.
     field(:bundle_channel, :string)
@@ -82,7 +91,11 @@ defmodule Troupe.Plane.Sessions.Session do
     # yet: the version, and who asked. Cleared when a pod starts the session on it.
     field(:bundle_raise_to, :integer)
     field(:bundle_raise_by, :string)
-    field(:retention_class, :string)
+    # How long it lasts: `throwaway` is erased by the plane's sweep a set time after it last
+    # worked, asleep with nothing waiting (`Troupe.Plane.Sessions.Lifespan`); `normal` is
+    # cleared away only by its owner or an administrator; `persistent` is never cleared away
+    # by any sweep, and sleeps as any session does. Its owner's alone to change.
+    field(:lifespan, :string, default: "normal")
     field(:pinned, :boolean, default: false)
     field(:pinned_by, :string)
     field(:pinned_at, :utc_datetime_usec)
@@ -147,6 +160,10 @@ defmodule Troupe.Plane.Sessions.Session do
   @spec kinds() :: [String.t()]
   def kinds, do: @kinds
 
+  @doc "How long a session may last: `throwaway`, `normal` or `persistent`."
+  @spec lifespans() :: [String.t()]
+  def lifespans, do: @lifespans
+
   @doc "The kinds of thing that start a session."
   @spec origins() :: [String.t()]
   def origins, do: @origins
@@ -170,11 +187,12 @@ defmodule Troupe.Plane.Sessions.Session do
     :workspace_source,
     :repository,
     :github,
+    :repositories,
     :bundle_version,
     :bundle_channel,
     :bundle_raise_to,
     :bundle_raise_by,
-    :retention_class,
+    :lifespan,
     :pinned,
     :pinned_by,
     :pinned_at,
@@ -204,6 +222,36 @@ defmodule Troupe.Plane.Sessions.Session do
     :reviewed_at
   ]
 
+  @doc """
+  Every repository the session holds, first the one it was created on. A row a plane from
+  before the list wrote has its one repository at the workspace's root, with its record.
+  """
+  @spec repositories(t()) :: [map()]
+  def repositories(%__MODULE__{repositories: [_ | _] = repositories}), do: repositories
+
+  def repositories(%__MODULE__{repository: %{} = repository, github: github}),
+    do: [Map.merge(repository, %{"path" => ".", "github" => github || %{}})]
+
+  def repositories(%__MODULE__{}), do: []
+
+  @doc """
+  The columns that say what a session holds, from its list: `repositories`, and
+  `repository` and `github` as its first entry's (or none).
+  """
+  @spec holding([map()]) :: map()
+  def holding([]), do: %{repositories: [], repository: nil, github: nil}
+
+  def holding([first | _] = repositories) do
+    %{
+      repositories: repositories,
+      repository: Map.take(first, ["owner", "name", "ref"]),
+      github: blank_record(first["github"])
+    }
+  end
+
+  defp blank_record(record) when record == %{}, do: nil
+  defp blank_record(record), do: record
+
   @spec changeset(t() | Ecto.Changeset.t(), map()) :: Ecto.Changeset.t()
   def changeset(session, attrs) do
     session
@@ -212,6 +260,7 @@ defmodule Troupe.Plane.Sessions.Session do
     |> validate_inclusion(:kind, @kinds)
     |> validate_inclusion(:state, @states)
     |> validate_inclusion(:visibility, @visibilities)
+    |> validate_inclusion(:lifespan, @lifespans)
     |> validate_inclusion(:fork_reason, @fork_reasons)
     |> validate_lineage()
     |> validate_shape()
@@ -221,6 +270,7 @@ defmodule Troupe.Plane.Sessions.Session do
     |> validate_number(:cost_micros, greater_than_or_equal_to: 0)
     |> validate_number(:usage_seq, greater_than_or_equal_to: 0)
     |> check_constraint(:kind, name: :sessions_kind_shape)
+    |> check_constraint(:lifespan, name: :sessions_lifespan_word)
   end
 
   # A fork says all three things or none of them. Half a lineage — a parent with no point,

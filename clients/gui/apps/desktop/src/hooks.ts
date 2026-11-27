@@ -16,9 +16,12 @@ import {
   isDurable,
   onThisComputer,
   PlaneSource,
+  planeKnowsLifespans,
   planeOpener,
   raiseKept,
   RemoteSource,
+  repositoriesOf,
+  repositoryName,
   ServerOffer,
   SessionAttachment,
   StartQuestions,
@@ -38,16 +41,19 @@ import type {
   FleetRow,
   FleetSnapshot,
   GateAnswer,
+  Lifespan,
   OfferAnswer,
   OfferState,
   OnboardingSuggested,
   Principal,
   ProfileOffering,
   ProfileSwitch,
+  RepositoryName,
   SessionKind,
   SessionView,
   StartAnswer,
   StartState,
+  Team,
   TranscriptState,
   TroupeEvent,
 } from "@troupe/client";
@@ -186,6 +192,15 @@ export interface Marks {
    * raise kept for when it is done, which the row says from then on.
    */
   raise: (row: FleetRow) => Promise<void>;
+  /** How long it lasts, where it runs (`session.lifespan.set`, troupe #1209). Rejects with the refusal. */
+  relive: (row: FleetRow, lifespan: Lifespan) => Promise<void>;
+  /** Erase it now, where it runs (`session.erase`): a throwaway session's head offers it. Irreversible. */
+  erase: (row: FleetRow) => Promise<void>;
+  /**
+   * Attach a GitHub repository to a pod session, or take one off, at the plane (troupe
+   * #1207); the answer's list goes on the row at once. Rejects with the refusal.
+   */
+  repository: (row: FleetRow, change: { attach: RepositoryName } | { takeOff: string }) => Promise<void>;
 }
 
 /**
@@ -264,7 +279,66 @@ export function useMarks(store: FleetStore, auth: AuthSession | null, daemon: Da
     },
     [store, auth],
   );
-  return useMemo(() => ({ rename, keep, share, raise }), [rename, keep, share, raise]);
+  const repository = useCallback(
+    async (row: FleetRow, change: { attach: RepositoryName } | { takeOff: string }) => {
+      if (row.kind !== "team" || !auth) throw new Error("Only a session on the platform works on a GitHub repository");
+      const token = await auth.token();
+      const answered =
+        "attach" in change ? await auth.plane.addSessionRepository(token, row.id, change.attach) : await auth.plane.removeSessionRepository(token, row.id, change.takeOff);
+      const raw = (row.raw && typeof row.raw === "object" ? row.raw : {}) as Record<string, unknown>;
+      const held = repositoriesOf(answered);
+      store.patch(row.id, { repositories: held.map(repositoryName), raw: { ...raw, repositories: held } });
+      await store.refreshAfterChange();
+    },
+    [store, auth],
+  );
+  // How long it lasts: its daemon's for a session on this computer, the plane's for a pod
+  // one. Nothing pushes the change to a list, so the answer goes on the row at once.
+  const relive = useCallback(
+    async (row: FleetRow, lifespan: Lifespan) => {
+      const erasesAt = await where<string | null>(
+        row,
+        async (d) => (await d.setSessionLifespan(row.id, lifespan)).erases_at ?? null,
+        async (a, token) => (await a.plane.setSessionLifespan(token, row.id, lifespan)).erases_at ?? null,
+      );
+      store.patch(row.id, { lifespan, erasesAt });
+      await store.refreshAfterChange();
+    },
+    [store, where],
+  );
+  // Erased where it runs, and out of the list at once: an erased session is listed nowhere.
+  const erase = useCallback(
+    async (row: FleetRow) => {
+      await where<unknown>(
+        row,
+        (d) => d.eraseSession(row.id),
+        (a, token) => a.plane.eraseSession(token, row.id),
+      );
+      store.drop(row.id);
+      await store.refreshAfterChange();
+    },
+    [store, where],
+  );
+  return useMemo(() => ({ rename, keep, share, raise, repository, relive, erase }), [rename, keep, share, raise, repository, relive, erase]);
+}
+
+/**
+ * Whether a row's server takes a lifespan (troupe #1209): the plane's from its `initialize`,
+ * asked once a sign-in, and this computer's daemon's from its own. An older server makes
+ * every session normal whatever it is asked, so nothing offers the choice there.
+ */
+export function useLifespans(auth: AuthSession | null, daemon: DaemonClient | null): (kind: SessionKind | null | undefined) => boolean {
+  const [plane, setPlane] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    setPlane(false);
+    if (auth) void planeKnowsLifespans(auth).then((yes) => alive && setPlane(yes));
+    return () => {
+      alive = false;
+    };
+  }, [auth]);
+  const here = daemon?.supportsLifespans ?? false;
+  return useCallback((kind) => (kind === "team" ? plane : kind === "local" || kind === "private" ? here : false), [plane, here]);
 }
 
 /** Who sessions on this computer are recorded as, and what to call them. */
@@ -621,6 +695,27 @@ export function useProfiles(auth: AuthSession | null): { profiles: ProfileOfferi
   }, [auth]);
 
   return { profiles, error };
+}
+
+/**
+ * The person's teams as the plane lists them (`teams.list`), for what each lets its sessions
+ * name on GitHub (troupe #1207). Empty while asked and signed out; a plane that cannot say
+ * leaves it empty, and the chooser says the team lists none.
+ */
+export function useTeams(auth: AuthSession | null): Team[] {
+  const [teams, setTeams] = useState<Team[]>([]);
+  useEffect(() => {
+    if (!auth) return;
+    let live = true;
+    auth
+      .withToken((plane, token) => plane.listTeams(token))
+      .then((r) => live && setTeams(r.teams ?? []))
+      .catch(() => undefined);
+    return () => {
+      live = false;
+    };
+  }, [auth]);
+  return teams;
 }
 
 export interface SessionHandle {

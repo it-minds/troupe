@@ -67,6 +67,7 @@ defmodule Troupe.Plane.Admin do
   alias Troupe.Plane.Identity.ServicePrincipal
   alias Troupe.Plane.{KMSCheck, Names, OIDC, Principals, Provision, Reach, Sessions, Settings, Triggers}
   alias Troupe.Plane.SCIM.Connector
+  alias Troupe.Plane.Sessions.Session
   alias Troupe.Plane.Settings.Ladder
   alias Troupe.Plane.Triggers.{Notify, Revision, Trigger}
   alias Troupe.Protocol.{AgentDefinition, AgentRule}
@@ -1361,7 +1362,7 @@ defmodule Troupe.Plane.Admin do
   @team_keys ~w(budget_micros budget_period idle_timeout_seconds cache_eviction_days) ++
                ~w(erase_after_days members_may_control pins_allowed volume_size) ++
                ~w(volume_storage_class allow_unenforced_workers github remote_offering_allowed) ++
-               ~w(artifact_quota_bytes)
+               ~w(artifact_quota_bytes members_may_schedule)
 
   @doc "The fields of a team `admin.team.update` sets, as its schema declares them."
   @spec team_keys() :: [String.t()]
@@ -1620,6 +1621,9 @@ defmodule Troupe.Plane.Admin do
 
   defp limit_refusal(:pins_allowed, _asked, _ceiling),
     do: "The platform does not let members pin a session; a team may not turn it on."
+
+  defp limit_refusal(:members_may_schedule, _asked, _ceiling),
+    do: "The platform does not let members turn on a proposed trigger; a team may not turn it on."
 
   defp limit_refusal(:members_may_control, _asked, _ceiling),
     do: "The platform does not let members steer a team session; a team may not turn it on."
@@ -5683,6 +5687,7 @@ defmodule Troupe.Plane.Admin do
       cache_eviction_days: team.cache_eviction_days,
       erase_after_days: team.erase_after_days,
       pins_allowed: team.pins_allowed,
+      members_may_schedule: team.members_may_schedule,
       volume_storage_class: team.volume_storage_class,
       volume_size: team.volume_size,
       allow_unenforced_workers: team.allow_unenforced_workers,
@@ -5774,6 +5779,9 @@ defmodule Troupe.Plane.Admin do
       profile: session.profile,
       state: session.state,
       visibility: session.visibility,
+      lifespan: session.lifespan,
+      # When a throwaway one is erased if nothing keeps it; nil for any other.
+      erases_at: Sessions.Lifespan.erases_at(session, Sessions.Lifespan.hours()),
       epoch: session.epoch,
       last_seq: session.last_seq,
       object_bytes: session.object_bytes,
@@ -5786,7 +5794,12 @@ defmodule Troupe.Plane.Admin do
       # The repository it was created with, and its branch, last commit and draft pull
       # request there: metadata the pod reported, never what the session said.
       repository: session.repository,
-      github: session.github
+      github: session.github,
+      # Every repository it holds, the one above first, each with its own record there.
+      repositories:
+        Enum.map(Session.repositories(session), fn entry ->
+          Map.take(entry, ["owner", "name", "ref", "path", "attached_by", "attached_at", "github"])
+        end)
     }
   end
 
@@ -5863,6 +5876,7 @@ defmodule Troupe.Plane.Admin do
       :cache_eviction_days,
       :erase_after_days,
       :pins_allowed,
+      :members_may_schedule,
       :volume_storage_class,
       :volume_size,
       :github,

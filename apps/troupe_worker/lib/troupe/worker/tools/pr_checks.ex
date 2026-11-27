@@ -33,6 +33,7 @@ defmodule Troupe.Worker.Tools.PrChecks do
     %{
       "type" => "object",
       "properties" => %{
+        "repository" => GitHub.repository_property(),
         "wait" => %{
           "type" => "boolean",
           "description" => "Wait for CI to finish (the default), or answer at once with false."
@@ -51,7 +52,7 @@ defmodule Troupe.Worker.Tools.PrChecks do
   def run(args, ctx) do
     wait_ms = if args["wait"] == false, do: 0, else: max(ctx.timeout_ms - @margin_ms, 0)
 
-    case GitHub.checks(ctx.session_id, wait_ms: wait_ms) do
+    case GitHub.checks(ctx.session_id, [wait_ms: wait_ms] ++ GitHub.named(args)) do
       {:ok, result} -> {:ok, GitHub.describe_checks(result)}
       {:error, reason} -> {:error, reason}
     end

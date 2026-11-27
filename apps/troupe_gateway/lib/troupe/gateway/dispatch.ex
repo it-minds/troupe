@@ -25,6 +25,7 @@ defmodule Troupe.Gateway.Dispatch do
     Connections,
     Idle,
     Invites,
+    Lifespan,
     LocalOnly,
     LocalSources,
     Memory,
@@ -48,9 +49,10 @@ defmodule Troupe.Gateway.Dispatch do
   alias Troupe.Protocol.Digest
   alias Troupe.Protocol.Error
   alias Troupe.Protocol.Event
-  alias Troupe.Session.{ClientTools, Log}
+  alias Troupe.Session.{ClientTools, Log, Proposals}
   alias Troupe.Session.MCP, as: LocalMCP
   alias Troupe.Sessions.{Index, Title, Unseen}
+  alias Troupe.Sessions.Lifespan, as: Lasting
   alias Troupe.Todo.Edit
   alias Troupe.Tool.Result
   alias Troupe.Workflow
@@ -154,6 +156,9 @@ defmodule Troupe.Gateway.Dispatch do
     "session.repair" => :control,
     "approval.respond" => :control,
     "question.answer" => :control,
+    # A no to what the harness proposed: `control`, and on top of it the owner, which the
+    # handler asks, as `shell.run` does.
+    "session.proposal.answer" => :control,
     "todo.edit" => :control,
     # Presence says who is here, which every attached client is entitled to say and to
     # hear. It changes nothing, so it needs no more than a seat.
@@ -167,6 +172,8 @@ defmodule Troupe.Gateway.Dispatch do
     "session.unarchive" => :admin,
     "session.pin" => :admin,
     "session.title.set" => :admin,
+    # How long a session lasts, the person's say as archiving or erasing it is.
+    "session.lifespan.set" => :admin,
     "session.unpin" => :admin,
     "session.erase" => :admin,
     # Taking a private session over from another device, which then stops sealing it, is
@@ -1205,6 +1212,22 @@ defmodule Troupe.Gateway.Dispatch do
     end
   end
 
+  # The owner's no to what the harness proposed: `later`, or `never` for its key, which the
+  # host keeps. Brings a dormant session back, as an answer to a question does, since its
+  # tree holds the proposal. A yes is the plane's (`session.proposal.accept`).
+  defp handle("session.proposal.answer", params, context) do
+    with {:ok, session_id} <- fetch(params, "session_id"),
+         {:ok, id} <- fetch(params, "id"),
+         {:ok, decision} <- fetch(params, "decision"),
+         :ok <- proposal_owner(context),
+         :ok <- activate(session_id, context) do
+      case Proposals.answer(session_id, id, decision, actor(context)) do
+        :ok -> {:ok, %{"accepted" => true, "id" => id, "decision" => decision}}
+        {:error, reason} -> {:error, Error.new(:invalid_params, %{reason: reason})}
+      end
+    end
+  end
+
   defp handle("todo.edit", params, context) do
     with {:ok, session_id} <- fetch(params, "session_id"),
          {:ok, action} <- fetch(params, "action"),
@@ -1299,6 +1322,7 @@ defmodule Troupe.Gateway.Dispatch do
   defp handle("session.create", params, context) do
     with {:ok, workspace} <- fetch(params, "workspace"),
          {:ok, title} <- title_of(params),
+         {:ok, lifespan} <- lifespan_of(params["lifespan"], :create),
          {:ok, parent} <- parent_of(params),
          {:ok, resolved} <- where(workspace, params) do
       private? = Map.get(params, "private", false) == true
@@ -1322,16 +1346,20 @@ defmodule Troupe.Gateway.Dispatch do
         ]
         |> maybe_put(:task, task)
         |> maybe_put(:parent, parent)
+        |> maybe_put(:lifespan, if(lifespan != "normal", do: lifespan))
         |> maybe_private(private?)
 
       case session_agent(profile, parent, resolved.path) || Troupe.start_session(opts) do
         {:ok, session} ->
           named(session.id, title)
+          # Before sealing starts, whose first registration tells the plane the word.
+          lasting(session.id, lifespan)
 
           {:ok,
            %{
              "session_id" => session.id,
              "title" => title,
+             "lifespan" => lifespan,
              "workspace" => resolved.path,
              "worktree" => resolved.worktree,
              "branch" => resolved.branch,
@@ -1400,6 +1428,33 @@ defmodule Troupe.Gateway.Dispatch do
   end
 
   defp handle("session.unpin", params, _context), do: pin(params, false)
+
+  # How long a session on this computer lasts (#1209): the mark beside its log, which this
+  # daemon's sweep reads, and a line in a running one's log. A private session's row at the
+  # plane is told first, since the plane's sweep is the one that erases it, and a plane that
+  # cannot be told leaves it as it was.
+  defp handle("session.lifespan.set", params, context) do
+    with {:ok, session_id} <- fetch(params, "session_id"),
+         {:ok, lifespan} <- lifespan_of(params["lifespan"], :set),
+         {:ok, session} <- lookup(session_id),
+         :ok <- lifespan_at_plane(session, lifespan) do
+      case Troupe.lifespan_session(session_id, lifespan, subject(context)) do
+        :ok ->
+          {:ok,
+           Map.put(
+             lifespan_json(%{session | lifespan: lifespan}),
+             "session_id",
+             session_id
+           )}
+
+        {:error, :not_found} ->
+          {:error, Error.new(:not_found, %{session_id: session_id})}
+
+        {:error, reason} ->
+          {:error, Error.new(:internal_error, %{reason: inspect(reason)})}
+      end
+    end
+  end
 
   # A private session is sealed at the plane as well, and erased there first, as one erased
   # from elsewhere is; `state` says whether the plane has destroyed its key yet (Decision
@@ -2535,6 +2590,35 @@ defmodule Troupe.Gateway.Dispatch do
   defp named(_session_id, nil), do: :ok
   defp named(session_id, title), do: Troupe.title_session(session_id, title)
 
+  # How long a new session lasts, its mark beside the log; `session_created` said it too.
+  defp lasting(_session_id, "normal"), do: :ok
+
+  defp lasting(session_id, lifespan) do
+    _ = Lasting.put(session_id, lifespan)
+    Index.update(session_id, %{lifespan: lifespan})
+  end
+
+  # Checked before the session exists, so a word that is not one costs nothing. Absent at a
+  # create is normal; `session.lifespan.set` names one.
+  defp lifespan_of(nil, :create), do: {:ok, "normal"}
+
+  defp lifespan_of(lifespan, _when) do
+    if Troupe.Protocol.Lifespan.word?(lifespan),
+      do: {:ok, lifespan},
+      else:
+        {:error,
+         Error.new(:invalid_params, %{
+           field: "lifespan",
+           reason: "lifespan is throwaway, normal or persistent"
+         })}
+  end
+
+  # A row's lifespan, and when a throwaway one goes at this daemon's window.
+  defp lifespan_json(session) do
+    meta = %{lifespan: Map.get(session, :lifespan, "normal"), last_active_at: Map.get(session, :last_active_at)}
+    %{"lifespan" => meta.lifespan, "erases_at" => Lasting.erases_at(meta, Lifespan.hours())}
+  end
+
   # Checked before the session exists, so a title too long costs nothing.
   defp title_of(params) do
     case Title.normalise(Map.get(params, "title")) do
@@ -2695,6 +2779,19 @@ defmodule Troupe.Gateway.Dispatch do
          Error.new(:forbidden, %{
            required_scope: "admin",
            reason: "only the session's owner can run commands on it"
+         })}
+  end
+
+  # What the harness proposes is the owner's to answer: a yes spends their budget, and a no
+  # is kept as theirs.
+  defp proposal_owner(%Context{scopes: scopes}) do
+    if :admin in scopes,
+      do: :ok,
+      else:
+        {:error,
+         Error.new(:forbidden, %{
+           required_scope: "admin",
+           reason: "only the session's owner answers what the harness proposes"
          })}
   end
 
@@ -3256,6 +3353,9 @@ defmodule Troupe.Gateway.Dispatch do
       "remote" => Remote.describe(session.id)
     }
     |> Map.merge(kept_json(session))
+    # How long it lasts (#1209): `throwaway`, `normal` or `persistent`, and `erases_at` for a
+    # throwaway one, when this daemon's sweep (or the plane's, for a private one) erases it.
+    |> Map.merge(lifespan_json(session))
   end
 
   # Where a session is kept, `local` or `private` (a pod's are `team`), and for a private
@@ -3353,6 +3453,26 @@ defmodule Troupe.Gateway.Dispatch do
       {:error, :not_found} -> {:error, Error.new(:not_found, %{kind: "session", id: session_id})}
     end
   end
+
+  # A private session's lifespan is its plane row's as well, which the plane's sweep reads:
+  # told first, and nothing changed here where the plane could not be told.
+  defp lifespan_at_plane(%{kind: "private", id: session_id}, lifespan) do
+    case Plane.call("session.lifespan.set", %{"session_id" => session_id, "lifespan" => lifespan}) do
+      {:ok, _row} ->
+        :ok
+
+      {:error, reason} ->
+        {:error,
+         Error.new(:unavailable, %{
+           session_id: session_id,
+           reason:
+             "a private session's lifespan is kept at the plane it is sealed at, which could " <>
+               "not be told (#{inspect(reason)}); sign in on this computer and try again"
+         })}
+    end
+  end
+
+  defp lifespan_at_plane(_local, _lifespan), do: :ok
 
   defp erase_private(%{id: session_id} = session) do
     case Private.erase(session) do

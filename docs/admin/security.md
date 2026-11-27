@@ -324,9 +324,13 @@ keyed, so it does not prove anything against someone who can rewrite the whole t
 **Erasing.** The owner erases a session with `session.erase`, an administrator with
 `admin.session.erase`. On a machine that deletes its directory. On a plane the plane
 destroys the session's key first, then every object version, which needs bucket
-versioning on ([routine-tasks.md](routine-tasks.md#erase-a-session), Decision 811). A
-team's retention period (`erase_after_days`) is recorded and shown, and nothing yet erases
-a session when it passes (#635).
+versioning on ([routine-tasks.md](routine-tasks.md#erase-a-session), Decision 811). One
+kind of session is erased without anybody asking: a **throwaway** one, which its owner
+chose, once it has been quiet for `throwaway_erase_after_hours` (24 by default), asleep
+with nothing waiting, through the same erasure and in the audit trail as `system:lifespan`
+(Decision 1110). A team's retention period (`erase_after_days`) is recorded and shown, and
+nothing yet erases a normal session when it passes (#635); nothing ever erases a
+persistent one but its owner or an administrator.
 
 **A private session** runs on the person's machine and nowhere else, sealed under a key in
 their own part of OpenBao that no pod can reach. The plane learns that it exists and how

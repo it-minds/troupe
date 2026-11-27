@@ -34,6 +34,31 @@ On the platform, *Only me, until I invite people* (`/new --only-me`, `troupe run
 [invite people](sessions-shared.md#starting-it-as-only-you). What a profile gives the session is on [profiles](profiles.md), and the terminal's screen
 for it on [a new session](terminal-screen.md#a-new-session).
 
+## How long a session lasts
+
+A session is **Normal** unless you say otherwise: it sleeps when nothing runs, wakes when
+you use it, and stays until you erase it. Two other lifespans are chosen in the same
+sentence as you start it, or later from the session's ⋯ (`/lifespan` in the terminal):
+
+- **Throwaway**, for a short question: erased a day after it goes quiet, which is
+  24 hours after it last worked by default (your administrator sets 1 to 168). Its row says
+  when, *throwaway · goes in 18 h*. It is not erased while it is awake, while it waits on
+  an approval or a question, while it is kept at the top, or before somebody has reviewed
+  a trigger's run. Erasing takes the whole session: its log, its workspace, its key and its
+  invitations; what it cost and the audit stay. It may publish an artifact, which outlives
+  it, and remember things in your own memory, but it proposes nothing for a team's or the
+  organisation's memory. The head offers **Erase now**, and **Keep it**, which makes it
+  normal. `/new --throwaway` and `troupe run --throwaway` start one.
+- **Persistent**, for a report you build over days: kept until you erase it, and never
+  cleared away by anything else. It still sleeps, and costs nothing asleep. `/new
+  --persistent` starts one.
+
+Only a session's owner changes its lifespan. A fork is normal unless you ask otherwise,
+whatever the session it came from. A session on your computer that is throwaway is erased
+by the daemon in the same way, after the same window (`throwaway_erase_after_hours` in its
+[configuration](configuration.md)); a private one is erased by the plane, which
+holds its key.
+
 ## Raising a session to the current configuration
 
 A session on the platform runs on the bundle version its profile's channel had when it
@@ -129,13 +154,27 @@ it). "No limit this session" lifts the limit it asked about for the rest of the 
 and the others still ask. Apart from the budget, a tool that fails ten times in a row
 stops the turn and asks whether to go on, even with every limit lifted.
 
-## A repository
+## Repositories
 
-A session on the plane may be created with a GitHub repository
-(`owner/name`), and its pod starts from a clone of it. On a profile that allows it, the
-agent then pushes its work to a `troupe/*` branch, opens a draft pull request, reads CI on
-it and pushes fixes, as your organisation's GitHub App and never as you; after three red
-CI rounds it stops, says on the pull request what still fails, and leaves the draft for a
-person. Each push and the pull request's link are in the transcript, and the session's
-listing shows its branch, last commit and pull request
+On a profile that allows GitHub, a new session on the platform offers your team's
+repositories after the profile ("… with dev [on no repository] as build"); pick one or
+several, with a branch where it is not the default (`owner/name@branch`), up to as many as
+the profile allows. In the terminal it is `/new --repo owner/name[@branch]`, once for each,
+and `troupe run --repo`. A profile that does not allow GitHub offers none, and one your team
+does not list is refused, saying why. The first is cloned at the top of the session's
+workspace, each other one in its own folder, `owner/name`, and the agent is told where
+each is from its first turn.
+
+While it runs, its owner attaches another (*Attach a repository* in the session's
+Backstage, `/repo add owner/name[@branch]`), cloned without a restart, and takes one off
+(*Take off*, `/repo remove owner/name`), which deletes its folder; the agent is told either
+way. `/repo` lists them. Nobody else may, and a repository being pushed to is taken off
+once the push is done. The list of sessions shows the first and how many more.
+
+The agent pushes its work on each to a `troupe/*` branch of its own, opens a draft pull
+request, reads CI on it and pushes fixes, as your organisation's GitHub App and never as
+you, naming the repository where there are several; after three red CI rounds on one it
+stops there, says on the pull request what still fails, and leaves the draft for a person.
+Each push and pull request link is in the transcript, and Backstage shows each
+repository's branch, last commit and pull request
 ([the GitHub App](../admin/github-runs.md#the-fix-loop)).

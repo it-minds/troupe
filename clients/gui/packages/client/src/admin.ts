@@ -17,6 +17,7 @@ import type { AgentCheck } from "./agents.js";
 import type { ArtifactComment, ArtifactDetail } from "./artifacts.js";
 import type { MemoryEntry } from "./entries.js";
 import type { MemoryProposal } from "./instructions.js";
+import type { SessionRepository } from "./plane.js";
 import type { UnpricedCalls } from "./profile.js";
 
 /**
@@ -38,11 +39,20 @@ export interface AdminSessionRow {
   workspace_bytes: number | null;
   pinned: boolean | null;
   pinned_by: string | null;
+  /** How long it lasts (troupe #1209); absent from an older plane, whose every session is normal. */
+  lifespan?: string | null;
+  /** When a throwaway one is erased if nothing keeps it; null for any other. */
+  erases_at?: string | null;
   last_active_at: string | null;
   /** The GitHub repository it was created with, which its pod cloned; null for none. */
   repository?: { owner: string; name: string; ref?: string | null } | null;
   /** What it did there, as its pod reported it; null until it has done something. */
   github?: SessionGitHub | null;
+  /**
+   * Every repository it holds, the one above first, each with its own record (troupe #1207);
+   * absent from an older plane.
+   */
+  repositories?: SessionRepository[] | null;
   /**
    * For a session running on a pod that has had a turn: whether that turn read the memory in
    * force for it (`current`) or an older version (`behind`). Absent otherwise, and from a
@@ -456,6 +466,8 @@ export interface AdminTeam extends TeamSpend {
   cache_eviction_days: number | null;
   erase_after_days: number | null;
   pins_allowed: boolean | null;
+  /** Whether a member may turn on a trigger the harness proposed (troupe #1208); absent from an older plane. */
+  members_may_schedule?: boolean | null;
   volume_storage_class: string | null;
   volume_size: string | null;
   /** A platform admin's to set; whether the team may be granted a profile nothing is enforced on. */
@@ -930,7 +942,7 @@ export interface TriggerRun {
  * How a person reads and types a setting's value. Not the value's own unit: a `dollars`
  * value is millionths of a dollar and a `minutes` one seconds, on the wire both ways.
  */
-export type SettingUnit = "days" | "days_or_off" | "minutes" | "seconds" | "dollars" | "bytes" | "count" | "switch" | "text" | "choice" | "url";
+export type SettingUnit = "days" | "days_or_off" | "hours" | "minutes" | "seconds" | "dollars" | "bytes" | "count" | "switch" | "text" | "choice" | "url";
 
 /** A setting's name and unit, as `admin.settings.list` and `admin.setting.effective` carry them; absent from a plane from before them. */
 export interface SettingNaming {

@@ -37,10 +37,15 @@ import {
   fullHouseSentence,
   pickLine,
   messageTokens,
+  LIFESPAN_CHOICES,
+  lifespanChoice,
   ONLY_ME_TICK,
   onlyMeSentence,
   platformVisibility,
   profileRoom,
+  repositoriesSummary,
+  repositoryName,
+  repositoryParam,
   stripTokens,
   teamQuestion,
   teamsToChoose,
@@ -48,14 +53,16 @@ import {
   tokensSentence,
   whoCanOpen,
 } from "@troupe/client";
-import type { AgentRow, Attachment, AuthSession, DaemonClient, FleetRow, NewSessionWhere, ProfileOffering, SessionKind } from "@troupe/client";
-import { useProfiles } from "../hooks";
+import type { AgentRow, Attachment, AuthSession, DaemonClient, FleetRow, Lifespan, NewSessionWhere, ProfileOffering, SessionKind } from "@troupe/client";
+import { useLifespans, useProfiles, useTeams } from "../hooks";
 import { prefs } from "../shell";
 import { useChooseFolder } from "./ChooseFolder";
 import { Mask } from "./brand";
+import { RepositoryChooser, teamRepositories } from "./Repositories";
+import type { ChosenRepository } from "./Repositories";
 
 type DaemonStatus = "unsupported" | "searching" | "absent" | "connected" | "error";
-type Picker = "where" | "folder" | "profile" | "agent" | "team";
+type Picker = "where" | "folder" | "profile" | "repository" | "agent" | "team";
 
 /** The pref the last profile chosen is kept under, which the auto-pick starts from before any session exists. */
 const LAST_PROFILE = "newSession.profile";
@@ -108,6 +115,7 @@ export function StartSession({
   const quip = firstLine("start_screen", seed);
   const curtain = firstLine("curtain_up", seed);
   const { profiles, error: profilesError } = useProfiles(auth);
+  const teamRows = useTeams(auth);
   const localReady = daemon !== null && daemonStatus === "connected";
 
   const [text, setText] = useState("");
@@ -123,6 +131,10 @@ export function StartSession({
   // On the platform: the session is its owner's alone until they invite people, on the
   // team's profile and budget all the same. Off, it is the team's from its first second.
   const [onlyMe, setOnlyMe] = useState(false);
+  // How long it lasts (troupe #1209): normal unless chosen, and offered only where the
+  // server it starts on says it knows lifespans, since an older one makes it normal anyway.
+  const [lifespan, setLifespan] = useState<Lifespan>("normal");
+  const lifespans = useLifespans(auth, daemon);
   const [open, setOpen] = useState<Picker | null>(null);
   const [ceilingSaid, setCeilingSaid] = useState<Record<string, string>>({});
   const [casting, setCasting] = useState<Casting | null>(null);
@@ -131,6 +143,8 @@ export function StartSession({
   const [teamPicks, setTeamPicks] = useState<Record<string, string>>({});
   const [teamsAsked, setTeamsAsked] = useState<Record<string, string[]>>({});
   const [startOnTeam, setStartOnTeam] = useState(false);
+  // The GitHub repositories it starts on, where its profile allows GitHub (troupe #1207).
+  const [repos, setRepos] = useState<ChosenRepository[]>([]);
   const recentFolders = useRecentFolders(daemon);
 
   const me = auth?.me?.subject ?? null;
@@ -185,6 +199,14 @@ export function StartSession({
   // Each tick says only where it applies: a sealed session is this computer's, only-me the platform's.
   const whoTeams = team ? [team] : (prof?.teams ?? myTeams);
   const who = whoCanOpen(where, { teams: whoTeams, private: local && privately, onlyMe: !local && onlyMe });
+  // What the create sends of how long it lasts: nothing where its server would not know it.
+  const canLast = lifespans(local ? (privately ? "private" : "local") : "team");
+  const lasting: Lifespan | null = canLast ? lifespan : null;
+  // Offered only on a profile with `spec.github`, from what the session's team lists; a
+  // profile without it says null and the sentence has no repository in it.
+  const maxRepos = !local && typeof prof?.max_repositories === "number" ? prof.max_repositories : null;
+  const listedRepos = maxRepos === null ? [] : teamRepositories(teamRows, team ?? (whoTeams.length === 1 ? whoTeams[0]! : null));
+  const sentRepos = maxRepos === null ? [] : repos.slice(0, maxRepos);
 
   let why = "";
   let warn = false;
@@ -318,9 +340,17 @@ export function StartSession({
         setOpen("team");
         setStartOnTeam(true);
       };
-      void castOnPlatform(auth!, prof, { agent: as ?? platformDefault, title: startedTitle, prompt: cleaned, team: forTeam, onlyMe }, set, alive, (reason) => setCeilingSaid((c) => ({ ...c, [prof.name]: reason })), askTeam);
+      void castOnPlatform(
+        auth!,
+        prof,
+        { agent: as ?? platformDefault, title: startedTitle, prompt: cleaned, team: forTeam, onlyMe, repositories: sentRepos, lifespan: lasting },
+        set,
+        alive,
+        (reason) => setCeilingSaid((c) => ({ ...c, [prof.name]: reason })),
+        askTeam,
+      );
     } else if (daemon) {
-      void castHere(daemon, { workspace: folder.trim(), agent: as, worktree, watch, privately, title: startedTitle, prompt: cleaned }, set);
+      void castHere(daemon, { workspace: folder.trim(), agent: as, worktree, watch, privately, title: startedTitle, prompt: cleaned, lifespan: lasting }, set);
     }
   };
 
@@ -411,6 +441,14 @@ export function StartSession({
                 <Chip label="Which profile" mono expanded={shownPicker === "profile"} onClick={() => toggle("profile")} tone={full || atCeiling ? "queued" : undefined}>
                   {prof?.name ?? "no profile"}
                 </Chip>{" "}
+                {maxRepos !== null && (
+                  <>
+                    on{" "}
+                    <Chip label="Which repositories" mono expanded={shownPicker === "repository"} onClick={() => toggle("repository")}>
+                      {repositoriesSummary(sentRepos.map(repositoryName)) || "no repository"}
+                    </Chip>{" "}
+                  </>
+                )}
               </>
             )}
             as{" "}
@@ -508,6 +546,12 @@ export function StartSession({
             </PickerPanel>
           )}
 
+          {shownPicker === "repository" && maxRepos !== null && (
+            <PickerPanel title="WHAT IT WORKS ON" hint="OWNER/NAME@BRANCH">
+              <RepositoryChooser listed={listedRepos} chosen={sentRepos} max={maxRepos} onChange={setRepos} />
+            </PickerPanel>
+          )}
+
           {shownPicker === "team" && teamChoice && prof && (
             <PickerPanel title="WHICH TEAM IT IS FOR" hint="ITS BUDGET PAYS">
               {teamCandidates.map((name) => (
@@ -544,6 +588,18 @@ export function StartSession({
               <p className="ns-who">
                 {onlyMeSentence(onlyMe, team ? [team] : teamChoice ? null : whoTeams)}
               </p>
+            </div>
+          )}
+
+          {canLast && (
+            <div className="ns-only-me ns-lifespan" role="radiogroup" aria-label="How long it lasts">
+              {LIFESPAN_CHOICES.map((c) => (
+                <label key={c.value} className="inline ns-small">
+                  <input type="radio" name="ns-lifespan" value={c.value} checked={lifespan === c.value} onChange={() => setLifespan(c.value)} />
+                  {c.label}
+                </label>
+              ))}
+              <p className="ns-who">{lifespanChoice(lifespan).sentence}.</p>
             </div>
           )}
 
@@ -858,7 +914,15 @@ const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms
 async function castOnPlatform(
   auth: AuthSession,
   prof: ProfileOffering,
-  ask: { agent: string | null; title: string; prompt: string; team: string | null; onlyMe: boolean },
+  ask: {
+    agent: string | null;
+    title: string;
+    prompt: string;
+    team: string | null;
+    onlyMe: boolean;
+    repositories: ChosenRepository[];
+    lifespan: Lifespan | null;
+  },
   set: SetCasting,
   alive: () => boolean,
   onCeiling: (reason: string) => void,
@@ -877,6 +941,10 @@ async function castOnPlatform(
         ...(ask.agent ? { agent: ask.agent } : {}),
         ...(ask.title ? { title: ask.title } : {}),
         ...(ask.prompt ? { prompt: ask.prompt } : {}),
+        // Only where the plane said it knows the word, and only where it is not normal.
+        ...(ask.lifespan && ask.lifespan !== "normal" ? { lifespan: ask.lifespan } : {}),
+        // The first is cloned at the workspace's root, each other in its own directory.
+        ...(ask.repositories.length > 0 ? { repositories: ask.repositories.map(repositoryParam) } : {}),
       }),
     );
   } catch (e) {
@@ -909,7 +977,16 @@ async function castOnPlatform(
 /** A start on this computer: the daemon's create, which answers once the session is made. */
 async function castHere(
   daemon: DaemonClient,
-  ask: { workspace: string; agent: string | null; worktree: "auto" | "never" | "always"; watch: boolean; privately: boolean; title: string; prompt: string },
+  ask: {
+    workspace: string;
+    agent: string | null;
+    worktree: "auto" | "never" | "always";
+    watch: boolean;
+    privately: boolean;
+    title: string;
+    prompt: string;
+    lifespan: Lifespan | null;
+  },
   set: SetCasting,
 ): Promise<void> {
   try {
@@ -923,6 +1000,7 @@ async function castHere(
       ...(ask.title ? { title: ask.title } : {}),
       config: { watch: ask.watch },
       ...(ask.privately ? { private: true } : {}),
+      ...(ask.lifespan && ask.lifespan !== "normal" ? { lifespan: ask.lifespan } : {}),
     });
     set({ id: created.session_id, kind: ask.privately ? "private" : "local", workspace: created.workspace ?? ask.workspace, done: 2 });
   } catch (e) {
@@ -933,6 +1011,8 @@ async function castHere(
 /** A refusal in one line, starting as a sentence does: the plane's or the daemon's own where it gave one. */
 function refusal(e: unknown): string {
   const said = errorText(e);
+  // A sentence that starts with a repository's `owner/name` keeps the name as it is.
+  if (/^\S+\/\S+:/.test(said)) return said;
   return said.charAt(0).toUpperCase() + said.slice(1);
 }
 

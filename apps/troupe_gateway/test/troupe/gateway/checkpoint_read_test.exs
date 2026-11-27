@@ -78,19 +78,47 @@ defmodule Troupe.Gateway.CheckpointReadTest do
     assert Enum.map(collect(head), & &1.seq) == Enum.to_list(1..head)
   end
 
-  test "session.events pages back before a seq, oldest first, a page at a time", context do
+  test "session.events pages back before a seq, oldest first, a page at a time, each beginning a turn",
+       context do
     id = dormant(context, @recorded, "manual")
     log = log(@recorded, "manual")
     [first | _] = Enum.filter(log, &(&1["type"] == "checkpoint"))
     through = first["data"]["through"]
     client = connect(context)
 
-    assert {:ok, %{"events" => page, "more" => true}} = Client.session_events(client, id, through, limit: 10)
-    assert Enum.map(page, & &1["seq"]) == Enum.to_list((through - 10)..(through - 1))
-    assert page == Enum.filter(log, &(&1["seq"] in (through - 10)..(through - 1)))
+    # The last ten before `through` begin in the middle of a turn: the page starts after
+    # the first rest in them, so no reply is drawn without the line it answers.
+    raw = (through - 10)..(through - 1)
+    refute rest?(Enum.find(log, &(&1["seq"] == through - 11)))
+    rest = Enum.find(log, &(&1["seq"] in raw and rest?(&1)))
 
-    {:ok, %{"events" => older, "more" => false}} = Client.session_events(client, id, through - 10)
-    assert Enum.map(older, & &1["seq"]) == Enum.to_list(1..(through - 11))
+    assert {:ok, %{"events" => page, "more" => true}} = Client.session_events(client, id, through, limit: 10)
+    assert Enum.map(page, & &1["seq"]) == Enum.to_list((rest["seq"] + 1)..(through - 1))
+    assert page == Enum.filter(log, &(&1["seq"] in (rest["seq"] + 1)..(through - 1)))
+
+    # The next page ends at that rest: nothing lost between the two, nothing twice.
+    {:ok, %{"events" => older, "more" => false}} = Client.session_events(client, id, rest["seq"] + 1)
+    assert Enum.map(older, & &1["seq"]) == Enum.to_list(1..rest["seq"])
+    assert List.last(older) == rest
+  end
+
+  test "a turn longer than the page is answered whole, and one longer than the cap in pieces", context do
+    # A turn of 1,200 events after one of three, then one of 6,000.
+    turn = fn n, text ->
+      [%Event{type: "user_input", agent: ["root"], data: %{"text" => text}}] ++
+        List.duplicate(%Event{type: "llm_request", agent: ["root"], data: %{}}, n - 2) ++
+        [%Event{type: "turn_ended", agent: ["root"], data: %{}}]
+    end
+
+    id = dormant_log(context, seal(turn.(3, "short") ++ turn.(1_200, "long") ++ turn.(6_000, "longer")))
+    client = connect(context)
+
+    {:ok, %{"events" => long, "more" => true}} = Client.session_events(client, id, 1_204, limit: 500)
+    assert Enum.map(long, & &1["seq"]) == Enum.to_list(4..1_203)
+    assert hd(long)["data"]["text"] == "long"
+
+    {:ok, %{"events" => longer, "more" => true}} = Client.session_events(client, id, 7_204)
+    assert Enum.map(longer, & &1["seq"]) == Enum.to_list(2_204..7_203)
   end
 
   test "a page past 500, a seq below 1, and from with from_seq are refused", context do
@@ -111,11 +139,14 @@ defmodule Troupe.Gateway.CheckpointReadTest do
   end
 
   test "an open from the checkpoint, and a page before it, decode only what they answer", context do
-    # 2,000 events, the checkpoint at 1,990 standing for 1,989.
+    # 2,000 events, a turn every ten, the checkpoint at 1,990 standing for 1,989.
     events =
       Enum.map(1..2_000, fn
         1_990 ->
           %Event{type: "checkpoint", agent: ["root"], data: checkpoint_data(1_989)}
+
+        n when rem(n, 10) == 0 ->
+          %Event{type: "turn_ended", agent: ["root"], data: %{}}
 
         n ->
           %Event{type: "user_input", agent: ["root"], data: %{"text" => "line #{n}"}}
@@ -139,10 +170,14 @@ defmodule Troupe.Gateway.CheckpointReadTest do
     assert Troupe.get_session(id)
 
     {result, decoded} = counting(fn -> Client.session_events(client, id, 1_000, limit: 50) end)
+    # The fifty before 1,000 and the one before them, which says they begin mid-turn; the
+    # page starts after the rest at 950.
     assert {:ok, %{"events" => page, "more" => true}} = result
-    assert Enum.map(page, & &1["seq"]) == Enum.to_list(950..999)
-    assert decoded == 50
+    assert Enum.map(page, & &1["seq"]) == Enum.to_list(951..999)
+    assert decoded == 51
   end
+
+  defp rest?(event), do: event["agent"] == ["root"] and event["type"] in ["turn_ended", "cancelled", "agent_done"]
 
   defp checkpoint_data(through) do
     %{

@@ -53,7 +53,7 @@ gitops mode a manifest names its image, and a release reaches the workers with a
 | `memoryProposals` | `false` refuses every proposal its sessions make to a team's or the organisation's memory; absent, the platform setting decides ([a profile's options](profile-options.md#proposals-to-shared-memory-from-a-pod)) |
 | `permissions` | per-tool `deny`, `ask` and `allow` rules every session on these pods obeys ([a profile's options](profile-options.md#per-tool-rules-on-a-profile)) |
 | `agents` | which agents exist on these pods, built-ins included: `allow` and `deny` lists of names, a grant narrowing only what they leave ([a profile's options](profile-options.md#which-agents-a-profile-has)) |
-| `github.*` | what a session's token may do on GitHub beyond cloning (`permissions`, [github.md §5](github.md#5-let-a-profile-reach-github)) and how far the fix loop goes (`allowPublic`, `denyPaths`, `maxPushes`, `maxRuns`, `maxAttempts`, [github.md §7](github.md#7-how-far-a-run-may-go)) |
+| `github.*` | what a session's token may do on GitHub beyond cloning (`permissions`, [github.md §5](github.md#5-let-a-profile-reach-github)) and how far the fix loop goes (`allowPublic`, `denyPaths`, `maxPushes`, `maxRuns`, `maxAttempts`, [github.md §7](github.md#7-how-far-a-run-may-go)), and how many repositories a session holds (`maxRepositories`, [§6](github.md#6-name-a-repository)) |
 | `mcpIdentities` | who the profile is at each MCP server its bundle calls with client credentials ([a profile's options](profile-options.md#calling-an-mcp-server-as-the-profile)). Yours to write in direct and gitops mode alike; nothing in it is secret |
 | `mcpServers` | MCP servers the profile adds to its bundle's (Decision 910). The resource's list, which its pods load, is its channel's bundle's with these added by name; one named like a bundle server replaces it only with `"override": true`. A publish to the channel composes the two again and keeps the profile's own. `admin.profile.get` answers the own ones in `spec`, and a put that sends back the resource's whole list has the bundle's dropped |
 | `teams` | **written by the plane** from grants; do not set it |
@@ -204,7 +204,7 @@ as they empty (Decision 726):
 2. The plane places new sessions on a pod on the current revision while one has room. Once
    a pod behind holds no active session, the plane drains it, one pod per profile at a
    time, highest ordinal first. A pod whose sessions stay busy is left alone until they go
-   dormant (ten minutes idle, unless somebody is reading).
+   dormant (after their team's idle timeout with nothing to do).
 3. When the pod is draining and holds nothing, the plane records it, with the revision it
    ran, in the profile's `troupe.dev/drained` annotation.
 4. The operator deletes a pod that is behind, recorded at the revision it still runs, and

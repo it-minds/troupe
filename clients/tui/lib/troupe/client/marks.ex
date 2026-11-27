@@ -2,8 +2,9 @@ defmodule Troupe.Client.Marks do
   @moduledoc """
   A session's name and whether it is kept at the top of the session list, in the sentences
   `/rename` and `/keep` say, whichever side the session lives on. Both are the owner's, and
-  both are the session's for everyone who sees it. Kept, a session is listed first, and a
-  plane does not clear it away under its retention (`session.pin`).
+  both are the session's for everyone who sees it. Kept, a session is listed first
+  (`session.pin`), and that is all keeping it does: how long it lasts is its lifespan's
+  (`Troupe.Client.Lifespan`).
   """
 
   @doc "The sentence for a session just named, or whose name was taken off (`nil`)."

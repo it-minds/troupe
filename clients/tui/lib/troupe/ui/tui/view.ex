@@ -729,15 +729,20 @@ defmodule Troupe.UI.TUI.View do
   Where a private session is kept and how its sealing stands, `private · synced`, in the
   desktop app's words (`@troupe/client`'s `syncWords`); `only you` for a pod session of the
   person's own the team cannot open (`@troupe/client`'s `onlyYou`), never "private", which
-  is a sealed session's word; empty for any other session.
+  is a sealed session's word; empty for any other session. Then how long it lasts, where it
+  is not normal (root #1209): `throwaway · goes in 18 h`, `persistent`.
   """
   @spec kept(map()) :: String.t()
   def kept(entry) do
-    case {Map.get(entry, :kind), Map.get(entry, :sync)} do
-      {"private", nil} -> "private"
-      {"private", sync} -> "private · " <> elem(sync_words(sync, Map.get(entry, :device)), 0)
-      _other -> if only_you?(entry), do: only_you(), else: ""
-    end
+    whose =
+      case {Map.get(entry, :kind), Map.get(entry, :sync)} do
+        {"private", nil} -> "private"
+        {"private", sync} -> "private · " <> elem(sync_words(sync, Map.get(entry, :device)), 0)
+        _other -> if only_you?(entry), do: only_you(), else: ""
+      end
+
+    lasts = Client.lifespan_mark(Map.get(entry, :lifespan), Map.get(entry, :erases_at))
+    [whose, lasts] |> Enum.reject(&(&1 == "")) |> Enum.join(" · ")
   end
 
   @doc "The mark of a pod session only its owner and the people they invite can open."
@@ -2650,13 +2655,22 @@ defmodule Troupe.UI.TUI.View do
       if(new > 0, do: " · #{new} new", else: "") <> loading_earlier(state) <> " "
   end
 
-  # A page of the history before the checkpoint the session opened from is on its way.
-  defp loading_earlier(%{model: %{earlier: %{loading: true}}}), do: " · loading earlier…"
-  defp loading_earlier(_state), do: ""
+  # A page of the history before the checkpoint the window opened from is on its way.
+  defp loading_earlier(state) do
+    case viewed_earlier(state) do
+      %{loading: true} -> " · loading earlier…"
+      _ -> ""
+    end
+  end
 
-  # The view is at its top and the session has history this screen has not drawn.
-  defp earlier_above?(%{offset: 0}, %{model: %{earlier: %{more: true, loading: false}}}), do: true
+  # The view is at its top and the window has history this screen has not drawn.
+  defp earlier_above?(%{offset: 0}, state),
+    do: match?(%{more: true, loading: false}, viewed_earlier(state))
+
   defp earlier_above?(_g, _state), do: false
+
+  defp viewed_earlier(%{focus: {:window, path}, model: model}), do: Model.earlier(model, path)
+  defp viewed_earlier(_state), do: nil
 
   # Context keys on the bottom border: the widest phrasing that fits, and only the keys
   # that do something right now. `End` stays in every form — once you have scrolled up it
@@ -3091,7 +3105,7 @@ defmodule Troupe.UI.TUI.View do
 
   defp remote_note(%{model: %{remote: %{} = remote}}) do
     mine = if remote[:only_me?], do: " · " <> only_you(), else: ""
-    state = " · remote (#{remote[:state] || "?"})" <> mine
+    state = " · remote (#{remote[:state] || "?"})" <> mine <> on_github(remote[:repositories])
 
     case remote[:reason] do
       reason when is_binary(reason) -> state <> " · #{reason}"
@@ -3100,6 +3114,10 @@ defmodule Troupe.UI.TUI.View do
   end
 
   defp remote_note(_state), do: ""
+
+  # The GitHub repositories a pod session holds (root #1207): the first, and how many more.
+  defp on_github([_ | _] = names), do: " · on " <> Troupe.Client.repositories_summary(names)
+  defp on_github(_none), do: ""
 
   # The reason input is off, when it is: a read-only session, a viewer token, or
   # a connection that is coming back.

@@ -1,0 +1,38 @@
+{
+  "$id": "https://troupe.dev/schema/v1/events/session_repository_changed.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "properties": {
+    "action": {
+      "type": "string"
+    },
+    "by": {
+      "type": "string"
+    },
+    "by_name": {
+      "type": "string"
+    },
+    "path": {
+      "type": "string"
+    },
+    "reason": {
+      "type": "string"
+    },
+    "ref": {
+      "type": "string"
+    },
+    "repositories": {
+      "type": "array"
+    },
+    "repository": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "action",
+    "repositories",
+    "repository"
+  ],
+  "title": "session_repository_changed",
+  "type": "object"
+}

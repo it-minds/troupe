@@ -164,7 +164,13 @@ defmodule Troupe.Client do
   @callback invites(session_id(), invite_verb()) :: {:ok, String.t()} | {:error, term()}
   @callback share(session_id(), Troupe.Client.Share.verb()) ::
               {:ok, String.t()} | {:error, String.t()}
+  @callback proposal(session_id(), Troupe.Client.Proposal.verb()) ::
+              {:ok, String.t()} | {:error, String.t()}
   @callback bundle(session_id(), Troupe.Client.Bundle.verb()) ::
+              {:ok, String.t()} | {:error, String.t()}
+  @callback lifespan(session_id(), Troupe.Client.Lifespan.verb()) ::
+              {:ok, String.t()} | {:error, String.t()}
+  @callback repositories(session_id(), Troupe.Client.Repositories.verb()) ::
               {:ok, String.t()} | {:error, String.t()}
   @callback archive(session_id(), boolean()) :: {:ok, String.t()} | {:error, String.t()}
   @callback rename(session_id(), String.t()) :: {:ok, String.t()} | {:error, String.t()}
@@ -597,6 +603,23 @@ defmodule Troupe.Client do
   defdelegate share_args(text), to: Troupe.Client.Share, as: :parse
 
   @doc """
+  How long a session lasts (root #1209): `:status` says, `{:set, word}` makes it
+  `throwaway`, `normal` or `persistent`, which only its owner may do; on the daemon for a
+  session on this computer, at the plane for one there. Answers the sentence to show.
+  """
+  @spec lifespan(session_id(), Troupe.Client.Lifespan.verb()) ::
+          {:ok, String.t()} | {:error, String.t()}
+  def lifespan(sid, verb), do: impl(sid).lifespan(sid, verb)
+
+  @doc "What `/lifespan` names after the command: nothing, or one of the three words."
+  @spec lifespan_args(String.t()) :: {:ok, Troupe.Client.Lifespan.verb()} | {:error, String.t()}
+  defdelegate lifespan_args(text), to: Troupe.Client.Lifespan, as: :parse
+
+  @doc "A row's lifespan mark: `throwaway · goes in 18 h`, `persistent`, or empty for normal."
+  @spec lifespan_mark(String.t() | nil, String.t() | nil) :: String.t()
+  def lifespan_mark(lifespan, erases_at), do: Troupe.Client.Lifespan.mark(lifespan, erases_at)
+
+  @doc """
   Which configuration a session on the platform runs on (root #1177): `:status` says its
   bundle version and its channel's current one, `:update` raises it to the current one,
   which only its owner may do. A session on this computer has no bundle. Answers the
@@ -606,9 +629,59 @@ defmodule Troupe.Client do
           {:ok, String.t()} | {:error, String.t()}
   def bundle(sid, verb), do: impl(sid).bundle(sid, verb)
 
+  @doc """
+  What the harness proposed in a session on the platform (root #1208): `:status` says what
+  is open, `:yes` turns it on at the plane as this person, `:later` and `:never` say no to the
+  session. The owner's alone. Answers the sentence to show.
+  """
+  @spec proposal(session_id(), Troupe.Client.Proposal.verb()) ::
+          {:ok, String.t()} | {:error, String.t()}
+  def proposal(sid, verb), do: impl(sid).proposal(sid, verb)
+
+  @doc "What `/proposal` names after the command: nothing, `yes`, `later` or `never`."
+  @spec proposal_args(String.t()) :: {:ok, Troupe.Client.Proposal.verb()} | {:error, String.t()}
+  defdelegate proposal_args(text), to: Troupe.Client.Proposal, as: :parse
+
   @doc "What `/bundle` names after the command: nothing or `update`."
   @spec bundle_args(String.t()) :: {:ok, Troupe.Client.Bundle.verb()} | {:error, String.t()}
   defdelegate bundle_args(text), to: Troupe.Client.Bundle, as: :parse
+
+  @doc """
+  The GitHub repositories a session on the platform holds (root #1207): `:list` says each
+  one, where its clone is and what was done there; `{:add, repository}` attaches one, which
+  its pod clones without a restart; `{:remove, "owner/name"}` takes one off. Attaching and
+  taking off are its owner's. A session on this computer holds none. Answers the sentence.
+  """
+  @spec repositories(session_id(), Troupe.Client.Repositories.verb()) ::
+          {:ok, String.t()} | {:error, String.t()}
+  def repositories(sid, verb), do: impl(sid).repositories(sid, verb)
+
+  @doc "What `/repo` names after the command: nothing, `add owner/name[@ref]` or `remove owner/name`."
+  @spec repo_args(String.t()) :: {:ok, Troupe.Client.Repositories.verb()} | {:error, String.t()}
+  defdelegate repo_args(text), to: Troupe.Client.Repositories, as: :parse
+
+  @doc "A repository as `--repo` names one, `owner/name[@ref]`, read; `:error` for anything else."
+  @spec read_repository(String.t()) :: {:ok, map()} | :error
+  defdelegate read_repository(text), to: Troupe.Client.Repositories, as: :read
+
+  @doc "Why something `--repo` named is not a repository."
+  @spec not_a_repository(String.t()) :: String.t()
+  defdelegate not_a_repository(text), to: Troupe.Client.Repositories, as: :not_one
+
+  @doc "Repositories by `owner/name` in a few words: the first, and how many more."
+  @spec repositories_summary([String.t()]) :: String.t()
+  defdelegate repositories_summary(names), to: Troupe.Client.Repositories, as: :summary
+
+  @doc "A repository's `owner/name`."
+  @spec repository_name(map()) :: String.t()
+  defdelegate repository_name(repository), to: Troupe.Client.Repositories, as: :name
+
+  @doc """
+  Why a new session on `profile` (a `profiles.list` row) cannot take the repositories asked
+  for, or `nil`: a profile with no `spec.github` takes none, and none takes past its cap.
+  """
+  @spec repositories_refused(map() | nil, [map()]) :: String.t() | nil
+  defdelegate repositories_refused(profile, asked), to: Troupe.Client.Repositories, as: :refused
 
   @doc """
   Archive a session (`true`) or bring it back (`false`), which only its owner may do: an

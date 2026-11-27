@@ -21,7 +21,7 @@ defmodule Troupe do
   alias Troupe.Onboard.Notice
   alias Troupe.Protocol.{Event, Origin}
   alias Troupe.Session.{Approvals, Blobs, Checkpoint, Log, Questions, Watcher}
-  alias Troupe.Sessions.{Archive, Fork, Index, Pin, Title, Unseen}
+  alias Troupe.Sessions.{Archive, Fork, Index, Lifespan, Pin, Title, Unseen}
 
   require Logger
 
@@ -329,6 +329,9 @@ defmodule Troupe do
     # subagents included, so the log says why a subagent the bundle has was never here.
     |> put_present("agent_rule", bundle && bundle[:agent_rule])
     |> put_present("origin", Keyword.get(session_opts, :origin))
+    # How long it lasts, where whoever started it said; absent is normal, as every log
+    # from before lifespans is.
+    |> put_present("lifespan", lasting(Keyword.get(session_opts, :lifespan)))
     # Who it belongs to. A worker is told; a daemon works it out from the link, and a
     # daemon nobody has linked leaves the field out rather than writing a username that
     # means nothing anywhere else.
@@ -337,6 +340,8 @@ defmodule Troupe do
     # one view reads it back from the listing; the log is where it survives dormancy.
     |> put_present("parent", Keyword.get(session_opts, :parent))
   end
+
+  defp lasting(lifespan), do: if(Troupe.Protocol.Lifespan.word?(lifespan), do: lifespan)
 
   # The owner a worker is told, or the linked person, with their name where the link
   # carries one that is more than the subject again, so a client shows a person by name.
@@ -440,6 +445,43 @@ defmodule Troupe do
       session_id,
       &Agent.compact(&1, actor: actor, command_id: Keyword.get(opts, :command_id))
     )
+  end
+
+  @doc """
+  Say that the GitHub repositories a pod session holds moved: the root agent writes
+  `session_repository_changed` with `change` under `actor`, and its next call is told.
+  """
+  @spec set_repositories(String.t(), map(), Troupe.Protocol.Event.Actor.t() | nil) ::
+          :ok | {:error, :no_session}
+  def set_repositories(session_id, change, actor \\ nil) when is_map(change) do
+    with_root(session_id, &Agent.set_repositories(&1, change, actor))
+  end
+
+  @doc """
+  The GitHub repositories the session last said it holds, each `{repository, path, ref}`,
+  or `nil` where it never said: asked of its root agent, which folded them from the log,
+  or read from the events where the tree is not up, as `goal/1` is.
+  """
+  @spec repositories(String.t()) :: [map()] | nil
+  def repositories(session_id) do
+    case with_root(session_id, &Agent.repositories/1) do
+      {:error, :no_session} -> repositories_in_log(session_id)
+      said -> said
+    end
+  end
+
+  defp repositories_in_log(session_id) do
+    root = Session.root_path()
+
+    session_id
+    |> events()
+    |> Enum.reduce(nil, fn
+      %{type: "session_repository_changed", agent: ^root, data: data}, _held ->
+        data["repositories"] || []
+
+      _event, held ->
+        held
+    end)
   end
 
   @doc "Clear the session's goal; the root agent writes `goal_cleared` if it had one."
@@ -983,15 +1025,61 @@ defmodule Troupe do
     found || find_checkpoint(session_id, from + 1, window * 2)
   end
 
+  # The most events one page of history carries when a single turn is longer than the page
+  # asked for: ten of the largest page, so an answer stays a bounded read and frame. A turn
+  # longer still is answered in pieces this long, cut where the count falls.
+  @turn_cap 5_000
+
   @doc """
-  Up to `limit` durable events before `before`, oldest first, and whether there are more
-  before those: a page of history for a reader that started from a checkpoint. Read only
-  from the page's first event to `before`.
+  A page of history for a reader that started from a checkpoint: about `limit` durable
+  events before `before`, oldest first, and whether there are more before those.
+
+  The page begins where a turn begins, after the root's rest (`Checkpoint.rest?/1`) or at
+  the session's start, so it never holds a reply without the line it answers, and the next
+  page, asked before its first seq, ends at that rest. Where the last `limit` events begin
+  mid-turn, the page starts after the first rest in them; where they hold none but their
+  last (a turn longer than the page), it reaches back to the rest before that turn, up to
+  #{@turn_cap} events. Read only from the event before the page's first to `before`.
   """
   @spec events_before(String.t(), pos_integer(), pos_integer()) :: {[Event.t()], boolean()}
   def events_before(session_id, before, limit) do
-    from = max(before - 1 - limit, 0)
-    {events_between(session_id, from, before), from > 0}
+    lowest = max(before - limit, 1)
+    # The page's raw events, and the one just before them, which says whether they begin a turn.
+    {head, page} =
+      session_id
+      |> events_between(max(lowest - 2, 0), before)
+      |> Enum.split_with(&(&1.seq < lowest))
+
+    if lowest == 1 or Enum.any?(head, &Checkpoint.rest?/1) do
+      {page, lowest > 1}
+    else
+      case page |> Enum.drop(-1) |> Enum.find_index(&Checkpoint.rest?/1) do
+        nil -> whole_turn(session_id, page, lowest, limit)
+        index -> {Enum.drop(page, index + 1), true}
+      end
+    end
+  end
+
+  # A page with no rest in it but its last: reach back a window at a time, each twice the
+  # last, to the rest the turn began after, the session's start, or the cap.
+  defp whole_turn(session_id, page, lowest, window) do
+    room = @turn_cap - length(page)
+    from = max(lowest - 1 - min(window, room), 0)
+    earlier = events_between(session_id, from, lowest)
+
+    case earlier |> Enum.reverse() |> Enum.find_index(&Checkpoint.rest?/1) do
+      nil when from == 0 ->
+        {earlier ++ page, false}
+
+      nil when room <= window ->
+        {earlier ++ page, true}
+
+      nil ->
+        whole_turn(session_id, earlier ++ page, from + 1, window * 2)
+
+      index ->
+        {Enum.take(earlier, -index) ++ page, true}
+    end
   end
 
   @doc "Durable events after `from_seq` and before `before`, read no further than `before`."
@@ -1044,6 +1132,35 @@ defmodule Troupe do
     with :ok <- Pin.put(session_id, pinned?, state_dirs()) do
       Index.update(session_id, %{pinned: pinned?})
     end
+  end
+
+  @doc """
+  Say how long a session lasts, running or dormant (`Troupe.Sessions.Lifespan`): the mark
+  beside its log, which the daemon's sweep and every listing read, and for a running one a
+  `session_lifespan_changed` line by `actor`, so whoever reads it hears. A dormant session's
+  log is not opened for it. Asked for what it already is, it writes nothing.
+  """
+  @spec lifespan_session(String.t(), String.t(), String.t() | nil) ::
+          :ok | {:error, :not_found | :invalid | String.t()}
+  def lifespan_session(session_id, lifespan, actor) do
+    from = Lifespan.of(session_id, state_dirs())
+
+    with :ok <- Lifespan.put(session_id, lifespan, state_dirs()) do
+      if from != lifespan do
+        Index.update(session_id, %{lifespan: lifespan})
+        said_lifespan(session_id, from, lifespan, actor)
+      end
+
+      :ok
+    end
+  end
+
+  defp said_lifespan(session_id, from, to, actor) do
+    data = %{"from" => from, "to" => to, "actor" => actor || linked_owner() || "local"}
+    Log.append(session_id, Session.root_path(), :session_lifespan_changed, data)
+  catch
+    # Not running: the mark is the record, as a dormant pod session's row is.
+    :exit, _ -> :ok
   end
 
   @doc """

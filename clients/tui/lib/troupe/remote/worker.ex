@@ -242,6 +242,19 @@ defmodule Troupe.Remote.Worker do
   @spec visibility(String.t(), String.t()) :: :ok | {:error, term()}
   def visibility(session_id, visibility), do: call(session_id, {:visibility, visibility})
 
+  @doc "The latest proposal of the harness's nobody answered yet, as `proposal_made` said it, or nil."
+  @spec open_proposal(String.t()) :: map() | nil
+  def open_proposal(session_id) do
+    case call(session_id, :open_proposal) do
+      {:error, _} -> nil
+      proposal -> proposal
+    end
+  end
+
+  @doc "The owner's `later` or `never` to the proposal `id`."
+  @spec answer_proposal(String.t(), String.t(), String.t()) :: :ok | {:error, term()}
+  def answer_proposal(session_id, id, decision), do: call(session_id, {:proposal, id, decision})
+
   @spec blob(String.t(), String.t(), non_neg_integer(), non_neg_integer()) ::
           {:ok, term()} | {:error, term()}
   def blob(session_id, blob, offset \\ 0, length \\ 1_000_000),
@@ -250,8 +263,10 @@ defmodule Troupe.Remote.Worker do
   @doc """
   A page of the session's history before `before`, for a window opened from a checkpoint:
   `session.events`, translated as the stream is but with a memory of its own, since the
-  page comes before everything the stream's memory has seen. Answers the page's events,
-  whether the server has earlier ones, and the lowest seq in it.
+  page comes before everything the stream's memory has seen. A branch shown inside another
+  session's screen answers its page under that screen's session and window, as it
+  publishes the stream. Answers the page's events, whether the server has earlier ones,
+  and the lowest seq in it.
   """
   @spec earlier(String.t(), pos_integer()) ::
           {:ok, %{events: [Troupe.Event.t()], more: boolean(), first: pos_integer() | nil}}
@@ -259,9 +274,11 @@ defmodule Troupe.Remote.Worker do
   def earlier(session_id, before) do
     with {:ok, %{"events" => events} = page} when is_list(events) <-
            call(session_id, {:rpc, "session.events", %{before: before, limit: @page}}),
-         {:ok, memory} <- call(session_id, :page_memory) do
+         {:ok, memory, as} <- call(session_id, :page_memory) do
       {translated, _memory} =
         Enum.flat_map_reduce(events, memory, &Translate.durable(session_id, &1, &2))
+
+      translated = Enum.map(translated, &paged_as(&1, as))
 
       first =
         events |> Enum.map(&Translate.seq/1) |> Enum.reject(&is_nil/1) |> Enum.min(fn -> nil end)
@@ -388,6 +405,13 @@ defmodule Troupe.Remote.Worker do
       # #1169): `team` or `private`, nil where nobody said; and whether it is this person's.
       visibility: Keyword.get(opts, :visibility),
       owner?: Keyword.get(opts, :owner?, false),
+      # What the harness proposed and nobody answered yet (root #1208), oldest first, each
+      # `proposal_made`'s data: what `/proposal` answers.
+      proposals: [],
+      # The GitHub repositories a pod session holds, by `owner/name`, as the plane said at
+      # the open and the log's `session_repository_changed` says since (root #1207); nil
+      # where nobody said.
+      repositories: Keyword.get(opts, :repositories),
       agent: nil,
       # Events of this client's own waiting for the window to open (`post/3`), each
       # `{type, data}`.
@@ -444,7 +468,8 @@ defmodule Troupe.Remote.Worker do
   # session's window is called.
   def handle_call(:page_memory, _from, %{memory: memory} = state),
     do:
-      {:reply, {:ok, Translate.me(Translate.memory(memory.isolation, memory.profile), memory.me)},
+      {:reply,
+       {:ok, Translate.me(Translate.memory(memory.isolation, memory.profile), memory.me), state.as},
        state}
 
   def handle_call(:attachment, _from, state) do
@@ -548,6 +573,16 @@ defmodule Troupe.Remote.Worker do
         command_id: RPC.command_id()
       })
     )
+  end
+
+  def handle_call(:open_proposal, _from, state), do: {:reply, List.last(state.proposals), state}
+
+  def handle_call({:proposal, id, decision}, from, state) do
+    activating(state, from, "session.proposal.answer", %{
+      id: id,
+      decision: decision,
+      command_id: RPC.command_id()
+    })
   end
 
   def handle_call({:answer, call_id, text}, from, state) do
@@ -1182,7 +1217,13 @@ defmodule Troupe.Remote.Worker do
         state = %{
           state
           | cursor: max(state.cursor, checkpoint["data"]["through"]),
-            visibility: if(is_binary(visibility), do: visibility, else: state.visibility)
+            visibility: if(is_binary(visibility), do: visibility, else: state.visibility),
+            proposals:
+              for(
+                p <- get_in(checkpoint, ["data", "facts", "open_proposals"]) || [],
+                is_map(p["data"]),
+                do: p["data"]
+              )
         }
 
         publish_status(state)
@@ -1412,7 +1453,9 @@ defmodule Troupe.Remote.Worker do
       state
       | memory: memory,
         agent: state.agent || Translate.root_of(params),
-        visibility: given(params) || state.visibility
+        visibility: given(params) || state.visibility,
+        proposals: proposed(state.proposals, params),
+        repositories: held(params) || state.repositories
     }
 
     state =
@@ -1431,7 +1474,7 @@ defmodule Troupe.Remote.Worker do
           %{state | cursor: max(state.cursor, Translate.seq(params) || state.cursor)}
       end
 
-    if given(params), do: publish_status(state)
+    if given(params) || held(params), do: publish_status(state)
     write_notes(state)
   end
 
@@ -1440,6 +1483,21 @@ defmodule Troupe.Remote.Worker do
   # The session given to its team or taken back, as its log says.
   defp given(%{"type" => "session_visibility_changed", "data" => %{"visibility" => v}}), do: v
   defp given(_params), do: nil
+
+  # What the harness proposed and nobody answered yet, as the log says.
+  defp proposed(open, %{"type" => "proposal_made", "data" => %{"id" => id} = data}),
+    do: Enum.reject(open, &(&1["id"] == id)) ++ [data]
+
+  defp proposed(open, %{"type" => "proposal_answered", "data" => %{"id" => id}}),
+    do: Enum.reject(open, &(&1["id"] == id))
+
+  defp proposed(open, _params), do: open
+  # The repositories it holds now, as its log says each time one moves.
+  defp held(%{"type" => "session_repository_changed", "data" => %{"repositories" => list}})
+       when is_list(list),
+       do: for(%{"repository" => full} <- list, is_binary(full), do: full)
+
+  defp held(_params), do: nil
 
   # The client's own lines go into the window once there is one, stamped after whatever
   # opened it: written earlier, they would sort ahead of the session's first events, which
@@ -1675,6 +1733,7 @@ defmodule Troupe.Remote.Worker do
       |> Map.put(:always_allow?, state.capabilities["approval_allow_always"] == true)
       |> Map.put(:attach_artifact?, state.capabilities["fs_upload_artifact"] == true)
       |> Map.put(:only_me?, only_me?(state))
+      |> Map.put(:repositories, state.repositories || [])
     )
   end
 
@@ -1788,6 +1847,13 @@ defmodule Troupe.Remote.Worker do
     remember_call(state, event)
     %{event | session_id: sid, agent_path: Branch.rewrite(event.agent_path, window)}
   end
+
+  # A page of a branch's history, spelled as the parent's screen spells the branch; the
+  # page's own opening of the window stays in it, since the page is folded on its own.
+  defp paged_as(event, nil), do: event
+
+  defp paged_as(%Troupe.Event{} = event, {sid, window}),
+    do: %{event | session_id: sid, agent_path: Branch.rewrite(event.agent_path, window)}
 
   # An approval or a question a branch asks, the budget's included, is answered through the
   # parent's session id, so the client finds its way back to this session by the call id.

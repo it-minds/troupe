@@ -7,7 +7,9 @@
 // under load without changing what the transcript says.
 
 import { upgradedText } from "./bundle.js";
+import { repositoryChangedText } from "./repositories.js";
 import { named } from "./people.js";
+import { type ProposalDecision, type ProposalResult, type ProposalState, proposalOf } from "./proposals.js";
 import { when } from "./remote.js";
 import { foldScratch, scratchDocumentOf } from "./scratch.js";
 import type { DurableEvent, LlmDeltaData, LoopInfo, ScratchDocument, TroupeEvent } from "./types.js";
@@ -232,8 +234,14 @@ export type Entry =
   /** Lifecycle: started, switched, compacted, done, cancelled, dormant, resumed, errors. */
   | { kind: "system"; seq: number; agent: string[]; type: string; text: string }
   /**
+   * Something the harness offers the session's owner (troupe #1208): a card while it is
+   * open, which only the owner answers, and its answer's line once it is not. Nothing waits
+   * for it.
+   */
+  | ({ kind: "proposal"; seq: number; agent: string[] } & ProposalState)
+  /**
    * Where a transcript opened from a checkpoint begins (troupe #1182): what the compaction
-   * said of everything before it, and when it was written. `seq` is the checkpoint's
+   * said of everything before it, and when that compaction was written. `seq` is the checkpoint's
    * `through`; what came before is drawn above it as it is paged in.
    */
   | { kind: "earlier"; seq: number; agent: string[]; summary: string; at: string | undefined };
@@ -386,6 +394,12 @@ export interface TranscriptState {
    * the session's row is the word.
    */
   visibility?: string | undefined;
+  /**
+   * How long the session lasts (troupe #1209), from `session_created` and then
+   * `session_lifespan_changed`: `throwaway`, `normal` or `persistent`; undefined until the
+   * log says, when the session's row is the word.
+   */
+  lifespan?: string | undefined;
   /**
    * A laptop's session steered through the plane, while its laptop is away and once it is
    * back (troupe #932): `offer_paused` says why it went (`stopped`, its daemon said it was
@@ -1020,6 +1034,18 @@ function visibilityChangedText(d: DurableEvent): string {
     : `${who} took this session back from the team: only they and the people invited can open it`;
 }
 
+/** How long the session lasts, changed, as one line: what it is now and what that means. */
+function lifespanChangedText(d: DurableEvent): string {
+  switch (d.data["to"]) {
+    case "throwaway":
+      return "This session is throwaway now: it is erased a while after it goes quiet";
+    case "persistent":
+      return "This session is persistent now: it is kept until its owner erases it";
+    default:
+      return "This session is normal now: it stays until its owner erases it";
+  }
+}
+
 function systemText(d: DurableEvent): string {
   switch (d.type) {
     case "session_created":
@@ -1049,6 +1075,8 @@ function systemText(d: DurableEvent): string {
       return "session went to sleep";
     case "session_activated":
       return "session woke on the platform";
+    case "session_repository_changed":
+      return repositoryChangedText(d.data);
     case "session_resumed":
       return d.data["moved"] ? "session resumed on another device" : "session resumed";
     case "fs_changed":
@@ -1258,6 +1286,7 @@ const SYSTEM_TYPES = new Set([
   "llm_error",
   "session_dormant",
   "session_activated",
+  "session_repository_changed",
   "session_resumed",
   "fs_changed",
   "session_tainted",
@@ -1739,9 +1768,48 @@ function foldOne(state: TranscriptState, e: TroupeEvent, options: FoldOptions = 
 
     // Its owner gave the session to its team, or took it back (troupe #1169): one line, and
     // whose it is now for the head's mark.
+    // What the harness offers the owner, at the root's rest: a card, once, whatever replays it.
+    case "proposal_made": {
+      const proposal = proposalOf(d.data);
+      if (!proposal || state.entries.some((e) => e.kind === "proposal" && e.id === proposal.id)) return next;
+      return { ...next, entries: [...state.entries, { kind: "proposal", ...base, ...proposal }] };
+    }
+
+    // The owner's answer, once: the card becomes its line.
+    case "proposal_answered": {
+      const id = str(d.data["id"]);
+      const decision = str(d.data["decision"]) as ProposalDecision;
+      const person = d.actor?.kind === "user" ? d.actor : undefined;
+      const by = person?.subject;
+      const byName = typeof d.data["by_name"] === "string" ? d.data["by_name"] : person ? nameOf(person).authorName : undefined;
+      const result = d.data["result"] && typeof d.data["result"] === "object" ? (d.data["result"] as ProposalResult) : undefined;
+      const edited = Array.isArray(d.data["edited"]) ? d.data["edited"].filter((f): f is string => typeof f === "string") : undefined;
+      return {
+        ...next,
+        entries: state.entries.map((en) =>
+          en.kind === "proposal" && en.id === id && en.decision === undefined
+            ? {
+                ...en,
+                decision,
+                ...(result ? { result } : {}),
+                ...(edited ? { edited } : {}),
+                ...(typeof by === "string" && by !== "" ? { answeredBy: by } : {}),
+                ...(byName ? { answeredByName: byName } : {}),
+              }
+            : en,
+        ),
+      };
+    }
+
     case "session_visibility_changed": {
       const visibility = str(d.data["visibility"]) || undefined;
       return { ...next, visibility, entries: [...state.entries, { kind: "system", ...base, type: d.type, text: visibilityChangedText(d) }] };
+    }
+
+    // Its owner changed how long it lasts (troupe #1209): one line, and the word for the head.
+    case "session_lifespan_changed": {
+      const lifespan = str(d.data["to"]) || undefined;
+      return { ...next, lifespan, entries: [...state.entries, { kind: "system", ...base, type: d.type, text: lifespanChangedText(d) }] };
     }
 
     // A reply the output cap cut, or one with nothing in it (troupe-remote Decision 659).
@@ -1873,6 +1941,7 @@ function foldOne(state: TranscriptState, e: TroupeEvent, options: FoldOptions = 
         ...next,
         profile: str(d.data["profile"]) || next.profile,
         bundleVersion: str(d.data["bundle_version"]) || next.bundleVersion,
+        lifespan: str(d.data["lifespan"]) || next.lifespan,
         entries: [...state.entries, { kind: "system", ...base, type: d.type, text: systemText(d) }],
       };
 

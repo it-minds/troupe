@@ -49,6 +49,7 @@ defmodule Troupe.Session.CheckpointTest do
     :warning,
     :error,
     :visibility,
+    :lifespan,
     :loop,
     :taint,
     :switch,
@@ -90,6 +91,95 @@ defmodule Troupe.Session.CheckpointTest do
     whole = log |> Checkpoint.fold_all() |> Checkpoint.facts()
     assert_from(log, first, whole)
     assert_from(log, second, whole)
+  end
+
+  test "the facts say how long the session lasts once its log has said, and follow a change" do
+    created = %Event{
+      type: "session_created",
+      seq: 1,
+      agent: ["root"],
+      data: %{"profile" => "build", "lifespan" => "throwaway"}
+    }
+
+    changed = %Event{
+      type: "session_lifespan_changed",
+      seq: 2,
+      agent: ["root"],
+      data: %{"from" => "throwaway", "to" => "normal", "actor" => "user:a"}
+    }
+
+    assert Checkpoint.fold_all([created]) |> Checkpoint.facts() |> Map.get("lifespan") == "throwaway"
+    assert Checkpoint.fold_all([created, changed]) |> Checkpoint.facts() |> Map.get("lifespan") == "normal"
+
+    before = %{created | data: %{"profile" => "build"}}
+    refute Checkpoint.fold_all([before]) |> Checkpoint.facts() |> Map.has_key?("lifespan")
+  end
+
+  test "the facts count the model calls and the money of the root's ended turns" do
+    log =
+      [{:input, 0}, {:rest, 4}, {:input, 1}, {:cancel, 6}, {:input, 2}, {:rest, 7}]
+      |> render()
+      |> with_checkpoints()
+
+    facts = log |> Checkpoint.fold_all() |> Checkpoint.facts()
+    # 2 + 1 + 2 calls; 400 + 100 + 200 micro-dollars; a subagent's own cancel counts nothing.
+    assert {facts["calls"], facts["turns_cost_micros"]} == {5, 700}
+
+    child = ev("cancelled", ["root", "general#1"], %{"turn" => turn_spend(1)})
+    assert (log ++ [%{child | seq: 99}]) |> Checkpoint.fold_all() |> Checkpoint.facts() == facts
+  end
+
+  test "a checkpoint written before calls were counted starts them from 0" do
+    old = Checkpoint.data(Checkpoint.new())
+    old = %{old | "facts" => Map.drop(old["facts"], ["calls", "turns_cost_micros"])}
+    checkpoint = %Event{type: "checkpoint", agent: ["root"], seq: 1, data: old}
+
+    {:ok, start} = Checkpoint.from_checkpoint(checkpoint)
+    tail = [%{events(:rest, 4, nil, nil) | seq: 2}]
+    facts = tail |> Checkpoint.fold_all(start) |> Checkpoint.facts()
+    assert {facts["calls"], facts["turns_cost_micros"], facts["turns"]} == {2, 400, 1}
+  end
+
+  test "a delegation still running says when it began" do
+    started = %{
+      ev("delegation_started", ["root"], %{
+        "call_id" => "c1",
+        "agent" => "general",
+        "child_path" => ["root", "general#1"],
+        "wait" => false
+      })
+      | seq: 3,
+        ts: "2026-11-23T10:00:03Z"
+    }
+
+    facts = [started] |> Checkpoint.fold_all() |> Checkpoint.facts()
+    assert [%{"ts" => "2026-11-23T10:00:03Z", "seq" => 3}] = facts["running"]
+  end
+
+  test "a checkpoint carries the time of the compaction it follows, beside its own" do
+    log = [{:input, 0}, {:compact, 1}, {:input, 2}, {:rest, 3}] |> render() |> with_checkpoints()
+
+    [compacted] = Enum.filter(log, &(&1.type == "compacted"))
+    [checkpoint] = Enum.filter(log, &(&1.type == "checkpoint"))
+    assert checkpoint.data["compacted_at"] == compacted.ts
+    assert checkpoint.ts != compacted.ts
+  end
+
+  test "one written before it carried that is read as it is, and the next carries its own" do
+    [old | _] = "manual" |> recorded() |> Enum.filter(&(&1.type == "checkpoint"))
+    refute Map.has_key?(old.data, "compacted_at")
+    assert {:ok, start} = Checkpoint.from_checkpoint(old)
+    refute Map.has_key?(Checkpoint.data(start), "compacted_at")
+
+    through = old.data["through"]
+    compacted = disk(%{ev("compacted", ["root"], %{"summary" => "again"}) | seq: through + 2})
+    rest = disk(%{ev("turn_ended", ["root"], %{}) | seq: through + 3})
+    fold = Checkpoint.fold_all([old, compacted, rest], start)
+
+    assert Checkpoint.owed?(fold)
+    assert Checkpoint.data(fold)["compacted_at"] == compacted.ts
+    assert {:ok, again} = Checkpoint.from_checkpoint(%Event{old | data: Checkpoint.data(fold)})
+    assert Checkpoint.data(again)["compacted_at"] == compacted.ts
   end
 
   test "a checkpoint in a shape this build does not read is not started from" do
@@ -229,6 +319,9 @@ defmodule Troupe.Session.CheckpointTest do
 
   defp ev(type, agent, data), do: %Event{type: type, agent: agent, data: data}
 
+  defp turn_spend(n),
+    do: %{"calls" => 1 + rem(n, 3), "cost_micros" => rem(n, 5) * 100, "unpriced" => rem(n, 2)}
+
   defp events(:input, n, _agent, _call),
     do: [
       ev("input_accepted", ["root"], %{"command_id" => "in-#{n}"}),
@@ -326,10 +419,10 @@ defmodule Troupe.Session.CheckpointTest do
   end
 
   defp events(:rest, n, _agent, _call),
-    do: ev("turn_ended", ["root"], %{"turn" => %{"calls" => 1, "unpriced" => rem(n, 2)}})
+    do: ev("turn_ended", ["root"], %{"turn" => turn_spend(n)})
 
   defp events(:cancel, n, agent, _call),
-    do: ev("cancelled", agent, %{"turn" => %{"calls" => 1, "unpriced" => rem(n, 2)}})
+    do: ev("cancelled", agent, %{"turn" => turn_spend(n)})
 
   defp events(:scratch, n, _agent, _call),
     do:
@@ -351,6 +444,13 @@ defmodule Troupe.Session.CheckpointTest do
   defp events(:visibility, n, _agent, _call),
     do:
       ev("session_visibility_changed", ["root"], %{"visibility" => pick(["team", "private"], n)})
+
+  defp events(:lifespan, n, _agent, _call),
+    do:
+      ev("session_lifespan_changed", ["root"], %{
+        "to" => pick(["throwaway", "normal", "persistent"], n),
+        "actor" => "user:a"
+      })
 
   defp events(:loop, n, _agent, _call) do
     id = "loop-#{rem(n, 2)}"

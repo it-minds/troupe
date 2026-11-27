@@ -13,9 +13,16 @@
 // also asks `admin.sessions.list`, only to know which of their own sessions the list of
 // every session shows them, so a row links there where it can.
 
-import { useState } from "react";
+import { Fragment, useState } from "react";
 import type { JSX } from "react";
 import {
+  LIFESPAN_CHOICES,
+  lifespanChoice,
+  lifespanItem,
+  lifespanMark,
+  lifespanOf,
+  lifespanRefusal,
+  planeKnowsLifespans,
   TAKE_BACK_LINE,
   appLink,
   behind,
@@ -30,7 +37,7 @@ import {
   versionOf,
   visibilityRefusal,
 } from "@troupe/client";
-import type { OwnClient, OwnMemory, OwnMemoryPreview, PlaneDocument, SessionRow } from "@troupe/client";
+import type { Lifespan, OwnClient, OwnMemory, OwnMemoryPreview, PlaneDocument, SessionRow } from "@troupe/client";
 import { OpenInApp } from "./OpenInApp";
 import { describeError, show, useConsole, useLoad } from "../console";
 import { href } from "../route";
@@ -89,6 +96,50 @@ function Whose({ session, onChanged }: { session: SessionRow; onChanged: () => v
       <button type="button" className="link" disabled={busy} title={team ? TAKE_BACK_LINE : giveLine(session.team)} onClick={() => void change()}>
         {team ? "Only me again" : `Give it to ${teamWords(session.team)}`}
       </button>
+      {refused && (
+        <span className="hint" role="alert">
+          {" "}
+          {refused}
+        </span>
+      )}
+    </>
+  );
+}
+
+/**
+ * How long one of the person's own sessions lasts (troupe #1209), and the change to either
+ * of the other two, where the plane knows lifespans: a throwaway one says when it goes.
+ */
+function Lasts({ session, knows, onChanged }: { session: SessionRow; knows: boolean; onChanged: () => void }): JSX.Element {
+  const { auth, notify } = useConsole();
+  const [busy, setBusy] = useState(false);
+  const [refused, setRefused] = useState<string | null>(null);
+  const now = lifespanOf(session.lifespan);
+  const change = async (to: Lifespan): Promise<void> => {
+    setBusy(true);
+    setRefused(null);
+    try {
+      await auth.withToken((plane, token) => plane.setSessionLifespan(token, session.id, to));
+      notify(`${session.title ?? session.id} is ${to} now.`);
+      onChanged();
+    } catch (e) {
+      setRefused(lifespanRefusal(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <>
+      <span title={lifespanChoice(now).sentence}>{lifespanMark({ lifespan: now, erasesAt: session.erases_at ?? null }) ?? "normal"}</span>
+      {knows &&
+        LIFESPAN_CHOICES.filter((c) => c.value !== now).map((c) => (
+          <Fragment key={c.value}>
+            {" · "}
+            <button type="button" className="link" disabled={busy} title={c.sentence} onClick={() => void change(c.value)}>
+              {lifespanItem(c.value)}
+            </button>
+          </Fragment>
+        ))}
       {refused && (
         <span className="hint" role="alert">
           {" "}
@@ -161,13 +212,13 @@ function YourSessions(): JSX.Element {
   const [load, reload] = useLoad(async () => {
     const mine = await auth.withToken((plane, token) => plane.listSessions(token)).then((r) => r.sessions.filter((s) => s.owner === me.subject));
     const seen = role === "member" || mine.length === 0 ? [] : await admin.sessions().catch(() => []);
-    return { rows: mine, onSessions: new Set(seen.map((s) => s.id)) };
+    return { rows: mine, onSessions: new Set(seen.map((s) => s.id)), knows: await planeKnowsLifespans(auth) };
   }, [auth, admin, me.subject, role]);
   return (
     <section aria-label="Your sessions">
       <Region>Your sessions</Region>
       <Loaded load={load} what="your sessions" retry={reload}>
-        {({ rows, onSessions }) =>
+        {({ rows, onSessions, knows }) =>
           rows.length === 0 ? (
             <Empty title="No session of yours on the plane">One you start on the platform, from the desktop app or the terminal, is listed here.</Empty>
           ) : (
@@ -181,6 +232,7 @@ function YourSessions(): JSX.Element {
                     <th>State</th>
                     <th>Last active</th>
                     <th>Who opens it</th>
+                    <th>How long it lasts</th>
                     <th>Configuration</th>
                     <th>Where it opens</th>
                   </tr>
@@ -198,6 +250,9 @@ function YourSessions(): JSX.Element {
                       <td>{when(s.last_active_at ?? null)}</td>
                       <td>
                         <Whose session={s} onChanged={reload} />
+                      </td>
+                      <td>
+                        <Lasts session={s} knows={knows} onChanged={reload} />
                       </td>
                       <td>
                         <Configuration session={s} onChanged={reload} />

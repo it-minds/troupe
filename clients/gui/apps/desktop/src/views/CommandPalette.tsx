@@ -30,18 +30,36 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { JSX } from "react";
-import type { AgentLayer, AgentRow, CommandEntry } from "@troupe/client";
+import type { AgentLayer, AgentRow, CommandEntry, Lifespan } from "@troupe/client";
 import { ErrorCodes, TroupeRpcError, errorText } from "@troupe/client";
 import { copyText } from "../clipboard";
 import type { SessionHandle } from "../hooks";
 import { switchable } from "./AgentSwitch";
 import { loopError } from "./Goal";
+import { onAbsentSide } from "./Rail";
 
 /** The screens a command can leave the session for; `setup` is also where a refused key sends people. */
 export type PaletteScreen = "sessions" | "local" | "connect" | "appearance" | "setup" | "memory";
 
+/** Which sides this install has, as the rail decides it. */
+export interface Sides {
+  local: boolean;
+  plane: boolean;
+}
+
+/** The screen each built-in that leaves the session for one goes to; the rail says which of them this install has. */
+const SCREEN_OF = {
+  settings: "local",
+  models: "local",
+  unlink: "local",
+  mcp: "connect",
+  skills: "connect",
+} as const satisfies Record<string, PaletteScreen>;
+
 export interface PaletteActions {
   go: (screen: PaletteScreen) => void;
+  /** The sides this install has: a command that belongs to a side it lacks is not listed. */
+  sides: Sides;
   /** Show the backstage's Files pane. */
   showFiles: () => void;
   /** Show the backstage's Memory pane, the repository's facts, and with `refresh` or `forget` do that there. */
@@ -88,6 +106,11 @@ export interface PaletteActions {
    * back (troupe #1169); `null` asks whose it is. A sentence back is a notice.
    */
   share?: ((to: "team" | "private" | null) => Promise<string | undefined>) | undefined;
+  /**
+   * `/lifespan throwaway|normal|persistent`: how long this session lasts, its owner's to
+   * change (troupe #1209); `null` asks what it is. A sentence back is a notice.
+   */
+  lifespan?: ((to: Lifespan | null) => Promise<string | undefined>) | undefined;
 }
 
 interface RunContext extends PaletteActions {
@@ -160,13 +183,13 @@ const RUNNERS: Record<string, (ctx: RunContext, args: string) => Promise<string 
     return `unknown /memory ${args}; use /memory, /memory refresh or /memory forget`;
   },
   detail: ({ detail }, args) => detail(args),
-  settings: ({ go }) => void go("local"),
+  settings: ({ go }) => void go(SCREEN_OF.settings),
   // Your own servers and skills, as the terminal client's /mcp and /skills pages.
-  mcp: ({ go }) => void go("connect"),
-  skills: ({ go }) => void go("connect"),
-  models: ({ go }) => void go("local"),
+  mcp: ({ go }) => void go(SCREEN_OF.mcp),
+  skills: ({ go }) => void go(SCREEN_OF.skills),
+  models: ({ go }) => void go(SCREEN_OF.models),
   // "Stop using my account here" is on This computer, under who it records.
-  unlink: ({ go }) => void go("local"),
+  unlink: ({ go }) => void go(SCREEN_OF.unlink),
   agents: ({ agents }) =>
     agents ? void agents() : "a session on the platform runs its profile bundle's agents, which are changed in the console; the header switches between them",
   // "Publish…", as the terminal client's /publish: a new artifact, or a new version of one of
@@ -192,6 +215,12 @@ const RUNNERS: Record<string, (ctx: RunContext, args: string) => Promise<string 
     if (args === "team") return share("team");
     if (args === "me") return share("private");
     return `unknown /share ${args}; use /share team, /share me or /share alone`;
+  },
+  lifespan: ({ lifespan }, args) => {
+    if (!lifespan) return "this session's lifespan cannot be changed from here";
+    if (args === "") return lifespan(null);
+    if (args === "throwaway" || args === "normal" || args === "persistent") return lifespan(args);
+    return `unknown /lifespan ${args}; use /lifespan throwaway, normal or persistent, or /lifespan alone`;
   },
 };
 
@@ -290,6 +319,16 @@ function reasonFor(entry: CommandEntry, local: boolean, agent: AgentRow | undefi
   if (defined(entry)) return null;
   if (!(entry.name in RUNNERS)) return NOT_HERE[entry.name] ?? "not in the desktop app yet";
   return null;
+}
+
+/**
+ * Whether a built-in opens a page of a side this install does not have, which the app would
+ * send to Sessions with no word. It is left out, as the rail leaves out the item; the rail's
+ * `onAbsentSide` says which screens those are, so a plane screen would go the same way.
+ */
+function onAbsent(entry: CommandEntry, sides: Sides): boolean {
+  const screen = entry.source === "builtin" && entry.name in SCREEN_OF ? SCREEN_OF[entry.name as keyof typeof SCREEN_OF] : null;
+  return screen !== null && onAbsentSide(screen, sides);
 }
 
 /** What kind of row a command is, in the word the terminal's palette uses. */
@@ -474,6 +513,9 @@ export function CommandPalette({
   const [linked, setLinked] = useState<boolean | null>(null);
   const [listed, setListed] = useState<AgentRow[] | null>(null);
   const { agentRows, planeLinked, sessionAgents, switchAgent, currentAgent } = actions;
+  // The two flags, not the object: a new object each draw would redo the list.
+  const { local: hasLocal, plane: hasPlane } = actions.sides;
+  const sides = useMemo<Sides>(() => ({ local: hasLocal, plane: hasPlane }), [hasLocal, hasPlane]);
 
   useEffect(() => {
     let live = true;
@@ -540,9 +582,9 @@ export function CommandPalette({
   const listFor = useCallback(
     (w: string): Row[] =>
       (commands ?? [])
-        .filter((c) => matches(c, w))
+        .filter((c) => !onAbsent(c, sides) && matches(c, w))
         .map((entry) => ({ entry, reason: reasonFor(entry, local, entry.source === "agent" ? agents.get(entry.name) : undefined, linked, switching) })),
-    [commands, local, agents, linked, switching],
+    [commands, sides, local, agents, linked, switching],
   );
   const rows = useMemo<Row[]>(() => listFor(word), [listFor, word]);
   const at = standing(rows, word, cursor);

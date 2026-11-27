@@ -62,6 +62,8 @@ defmodule Troupe.Plane.Identity.Team do
     field :cache_eviction_days, :integer, default: 7
     field :erase_after_days, :integer, default: 365
     field :pins_allowed, :boolean, default: true
+    # Whether a member may turn on a trigger the harness proposed in one of their sessions.
+    field :members_may_schedule, :boolean, default: true
 
     field :budget_micros, :integer, default: 0
     field :budget_period, :string, default: "monthly"
@@ -105,6 +107,7 @@ defmodule Troupe.Plane.Identity.Team do
     :cache_eviction_days,
     :erase_after_days,
     :pins_allowed,
+    :members_may_schedule,
     :budget_micros,
     :budget_period,
     :volume_storage_class,

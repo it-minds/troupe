@@ -44,6 +44,8 @@ defmodule Troupe.Session.Checkpoint do
     "cost_micros" => 0,
     "unpriced" => 0,
     "turns" => 0,
+    "calls" => 0,
+    "turns_cost_micros" => 0,
     "context" => %{"used" => nil},
     "open_approvals" => [],
     "open_questions" => [],
@@ -75,8 +77,9 @@ defmodule Troupe.Session.Checkpoint do
 
   defstruct facts: @empty_facts,
             seq: 0,
-            # The latest root `compacted`, its seq and summary.
+            # The latest root `compacted`, its seq, time and summary.
             compacted: nil,
+            compacted_at: nil,
             summary: nil,
             # The latest `checkpoint`: its seq, and the compaction it follows.
             checkpoint: nil,
@@ -109,6 +112,7 @@ defmodule Troupe.Session.Checkpoint do
        facts: data["facts"],
        seq: data["through"],
        compacted: data["compacted"],
+       compacted_at: data["compacted_at"],
        summary: data["summary"],
        checkpoint: data["previous"],
        covered: nil,
@@ -132,7 +136,12 @@ defmodule Troupe.Session.Checkpoint do
   def owed?(%__MODULE__{compacted: compacted, covered: compacted}), do: false
   def owed?(%__MODULE__{rest: rest}), do: rest
 
-  @doc "The `checkpoint` event's data for the fold so far, standing for its last seq."
+  @doc """
+  The `checkpoint` event's data for the fold so far, standing for its last seq. With
+  `compacted_at`, the time of the compaction it follows, so a reader can say when the
+  summary was made rather than when the root next rested; a checkpoint written before it
+  was carried has none, and a reader takes the checkpoint's own time.
+  """
   @spec data(t()) :: map()
   def data(%__MODULE__{} = state) do
     %{
@@ -143,6 +152,7 @@ defmodule Troupe.Session.Checkpoint do
       "summary" => state.summary,
       "facts" => state.facts
     }
+    |> then(&if(state.compacted_at, do: Map.put(&1, "compacted_at", state.compacted_at), else: &1))
   end
 
   @doc "Whether this event is the root coming to rest."
@@ -165,8 +175,8 @@ defmodule Troupe.Session.Checkpoint do
 
   # -- what the writer keeps ----------------------------------------------------
 
-  defp meta(state, %Event{type: "compacted", agent: ["root"], seq: seq, data: data}),
-    do: %{state | compacted: seq, summary: data["summary"], rest: false}
+  defp meta(state, %Event{type: "compacted", agent: ["root"], seq: seq, ts: ts, data: data}),
+    do: %{state | compacted: seq, compacted_at: ts, summary: data["summary"], rest: false}
 
   defp meta(state, %Event{type: "checkpoint", seq: seq, data: data}),
     do: %{state | checkpoint: seq, covered: data["compacted"]}
@@ -184,6 +194,11 @@ defmodule Troupe.Session.Checkpoint do
 
   # -- the facts ----------------------------------------------------------------
 
+  # How long the session lasts, once its log has said: absent is normal, and a fact only a
+  # log that says it carries, so a checkpoint written before lifespans folds as it did.
+  defp lasting(f, lifespan) when is_binary(lifespan), do: Map.put(f, "lifespan", lifespan)
+  defp lasting(f, _none), do: f
+
   # When the session began is when it was created: a fork carries its parent's creation
   # with the rest of its history, and says when it was forked in `session_forked`.
   defp facts(f, %Event{type: "session_created", ts: ts, data: data}) do
@@ -197,10 +212,13 @@ defmodule Troupe.Session.Checkpoint do
       "owner_name" => data["owner_name"],
       "bundle_version" => data["bundle_version"] || f["bundle_version"]
     })
+    |> lasting(data["lifespan"])
   end
 
   defp facts(f, %Event{type: "session_visibility_changed", data: data}),
     do: %{f | "visibility" => data["visibility"]}
+
+  defp facts(f, %Event{type: "session_lifespan_changed", data: data}), do: lasting(f, data["to"])
 
   defp facts(f, %Event{type: "config_upgraded", data: data}),
     do: %{f | "bundle_version" => data["to"] || f["bundle_version"]}
@@ -331,6 +349,18 @@ defmodule Troupe.Session.Checkpoint do
        when type in ["question_answered", "budget_ask_answered", "tool_failures_ask_answered"],
        do: %{f | "open_questions" => close(f["open_questions"], [data["call_id"]])}
 
+  # What the harness offered the owner and nobody has answered: never waited for, so in
+  # neither list above, and here only so a client attaching late can still show it. A log
+  # that never had a proposal has no such fact, as the facts of a session written before
+  # there were proposals have none: absent is an empty list.
+  defp facts(f, %Event{type: "proposal_made", seq: seq, data: data}) do
+    open = f |> Map.get("open_proposals", []) |> Enum.reject(&(&1["id"] == data["id"]))
+    Map.put(f, "open_proposals", open ++ [%{"id" => data["id"], "seq" => seq, "agent" => ["root"], "data" => data}])
+  end
+
+  defp facts(f, %Event{type: "proposal_answered", data: data}),
+    do: Map.put(f, "open_proposals", f |> Map.get("open_proposals", []) |> Enum.reject(&(&1["id"] == data["id"])))
+
   # A call that ended takes what it waited on with it: a cancel closes each call it stops
   # so, and so does a tool that timed out waiting; and a delegation waited for is over.
   defp facts(f, %Event{type: "tool_call_completed", data: data}) do
@@ -344,13 +374,16 @@ defmodule Troupe.Session.Checkpoint do
     }
   end
 
-  defp facts(f, %Event{type: "delegation_started", seq: seq, data: data}) do
+  # When it began rides along, so a reader starting after it can say how long the child
+  # ran once its end arrives.
+  defp facts(f, %Event{type: "delegation_started", seq: seq, ts: ts, data: data}) do
     entry = %{
       "call_id" => data["call_id"],
       "agent" => data["agent"],
       "child_path" => data["child_path"],
       "wait" => data["wait"] != false,
-      "seq" => seq
+      "seq" => seq,
+      "ts" => ts
     }
 
     %{f | "running" => Enum.reject(f["running"], &(&1["call_id"] == data["call_id"])) ++ [entry]}
@@ -401,11 +434,19 @@ defmodule Troupe.Session.Checkpoint do
   defp end_running(f, path),
     do: %{f | "running" => Enum.reject(f["running"], &(&1["child_path"] == path))}
 
-  # A root turn's end counts a turn, and what of it nobody priced.
+  # A root turn's end counts a turn, its model calls, the money of those priced and what of
+  # it nobody priced: the session's spend as its turns add it up, a subagent's calls joining
+  # when its report reaches one, where `cost_micros` counts each call as it is answered. A
+  # checkpoint written before these two were folded has neither, which a reader takes as 0.
   defp turn(f, ["root"], data) do
     case data["turn"] do
       %{} = turn ->
-        %{f | "turns" => f["turns"] + 1, "unpriced" => f["unpriced"] + count(turn["unpriced"])}
+        Map.merge(f, %{
+          "turns" => f["turns"] + 1,
+          "unpriced" => f["unpriced"] + count(turn["unpriced"]),
+          "calls" => count(f["calls"]) + count(turn["calls"]),
+          "turns_cost_micros" => count(f["turns_cost_micros"]) + count(turn["cost_micros"])
+        })
 
       _ ->
         f

@@ -1016,6 +1016,44 @@ defmodule Troupe.Client.Daemon do
   @impl true
   def bundle(_sid, _verb), do: {:error, Troupe.Client.Bundle.not_here()}
 
+  # How long a session on this computer lasts (root #1209): the daemon's mark beside its
+  # log, which its sweep reads; everything here is the person's own.
+  @impl true
+  def lifespan(sid, :status) do
+    case Link.call("session.get", %{session_id: sid}) do
+      {:ok, %{} = row} -> {:ok, Troupe.Client.Lifespan.status(row)}
+      {:error, reason} -> {:error, refusal(reason)}
+    end
+  end
+
+  def lifespan(sid, {:set, word}) do
+    params = %{session_id: sid, lifespan: word, command_id: Troupe.Remote.RPC.command_id()}
+
+    case Link.call_with_data("session.lifespan.set", params) do
+      {:ok, %{} = answer} ->
+        {:ok, Troupe.Client.Lifespan.set(answer["lifespan"] || word, answer["erases_at"])}
+
+      {:error, %{code: "method_not_found"}} ->
+        {:error, Troupe.Client.Lifespan.not_known()}
+
+      {:error, %{code: "forbidden", data: data}} ->
+        {:error, Troupe.Client.Lifespan.forbidden(data)}
+
+      {:error, %{message: said}} when is_binary(said) ->
+        {:error, said}
+
+      {:error, reason} ->
+        {:error, refusal(reason)}
+    end
+  end
+
+  # Nothing on this computer schedules, so nothing is proposed here (root #1208).
+  @impl true
+  def proposal(_sid, _verb), do: {:error, Troupe.Client.Proposal.not_here()}
+  # A session on this computer works in its own folder, not in a plane's clone (root #1207).
+  @impl true
+  def repositories(_sid, _verb), do: {:error, Troupe.Client.Repositories.not_here()}
+
   @impl true
   def keep(sid, kept?) do
     params = %{session_id: sid, command_id: Troupe.Remote.RPC.command_id()}
@@ -1283,6 +1321,8 @@ defmodule Troupe.Client.Daemon do
         worktree: params[:worktree] || "never",
         config: params[:config] || %{},
         private: if(params[:private] == true, do: true),
+        # How long it lasts, where it is not normal (root #1209).
+        lifespan: if(params[:lifespan] in ["throwaway", "persistent"], do: params[:lifespan]),
         command_id: Troupe.Remote.RPC.command_id()
       }
       |> Enum.reject(fn {_k, v} -> is_nil(v) end)
@@ -1876,6 +1916,10 @@ defmodule Troupe.Client.Daemon do
       kind: row["kind"] || "local",
       sync: row["sync"],
       device: row["device"],
+      # How long it lasts, and when a throwaway one goes (root #1209); normal from a daemon
+      # from before lifespans.
+      lifespan: Troupe.Client.Lifespan.of(row),
+      erases_at: row["erases_at"],
       # A daemon from before archiving says nothing, and archived nothing.
       archived: row["archived"] == true
     }

@@ -24,7 +24,8 @@ defmodule Troupe.Worker.Tools.PrComment do
     %{
       "type" => "object",
       "properties" => %{
-        "body" => %{"type" => "string", "description" => "The comment, in Markdown."}
+        "body" => %{"type" => "string", "description" => "The comment, in Markdown."},
+        "repository" => GitHub.repository_property()
       },
       "required" => ["body"]
     }
@@ -38,7 +39,7 @@ defmodule Troupe.Worker.Tools.PrComment do
 
   @impl Troupe.Tool
   def run(args, ctx) do
-    case GitHub.comment(ctx.session_id, args["body"]) do
+    case GitHub.comment(ctx.session_id, args["body"], GitHub.named(args)) do
       {:ok, url} -> {:ok, "Commented: #{url}"}
       {:error, reason} -> {:error, reason}
     end

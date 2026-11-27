@@ -361,11 +361,19 @@ defmodule Troupe.FakeRemote do
       device: Keyword.get(fields, :device),
       archived: Keyword.get(fields, :archived, false),
       visibility: Keyword.get(fields, :visibility, "private"),
+      # How long it lasts (root #1209): a seeded one is normal.
+      lifespan: Keyword.get(fields, :lifespan, "normal"),
       # The bundle version it is pinned to and its channel's current one (root #1177); a
       # session whose agent is working (`busy`) has a raise kept rather than taken.
       bundle_version: Keyword.get(fields, :bundle_version, 3),
       bundle_current: Keyword.get(fields, :bundle_current, 3),
-      busy: Keyword.get(fields, :busy, false)
+      busy: Keyword.get(fields, :busy, false),
+      # The GitHub repositories it holds, each `owner/name` (root #1207), the first at the
+      # workspace's root; `pushing` names one with a push going, which is busy to take off;
+      # `max_repositories` the profile's cap.
+      repositories: Keyword.get(fields, :repositories, []),
+      pushing: Keyword.get(fields, :pushing),
+      max_repositories: Keyword.get(fields, :max_repositories, 3)
     }
   end
 
@@ -1084,6 +1092,90 @@ defmodule Troupe.FakeRemote do
     end
   end
 
+  # The owner's yes to what the harness proposed (root #1208): what the plane made, and the
+  # log's line the pod writes, pushed to whoever is attached.
+  defp dispatch(state, :plane, "session.proposal.accept", %{"session_id" => id} = params, _pid) do
+    me = state.principal["sub"]
+
+    case Map.fetch(state.sessions, id) do
+      {:ok, %{owner: ^me}} ->
+        made = %{"team" => "eng", "name" => "rerun-weekly-numbers", "url" => nil}
+
+        {event, state} =
+          append(
+            state,
+            id,
+            "proposal_answered",
+            %{
+              "id" => params["id"],
+              "decision" => "accepted",
+              "result" => made,
+              "by_name" => state.principal["name"]
+            },
+            []
+          )
+
+        push(state, id, notification(id, event))
+        {{:ok, Map.put(made, "edited", [])}, state}
+
+      {:ok, _theirs} ->
+        {{:error, -32_004, "forbidden", %{"required_role" => "owner"}}, state}
+
+      :error ->
+        {{:error, -32_005, "no such session"}, state}
+    end
+  end
+
+  # The owner's no to what the harness proposed: the log's line, pushed to whoever is attached.
+  defp dispatch(state, :worker, "session.proposal.answer", %{"session_id" => id} = params, _pid) do
+    {event, state} =
+      append(
+        state,
+        id,
+        "proposal_answered",
+        %{"id" => params["id"], "decision" => params["decision"]},
+        []
+      )
+
+    push(state, id, notification(id, event))
+    {{:ok, %{"accepted" => true}}, state}
+  end
+
+  # How long it lasts, the owner's alone (root #1209): the row answered as `session.get`
+  # answers it, and the log's line, which the pod writes, pushed to whoever is attached.
+  defp dispatch(state, :plane, "session.lifespan.set", %{"session_id" => id} = params, _pid) do
+    me = state.principal["sub"]
+    to = params["lifespan"]
+
+    case Map.fetch(state.sessions, id) do
+      {:ok, %{owner: ^me} = session} when to in ["throwaway", "normal", "persistent"] ->
+        from = Map.get(session, :lifespan, "normal")
+        session = Map.put(session, :lifespan, to)
+        state = put_in(state.sessions[id], session)
+
+        {event, state} =
+          append(
+            state,
+            id,
+            "session_lifespan_changed",
+            %{"from" => from, "to" => to, "actor" => me},
+            []
+          )
+
+        push(state, id, notification(id, event))
+        {{:ok, pod_row(session, me)}, state}
+
+      {:ok, %{owner: ^me}} ->
+        {{:error, -32_602, "invalid_params", %{"field" => "lifespan"}}, state}
+
+      {:ok, _theirs} ->
+        {{:error, -32_004, "forbidden", %{"required_role" => "owner"}}, state}
+
+      :error ->
+        {{:error, -32_005, "no such session"}, state}
+    end
+  end
+
   # Raised to its channel's current version, the owner's alone (root #1177): at once with the
   # log's `config_upgraded`, pushed to whoever is attached; kept while its agent works.
   defp dispatch(state, :plane, "session.bundle.raise", %{"session_id" => id}, _pid) do
@@ -1116,6 +1208,27 @@ defmodule Troupe.FakeRemote do
         {event, state} = append(state, id, "config_upgraded", data, [])
         push(state, id, notification(id, event))
         {{:ok, pod_row(state.sessions[id], me)}, state}
+
+      {:ok, _theirs} ->
+        {{:error, -32_004, "forbidden", %{"required_role" => "owner"}}, state}
+
+      :error ->
+        {{:error, -32_005, "no such session"}, state}
+    end
+  end
+
+  # A GitHub repository attached or taken off, the owner's alone (root #1207): within the
+  # cap and once each, refused as busy while a push on it is going; the log's
+  # `session_repository_changed` pushed to whoever is attached.
+  defp dispatch(state, :plane, method, %{"session_id" => id} = params, _pid)
+       when method in ["session.repository.add", "session.repository.remove"] do
+    me = state.principal["sub"]
+    full = repository_name(params["repository"])
+
+    case Map.fetch(state.sessions, id) do
+      {:ok, %{owner: ^me} = session} ->
+        held = Map.get(session, :repositories, [])
+        repositories_change(state, id, session, method, full, held)
 
       {:ok, _theirs} ->
         {{:error, -32_004, "forbidden", %{"required_role" => "owner"}}, state}
@@ -2143,6 +2256,8 @@ defmodule Troupe.FakeRemote do
       "cost" => session.cost,
       "updated_at" => session.updated_at,
       "visibility" => Map.get(session, :visibility, "team"),
+      "lifespan" => Map.get(session, :lifespan, "normal"),
+      "erases_at" => if(Map.get(session, :lifespan) == "throwaway", do: "2099-01-01T00:00:00Z"),
       "archived" => Map.get(session, :archived, false)
     }
   end
@@ -2163,6 +2278,7 @@ defmodule Troupe.FakeRemote do
       |> Map.put(:agent, params["agent"])
       # As the plane keeps it: what the create said, else its own default.
       |> Map.put(:visibility, params["visibility"] || "private")
+      |> Map.put(:repositories, Enum.map(List.wrap(params["repositories"]), &repository_name/1))
 
     state = put_in(state.sessions[id], session)
 
@@ -2173,7 +2289,8 @@ defmodule Troupe.FakeRemote do
           %{
             "session_id" => id,
             "endpoint" => endpoint(state, session.worker),
-            "token" => token(id)
+            "token" => token(id),
+            "repositories" => repository_rows(session.repositories)
           }}, state}
   end
 
@@ -2227,7 +2344,8 @@ defmodule Troupe.FakeRemote do
         "team" => session.team,
         "title" => session.title,
         "role" => if(session.owner == state.principal["sub"], do: "owner", else: "collaborator"),
-        "visibility" => Map.get(session, :visibility, "private")
+        "visibility" => Map.get(session, :visibility, "private"),
+        "repositories" => repository_rows(Map.get(session, :repositories, []))
       }}, state}
   end
 
@@ -2332,6 +2450,9 @@ defmodule Troupe.FakeRemote do
       "active_sessions" => total - free,
       "healthy_pods" => healthy,
       "max_sessions" => profile["max_sessions"],
+      # How many GitHub repositories a session there holds; null for a profile with no
+      # spec.github, which offers none (root #1207).
+      "max_repositories" => profile["max_repositories"],
       "teams" => profile["teams"],
       "channel" => "stable",
       "bundle_version" => "1",
@@ -2356,16 +2477,99 @@ defmodule Troupe.FakeRemote do
       "kind" => Map.get(session, :kind, "team"),
       # Who may open a pod session: a seeded one is the team's.
       "visibility" => Map.get(session, :visibility, "team"),
+      "lifespan" => Map.get(session, :lifespan, "normal"),
+      "erases_at" => if(Map.get(session, :lifespan) == "throwaway", do: "2099-01-01T00:00:00Z"),
       "device" => Map.get(session, :device),
       "archived" => Map.get(session, :archived, false)
     }
+  end
+
+  defp repository_name(%{"owner" => owner, "name" => name}), do: "#{owner}/#{name}"
+  defp repository_name(name), do: name
+
+  defp repositories_change(state, id, session, "session.repository.add", full, held) do
+    cap = Map.get(session, :max_repositories, 3)
+
+    cond do
+      Enum.any?(held, &(String.downcase(&1) == String.downcase(full))) ->
+        {{:error, -32_602, "invalid_params",
+          %{"field" => "repository", "reason" => "the session holds #{full} already"}}, state}
+
+      length(held) >= cap ->
+        reason =
+          "a session on the profile #{session.profile} holds at most #{cap} repositories " <>
+            "(spec.github.maxRepositories)"
+
+        {{:error, -32_602, "invalid_params", %{"field" => "repository", "reason" => reason}}, state}
+
+      true ->
+        repositories_changed(state, id, session, held ++ [full], "attached", full)
+    end
+  end
+
+  defp repositories_change(state, id, session, "session.repository.remove", full, held) do
+    cond do
+      full not in held ->
+        {{:error, -32_602, "invalid_params",
+          %{"field" => "repository", "reason" => "this session holds no repository #{full}"}},
+         state}
+
+      session[:pushing] == full ->
+        {{:error, -32_006, "conflict",
+          %{"reason" => "busy", "detail" => "#{full} has a push, a pull request or a CI read going"}},
+         state}
+
+      true ->
+        repositories_changed(state, id, session, held -- [full], "detached", full)
+    end
+  end
+
+  defp repositories_changed(state, id, session, now, action, full) do
+    state = put_in(state.sessions[id], Map.put(session, :repositories, now))
+
+    data = %{
+      "action" => action,
+      "repository" => full,
+      "path" => full,
+      "by" => state.principal["sub"],
+      "by_name" => state.principal["name"],
+      "repositories" =>
+        Enum.map(
+          repository_rows(now),
+          &%{"repository" => repository_name(&1), "path" => &1["path"], "ref" => nil}
+        )
+    }
+
+    {event, state} = append(state, id, "session_repository_changed", data, [])
+    push(state, id, notification(id, event))
+    {{:ok, pod_row(state.sessions[id], state.principal["sub"])}, state}
+  end
+
+  # A session's repositories as the plane's row has them, the first at the root.
+  defp repository_rows(names) do
+    names
+    |> Enum.with_index()
+    |> Enum.map(fn {full, i} ->
+      [owner, name] = String.split(full, "/", parts: 2)
+
+      %{
+        "owner" => owner,
+        "name" => name,
+        "ref" => nil,
+        "path" => if(i == 0, do: ".", else: full),
+        "github" => nil
+      }
+    end)
   end
 
   defp pod_row(session, me) do
     session
     |> live_summary()
     |> Map.merge(%{
+      "repositories" => repository_rows(Map.get(session, :repositories, [])),
       "visibility" => Map.get(session, :visibility, "private"),
+      "lifespan" => Map.get(session, :lifespan, "normal"),
+      "erases_at" => if(Map.get(session, :lifespan) == "throwaway", do: "2099-01-01T00:00:00Z"),
       "team" => session.team,
       "your_role" => if(session.owner == me, do: "owner", else: "collaborator"),
       "bundle_version" => Map.get(session, :bundle_version, 3),

@@ -239,6 +239,9 @@ defmodule Troupe.Config do
             # means the platform state directory; an explicit path lets an embedding caller
             # isolate state without touching the environment.
             state_dir: nil,
+            # How many hours after it last worked a throwaway session on this computer is
+            # erased by the daemon (#1209), 1 to 168.
+            throwaway_erase_after_hours: 24,
             # Only meaningful with `provider: "fake"`: a JSON script of scripted
             # answers, which is how a packaged binary is smoke-tested with no model.
             fake_script: nil,

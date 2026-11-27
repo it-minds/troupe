@@ -1,0 +1,19 @@
+{
+  "$id": "https://troupe.dev/schema/v1/commands/session.repository.remove.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "properties": {
+    "repository": {
+      "type": "string"
+    },
+    "session_id": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "repository",
+    "session_id"
+  ],
+  "title": "session.repository.remove",
+  "type": "object"
+}

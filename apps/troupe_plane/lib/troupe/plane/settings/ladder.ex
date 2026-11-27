@@ -59,6 +59,7 @@ defmodule Troupe.Plane.Settings.Ladder do
     "default_cache_eviction_days" => %{field: :cache_eviction_days, narrower: :lower},
     "default_erase_after_days" => %{field: :erase_after_days, narrower: :lower},
     "pins_allowed" => %{field: :pins_allowed, narrower: :off},
+    "members_may_schedule" => %{field: :members_may_schedule, narrower: :off},
     "members_may_control" => %{field: :members_may_control, narrower: :off}
   }
 

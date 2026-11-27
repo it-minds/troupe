@@ -67,6 +67,8 @@ interface Session {
   costMicros: number;
   /** The `ask_user` calls waiting for an answer. */
   questions: Set<string>;
+  /** How many proposals the harness made in it (troupe #1208). */
+  proposals: number;
   /** Why the laptop this session stands in for is away, while it is (troupe #932). */
   paused?: string;
   /** How the root ended, once a `spend:` turn ran its budget out: input is dropped after it. */
@@ -205,6 +207,7 @@ export class FakeWorker {
       pendingApprovalCount: 0,
       costMicros: 0,
       questions: new Set(),
+      proposals: 0,
     };
     this.sessions.set(id, session);
     // `profile` here is the agent the root runs, as a pod writes it (`Troupe.Session`
@@ -517,6 +520,23 @@ export class FakeWorker {
         this.respond(session, `You answered: ${answer}`);
         this.setStatus(session, "idle");
         return;
+      }
+
+      // The owner's no to what the harness proposed (troupe #1208): later or never, once.
+      case "session.proposal.answer": {
+        if (!session) return reply(ws, id, null, { code: -32005, message: "not_found" });
+        if (!client.token.scopes.includes("control")) return reply(ws, id, null, { code: -32004, message: "forbidden", data: { required_scope: "control" } });
+        if (client.token.role !== "owner") return reply(ws, id, null, { code: -32004, message: "forbidden", data: { required_scope: "admin", reason: "only the session's owner answers what the harness proposes" } });
+        const proposal = String(params["id"] ?? "");
+        const decision = params["decision"];
+        if (decision !== "later" && decision !== "never") return reply(ws, id, null, { code: -32602, message: "invalid_params", data: { reason: decision === "accepted" ? "a yes is the plane's: session.proposal.accept makes what it drafted" : "the answer is later or never" } });
+        const answered = session.log.events.find((e) => e.type === "proposal_answered" && e.data["id"] === proposal);
+        if (answered) return reply(ws, id, null, { code: -32602, message: "invalid_params", data: { reason: `the proposal ${proposal} was already answered: ${String(answered.data["decision"])}` } });
+        if (!session.log.events.some((e) => e.type === "proposal_made" && e.data["id"] === proposal)) {
+          return reply(ws, id, null, { code: -32602, message: "invalid_params", data: { reason: `there is no proposal ${proposal} in this session` } });
+        }
+        session.log.append("proposal_answered", { id: proposal, decision }, actorOf(client.token));
+        return reply(ws, id, { accepted: true, id: proposal, decision });
       }
 
       // As a pod's root agent compacts between turns: refused while a turn runs.
@@ -857,6 +877,7 @@ export class FakeWorker {
     if (text.startsWith("big:")) return this.bigResult(session, text.slice("big:".length).trim());
     if (text.startsWith("show:")) return this.showNotes(session, text.slice("show:".length).trim());
     if (text.startsWith("spend:")) return this.spendBudget(session);
+    if (text.startsWith("report:")) return this.report(session, text.slice("report:".length).trim());
     const quiet = text.startsWith("quiet:");
 
     const answer = quiet ? `(silently) ${text.slice("quiet:".length)}` : `You said: ${text}`;
@@ -905,6 +926,90 @@ export class FakeWorker {
     session.log.append("budget_exhausted", { limit: "wall_clock" });
     session.done = "budget_exhausted";
     this.setStatus(session, "done");
+  }
+
+  /**
+   * A report built from live data and published (troupe #1208): a page fetched, the
+   * artifact published, and at the turn's end the harness's proposal to rerun it, as a pod
+   * writes it. `report: every Monday` says when, in the person's words.
+   */
+  private async report(session: Session, words: string): Promise<void> {
+    const n = session.log.headSeq;
+    this.setStatus(session, "acting");
+    session.log.append("tool_call_started", { call_id: `call-${n}`, name: "web_fetch", args: { url: "https://stats.example.test/week" } });
+    await sleep(1);
+    session.log.append("tool_call_completed", { call_id: `call-${n}`, name: "web_fetch", ok: true, content: "the numbers\n" });
+    const artifact = { id: "art-weeklynumbers01", version: 1, url: "https://artifacts.example.test/a/art-weeklynumbers01/" };
+    session.log.append("tool_call_started", { call_id: `call-${n + 2}`, name: "publish_artifact", args: { title: "Weekly numbers", kind: "html", files: ["index.html"], visibility: "private" } });
+    session.log.append("tool_call_completed", { call_id: `call-${n + 2}`, name: "publish_artifact", ok: true, content: "published", artifact });
+    this.respond(session, "Published “Weekly numbers”.");
+    session.log.append("turn_ended", { reason: "end_turn" });
+    this.setStatus(session, "idle");
+    // Once per session, as the harness proposes a kind of thing.
+    if (session.proposals > 0) return;
+    const daily = /\b(daily|every day)\b/i.test(words);
+    const monday = /\bmonday\b/i.test(words);
+    const schedule = daily ? "every day" : monday ? "every Monday" : "every week";
+    const cron = daily ? "0 6 * * *" : "0 6 * * 1";
+    session.proposals += 1;
+    session.log.append("proposal_made", {
+      id: `proposal-${session.proposals}`,
+      kind: "trigger",
+      key: `artifact:${artifact.id}`,
+      title: `Rerun this report ${schedule}?`,
+      why: "It was built from live data (1 page fetched), which a rerun reads again.",
+      options: ["accepted", "later", "never"],
+      mode: words.includes("unavailable") ? "unavailable" : "direct",
+      ...(words.includes("unavailable") ? { reason: "the profile dev asks before web_fetch, which a run needs and nobody is there to answer" } : {}),
+      draft: {
+        name: "rerun-weekly-numbers",
+        schedule,
+        source: { kind: "schedule", cron, tz: "UTC" },
+        prompt_template: `Pull this week's numbers and publish the report.\n\nRead the same sources again: https://stats.example.test/week.\n\nPublish the result with publish_artifact as the next version of "Weekly numbers": \`id\` \`${artifact.id}\`, \`visibility\` \`private\`, and a \`note\` naming the date of this run.`,
+        profile: session.profile,
+        agent: session.agent,
+        visibility: "private",
+        review: "required",
+        notify: [],
+        terms: { budget_micros: 1_000_000, approvals: "deny", allow: ["publish_artifact", "web_fetch"] },
+        artifact: { id: artifact.id, title: "Weekly numbers", version: 1, url: artifact.url, visibility: "private" },
+      },
+    });
+  }
+
+  /**
+   * A session whose person already asked for a report and got one, and the proposal that
+   * followed (troupe #1208): what the fake deployment seeds so the card is there to answer.
+   */
+  async seedReport(sessionId: string, owner: string, words: string): Promise<void> {
+    const session = this.sessions.get(sessionId);
+    if (!session) return;
+    session.log.append("user_input", { source: "user", text: `Pull this week's numbers and publish the report, ${words}` }, { kind: "user", subject: owner });
+    await this.report(session, words);
+  }
+
+  /**
+   * What the plane made on the owner's yes, as the pod writes it once (troupe #1208); false
+   * where the session has no such open proposal.
+   */
+  decideProposal(sessionId: string, id: string, result: Record<string, unknown>, edited: string[], actor: { kind: string; subject: string; display_name?: string }): boolean {
+    const session = this.sessions.get(sessionId);
+    if (!session || !this.openProposal(session, id)) return false;
+    session.log.append("proposal_answered", { id, decision: "accepted", result, edited, ...(actor.display_name ? { by_name: actor.display_name } : {}) }, actor);
+    return true;
+  }
+
+  /** The draft of an open proposal of a session here, or null. */
+  proposalDraft(sessionId: string, id: string): Record<string, unknown> | null {
+    const session = this.sessions.get(sessionId);
+    const made = session && this.openProposal(session, id);
+    return made ? (made.data["draft"] as Record<string, unknown>) : null;
+  }
+
+  private openProposal(session: Session, id: string): LoggedEvent | undefined {
+    const events = session.log.events;
+    if (events.some((e) => e.type === "proposal_answered" && e.data["id"] === id)) return undefined;
+    return events.find((e) => e.type === "proposal_made" && e.data["id"] === id);
   }
 
   /** The agent's `ask_user`: `ask: Which branch? | main | develop` asks with those options. */

@@ -26,6 +26,7 @@ defmodule Troupe.Worker.Tools.PrOpen do
       "type" => "object",
       "properties" => %{
         "title" => %{"type" => "string", "description" => "The pull request's title."},
+        "repository" => GitHub.repository_property(),
         "body" => %{
           "type" => "string",
           "description" => "What it changes and why, and how it was checked."
@@ -43,7 +44,7 @@ defmodule Troupe.Worker.Tools.PrOpen do
 
   @impl Troupe.Tool
   def run(args, ctx) do
-    case GitHub.open_pull_request(ctx.session_id, args["title"], args["body"]) do
+    case GitHub.open_pull_request(ctx.session_id, args["title"], args["body"], GitHub.named(args)) do
       {:ok, %{opened: true} = pull} ->
         {:ok,
          "Opened draft pull request ##{pull.number} into #{pull.base}: #{pull.url}. Read its " <>

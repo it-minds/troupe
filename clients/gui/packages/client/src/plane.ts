@@ -8,6 +8,7 @@ import type { OwnMemory, OwnMemoryPreview, OwnMemorySaved } from "./instructions
 import type { Invitation, Invitee, InviteRole, Person } from "./invites.js";
 import type { PlaneDocument } from "./own.js";
 import type { ProfileView } from "./profile.js";
+import type { ProposalResult } from "./proposals.js";
 import type { RemoteListRow } from "./remote.js";
 import type { JsonRpcError, JsonRpcResponse } from "./types.js";
 
@@ -74,6 +75,8 @@ export interface Team {
   budget_micros?: number;
   members_may_control?: boolean;
   idle_timeout_seconds?: number;
+  /** The GitHub repositories its sessions may name, `owner/name` or `owner/*` (troupe #1207); absent from an older plane. */
+  repositories?: string[];
   [k: string]: unknown;
 }
 
@@ -130,6 +133,10 @@ export interface SessionRow {
   kind?: "team" | "private" | string;
   /** The device that sealed a private session last. */
   device?: string | null;
+  /** How long it lasts: `throwaway`, `normal` or `persistent` (troupe #1209). Absent from an older plane, which makes every session normal. */
+  lifespan?: string | null;
+  /** When a throwaway session is erased if nothing keeps it; null for any other. */
+  erases_at?: string | null;
   epoch: number;
   title: string | null;
   /** The agent it was created as or last switched to; null for the profile's default. Absent from an older plane. */
@@ -173,8 +180,40 @@ export interface SessionRow {
   bundle_channel?: string | null;
   bundle_current?: number | null;
   bundle_raise_to?: number | null;
+  /**
+   * Every GitHub repository it holds, the one it was created on first (troupe #1207); absent
+   * from an older plane, which says the one in `repository`.
+   */
+  repositories?: SessionRepository[];
   [k: string]: unknown;
 }
+
+/** What a session did on one repository, as its pod reported it: metadata only. */
+export interface RepositoryRecord {
+  branch?: string | null;
+  commit?: string | null;
+  pushes?: number | null;
+  pull_request?: { number: number; url: string } | null;
+  stopped?: { at: string; reason: string } | null;
+  [k: string]: unknown;
+}
+
+/**
+ * One GitHub repository a pod session holds: where its clone is in the workspace (`.` for
+ * the root, `owner/name` for every other), who attached it, and what the session did there.
+ */
+export interface SessionRepository {
+  owner: string;
+  name: string;
+  ref?: string | null;
+  path?: string;
+  attached_by?: string | null;
+  attached_at?: string | null;
+  github?: RepositoryRecord | null;
+}
+
+/** A repository as `session.create` and `session.repository.add` take one. */
+export type RepositoryName = string | { owner: string; name: string; ref?: string | null };
 
 export interface WorkerPod {
   pod: string;
@@ -218,6 +257,11 @@ export interface ProfileOffering {
   max_sessions?: number | null;
   /** The caller's teams that may use it, by name: whom a session there is open to. */
   teams?: string[];
+  /**
+   * How many GitHub repositories a session here may hold; null where the profile has no
+   * `spec.github` and a new session is offered none (troupe #1207). Absent from an older plane.
+   */
+  max_repositories?: number | null;
   [k: string]: unknown;
 }
 
@@ -230,6 +274,8 @@ export interface SessionsFilter {
   needs_review?: boolean;
   /** True lists only the archived sessions; omitted or false, only those not archived. */
   archived?: boolean;
+  /** Only the sessions of this lifespan; a plane from before lifespans ignores it. */
+  lifespan?: "throwaway" | "normal" | "persistent";
   limit?: number;
 }
 
@@ -242,8 +288,12 @@ export interface CreateSessionParams {
   /** One of `profiles.list`'s `agents`; refused with the list if it is not. */
   agent?: string;
   visibility?: string;
+  /** How long it lasts; absent is normal. Send it only to a plane whose `initialize` says `lifespans`. */
+  lifespan?: "throwaway" | "normal" | "persistent";
   terms?: { budget_micros?: number; max_turns?: number; wall_clock_seconds?: number; approvals?: "wait" | "deny" };
   origin?: { kind?: string; [k: string]: unknown };
+  /** The GitHub repositories it starts on, the first cloned at the workspace's root (troupe #1207). */
+  repositories?: RepositoryName[];
 }
 
 const trimSlash = (s: string) => s.replace(/\/+$/, "");
@@ -542,12 +592,58 @@ export class PlaneClient {
   }
 
   /**
+   * How long a session lasts, changed by its owner (troupe #1209); the answer is its row.
+   * Its owner's alone: anybody else is refused `forbidden`. A pod session's and a private one's.
+   */
+  setSessionLifespan(planeToken: string, sessionId: string, lifespan: "throwaway" | "normal" | "persistent"): Promise<SessionRow> {
+    return this.rpc<SessionRow>(planeToken, "session.lifespan.set", { session_id: sessionId, lifespan });
+  }
+
+  /** Erase a session, irreversibly: its owner's, or an administrator's. `erased` is false while its key is not destroyed yet. */
+  eraseSession(planeToken: string, sessionId: string): Promise<{ session_id: string; erased: boolean; state: string }> {
+    return this.rpc(planeToken, "session.erase", { session_id: sessionId });
+  }
+
+  /**
+   * The owner's yes to a trigger the harness proposed in their pod session (troupe #1208),
+   * with what they changed of its schedule, prompt and budget: the plane makes it, under
+   * their own principal, and tells the session, which writes `proposal_answered`. The
+   * answer is what was made, `{team, name, url, artifact_url}`, or on a gitops plane the
+   * `Trigger` resource to commit, `{yaml, path}`. Its owner's alone.
+   */
+  acceptProposal(planeToken: string, sessionId: string, id: string, edits: Record<string, unknown>): Promise<ProposalResult & { edited?: string[] }> {
+    return this.rpc<ProposalResult & { edited?: string[] }>(planeToken, "session.proposal.accept", { session_id: sessionId, id, edits });
+  }
+
+  /**
    * Raise a pod session to its channel's current bundle version (troupe #1177); the answer
    * is its row. Its owner's alone. A session whose agent is working is refused `conflict`
    * with `raise_to`: the raise is kept, and lands when the agent is done (`raiseKept`).
    */
   raiseSessionBundle(planeToken: string, sessionId: string): Promise<SessionRow> {
     return this.rpc<SessionRow>(planeToken, "session.bundle.raise", { session_id: sessionId });
+  }
+
+  /** The person's teams, each with what it lets its sessions do: its GitHub `repositories` among them. */
+  listTeams(planeToken: string): Promise<{ teams: Team[] }> {
+    return this.rpc<{ teams: Team[] }>(planeToken, "teams.list");
+  }
+
+  /**
+   * Attach a GitHub repository to a pod session (troupe #1207); the answer is its row. Its
+   * owner's alone. Its pod clones it into `owner/name` without a restart, or at the next
+   * wake of a session that sleeps.
+   */
+  addSessionRepository(planeToken: string, sessionId: string, repository: RepositoryName): Promise<SessionRow> {
+    return this.rpc<SessionRow>(planeToken, "session.repository.add", { session_id: sessionId, repository });
+  }
+
+  /**
+   * Take a repository off a pod session: its directory goes and its tokens are revoked. Its
+   * owner's alone; refused `conflict` with `reason: "busy"` while a push on it is going.
+   */
+  removeSessionRepository(planeToken: string, sessionId: string, repository: string): Promise<SessionRow> {
+    return this.rpc<SessionRow>(planeToken, "session.repository.remove", { session_id: sessionId, repository });
   }
 
   /**
