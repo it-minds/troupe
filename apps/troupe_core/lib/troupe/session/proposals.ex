@@ -106,18 +106,30 @@ defmodule Troupe.Session.Proposals do
     Events.subscribe(session_id, :internal)
 
     state = %__MODULE__{session_id: session_id, rule: TriggerRule.new()}
-    # A rest read back from the log ended a turn that was proposed about already, or not.
-    state =
-      Enum.reduce(Log.replay_from(session_id, 0), state, fn event, state ->
+
+    # A rest read back from the log ended a turn this projection was there for, or not: the
+    # root's first turn on a pod can begin before the tree reaches this child and end before
+    # it has read the log, which then holds the rest and nothing after it. That last rest, the
+    # root still resting, is owed a look as the live one would have had (`:owed`); any
+    # earlier one ended a turn the root has worked past.
+    {state, owed} =
+      Enum.reduce(Log.replay_from(session_id, 0), {state, nil}, fn event, {state, owed} ->
         state = step(state, event)
 
-        if Checkpoint.rest?(event) and state.rule,
-          do: %{state | rule: TriggerRule.rested(state.rule)},
-          else: state
+        cond do
+          is_nil(state.rule) -> {state, nil}
+          Checkpoint.rest?(event) -> {%{state | rule: TriggerRule.rested(state.rule)}, state.rule}
+          works?(event) -> {state, nil}
+          true -> {state, owed}
+        end
       end)
 
-    {:ok, state}
+    {:ok, state, {:continue, {:owed, owed}}}
   end
+
+  @impl GenServer
+  def handle_continue({:owed, nil}, state), do: {:noreply, state}
+  def handle_continue({:owed, rule}, state), do: {:noreply, rest(%{state | rule: rule})}
 
   @impl GenServer
   def handle_call(:open, _from, state), do: {:reply, Map.values(state.open), state}
@@ -251,6 +263,11 @@ defmodule Troupe.Session.Proposals do
   end
 
   defp own(state, _event), do: state
+
+  # The root at work again after a rest: its turn is past being proposed about.
+  @works ~w(input_accepted user_input agent_woken llm_request tool_call_started compacted)
+  defp works?(%Event{agent: ["root"], type: type}), do: type in @works
+  defp works?(_event), do: false
 
   # -- at rest ------------------------------------------------------------------
 
