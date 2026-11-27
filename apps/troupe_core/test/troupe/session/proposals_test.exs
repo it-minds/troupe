@@ -134,6 +134,29 @@ defmodule Troupe.Session.ProposalsTest do
     assert events_of_type(other.id, "proposal_made") == []
   end
 
+  # A pod's first turn starts with its tree and may be over before this child reads the
+  # log: the rest it finds there, with the root still resting, is proposed about then.
+  test "a turn that rested before the projection started is proposed about as it starts",
+       %{install: install} = context do
+    session = reporting(context, live_then_publish())
+    turn(session, "publish it")
+    assert GenServer.whereis(Troupe.Registry.proposals(session.id)) == nil
+
+    install.({:ok, %{"propose" => true, "mode" => "direct"}})
+    {:ok, pid} = Proposals.start_link(session_id: session.id)
+    on_exit(fn -> if Process.alive?(pid), do: GenServer.stop(pid) end)
+
+    made = await_event(session.id, "proposal_made", 5_000)
+    assert made.data["key"] == "artifact:art-weekly"
+    assert_received {:checked, _, %{"kind" => "trigger"}}
+
+    # Proposed once, a projection started again asks nothing more.
+    GenServer.stop(pid)
+    assert {:ok, again} = Proposals.start_link(session_id: session.id)
+    GenServer.stop(again)
+    refute_received {:checked, _, _}
+  end
+
   test "a person's machine, where nothing is installed, runs no proposals at all", context do
     session = reporting(context, live_then_publish())
     turn(session, "publish it")
