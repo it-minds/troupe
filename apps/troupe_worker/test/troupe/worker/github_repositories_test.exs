@@ -308,7 +308,13 @@ defmodule Troupe.Worker.GitHubRepositoriesTest do
 
     assert detail =~ "example-org/gadgets has a push"
     assert File.dir?(Path.join([context.workspace, "example-org", "gadgets"]))
+
+    # The push ends. The lock is released as the pusher's function returns, before the
+    # process exits, so waiting for its exit is waiting for the release: the next remove
+    # must find the repository free, not race the release.
+    pushing = Process.monitor(pusher)
     send(pusher, :done)
+    assert_receive {:DOWN, ^pushing, :process, _, _}, 5_000
 
     assert {:ok, %{"removed" => true}} = Commands.handle("session.repository.remove", remove)
     refute File.exists?(Path.join([context.workspace, "example-org"]))
