@@ -170,6 +170,7 @@ defmodule Troupe.Client do
               {:ok, String.t()} | {:error, String.t()}
   @callback lifespan(session_id(), Troupe.Client.Lifespan.verb()) ::
               {:ok, String.t()} | {:error, String.t()}
+  @callback sensitive(session_id(), :status | :mark) :: {:ok, String.t()} | {:error, String.t()}
   @callback repositories(session_id(), Troupe.Client.Repositories.verb()) ::
               {:ok, String.t()} | {:error, String.t()}
   @callback archive(session_id(), boolean()) :: {:ok, String.t()} | {:error, String.t()}
@@ -614,6 +615,32 @@ defmodule Troupe.Client do
   @doc "What `/lifespan` names after the command: nothing, or one of the three words."
   @spec lifespan_args(String.t()) :: {:ok, Troupe.Client.Lifespan.verb()} | {:error, String.t()}
   defdelegate lifespan_args(text), to: Troupe.Client.Lifespan, as: :parse
+
+  @doc """
+  Whether a session is sensitive (root #1239): `:status` says it, and for one that is not
+  asks first, since nothing clears the mark; `:mark` marks it, which only its owner may do,
+  at the plane for a session there. Answers the sentence to show.
+  """
+  @spec sensitive(session_id(), :status | :mark) :: {:ok, String.t()} | {:error, String.t()}
+  def sensitive(sid, verb), do: impl(sid).sensitive(sid, verb)
+
+  @doc "A row's sensitive mark: `sensitive`, or empty for a session that is not."
+  @spec sensitive_mark(map() | nil) :: String.t()
+  defdelegate sensitive_mark(value), to: Troupe.Client.Sensitive, as: :mark
+
+  @doc "The word every client marks a sensitive session with."
+  @spec sensitive_word() :: String.t()
+  defdelegate sensitive_word(), to: Troupe.Client.Sensitive, as: :word
+
+  @doc "What `/sensitive` names after the command: nothing, which asks, or `y` to mark it."
+  @spec sensitive_args(String.t()) :: {:ok, :status | :mark} | {:error, String.t()}
+  def sensitive_args(text) do
+    case String.trim(text) do
+      "" -> {:ok, :status}
+      yes when yes in ["y", "yes"] -> {:ok, :mark}
+      other -> {:error, "/sensitive alone asks first, and /sensitive y marks it: not #{other}"}
+    end
+  end
 
   @doc "A row's lifespan mark: `throwaway · goes in 18 h`, `persistent`, or empty for normal."
   @spec lifespan_mark(String.t() | nil, String.t() | nil) :: String.t()

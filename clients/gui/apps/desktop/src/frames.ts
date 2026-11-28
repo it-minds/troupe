@@ -8,7 +8,21 @@
 // the strip, every header's grammar and the curtain line's written set are functions of
 // the transcript, the level and the time.
 
-import { bytes, counted, firstLine, isBlobRef, isBusy, isRoot, needsYou, pickLine, rootState, toolGlyph as glyph, toolOutcome as outcome, toolTarget as target } from "@troupe/client";
+import {
+  bytes,
+  counted,
+  firstLine,
+  isBlobRef,
+  isBusy,
+  isRoot,
+  needsYou,
+  pickLine,
+  refusedWords,
+  rootState,
+  toolGlyph as glyph,
+  toolOutcome as outcome,
+  toolTarget as target,
+} from "@troupe/client";
 import type { BlobRef, CurtainPhase, Entry, LineKind, TranscriptState } from "@troupe/client";
 
 // A call's glyph, target and outcome are the client's, so the console's tool lines say the same.
@@ -119,6 +133,8 @@ export interface Strip {
   open: boolean;
   steps: number;
   failed: number;
+  /** Calls refused by a rule and not run (a sensitive session's, troupe #1239): never counted as failed. */
+  refused: number;
   /** The tools used, in the order first used, four at most. */
   tools: string[];
   /** How many more tools than `tools` names. */
@@ -128,11 +144,12 @@ export interface Strip {
 }
 
 /** The strip in words, its glyph first, as the design page writes it. */
-export function stripParts(s: Strip): { glyph: string; steps: string; failed: string | null; tools: string; took: string | null } {
+export function stripParts(s: Strip): { glyph: string; steps: string; failed: string | null; refused: string | null; tools: string; took: string | null } {
   return {
     glyph: s.open ? "▾" : "▸",
     steps: counted(s.steps, "step"),
     failed: s.failed > 0 ? `${s.failed} failed` : null,
+    refused: s.refused > 0 ? `${s.refused} refused` : null,
     tools: s.tools.join(", ") + (s.more > 0 ? ` and ${s.more} more` : ""),
     took: took(s.ms),
   };
@@ -242,7 +259,8 @@ function stripOf(turn: string, steps: ToolEntry[], level: Detail, now: number): 
     turn,
     open: level !== "quiet",
     steps: steps.length,
-    failed: steps.filter((s) => s.ok === false).length,
+    failed: steps.filter((s) => s.ok === false && !s.refused).length,
+    refused: steps.filter((s) => s.refused).length,
     tools: names.slice(0, 4),
     more: Math.max(names.length - 4, 0),
     ms: starts.length > 0 && ends.length > 0 ? Math.max(...ends) - Math.min(...starts) : undefined,
@@ -260,7 +278,8 @@ export function toolHead(entry: ToolEntry): { glyph: string; name: string; targe
     glyph: glyph(entry.ok),
     name: entry.name,
     target: target(entry.name, entry.args),
-    notes: [outcome(entry), took(span)].filter((n): n is string => n !== null),
+    // A refused call did not run: what refused it in the header, the harness's sentence in its body.
+    notes: [entry.refused ? refusedWords(entry.refused) : outcome(entry), took(span)].filter((n): n is string => n !== null),
   };
 }
 

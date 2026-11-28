@@ -46,6 +46,7 @@ import {
   repositoriesSummary,
   repositoryName,
   repositoryParam,
+  SENSITIVE_SWITCH,
   stripTokens,
   teamQuestion,
   teamsToChoose,
@@ -54,7 +55,7 @@ import {
   whoCanOpen,
 } from "@troupe/client";
 import type { AgentRow, Attachment, AuthSession, DaemonClient, FleetRow, Lifespan, NewSessionWhere, ProfileOffering, SessionKind } from "@troupe/client";
-import { useLifespans, useProfiles, useTeams } from "../hooks";
+import { useLifespans, useProfiles, useSensitive, useTeams } from "../hooks";
 import { prefs } from "../shell";
 import { useChooseFolder } from "./ChooseFolder";
 import { Mask } from "./brand";
@@ -135,6 +136,9 @@ export function StartSession({
   // server it starts on says it knows lifespans, since an older one makes it normal anyway.
   const [lifespan, setLifespan] = useState<Lifespan>("normal");
   const lifespans = useLifespans(auth, daemon);
+  // Sensitive from its start (troupe #1239): a pod session's, where the plane knows the word.
+  const [sensitive, setSensitive] = useState(false);
+  const knowsSensitive = useSensitive(auth);
   const [open, setOpen] = useState<Picker | null>(null);
   const [ceilingSaid, setCeilingSaid] = useState<Record<string, string>>({});
   const [casting, setCasting] = useState<Casting | null>(null);
@@ -343,7 +347,16 @@ export function StartSession({
       void castOnPlatform(
         auth!,
         prof,
-        { agent: as ?? platformDefault, title: startedTitle, prompt: cleaned, team: forTeam, onlyMe, repositories: sentRepos, lifespan: lasting },
+        {
+          agent: as ?? platformDefault,
+          title: startedTitle,
+          prompt: cleaned,
+          team: forTeam,
+          onlyMe,
+          repositories: sentRepos,
+          lifespan: lasting,
+          sensitive: knowsSensitive && sensitive,
+        },
         set,
         alive,
         (reason) => setCeilingSaid((c) => ({ ...c, [prof.name]: reason })),
@@ -600,6 +613,16 @@ export function StartSession({
                 </label>
               ))}
               <p className="ns-who">{lifespanChoice(lifespan).sentence}.</p>
+            </div>
+          )}
+
+          {!local && prof && knowsSensitive && (
+            <div className="ns-only-me ns-sensitive">
+              <label className="inline ns-small">
+                <input type="checkbox" checked={sensitive} onChange={(e) => setSensitive(e.target.checked)} />
+                {SENSITIVE_SWITCH.label}
+              </label>
+              {sensitive && <p className="ns-who">{SENSITIVE_SWITCH.sentence}.</p>}
             </div>
           )}
 
@@ -922,6 +945,7 @@ async function castOnPlatform(
     onlyMe: boolean;
     repositories: ChosenRepository[];
     lifespan: Lifespan | null;
+    sensitive: boolean;
   },
   set: SetCasting,
   alive: () => boolean,
@@ -943,6 +967,8 @@ async function castOnPlatform(
         ...(ask.prompt ? { prompt: ask.prompt } : {}),
         // Only where the plane said it knows the word, and only where it is not normal.
         ...(ask.lifespan && ask.lifespan !== "normal" ? { lifespan: ask.lifespan } : {}),
+        // One-way, and only where the plane said it knows the word.
+        ...(ask.sensitive ? { sensitive: true as const } : {}),
         // The first is cloned at the workspace's root, each other in its own directory.
         ...(ask.repositories.length > 0 ? { repositories: ask.repositories.map(repositoryParam) } : {}),
       }),

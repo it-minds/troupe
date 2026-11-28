@@ -660,6 +660,11 @@ defmodule Troupe.Remote.Translate do
       "session_visibility_changed" ->
         {[emit.(:remote_note, %{text: visibility_changed(data)})], memory}
 
+      # The session became sensitive (root #1239), once and for good: a line saying since
+      # when and by what; the worker moves the status line's mark.
+      "session_marked_sensitive" ->
+        {[emit.(:remote_note, %{text: Troupe.Client.Sensitive.line(data)})], memory}
+
       # How long the session lasts, changed by its owner (root #1209): a line.
       "session_lifespan_changed" ->
         {[emit.(:remote_note, %{text: Troupe.Client.Lifespan.set(to_string(data["to"]), nil)})],
@@ -1341,12 +1346,15 @@ defmodule Troupe.Remote.Translate do
     end
   end
 
+  # `refused` is why a call that did not run was refused (`sensitive`, root #1239), which the
+  # window says apart from a failure; the harness's sentence is its content.
   defp completed(data) do
     %{
       call_id: call_id(data),
       ok: data["ok"] != false and data["error"] in [nil, false],
       content: result_text(data),
-      blob: data["blob"] || get_in(data, ["result", "blob"])
+      blob: data["blob"] || get_in(data, ["result", "blob"]),
+      refused: if(is_binary(data["refused"]), do: data["refused"])
     }
   end
 

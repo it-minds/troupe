@@ -14,7 +14,7 @@
 
 import { useState } from "react";
 import type { JSX } from "react";
-import { bytes, lifespanMark, lifespanOf, nameOrSubject, repositoriesOf, repositoryName } from "@troupe/client";
+import { bytes, lifespanMark, lifespanOf, nameOrSubject, repositoriesOf, repositoryName, sensitiveMark, sensitiveOf } from "@troupe/client";
 import type { AdminSessionRow, SessionErasePreview, SessionErased, SessionGitHub, SessionRepository } from "@troupe/client";
 import { recorded, useConsole, useLoad } from "../console";
 import { href } from "../route";
@@ -161,6 +161,7 @@ export function Sessions({ query: initial = "" }: { query?: string } = {}): JSX.
                       <th className="num">Workspace</th>
                       <th>Pinned</th>
                       <th>Lasts</th>
+                      <th>Sensitive</th>
                       <th>On GitHub</th>
                       <th>Last active</th>
                       <th className="row-actions" aria-label="Actions" />
@@ -222,6 +223,9 @@ function SessionRow({ session: s, busy, onErase }: { session: AdminSessionRow; b
       <td>{s.pinned ? (s.pinned_by ? `pinned by ${s.pinned_by}` : "pinned") : <span className="muted">no</span>}</td>
       <td>{lifespanMark({ lifespan: lifespanOf(s.lifespan), erasesAt: s.erases_at ?? null }) ?? <span className="muted">normal</span>}</td>
       <td>
+        <SensitiveCell row={s} />
+      </td>
+      <td>
         <OnGitHub repositories={repositoriesOf(s)} />
       </td>
       <td>{when(s.last_active_at)}</td>
@@ -239,6 +243,13 @@ function SessionRow({ session: s, busy, onErase }: { session: AdminSessionRow; b
 /** What erasing one session takes, read from the plane first, then typed by its id. */
 // What the session did on GitHub, per repository it holds (troupe #1207): the first, and
 // every other one under "+N more", opened in place.
+/** Whether a session is sensitive (troupe #1239), its title since when and by what; a dash from a plane that does not say. */
+function SensitiveCell({ row }: { row: AdminSessionRow }): JSX.Element {
+  if (row.sensitive === undefined) return <span className="muted">—</span>;
+  const mark = sensitiveMark({ sensitive: sensitiveOf(row.sensitive) }, { nameOf: (s) => (s === row.owner ? row.owner_name : null) });
+  return mark ? <span title={mark.title}>{mark.word}</span> : <span className="muted">no</span>;
+}
+
 function OnGitHub({ repositories }: { repositories: SessionRepository[] }): JSX.Element {
   const [first, ...rest] = repositories;
   if (!first) return <span className="muted">—</span>;

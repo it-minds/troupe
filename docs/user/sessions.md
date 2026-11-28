@@ -73,6 +73,24 @@ team, inviting somebody or sharing what it published may be refused, or wait for
 administrator's yes, as the profile says; the people who read it now go on reading it
 ([sensitive sessions](../admin/sensitive-sessions.md)).
 
+A sensitive session is marked **sensitive** wherever its other marks are: in the session
+list beside how long it lasts, as a tag in its head with since when and by what (*Sensitive
+since 10:14: mcp.ehr.lookup read from it*), in a line under the head, in the console's lists
+and in the terminal's status line. A call its profile refused is drawn as **refused**, not
+failed, with the harness's sentence saying why.
+
+You may mark one of your own sessions on the platform sensitive yourself, before it reads
+anything or after: **Make it sensitive** in the session's ⋯ or on the console's *Your
+sessions*, the *Sensitive* switch as you start it, `/sensitive` in the terminal (it asks
+first; `/sensitive y` marks it), `/new --sensitive` or `troupe run --profile NAME
+--sensitive`. Each asks once more, since it is one-way.
+
+Where the profile asks a team administrator before a sensitive session is shared wider,
+giving it to the team or inviting somebody answers that it is **waiting on a team
+administrator**: nothing changed yet, and it applies as you asked the moment one of your
+team's administrators allows it on the team's *Waiting shares* in the console. They may also
+refuse it. A link cannot wait, so none is made; invite the person by name instead.
+
 ## Raising a session to the current configuration
 
 A session on the platform runs on the bundle version its profile's channel had when it

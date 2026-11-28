@@ -43,6 +43,22 @@ interface Row {
   lifespan: "throwaway" | "normal" | "persistent";
   /** The GitHub repositories it holds, the one it was created on first (troupe #1207). */
   repositories: Array<{ owner: string; name: string; ref: string | null; path: string; attached_by: string; attached_at: string; github: null }>;
+  /** Since when, and by what, it is sensitive (troupe #1239); null while it is not, and nothing clears it. */
+  sensitive: { at: string; by: string; how: "call" | "person" } | null;
+}
+
+/** A share of a sensitive session held for a team administrator (troupe #1239), as `session.share_requests` lists it. */
+interface HeldShare {
+  id: string;
+  session_id: string;
+  team: string | null;
+  kind: "visibility" | "invite";
+  params: Record<string, unknown>;
+  requested_by: string;
+  state: "pending" | "approved" | "declined";
+  decided_by: string | null;
+  decided_at: string | null;
+  at: string;
 }
 
 /** The agent a session given none runs as: `build` where the profile offers it, else its first; none where it offers none. */
@@ -118,6 +134,12 @@ export interface PlaneOptions {
   beforePolicy?: boolean;
   /** A plane from before lifespans (troupe #1209): its `initialize` says no `lifespans`, and its rows carry none. */
   beforeLifespans?: boolean;
+  /** A plane from before sensitive sessions (troupe #1239): its `initialize` says no `sensitive`, its rows carry none, and it has no method for one. */
+  beforeSensitive?: boolean;
+  /** What every profile's `sensitive.sharing` says of a sensitive session: `allow` where none is given. */
+  sensitiveSharing?: "allow" | "ask" | "deny";
+  /** The people who administer a team, whom a held share waits on. */
+  teamAdmins?: string[];
   /** The administrative half, `admin.*`. None is a plane whose admin methods are not found. */
   admin?: FakeAdmin;
   /** A plane from before a person's watch (`/v1/relay/watch`): `remote.list` is asked instead. */
@@ -654,16 +676,84 @@ export class FakePlane {
    */
   seed(
     owner: string,
-    params: { id?: string; profile?: string; title?: string; agent?: string | null; origin?: Row["origin"]; prompt?: string; visibility?: string; lifespan?: Row["lifespan"] } = {},
+    params: {
+      id?: string;
+      profile?: string;
+      title?: string;
+      agent?: string | null;
+      origin?: Row["origin"];
+      prompt?: string;
+      visibility?: string;
+      lifespan?: Row["lifespan"];
+      sensitive?: Row["sensitive"];
+    } = {},
   ): Row {
     const id = params.id ?? `s-p-${++this.counter}`;
     const row: Row = { ...this.blankRow(id, owner, params.profile ?? "dev", params.title ?? null), agent: params.agent ?? null };
     if (params.visibility) row.visibility = params.visibility;
     if (params.lifespan) row.lifespan = params.lifespan;
     if (params.origin) row.origin = params.origin;
+    if (params.sensitive) row.sensitive = params.sensitive;
     this.rows.set(id, row);
     this.activate(row, params.prompt);
+    // A seeded mark is in its log too, as the pod wrote it at the call.
+    if (params.sensitive) {
+      const { at, by, how } = params.sensitive;
+      const data = how === "call" ? { at, by, how, rule: `mcp(${by.replace(/^mcp\./, "").split(".")[0]}.*)`, call_id: "call_seed" } : { at, by, how };
+      this.opts.worker.sessions.get(row.id)?.log.append("session_marked_sensitive", data, { kind: "system" });
+    }
     return row;
+  }
+
+  /** Mark a row sensitive by hand, once: the row, and the log's line the pod writes. */
+  private markSensitive(row: Row, subject: string): void {
+    if (row.sensitive) return;
+    const at = new Date().toISOString().replace(/\.\d+Z$/, "Z");
+    row.sensitive = { at, by: subject, how: "person" };
+    const name = this.nameOf(subject);
+    this.opts.worker.sessions.get(row.id)?.log.append("session_marked_sensitive", { at, by: subject, how: "person", ...(name ? { display_name: name } : {}) }, { kind: "system" });
+  }
+
+  /**
+   * A share of a sensitive session beyond who reads it now, as the profile's `sharing`
+   * says: null to go on, an error under `deny`, and under `ask` the hold's answer, nothing
+   * applied. A team administrator's own share is not held.
+   */
+  private sensitiveShare(
+    row: Row,
+    subject: string,
+    kind: HeldShare["kind"],
+    params: Record<string, unknown>,
+  ): { result: unknown } | { error: { code: number; message: string; data?: unknown } } | null {
+    if (!row.sensitive) return null;
+    const sharing = this.opts.sensitiveSharing ?? "allow";
+    if (sharing === "allow") return null;
+    const team = this.teamsOf(row.owner)[0] ?? null;
+    if (sharing === "deny") {
+      const readers = row.visibility === "team" && team ? `the team that already reads it, ${team}` : "the people who already read it";
+      return { error: { code: -32004, message: "forbidden", data: { reason: `This session is sensitive and ${row.profile} does not allow sharing it outside ${readers}`, setting: "sensitive.sharing" } } };
+    }
+    if (this.opts.teamAdmins?.includes(subject)) return null;
+    const request: HeldShare = {
+      id: `share-${++this.counter}`,
+      session_id: row.id,
+      team,
+      kind,
+      params,
+      requested_by: subject,
+      state: "pending",
+      decided_by: null,
+      decided_at: null,
+      at: new Date().toISOString(),
+    };
+    this.shareRequests.push(request);
+    return {
+      result: {
+        waiting: true,
+        reason: "This session is sensitive, so sharing it wider is waiting on a team administrator: the people who read it now go on reading it",
+        share_request: request,
+      },
+    };
   }
 
   /**
@@ -723,6 +813,10 @@ export class FakePlane {
   readonly createdVisibility: string[] = [];
   /** The lifespan each `session.create` asked for, `null` where it named none (troupe #1209). */
   readonly createdLifespan: Array<string | null> = [];
+  /** Whether each `session.create` asked for a sensitive session (troupe #1239). */
+  readonly createdSensitive: boolean[] = [];
+  /** The shares of sensitive sessions held for a team administrator, every state, oldest first. */
+  readonly shareRequests: HeldShare[] = [];
   /** The sessions erased through `session.erase`, in order. */
   readonly erased: string[] = [];
 
@@ -766,6 +860,7 @@ export class FakePlane {
       bundle_raise_to: null,
       lifespan: "normal",
       repositories: [],
+      sensitive: null,
     };
   }
 
@@ -1350,6 +1445,11 @@ export class FakePlane {
     json(404, { error: "not_found" });
   }
 
+  /** A method asked as `subject`, as their client would, for a test to set the scene another person's client made. */
+  rpcAs(subject: string, method: string, params: Record<string, unknown>): { result: unknown } | { error: { code: number; message: string; data?: unknown } } {
+    return this.rpc(subject, this.nameOf(subject) ?? subject, method, params);
+  }
+
   private rpc(
     subject: string,
     name: string,
@@ -1389,8 +1489,8 @@ export class FakePlane {
             server_info: { name: "troupe-plane", version: "test" },
             principal: "result" in principal ? principal.result : null,
             client_update: clientUpdate,
-            // What this plane takes that one before it did not (troupe #1209).
-            ...(this.opts.beforeLifespans ? {} : { capabilities: { lifespans: true } }),
+            // What this plane takes that one before it did not (troupe #1209, #1239).
+            ...(this.opts.beforeLifespans ? {} : { capabilities: { lifespans: true, ...(this.opts.beforeSensitive ? {} : { sensitive: true }) } }),
           },
         });
         if (!component) return hello(null);
@@ -1532,6 +1632,7 @@ export class FakePlane {
         }
         const lifespan = this.opts.beforeLifespans ? "normal" : ((asked as Row["lifespan"] | undefined) ?? "normal");
         this.createdLifespan.push(asked === undefined ? null : String(asked));
+        this.createdSensitive.push(params["sensitive"] === true);
         const held = this.repositoriesFor(profile, params, subject);
         if ("error" in held) return held;
         const room = this.opts.room?.[profile];
@@ -1549,6 +1650,7 @@ export class FakePlane {
         }
         const row = this.seed(subject, { profile, ...(title === undefined ? {} : { title }), agent, visibility, lifespan, ...(prompt ? { prompt } : {}) });
         row.repositories = held.repositories;
+        if (params["sensitive"] === true && !this.opts.beforeSensitive) this.markSensitive(row, subject);
         if (room) room.active += 1;
         return { result: this.attachment(row, subject, name, "owner", "activate") };
       }
@@ -1597,6 +1699,8 @@ export class FakePlane {
           return { error: { code: -32004, message: "forbidden", data: { person: person.subject, reason: "not on this profile's teams", profile: row.profile } } };
         }
         const role = params["role"] === "control" ? "control" : "observe";
+        const held = this.sensitiveShare(row, subject, "invite", { subject: person.subject, role });
+        if (held) return held;
         const made = this.invite(id, person.subject, role, subject, { byName: name, ownerName: name, displayName: person.display_name });
         return { result: { session_id: id, invite: this.inviteesOf(id).find((i) => i["subject"] === made.subject), pushed: true } };
       }
@@ -2032,6 +2136,43 @@ export class FakePlane {
         return { result: { session_id: row.id, erased: true, state: "erased", head_hash: null } };
       }
 
+      // Marked sensitive by its owner, one-way (troupe #1239): the row, and the log's line the
+      // pod writes. A plane from before has no method.
+      case "session.sensitive.set": {
+        if (this.opts.beforeSensitive) return { error: { code: -32601, message: "method_not_found", data: { method } } };
+        const row = this.rows.get(String(params["session_id"] ?? ""));
+        if (!row) return { error: { code: -32005, message: "not_found" } };
+        if (row.owner !== subject) return { error: { code: -32004, message: "forbidden", data: { required_role: "owner", reason: "only the session's owner marks it sensitive" } } };
+        if (params["sensitive"] !== true) return { error: { code: -32602, message: "invalid_params", data: { field: "sensitive", reason: "nothing clears a sensitive session's mark" } } };
+        this.markSensitive(row, subject);
+        return { result: this.sessionJson(row, subject) };
+      }
+
+      case "session.share_requests": {
+        if (this.opts.beforeSensitive) return { error: { code: -32601, message: "method_not_found", data: { method } } };
+        const mine = this.opts.teamAdmins?.includes(subject) ? this.shareRequests.filter((r) => r.state === "pending") : [];
+        return { result: { requests: mine } };
+      }
+
+      // A team administrator's answer: a yes applies the share as its owner asked it.
+      case "session.share_request.decide": {
+        if (this.opts.beforeSensitive) return { error: { code: -32601, message: "method_not_found", data: { method } } };
+        const request = this.shareRequests.find((r) => r.id === params["id"]);
+        if (!request || !this.opts.teamAdmins?.includes(subject)) return { error: { code: -32005, message: "not_found", data: { share_request: params["id"] } } };
+        if (request.state !== "pending") return { error: { code: -32006, message: "conflict", data: { reason: "this request was answered already", state: request.state } } };
+        const decision = params["decision"];
+        if (decision !== "approve" && decision !== "decline") return { error: { code: -32602, message: "invalid_params", data: { reason: "decision is approve or decline" } } };
+        request.state = decision === "approve" ? "approved" : "declined";
+        request.decided_by = subject;
+        request.decided_at = new Date().toISOString();
+        const row = this.rows.get(request.session_id);
+        if (decision === "approve" && row) {
+          if (request.kind === "visibility") row.visibility = "team";
+          else this.invite(row.id, String(request.params["subject"]), request.params["role"] === "control" ? "control" : "observe", request.requested_by, {});
+        }
+        return { result: { share_request: request, applied: row ? this.sessionJson(row, request.requested_by) : {} } };
+      }
+
       // Given to its team or taken back, by its owner alone (troupe #1169): the row, and the
       // log's line the pod writes, which every client attached hears.
       case "session.visibility.set": {
@@ -2040,6 +2181,10 @@ export class FakePlane {
         if (row.owner !== subject) return { error: { code: -32004, message: "forbidden", data: { required_role: "owner", reason: "only the session's owner gives it to the team or takes it back" } } };
         const to = params["visibility"];
         if (to !== "team" && to !== "private") return { error: { code: -32602, message: "invalid_params", data: { reason: "visibility is team or private" } } };
+        if (to === "team" && row.visibility !== "team") {
+          const held = this.sensitiveShare(row, subject, "visibility", { visibility: "team" });
+          if (held) return held;
+        }
         if (row.visibility !== to) {
           row.visibility = to;
           const name = this.nameOf(subject);
@@ -2254,6 +2399,7 @@ export class FakePlane {
       profile: row.profile,
       visibility: row.visibility,
       ...(this.opts.beforeLifespans ? {} : { lifespan: row.lifespan, erases_at: row.lifespan === "throwaway" ? new Date(row.created_at + 24 * 3_600_000).toISOString() : null }),
+      ...(this.opts.beforeSensitive ? {} : { sensitive: row.sensitive }),
       team: this.teamsOf(row.owner)[0] ?? null,
       state: row.state,
       epoch: row.epoch,

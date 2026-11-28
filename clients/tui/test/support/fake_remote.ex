@@ -25,7 +25,8 @@ defmodule Troupe.FakeRemote do
 
   use GenServer
 
-  alias Troupe.Protocol.ClientUpdate
+  alias Troupe.Protocol.{ClientUpdate, Event}
+  alias Troupe.Session.History
 
   @guid "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 
@@ -363,6 +364,10 @@ defmodule Troupe.FakeRemote do
       visibility: Keyword.get(fields, :visibility, "private"),
       # How long it lasts (root #1209): a seeded one is normal.
       lifespan: Keyword.get(fields, :lifespan, "normal"),
+      # Since when, and by what, it is sensitive (root #1239), `%{"at", "by", "how"}`, nil
+      # while it is not; and what its profile says of sharing it, `allow` unless a test says.
+      sensitive: Keyword.get(fields, :sensitive),
+      sharing: Keyword.get(fields, :sharing, "allow"),
       # The bundle version it is pinned to and its channel's current one (root #1177); a
       # session whose agent is working (`busy`) has a raise kept rather than taken.
       bundle_version: Keyword.get(fields, :bundle_version, 3),
@@ -1061,6 +1066,12 @@ defmodule Troupe.FakeRemote do
     visibility = params["visibility"]
 
     case Map.fetch(state.sessions, id) do
+      # A sensitive session's profile refuses giving it to the team, or holds it for a team
+      # administrator's yes (root #1239).
+      {:ok, %{owner: ^me, sensitive: %{}, sharing: sharing} = session}
+      when visibility == "team" and sharing in ["ask", "deny"] ->
+        sensitive_share(state, session, "visibility", %{"visibility" => "team"})
+
       {:ok, %{owner: ^me} = session} when visibility in ["team", "private"] ->
         session = Map.put(session, :visibility, params["visibility"])
         state = put_in(state.sessions[id], session)
@@ -1139,6 +1150,37 @@ defmodule Troupe.FakeRemote do
 
     push(state, id, notification(id, event))
     {{:ok, %{"accepted" => true}}, state}
+  end
+
+  # Marked sensitive by its owner, one-way (root #1239): the row answered as `session.get`
+  # answers it, and the log's line, which the pod writes, pushed to whoever is attached. A
+  # session sensitive already is answered as it is.
+  defp dispatch(state, :plane, "session.sensitive.set", %{"session_id" => id} = params, _pid) do
+    me = state.principal["sub"]
+    one_way? = params["sensitive"] == true
+
+    case Map.fetch(state.sessions, id) do
+      {:ok, %{owner: ^me}} when not one_way? ->
+        {{:error, -32_602, "invalid_params", %{"field" => "sensitive"}}, state}
+
+      {:ok, %{owner: ^me, sensitive: %{}} = session} ->
+        {{:ok, pod_row(session, me)}, state}
+
+      {:ok, %{owner: ^me} = session} ->
+        mark = hand_mark(state)
+        session = Map.put(session, :sensitive, mark)
+        state = put_in(state.sessions[id], session)
+        data = Map.put(mark, "display_name", state.principal["name"])
+        {event, state} = append(state, id, "session_marked_sensitive", data, [])
+        push(state, id, notification(id, event))
+        {{:ok, pod_row(session, me)}, state}
+
+      {:ok, _theirs} ->
+        {{:error, -32_004, "forbidden", %{"required_role" => "owner"}}, state}
+
+      :error ->
+        {{:error, -32_005, "no such session"}, state}
+    end
   end
 
   # How long it lasts, the owner's alone (root #1209): the row answered as `session.get`
@@ -1306,7 +1348,9 @@ defmodule Troupe.FakeRemote do
     {{:ok, %{"head_seq" => head}}, put_in(state.subscriptions[pid], id)}
   end
 
-  # A page of the history before a seq, oldest first, at most `limit` (500 when absent).
+  # A page of the history before a seq, oldest first, about `limit` (500 when absent), cut
+  # at a turn by the rule the plane's own `session.events` cuts by: it may be shorter than
+  # asked, or longer for a turn longer than the page.
   defp dispatch(
          state,
          _kind,
@@ -1315,9 +1359,15 @@ defmodule Troupe.FakeRemote do
          _pid
        )
        when is_integer(before) and before >= 1 do
-    above = Enum.filter(state.sessions[id][:events] || [], &(&1["seq"] < before))
-    page = Enum.take(above, -min(params["limit"] || 500, state.events_page))
-    {{:ok, %{"events" => page, "more" => length(above) > length(page)}}, state}
+    events = state.sessions[id][:events] || []
+    by_seq = Map.new(events, &{&1["seq"], &1})
+
+    read = fn from, below ->
+      for e <- events, e["seq"] > from and e["seq"] < below, do: Event.from_json(e)
+    end
+
+    {page, more} = History.page(read, before, min(params["limit"] || 500, state.events_page))
+    {{:ok, %{"events" => Enum.map(page, &by_seq[&1.seq]), "more" => more}}, state}
   end
 
   defp dispatch(state, _kind, "unsubscribe", _params, pid),
@@ -2257,12 +2307,53 @@ defmodule Troupe.FakeRemote do
       "updated_at" => session.updated_at,
       "visibility" => Map.get(session, :visibility, "team"),
       "lifespan" => Map.get(session, :lifespan, "normal"),
+      "sensitive" => Map.get(session, :sensitive),
       "erases_at" => if(Map.get(session, :lifespan) == "throwaway", do: "2099-01-01T00:00:00Z"),
       "archived" => Map.get(session, :archived, false)
     }
   end
 
   # A create the plane takes: the session made, placed or waiting for a place.
+  # A mark by hand, as the plane writes it: now, by the person signed in.
+  defp hand_mark(state),
+    do: %{
+      "at" => DateTime.utc_now() |> DateTime.truncate(:second) |> DateTime.to_iso8601(),
+      "by" => state.principal["sub"],
+      "how" => "person"
+    }
+
+  # A share of a sensitive session its profile refuses (`deny`) or holds for a team
+  # administrator (`ask`), as the plane answers each (root #1239); nothing is applied.
+  defp sensitive_share(state, %{sharing: "deny"} = session, _kind, _params) do
+    reason =
+      "This session is sensitive and #{session.profile} does not allow sharing it outside " <>
+        "the people who already read it"
+
+    {{:error, -32_004, "forbidden", %{"reason" => reason, "setting" => "sensitive.sharing"}}, state}
+  end
+
+  defp sensitive_share(state, session, kind, params) do
+    request = %{
+      "id" => "share-" <> Base.encode16(:crypto.strong_rand_bytes(3), case: :lower),
+      "session_id" => session.id,
+      "team" => session.team,
+      "kind" => kind,
+      "params" => params,
+      "requested_by" => state.principal["sub"],
+      "state" => "pending"
+    }
+
+    answer = %{
+      "waiting" => true,
+      "reason" =>
+        "This session is sensitive, so sharing it wider is waiting on a team administrator: " <>
+          "the people who read it now go on reading it",
+      "share_request" => request
+    }
+
+    {{:ok, answer}, Map.update(state, :share_requests, [request], &(&1 ++ [request]))}
+  end
+
   defp create(state, id, params, free) do
     waits? = free == 0
 
@@ -2279,6 +2370,8 @@ defmodule Troupe.FakeRemote do
       # As the plane keeps it: what the create said, else its own default.
       |> Map.put(:visibility, params["visibility"] || "private")
       |> Map.put(:repositories, Enum.map(List.wrap(params["repositories"]), &repository_name/1))
+      # `sensitive: true` marks it from its start, as its owner's (root #1239).
+      |> Map.put(:sensitive, if(params["sensitive"] == true, do: hand_mark(state)))
 
     state = put_in(state.sessions[id], session)
 
@@ -2478,6 +2571,7 @@ defmodule Troupe.FakeRemote do
       # Who may open a pod session: a seeded one is the team's.
       "visibility" => Map.get(session, :visibility, "team"),
       "lifespan" => Map.get(session, :lifespan, "normal"),
+      "sensitive" => Map.get(session, :sensitive),
       "erases_at" => if(Map.get(session, :lifespan) == "throwaway", do: "2099-01-01T00:00:00Z"),
       "device" => Map.get(session, :device),
       "archived" => Map.get(session, :archived, false)
@@ -2569,6 +2663,7 @@ defmodule Troupe.FakeRemote do
       "repositories" => repository_rows(Map.get(session, :repositories, [])),
       "visibility" => Map.get(session, :visibility, "private"),
       "lifespan" => Map.get(session, :lifespan, "normal"),
+      "sensitive" => Map.get(session, :sensitive),
       "erases_at" => if(Map.get(session, :lifespan) == "throwaway", do: "2099-01-01T00:00:00Z"),
       "team" => session.team,
       "your_role" => if(session.owner == me, do: "owner", else: "collaborator"),

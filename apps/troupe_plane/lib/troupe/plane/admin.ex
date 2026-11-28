@@ -5782,6 +5782,9 @@ defmodule Troupe.Plane.Admin do
       lifespan: session.lifespan,
       # When a throwaway one is erased if nothing keeps it; nil for any other.
       erases_at: Sessions.Lifespan.erases_at(session, Sessions.Lifespan.hours()),
+      # Since when, and by what, it is sensitive, as a session's own row says it; nil while
+      # it is not.
+      sensitive: Sessions.Sensitive.json(session),
       epoch: session.epoch,
       last_seq: session.last_seq,
       object_bytes: session.object_bytes,

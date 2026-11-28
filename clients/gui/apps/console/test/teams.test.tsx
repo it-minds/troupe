@@ -64,7 +64,7 @@ describe("a team", () => {
     visit("#/teams/core");
     unmount = render(<App />).unmount;
     await waitFor(() => heading() === "core" && says("Membership is the identity provider's"), "the members tab");
-    expect(tabs()).toEqual(["Members and groups", "Access", "Admins", "Limits", "GitHub", "Danger zone"]);
+    expect(tabs()).toEqual(["Members and groups", "Access", "Admins", "Limits", "Waiting shares", "GitHub", "Danger zone"]);
     await sees("grp-core");
     await sees("erin@example.com");
     await sees("150.00");
