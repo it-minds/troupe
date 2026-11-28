@@ -84,21 +84,26 @@ export interface PlaneAsker {
   rpc<T>(method: string, params?: unknown): Promise<T>;
 }
 
-const asked = new WeakMap<PlaneAsker, Promise<boolean>>();
+const asked = new WeakMap<PlaneAsker, Promise<Record<string, unknown>>>();
 
 /**
- * Whether the plane takes `lifespan`, from its `initialize`, asked once for each sign-in.
- * Asked naming no client, so it is no client's version the plane records or judges; a plane
- * that could not be asked, or from before lifespans, answers false and nothing is offered.
+ * What the plane's `initialize` says it takes, asked once for each sign-in and shared by
+ * every question about it. Asked naming no client, so it is no client's version the plane
+ * records or judges; a plane that could not be asked says nothing, and nothing is offered.
  */
-export function planeKnowsLifespans(auth: PlaneAsker): Promise<boolean> {
+export function planeCapabilities(auth: PlaneAsker): Promise<Record<string, unknown>> {
   let answer = asked.get(auth);
   if (!answer) {
     answer = auth
       .rpc<{ capabilities?: Record<string, unknown> }>("initialize", { protocol_version: "1" })
-      .then((hello) => knowsLifespans(hello?.capabilities))
-      .catch(() => false);
+      .then((hello) => hello?.capabilities ?? {})
+      .catch(() => ({}));
     asked.set(auth, answer);
   }
   return answer;
+}
+
+/** Whether the plane takes `lifespan`, from its `initialize`; one from before lifespans answers false. */
+export function planeKnowsLifespans(auth: PlaneAsker): Promise<boolean> {
+  return planeCapabilities(auth).then(knowsLifespans);
 }

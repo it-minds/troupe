@@ -15,6 +15,8 @@ import { invitationsFrom } from "./invites.js";
 import type { Invitation } from "./invites.js";
 import { lifespanOf } from "./lifespan.js";
 import type { Lifespan } from "./lifespan.js";
+import { sensitiveOf } from "./sensitive.js";
+import type { SensitiveMark } from "./sensitive.js";
 import { named } from "./people.js";
 import type { PlaneClient, SessionRow, SessionsFilter } from "./plane.js";
 import { watchRemote } from "./remote.js";
@@ -213,6 +215,8 @@ export interface FleetRow {
   lifespan?: Lifespan;
   /** When a throwaway session is erased if nothing keeps it, as the source says; null for any other. */
   erasesAt?: string | null;
+  /** Since when, and by what, it is sensitive (troupe #1239); null while it is not, and from a source that does not say. */
+  sensitive?: SensitiveMark | null;
   yourRole: string | null;
   origin: { kind?: string; trigger?: string; [k: string]: unknown } | null;
   reviewedBy: string | null;
@@ -293,6 +297,7 @@ export function rowFromPlane(row: SessionRow, source = "plane"): FleetRow {
     visibility: row.visibility ?? null,
     lifespan: lifespanOf(row.lifespan),
     erasesAt: row.erases_at ?? null,
+    sensitive: sensitiveOf(row.sensitive),
     yourRole: row.your_role ?? null,
     origin: row.origin ?? null,
     reviewedBy: row.reviewed_by ?? null,

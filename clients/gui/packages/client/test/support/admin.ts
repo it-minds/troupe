@@ -507,6 +507,8 @@ export interface FakeSession {
   /** How long it lasts (troupe #1209); normal where a test says nothing. */
   lifespan?: "throwaway" | "normal" | "persistent";
   erases_at?: string | null;
+  /** Since when, and by what, it is sensitive (troupe #1239); not sensitive where a test says nothing. */
+  sensitive?: { at: string; by: string; how: "call" | "person" } | null;
   last_active_at: string;
   parent: string | null;
   origin: "user" | "trigger";
@@ -1539,6 +1541,23 @@ export class FakeAdmin {
         if (rules !== undefined && rules !== null) {
           const why = checkRuleSet(rules);
           if (why.length) return refuse(INVALID_PARAMS, "invalid_params", { field: "spec.permissions", reason: why.join("; ") });
+        }
+        // A sensitive session's lists, read as the permission rules are, and the plane's
+        // refusal of rules that mark a session with nothing refused once marked (troupe #1239).
+        const sensitive = typeof sentSpec === "object" && sentSpec !== null ? (sentSpec as Record<string, unknown>)["sensitive"] : undefined;
+        if (typeof sensitive === "object" && sensitive !== null) {
+          const s = sensitive as Record<string, unknown>;
+          const why = checkRuleSet({ deny: [...(Array.isArray(s["markedBy"]) ? s["markedBy"] : []), ...(Array.isArray(s["deny"]) ? s["deny"] : [])] });
+          if (why.length) return refuse(INVALID_PARAMS, "invalid_params", { field: "spec.sensitive", reason: why.join("; ") });
+          if (s["sharing"] !== undefined && !["allow", "ask", "deny"].includes(String(s["sharing"]))) {
+            return refuse(INVALID_PARAMS, "invalid_params", { field: "spec.sensitive", reason: `sensitive.sharing must be allow, ask or deny, not ${JSON.stringify(s["sharing"])}` });
+          }
+          if (Array.isArray(s["markedBy"]) && s["markedBy"].length > 0 && !(Array.isArray(s["deny"]) && s["deny"].length > 0)) {
+            return refuse(INVALID_PARAMS, "invalid_params", {
+              field: "spec.sensitive",
+              reason: 'sensitive.markedBy is set and sensitive.deny is not: say which tools a sensitive session is refused in sensitive.deny, such as ["publish_artifact", "web_fetch", "remember"], or take markedBy out',
+            });
+          }
         }
         // A write that names a parent, or stops naming one, is the profile in effect.
         const effect =this.inEffect(name, sentAttrs, parent, before);
@@ -3158,6 +3177,7 @@ export class FakeAdmin {
       pinned_by: s.pinned_by,
       lifespan: s.lifespan ?? "normal",
       erases_at: s.erases_at ?? null,
+      sensitive: s.sensitive ?? null,
       last_active_at: s.last_active_at,
       repository: s.repository ?? null,
       github: s.github ?? null,

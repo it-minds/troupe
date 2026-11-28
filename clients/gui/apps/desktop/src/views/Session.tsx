@@ -63,6 +63,11 @@ import {
   lifespanOf,
   lifespanRefusal,
   throwawaySentence,
+  SENSITIVE_CONFIRM,
+  SENSITIVE_ITEM,
+  sensitiveBanner,
+  sensitiveMark,
+  sensitiveRefusal,
 } from "@troupe/client";
 import type {
   Artifact,
@@ -81,7 +86,7 @@ import type {
   SessionView,
   TranscriptState,
 } from "@troupe/client";
-import { useLifespans, useSessionView, useStartQuestions, useTeams } from "../hooks";
+import { useLifespans, useSensitive, useSessionView, useStartQuestions, useTeams } from "../hooks";
 import { useNarrow } from "../narrow";
 import type { Marks, SessionHandle } from "../hooks";
 import { curtainLine, curtainUp, DEFAULT_DETAIL, isDetail, layout, waitingOn, waitingWords } from "../frames";
@@ -308,9 +313,11 @@ export function Session({
   const rowSaid = row?.raw as { team?: string | null } | undefined;
   const [answered, setAnswered] = useState<{ visibility: string; seen: string | undefined } | null>(null);
   const [shareError, setShareError] = useState<string | null>(null);
+  const [shareWaiting, setShareWaiting] = useState<string | null>(null);
   useEffect(() => {
     setAnswered(null);
     setShareError(null);
+    setShareWaiting(null);
   }, [sessionId]);
   const visibility = answered && view.state.visibility === answered.seen ? answered.visibility : (view.state.visibility ?? row?.visibility ?? undefined);
   const team = rowSaid?.team ?? null;
@@ -321,14 +328,47 @@ export function Session({
     marking && marking.row.kind === "team" && (visibility === "team" || visibility === "private")
       ? async (to: "team" | "private"): Promise<string | null> => {
           setShareError(null);
+          setShareWaiting(null);
           try {
-            await marking.marks.share(marking.row, to);
+            const waiting = await marking.marks.share(marking.row, to);
+            // A sensitive session's profile asks a team administrator first: nothing
+            // changed yet, and the head says it waits.
+            if (waiting) {
+              setShareWaiting(waiting);
+              return waiting;
+            }
             setAnswered({ visibility: to, seen: view.state.visibility });
             return null;
           } catch (e) {
             const why = visibilityRefusal(e, to === "team");
             setShareError(why);
             return why;
+          }
+        }
+      : undefined;
+  // Sensitive (troupe #1239): the log's mark, else the row's, else the answer to a mark made
+  // here. Nothing clears it, so whichever says it first holds. Its owner marks a pod session
+  // from the ⋯, asked once more, where the plane knows sensitive sessions.
+  const knowsSensitive = useSensitive(auth);
+  const [sensitiveError, setSensitiveError] = useState<string | null>(null);
+  const [askSensitive, setAskSensitive] = useState(false);
+  useEffect(() => {
+    setSensitiveError(null);
+    setAskSensitive(false);
+  }, [sessionId]);
+  const sensitive = view.state.sensitive ?? row?.sensitive ?? null;
+  const markWords = { self: self ?? null, nameOf: (s: string) => (s === row?.owner ? row?.ownerName : null) };
+  const sensitiveTag = sensitiveMark({ sensitive }, markWords);
+  const makeSensitive =
+    marking && marking.row.kind === "team" && marking.row.yourRole === "owner" && knowsSensitive && !sensitive
+      ? async (): Promise<void> => {
+          setSensitiveError(null);
+          try {
+            await marking.marks.sensitive(marking.row);
+          } catch (e) {
+            setSensitiveError(sensitiveRefusal(e));
+          } finally {
+            setAskSensitive(false);
           }
         }
       : undefined;
@@ -600,7 +640,8 @@ export function Session({
         onBack={onBack}
         renaming={rename && renaming ? { onRename: async (title) => void (await rename(title)), onDone: () => setRenaming(false) } : null}
         lasts={lifespan === "persistent" ? "persistent" : null}
-        invites={row ? <InviteControl auth={auth} daemon={daemon} row={row} /> : null}
+        sensitive={sensitiveTag}
+        invites={row ? <InviteControl auth={auth} daemon={daemon} row={row} onWaiting={setShareWaiting} /> : null}
         remoteLine={row?.kind === "remote" ? <RemoteLine row={row} /> : null}
         menu={
           <SessionMenu
@@ -621,6 +662,7 @@ export function Session({
             onKeep={keep ? (on) => void keep(on) : undefined}
             sharing={share && (visibility === "team" || visibility === "private") ? { visibility, team, onShare: (to) => void share(to) } : undefined}
             living={relive ? { lifespan, onRelive: (to) => void relive(to) } : undefined}
+            onSensitive={makeSensitive ? () => setAskSensitive(true) : undefined}
             whose={whose}
             remote={
               row && daemon && auth && (row.kind === "local" || row.kind === "private") ? (
@@ -659,6 +701,35 @@ export function Session({
         <div className="banner error" role="alert">
           <p>{shareError}</p>
         </div>
+      )}
+      {sensitive && (
+        <div className="banner sensitive" role="status">
+          <p>{sensitiveBanner(sensitive, markWords)}</p>
+        </div>
+      )}
+      {shareWaiting && (
+        <div className="banner sensitive" role="status">
+          <p>{shareWaiting}</p>
+        </div>
+      )}
+      {sensitiveError && (
+        <div className="banner error" role="alert">
+          <p>{sensitiveError}</p>
+        </div>
+      )}
+      {askSensitive && makeSensitive && (
+        <Dialog label={SENSITIVE_ITEM.title} role="alertdialog" onClose={() => setAskSensitive(false)} className="sensitive-confirm">
+          <h1>{SENSITIVE_ITEM.title}</h1>
+          <p>{SENSITIVE_CONFIRM}</p>
+          <div className="actions">
+            <button type="button" onClick={() => setAskSensitive(false)}>
+              Cancel
+            </button>
+            <button type="button" className="primary" onClick={() => void makeSensitive()}>
+              {SENSITIVE_ITEM.title}
+            </button>
+          </div>
+        </Dialog>
       )}
       {lifespan === "throwaway" && !row?.archived && (
         <Throwaway erasesAt={row?.erasesAt ?? null} onErase={eraseNow} onKeep={relive ? () => void relive("normal") : undefined} />
@@ -1020,6 +1091,7 @@ function Header({
   onBack,
   renaming,
   lasts,
+  sensitive,
   invites,
   remoteLine,
   menu,
@@ -1035,6 +1107,8 @@ function Header({
   renaming?: { onRename: (title: string) => Promise<void>; onDone: () => void } | null;
   /** `persistent`, the head's mark of a session kept until erased; null otherwise, a throwaway one's line under the head saying it whole. */
   lasts?: string | null;
+  /** `sensitive` and since when, by what (troupe #1239); null for a session that is not, which shows nothing. */
+  sensitive?: { word: string; title: string } | null;
   /** Whom it is shared with by name, and for its owner the invitation (troupe #765). */
   invites?: JSX.Element | null;
   /** Whose laptop a relayed session is on. */
@@ -1062,6 +1136,13 @@ function Header({
         </h1>
       )}
       <div className="crumbs">
+        {/* First, so a narrow head, which leaves tags out from the end, keeps it longest:
+            it limits what the session may do. */}
+        {sensitive && (
+          <span className="tag sensitive" title={sensitive.title}>
+            {sensitive.word}
+          </span>
+        )}
         {row && (
           <>
             <Where kind={row.kind} row={row} />
@@ -1070,18 +1151,18 @@ function Header({
           </>
         )}
         {/* Before the profile and the agent, which the composer says too, so a narrow head
-            clips those and not this. */}
+            leaves those out and not this. */}
         {lasts && (
           <span className="tag lasts" title={lasts === "persistent" ? "Kept until its owner erases it" : "Erased a while after it goes quiet, unless somebody keeps it"}>
             {lasts}
           </span>
         )}
         {row?.kind === "team" && row.profile && (
-          <span className="tag" title="The plane profile this session runs on; a session keeps the one it started with">
+          <span className="tag" title={`${row.profile}: the plane profile this session runs on; a session keeps the one it started with`}>
             {row.profile}
           </span>
         )}
-        <span className="tag profile" title="The agent this window runs">
+        <span className="tag profile" title={agent ? `${agent}: the agent this window runs` : "The agent this window runs"}>
           {agent ?? "—"}
         </span>
         {remoteLine}
@@ -1200,6 +1281,7 @@ function SessionMenu({
   onKeep,
   sharing,
   living,
+  onSensitive,
   whose,
   remote,
 }: {
@@ -1224,6 +1306,8 @@ function SessionMenu({
   sharing?: { visibility: "team" | "private"; team: string | null; onShare: (to: "team" | "private") => void } | undefined;
   /** How long it lasts, and the change to either of the other two: its owner's alone. */
   living?: { lifespan: Lifespan; onRelive: (to: Lifespan) => void } | undefined;
+  /** Ask to mark it sensitive, one-way: its owner's alone, and gone once it is. */
+  onSensitive?: (() => void) | undefined;
   /** Whose a pod session is, as the head marks it. */
   whose?: string | null;
   /** Steering from another device: this computer's offer. */
@@ -1303,6 +1387,12 @@ function SessionMenu({
               <span className="d">{c.sentence}</span>
             </button>
           ))}
+        {onSensitive && (
+          <button type="button" className="item" onClick={then(onSensitive)}>
+            <span className="t">{SENSITIVE_ITEM.title}</span>
+            <span className="d">{SENSITIVE_ITEM.line}</span>
+          </button>
+        )}
         {onArchive && (
           <button type="button" className="item" onClick={then(() => onArchive(!row?.archived))}>
             <span className="t">{archiveItem(Boolean(row?.archived)).title}</span>
@@ -2038,7 +2128,7 @@ const StreamEntry = memo(function StreamEntry({
       return (
         <>
           <p
-            className={`note ${ERROR_NOTES.has(entry.type) ? "error" : ""} ${entry.type === "profile_switched" ? "switched" : ""}`}
+            className={`note ${ERROR_NOTES.has(entry.type) ? "error" : ""} ${entry.type === "profile_switched" ? "switched" : ""} ${entry.type === "session_marked_sensitive" ? "sensitive" : ""}`}
           >
             {/* The start's suggestion is the harness's sentence, written for a terminal in
                 Markdown: in this app's words where it has them, else rendered, never raw. */}
