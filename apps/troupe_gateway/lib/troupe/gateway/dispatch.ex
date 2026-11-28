@@ -1361,9 +1361,7 @@ defmodule Troupe.Gateway.Dispatch do
           named(session.id, title)
           # Before sealing starts, whose first registration tells the plane the word.
           lasting(session.id, lifespan)
-          # Sensitive from its start, by its person's hand (#1239), before any turn runs.
-          if params["sensitive"] == true,
-            do: {:ok, _mark} = Sensitive.mark_by_hand(session.id, subject(context), name_of(context.principal))
+          :ok = sensitive_from_start(session.id, params["sensitive"], context)
 
           {:ok,
            %{
@@ -1510,12 +1508,7 @@ defmodule Troupe.Gateway.Dispatch do
 
   # Marked sensitive by its person, once and for good (#1239): no `false`. The mark is a line
   # of the session's log, which only its running tree writes, so a dormant one is woken for
-  # it. On a pod a session is marked at its plane, which tells the pod.
-  defp handle("session.sensitive.set", _params, %Context{activate: activate}) when activate != nil do
-    {:error,
-     Error.new(:unavailable, %{reason: "a session on a pod is marked sensitive at its plane, which tells the pod"})}
-  end
-
+  # it. A pod's guard refuses it: there a session is marked at its plane, which tells the pod.
   defp handle("session.sensitive.set", params, context) do
     with {:ok, session_id} <- fetch(params, "session_id"),
          :ok <- Sensitive.one_way(params["sensitive"]),
@@ -2638,6 +2631,14 @@ defmodule Troupe.Gateway.Dispatch do
   end
 
   # Checked before the session exists, so a word that is not one costs nothing. Absent at a
+  # Sensitive from its start, by its person's hand (#1239), before any turn runs.
+  defp sensitive_from_start(session_id, true, context) do
+    {:ok, _mark} = Sensitive.mark_by_hand(session_id, subject(context), name_of(context.principal))
+    :ok
+  end
+
+  defp sensitive_from_start(_session_id, _not_asked, _context), do: :ok
+
   # `session.create`'s `sensitive`: true marks it from its start, and nothing else is a word.
   defp sensitive_at_create(nil), do: :ok
   defp sensitive_at_create(false), do: :ok

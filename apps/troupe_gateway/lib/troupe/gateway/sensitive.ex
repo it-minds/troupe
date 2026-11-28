@@ -26,6 +26,7 @@ defmodule Troupe.Gateway.Sensitive do
   alias Troupe.Config.Permissions
   alias Troupe.Protocol.{Error, Sensitive}
   alias Troupe.Session.Sensitive, as: Mark
+  alias Troupe.Tool.Result
   alias Troupe.Tools
 
   @doc "The session's mark, running or not: `%{at, by, how, ...}`, or `nil`."
@@ -115,7 +116,7 @@ defmodule Troupe.Gateway.Sensitive do
     with %{} = mark <- mark_of(session_id),
          {:denied_sensitive, _tool, _rule, _mark} = refused <-
            Tools.sensitive_refusal(config_of(session_id), mark, tool, args) do
-      Troupe.Tool.Result.describe(refused)
+      Result.describe(refused)
     else
       _none -> nil
     end

@@ -22,6 +22,7 @@ defmodule Troupe.Gateway.LocalSources do
   prints it; the files themselves are read and written by the paths they had.
   """
 
+  alias Troupe.Gateway.Sensitive
   alias Troupe.MCP.{Import, Local, OAuth, Secrets, Tool, Trust}
   alias Troupe.Paths
   alias Troupe.Protocol.Error
@@ -412,7 +413,7 @@ defmodule Troupe.Gateway.LocalSources do
   end
 
   defp gated(session_id, name, arguments) do
-    case Troupe.Gateway.Sensitive.call(session_id, name, arguments) do
+    case Sensitive.call(session_id, name, arguments) do
       :ok -> :ok
       {:refused, sentence} -> {:error, Error.new(:forbidden, %{reason: sentence, sensitive: true})}
     end

@@ -351,7 +351,8 @@ defmodule Troupe.Tools do
   # above read nothing and marks nothing.
   defp mark(name, args, %Ctx{config: %{sensitive: %{} = sensitive}} = ctx) do
     root = if ctx.workspace, do: ctx.workspace.root_real
-    _marked = mark_sensitive(sensitive, ctx.session_id, name, args, root: root, call_id: ctx.call_id, agent_path: ctx.agent_path)
+    opts = [root: root, call_id: ctx.call_id, agent_path: ctx.agent_path]
+    _marked = mark_sensitive(sensitive, ctx.session_id, name, args, opts)
     :ok
   end
 

@@ -81,6 +81,8 @@ defmodule Troupe.Worker.AuthTest do
     "session.unpin",
     "session.title.set",
     "session.lifespan.set",
+    # Marking it sensitive by hand: the plane holds the mark, and tells the pod.
+    "session.sensitive.set",
     "session.erase",
     # A sensitive session's held shares, which a team administrator answers at the plane.
     "session.share_requests",

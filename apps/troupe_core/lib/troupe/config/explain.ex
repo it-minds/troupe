@@ -187,10 +187,9 @@ defmodule Troupe.Config.Explain do
     (schema_paths ++ set_paths)
     |> Enum.uniq()
     # The per-tool rules are every file's together, not one value from the highest: they
-    # are listed as rules, each with its file (`rules/1`).
-    |> Enum.reject(&match?(["permissions" | _], &1))
-    # So are a sensitive session's: the organisation's and the user's together (`sensitive_text/2`).
-    |> Enum.reject(&match?(["sensitive" | _], &1))
+    # are listed as rules, each with its file (`rules/1`). So are a sensitive session's, the
+    # organisation's and the user's together (`sensitive_text/2`).
+    |> Enum.reject(&(match?(["permissions" | _], &1) or match?(["sensitive" | _], &1)))
     |> Enum.map(&row(&1, layers))
     |> Enum.reject(&is_nil/1)
     |> order(schema_paths)

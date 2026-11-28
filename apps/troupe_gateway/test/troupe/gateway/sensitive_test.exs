@@ -14,7 +14,7 @@ defmodule Troupe.Gateway.SensitiveTest do
 
   alias Troupe.Gateway.{Daemon, FakePlane, Memory}
   alias Troupe.LLM.Fake
-  alias Troupe.Protocol.{Client, Endpoint, Event}
+  alias Troupe.Protocol.{Client, Endpoint, Event, Sensitive}
   alias Troupe.Session.Log
   alias Troupe.Tool.Ctx
 
@@ -164,7 +164,7 @@ defmodule Troupe.Gateway.SensitiveTest do
     # A proposal for a team's memory, whatever deny says.
     agent = %Ctx{session_id: session.id, agent_path: ["root"], workspace: nil, call_id: "c-1", agent_pid: self()}
     assert {:error, said} = Memory.propose("Ward 7 is short-staffed", agent, "team", %{})
-    assert said == Troupe.Protocol.Sensitive.no_proposals()
+    assert said == Sensitive.no_proposals()
 
     # An offer for steering from another device, under ask: no administrator answers a laptop.
     assert {:error, %{message: "forbidden", data: %{"reason" => reason}}} =
