@@ -90,7 +90,7 @@ defmodule Troupe.Plane.SessionSensitiveTest do
 
   describe "the mark" do
     test "the pod's report marks the row once, audited as the harness with the tool and rule",
-         %{ada: ada, team: team, pod: pod} do
+         %{ada: ada, team: team, pod: pod, lead: lead} do
       session = running(ada, team, pod)
       assert Sensitive.json(session) == nil
       assert {:ok, %{"sensitive" => nil}} = get(session.id, ada)
@@ -122,6 +122,12 @@ defmodule Troupe.Plane.SessionSensitiveTest do
 
       assert {:ok, %{"sessions" => [%{"sensitive" => %{"how" => "call"}}]}} =
                Harness.call("sessions.list", %{}, as(ada))
+
+      # The team administrator's list of its sessions says it as the session's own row does.
+      assert {:ok, listed} = Troupe.Plane.Admin.sessions_list(Troupe.Plane.Admin.actor_for(lead))
+
+      assert %{sensitive: %{"how" => "call", "by" => "mcp.records.lookup"}} =
+               Enum.find(listed, &(&1.id == session.id))
     end
 
     test "comes through the pod's session.status", %{ada: ada, team: team, pod: pod} do
