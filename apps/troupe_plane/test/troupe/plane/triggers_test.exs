@@ -654,6 +654,45 @@ defmodule Troupe.Plane.TriggersTest do
       assert {:ok, %{"sessions" => []}} =
                Harness.call("sessions.list", %{"needs_review" => true}, context(lead))
     end
+
+    test "a trigger whose review is none keeps its runs out of the queue, one that requires it does not",
+         context do
+      _pod = FakePod.enrol(context.port, "dev-token", "troupe-w-dev-0")
+      lead = person("lead@example.test", ["engineering"])
+      routine = trigger!(context, %{"name" => "routine", "review" => "none", "notify" => [lead.subject]})
+      careful = trigger!(context, %{"name" => "careful", "review" => "required", "notify" => [lead.subject]})
+
+      assert {:ok, quiet} = Triggers.fire(routine, "schedule", "cron:routine", %{}, "scheduler")
+      assert_receive {:pushed, "session.activate", _}, 5_000
+      assert {:ok, loud} = Triggers.fire(careful, "schedule", "cron:careful", %{}, "scheduler")
+      assert_receive {:pushed, "session.activate", _}, 5_000
+
+      assert Sessions.get(quiet.session.id).origin["review"] == "none"
+
+      assert {:ok, %{"sessions" => queued}} =
+               Harness.call("sessions.list", %{"needs_review" => true}, context(lead))
+
+      assert Enum.map(queued, & &1["id"]) == [loud.session.id]
+    end
+
+    test "a run whose origin carries no review is queued, as it was before it was carried", context do
+      _pod = FakePod.enrol(context.port, "dev-token", "troupe-w-dev-0")
+      lead = person("lead@example.test", ["engineering"])
+      trigger = trigger!(context, %{"name" => "old", "notify" => [lead.subject]})
+
+      assert {:ok, fired} = Triggers.fire(trigger, "schedule", "cron:old", %{}, "scheduler")
+      assert_receive {:pushed, "session.activate", _}, 5_000
+
+      older = Map.delete(Sessions.get(fired.session.id).origin, "review")
+
+      {1, _} =
+        Repo.update_all(from(s in Sessions.Session, where: s.id == ^fired.session.id), set: [origin: older])
+
+      assert {:ok, %{"sessions" => [%{"id" => id}]}} =
+               Harness.call("sessions.list", %{"needs_review" => true}, context(lead))
+
+      assert id == fired.session.id
+    end
   end
 
   describe "a run whose turn the harness stopped" do
