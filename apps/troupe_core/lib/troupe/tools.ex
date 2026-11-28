@@ -10,7 +10,7 @@ defmodule Troupe.Tools do
 
   alias Troupe.Agent.{Definition, Server}
   alias Troupe.Config.Permissions
-  alias Troupe.Session.{Approvals, ClientTools}
+  alias Troupe.Session.{Approvals, ClientTools, Sensitive}
   alias Troupe.{Skills, Tool}
   alias Troupe.Tool.{Ctx, Result}
   alias Troupe.Tools.{GoalComplete, PublishArtifact}
@@ -336,10 +336,35 @@ defmodule Troupe.Tools do
 
   defp unless_denied(tool, name, args, ctx) do
     case rule(name, args, ctx) do
-      {:deny, rule} -> {:reject, Result.error(ctx.call_id, name, {:denied_by_rule, name, rule})}
-      _other -> {:run, tool, Tool.mode(tool)}
+      {:deny, rule} ->
+        {:reject, Result.error(ctx.call_id, name, {:denied_by_rule, name, rule})}
+
+      _other ->
+        mark(name, args, ctx)
+        {:run, tool, Tool.mode(tool)}
     end
   end
+
+  # A call the profile's `sensitive.markedBy` names marks the session sensitive here, once
+  # the gate has let it through and before it runs: the mark is in the log, and every agent
+  # of the session reads it, before the call can return what it is about. A call refused
+  # above read nothing and marks nothing.
+  defp mark(name, args, %Ctx{config: %{sensitive: %{marked_by: [_ | _] = rules}}} = ctx) do
+    root = if ctx.workspace, do: ctx.workspace.root_real
+
+    case Permissions.match(rules, name, args, root) do
+      nil ->
+        :ok
+
+      rule ->
+        data = %{"how" => "call", "by" => name, "rule" => rule.text, "call_id" => ctx.call_id}
+        # A call outside any session tree (a tool run alone) has no session to mark.
+        _marked = Sensitive.mark(ctx.session_id, data, ctx.agent_path || ["root"])
+        :ok
+    end
+  end
+
+  defp mark(_name, _args, _ctx), do: :ok
 
   # What the configuration's per-tool rules say about this call (#658), or `nil`.
   defp rule(name, args, %Ctx{config: %{permissions: [_ | _] = rules}} = ctx) do

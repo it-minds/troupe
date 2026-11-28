@@ -141,6 +141,23 @@ defmodule Troupe.Config.Permissions do
     end
   end
 
+  @doc """
+  The first of `rules` that matches one call, whatever its action, or `nil`: what a worker
+  profile's `sensitive.markedBy` asks of a call, where any rule that matches marks. A shell
+  line matches where any command it runs does, a substitution's included.
+  """
+  @spec match([rule()], String.t(), map(), Path.t() | nil) :: rule() | nil
+  def match(rules, tool, args, root) do
+    case Enum.filter(rules, &for_tool?(&1, tool)) do
+      [] ->
+        nil
+
+      relevant ->
+        {subjects, _complex?} = subjects(tool, args || %{}, root)
+        Enum.find(relevant, fn rule -> Enum.any?(subjects, &matches?(rule, &1, root)) end)
+    end
+  end
+
   defp for_tool?(%{tool: "mcp"}, "mcp." <> _name), do: true
   # A person's client's own MCP servers' tools are MCP tools too.
   defp for_tool?(%{tool: "mcp"}, "client." <> _name), do: true

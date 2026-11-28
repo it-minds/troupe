@@ -4467,6 +4467,9 @@ defmodule Troupe.Plane.Harness do
       # activation like the two above, so a rule reaches a session at its next wake and
       # restarts no pod; an empty list takes away what was there.
       |> Map.put("permission_rules", Extends.rules(profile))
+      # What makes a session sensitive and what a sensitive one is refused, the chain's in
+      # effect with the profile's name, read again at every activation like the rules.
+      |> put_sensitive_rules(profile)
       # Which agents exist on the profile's pods, the chain's rule composed, for the pod
       # to apply to its subagents too: the entitlement set already carries the primaries
       # it leaves. Read again at every activation like the rules; left out where the
@@ -4476,6 +4479,18 @@ defmodule Troupe.Plane.Harness do
       _ -> %{"bundle_version" => session.bundle_version}
     end
   end
+
+  defp put_sensitive_rules(params, %{name: name, spec: %{"sensitive" => %{} = sensitive}}) do
+    rules = %{
+      "markedBy" => List.wrap(sensitive["markedBy"]),
+      "deny" => List.wrap(sensitive["deny"]),
+      "profile" => name
+    }
+
+    Map.put(params, "sensitive_rules", rules)
+  end
+
+  defp put_sensitive_rules(params, _profile), do: params
 
   # The pin is a version of the session's own channel, which it was pinned on; a row from
   # before the column names none, and its profile's is the one it was read against. A raise

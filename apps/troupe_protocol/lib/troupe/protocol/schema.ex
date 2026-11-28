@@ -751,6 +751,19 @@ defmodule Troupe.Protocol.Schema do
         "actor" => required(:string),
         "display_name" => optional(:string)
       },
+      # The session became sensitive, once and for good: `how` is `call` (a tool call that
+      # matched the profile's `sensitive.markedBy`, written before the call ran; `by` its
+      # tool, `rule` the rule, `call_id` the call, `agent` a subagent's path) or `person` (a
+      # mark by hand; `by` their subject). Nothing clears it, and no event says otherwise.
+      "session_marked_sensitive" => %{
+        "how" => required(:string),
+        "by" => required(:string),
+        "at" => required(:string),
+        "rule" => optional(:string),
+        "call_id" => optional(:string),
+        "agent" => optional({:array, :string}),
+        "display_name" => optional(:string)
+      },
       # Something the harness offers the session's owner, written at the root's rest and
       # never during a turn; nothing waits for it. `kind` says what (`trigger`, a schedule
       # that reruns what the session published), `key` what "the same thing" is
