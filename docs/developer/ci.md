@@ -125,6 +125,20 @@ then the suite, with its Mix build cached under a key of its own.
 of the same change have passed, so it is the last to finish on a change to the chart or the
 operator; a change elsewhere does not run it.
 
+**The image cache.** Both jobs build the images through buildx with GitHub Actions' cache as
+the layer cache (`TROUPE_BUILD_CACHE=gha` in `cluster.yml`, which `scripts/build-images`
+reads), every layer of both stages kept (`mode=max`), in one scope per image,
+`cluster-v1-<image>`, which `kind` and `upgrade` share, then `--load` each image for `kind
+load`. A run reads what its own branch, its base and `main` wrote, and writes under its own
+branch, so a pull request's second run is warm and the nightly's warms the next pull
+request's first. What a change to `apps/`, `config/` or the lock invalidates is built again
+from that layer on: `mix compile` and the release, for every server image, while the
+toolchain, the fetched dependencies and the runtime's packages come from the cache. To start
+from nothing, change `TROUPE_BUILD_CACHE_SCOPE` in `cluster.yml` (`cluster-v2`); a change to
+a Dockerfile needs no new name, since a changed instruction misses on its own. Each run prints
+`phase time:` lines (the image build, the kind load, each step of `remote-up`, the suite), so
+a slow run shows where it went. Without the variable, as on a laptop, it is `docker build`.
+
 **On a laptop**, the same: `scripts/remote-up` once, then `scripts/e2e` (or `mix
 troupe.e2e` with kind, kubectl and helm on the machine). The metadata test says it skipped
 the connection where nothing answers at that address; CI sets
