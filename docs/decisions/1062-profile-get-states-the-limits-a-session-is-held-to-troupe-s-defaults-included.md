@@ -15,7 +15,7 @@ paths:
 symbols:
   - Troupe.Protocol.Allowance
   - Troupe.Plane.GitHub.Policy.caps/2
-gist: "profile.get adds limits.max_tokens/session/idle_seconds/budgets.team_period, agents' own max_turns/max_tokens (lowered), github caps, harness_tools [{name, refused}], personal_tools, memory_proposals; defaults live in Troupe.Protocol.Allowance"
+gist: "[partly superseded by 1122] profile.get adds limits.max_tokens/session/idle_seconds/budgets.team_period, agents' own max_turns/max_tokens (lowered), github caps, harness_tools [{name, refused}], personal_tools, memory_proposals; defaults live in Troupe.Protocol.Allowance"
 ---
 
 Issue #1121. `profile.get` said a profile's room and budgets, not what a session there is
