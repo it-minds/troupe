@@ -8,11 +8,13 @@ supersedes: [1094, 1095]
 paths:
   - apps/troupe_core/lib/troupe.ex
   - apps/troupe_core/lib/troupe/session/checkpoint.ex
+  - apps/troupe_core/lib/troupe/session/history.ex
   - apps/troupe_protocol/lib/troupe/protocol/schema.ex
   - clients/gui/packages/client/src/opening.ts
   - clients/tui/lib/troupe/remote/translate.ex
 symbols:
   - Troupe.events_before/3
+  - Troupe.Session.History.page/3
   - Troupe.Session.Checkpoint.data/1
   - fromCheckpoint
 gist: "session.events page starts after a root rest (Checkpoint.rest?) or at seq 1: mid-turn raw page trimmed to after its first rest; none but its last = reach back to the turn's rest, cap 5,000 (then cut); reads one event before the page; checkpoint gains optional compacted_at (the compacted event's ts), shape stays session/1, absent = the checkpoint's ts"

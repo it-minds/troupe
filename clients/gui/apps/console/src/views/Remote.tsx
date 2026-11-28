@@ -34,6 +34,9 @@
 import { useEffect, useRef, useState } from "react";
 import type { JSX } from "react";
 import {
+  artifactAccessWords,
+  offeredTeams,
+  publishAnswer,
   ALLOW_ALWAYS,
   ONCE_ONLY_SENTENCE,
   RELAYED_ALLOW_SESSION,
@@ -65,7 +68,7 @@ import {
   watchRemote,
   whoseSentence,
 } from "@troupe/client";
-import type { AgentRow, AttachStatus, Entry, Invitation, Invitee, TranscriptState } from "@troupe/client";
+import type { AgentRow, AttachStatus, Entry, GateAnswer, Invitation, Invitee, PublicationGate, TranscriptState } from "@troupe/client";
 import { describeError, useConsole } from "../console";
 import type { Load } from "../console";
 import { href } from "../route";
@@ -204,36 +207,69 @@ export function RemoteSessions({ load, reload }: { load: Load<RemoteRow[]>; relo
  * endpoint and a token from `session.open`, read to follow it and activated to steer it.
  */
 /**
- * Whom a publication may be for, from this person's own `me`: only them, the organisation,
- * each team (the team's own, or theirs alone) and each profile; the agent's proposal first,
- * and offered even where the plane has not named it for them.
+ * An agent's publication at the gate, as the desktop app's is (troupe #1238): a new version
+ * keeps who reads the artifact, so it says who does and is allowed with nothing asked; a new
+ * artifact is its sharing menu, the teams the plane named ticked (those granted the
+ * session's profile), this person's other teams unticked, the organisation switch, and the
+ * one team's ownership where exactly one is ticked.
  */
-function audienceOptions(me: { teams: Array<{ name: string }>; profiles: string[] }, proposed: { visibility: string | null; owner: "me" | "team" | null; id: string | null }): Array<{ key: string; label: string }> {
-  // A new version keeps whose the artifact is, so only whom it is for is offered.
-  const own = proposed.id === null ? "|me" : "";
-  const options = [
-    { key: `private${own}`, label: "Only you" },
-    { key: `organisation${own}`, label: "The whole organisation" },
-    ...me.teams.flatMap((t) =>
-      proposed.id === null
-        ? [
-            { key: `team:${t.name}|team`, label: `Team ${t.name}, owned by the team` },
-            { key: `team:${t.name}|me`, label: `Team ${t.name}, owned by you` },
-          ]
-        : [{ key: `team:${t.name}`, label: `Team ${t.name}` }],
-    ),
-    ...me.profiles.map((p) => ({ key: `profile:${p}${own}`, label: `The ${p} profile's people` })),
-  ];
-  const key = proposedKey(proposed);
-  if (key && !options.some((o) => o.key === key)) options.push({ key, label: proposed.id === null ? `${proposed.visibility}, ${key.endsWith("|team") ? "owned by the team" : "owned by you"}` : String(proposed.visibility) });
-  return options;
-}
-
-/** The proposal's key: its visibility, and for a new artifact whose it is (`visibility|owner`). */
-function proposedKey(proposed: { visibility: string | null; owner: "me" | "team" | null; id: string | null }): string | null {
-  if (proposed.visibility === null) return null;
-  if (proposed.id !== null) return proposed.visibility;
-  return `${proposed.visibility}|${proposed.owner ?? (proposed.visibility.startsWith("team:") ? "team" : "me")}`;
+function RelayedPublication({
+  pub,
+  myTeams,
+  laptop,
+  sessionWide,
+  onAnswer,
+}: {
+  pub: PublicationGate;
+  myTeams: string[];
+  laptop: boolean;
+  sessionWide: boolean;
+  onAnswer: (decision: "allow" | "allow_session" | "deny", answer?: GateAnswer) => void;
+}): JSX.Element {
+  const republish = pub.id !== null;
+  const [ticked, setTicked] = useState<string[]>(pub.teams ?? []);
+  const [organisation, setOrganisation] = useState(pub.visibility === "organisation");
+  const [owner, setOwner] = useState<"me" | "team">(pub.owner ?? "me");
+  const answer: GateAnswer = republish ? {} : publishAnswer({ organisation, teams: ticked, owner });
+  const again = republish || pub.visibility !== null;
+  return (
+    <>
+      {republish ? (
+        <p>
+          It is a new version of {pub.id}, which keeps who reads it: {pub.access ?? "as now"}. To change who reads it, open the artifact once it is published.
+        </p>
+      ) : (
+        <fieldset className="readers">
+          <legend>Who reads it</legend>
+          {offeredTeams(pub, myTeams).map((t) => (
+            <label key={t} className="inline">
+              <input type="checkbox" checked={ticked.includes(t)} onChange={(e) => setTicked((now) => (e.target.checked ? [...now, t] : now.filter((x) => x !== t)))} /> The {t} team
+            </label>
+          ))}
+          <label className="inline">
+            <input type="checkbox" checked={organisation} onChange={(e) => setOrganisation(e.target.checked)} /> The whole organisation
+          </label>
+          <p className="also">{ticked.length === 0 && !organisation ? "Only you will read it." : `It will be ${artifactAccessWords({ teams: ticked, organisation })}.`}</p>
+          <label className="inline">
+            <input type="checkbox" checked={owner === "team" && ticked.length === 1} disabled={ticked.length !== 1} onChange={(e) => setOwner(e.target.checked ? "team" : "me")} /> {ticked.length === 1 ? `The ${ticked[0]} team's, every member its owner` : "A team's, every member its owner (tick one team)"}
+          </label>
+        </fieldset>
+      )}
+      <div className="answers">
+        <button type="button" className="primary" onClick={() => onAnswer("allow", answer)}>
+          Allow once
+        </button>
+        <button type="button" onClick={() => onAnswer("deny")}>
+          Deny
+        </button>
+        {(!laptop || sessionWide) && again && (
+          <button type="button" onClick={() => onAnswer("allow_session", answer)}>
+            Allow, and let it publish unasked for this session
+          </button>
+        )}
+      </div>
+    </>
+  );
 }
 
 /** Where the session is, for the line under the page's head. */
@@ -389,8 +425,7 @@ export function RemoteSession({ id, pod }: { id: string; pod?: { mode: "read" | 
   // The laptop's offer as the plane lists it: whose laptop and which folder.
   const [row, setRow] = useState<RemoteRow | null>(null);
   const [text, setText] = useState("");
-  // Whom each publication is for, as chosen here, by its call id (`visibility|owner`).
-  const [audiences, setAudiences] = useState<Record<string, string>>({});
+
   const [refusal, setRefusal] = useState<string | null>(null);
   // Whom a pod session is shared with by name, named to everybody in it (troupe #765).
   const [shared, setShared] = useState<Invitee[]>([]);
@@ -635,54 +670,15 @@ export function RemoteSession({ id, pod }: { id: string; pod?: { mode: "read" | 
           {openApprovals(state).map((a) => {
             const pub = a.publication;
             return pub ? (
-              // An agent's publication: whom it is for is the person's to say, the proposal chosen already.
+              // An agent's publication: a new artifact's readers are the person's to say, a new version keeps its own.
               <section key={a.callId} className="approval" aria-label={`Publish ${pub.title}`}>
                 <h3>{callHeadline(a.tool)}</h3>
                 <p>
                   The agent asks to publish <b>{pub.title}</b> ({pub.kind}, {pub.files === 1 ? "1 file" : `${pub.files} files`}).
-                  {pub.visibility === null ? " It did not say whom it is for." : ""}
                 </p>
                 {steer ? (
                   <>
-                    <label>
-                      Who may open it
-                      <select value={audiences[a.callId] ?? proposedKey(pub) ?? ""} onChange={(e) => setAudiences((m) => ({ ...m, [a.callId]: e.target.value }))}>
-                        {pub.visibility === null && <option value="">Choose whom it is for</option>}
-                        {audienceOptions(me, pub).map((o) => (
-                          <option key={o.key} value={o.key}>
-                            {o.label}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                    <div className="answers">
-                      <button
-                        type="button"
-                        className="primary"
-                        disabled={(audiences[a.callId] ?? proposedKey(pub) ?? "") === ""}
-                        onClick={() => {
-                          const [visibility, owner] = (audiences[a.callId] ?? proposedKey(pub) ?? "").split("|");
-                          void act((x) => x.view.respondApproval(a.callId, "allow", { visibility: visibility ?? "private", ...(owner === undefined ? {} : { owner: owner === "team" ? "team" : "me" }) }));
-                        }}
-                      >
-                        Allow once
-                      </button>
-                      <button type="button" onClick={() => void act((x) => x.view.respondApproval(a.callId, "deny"))}>
-                        Deny
-                      </button>
-                      {(!laptop || sessionWide) && pub.visibility !== null && (
-                        <button
-                          type="button"
-                          disabled={(audiences[a.callId] ?? proposedKey(pub) ?? "") === ""}
-                          onClick={() => {
-                            const [visibility, owner] = (audiences[a.callId] ?? proposedKey(pub) ?? "").split("|");
-                            void act((x) => x.view.respondApproval(a.callId, "allow_session", { visibility: visibility ?? "private", ...(owner === undefined ? {} : { owner: owner === "team" ? "team" : "me" }) }));
-                          }}
-                        >
-                          Allow, and let it publish unasked for this session
-                        </button>
-                      )}
-                    </div>
+                    <RelayedPublication pub={pub} myTeams={me.teams.map((t) => t.name)} laptop={laptop} sessionWide={sessionWide} onAnswer={(d, answer) => void act((x) => x.view.respondApproval(a.callId, d, answer))} />
                     {laptop && !sessionWide && <p className="also">{ONCE_ONLY_SENTENCE}</p>}
                   </>
                 ) : (

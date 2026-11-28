@@ -36,7 +36,7 @@ defmodule Troupe.RecordedProposalsTest do
     assert Enum.any?(
              notes("accepted"),
              &(&1 ==
-                 "Ada turned on a rerun of \"Weekly numbers\" as the trigger rerun-weekly-numbers of reports; each run asks to be reviewed.")
+                 "Ada turned on a rerun of \"Weekly numbers\" as the trigger rerun-weekly-numbers of reports; each run asks to be reviewed. /triggers says whether it is on now.")
            )
 
     assert Enum.any?(notes("never"), &(&1 =~ "said never for rerunning \"Weekly numbers\""))

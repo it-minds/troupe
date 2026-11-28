@@ -218,7 +218,7 @@ repository holds the triggers' definitions as well ([triggers-from-a-repository.
 | `terms` | §3 | `{}` |
 | `visibility` | `private` or `team` | `team` |
 | `lifespan` | how long each run's session lasts: `throwaway` (erased a set time after it goes quiet, never before it is reviewed), `normal` or `persistent` ([How long a session lasts](../user/sessions.md#how-long-a-session-lasts)); a trigger from a repository has no such field yet, and its runs are normal | `normal` |
-| `review` | `required` or `none` | `required` |
+| `review` | `required`: each run waits in the review queue (`admin.runs.list`, `sessions.list` with `needs_review`, the console's count) until somebody reviews it, and a throwaway run is not erased before then. `none`: its runs are never in the queue and a throwaway one is erased when its window has passed; the notification to `notify` is unchanged. Written into each run's origin when it starts, so a run that began before the setting was carried stays queued | `required` |
 | `notify` | subjects granted `collaborator` on every run's session | `[]` |
 | `notify_url` | an absolute `http` or `https` URL posted the run's outcome when it ends, never its content; not loopback (`localhost` included), unspecified, link-local, multicast, a cloud metadata address (`fd00:ec2::254`, `100.100.100.200`) or in `100.64.0.0/10`, by address, in any IPv6 spelling of one, or by a name that resolves there (Decision 866), and a host the policy's egress allows, checked when saved and again at send, and posted to the address the second check passed, following no redirect | none |
 | `concurrency` | cap on live runs, 1–100; a firing over it records a `skipped` run | 1 |
@@ -306,6 +306,27 @@ the same name, which may only narrow it); off, no session of the team proposes o
 triggers already made keep running. A person holds at most five such triggers per team. On a
 gitops plane Turn on makes nothing: the owner is handed the `Trigger` resource, with no
 principal, to commit. A "never for this report" is kept per person and artifact.
+
+**The person stops their own** (Decision 1123; [reruns](../user/reruns.md#stopping-what-you-turned-on)).
+A trigger whose principal is the caller's own sponsored principal in its team is theirs,
+through member methods that take `trigger` as `trigger.fire` does (an id, `name` or
+`team/name`, within the teams they are in); `initialize` says `own_triggers` where the plane
+has them:
+
+- `trigger.own.list` — the caller's own across their teams, each with `enabled`, `cron`,
+  `next_run_at`, `last_run` `{fired_at, state, reason}`, `budget_micros`, and the
+  `session_id` and `artifact_id` its yes came from; `most_per_team` is the cap.
+- `trigger.own.disable` and `trigger.own.enable` — a put of `enabled` alone, audited
+  `trigger.put` with the person as actor and `via: own`, as `admin.trigger.put` is audited.
+  Switching on is refused where the team no longer lets members schedule.
+- `trigger.own.delete` — audited `trigger.delete` with `via: own`; its runs go, their
+  sessions stay, and the slot is freed: the five count every trigger a yes made, on or off.
+
+Any other trigger of their teams, a team admin's among them, is refused `forbidden` naming
+the principal it runs as; one outside their teams is `not_found`. On a gitops plane a switch
+is refused `managed_by_gitops` as `admin.trigger.put` is, the attempt audited, and a removal
+too except of a row the cluster has no resource for. `admin.triggers.list` marks each such
+trigger with `own_by`, the person whose it is, and the console's Triggers page says so.
 
 ## 3. Unattended session terms
 

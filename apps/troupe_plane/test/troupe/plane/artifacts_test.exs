@@ -1,8 +1,8 @@
 defmodule Troupe.Plane.ArtifactsTest do
   @moduledoc """
   Artifacts (#62) as the plane keeps them: published as versions at one id, their files in
-  the object store under `artifacts/<id>/<n>/`, seen by their owner, the organisation or a
-  profile's people and by nobody else, deleted by their owner or taken down by a platform
+  the object store under `artifacts/<id>/<n>/`, seen by their owner, the organisation or the teams
+  given it and by nobody else, deleted by their owner or taken down by a platform
   administrator, every publish and delete audited, and held to the size limits, the team's
   quota and the two settings. Through `Harness`, as a client's `/rpc` reaches them.
 
@@ -69,7 +69,7 @@ defmodule Troupe.Plane.ArtifactsTest do
 
       assert {:ok, artifact} =
                publish(context.ada, %{
-                 "visibility" => "profile:dev",
+                 "teams" => ["engineering"],
                  "files" => page("<h1>Weekly</h1>", [css]),
                  "session_id" => "s-laptop-1",
                  "agent" => "agent:build"
@@ -105,7 +105,6 @@ defmodule Troupe.Plane.ArtifactsTest do
       assert {:ok, second} =
                publish(context.ada, %{
                  "id" => first["id"],
-                 "visibility" => "profile:dev",
                  "files" => page("<h1>Two</h1>")
                })
 
@@ -122,12 +121,11 @@ defmodule Troupe.Plane.ArtifactsTest do
 
       # Somebody else's is not theirs to republish, and the kind stays.
       assert {:error, %{message: "forbidden"}} =
-               publish(context.bo, %{"id" => first["id"], "visibility" => "profile:dev"})
+               publish(context.bo, %{"id" => first["id"]})
 
       assert {:error, %{message: "invalid_params"}} =
                publish(context.ada, %{
                  "id" => first["id"],
-                 "visibility" => "profile:dev",
                  "kind" => "markdown",
                  "files" => [%{"path" => "a.md", "bytes" => Base.encode64("# A")}]
                })
@@ -138,7 +136,7 @@ defmodule Troupe.Plane.ArtifactsTest do
       {:ok, artifact} =
         publish(context.ada, %{"visibility" => "organisation", "session_id" => "s-1"})
 
-      {:ok, _} = publish(context.ada, %{"id" => artifact["id"], "visibility" => "profile:dev"})
+      {:ok, _} = publish(context.ada, %{"id" => artifact["id"], "visibility" => "private"})
 
       rows =
         Audit.list()
@@ -150,7 +148,7 @@ defmodule Troupe.Plane.ArtifactsTest do
 
       assert hd(rows).detail["session"] == "s-1"
       assert List.last(rows).detail["visibility_from"] == "organisation"
-      assert List.last(rows).detail["visibility"] == "profile:dev"
+      assert List.last(rows).detail["visibility"] == "private"
       refute inspect(rows) =~ "<h1>"
     end
 
@@ -224,7 +222,7 @@ defmodule Troupe.Plane.ArtifactsTest do
 
       {:ok, first} =
         publish(context.ada, %{
-          "visibility" => "profile:dev",
+          "teams" => ["engineering"],
           "files" => page(String.duplicate("x", 60))
         })
 
@@ -234,7 +232,6 @@ defmodule Troupe.Plane.ArtifactsTest do
               %{message: "payload_too_large", data: %{quota: 100, used: 60, reason: reason}}} =
                publish(context.ada, %{
                  "id" => first["id"],
-                 "visibility" => "profile:dev",
                  "files" => page(String.duplicate("y", 50))
                })
 
@@ -246,7 +243,7 @@ defmodule Troupe.Plane.ArtifactsTest do
       assert engineering.artifact_quota_bytes == 100
     end
 
-    test "needs a team, and a profile the publisher is covered by", context do
+    test "needs a team, and gives it only to a team the publisher may give it to", context do
       nobody = person("nobody@example.test", [])
 
       assert {:error, %{message: "forbidden", data: %{reason: reason}}} =
@@ -255,24 +252,24 @@ defmodule Troupe.Plane.ArtifactsTest do
       assert reason =~ "needs a team"
 
       assert {:error, %{message: "forbidden"}} =
-               publish(context.ada, %{"visibility" => "profile:lab"})
+               publish(context.ada, %{"teams" => ["research"]})
     end
   end
 
   describe "who sees one" do
-    test "a profile's are its people's and the organisation's everybody's; nobody else's",
+    test "a team's are its members', the organisation's everybody's; nobody else's",
          context do
-      {:ok, dev} = publish(context.ada, %{"title" => "For dev", "visibility" => "profile:dev"})
+      {:ok, dev} = publish(context.ada, %{"title" => "For dev", "teams" => ["engineering"]})
       {:ok, org} = publish(context.ada, %{"title" => "For all", "visibility" => "organisation"})
 
       # Bo is in dev's team; Cy is not.
-      assert {:ok, %{"artifacts" => seen, "profiles" => ["dev"]}} =
+      assert {:ok, %{"artifacts" => seen, "profiles" => []}} =
                call(context.bo, "artifact.list", %{})
 
       assert Enum.sort(Enum.map(seen, & &1["title"])) == ["For all", "For dev"]
       assert {:ok, %{"id" => _}} = call(context.bo, "artifact.get", %{"id" => dev["id"]})
 
-      assert {:ok, %{"artifacts" => [%{"title" => "For all"}], "profiles" => ["lab"]}} =
+      assert {:ok, %{"artifacts" => [%{"title" => "For all"}], "profiles" => []}} =
                call(context.cy, "artifact.list", %{})
 
       assert {:error, %{message: "not_found"}} =
@@ -290,9 +287,9 @@ defmodule Troupe.Plane.ArtifactsTest do
                call(context.ada, "artifact.list", %{"mine" => true})
 
       assert {:ok, %{"artifacts" => [%{"title" => "For dev"}]}} =
-               call(context.bo, "artifact.list", %{"visibility" => "profile:dev"})
+               call(context.bo, "artifact.list", %{"team" => "engineering"})
 
-      # A person who leaves the profile's team stops seeing it at their next request.
+      # A person who leaves the team stops seeing it at their next request.
       {:ok, _} = Identity.set_memberships(context.bo, [])
 
       assert {:error, %{message: "not_found"}} =
@@ -307,8 +304,8 @@ defmodule Troupe.Plane.ArtifactsTest do
       assert {:error, %{message: "forbidden", data: %{reason: reason}}} =
                publish(context.ada, %{"visibility" => "organisation"})
 
-      assert reason =~ "profile:<name>"
-      assert {:ok, _} = publish(context.ada, %{"visibility" => "profile:dev"})
+      assert reason =~ "give it to teams"
+      assert {:ok, _} = publish(context.ada, %{"teams" => ["engineering"]})
       assert {:ok, _} = publish(context.root, %{"visibility" => "organisation"})
     end
 
@@ -331,9 +328,9 @@ defmodule Troupe.Plane.ArtifactsTest do
     test "is the owner's, or a platform administrator's takedown, and takes every byte",
          context do
       {:ok, artifact} =
-        publish(context.ada, %{"visibility" => "profile:dev", "session_id" => "s-9"})
+        publish(context.ada, %{"teams" => ["engineering"], "session_id" => "s-9"})
 
-      {:ok, _} = publish(context.ada, %{"id" => artifact["id"], "visibility" => "profile:dev"})
+      {:ok, _} = publish(context.ada, %{"id" => artifact["id"]})
 
       assert {:error, %{message: "forbidden"}} =
                call(context.bo, "artifact.delete", %{"id" => artifact["id"]})
@@ -358,7 +355,7 @@ defmodule Troupe.Plane.ArtifactsTest do
       assert row.detail["by"] == "takedown"
       assert row.detail["session"] == "s-9"
 
-      {:ok, own} = publish(context.ada, %{"visibility" => "profile:dev"})
+      {:ok, own} = publish(context.ada, %{"teams" => ["engineering"]})
       assert {:ok, _} = call(context.ada, "artifact.delete", %{"id" => own["id"]})
 
       assert Enum.any?(
@@ -370,7 +367,7 @@ defmodule Troupe.Plane.ArtifactsTest do
 
   describe "the artifacts host's sign-in" do
     test "a ticket opens once, within a minute, as the person it was signed for", context do
-      {:ok, artifact} = publish(context.ada, %{"visibility" => "profile:dev"})
+      {:ok, artifact} = publish(context.ada, %{"teams" => ["engineering"]})
 
       assert {:ok, %{"url" => url, "expires_in" => 60}} =
                call(context.bo, "artifact.open", %{"id" => artifact["id"]})
@@ -396,7 +393,7 @@ defmodule Troupe.Plane.ArtifactsTest do
 
     test "no host deployed, there is nothing to open, and it says why", context do
       Application.put_env(:troupe_plane, :artifacts, [])
-      {:ok, artifact} = publish(context.ada, %{"visibility" => "profile:dev"})
+      {:ok, artifact} = publish(context.ada, %{"teams" => ["engineering"]})
       assert artifact["url"] == nil
 
       assert {:error, %{message: "unavailable", data: %{reason: reason}}} =

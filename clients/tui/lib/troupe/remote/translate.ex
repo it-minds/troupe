@@ -532,8 +532,8 @@ defmodule Troupe.Remote.Translate do
              name: data["name"] || data["tool"] || "tool",
              preview: preview(data),
              delegation: if(is_map(data["delegation"]), do: data["delegation"]),
-             # An agent's publication, for the person to say whom it is for: its title,
-             # kind, how many files, whom the agent proposed it for and whose, its note.
+             # An agent's publication: its title, kind, how many files, the teams and switch
+             # proposed for a new one and whose, a new version's readers (`access`), its note.
              publication: if(is_map(data["publication"]), do: data["publication"]),
              # The per-tool rule of the configuration that asked, when one did (root #658).
              rule: if(is_map(data["rule"]), do: data["rule"])
@@ -659,6 +659,12 @@ defmodule Troupe.Remote.Translate do
       # worker moves the status line's mark.
       "session_visibility_changed" ->
         {[emit.(:remote_note, %{text: visibility_changed(data)})], memory}
+
+      # The session became sensitive (root #1239), once and for good: a line saying since
+      # when and by what; the worker moves the status line's mark.
+      "session_marked_sensitive" ->
+        {[emit.(:remote_note, %{text: Troupe.Client.Sensitive.line(data, where_rules(memory))})],
+         memory}
 
       # How long the session lasts, changed by its owner (root #1209): a line.
       "session_lifespan_changed" ->
@@ -1341,12 +1347,15 @@ defmodule Troupe.Remote.Translate do
     end
   end
 
+  # `refused` is why a call that did not run was refused (`sensitive`, root #1239), which the
+  # window says apart from a failure; the harness's sentence is its content.
   defp completed(data) do
     %{
       call_id: call_id(data),
       ok: data["ok"] != false and data["error"] in [nil, false],
       content: result_text(data),
-      blob: data["blob"] || get_in(data, ["result", "blob"])
+      blob: data["blob"] || get_in(data, ["result", "blob"]),
+      refused: if(is_binary(data["refused"]), do: data["refused"])
     }
   end
 
@@ -1619,6 +1628,11 @@ defmodule Troupe.Remote.Translate do
 
   defp where(%{isolation: :remote, profile: profile}) when is_binary(profile), do: profile
   defp where(_memory), do: nil
+
+  # Whose rules hold a sensitive session: a pod's profile's, or this computer's for a session
+  # its daemon runs (a worktree or the shared checkout).
+  defp where_rules(%{isolation: :remote}), do: :plane
+  defp where_rules(_memory), do: :here
 
   # A comment on an artifact this session published, as one line: who, on which, and what.
   defp commented(data) do

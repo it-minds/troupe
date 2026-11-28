@@ -52,3 +52,5 @@ the root's (the `owner_team`, `may_transfer` and `role` of a row; `artifact.publ
 - **Headless** denies it, as every request with nobody to ask, with a line saying what
   the publication is and whom the agent proposed it for; one the agent named nobody for
   says `--auto-approve` would not have answered it either.
+
+> Superseded by TUI Decision 191: a new artifact's box is a menu of teams and the organisation ticked by digit, a new version asks nothing.

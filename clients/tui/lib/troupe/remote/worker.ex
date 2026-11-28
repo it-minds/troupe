@@ -242,6 +242,10 @@ defmodule Troupe.Remote.Worker do
   @spec visibility(String.t(), String.t()) :: :ok | {:error, term()}
   def visibility(session_id, visibility), do: call(session_id, {:visibility, visibility})
 
+  @doc "The session is sensitive now, as the plane answered a mark by hand: the status line's mark follows."
+  @spec sensitive(String.t()) :: :ok | {:error, term()}
+  def sensitive(session_id), do: call(session_id, :sensitive)
+
   @doc "The latest proposal of the harness's nobody answered yet, as `proposal_made` said it, or nil."
   @spec open_proposal(String.t()) :: map() | nil
   def open_proposal(session_id) do
@@ -405,6 +409,9 @@ defmodule Troupe.Remote.Worker do
       # #1169): `team` or `private`, nil where nobody said; and whether it is this person's.
       visibility: Keyword.get(opts, :visibility),
       owner?: Keyword.get(opts, :owner?, false),
+      # Whether it is sensitive (root #1239): as the create asked, then as the log or its
+      # checkpoint says; nothing here clears it, as nothing anywhere does.
+      sensitive?: Keyword.get(opts, :sensitive, false),
       # What the harness proposed and nobody answered yet (root #1208), oldest first, each
       # `proposal_made`'s data: what `/proposal` answers.
       proposals: [],
@@ -451,6 +458,7 @@ defmodule Troupe.Remote.Worker do
        error: state.error,
        relayed?: relayed?(state),
        only_me?: only_me?(state),
+       sensitive?: state.sensitive?,
        always_allow?: state.capabilities["approval_allow_always"] == true,
        attach_artifact?: state.capabilities["fs_upload_artifact"] == true
      }, state}
@@ -458,6 +466,12 @@ defmodule Troupe.Remote.Worker do
 
   def handle_call({:visibility, visibility}, _from, state) do
     state = %{state | visibility: visibility}
+    publish_status(state)
+    {:reply, :ok, state}
+  end
+
+  def handle_call(:sensitive, _from, state) do
+    state = %{state | sensitive?: true}
     publish_status(state)
     {:reply, :ok, state}
   end
@@ -547,9 +561,8 @@ defmodule Troupe.Remote.Worker do
       ),
       do: {:reply, :ok, decide(state, decision != :deny)}
 
-  # A delegation's answer carries more than its word (root Decision 850): `agent`, `brief`
-  # and `reason`, sent as they are given; a publication's carries whom it is for and whose
-  # (`visibility`, `owner`) the same way, beside the decision; an Always allow carries
+  # and `reason`, sent as they are given; a new publication's carries who reads it and whose
+  # (`visibility`, `teams`, `owner`) the same way, beside the decision; an Always allow carries
   # where its rule is written (`scope`).
   def handle_call({:approve, call_id, decision, answer}, from, state) do
     keys = %{
@@ -557,6 +570,7 @@ defmodule Troupe.Remote.Worker do
       "brief" => :brief,
       "reason" => :reason,
       "visibility" => :visibility,
+      "teams" => :teams,
       "owner" => :owner,
       "scope" => :scope
     }
@@ -1211,7 +1225,15 @@ defmodule Troupe.Remote.Worker do
     case Translate.checkpoint(state.session_id, checkpoint, state.memory) do
       {:ok, events, memory} ->
         visibility = get_in(checkpoint, ["data", "facts", "visibility"])
-        state = %{state | memory: memory, agent: state.agent || Translate.root_of(checkpoint)}
+        sensitive? = is_map(get_in(checkpoint, ["data", "facts", "sensitive"]))
+
+        state = %{
+          state
+          | memory: memory,
+            agent: state.agent || Translate.root_of(checkpoint),
+            sensitive?: state.sensitive? or sensitive?
+        }
+
         for event <- Journal.append(state.session_id, events), do: publish(state, event)
 
         state = %{
@@ -1454,6 +1476,7 @@ defmodule Troupe.Remote.Worker do
       | memory: memory,
         agent: state.agent || Translate.root_of(params),
         visibility: given(params) || state.visibility,
+        sensitive?: state.sensitive? or marked?(params),
         proposals: proposed(state.proposals, params),
         repositories: held(params) || state.repositories
     }
@@ -1474,7 +1497,7 @@ defmodule Troupe.Remote.Worker do
           %{state | cursor: max(state.cursor, Translate.seq(params) || state.cursor)}
       end
 
-    if given(params) || held(params), do: publish_status(state)
+    if given(params) || held(params) || marked?(params), do: publish_status(state)
     write_notes(state)
   end
 
@@ -1483,6 +1506,10 @@ defmodule Troupe.Remote.Worker do
   # The session given to its team or taken back, as its log says.
   defp given(%{"type" => "session_visibility_changed", "data" => %{"visibility" => v}}), do: v
   defp given(_params), do: nil
+
+  # The session became sensitive, as its log says.
+  defp marked?(%{"type" => "session_marked_sensitive"}), do: true
+  defp marked?(_params), do: false
 
   # What the harness proposed and nobody answered yet, as the log says.
   defp proposed(open, %{"type" => "proposal_made", "data" => %{"id" => id} = data}),
@@ -1733,6 +1760,7 @@ defmodule Troupe.Remote.Worker do
       |> Map.put(:always_allow?, state.capabilities["approval_allow_always"] == true)
       |> Map.put(:attach_artifact?, state.capabilities["fs_upload_artifact"] == true)
       |> Map.put(:only_me?, only_me?(state))
+      |> Map.put(:sensitive?, state.sensitive?)
       |> Map.put(:repositories, state.repositories || [])
     )
   end

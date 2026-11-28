@@ -813,10 +813,12 @@ defmodule Troupe.CLITest do
   # and a stop sent in between answered no question: the session drops an answer to one it
   # has not asked, and the run waited for good. Here that moment is held
   # open. The agent asks from a task, so its tasks are held while it says the budget ran
-  # out, and let go once the printer has had its say.
+  # out, and let go once the printer has had its say. They are held once the shell call
+  # runs, not once the agent says it started: the agent says so first and then starts the
+  # call from a task of its own, which a hold taken in between would keep from starting.
   test "headless printer stops the budget question once it is asked, not when the budget runs out" do
     script = [
-      {:tool, "shell", %{"command" => "while [ ! -e go ]; do sleep 0.05; done"}},
+      {:tool, "shell", %{"command" => "touch running; while [ ! -e go ]; do sleep 0.05; done"}},
       {:tools, [{"todo_read", %{}}]},
       {:text, "done"}
     ]
@@ -826,14 +828,13 @@ defmodule Troupe.CLITest do
 
     say!(sid, "go")
     assert %{data: %{name: "shell"}} = await_event("root", :tool_started, 15_000)
+    eventually(fn -> File.exists?(Path.join(ws, "running")) end, 15_000)
     tasks = Troupe.Registry.tasks(sid, ["root"])
     :sys.suspend(tasks)
 
     try do
       File.write!(Path.join(ws, "go"), "")
-      # The shell call's end and the harness saying the budget ran out are the agent's
-      # turn, which a loaded runner takes its time over; the printer's line comes after it.
-      assert %{data: %{call_id: _}} = await_event("root", :budget_ask_started, 60_000)
+      assert %{data: %{call_id: _}} = await_event("root", :budget_ask_started, 15_000)
       eventually(fn -> contents(io) =~ "headless mode stops here" end, 15_000)
       # Answered once anything the printer sent as it said so has reached the daemon.
       :sys.get_state(printer)

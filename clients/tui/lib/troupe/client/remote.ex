@@ -14,7 +14,7 @@ defmodule Troupe.Client.Remote do
 
   @behaviour Troupe.Client
 
-  alias Troupe.Client.{Events, Repositories}
+  alias Troupe.Client.{Events, OwnTriggers, Repositories, Sensitive}
   alias Troupe.Config
   alias Troupe.Protocol.ClientUpdate
   alias Troupe.Remote.{Capability, Credentials, Discovery, Journal, Plane, RPC, Tokens, Worker}
@@ -82,6 +82,7 @@ defmodule Troupe.Client.Remote do
     |> Capability.of(status.scopes, status.up?, status.error)
     |> Map.put(:relayed?, Map.get(status, :relayed?, false))
     |> Map.put(:only_me?, Map.get(status, :only_me?, false))
+    |> Map.put(:sensitive?, Map.get(status, :sensitive?, false))
     |> Map.put(:always_allow?, Map.get(status, :always_allow?, false))
     |> Map.put(:attach_artifact?, Map.get(status, :attach_artifact?, false))
   end
@@ -303,10 +304,13 @@ defmodule Troupe.Client.Remote do
     end
   end
 
+  # A sensitive session's profile may refuse the invitation, or hold it for a team
+  # administrator's yes, which nobody is invited before (root #1239).
   defp invite_on(plane, sid, {:invite, person, role}) do
     case call(plane, "session.invite", %{session_id: sid, subject: person, role: role}) do
+      {:ok, %{"waiting" => true} = answer} -> {:ok, Sensitive.waiting(answer)}
       {:ok, answer} -> {:ok, Troupe.Client.Invites.invited(answer, role)}
-      {:error, reason} -> {:error, refusal(reason)}
+      {:error, reason} -> {:error, Sensitive.sharing_refused(reason) || refusal(reason)}
     end
   end
 
@@ -324,6 +328,43 @@ defmodule Troupe.Client.Remote do
     case attachment(sid) do
       %{plane_url: plane} when is_binary(plane) -> share_on(plane, sid, verb)
       _ -> {:error, message(:not_attached)}
+    end
+  end
+
+  # A pod session marked sensitive by its owner, at the plane, one-way (root #1239): the
+  # status line's mark follows the answer at once; the log's line follows from the pod.
+  @impl true
+  def sensitive(sid, verb) do
+    case attachment(sid) do
+      %{plane_url: plane} when is_binary(plane) -> sensitive_on(plane, sid, verb)
+      _ -> {:error, message(:not_attached)}
+    end
+  end
+
+  defp sensitive_on(plane, sid, :status) do
+    case call(plane, "session.get", %{session_id: sid}) do
+      {:ok, %{"sensitive" => %{} = mark}} ->
+        {:ok, Sensitive.already(mark)}
+
+      {:ok, %{"your_role" => role}} when role not in [nil, "owner"] ->
+        {:ok, "This session is not sensitive."}
+
+      {:ok, %{} = _row} ->
+        {:ok, Sensitive.ask(:plane)}
+
+      {:error, reason} ->
+        {:error, refusal(reason)}
+    end
+  end
+
+  defp sensitive_on(plane, sid, :mark) do
+    case call(plane, "session.sensitive.set", %{session_id: sid, sensitive: true}) do
+      {:ok, %{} = row} ->
+        _ = Worker.sensitive(sid)
+        {:ok, Sensitive.set(row)}
+
+      {:error, reason} ->
+        {:error, Sensitive.refused(reason)}
     end
   end
 
@@ -365,6 +406,7 @@ defmodule Troupe.Client.Remote do
   @impl true
   def proposal(sid, verb) do
     case {verb, Worker.open_proposal(sid)} do
+      {:status, nil} -> {:ok, made_here(sid)}
       {:status, open} -> {:ok, Troupe.Client.Proposal.status(open)}
       {_verb, nil} -> {:error, Troupe.Client.Proposal.status(nil)}
       {:yes, open} -> accept(sid, open)
@@ -391,6 +433,45 @@ defmodule Troupe.Client.Remote do
 
       _ ->
         {:error, message(:not_attached)}
+    end
+  end
+
+  # The person's own triggers (root #1235), at the plane the session is on, as this person.
+  @impl true
+  def own_triggers(sid, verb) do
+    case attachment(sid) do
+      %{plane_url: plane} when is_binary(plane) -> own_triggers_on(plane, verb)
+      _ -> {:error, message(:not_attached)}
+    end
+  end
+
+  defp own_triggers_on(plane, :list) do
+    case call(plane, "trigger.own.list") do
+      {:ok, %{"triggers" => triggers}} -> {:ok, OwnTriggers.list(triggers)}
+      {:error, %{code: -32_601}} -> {:error, OwnTriggers.not_known()}
+      {:error, reason} -> {:error, refusal(reason)}
+    end
+  end
+
+  defp own_triggers_on(plane, {change, name}) do
+    case call(plane, OwnTriggers.method(change), %{trigger: name}) do
+      {:ok, %{} = answer} -> {:ok, OwnTriggers.changed(change, answer)}
+      {:error, %{code: -32_601}} -> {:error, OwnTriggers.refused(change, OwnTriggers.not_known())}
+      {:error, reason} -> {:error, OwnTriggers.refused(change, refusal(reason))}
+    end
+  end
+
+  # With nothing open: what a yes in this session turned on, as it stands now, where the
+  # plane lists the person's own triggers.
+  defp made_here(sid) do
+    none = Troupe.Client.Proposal.status(nil)
+
+    with %{plane_url: plane} when is_binary(plane) <- attachment(sid),
+         {:ok, %{"triggers" => triggers}} <- call(plane, "trigger.own.list"),
+         [_ | _] = here <- Enum.filter(triggers, &(&1["session_id"] == sid)) do
+      Enum.join([none | Enum.map(here, &("turned on here: " <> OwnTriggers.line(&1)))], "; ")
+    else
+      _ -> none
     end
   end
 
@@ -500,12 +581,16 @@ defmodule Troupe.Client.Remote do
 
   defp share_on(plane, sid, {:set, visibility}) do
     case call(plane, "session.visibility.set", %{session_id: sid, visibility: visibility}) do
+      # Held for a team administrator's yes (root #1239): nothing changed yet.
+      {:ok, %{"waiting" => true} = answer} ->
+        {:ok, Sensitive.waiting(answer)}
+
       {:ok, %{} = row} ->
         _ = Worker.visibility(sid, row["visibility"])
         {:ok, Troupe.Client.Share.set(row)}
 
       {:error, %{message: "forbidden"} = error} ->
-        {:error, Troupe.Client.Share.forbidden(error[:data])}
+        {:error, Sensitive.sharing_refused(error) || Troupe.Client.Share.forbidden(error[:data])}
 
       {:error, %{code: -32_601}} ->
         {:error, "this plane does not give a session to a team after it started yet"}
@@ -853,6 +938,9 @@ defmodule Troupe.Client.Remote do
         visibility: params[:visibility] || "team",
         # How long it lasts, where it is not normal (root #1209).
         lifespan: if(params[:lifespan] in ["throwaway", "persistent"], do: params[:lifespan]),
+        # Sensitive from its start, one-way (`/new --sensitive`, `troupe run --sensitive`,
+        # root #1239); absent otherwise, which a plane from before takes as it always did.
+        sensitive: if(params[:sensitive] == true, do: true),
         # The GitHub repositories it starts on (`/new --repo`, `troupe run --repo`), each
         # `owner/name` or `{owner, name, ref}`; with none the plane is sent none.
         repositories: repositories_param(params[:repositories]),
@@ -869,6 +957,7 @@ defmodule Troupe.Client.Remote do
         profile: params[:profile],
         team: params[:team],
         only_me: body[:visibility] == "private",
+        sensitive: body[:sensitive] == true,
         repositories: repository_names(result["repositories"]),
         title: params[:title] || params[:prompt]
       })
@@ -1181,6 +1270,7 @@ defmodule Troupe.Client.Remote do
          profile: info[:profile],
          team: info[:team],
          only_me: info[:only_me] == true,
+         sensitive: info[:sensitive] == true,
          title: info[:title],
          visibility: info[:visibility],
          owner?: info[:owner?] == true,
@@ -1397,6 +1487,8 @@ defmodule Troupe.Client.Remote do
       # from before lifespans.
       lifespan: Troupe.Client.Lifespan.of(session),
       erases_at: session["erases_at"],
+      # Since when, and by what, it is sensitive (root #1239); nil while it is not.
+      sensitive: Sensitive.of(session["sensitive"]),
       # A plane cannot say how this machine's copy of a private session stands, only that
       # it is waiting to be erased (root Decision 756).
       sync: if(session["state"] == "erasure_pending", do: "erasure_pending"),

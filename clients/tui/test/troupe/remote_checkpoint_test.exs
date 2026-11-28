@@ -76,7 +76,8 @@ defmodule Troupe.RemoteCheckpointTest do
     assert pages(remote) == []
     assert screen_text(pid, screen) =~ "PgUp loads earlier"
 
-    # At the top, PgUp asks for the page before the checkpoint.
+    # At the top, PgUp asks for the page before the checkpoint: the twenty before it, as
+    # the one before those, 25, is the root's rest.
     press(pid, "page_up")
     eventually(fn -> earlier(pid).before == 26 end)
     assert pages(remote) == [46]
@@ -87,20 +88,22 @@ defmodule Troupe.RemoteCheckpointTest do
     assert {:user, "sixth"} in transcript(pid)
     refute screen_text(pid, screen) =~ "PgUp loads earlier"
 
-    # Home goes to the top; at the top it asks for the next page, until there is none.
-    for before <- [6, 1] do
+    # Home goes to the top; at the top it asks for the next page, until there is none. The
+    # twenty before 26 begin mid-turn, so that page starts after the rest at 9, and the
+    # last is the first turn, from seq 1.
+    for before <- [10, 1] do
       press(pid, "home")
       press(pid, "home")
       eventually(fn -> earlier(pid).before == before end)
     end
 
-    assert pages(remote) == [46, 26, 6]
+    assert pages(remote) == [46, 26, 10]
     assert earlier(pid).more == false
 
     press(pid, "home")
     press(pid, "page_up")
     _ = user_state(pid)
-    assert pages(remote) == [46, 26, 6]
+    assert pages(remote) == [46, 26, 10]
     refute screen_text(pid, screen) =~ "loads earlier"
 
     # Above the summary, the history as one fold of seqs 1 to 45 draws it; below it, the
@@ -110,6 +113,38 @@ defmodule Troupe.RemoteCheckpointTest do
 
     assert history == whole_history()
     assert [{:earlier, _} | ^after_summary] = tail
+
+    GenServer.stop(pid, :normal)
+  end
+
+  # A page of three, cut at a turn as the plane cuts it: the page after the compaction's
+  # rests is two events, the turn from 10 to 20 comes whole at eleven, and each says there
+  # is more until the first turn, from seq 1.
+  test "pages shorter and longer than asked draw the whole history and stop at seq 1" do
+    {remote, url} =
+      start_remote!(sessions: [fixture()], capabilities: @checkpoints, events_page: 3)
+
+    sid = attach!(connect!(remote, url), "s-cp")
+    eventually(fn -> held(sid) |> Enum.member?(51) end)
+
+    {pid, _screen} = start_tui(sid, height: 16)
+    eventually(fn -> user_state(pid).model.windows["root"] != nil end)
+    press(pid, "1")
+
+    for before <- [44, 39, 33, 31, 26, 21, 10, 1] do
+      assert earlier(pid).more == true
+      press(pid, "home")
+      press(pid, "home")
+      eventually(fn -> earlier(pid).before == before end)
+    end
+
+    assert pages(remote) == [46, 44, 39, 33, 31, 26, 21, 10]
+    assert earlier(pid).more == false
+
+    {history, [{:earlier, _} | _]} =
+      Enum.split_while(transcript(pid), &(not match?({:earlier, _}, &1)))
+
+    assert history == whole_history()
 
     GenServer.stop(pid, :normal)
   end

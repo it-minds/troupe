@@ -47,8 +47,9 @@ defmodule Troupe.Config.Permissions do
         }
 
   # Which file's rule is named when several of one kind hold: the platform's first, the
-  # worker profile's on a pod and the organisation's elsewhere.
-  @priority %{profile: 6, enforced: 5, org: 4, user: 3, project: 2, local: 1}
+  # worker profile's rules for a sensitive session above its own, then the worker profile's
+  # on a pod and the organisation's elsewhere.
+  @priority %{sensitive: 7, profile: 6, enforced: 5, org: 4, user: 3, project: 2, local: 1}
 
   # The layers whose `allow` stands under `managed_permission_rules_only`: what a platform
   # set, not anything a session's own files say.
@@ -138,6 +139,23 @@ defmodule Troupe.Config.Permissions do
           nil -> nil
           rule -> {rule.action, rule}
         end
+    end
+  end
+
+  @doc """
+  The first of `rules` that matches one call, whatever its action, or `nil`: what a worker
+  profile's `sensitive.markedBy` asks of a call, where any rule that matches marks. A shell
+  line matches where any command it runs does, a substitution's included.
+  """
+  @spec match([rule()], String.t(), map(), Path.t() | nil) :: rule() | nil
+  def match(rules, tool, args, root) do
+    case Enum.filter(rules, &for_tool?(&1, tool)) do
+      [] ->
+        nil
+
+      relevant ->
+        {subjects, _complex?} = subjects(tool, args || %{}, root)
+        Enum.find(relevant, fn rule -> Enum.any?(subjects, &matches?(rule, &1, root)) end)
     end
   end
 
@@ -381,11 +399,20 @@ defmodule Troupe.Config.Permissions do
 
   @doc """
   Where a rule came from, in words: "your organisation (managed.yaml)", "your config.yaml",
-  "this project's .troupe/config.yaml", and on the platform "the profile fixing".
+  "this project's .troupe/config.yaml", and on the platform "the profile fixing", or "the
+  profile records, in a sensitive session" for a rule of its `sensitive.deny`.
   """
   @spec scope(rule()) :: String.t()
   # A worker profile's rules are its name's, not a file's.
   def scope(%{layer: :profile, source: profile}), do: "the profile #{profile}"
+  # A rule of `sensitive` on this computer: the organisation's file's or the user's own,
+  # said as that file's rules are, in a sensitive session.
+  def scope(%{layer: :sensitive, origin: origin} = rule) when origin in [:enforced, :user],
+    do: scope(%{rule | layer: origin}) <> ", in a sensitive session"
+
+  # A worker profile's `sensitive.deny`, which holds only once the session is sensitive.
+  def scope(%{layer: :sensitive, source: profile}),
+    do: "the profile #{profile}, in a sensitive session"
   # A trigger's terms allow what its runs need, named by the trigger that runs them.
   def scope(%{layer: :trigger, source: trigger}), do: "the terms of the trigger #{trigger}"
 
@@ -402,6 +429,17 @@ defmodule Troupe.Config.Permissions do
     end
   end
 
+  @doc """
+  Whose rule refuses a call in a sensitive session, as its refusal says it: "the profile
+  records" on a pod, "what your organisation enforces (managed.yaml)" or "your own
+  config.yaml (...)" on this computer.
+  """
+  @spec whose(rule()) :: String.t()
+  def whose(%{layer: :sensitive, origin: origin} = rule) when origin in [:enforced, :user],
+    do: scope(%{rule | layer: origin})
+
+  def whose(%{source: profile}), do: "the profile #{profile}"
+
   @doc "A rule as a sentence names it: `deny shell(git push), from what your organisation enforces (...)`."
   @spec describe(rule()) :: String.t()
   def describe(rule), do: "#{rule.action} #{rule.text}, from #{scope(rule)}"
@@ -414,13 +452,15 @@ defmodule Troupe.Config.Permissions do
       "rule" => rule.text,
       "tool" => rule.tool,
       "pattern" => rule.pattern,
-      "scope" => Atom.to_string(rule.layer),
+      "scope" => Atom.to_string(Map.get(rule, :origin) || rule.layer),
       "source" => source(rule),
       "ignored" => rule.ignored
     }
   end
 
   defp source(%{layer: :profile, source: profile}), do: profile
+  defp source(%{layer: :sensitive, origin: _file, source: path}) when is_binary(path), do: Troupe.Paths.display(path)
+  defp source(%{layer: :sensitive, source: profile}), do: profile
   defp source(%{layer: :trigger, source: trigger}), do: trigger
   defp source(%{source: nil}), do: nil
   defp source(%{source: path}), do: Troupe.Paths.display(path)

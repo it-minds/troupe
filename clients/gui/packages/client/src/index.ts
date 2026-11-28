@@ -142,13 +142,51 @@ export {
   lifespanMark,
   lifespanOf,
   lifespanRefusal,
+  planeCapabilities,
   planeKnowsLifespans,
   throwawaySentence,
   untilWords,
 } from "./lifespan.js";
 export type { Lifespan, PlaneAsker } from "./lifespan.js";
+export {
+  SENSITIVE,
+  SENSITIVE_ITEM,
+  SENSITIVE_SWITCH,
+  clockWords,
+  isWaiting,
+  knowsSensitive,
+  planeKnowsSensitive,
+  refusedWords,
+  sensitiveBanner,
+  sensitiveConfirm,
+  sensitiveLine,
+  sensitiveMark,
+  sensitiveOf,
+  sensitiveRefusal,
+  sensitiveRules,
+  sensitiveTitle,
+  shareRequestLine,
+  sharingRefusal,
+  waitingSentence,
+} from "./sensitive.js";
+export type { MarkWords, SensitiveMark, ShareRequest, ShareWaiting } from "./sensitive.js";
 export { SCHEDULE_CHOICES, WEEKDAYS, answeredLine, cronOf, cronProblem, editsOf, othersLine, proposalOf, proposalRefusal, runsLine, scheduleOf, scheduleWords } from "./proposals.js";
 export type { ProposalDecision, ProposalResult, ProposalState, ScheduleChoice, ScheduleEvery, TriggerDraft } from "./proposals.js";
+export {
+  OWN_TRIGGER_ACTIONS,
+  knowsOwnTriggers,
+  ownByLine,
+  lastRunWords,
+  ownBudgetWords,
+  ownTriggerRefusal,
+  ownTriggerState,
+  planeKnowsOwnTriggers,
+  proposalTriggerLine,
+  removeConfirm,
+  triggerOfProposal,
+  utcWords,
+} from "./ownTriggers.js";
+export type { OwnTrigger, OwnTriggerAction, OwnTriggerRun, OwnTriggers } from "./ownTriggers.js";
 export { behind, configurationLine, owedLine, raiseKept, raiseRefusal, updateLine, upgradedText, versionOf } from "./bundle.js";
 export type {
   Entry,
@@ -213,7 +251,8 @@ export type {
   RemoteOffer,
   RemotePerson,
 } from "./fleet.js";
-export { ArtifactApi, audienceName, audienceOf, blockedKindWords, blockedWords, ownerWords, teamOwned, textBytes, visibilityWords } from "./artifacts.js";
+export { ArtifactApi, accessChanges, accessWaiting, artifactAccessWords, audienceOf, audienceTeams, offeredTeams, publishAnswer, blockedKindWords, blockedWords, ownerWords, teamOwned, textBytes, visibilityWords } from "./artifacts.js";
+export type { ArtifactAccess, ArtifactAccessChange, ArtifactAccessPerson, ArtifactAccessTeam, ArtifactAccessWaiting, ArtifactReaders } from "./artifacts.js";
 export { besideRows, renderEntries, replacedBy, topicKey, writtenBy } from "./entries.js";
 export type { EntryDraft, EntryLevel, InEffect, MemoryEntry, MemoryInEffect } from "./entries.js";
 export type { ArtifactComment, ArtifactPersonShare, ArtifactShareRole, ArtifactThread } from "./artifacts.js";
@@ -449,6 +488,7 @@ export type {
   ModelsParams,
   PermissionRule,
   ProviderTypeInfo,
+  SensitiveConfig,
   SessionConfig,
 } from "./config.js";
 export { PATH_TOOLS, RULE_ACTIONS, checkRuleSet, parseRule, ruleKind, ruleParts } from "./rules.js";

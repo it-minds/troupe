@@ -3,7 +3,8 @@ defmodule Troupe.Session do
   One session: a log, an approval gate, client-hosted tools, a root agent, and a watcher.
 
   `rest_for_one` orders those by dependency. `Log` first, because everything persists
-  through it and everything after it must replay if it restarts. `Approvals` next, then
+  through it and everything after it must replay if it restarts. `Sensitive` right after
+  it, the one mark the root and every subagent read. `Approvals` next, then
   `ClientTools` — both above the agent, so a restarted agent comes back to the same
   answered approvals and the same registered client tools rather than asking again or
   silently losing them. Then the root `Agent.Node`. Then `Session.Watcher` **last**, so a
@@ -111,6 +112,10 @@ defmodule Troupe.Session do
          workspace_root: workspace.root_real,
          state_dir: config.state_dir,
          starts: starts},
+        # Whether the session is sensitive: right under the log, above every agent, so the
+        # root and each subagent read one mark, and an agent that restarts reads it again.
+        {Troupe.Session.Sensitive,
+         session_id: session_id, given: Keyword.get(opts, :sensitive), config: config.sensitive},
         # A person's own commands (`!cmd`, Decision 813): right under the log, so nothing
         # below that restarts — an agent, an MCP server — kills a command someone is
         # watching, and gone with the session, which takes every command it runs with it.
@@ -307,6 +312,9 @@ defmodule Troupe.Session do
          # How long it lasts, `throwaway`, `normal` or `persistent`, as the plane or the
          # client said at its creation; recorded in `session_created`, absent for normal.
          lifespan: Keyword.get(opts, :lifespan),
+         # The plane's word that the session is sensitive (`at`, `by`, `how`), at a wake,
+         # so the gate holds before its log is read; `nil` everywhere else.
+         sensitive: Keyword.get(opts, :sensitive),
          # A pod is told whose session this is; a daemon is not, and works it out from
          # whoever has linked their identity to it.
          owner: Keyword.get(opts, :owner),

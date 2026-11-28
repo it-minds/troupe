@@ -410,6 +410,11 @@ defmodule Troupe.Session.Checkpoint do
     %{f | "taint" => f["taint"] ++ [entry]}
   end
 
+  # Sensitive since when and by what, for a late attacher; the first mark holds. A fact only
+  # a log that says it carries, so a checkpoint written before it folds as it did.
+  defp facts(f, %Event{type: "session_marked_sensitive", data: data}),
+    do: Map.put_new(f, "sensitive", Map.take(data, ~w(how by rule at)))
+
   defp facts(f, %Event{}), do: f
 
   # -- small folds ----------------------------------------------------------------

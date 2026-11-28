@@ -81,8 +81,18 @@ defmodule Troupe.Worker.AuthTest do
     "session.unpin",
     "session.title.set",
     "session.lifespan.set",
+    # Marking it sensitive by hand: the plane holds the mark, and tells the pod.
+    "session.sensitive.set",
     "session.erase",
-    "session.fork"
+    # A sensitive session's held shares, which a team administrator answers at the plane.
+    "session.share_requests",
+    "session.share_request.decide",
+    "session.fork",
+    # A person's own triggers, rows of the plane's about no session.
+    "trigger.own.list",
+    "trigger.own.disable",
+    "trigger.own.enable",
+    "trigger.own.delete"
   ]
 
   # Every method the clients send a worker today, read from their sources: the TUI's

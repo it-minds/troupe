@@ -13,7 +13,7 @@ import { castingTiming } from "../src/views/StartSession";
 import { FakeDaemon } from "../../../packages/client/test/support/daemon.js";
 import { startHarness } from "../../../packages/client/test/support/harness.js";
 import type { Harness } from "../../../packages/client/test/support/harness.js";
-import { button, render, says, sees, seesButton, showBackstage, startOnTheList, type, waitFor } from "./support";
+import { button, enabled, render, says, sees, seesButton, showBackstage, startOnTheList, type, waitFor } from "./support";
 
 Element.prototype.scrollIntoView = function scrollIntoView() {};
 globalThis.WebSocket = NodeWebSocket as unknown as typeof WebSocket;
@@ -151,16 +151,22 @@ describe("a running session's repositories", () => {
     // The one it was created on is taken off only beside another.
     expect(button("Take off", p)).toBeNull();
 
-    button("Attach a repository", p)!.click();
+    (await seesButton("Attach a repository", p)).click();
+    const gadgets = await waitFor(() => option(p, "example-org/gadgets"), "the team's other repository");
+    // The chooser is drawn: the one the session holds is not offered in it.
     expect(option(p, "example-org/widgets")).toBeUndefined();
-    (await waitFor(() => option(p, "example-org/gadgets"), "the team's other repository")).click();
-    (await waitFor(() => (button("Attach", p)?.disabled === false ? button("Attach", p) : null), "Attach, with one chosen")).click();
+    gadgets.click();
+    (await waitFor(() => enabled(button("Attach", p)), "Attach, with one chosen")).click();
     await waitFor(() => says("in example-org/gadgets/", panel()!), "the attached one, in its own directory");
     await waitFor(() => says("example-org/gadgets attached by"), "the transcript's line");
     expect(row.repositories.map((r) => r.name)).toEqual(["widgets", "gadgets"]);
 
-    const takeOff = await waitFor(() => [...panel()!.querySelectorAll<HTMLButtonElement>("button")].filter((b) => b.textContent === "Take off"), "Take off");
-    expect(takeOff).toHaveLength(2);
+    // The answer's list is drawn before the session list is read again, and Take off waits,
+    // disabled, until that read is done: a press before then is a press on a disabled button.
+    const takeOff = await waitFor(() => {
+      const shown = [...panel()!.querySelectorAll<HTMLButtonElement>("button")].filter((b) => b.textContent === "Take off");
+      return shown.length === 2 && shown.every((b) => !b.disabled) ? shown : null;
+    }, "a Take off beside each of the two, enabled once the attach is done");
     takeOff[1]!.click();
     await waitFor(() => !says("example-org/gadgets", panel()!), "the one taken off, gone");
     expect(row.repositories.map((r) => r.name)).toEqual(["widgets"]);
@@ -171,7 +177,7 @@ describe("a running session's repositories", () => {
     const row = h.plane.seed("alice@example.com", { title: "Fix the widgets" });
     row.repositories = [{ owner: "example-org", name: "widgets", ref: null, path: ".", attached_by: "alice@example.com", attached_at: "2026-11-26T09:00:00Z", github: null }];
     const p = await openSession("Fix the widgets");
-    button("Attach a repository", p)!.click();
+    (await seesButton("Attach a repository", p)).click();
     type(await waitFor(() => p.querySelector<HTMLInputElement>('input[aria-label="Repository, as owner/name@branch"]'), "the typed repository"), "other-org/secret");
     button("Add", p)!.click();
     (await waitFor(() => (button("Attach", p)?.disabled === false ? button("Attach", p) : null), "Attach, with one chosen")).click();

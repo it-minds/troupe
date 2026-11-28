@@ -26,13 +26,13 @@ defmodule Troupe.Gateway.Artifacts do
   here and is not under Local only. A line whoever steers the session reads, never input.
   """
 
-  alias Troupe.Gateway.{LocalOnly, Memory, Plane}
+  alias Troupe.Gateway.{LocalOnly, Memory, Plane, Sensitive}
   alias Troupe.Session.Log
 
   # `owner`, `me` or `team`, is whose a new team publication is; the plane makes it the
   # team's unless told `me`. `thumbnail`, a picture for the version's card, rides inline
   # beside the files or the upload handle: at most 256 KiB, it never needs one of its own.
-  @keys ~w(title kind visibility owner files id note session_id agent thumbnail)
+  @keys ~w(title kind visibility teams owner files id note session_id agent thumbnail)
 
   # What one call carries inline at most, in base64: under the plane's door with room for the
   # rest of the request.
@@ -45,8 +45,31 @@ defmodule Troupe.Gateway.Artifacts do
   @spec install() :: :ok
   def install do
     :ok = Troupe.Artifacts.install_files(&__MODULE__.files/1)
+    :ok = Troupe.Artifacts.install_about(&__MODULE__.about/2)
     Troupe.Artifacts.install(&__MODULE__.publish/2, ready: &__MODULE__.signed_in?/1)
   end
+
+  @doc """
+  What the plane says of a publication from a session here before its gate asks
+  (`Troupe.Artifacts.about/2`): for a new version, who reads that artifact now, in words, as
+  the plane's `artifact.access.get` answers its owner. A new one from this machine has no
+  profile to give it teams by default, so nothing is asked for it; nor for a session under
+  Local only.
+  """
+  @spec about(map(), Troupe.Tool.Ctx.t()) :: {:ok, map()} | {:error, term()}
+  def about(%{"id" => id}, ctx) when is_binary(id) do
+    with false <- LocalOnly.session?(ctx.session_id),
+         url when is_binary(url) <- Plane.url(),
+         true <- Plane.linked?(),
+         {:ok, %{"words" => words}} <- Plane.call("artifact.access.get", %{"id" => id}) do
+      {:ok, %{"access" => words}}
+    else
+      {:error, reason} -> {:error, reason}
+      _nothing -> {:ok, %{}}
+    end
+  end
+
+  def about(_ask, _ctx), do: {:ok, %{}}
 
   @doc """
   The files of one of the person's artifacts for a session here (`fs.upload` with
@@ -108,6 +131,7 @@ defmodule Troupe.Gateway.Artifacts do
     |> case do
       {:ok, artifact} -> {:ok, artifact}
       {:error, :signed_out} -> {:error, :signed_out}
+      {:error, {:sensitive, sentence}} -> {:error, sentence}
       {:error, reason} -> {:error, Memory.sentence(reason)}
     end
   end
@@ -115,7 +139,8 @@ defmodule Troupe.Gateway.Artifacts do
   @doc "Publish `params` on the linked plane as this daemon's person: the plane's answer."
   @spec put(map()) :: {:ok, map()} | {:error, :signed_out | term()}
   def put(params) do
-    with url when is_binary(url) <- Plane.url(),
+    with :ok <- unless_sensitive(params["session_id"]),
+         url when is_binary(url) <- Plane.url(),
          true <- Plane.linked?(),
          {:ok, params} <-
            carried(
@@ -128,6 +153,16 @@ defmodule Troupe.Gateway.Artifacts do
       {:error, :unlinked} -> {:error, :signed_out}
       {:error, reason} -> {:error, reason}
       _signed_out -> {:error, :signed_out}
+    end
+  end
+
+  # A sensitive session here whose configuration's `deny` names `publish_artifact` (#1239)
+  # publishes nothing, whoever asks for it: its agent's tool, past its gate, or a client's
+  # "Publish…" naming it. The gate's own sentence.
+  defp unless_sensitive(session_id) do
+    case Sensitive.refusal(session_id, "publish_artifact") do
+      nil -> :ok
+      sentence -> {:error, {:sensitive, sentence}}
     end
   end
 
@@ -148,7 +183,7 @@ defmodule Troupe.Gateway.Artifacts do
     with url when is_binary(url) <- Plane.url(),
          true <- Plane.linked?(),
          {:ok, answer} <-
-           Plane.call("artifact.list", Map.take(params, ~w(mine shared teams visibility))) do
+           Plane.call("artifact.list", Map.take(params, ~w(mine shared teams team visibility))) do
       {:ok, Map.put(answer, "plane_url", url)}
     else
       {:error, :unlinked} -> {:error, :signed_out}
@@ -167,7 +202,7 @@ defmodule Troupe.Gateway.Artifacts do
     # One text file of a version, for the terminal's frame.
     "artifact.read" => ~w(id version path),
     # A link, or with `person` the artifact shared with that person by name.
-    "artifact.share" => ~w(id role expires person),
+    "artifact.share" => ~w(id role expires person team),
     # Its thread, and a comment in it.
     "artifact.comments" => ~w(id),
     "artifact.comment" => ~w(id body),
@@ -175,8 +210,12 @@ defmodule Troupe.Gateway.Artifacts do
     "artifact.comment.delete" => ~w(id comment),
     "artifact.comment.edit" => ~w(id comment body),
     # The share picker's search for a person, as the plane lets the person find them.
-    "people.search" => ~w(query limit),
-    "artifact.unshare" => ~w(id share person),
+    "people.search" => ~w(query limit artifact),
+    "artifact.unshare" => ~w(id share person team),
+    # Who reads it, whole, and its owner's change of that; and the teams a profile is granted.
+    "artifact.access.get" => ~w(id),
+    "artifact.access.set" => ~w(id teams people organisation),
+    "profile.teams" => ~w(profile),
     "artifact.rollback" => ~w(id version),
     "artifact.pin" => ~w(id version),
     # Who may open it, moved by its owner (or its title): a put over a version, no files sent.

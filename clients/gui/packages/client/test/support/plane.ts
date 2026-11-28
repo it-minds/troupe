@@ -7,7 +7,8 @@
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { WebSocketServer, type WebSocket } from "ws";
-import type { FakeAdmin } from "./admin.js";
+import type { FakeAdmin, FakeTrigger } from "./admin.js";
+import { ownTriggerRow, ownTriggerRpc } from "./ownTriggers.js";
 import { composeProfile, exampleProfiles, specOfAdminProfile } from "./profiles.js";
 import type { FakeProfileSpec } from "./profiles.js";
 import { readBody, subjectOfIdToken, type FakeIdp } from "./idp.js";
@@ -43,6 +44,22 @@ interface Row {
   lifespan: "throwaway" | "normal" | "persistent";
   /** The GitHub repositories it holds, the one it was created on first (troupe #1207). */
   repositories: Array<{ owner: string; name: string; ref: string | null; path: string; attached_by: string; attached_at: string; github: null }>;
+  /** Since when, and by what, it is sensitive (troupe #1239); null while it is not, and nothing clears it. */
+  sensitive: { at: string; by: string; how: "call" | "person" } | null;
+}
+
+/** A share of a sensitive session held for a team administrator (troupe #1239), as `session.share_requests` lists it. */
+interface HeldShare {
+  id: string;
+  session_id: string;
+  team: string | null;
+  kind: "visibility" | "invite";
+  params: Record<string, unknown>;
+  requested_by: string;
+  state: "pending" | "approved" | "declined";
+  decided_by: string | null;
+  decided_at: string | null;
+  at: string;
 }
 
 /** The agent a session given none runs as: `build` where the profile offers it, else its first; none where it offers none. */
@@ -63,6 +80,16 @@ export interface PlaneOptions {
   /** Seconds a plane token is good for. */
   planeTokenLifetime?: number;
   profiles?: string[];
+  /**
+   * The teams granted each profile, by profile (`profile.teams`): those an artifact a session
+   * on it published may be given to by its owner, beside the owner's own teams.
+   */
+  profileTeams?: Record<string, string[]>;
+  /**
+   * The people each profile covers beyond those who share a team with the caller, by profile:
+   * whom `people.search` with an `artifact` from a session on it finds too.
+   */
+  profilePeople?: Record<string, Array<{ subject: string; display_name: string; email: string }>>;
   /**
    * What `profile.get` composes its answer from, per profile: its bundle, rules, model,
    * egress, limits, budgets and grants. Defaults to `exampleProfiles()`.
@@ -118,6 +145,14 @@ export interface PlaneOptions {
   beforePolicy?: boolean;
   /** A plane from before lifespans (troupe #1209): its `initialize` says no `lifespans`, and its rows carry none. */
   beforeLifespans?: boolean;
+  /** A plane from before sensitive sessions (troupe #1239): its `initialize` says no `sensitive`, its rows carry none, and it has no method for one. */
+  beforeSensitive?: boolean;
+  /** A plane from before a person's own triggers (troupe #1235): its `initialize` says no `own_triggers`, and it has no `trigger.own.*`. */
+  beforeOwnTriggers?: boolean;
+  /** What every profile's `sensitive.sharing` says of a sensitive session: `allow` where none is given. */
+  sensitiveSharing?: "allow" | "ask" | "deny";
+  /** The people who administer a team, whom a held share waits on. */
+  teamAdmins?: string[];
   /** The administrative half, `admin.*`. None is a plane whose admin methods are not found. */
   admin?: FakeAdmin;
   /** A plane from before a person's watch (`/v1/relay/watch`): `remote.list` is asked instead. */
@@ -220,7 +255,16 @@ export interface FakeArtifact {
   id: string;
   title: string;
   kind: "html" | "markdown" | "file";
+  /** `private` or `organisation`; a `team:<name>` a test writes is that one team in `teams`. */
   visibility: string;
+  /** The teams that read it, by name. */
+  teams?: string[];
+  /**
+   * The sharing rule of the sensitive session it came from: `ask` holds a change that adds
+   * readers for a team administrator (`waiting`), `deny` refuses it. None is a session that
+   * is not sensitive.
+   */
+  sharing?: "ask" | "deny";
   owner: { subject: string; display_name: string | null };
   /** The team that owns it, every member its owner; null for a person's own. */
   owner_team?: string | null;
@@ -239,7 +283,7 @@ export interface FakeArtifact {
 
 /** An artifact with the plane's shape: one version of one HTML page, unless told otherwise. */
 export function artifact(id: string, owner: { subject: string; display_name: string | null }, fields: Partial<FakeArtifact> = {}): FakeArtifact {
-  return {
+  const a: FakeArtifact = {
     id,
     title: id,
     kind: "html",
@@ -252,6 +296,14 @@ export function artifact(id: string, owner: { subject: string; display_name: str
     versions: [{ n: 1, files: [{ path: "index.html", content_type: "text/html", content: "<h1>A page</h1>" }], published_by: owner, published_at: "2026-10-25T10:00:00Z" }],
     ...fields,
   };
+  // One team a test names as a visibility, as the plane's migration reads one: that team in the set, private.
+  if (a.visibility.startsWith("team:")) return { ...a, visibility: "private", teams: [...new Set([...(a.teams ?? []), a.visibility.slice("team:".length)])] };
+  return a;
+}
+
+/** The teams that read an artifact the fake keeps. */
+export function readersOf(a: FakeArtifact): string[] {
+  return a.teams ?? [];
 }
 
 /** A person's own memory document as the fake plane keeps it. */
@@ -355,8 +407,9 @@ interface Invited {
 /** What a keeper answers for one of the plane's methods, as the plane would. */
 export type Keeper = (method: string, params: Record<string, unknown>) => Promise<{ result: unknown } | { error: { code: number; message: string; data?: unknown } }>;
 
-/** The person's own memory and artifacts: the methods a keeper answers. */
-export const KEPT = (method: string): boolean => method.startsWith("me.memory") || method === "memory.in_effect" || method.startsWith("admin.memory.") || method.startsWith("artifact.");
+/** The person's own memory and artifacts, and the reads an artifact's sharing menu makes beside them (`profile.teams`, and `people.search` for an artifact): the methods a keeper answers. */
+export const KEPT = (method: string, params: Record<string, unknown> = {}): boolean =>
+  method.startsWith("me.memory") || method === "memory.in_effect" || method.startsWith("admin.memory.") || method.startsWith("artifact.") || method === "profile.teams" || (method === "people.search" && typeof params["artifact"] === "string");
 
 export class FakePlane {
   readonly server: Server;
@@ -654,16 +707,84 @@ export class FakePlane {
    */
   seed(
     owner: string,
-    params: { id?: string; profile?: string; title?: string; agent?: string | null; origin?: Row["origin"]; prompt?: string; visibility?: string; lifespan?: Row["lifespan"] } = {},
+    params: {
+      id?: string;
+      profile?: string;
+      title?: string;
+      agent?: string | null;
+      origin?: Row["origin"];
+      prompt?: string;
+      visibility?: string;
+      lifespan?: Row["lifespan"];
+      sensitive?: Row["sensitive"];
+    } = {},
   ): Row {
     const id = params.id ?? `s-p-${++this.counter}`;
     const row: Row = { ...this.blankRow(id, owner, params.profile ?? "dev", params.title ?? null), agent: params.agent ?? null };
     if (params.visibility) row.visibility = params.visibility;
     if (params.lifespan) row.lifespan = params.lifespan;
     if (params.origin) row.origin = params.origin;
+    if (params.sensitive) row.sensitive = params.sensitive;
     this.rows.set(id, row);
     this.activate(row, params.prompt);
+    // A seeded mark is in its log too, as the pod wrote it at the call.
+    if (params.sensitive) {
+      const { at, by, how } = params.sensitive;
+      const data = how === "call" ? { at, by, how, rule: `mcp(${by.replace(/^mcp\./, "").split(".")[0]}.*)`, call_id: "call_seed" } : { at, by, how };
+      this.opts.worker.sessions.get(row.id)?.log.append("session_marked_sensitive", data, { kind: "system" });
+    }
     return row;
+  }
+
+  /** Mark a row sensitive by hand, once: the row, and the log's line the pod writes. */
+  private markSensitive(row: Row, subject: string): void {
+    if (row.sensitive) return;
+    const at = new Date().toISOString().replace(/\.\d+Z$/, "Z");
+    row.sensitive = { at, by: subject, how: "person" };
+    const name = this.nameOf(subject);
+    this.opts.worker.sessions.get(row.id)?.log.append("session_marked_sensitive", { at, by: subject, how: "person", ...(name ? { display_name: name } : {}) }, { kind: "system" });
+  }
+
+  /**
+   * A share of a sensitive session beyond who reads it now, as the profile's `sharing`
+   * says: null to go on, an error under `deny`, and under `ask` the hold's answer, nothing
+   * applied. A team administrator's own share is not held.
+   */
+  private sensitiveShare(
+    row: Row,
+    subject: string,
+    kind: HeldShare["kind"],
+    params: Record<string, unknown>,
+  ): { result: unknown } | { error: { code: number; message: string; data?: unknown } } | null {
+    if (!row.sensitive) return null;
+    const sharing = this.opts.sensitiveSharing ?? "allow";
+    if (sharing === "allow") return null;
+    const team = this.teamsOf(row.owner)[0] ?? null;
+    if (sharing === "deny") {
+      const readers = row.visibility === "team" && team ? `the team that already reads it, ${team}` : "the people who already read it";
+      return { error: { code: -32004, message: "forbidden", data: { reason: `This session is sensitive and ${row.profile} does not allow sharing it outside ${readers}`, setting: "sensitive.sharing" } } };
+    }
+    if (this.opts.teamAdmins?.includes(subject)) return null;
+    const request: HeldShare = {
+      id: `share-${++this.counter}`,
+      session_id: row.id,
+      team,
+      kind,
+      params,
+      requested_by: subject,
+      state: "pending",
+      decided_by: null,
+      decided_at: null,
+      at: new Date().toISOString(),
+    };
+    this.shareRequests.push(request);
+    return {
+      result: {
+        waiting: true,
+        reason: "This session is sensitive, so sharing it wider is waiting on a team administrator: the people who read it now go on reading it",
+        share_request: request,
+      },
+    };
   }
 
   /**
@@ -723,6 +844,10 @@ export class FakePlane {
   readonly createdVisibility: string[] = [];
   /** The lifespan each `session.create` asked for, `null` where it named none (troupe #1209). */
   readonly createdLifespan: Array<string | null> = [];
+  /** Whether each `session.create` asked for a sensitive session (troupe #1239). */
+  readonly createdSensitive: boolean[] = [];
+  /** The shares of sensitive sessions held for a team administrator, every state, oldest first. */
+  readonly shareRequests: HeldShare[] = [];
   /** The sessions erased through `session.erase`, in order. */
   readonly erased: string[] = [];
 
@@ -766,6 +891,7 @@ export class FakePlane {
       bundle_raise_to: null,
       lifespan: "normal",
       repositories: [],
+      sensitive: null,
     };
   }
 
@@ -781,6 +907,30 @@ export class FakePlane {
 
   /** Each yes to a proposal this plane took: the session, the proposal and the edits sent. */
   readonly proposalsAccepted: Array<{ session: string; id: string; edits: Record<string, unknown> }> = [];
+
+  /**
+   * The people's own triggers (troupe #1235) where there is no administrative half; with one
+   * they are its trigger rows, so the console's Triggers page and the person's list agree.
+   */
+  readonly ownTriggerRows: FakeTrigger[] = [];
+
+  /** Whether a person's own triggers are a repository's here, with no administrative half to say so. */
+  ownTriggersGitops = false;
+
+  /** What the people did to their own triggers, with no administrative half to record it. */
+  readonly ownTriggerAudit: Array<{ actor: string; action: string; subject: string; detail: Record<string, unknown> }> = [];
+
+  /** The rows a person's own triggers are among. */
+  get triggerRows(): FakeTrigger[] {
+    return this.opts.admin?.triggerRows ?? this.ownTriggerRows;
+  }
+
+  /** One of `owner`'s own triggers, as a yes of theirs would have made it. */
+  seedOwnTrigger(owner: string, fields: Partial<FakeTrigger> & { name: string; team?: string; cron?: string }): FakeTrigger {
+    const row = { ...ownTriggerRow({ team: fields.team ?? this.teamsOf(owner)[0] ?? "core", name: fields.name, owner, cron: fields.cron ?? "0 6 * * 1", profile: fields.profile ?? "dev", session_id: fields.made?.session_id ?? `s-${fields.name}`, artifact_id: fields.made?.artifact_id ?? null }), ...fields };
+    this.triggerRows.push(row);
+    return row;
+  }
 
   /** A laptop's session, offered by `owner` and shared as `shares` says, its laptop online. */
   relay(
@@ -905,25 +1055,83 @@ export class FakePlane {
     return null;
   }
 
-  /** Whether it is for somebody this person is: the organisation, a profile, a team of theirs. A private one is for nobody. */
+  /** Whether it is for somebody this person is: the organisation, or a team of theirs that reads it. */
   private forThem(a: FakeArtifact, subject: string): boolean {
     if (a.visibility === "organisation") return true;
-    if (a.visibility.startsWith("profile:")) return (this.opts.profiles ?? ["dev", "ux"]).includes(a.visibility.slice("profile:".length));
-    if (a.visibility.startsWith("team:")) return this.teamsOf(subject).includes(a.visibility.slice("team:".length));
-    return false;
+    return readersOf(a).some((t) => this.teamsOf(subject).includes(t));
   }
 
   /** The gallery tab it is under for this person, as the plane says it. */
   private scopeOf(a: FakeArtifact, subject: string): string {
-    if (this.owns(a, subject)) return a.visibility === "private" ? "private" : "mine";
-    if (this.forThem(a, subject)) return a.visibility;
-    return this.linkRole(a, subject) !== null ? "shared" : a.visibility;
+    if (this.owns(a, subject)) return a.visibility === "private" && readersOf(a).length === 0 ? "private" : "mine";
+    const theirs = readersOf(a).find((t) => this.teamsOf(subject).includes(t));
+    if (theirs) return `team:${theirs}`;
+    if (a.visibility === "organisation") return "organisation";
+    if (this.linkRole(a, subject) !== null) return "shared";
+    return readersOf(a)[0] ? `team:${readersOf(a)[0]}` : a.visibility;
   }
 
-  /** Whether this person administers the team it is for. */
+  /** Whether this person administers a team that reads it. */
   private administers(a: FakeArtifact, subject: string): boolean {
-    if (!a.visibility.startsWith("team:")) return false;
-    return this.opts.admin?.teams.get(a.visibility.slice("team:".length))?.admins.includes(subject) ?? false;
+    return readersOf(a).some((t) => this.opts.admin?.teams.get(t)?.admins.includes(subject) ?? false);
+  }
+
+  /** The teams this person may give an artifact to: theirs, and those granted the profile its session ran on. */
+  private mayAdd(a: FakeArtifact, subject: string): string[] {
+    const granted = a.origin.profile ? (this.opts.profileTeams?.[a.origin.profile] ?? []) : [];
+    return [...new Set([...this.teamsOf(subject), ...granted])].sort();
+  }
+
+  /** Who reads it, as `artifact.access.get` answers it. */
+  private accessJson(a: FakeArtifact): Record<string, unknown> {
+    const people = [...(this.named.get(a.id) ?? new Map()).entries()].map(([s, g]) => ({ subject: s, display_name: this.nameOf(s), role: g.role }));
+    const links = [...this.shares.values()].filter((sh) => sh.artifact === a.id).map((sh) => this.shareJson(sh));
+    const teams = readersOf(a);
+    const live = links.filter((l) => l["state"] === "live").length;
+    const words = [a.visibility === "organisation" ? "the whole organisation" : null, teams.length === 1 ? `the ${teams[0]} team` : teams.length > 1 ? `the ${teams.join(" and ")} teams` : null, people.length > 0 ? `${people.length} ${people.length === 1 ? "person" : "people"}` : null].filter(Boolean).join(" and ");
+    return {
+      id: a.id,
+      owner: a.owner,
+      owner_team: a.owner_team ?? null,
+      teams: teams.map((name) => ({ name, granted_by: a.owner.subject, at: a.created_at })),
+      people,
+      organisation: a.visibility === "organisation",
+      links,
+      words: (words || "nobody else") + (live > 0 ? `; ${live === 1 ? "a view link" : `${live} view links`}` : ""),
+    };
+  }
+
+  /**
+   * `artifact.access.set`: the owner's, each part named the whole of that part, applied as the
+   * difference; a team the owner may not give it to refuses the whole change; one that adds
+   * readers to an artifact of a sensitive session waits for a team administrator, or is
+   * refused, by its rule. No version is made.
+   */
+  private setAccess(a: FakeArtifact, subject: string, params: Record<string, unknown>): { result: unknown } | { error: { code: number; message: string; data?: unknown } } {
+    if (!this.owns(a, subject)) return { error: { code: -32004, message: "forbidden", data: { id: a.id, reason: "only its owner changes who reads an artifact" } } };
+    const teams = Array.isArray(params["teams"]) ? params["teams"].map(String) : null;
+    const people = Array.isArray(params["people"]) ? (params["people"] as Array<{ subject: string; role: "view" | "comment" | "edit" }>) : null;
+    const organisation = typeof params["organisation"] === "boolean" ? params["organisation"] : null;
+    const may = this.mayAdd(a, subject);
+    const added = (teams ?? []).filter((t) => !readersOf(a).includes(t));
+    const refused = added.filter((t) => !may.includes(t));
+    if (refused.length > 0) {
+      const profile = a.origin.profile ? ` and teams granted profile ${a.origin.profile}, which its session ran on` : "";
+      return { error: { code: -32004, message: "forbidden", data: { teams: refused, reason: `you may not give it to ${refused.map((t) => `team ${t}`).join(" and ")}: an artifact goes to teams you are in${profile}; you may give it to ${may.join(", ")}` } } };
+    }
+    const there = this.named.get(a.id) ?? new Map<string, { role: "view" | "comment" | "edit"; granted_by: string; granted_at: string }>();
+    const widens = added.length > 0 || (organisation === true && a.visibility !== "organisation") || (people ?? []).some((p) => there.get(p.subject)?.role !== p.role);
+    if (widens && a.sharing === "deny") return { error: { code: -32004, message: "forbidden", data: { setting: "sensitive.sharing", reason: "This session is sensitive and its profile does not allow sharing it beyond the people who already read it" } } };
+    if (widens && a.sharing === "ask") return { result: { waiting: true, reason: "This session is sensitive, so sharing it wider is waiting on a team administrator: the people who read it now go on reading it", share_request: { id: `share-${++this.counter}`, state: "pending" } } };
+    for (const p of people ?? []) if (!this.people.some((x) => x.subject === p.subject) && !Object.values(this.opts.profilePeople ?? {}).flat().some((x) => x.subject === p.subject)) return { error: { code: -32005, message: "not_found", data: { person: p.subject, reason: "nobody of that name is a person of this plane" } } };
+    if (teams) a.teams = teams;
+    if (organisation !== null) a.visibility = organisation ? "organisation" : "private";
+    if (people) {
+      const next = new Map<string, { role: "view" | "comment" | "edit"; granted_by: string; granted_at: string }>();
+      for (const p of people) next.set(p.subject, there.get(p.subject)?.role === p.role ? there.get(p.subject)! : { role: p.role, granted_by: subject, granted_at: "2026-10-25T12:00:00Z" });
+      this.named.set(a.id, next);
+    }
+    return { result: { ...this.accessJson(a), may_add: may } };
   }
 
   /**
@@ -969,24 +1177,28 @@ export class FakePlane {
    */
   private publishNew(subject: string, name: string, params: Record<string, unknown>): { result: unknown } | { error: { code: number; message: string; data?: unknown } } {
     const visibility = typeof params["visibility"] === "string" ? params["visibility"] : "private";
+    if (visibility !== "private" && visibility !== "organisation") return { error: { code: -32602, message: "invalid_params", data: { reason: `visibility is private or organisation, not ${JSON.stringify(visibility)}; the teams that read it are teams, and artifact.access.set changes them` } } };
+    const teams = Array.isArray(params["teams"]) ? params["teams"].map(String) : [];
     const files = ((params["files"] as Array<{ path: string; bytes: string; content_type?: string }> | undefined) ?? []).map((f) => ({ path: f.path, content_type: f.content_type ?? (f.path.endsWith(".md") ? "text/markdown" : "text/html"), content: Buffer.from(f.bytes, "base64").toString("utf8") }));
     if (typeof params["id"] === "string") {
       const a = this.artifacts.get(params["id"]);
       if (!a || !this.mayRead(a, subject)) return { error: { code: -32005, message: "not_found" } };
       if (!["owner", "edit"].includes(this.roleOf(a, subject) ?? "")) return { error: { code: -32004, message: "forbidden" } };
       if (params["owner"] !== undefined && params["owner"] !== null) return { error: { code: -32602, message: "invalid_params", data: { reason: "whose an artifact is does not change with a version; artifact.transfer moves it" } } };
+      if (params["teams"] !== undefined) return { error: { code: -32602, message: "invalid_params", data: { reason: "a new version keeps who reads it; artifact.access.set changes who does" } } };
       this.publish(a, subject, files, { note: typeof params["note"] === "string" ? params["note"] : null, thumbnail: sentPicture(params) });
       return { result: { ...this.artifactJson(a, subject), blocked: fakeBlocked(files) } };
     }
     const admin = this.opts.admin?.role(subject) === "platform_admin";
-    const forTeam = visibility.startsWith("team:") ? visibility.slice("team:".length) : null;
-    if (forTeam !== null && !admin && !this.teamsOf(subject).includes(forTeam)) {
-      return { error: { code: -32004, message: "forbidden", data: { reason: `you are not in team ${forTeam}, so you cannot publish to its people; you are in ${this.teamsOf(subject).map((t) => `team:${t}`).join(", ")}`, teams: this.teamsOf(subject) } } };
+    const notMine = teams.filter((t) => !this.teamsOf(subject).includes(t));
+    if (notMine.length > 0 && !admin) {
+      return { error: { code: -32004, message: "forbidden", data: { reason: `you may not give it to ${notMine.map((t) => `team ${t}`).join(" and ")}: an artifact goes to teams you are in; you may give it to ${this.teamsOf(subject).join(", ")}`, teams: this.teamsOf(subject) } } };
     }
-    const owner = params["owner"] ?? (forTeam !== null ? "team" : "me");
+    const forTeam = teams.length === 1 ? teams[0]! : null;
+    const owner = params["owner"] ?? "me";
     let ownerTeam: string | null = null;
     if (owner === "team") {
-      if (forTeam === null) return { error: { code: -32602, message: "invalid_params", data: { reason: "owner team names the team it is published for, and this is published for no team; name one as owner: team:<name>" } } };
+      if (forTeam === null) return { error: { code: -32602, message: "invalid_params", data: { reason: "owner team is the one team in teams, and this names " + (teams.length === 0 ? "none" : `${teams.length}`) + "; name one as owner: team:<name>" } } };
       ownerTeam = forTeam;
     } else if (typeof owner === "string" && owner.startsWith("team:")) {
       ownerTeam = owner.slice("team:".length);
@@ -1000,6 +1212,7 @@ export class FakePlane {
       title: String(params["title"] ?? id),
       kind: params["kind"] === "markdown" || params["kind"] === "file" ? params["kind"] : "html",
       visibility,
+      teams,
       owner: { subject, display_name: name },
       owner_team: ownerTeam,
       origin: { session_id: typeof params["session_id"] === "string" ? params["session_id"] : null, profile: null, agent: null, where: "person" },
@@ -1020,7 +1233,7 @@ export class FakePlane {
       const rows = [...this.artifacts.values()].filter(mayTake).map((a) => {
         const latest = a.versions[a.versions.length - 1]!;
         const bytes = latest.files.reduce((n, f) => n + new TextEncoder().encode(f.content).length, 0);
-        return { id: a.id, title: a.title, kind: a.kind, visibility: a.visibility, owner: a.owner, owner_team: a.owner_team ?? null, team: a.team, origin: a.origin, version: latest.n, bytes, total_bytes: bytes, created_at: a.created_at, published_at: latest.published_at, may_take_down: true };
+        return { id: a.id, title: a.title, kind: a.kind, visibility: a.visibility, teams: readersOf(a), owner: a.owner, owner_team: a.owner_team ?? null, team: a.team, origin: a.origin, version: latest.n, bytes, total_bytes: bytes, created_at: a.created_at, published_at: latest.published_at, may_take_down: true };
       });
       return { result: rows.sort((x, y) => y.published_at.localeCompare(x.published_at)) };
     }
@@ -1091,9 +1304,11 @@ export class FakePlane {
   /** An artifact as `artifact.list` answers it to this person: never a file's content. */
   private artifactJson(a: FakeArtifact, subject: string): Record<string, unknown> {
     const latest = a.versions[a.versions.length - 1]!;
-    const { versions: _versions, opened_at: _opened, ...shown } = a;
+    const { versions: _versions, opened_at: _opened, sharing: _sharing, ...shown } = a;
     return {
       ...shown,
+      teams: readersOf(a),
+      organisation: a.visibility === "organisation",
       goes_at: this.goesAt(a),
       owner_team: a.owner_team ?? null,
       mine: this.owns(a, subject),
@@ -1326,7 +1541,7 @@ export class FakePlane {
       let answer =
         method === "me" && held.breakglass
           ? { result: { subject: held.subject, display_name: held.name, kind: "breakglass", teams: [], profiles: [], platform_admin: true, breakglass: true } }
-          : this.opts.keeper && KEPT(method)
+          : this.opts.keeper && KEPT(method, request.params ?? {})
           ? await this.opts.keeper(method, request.params ?? {})
           : method === "admin.artifacts.list" || method === "admin.artifact.get" || method === "admin.artifact.takedown"
           ? this.adminArtifacts(held.subject, method, request.params ?? {})
@@ -1348,6 +1563,11 @@ export class FakePlane {
     }
 
     json(404, { error: "not_found" });
+  }
+
+  /** A method asked as `subject`, as their client would, for a test to set the scene another person's client made. */
+  rpcAs(subject: string, method: string, params: Record<string, unknown>): { result: unknown } | { error: { code: number; message: string; data?: unknown } } {
+    return this.rpc(subject, this.nameOf(subject) ?? subject, method, params);
   }
 
   private rpc(
@@ -1389,8 +1609,10 @@ export class FakePlane {
             server_info: { name: "troupe-plane", version: "test" },
             principal: "result" in principal ? principal.result : null,
             client_update: clientUpdate,
-            // What this plane takes that one before it did not (troupe #1209).
-            ...(this.opts.beforeLifespans ? {} : { capabilities: { lifespans: true } }),
+            // What this plane takes that one before it did not (troupe #1209, #1239).
+            ...(this.opts.beforeLifespans
+              ? {}
+              : { capabilities: { lifespans: true, ...(this.opts.beforeSensitive ? {} : { sensitive: true }), ...(this.opts.beforeOwnTriggers ? {} : { own_triggers: true }) } }),
           },
         });
         if (!component) return hello(null);
@@ -1532,6 +1754,7 @@ export class FakePlane {
         }
         const lifespan = this.opts.beforeLifespans ? "normal" : ((asked as Row["lifespan"] | undefined) ?? "normal");
         this.createdLifespan.push(asked === undefined ? null : String(asked));
+        this.createdSensitive.push(params["sensitive"] === true);
         const held = this.repositoriesFor(profile, params, subject);
         if ("error" in held) return held;
         const room = this.opts.room?.[profile];
@@ -1549,6 +1772,7 @@ export class FakePlane {
         }
         const row = this.seed(subject, { profile, ...(title === undefined ? {} : { title }), agent, visibility, lifespan, ...(prompt ? { prompt } : {}) });
         row.repositories = held.repositories;
+        if (params["sensitive"] === true && !this.opts.beforeSensitive) this.markSensitive(row, subject);
         if (room) room.active += 1;
         return { result: this.attachment(row, subject, name, "owner", "activate") };
       }
@@ -1597,6 +1821,8 @@ export class FakePlane {
           return { error: { code: -32004, message: "forbidden", data: { person: person.subject, reason: "not on this profile's teams", profile: row.profile } } };
         }
         const role = params["role"] === "control" ? "control" : "observe";
+        const held = this.sensitiveShare(row, subject, "invite", { subject: person.subject, role });
+        if (held) return held;
         const made = this.invite(id, person.subject, role, subject, { byName: name, ownerName: name, displayName: person.display_name });
         return { result: { session_id: id, invite: this.inviteesOf(id).find((i) => i["subject"] === made.subject), pushed: true } };
       }
@@ -1618,12 +1844,27 @@ export class FakePlane {
       case "invites.list":
         return { result: { invites: this.invitesTo(subject) } };
 
+      // With `artifact`, one of the caller's, the people the profile its session ran on
+      // covers are found too, as a session's invitation picker finds them.
       case "people.search": {
         const q = String(params["query"] ?? "").toLowerCase();
-        const people = this.people.filter(
-          (p) => p.subject !== subject && [p.display_name, p.email, p.subject].some((s) => s.toLowerCase().startsWith(q)),
-        );
+        let pool = this.people;
+        if (typeof params["artifact"] === "string") {
+          const a = this.artifacts.get(params["artifact"]);
+          if (!a || !this.owns(a, subject)) return { error: { code: -32005, message: "not_found", data: { artifact: params["artifact"] } } };
+          const covered = a.origin.profile ? (this.opts.profilePeople?.[a.origin.profile] ?? []) : [];
+          pool = [...pool, ...covered.filter((c) => !pool.some((p) => p.subject === c.subject))];
+        }
+        const people = pool.filter((p) => p.subject !== subject && [p.display_name, p.email, p.subject].some((s) => s.toLowerCase().startsWith(q)));
         return { result: { people } };
+      }
+
+      // The teams granted a profile, for an artifact's sharing menu.
+      case "profile.teams": {
+        const wanted = String(params["profile"] ?? "");
+        const teams = this.opts.profileTeams?.[wanted];
+        if (!teams) return { error: { code: -32005, message: "not_found", data: { profile: wanted } } };
+        return { result: { profile: wanted, teams } };
       }
 
       // A person's own clients, as the plane last saw them, against its policy now.
@@ -1715,13 +1956,14 @@ export class FakePlane {
               .filter((a) => this.mayRead(a, subject))
               .filter((a) => params["mine"] !== true || this.owns(a, subject))
               .filter((a) => params["shared"] !== true || (!this.owns(a, subject) && this.linkRole(a, subject) !== null))
-              .filter((a) => params["teams"] !== true || (a.visibility.startsWith("team:") && (this.forThem(a, subject) || this.opts.admin?.role(subject) === "platform_admin")))
+              .filter((a) => params["teams"] !== true || (readersOf(a).length > 0 && (this.forThem(a, subject) || this.opts.admin?.role(subject) === "platform_admin")))
+              .filter((a) => typeof params["team"] !== "string" || readersOf(a).includes(params["team"]))
               .filter((a) => typeof params["visibility"] !== "string" || a.visibility === params["visibility"])
               .map((a) => this.artifactJson(a, subject))
               .sort((x, y) => String(y["published_at"]).localeCompare(String(x["published_at"])))
           : [];
         return {
-          result: { enabled, profiles, teams: this.teamsOf(subject), publish_organisation: this.opts.publishOrganisation ?? "everyone", public_links: this.opts.publicLinks ?? false, gallery_url: `${this.url}/console#/artifacts`, artifacts: rows },
+          result: { enabled, profiles: [], teams: this.teamsOf(subject), publish_organisation: this.opts.publishOrganisation ?? "everyone", public_links: this.opts.publicLinks ?? false, gallery_url: `${this.url}/console#/artifacts`, artifacts: rows },
         };
       }
 
@@ -1729,13 +1971,27 @@ export class FakePlane {
         const a = this.artifacts.get(String(params["id"] ?? ""));
         if (!a || !this.mayRead(a, subject)) return { error: { code: -32005, message: "not_found" } };
         const people = [...(this.named.get(a.id) ?? new Map()).entries()].map(([s, g]) => ({ subject: s, display_name: this.nameOf(s), email: this.people.find((p) => p.subject === s)?.email ?? null, ...g }));
-        const shares = this.owns(a, subject) ? { shares: [...this.shares.values()].filter((sh) => sh.artifact === a.id).map((sh) => this.shareJson(sh)), people, public_links_allowed: this.opts.publicLinks ?? false } : {};
+        const shares = this.owns(a, subject) ? { shares: [...this.shares.values()].filter((sh) => sh.artifact === a.id).map((sh) => this.shareJson(sh)), people, public_links_allowed: this.opts.publicLinks ?? false, access: this.accessJson(a) } : {};
         const retention = { versions_days: this.opts.retention?.versions_days || null, unopened_days: this.opts.retention?.unopened_days || null };
         return { result: { ...this.artifactJson(a, subject), versions: this.artifactVersions(a), retention, ...shares } };
       }
 
       case "artifact.publish":
         return this.publishNew(subject, name, params);
+
+      // Who reads it, read and changed by its owner: no version is made.
+      case "artifact.access.get": {
+        const a = this.artifacts.get(String(params["id"] ?? ""));
+        if (!a || !this.mayRead(a, subject)) return { error: { code: -32005, message: "not_found" } };
+        if (!this.owns(a, subject) && this.opts.admin?.role(subject) !== "platform_admin") return { error: { code: -32004, message: "forbidden", data: { reason: "only its owner reads who reads an artifact" } } };
+        return { result: { ...this.accessJson(a), may_add: this.mayAdd(a, subject) } };
+      }
+
+      case "artifact.access.set": {
+        const a = this.artifacts.get(String(params["id"] ?? ""));
+        if (!a || !this.mayRead(a, subject)) return { error: { code: -32005, message: "not_found" } };
+        return this.setAccess(a, subject, params);
+      }
 
       // Between a person and a team: given to a team of the owner's, or taken back by the team's admin.
       case "artifact.transfer": {
@@ -1751,6 +2007,7 @@ export class FakePlane {
         if (!a || !this.mayRead(a, subject)) return { error: { code: -32005, message: "not_found" } };
         if (!["owner", "edit"].includes(this.roleOf(a, subject) ?? "")) return { error: { code: -32004, message: "forbidden", data: { reason: "only its owner, or somebody the owner gave an edit link, publishes a new version of an artifact" } } };
         if (params["owner"] !== undefined && params["owner"] !== null) return { error: { code: -32602, message: "invalid_params", data: { reason: "whose an artifact is does not change with a version; artifact.transfer moves it" } } };
+        if (params["teams"] !== undefined) return { error: { code: -32602, message: "invalid_params", data: { reason: "who reads it is artifact.access.set's, which makes no version" } } };
         const newest = a.versions[a.versions.length - 1]!;
         const base = typeof params["base"] === "number" ? params["base"] : null;
         if (base !== null && base !== newest.n) return { error: { code: -32009, message: "conflict", data: { reason: `version ${newest.n} was published after version ${base}, which this edit was made on; open version ${newest.n} and make the edit again` } } };
@@ -2032,6 +2289,43 @@ export class FakePlane {
         return { result: { session_id: row.id, erased: true, state: "erased", head_hash: null } };
       }
 
+      // Marked sensitive by its owner, one-way (troupe #1239): the row, and the log's line the
+      // pod writes. A plane from before has no method.
+      case "session.sensitive.set": {
+        if (this.opts.beforeSensitive) return { error: { code: -32601, message: "method_not_found", data: { method } } };
+        const row = this.rows.get(String(params["session_id"] ?? ""));
+        if (!row) return { error: { code: -32005, message: "not_found" } };
+        if (row.owner !== subject) return { error: { code: -32004, message: "forbidden", data: { required_role: "owner", reason: "only the session's owner marks it sensitive" } } };
+        if (params["sensitive"] !== true) return { error: { code: -32602, message: "invalid_params", data: { field: "sensitive", reason: "nothing clears a sensitive session's mark" } } };
+        this.markSensitive(row, subject);
+        return { result: this.sessionJson(row, subject) };
+      }
+
+      case "session.share_requests": {
+        if (this.opts.beforeSensitive) return { error: { code: -32601, message: "method_not_found", data: { method } } };
+        const mine = this.opts.teamAdmins?.includes(subject) ? this.shareRequests.filter((r) => r.state === "pending") : [];
+        return { result: { requests: mine } };
+      }
+
+      // A team administrator's answer: a yes applies the share as its owner asked it.
+      case "session.share_request.decide": {
+        if (this.opts.beforeSensitive) return { error: { code: -32601, message: "method_not_found", data: { method } } };
+        const request = this.shareRequests.find((r) => r.id === params["id"]);
+        if (!request || !this.opts.teamAdmins?.includes(subject)) return { error: { code: -32005, message: "not_found", data: { share_request: params["id"] } } };
+        if (request.state !== "pending") return { error: { code: -32006, message: "conflict", data: { reason: "this request was answered already", state: request.state } } };
+        const decision = params["decision"];
+        if (decision !== "approve" && decision !== "decline") return { error: { code: -32602, message: "invalid_params", data: { reason: "decision is approve or decline" } } };
+        request.state = decision === "approve" ? "approved" : "declined";
+        request.decided_by = subject;
+        request.decided_at = new Date().toISOString();
+        const row = this.rows.get(request.session_id);
+        if (decision === "approve" && row) {
+          if (request.kind === "visibility") row.visibility = "team";
+          else this.invite(row.id, String(request.params["subject"]), request.params["role"] === "control" ? "control" : "observe", request.requested_by, {});
+        }
+        return { result: { share_request: request, applied: row ? this.sessionJson(row, request.requested_by) : {} } };
+      }
+
       // Given to its team or taken back, by its owner alone (troupe #1169): the row, and the
       // log's line the pod writes, which every client attached hears.
       case "session.visibility.set": {
@@ -2040,6 +2334,10 @@ export class FakePlane {
         if (row.owner !== subject) return { error: { code: -32004, message: "forbidden", data: { required_role: "owner", reason: "only the session's owner gives it to the team or takes it back" } } };
         const to = params["visibility"];
         if (to !== "team" && to !== "private") return { error: { code: -32602, message: "invalid_params", data: { reason: "visibility is team or private" } } };
+        if (to === "team" && row.visibility !== "team") {
+          const held = this.sensitiveShare(row, subject, "visibility", { visibility: "team" });
+          if (held) return held;
+        }
         if (row.visibility !== to) {
           row.visibility = to;
           const name = this.nameOf(subject);
@@ -2072,7 +2370,42 @@ export class FakePlane {
         const nameOf = this.nameOf(subject);
         this.opts.worker.decideProposal(row.id, proposal, result, edited, { kind: "user", subject, ...(nameOf ? { display_name: nameOf } : {}) });
         this.proposalsAccepted.push({ session: row.id, id: proposal, edits });
+        // What a direct plane made is the person's own trigger, theirs to switch off.
+        if (!this.proposalsGitops && !this.triggerRows.some((t) => t.team === team && t.name === name)) {
+          const budget = typeof edits["budget_micros"] === "number" ? edits["budget_micros"] : undefined;
+          const artifact = (draft["artifact"] as Record<string, unknown> | undefined)?.["id"];
+          this.triggerRows.push(
+            ownTriggerRow({ team, name, owner: subject, cron: String(result["cron"] ?? "0 6 * * 1"), profile: row.profile, ...(budget !== undefined ? { budget_micros: budget } : {}), session_id: row.id, artifact_id: typeof artifact === "string" ? artifact : null }),
+          );
+        }
         return { result: { ...result, edited } };
+      }
+
+      // A person's own triggers (troupe #1235): listed, switched off and on, and removed by
+      // them, every other trigger refused as not theirs.
+      case "trigger.own.list":
+      case "trigger.own.disable":
+      case "trigger.own.enable":
+      case "trigger.own.delete": {
+        if (this.opts.beforeOwnTriggers) return { error: { code: -32601, message: "method_not_found", data: { method } } };
+        const admin = this.opts.admin;
+        return ownTriggerRpc(
+          {
+            rows: this.triggerRows,
+            teams: this.teamsOf(subject),
+            held: (who, action, name) =>
+              admin
+                ? admin.heldByRepository(who, action, name, "Trigger")
+                : this.ownTriggersGitops
+                  ? (this.ownTriggerAudit.push({ actor: who, action, subject: name, detail: { outcome: "refused", reason: "managed_by_gitops", via: "own" } }),
+                    { error: { code: -32015, message: "managed_by_gitops", data: { kind: "Trigger", name, reason: "this plane is in gitops mode: a Trigger is a resource a repository holds, and a change to one is a commit there" } } })
+                  : null,
+            record: (actor, action, name, detail) => (admin ? admin.record(actor, action, name, detail) : this.ownTriggerAudit.push({ actor, action, subject: name, detail })),
+          },
+          subject,
+          method,
+          params,
+        );
       }
 
       // Raised to its channel's current version by its owner (troupe #1177): at once when its
@@ -2254,6 +2587,7 @@ export class FakePlane {
       profile: row.profile,
       visibility: row.visibility,
       ...(this.opts.beforeLifespans ? {} : { lifespan: row.lifespan, erases_at: row.lifespan === "throwaway" ? new Date(row.created_at + 24 * 3_600_000).toISOString() : null }),
+      ...(this.opts.beforeSensitive ? {} : { sensitive: row.sensitive }),
       team: this.teamsOf(row.owner)[0] ?? null,
       state: row.state,
       epoch: row.epoch,

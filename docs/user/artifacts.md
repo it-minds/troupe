@@ -20,39 +20,49 @@ you.
 
 ## Who reads it
 
-You choose when you publish:
+Who reads an artifact is a set, as for a shared document:
 
-- `private`, the default when you say nothing: only you. Nobody else can find or open it, not
-  your teammates and not your team's administrator, until you give them a [link](#links).
-- `organisation`: everybody in your organisation. An administrator may keep this to platform
-  administrators, and then you publish to a team or a profile's people instead.
-- `team:<name>`: the members of a team you are in. Publishing to a team you are not in is
-  refused, and the refusal names the teams you are in. It counts against that team's quota,
-  and the team's administrator may take it down.
-- `profile:<name>`: the people a worker profile is granted to.
+- **You**, its owner, or every member of the team that [owns it](#a-teams-artifact).
+- **Teams**: the members of each team you give it to read it. You may give it to any team
+  you are in, and to any team granted the worker profile of the session that published it,
+  whether you are in that team or not: its people could already run that profile. Any other
+  team is refused, and the refusal names the teams you may give it to.
+- **People**, each at view, comment or edit ([sharing with picked people](#sharing-with-picked-people)).
+- **The organisation**, everybody in it, while that switch is on. An administrator may keep
+  it to platform administrators.
+- **[Links](#links)** you made.
 
-Someone who leaves a team, or a profile's team, stops seeing its artifacts at their next
-click. You always see your own. Anybody else sees it only through who it is for, or through a
-[link](#links) you gave them: not a guess at an address. A platform administrator can read
-any artifact's page in the console, a private one too: its versions and their files' names,
-who you shared it with, its links and its comments, never what its files hold, and each read
-is in the audit trail. They can take any artifact down, a private one too, also in the trail;
-a team's administrator can do both for their team's artifacts.
+`private`, the default when you say nothing, is the set without the organisation: with no
+team, person or link in it, only you. Nobody else can find or open it, not your teammates
+and not your team's administrator.
+
+**A new version keeps the set.** Publishing the next version changes nobody who reads it,
+and asks nothing about it; the approval says who reads it. You change who reads it from its
+Access menu (`artifact.access.set`), which makes no version. When an agent's session on a
+pod publishes a new artifact, the approval offers the teams granted that session's profile,
+already ticked.
+
+Someone who leaves a team stops seeing what it reads at their next click. You always see
+your own. Anybody else sees it only through the set: not a guess at an address. A platform
+administrator can read any artifact's page in the console, a private one too: its versions
+and their files' names, who you shared it with, its links and its comments, never what its
+files hold, and each read is in the audit trail. They can take any artifact down, a private
+one too, also in the trail; a team's administrator can do both for the artifacts their team
+reads or owns. Each team or person added or taken off is in the trail too.
 
 ## A team's artifact
 
 An artifact can belong to a team instead of to you. Then everybody in the team, and the
-team's administrators, own it together: each of them publishes versions, edits, pins, moves
-who may open it, makes and revokes links and deletes it, as you do with your own, and it is
-under **Mine** in each of their galleries, whoever it is for. Someone leaving the team
+team's administrators, own it together: each of them publishes versions, edits, pins,
+changes who reads it, makes and revokes links and deletes it, as you do with your own, and
+it is under **Mine** in each of their galleries, whoever reads it. Someone leaving the team
 changes nothing for the artifact; someone joining has it at once. Each version still says
 who published it, and the artifact's page still names the person who published it first.
 
-- **Publishing to a team makes it the team's.** `team:<name>` as the audience makes the
-  artifact that team's unless you say otherwise: `owner: "me"` on the agent's tool, from the
-  terminal client or in the desktop app keeps it yours, for the team to read. You can also
-  give a team an artifact for nobody but its members, with `private` and
-  `owner: "team:<name>"`.
+- **Who reads it is not whose it is.** Giving an artifact to a team to read keeps it yours.
+  It is a team's when you say so: `owner: "team"` (the one team it is given to) or
+  `owner: "team:<name>"`, a team you are in. Its bytes count against the quota of the team
+  that owns it, else the session's team, else your first team.
 - **Giving one to a team.** Your own artifact goes to a team you are in with **Transfer** on
   its page (`artifact.transfer`). A platform administrator can give any artifact to any
   team.
@@ -65,23 +75,37 @@ Giving and taking back are in the audit trail, with where the artifact came from
 
 ## Publishing
 
-**An agent** publishes with its `publish_artifact` tool, naming a title, the kind, who reads
-it and the workspace files. It asks you first unless a [permission rule](configuration.md)
+**An agent** publishes with its `publish_artifact` tool, naming a title, the kind and the
+workspace files, and for a new artifact who reads it (`visibility`, `private` or
+`organisation`, and `teams`). It asks you first unless a [permission rule](configuration.md)
 allows it. The files keep their paths below the directory they share, so a page's links to
 its stylesheet still work. To publish a new version, the agent names the artifact's `id`, and
-may say what changed in a `note`. An agent that has a screenshot of the page may send it as a
-`thumbnail` (a PNG, JPEG or WebP of at most 256 KiB) for the gallery card; **Publish…** in the
-desktop app takes one too.
+may say what changed in a `note`; it never names who reads a new version. An agent that has
+a screenshot of the page may send it as a `thumbnail` (a PNG, JPEG or WebP of at most
+256 KiB) for the gallery card; **Publish…** in the desktop app takes one too.
 
-An agent names an audience only when you told it one; otherwise the approval asks you whom the artifact is for (you alone, the organisation, a team or a profile) and, for a new team artifact, whether it is the team's or yours, and nothing in your permission rules or `--auto-approve` answers that for you.
+An agent names an audience only when you told it one; otherwise the approval asks you who
+reads a new artifact and whether it is a team's or yours, and nothing in your permission
+rules or `--auto-approve` answers that for you.
 
-**You** publish one file from the terminal client with
-`/publish <path> [private | organisation | team:<name> [me | team] | profile:<name>]`, for example
-`/publish report.html team:core`; with no audience it is yours alone. In the desktop app,
-**Publish…** in the command palette (Ctrl-K, then `publish`) takes files from this computer: a
-new artifact, for **Only you** unless you pick the organisation, one of your teams or one of
-your profiles, or **Publish a new version of…** one of yours, with a line on what changed. It
-links the console's gallery.
+**You** publish one file from the terminal client with `/publish <path>`, yours alone,
+`/publish <path> organisation`, or `/publish <path> --team core --team billing` for each team
+that reads it (`--owner team` makes it the one team's named). In the desktop app,
+**Publish…** in the command palette (Ctrl-K, then `publish`) takes files from this computer:
+a new artifact, with your teams to tick and the organisation switch, or **Publish a new
+version of…** one of yours, with a line on what changed. It links the console's gallery.
+
+### At the approval, in each client
+
+- **A new artifact.** The approval is its sharing menu: the teams the plane names ticked
+  (for a pod's session, the teams granted its profile), your other teams unticked, **The
+  whole organisation**, and whether it is yours or the one ticked team's. **Allow** publishes
+  it as the menu stands. The desktop app and the console tick with checkboxes; the terminal's
+  approval box numbers the choices, a digit ticks or unticks one, and `y` or Enter publishes.
+- **A new version.** The approval says who reads the artifact, "read by the core team and 2
+  people; a view link", and that the version keeps them; there is nothing to choose, and
+  **Allow** (or `y`) is there at once. To change who reads it, open it afterwards and use its
+  Access menu.
 
 All of these go through this computer's daemon, as the person it is signed in as. Signed out,
 nothing is published, and the agent tells you where the file is so you can send it yourself.
@@ -103,7 +127,7 @@ page in the console lists them newest first, each with who published it, when, a
   the newest again.
 
 Who may publish a version: the owner, and anybody the owner gave an [edit link](#links). Only
-the owner pins one, changes who it is for, deletes it, or makes and revokes links. Where a
+the owner pins one, changes who reads it, deletes it, or makes and revokes links. Where a
 [team owns it](#a-teams-artifact), every member is its owner.
 
 ## How long it is kept
@@ -165,17 +189,35 @@ a slash, and the artifact's own files are served beneath it. The gallery marks a
 public link opens. The owner turns an artifact's public links off on its page, and the
 administrator's setting off stops all of them.
 
+## Changing who reads it
+
+The menu is in the desktop app's gallery (an artifact's **Info**, then the **Access** tab) and
+on the artifact's page in the console (**Who reads it**), for its owner and, in the console, a
+platform administrator. It lists the teams, those granted the profile its session ran on
+first and then yours, each ticked where the team reads it; a team that reads it but that you
+may not give it to is shown as it is, with why. Then **The whole organisation**, where your
+administrator allows it, and the people it is shared with by name, each with what they may
+do. Tick, untick, add or remove, then **Save who reads it**: the change is made at once, as
+no new version, and the menu says what changed ("Saved: added the billing team and Gil"). A
+refusal is said in the menu and your changes stay to correct; a change to an artifact a
+[sensitive session](sessions.md#a-sensitive-session) published may say it waits on a team
+administrator, and nothing changes until they answer. The terminal shares by link only
+(`l` on `/artifacts`); its menu is the apps'.
+
 ## Sharing with picked people
 
-An owner also shares an artifact with one person by name, no link made: in the desktop app's
-gallery, under **Who can see it**, type the start of their name or email in **Share with**,
-pick them, and choose what they may do: **view** it, **comment** on it, or **edit** it
-(comment and publish new versions). The picker finds the people who share a team with you,
-as the session's invitation picker does. They find it under **Shared with you** at once,
-whatever it is for, and keep that role until you **Remove** them; naming them again changes
-the role. A link and a share by name add up: a person holds the stronger of the two.
-Removing a person ends both. The console lists who an artifact is shared with by name on its
-page, for its owner, and removes them there too.
+An owner also shares an artifact with one person by name, no link made: in the Access menu,
+type the start of their name or email in **Add somebody**, choose what they may do: **view**
+it, **comment** on it, or **edit** it (comment and publish new versions), pick them, and save.
+The picker finds the people who share a team with you
+and, for an artifact a pod's session published, the people its profile covers, as the
+session's invitation picker does. They are told, and find it under **Shared with you** at once,
+whoever else reads it, and keep that role until you **Remove** them and save; changing their
+role is the same. A link and a share by name add up: a person holds the stronger of the two.
+Removing a person ends both. An artifact a [sensitive
+session](sessions.md#a-sensitive-session) published is shared wider only as its profile
+says: allowed, refused with a sentence, or waiting on a team administrator's yes, in which
+case no link is made, since a link cannot wait.
 
 ## Comments
 
@@ -202,7 +244,7 @@ an agent on its own. The gallery's cards say how many comments an artifact has.
 
 The console's **Artifacts** has a tab for your own, **Mine** (your private ones among them),
 one for those shared with you, one for the organisation's, one for your teams' (each card
-names its team) and one for each profile you are granted; an administrator's opens on
+names its team); an administrator's opens on
 **Every artifact** before them. Which tab an artifact is under is the plane's
 to say, so every client tabs them alike. A card shows the title and the kind, never the page
 itself, and the picture its publisher sent with that version, if they sent one.
@@ -216,7 +258,7 @@ the plane opens the session only for the people it is shared with.
 
 **In the terminal client**, `/artifacts` lists what is published for you on the plane, through this computer's daemon
 and its sign-in, in the desktop app's words: **All**, **◉
-Everyone at** your organisation, **◎ Your teams** (a team's and a profile's), **◐ Shared
+Everyone at** your organisation, **◎ Your teams** (those a team of yours reads), **◐ Shared
 with you** (through a link) and **○ Only you**, ←/→ or `1`–`5`. A row is its title,
 kind, version, whose it is (`team finance` for a team's, which every member of the team
 owns; `you`; or who published it) and when, and `new` on a version you have not opened on
@@ -261,11 +303,11 @@ sign in first, and it brings you straight back to the artifact.
 
 **In the desktop app**, *Artifacts* in the rail is the same gallery, read from the plane the
 app is signed in to, or through this computer's daemon and its sign-in when the app is not:
-cards grouped by when, chips for who each is for (everyone, your teams and
-profiles, shared with you, only you), a choice of kind (pages, documents, files), a range of
+cards grouped by when, chips for who reads each (everyone, your teams,
+shared with you, only you), a choice of kind (pages, documents, files), a range of
 days it was published in (*Published since … until …*) and a search by title, person or
-session. Under *Your teams*, when what it shows comes from more than one of your teams or
-profiles, a second row of chips picks one of them. The range and the team are this window's
+session. Under *Your teams*, when what it shows comes from more than one of your teams, a
+second row of chips picks one of them. The range and the team are this window's
 choice and are cleared when the app starts again; an empty gallery says what narrowed it. A
 card new to you is one whose newest version this computer has not opened. The one you choose
 shows its versions, where it came from and who can see it; **Open** shows it in a window of its own, from its own host,

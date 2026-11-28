@@ -2,7 +2,8 @@
 // the thread beside the artifact's page, oldest first with who wrote each comment and when;
 // a box for whoever may write (its owner, somebody given comment or edit) and none for
 // whoever may only read; and, for its owner, the people it is shared with by name, each at a
-// role, taken back here. Somebody it is shared with by name finds it under Shared with you.
+// role, in its Who reads it menu, taken back there. Somebody it is shared with by name finds
+// it under Shared with you.
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { App } from "../src/App";
@@ -19,7 +20,7 @@ let unmount: (() => void) | null = null;
 const { open, close } = opener(() => fake, { openTab: () => undefined, navigate: () => undefined });
 
 const thread = () => document.querySelector<HTMLElement>('section[aria-label="Comments"]');
-const people = () => document.querySelector<HTMLElement>('section[aria-label="Shared with"]');
+const people = () => document.querySelector<HTMLElement>('section[aria-label="Who reads it"]');
 
 beforeEach(async () => {
   freshBrowser();
@@ -117,9 +118,10 @@ describe("who it is shared with by name", () => {
     fake.plane.named.set("art-plan", new Map([[PEOPLE.bob.subject, { role: "edit" as const, granted_by: carol.subject, granted_at: "2026-10-25T12:00:00Z" }]]));
     await open("#/artifacts/art-plan", PEOPLE.carol);
     await sees("Bob", people);
-    expect(people()!.textContent).toContain("may comment on it and publish new versions");
+    expect((await waitFor(() => people()!.querySelector<HTMLSelectElement>('select[aria-label="What Bob may do"]'), "Bob's role")).value).toBe("edit");
     (await waitFor(() => people()!.querySelector<HTMLButtonElement>('button[aria-label="Remove Bob"]'), "Remove Bob")).click();
     await sees("Nobody by name.", people);
-    expect(fake.plane.named.get("art-plan")?.has(PEOPLE.bob.subject)).toBe(false);
+    (await seesButton("Save who reads it", people()!)).click();
+    await waitFor(() => fake.plane.named.get("art-plan")?.has(PEOPLE.bob.subject) === false, "Bob taken off on the plane");
   });
 });

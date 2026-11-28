@@ -87,6 +87,7 @@ file and the line, and an unknown key warns. `enforced:` takes only these, each 
 | `managed_mcp_servers_only`, `managed_permission_rules_only` | turn one on, not turn it off |
 | `provider`, `base_url` | nothing else: the session's provider is this one, and a named provider of another type or at another URL is refused |
 | `permissions` | add rules of its own, not loosen these: every file's per-tool rules are added together and the strictest that matches a call holds, so an enforced `ask` beats a person's `allow` ([per-tool rules](../user/configuration.md#per-tool-permission-rules)) |
+| `sensitive` (`marked_by`, `deny`, `sharing`) | add rules to both lists from the person's own `config.yaml` and tighten `sharing`, not remove a rule or loosen it; the managed file's only, not yet the plane's set ([sensitive sessions](sensitive-sessions.md#on-peoples-own-computers)) |
 
 A rule under `defaults:` is added and holds the same way, since no rule is a default a
 person's file replaces; the two differ for rules only in how `--explain` names them (`org`

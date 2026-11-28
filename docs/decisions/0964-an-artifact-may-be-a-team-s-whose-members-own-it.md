@@ -89,3 +89,5 @@ administrator's has their teams' own in it.
 - **The quota moving with ownership.** The bytes stay with the team the artifact is for,
   as 953 has it; a team that owns a private artifact counts it against whatever team the
   publish counted it against.
+
+> Superseded in part by Decision 1121: a new artifact read by a team is its publisher's unless they say `team` or `team:<name>`; who reads it does not decide whose it is.

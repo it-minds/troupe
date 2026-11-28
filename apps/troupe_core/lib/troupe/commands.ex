@@ -296,7 +296,7 @@ defmodule Troupe.Commands do
     [
       entry("new", "session", "Start a fresh session here, without leaving the client",
         usage:
-          "/new [--private | --remote PROFILE | --only-me | --branch] [--throwaway | --persistent] [--repo OWNER/NAME[@REF]]...",
+          "/new [--private | --remote PROFILE | --only-me | --branch] [--throwaway | --persistent] [--sensitive] [--repo OWNER/NAME[@REF]]...",
         args: [arg("flags", false, "text")],
         detail:
           "Opens the new-session screen and the session takes the screen; the one you " <>
@@ -311,7 +311,9 @@ defmodule Troupe.Commands do
             "like one. --private and --remote PROFILE set the chips; --only-me starts it " <>
             "on the platform as yours alone until you invite people (with --remote " <>
             "PROFILE too), on the team's profile all the same; --throwaway or --persistent " <>
-            "says how long it lasts, with any of those (/lifespan); and --branch forks the one on screen at once: a session of its own that starts " <>
+            "says how long it lasts, with any of those (/lifespan); --sensitive starts it on " <>
+            "the platform sensitive from its start, which nothing clears (/sensitive); " <>
+            "and --branch forks the one on screen at once: a session of its own that starts " <>
             "from this conversation as it stands. --repo OWNER/NAME[@REF], as often as " <>
             "you like, starts it on the platform on those GitHub repositories, which the " <>
             "team lists and the profile allows: the first at the workspace's root, each " <>
@@ -454,6 +456,18 @@ defmodule Troupe.Commands do
             "persistent is kept until you erase it, and nothing else clears it away. " <>
             "/lifespan alone says which this session is.",
         example: "/lifespan persistent"
+      ),
+      entry("sensitive", "session", "Say whether this session is sensitive, or make it so",
+        usage: "/sensitive [y]",
+        args: [arg("yes", false, "text")],
+        availability: "tui",
+        detail:
+          "For a session on the platform, its owner's to do, and one-way: nothing clears " <>
+            "it. A sensitive session's profile refuses what would take what it read out of " <>
+            "it, such as publishing or fetching a page, and says who it may be shared with. " <>
+            "A call the profile names makes a session sensitive by itself; /sensitive alone " <>
+            "says whether this one is, and asks first; /sensitive y marks it.",
+        example: "/sensitive y"
       ),
       entry("proposal", "session", "Answer what Troupe proposed in this session",
         usage: "/proposal [yes | later | never]",
@@ -623,23 +637,25 @@ defmodule Troupe.Commands do
       ),
       entry("publish", "workspace", "Publish a page, a document or a file for others to read",
         usage:
-          "/publish <path> [private | organisation | team:<name> [me | team] | profile:<name>]",
+          "/publish <path> [private | organisation] [--team <name>]... [--owner me | team]",
         args: [
           arg("path", true, "file"),
           arg("visibility", false, "text"),
+          arg("team", false, "text"),
           arg("owner", false, "text")
         ],
         availability: "plane",
         detail:
           "The file is read on this machine and published on your Troupe plane as an artifact, " <>
             "as the person this computer's daemon is signed in as: a page (.html), a Markdown " <>
-            "document (.md) or any other file. Yours alone unless you say otherwise, until you " <>
-            "share a link to it; or the whole organisation reads it, a team you are in, or the " <>
-            "people a profile is granted to, served from a host that can reach nothing of yours. " <>
-            "A team you are not in is refused, naming yours. One published to a team is the " <>
-            "team's, every member its owner, unless the third word is me. A page with stylesheets " <>
-            "or scripts of its own is an agent's to publish, with publish_artifact.",
-        example: "/publish report.html team:core"
+            "document (.md) or any other file. Read by you alone unless you say otherwise: " <>
+            "--team for each team that reads it, organisation for everyone; served from a host " <>
+            "that can reach nothing of yours. It is yours unless --owner team makes it the one " <>
+            "team's named. Teams and people are changed later from the artifact's Access menu " <>
+            "in the desktop app or the console, and a new version keeps them. A page with " <>
+            "stylesheets or scripts of its own is an " <>
+            "agent's to publish, with publish_artifact.",
+        example: "/publish report.html organisation"
       ),
       entry("artifacts", "workspace", "What is published for you, by who can see it",
         usage: "/artifacts",
@@ -673,6 +689,28 @@ defmodule Troupe.Commands do
             "the model; the hosts it reaches; its limits and budgets; and which of your teams it " <>
             "runs under. What the plane does not say is shown as not said. q or Esc closes it.",
         example: "/profile code"
+      ),
+      entry("triggers", "workspace", "List the triggers you turned on, and how each stands",
+        usage: "/triggers",
+        availability: "tui",
+        detail:
+          "From a session on the platform. Each rerun you turned on with /proposal yes, in " <>
+            "every team of yours: whether it is on and when it runs next, how its last run " <>
+            "went, and what a run may spend. They run as you, on your budget, so they are " <>
+            "yours to switch off and remove: /trigger does it.",
+        example: "/triggers"
+      ),
+      entry("trigger", "workspace", "Switch one of your triggers off or on, or remove it",
+        usage: "/trigger off|on|remove NAME",
+        args: [arg("verb", true, "text"), arg("name", true, "text")],
+        availability: "tui",
+        detail:
+          "From a session on the platform, and only for a trigger you turned on with " <>
+            "/proposal yes: /trigger off stops it running until /trigger on; /trigger remove " <>
+            "takes it away for good, its runs' sessions staying, and frees one of the five you " <>
+            "may turn on in a team. NAME is its name, or TEAM/NAME where two teams have one. " <>
+            "Anybody else's trigger is a team admin's to change.",
+        example: "/trigger off rerun-weekly-numbers"
       ),
       entry("copy", "workspace", "Copy a transcript to the clipboard",
         usage: "/copy [window]",

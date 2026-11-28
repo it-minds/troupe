@@ -1,0 +1,38 @@
+{
+  "$id": "https://troupe.dev/schema/v1/events/session_marked_sensitive.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "properties": {
+    "agent": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "at": {
+      "type": "string"
+    },
+    "by": {
+      "type": "string"
+    },
+    "call_id": {
+      "type": "string"
+    },
+    "display_name": {
+      "type": "string"
+    },
+    "how": {
+      "type": "string"
+    },
+    "rule": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "at",
+    "by",
+    "how"
+  ],
+  "title": "session_marked_sensitive",
+  "type": "object"
+}

@@ -3,19 +3,21 @@ defmodule Troupe.CLI.Artifacts do
   `troupe artifacts` (root #62): the person's artifacts on the plane from the command line,
   through this machine's daemon and its sign-in, as `/artifacts` reaches them.
 
-      troupe artifacts list [--scope mine|organisation|team:<name>|profile:<name>|shared|private] [--json]
+      troupe artifacts list [--scope mine|organisation|team:<name>|shared|private] [--json]
       troupe artifacts open ID [--version N]      the browser, through the plane's one-time address
       troupe artifacts show ID [--version N]      its text on standard output (a Markdown one's source)
-      troupe artifacts publish FILE [--to SCOPE] [--title TITLE] [--owner me|team]
-                                                  as /publish; Only you when no --to; a team's
-                                                  when --to names a team, unless --owner me
+      troupe artifacts publish FILE [--to private|organisation] [--team NAME]... [--title TITLE] [--owner me|team]
+                                                  as /publish; read by you alone, each team
+                                                  named and, with --to organisation, everyone;
+                                                  yours unless --owner team, the one team named
       troupe artifacts transfer ID --to team:NAME|me   hand one of yours to a team you are in,
                                                   or take a team's back (its admins', or a
                                                   platform admin's)
       troupe artifacts link ID                    a view link to one of yours
 
   A row says whose each artifact is (`team finance`, `you`, or who published it) and
-  `transferable` where the person may hand it on. Under Local only nothing is asked, and it
+  `transferable` where the person may hand it on. Who reads one already is changed in its
+  Access menu, in the desktop app or the console. Under Local only nothing is asked, and it
   says so.
   """
 
@@ -34,7 +36,8 @@ defmodule Troupe.CLI.Artifacts do
     version: :integer,
     to: :string,
     title: :string,
-    owner: :string
+    owner: :string,
+    team: :keep
   ]
 
   @doc "What `troupe artifacts …` asks, from the words after `artifacts`."
@@ -42,7 +45,10 @@ defmodule Troupe.CLI.Artifacts do
   def parse(argv) do
     case OptionParser.parse(argv, strict: @switches) do
       {opts, words, []} ->
-        verb(words, Map.new(opts))
+        # `--team` is given once for each team; the rest once each.
+        teams = Keyword.get_values(opts, :team)
+        opts = opts |> Keyword.delete(:team) |> Map.new()
+        verb(words, if(teams == [], do: opts, else: Map.put(opts, :teams, teams)))
 
       {_opts, _words, invalid} ->
         {:error, "unknown option: #{Enum.map_join(invalid, ", ", &elem(&1, 0))} (#{usage()})"}
@@ -54,7 +60,7 @@ defmodule Troupe.CLI.Artifacts do
   defp verb(["show", id], opts), do: only(opts, [:version], %{verb: :show, id: id})
 
   defp verb(["publish", file], opts),
-    do: only(opts, [:to, :title, :owner], %{verb: :publish, file: file})
+    do: only(opts, [:to, :teams, :title, :owner], %{verb: :publish, file: file})
 
   defp verb(["transfer", id], opts), do: only(opts, [:to], %{verb: :transfer, id: id})
   defp verb(["link", id], opts), do: only(opts, [], %{verb: :link, id: id})
@@ -76,10 +82,15 @@ defmodule Troupe.CLI.Artifacts do
   defp checked(%{verb: :publish, owner: owner}) when owner not in ["me", "team"],
     do: {:error, "--owner is me or team, not #{inspect(owner)}"}
 
+  defp checked(%{verb: :publish, to: to}) when to not in ["private", "organisation"],
+    do:
+      {:error,
+       "--to is private or organisation, not #{inspect(to)}; name each team that reads it with --team NAME"}
+
   defp checked(%{verb: :publish, owner: "team"} = asked) do
-    case asked[:to] do
-      "team:" <> name when name != "" -> {:ok, asked}
-      _other -> {:error, "--owner team needs --to team:<name>: only a team publication is a team's"}
+    case asked[:teams] do
+      [_one] -> {:ok, asked}
+      _other -> {:error, "--owner team needs one --team NAME: it is that one team's"}
     end
   end
 
@@ -97,7 +108,7 @@ defmodule Troupe.CLI.Artifacts do
   defp usage,
     do:
       "troupe artifacts list [--scope SCOPE] [--json] | open ID | show ID [--version N] | " <>
-        "publish FILE [--to SCOPE] [--title T] [--owner me|team] | transfer ID --to team:NAME|me | link ID"
+        "publish FILE [--to private|organisation] [--team NAME]... [--title T] [--owner me|team] | transfer ID --to team:NAME|me | link ID"
 
   @doc "Run it; returns the exit status."
   @spec run(map(), say()) :: non_neg_integer()
@@ -154,11 +165,13 @@ defmodule Troupe.CLI.Artifacts do
   defp verb_run(%{verb: :publish, file: file} = asked, say) do
     case Artifacts.publish(file, asked[:to] || "private",
            title: asked[:title],
-           owner: asked[:owner]
+           owner: asked[:owner],
+           teams: asked[:teams] || []
          ) do
       {:ok, artifact} ->
         say.(
-          "published #{file} as #{artifact["id"]} version #{artifact["version"]}" <>
+          "published #{file} as #{artifact["id"]} version #{artifact["version"]}, read by " <>
+            (Artifacts.readers(artifact) || "you alone") <>
             whose(artifact) <> if(artifact["url"], do: ": #{artifact["url"]}", else: "")
         )
 
@@ -206,7 +219,7 @@ defmodule Troupe.CLI.Artifacts do
     1
   end
 
-  # A team's publication says so on the spot, since the default made it the team's.
+  # One made a team's says so on the spot.
   defp whose(%{"owner_team" => team}) when is_binary(team), do: " (team #{team}'s)"
   defp whose(_artifact), do: ""
 

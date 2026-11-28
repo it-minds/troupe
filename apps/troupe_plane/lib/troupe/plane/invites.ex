@@ -219,22 +219,24 @@ defmodule Troupe.Plane.Invites do
 
   defp covering_teams(_session), do: []
 
+  defp covering(%Session{} = session), do: covering_teams(session)
+  defp covering({:profile, profile}) when is_binary(profile),
+    do: profile |> Identity.grants_for_profile() |> Enum.map(& &1.team_id)
+  defp covering(_none), do: []
+
   @doc """
   People whose name, email or subject starts with `query`, for a picker: those who share a
-  team with `caller`, and, given a session, those its profile covers. Never more than the
+  team with `caller`, and, given a session, those its profile covers; given `{:profile,
+  name}` (an artifact's sharing menu), those that profile covers. Never more than the
   caller could invite into it, or would meet in their own teams.
   """
-  @spec search(User.t(), String.t(), Session.t() | nil, pos_integer() | nil) :: [map()]
-  def search(%User{} = caller, query, session \\ nil, limit \\ nil) do
+  @spec search(User.t(), String.t(), Session.t() | {:profile, String.t()} | nil, pos_integer() | nil) :: [map()]
+  def search(%User{} = caller, query, within \\ nil, limit \\ nil) do
     prefix = String.downcase(String.trim(query)) <> "%"
     limit = min(max(limit || @search_limit, 1), @search_max)
-    owner = session && session.owner_subject
+    owner = match?(%Session{}, within) && within.owner_subject
 
-    teams =
-      Enum.uniq(
-        Enum.map(Identity.teams_for(caller), & &1.id) ++
-          if(session, do: covering_teams(session), else: [])
-      )
+    teams = Enum.uniq(Enum.map(Identity.teams_for(caller), & &1.id) ++ covering(within))
 
     from(u in User,
       join: m in Membership,

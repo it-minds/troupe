@@ -45,7 +45,7 @@ defmodule Troupe.Plane.ArtifactLinksHostTest do
       call(ada, "artifact.publish", %{
         "title" => "Notes",
         "kind" => "markdown",
-        "visibility" => "profile:dev",
+        "teams" => ["engineering"],
         "files" => [
           %{"path" => "index.md", "bytes" => Base.encode64("# Notes\n\nSee [the figure](figure.svg).")},
           %{"path" => "figure.svg", "bytes" => Base.encode64("<svg/>"), "content_type" => "image/svg+xml"}
@@ -106,7 +106,7 @@ defmodule Troupe.Plane.ArtifactLinksHostTest do
         call(context.cy, "artifact.publish", %{
           "title" => "Lab",
           "kind" => "file",
-          "visibility" => "profile:lab",
+          "teams" => ["research"],
           "files" => [%{"path" => "a.txt", "bytes" => Base.encode64("a")}]
         })
 

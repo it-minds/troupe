@@ -25,7 +25,9 @@
 // OFFER_AFTER_MS (15000 by default) later, a second laptop session is offered, which the list
 // shows as it is pushed; OFFER_AFTER_MS=0 for none. Artifacts has four: a page of the person's
 // own in two versions, a Markdown document of theirs to edit and share, somebody else's
-// Markdown for the dev profile's people, and Ada's private page, on Every artifact.
+// Markdown the core team reads, and Ada's private page, on Every artifact. Who reads the
+// person's own is the Who reads it menu on its page (troupe #1238): the dev profile is granted
+// to core and clinics, and its picker finds Dana, whom dev covers.
 
 import { readFileSync } from "node:fs";
 import { exampleAdmin } from "../packages/client/test/support/admin.js";
@@ -76,6 +78,8 @@ const plane = await FakePlane.start({
   worker,
   corsOrigins: origins,
   admin,
+  profileTeams: { dev: ["core", "clinics"] },
+  profilePeople: { dev: [{ subject: "dana@example.com", display_name: "Dana Example", email: "dana@example.com" }] },
   version,
   // The desktop app the plane recommends, which the console's "Open in the app" offers to
   // install where nothing opened (#959).
@@ -89,6 +93,10 @@ const plane = await FakePlane.start({
   // RETENTION=<versions days>,<unopened days> sets the artifact retention periods (#981),
   // so the gallery says when each goes; unset, both are off and nothing new is shown.
   ...(process.env["RETENTION"] ? { retention: { versions_days: Number(process.env["RETENTION"].split(",")[0]) || null, unopened_days: Number(process.env["RETENTION"].split(",")[1]) || null } } : {}),
+  // What the profiles say of sharing a sensitive session (#1239): ask unless SENSITIVE_SHARING
+  // says allow or deny, so the team's Waiting shares has Carol's share for the person to answer.
+  sensitiveSharing: process.env["SENSITIVE_SHARING"] === "allow" || process.env["SENSITIVE_SHARING"] === "deny" ? process.env["SENSITIVE_SHARING"] : "ask",
+  teamAdmins: [as.subject],
   memory: [{ scope: "organisation", name: null, version: 2, hash: "sha256:fake", updated_at: "2026-10-22T10:00:00Z", text: "We write British English.\nEvery change has a test." }],
   // People's own memory, which a platform admin's Memory lists and reads, each read audited.
   own: { "ada@example.com": "## Tone\n\nShort answers, no emoji.\n\n## Reviews\n\nSmall pull requests, one concern each.", "carol@example.com": "I write British English." },
@@ -108,16 +116,37 @@ const plane = await FakePlane.start({
     // A document of the person's own, to edit, roll back and share.
     artifact("art-fake-plan", { subject: as.subject, display_name: as.displayName }, {
       title: "Quarter plan",
+      origin: { session_id: "s-fake-1", profile: "dev", agent: "agent:build", where: "pod" },
       kind: "markdown",
-      visibility: "profile:dev",
+      visibility: "private",
+      teams: ["core"],
       versions: [{ n: 1, files: [{ path: "index.md", content_type: "text/markdown", content: "# Quarter plan\n\nFirst draft." }], published_by: { subject: as.subject, display_name: as.displayName }, published_at: "2026-10-25T08:00:00Z" }],
     }),
-    artifact("art-fake-notes", { subject: "ada@example.com", display_name: "Ada" }, { title: "Release notes draft", kind: "markdown", visibility: "profile:dev", versions: [{ n: 1, files: [{ path: "notes.md", content_type: "text/markdown", content: "# Notes" }], published_by: { subject: "ada@example.com", display_name: "Ada" }, published_at: "2026-10-23T09:00:00Z" }] }),
+    artifact("art-fake-notes", { subject: "ada@example.com", display_name: "Ada" }, { title: "Release notes draft", kind: "markdown", visibility: "private", teams: ["core"], versions: [{ n: 1, files: [{ path: "notes.md", content_type: "text/markdown", content: "# Notes" }], published_by: { subject: "ada@example.com", display_name: "Ada" }, published_at: "2026-10-23T09:00:00Z" }] }),
   ],
 });
 
 plane.relay("ada@example.com", { id: "s-laptop-billing", ownerName: "Ada", workspace: "billing", shares: [{ subject: as.subject, role: "control" }] });
 plane.seed(as.subject, { title: "Tidy the icons", profile: "ux" });
+// A rerun the person turned on from a session of theirs (#1235): on Sessions' Your triggers,
+// to switch off or remove, and marked as theirs on core's Triggers page.
+plane.seedOwnTrigger(as.subject, {
+  name: "rerun-weekly-report",
+  team: "core",
+  made: { session_id: "s-fake-1", artifact_id: "art-fake-weekly" },
+  last_run: { fired_at: "2026-11-23T06:00:00Z", state: "done", session_id: "s-fake-1" },
+});
+// Sensitive sessions (#1239): one of the person's own a records lookup marked, which Your
+// sessions marks; one of Carol's whose giving to the team waits on the person on the team's
+// Waiting shares; and one on Every session.
+const sensitiveAt = new Date(Date.now() - 20 * 60_000).toISOString().replace(/\.\d+Z$/, "Z");
+plane.seed(as.subject, { title: "Look Ann up in the records", profile: "dev", visibility: "private", sensitive: { at: sensitiveAt, by: "mcp.records.lookup", how: "call" } });
+if (as.subject !== PEOPLE["carol"]!.subject) {
+  plane.seed(PEOPLE["carol"]!.subject, { id: "s-carol-records", title: "Bea's record", profile: "dev", visibility: "private", sensitive: { at: sensitiveAt, by: "mcp.records.lookup", how: "call" } });
+  plane.rpcAs(PEOPLE["carol"]!.subject, "session.visibility.set", { session_id: "s-carol-records", visibility: "team" });
+}
+const everySession = admin.sessions.find((s) => s.id === "s-7f3a9c21");
+if (everySession) everySession.sensitive = { at: sensitiveAt, by: "mcp.records.lookup", how: "call" };
 const offerAfter = Number(process.env["OFFER_AFTER_MS"] ?? 15_000);
 if (offerAfter > 0) {
   setTimeout(() => plane.relay("ada@example.com", { id: "s-laptop-ledger", ownerName: "Ada", workspace: "ledger", shares: [{ subject: as.subject, role: "observe" }] }), offerAfter).unref?.();

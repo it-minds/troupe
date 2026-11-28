@@ -41,7 +41,7 @@ defmodule Troupe.Sessions.Index do
 
   alias Troupe.{Config, Events, Paths, Registry, Session}
   alias Troupe.Protocol.Event
-  alias Troupe.Session.{Approvals, Log, Questions, Summary, Watcher}
+  alias Troupe.Session.{Approvals, Log, Questions, Sensitive, Summary, Watcher}
   alias Troupe.Sessions.{Archive, Lifespan, Pin, Title, Unseen}
 
   @type meta :: %{
@@ -66,6 +66,7 @@ defmodule Troupe.Sessions.Index do
           archived: boolean(),
           title: String.t() | nil,
           lifespan: String.t(),
+          sensitive: map() | nil,
           state_dir: Path.t() | nil
         }
 
@@ -676,6 +677,8 @@ defmodule Troupe.Sessions.Index do
         |> Map.put(:unseen, (listed && Map.get(listed, :unseen)) || unseen(session_id))
         |> Map.put(:failed, listed && Map.get(listed, :failed))
         |> Map.merge(marks(session_id, listed))
+        # Sensitive since when and by what (#1239), as the tree holds it.
+        |> Map.put(:sensitive, row_mark(Sensitive.mark_of(session_id)))
 
       :error ->
         nil
@@ -921,12 +924,25 @@ defmodule Troupe.Sessions.Index do
           archived: false,
           title: nil,
           lifespan: "normal",
+          sensitive: sensitive_from_log(events),
           state_dir: root
         }
 
         [meta |> put_asked(root_asked(events)) |> waiting()]
     end
   end
+
+  # The first `session_marked_sensitive`, the one that holds: nothing clears it.
+  defp sensitive_from_log(events) do
+    Enum.find_value(events, fn
+      %Event{type: "session_marked_sensitive", data: data} -> row_mark(data)
+      _other -> nil
+    end)
+  end
+
+  # A mark as a row says it, as the plane's row does: since when, by what, and how.
+  defp row_mark(%{} = data), do: Map.take(data, ~w(at by how rule display_name))
+  defp row_mark(_none), do: nil
 
   # The root agent's approvals and questions still open, folded by the summary
   # projection's own rules: an approval ends with its decision, a question with its

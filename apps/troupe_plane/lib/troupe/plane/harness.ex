@@ -53,7 +53,7 @@ defmodule Troupe.Plane.Harness do
   alias Troupe.Plane.Identity.User
   alias Troupe.Plane.Memory.InEffect
   alias Troupe.Plane.Provision
-  alias Troupe.Plane.Sessions.{ACL, Lifespan, Session, Share}
+  alias Troupe.Plane.Sessions.{ACL, Lifespan, Sensitive, Session, Share, ShareRequest}
   alias Troupe.Plane.Settings
   alias Troupe.Plane.Settings.Ladder
   alias Troupe.Plane.{Tokens, Triggers}
@@ -153,6 +153,8 @@ defmodule Troupe.Plane.Harness do
     "profiles.list" => :observe,
     # What one profile gives a session of the caller's, before they start one.
     "profile.get" => :observe,
+    # The names of the teams granted one profile, for an artifact's sharing menu.
+    "profile.teams" => :observe,
     "sessions.list" => :observe,
     "session.get" => :observe,
     "session.open" => :observe,
@@ -173,6 +175,11 @@ defmodule Troupe.Plane.Harness do
     "session.visibility.set" => :control,
     # How long it lasts, throwaway, normal or persistent: its owner's alone too.
     "session.lifespan.set" => :control,
+    # Marked sensitive by hand, once and for good: its owner's alone. A share of a sensitive
+    # session its profile holds for a team administrator, listed and answered by them.
+    "session.sensitive.set" => :control,
+    "session.share_requests" => :observe,
+    "session.share_request.decide" => :control,
     # A yes to what the harness proposed in it, which makes a trigger for its owner: its
     # owner's alone, as giving it to the team is.
     "session.proposal.accept" => :control,
@@ -198,6 +205,12 @@ defmodule Troupe.Plane.Harness do
     "people.search" => :observe,
     "session.review" => :control,
     "trigger.fire" => :control,
+    # The caller's own triggers, the ones a yes of theirs made under their own sponsored
+    # principal: listed, switched off and on, and removed, by them as by an administrator.
+    "trigger.own.list" => :observe,
+    "trigger.own.disable" => :control,
+    "trigger.own.enable" => :control,
+    "trigger.own.delete" => :control,
     "session.spawn" => :control,
     "session.fork" => :control,
     "session.share" => :control,
@@ -236,6 +249,9 @@ defmodule Troupe.Plane.Harness do
     "artifact.upload.begin" => :control,
     "artifact.share" => :control,
     "artifact.unshare" => :control,
+    # Who reads one, whole, and its owner's change of it.
+    "artifact.access.get" => :observe,
+    "artifact.access.set" => :control,
     "artifact.public" => :control,
     # One kept at the top of the caller's own gallery, or let go: theirs alone.
     "artifact.keep" => :control,
@@ -415,7 +431,10 @@ defmodule Troupe.Plane.Harness do
          # What this plane takes that one before it did not, so a client offers it only
          # here: `lifespans`, `session.create`'s `lifespan` and `session.lifespan.set`. A
          # plane from before them makes every session normal, whatever it was asked.
-         "capabilities" => %{"lifespans" => true}
+         # `sensitive`: a row's `sensitive`, `session.sensitive.set`, `session.create`'s
+         # `sensitive` and the share requests a sensitive session's profile holds.
+         # `own_triggers`: `trigger.own.list`, `.disable`, `.enable` and `.delete`.
+         "capabilities" => %{"lifespans" => true, "sensitive" => true, "own_triggers" => true}
        }}
     end
   end
@@ -584,6 +603,7 @@ defmodule Troupe.Plane.Harness do
         {:ok, proposal} -> {:ok, Memory.Proposals.json(proposal)}
         {:error, :off} -> {:error, Error.new(:forbidden, %{reason: Memory.Proposals.off_reason()})}
         {:error, :throwaway} -> {:error, Error.new(:forbidden, %{reason: Memory.Proposals.throwaway_reason()})}
+        {:error, :sensitive} -> {:error, Error.new(:forbidden, %{reason: Memory.Proposals.sensitive_reason()})}
         {:error, :no_person} -> own_memory(nil)
         {:error, reason} -> invalid(reason)
       end
@@ -627,7 +647,7 @@ defmodule Troupe.Plane.Harness do
   # came from as provenance; a pod's agent publishes over its control link instead, where
   # the plane reads the session off its own row.
   defp handle("artifact.list", params, %{user: user} = context) do
-    Artifacts.list(user, Map.take(params, ["mine", "shared", "teams", "visibility"]),
+    Artifacts.list(user, Map.take(params, ["mine", "shared", "teams", "team", "visibility"]),
       platform_admin?: admin?(context)
     )
   end
@@ -658,6 +678,17 @@ defmodule Troupe.Plane.Harness do
 
   defp handle("artifact.unshare", %{"id" => id} = params, %{user: user} = context),
     do: Artifacts.unshare(id, user, params, platform_admin?: admin?(context))
+
+  # Who reads it, whole, for its owner; and its owner's change of that, each part named
+  # applied as the difference from what is there.
+  defp handle("artifact.access.get", %{"id" => id}, %{user: user} = context) when is_binary(id),
+    do: Artifacts.access(id, user, platform_admin?: admin?(context))
+
+  defp handle("artifact.access.set", %{"id" => id} = params, %{user: user} = context) when is_binary(id),
+    do:
+      Artifacts.set_access(id, user, Map.take(params, ["teams", "people", "organisation"]),
+        platform_admin?: admin?(context)
+      )
 
   defp handle("artifact.public", %{"id" => id, "enabled" => enabled}, %{user: user} = context)
        when is_boolean(enabled),
@@ -721,7 +752,8 @@ defmodule Troupe.Plane.Harness do
        when method in ~w(artifact.get artifact.open artifact.delete artifact.rollback artifact.pin
                          artifact.read artifact.preview artifact.share artifact.unshare
                          artifact.transfer artifact.comments artifact.comment
-                         artifact.comment.delete artifact.comment.edit),
+                         artifact.comment.delete artifact.comment.edit artifact.access.get
+                         artifact.access.set),
        do: {:error, Error.new(:invalid_params, %{reason: "#{method} takes an artifact's id"})}
 
   # Which version each of the caller's own clients last ran, and how that stands against
@@ -911,7 +943,7 @@ defmodule Troupe.Plane.Harness do
 
   # -- creating ---------------------------------------------------------------
 
-  defp handle("session.create", params, %{user: user}) do
+  defp handle("session.create", params, %{user: user} = context) do
     profile = params["profile"]
 
     # The row comes first because reserving capacity *places* the session, and a
@@ -930,11 +962,15 @@ defmodule Troupe.Plane.Harness do
          {:ok, terms} <- terms_for(params["terms"], team, answerable, profile),
          {:ok, held} <- repositories_for(params, profile, team),
          {:ok, lifespan} <- lifespan_param(params["lifespan"], :create),
+         {:ok, sensitive?} <- sensitive_param(params["sensitive"]),
          {:ok, session_id} <- session_id_for(params["session_id"]),
          params = Map.put(params, "repositories", held),
          params = Map.put(params, "lifespan", lifespan),
          params = Map.put(params, "agent", agent),
          {:ok, session} <- create_row(session_id, user, team, profile, params, terms, origin),
+         # Sensitive from its first call where its creator says so, or where it is spawned
+         # or forked from a sensitive session, which its first activation carries.
+         {:ok, session} <- marked(session, sensitive?, context[:sensitive_from], user),
          {:ok, _budget} <- reserve_budget(team, session),
          {:ok, placement} <- place_or_wait(session, prompt) do
       started(placement, session, team, user, agent, prompt)
@@ -986,7 +1022,7 @@ defmodule Troupe.Plane.Harness do
             )
         }
         |> Map.reject(fn {_key, value} -> is_nil(value) end),
-        context
+        Map.put(context, :sensitive_from, parent)
       )
     end
   end
@@ -1035,7 +1071,7 @@ defmodule Troupe.Plane.Harness do
           }
         }
         |> Map.reject(fn {_key, value} -> is_nil(value) end),
-        context
+        Map.put(context, :sensitive_from, parent)
       )
     end
   end
@@ -1060,6 +1096,7 @@ defmodule Troupe.Plane.Harness do
          {:ok, mine} <- sharer_scope(user, session),
          {:ok, role} <- share_role(params["role"], mine),
          :ok <- share_within_team(session, role),
+         :ok <- Sensitive.check(session, "link", %{"role" => role}, user),
          {:ok, expires_at} <- share_expiry(params["expires_in_seconds"]) do
       attrs = %{
         role: role,
@@ -1292,21 +1329,9 @@ defmodule Troupe.Plane.Harness do
   defp handle("session.grant", params, %{user: user}) do
     with {:ok, session} <- administered(params["session_id"], user),
          {:ok, subject} <- required_string(params, "subject"),
-         {:ok, role} <- role_param(params["role"]) do
-      case Sessions.grant_access(session.id, subject, role, user.subject) do
-        {:ok, acl} ->
-          {:ok,
-           %{
-             "session_id" => session.id,
-             "subject" => acl.subject,
-             "role" => acl.role,
-             "granted_by" => acl.granted_by,
-             "pushed" => push_acl(session, acl)
-           }}
-
-        {:error, changeset} ->
-          {:error, Error.new(:invalid_params, %{reason: inspect(changeset.errors)})}
-      end
+         {:ok, role} <- role_param(params["role"]),
+         :ok <- Sensitive.check(session, "grant", %{"subject" => subject, "role" => params["role"]}, user) do
+      grant(session, subject, role, user)
     end
   end
 
@@ -1320,7 +1345,8 @@ defmodule Troupe.Plane.Harness do
   # read what is there, so a private session is invited from the machine that seals it.
   defp handle("session.invite", params, %{user: user}) do
     with {:ok, session} <- inviting(params["session_id"], user),
-         {:ok, name} <- required_string(params, "subject") do
+         {:ok, name} <- required_string(params, "subject"),
+         :ok <- Sensitive.check(session, "invite", Map.take(params, ["subject", "role"]), user) do
       invitee = Invites.person(name)
 
       case invite(session, invitee, params, user) do
@@ -1382,11 +1408,22 @@ defmodule Troupe.Plane.Harness do
 
   # A picker's prefix search: people who share a team with the caller, and, for a session
   # they may invite into, the people its profile covers. Nobody else.
-  defp handle("people.search", params, %{user: user}) do
+  defp handle("people.search", params, %{user: user} = context) do
     with {:ok, query} <- required_string(params, "query"),
-         {:ok, session} <- searched_session(params["session_id"], user) do
+         {:ok, within} <- searched_within(params, user, context) do
       limit = if is_integer(params["limit"]), do: params["limit"], else: nil
-      {:ok, %{"people" => Invites.search(user, query, session, limit)}}
+      {:ok, %{"people" => Invites.search(user, query, within, limit)}}
+    end
+  end
+
+  # The names of the teams granted `profile`: for a person who may run it, or who owns an
+  # artifact a session on it published, whose sharing menu offers those teams. Anybody
+  # else is told there is no such profile, as for one that is not there.
+  defp handle("profile.teams", params, %{user: user}) do
+    with {:ok, profile} <- required_string(params, "profile") do
+      if profile in granted_profiles(user) or Artifacts.owns_from?(user, profile),
+        do: {:ok, %{"profile" => profile, "teams" => Artifacts.profile_teams(profile)}},
+        else: {:error, Error.new(:not_found, %{profile: profile})}
     end
   end
 
@@ -1477,6 +1514,19 @@ defmodule Troupe.Plane.Harness do
       {:ok, Triggers.fired_json(fired)}
     end
   end
+
+  # A person's own triggers, named as `trigger.fire` names one (`trigger`: an id, `name` or
+  # `team/name`), within the teams they are in; any other trigger is refused as not theirs.
+  defp handle("trigger.own.list", _params, %{user: user}), do: {:ok, Triggers.Own.list(user)}
+
+  defp handle("trigger.own.disable", params, %{user: user}),
+    do: Triggers.Own.switch(user, params["trigger"], false)
+
+  defp handle("trigger.own.enable", params, %{user: user}),
+    do: Triggers.Own.switch(user, params["trigger"], true)
+
+  defp handle("trigger.own.delete", params, %{user: user}),
+    do: Triggers.Own.delete(user, params["trigger"])
 
   defp handle("session.open", params, %{user: user}) do
     mode = Map.get(params, "mode", "read")
@@ -1578,8 +1628,41 @@ defmodule Troupe.Plane.Harness do
   defp handle("session.visibility.set", params, %{user: user} = context) do
     with {:ok, session} <- owned_pod_session(params["session_id"], user, context),
          {:ok, visibility} <- visibility_param(params["visibility"]),
+         :ok <- widening(session, visibility, user),
          {:ok, updated} <- give_or_take(session, visibility, user) do
       {:ok, session_json(updated, user)}
+    end
+  end
+
+  # Marked sensitive by its owner, once and for good: no `false`, from anybody. A dormant
+  # session's row is the word, and its next activation carries it; a live one's pod is told.
+  defp handle("session.sensitive.set", params, %{user: user} = context) do
+    with {:ok, session} <- owned_pod_session(params["session_id"], user, context, "marks it sensitive"),
+         :ok <- one_way(params["sensitive"]),
+         {:ok, updated} <- Sensitive.mark(session, user) do
+      {:ok, session_json(updated, user)}
+    end
+  end
+
+  # The shares of sensitive sessions waiting on the caller, a team administrator: their
+  # teams', oldest first.
+  defp handle("session.share_requests", _params, %{user: user}) do
+    {:ok, %{"requests" => Enum.map(Sensitive.pending(user), &ShareRequest.json/1)}}
+  end
+
+  # A team administrator's answer to one. A yes applies the share as its owner asked it,
+  # audited under the owner as it would have been, beside the administrator's answer.
+  defp handle("session.share_request.decide", params, %{user: user}) do
+    with {:ok, request} <- Sensitive.decide(params["id"], user, params["decision"]) do
+      applied =
+        if request.state == "approved",
+          do: apply_share(request),
+          else: {:ok, %{}}
+
+      case applied do
+        {:ok, answer} -> {:ok, %{"share_request" => ShareRequest.json(request), "applied" => answer}}
+        {:error, _error} = refused -> refused
+      end
     end
   end
 
@@ -1923,6 +2006,94 @@ defmodule Troupe.Plane.Harness do
         })
 
         :ok
+    end
+  end
+
+  # Given to the team where only its owner and the people invited read it: beyond its
+  # present readers, which a sensitive session's profile may refuse or hold for a team
+  # administrator's yes. Taking it back is never refused.
+  defp widening(%Session{visibility: "team"}, _visibility, _user), do: :ok
+
+  defp widening(session, "team", user),
+    do: Sensitive.check(session, "visibility", %{"visibility" => "team"}, user)
+
+  defp widening(_session, _visibility, _user), do: :ok
+
+  # A sibling or a fork of a sensitive session is sensitive as its parent is: a sibling's
+  # prompt is the parent agent's words, and a fork carries its parent's history.
+  defp marked(session, sensitive?, parent, user) do
+    cond do
+      Sensitive.sensitive?(parent) -> Sensitive.inherit(session, parent)
+      sensitive? -> Sensitive.mark(session, user)
+      true -> {:ok, session}
+    end
+  end
+
+  defp sensitive_param(nil), do: {:ok, false}
+  defp sensitive_param(value) when is_boolean(value), do: {:ok, value}
+  defp sensitive_param(_other), do: invalid("sensitive is true or false", field: "sensitive")
+
+  defp one_way(true), do: :ok
+
+  defp one_way(false),
+    do:
+      invalid(
+        "nothing clears a sensitive session's mark, not its owner and not an administrator: " <>
+          "it is sensitive until it is erased",
+        field: "sensitive"
+      )
+
+  defp one_way(_other), do: invalid("sensitive is true", field: "sensitive")
+
+  # A held share, applied as its owner asked it once a team administrator said yes.
+  defp apply_share(request) do
+    with %Session{} = session <- Sessions.get(request.session_id) || {:error, gone(request.session_id)},
+         %User{} = owner <- Identity.get_user(request.requested_by) || {:error, gone_owner()} do
+      applied(request.kind, request.params, session, owner)
+    end
+  end
+
+  defp applied("visibility", _params, session, owner) do
+    with {:ok, updated} <- give_or_take(session, "team", owner), do: {:ok, session_json(updated, owner)}
+  end
+
+  defp applied("invite", params, session, owner),
+    do: invite(session, Invites.person(params["subject"]), params, owner)
+
+  defp applied("grant", params, session, owner) do
+    with {:ok, role} <- role_param(params["role"]), do: grant(session, params["subject"], role, owner)
+  end
+
+  defp applied("artifact", %{"access" => access} = params, _session, owner) when is_map(access),
+    do: Artifacts.set_access(params["artifact"], owner, access, sensitive: :approved)
+
+  defp applied("artifact", %{"person" => person} = params, _session, owner),
+    do: Artifacts.share(params["artifact"], owner, %{"person" => person, "role" => params["role"]}, sensitive: :approved)
+
+  defp applied("artifact", params, _session, owner) do
+    moved = %{"id" => params["artifact"], "visibility" => params["visibility"], "base" => params["base"]}
+    Artifacts.put(owner, Map.reject(moved, fn {_k, v} -> is_nil(v) end), sensitive: :approved)
+  end
+
+  defp gone_owner,
+    do: Error.new(:conflict, %{reason: "the person who asked for this share is no longer here"})
+
+  # The grant, written and pushed: by whoever may grant, or by a team administrator's yes
+  # to a sensitive session's owner's request, as that owner.
+  defp grant(session, subject, role, user) do
+    case Sessions.grant_access(session.id, subject, role, user.subject) do
+      {:ok, acl} ->
+        {:ok,
+         %{
+           "session_id" => session.id,
+           "subject" => acl.subject,
+           "role" => acl.role,
+           "granted_by" => acl.granted_by,
+           "pushed" => push_acl(session, acl)
+         }}
+
+      {:error, changeset} ->
+        {:error, Error.new(:invalid_params, %{reason: inspect(changeset.errors)})}
     end
   end
 
@@ -2800,7 +2971,18 @@ defmodule Troupe.Plane.Harness do
     end
   end
 
-  # A search names a session only where the caller may invite into it.
+  # A search names a session only where the caller may invite into it, and an artifact only
+  # where they own it: then the people its session's profile covers are found too.
+  defp searched_within(%{"artifact" => id}, user, context) when is_binary(id) do
+    case Artifacts.profile_of(id, user, platform_admin?: admin?(context)) do
+      {:ok, nil} -> {:ok, nil}
+      {:ok, profile} -> {:ok, {:profile, profile}}
+      {:error, _} = error -> error
+    end
+  end
+
+  defp searched_within(params, user, _context), do: searched_session(params["session_id"], user)
+
   defp searched_session(nil, _user), do: {:ok, nil}
   defp searched_session(session_id, user), do: inviting(session_id, user)
 
@@ -4241,8 +4423,14 @@ defmodule Troupe.Plane.Harness do
   # The terms and origin a pod is handed on activation, from the row, and how long the
   # session lasts, which its first `session_created` records and a later change does not
   # rewrite: the log has `session_lifespan_changed` for that, and the row is the word.
+  # And whether it is sensitive, so its gate holds before its log is read on the pod.
   defp session_terms(session) do
-    %{"terms" => session.terms, "origin" => session.origin, "lifespan" => session.lifespan}
+    %{
+      "terms" => session.terms,
+      "origin" => session.origin,
+      "lifespan" => session.lifespan,
+      "sensitive" => Sensitive.json(session)
+    }
     |> Map.reject(fn {_key, value} -> is_nil(value) end)
     |> Map.put("managed", managed_switches())
   end
@@ -4252,12 +4440,9 @@ defmodule Troupe.Plane.Harness do
   # client is told. Read at every activation, as the platform's switches are, so a team
   # that changes it reaches a session awake now at its next wake.
   defp idle_params(team) do
-    case Ladder.effective("default_idle_timeout_seconds", team) do
-      %{value: seconds} when is_integer(seconds) and seconds > 0 ->
-        %{"idle_timeout_seconds" => seconds}
-
-      _none ->
-        %{}
+    case Ladder.idle_timeout_seconds(team) do
+      nil -> %{}
+      seconds -> %{"idle_timeout_seconds" => seconds}
     end
   end
 
@@ -4467,6 +4652,9 @@ defmodule Troupe.Plane.Harness do
       # activation like the two above, so a rule reaches a session at its next wake and
       # restarts no pod; an empty list takes away what was there.
       |> Map.put("permission_rules", Extends.rules(profile))
+      # What makes a session sensitive and what a sensitive one is refused, the chain's in
+      # effect with the profile's name, read again at every activation like the rules.
+      |> put_sensitive_rules(profile)
       # Which agents exist on the profile's pods, the chain's rule composed, for the pod
       # to apply to its subagents too: the entitlement set already carries the primaries
       # it leaves. Read again at every activation like the rules; left out where the
@@ -4476,6 +4664,18 @@ defmodule Troupe.Plane.Harness do
       _ -> %{"bundle_version" => session.bundle_version}
     end
   end
+
+  defp put_sensitive_rules(params, %{name: name, spec: %{"sensitive" => %{} = sensitive}}) do
+    rules = %{
+      "markedBy" => List.wrap(sensitive["markedBy"]),
+      "deny" => List.wrap(sensitive["deny"]),
+      "profile" => name
+    }
+
+    Map.put(params, "sensitive_rules", rules)
+  end
+
+  defp put_sensitive_rules(params, _profile), do: params
 
   # The pin is a version of the session's own channel, which it was pinned on; a row from
   # before the column names none, and its profile's is the one it was read against. A raise
@@ -4801,6 +5001,8 @@ defmodule Troupe.Plane.Harness do
       "visibility" => session.visibility,
       # How long it lasts: `throwaway`, `normal` or `persistent`.
       "lifespan" => session.lifespan,
+      # Sensitive since when and by what (`{at, by, how}`), or `null`; never cleared.
+      "sensitive" => Sensitive.json(session),
       # Which configuration this session is pinned to, a version of `bundle_channel`. It
       # does not move when a new version is published: its owner raises it to the current
       # one (`bundle_current`, beside it), or it moves when its version is retired. A

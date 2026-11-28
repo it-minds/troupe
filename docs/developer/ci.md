@@ -120,10 +120,27 @@ one ten minutes into this job, and nothing before it had applied a CRD to an API
 profile); a stand-in answering at 169.254.169.254 on the runner, for the metadata test;
 then the suite, with its Mix build cached under a key of its own.
 
-**What it costs.** About twenty-five minutes of one runner, most of it the image builds
-(nine minutes) and the suite (twelve). On a pull request it starts once the cheaper checks
-of the same change have passed, so it is the last to finish on a change to the chart or the
+**What it costs.** Twenty-five to thirty minutes of one runner, most of it the suite (about
+fourteen) and the image builds: about six minutes from a warm cache, seven with no cache,
+eleven while filling one. On a pull request it starts once the cheaper checks of the same
+change have passed, so it is the last to finish on a change to the chart or the
 operator; a change elsewhere does not run it.
+
+**The image cache.** Both jobs build the images through buildx with GitHub Actions' cache as
+the layer cache (`TROUPE_BUILD_CACHE=gha` in `cluster.yml`, which `scripts/build-images`
+reads), every layer of both stages kept (`mode=max`), in one scope per image,
+`cluster-v1-<image>`, which `kind` and `upgrade` share, then `--load` each image for `kind
+load`. Only a run outside a pull request writes it (`TROUPE_BUILD_CACHE_WRITE=1`: the
+nightly, a push, a release), so the nightly's warms the next day's pull requests, which read
+what `main` and their base wrote and write nothing: a pull request's own copy would be about
+2.4 GiB of the repository's cache, and writing it is what makes a run that fills the cache
+slower than one with none. What a change to `apps/`, `config/` or the lock invalidates is built again
+from that layer on: `mix compile` and the release, for every server image, while the
+toolchain, the fetched dependencies and the runtime's packages come from the cache. To start
+from nothing, change `TROUPE_BUILD_CACHE_SCOPE` in `cluster.yml` (`cluster-v2`); a change to
+a Dockerfile needs no new name, since a changed instruction misses on its own. Each run prints
+`phase time:` lines (the image build, the kind load, each step of `remote-up`, the suite), so
+a slow run shows where it went. Without the variable, as on a laptop, it is `docker build`.
 
 **On a laptop**, the same: `scripts/remote-up` once, then `scripts/e2e` (or `mix
 troupe.e2e` with kind, kubectl and helm on the machine). The metadata test says it skipped

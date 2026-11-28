@@ -24,6 +24,12 @@
     "session_id": {
       "type": "string"
     },
+    "teams": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
     "thumbnail": {
       "type": "object"
     },

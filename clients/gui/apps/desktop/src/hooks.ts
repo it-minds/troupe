@@ -16,8 +16,13 @@ import {
   isDurable,
   onThisComputer,
   PlaneSource,
+  isWaiting,
   planeKnowsLifespans,
+  planeKnowsOwnTriggers,
+  planeKnowsSensitive,
   planeOpener,
+  sensitiveOf,
+  waitingSentence,
   raiseKept,
   RemoteSource,
   repositoriesOf,
@@ -30,6 +35,8 @@ import {
   withEarlier,
 } from "@troupe/client";
 import { storedLocalOnly } from "./mode";
+import { ownTriggerSource } from "./views/OwnTriggers";
+import type { OwnTriggerSource } from "./views/OwnTriggers";
 import { noticeEvent } from "./notify";
 import { adoptFragment, daemonHint, forgetDaemon, rememberDaemon, shell } from "./shell";
 import type {
@@ -184,8 +191,17 @@ export interface Marks {
   rename: (row: FleetRow, title: string) => Promise<void>;
   /** Keep it at the top of the list (`on`) or let it go, where it runs (`session.pin`). */
   keep: (row: FleetRow, on: boolean) => Promise<void>;
-  /** Give a pod session to its team (`team`) or take it back (`private`), at the plane (troupe #1169). Rejects with the refusal. */
-  share: (row: FleetRow, visibility: "team" | "private") => Promise<void>;
+  /**
+   * Give a pod session to its team (`team`) or take it back (`private`), at the plane (troupe
+   * #1169). Rejects with the refusal; a sensitive session's share held for a team
+   * administrator answers the sentence saying it waits, and nothing changed.
+   */
+  share: (row: FleetRow, visibility: "team" | "private") => Promise<string | null>;
+  /**
+   * Mark a session sensitive by hand (troupe #1239): a pod session at the plane, its owner's
+   * alone; one on this computer at its daemon. One-way. Rejects with the refusal.
+   */
+  sensitive: (row: FleetRow) => Promise<void>;
   /**
    * Raise a pod session to its channel's current bundle version, at the plane (troupe
    * #1177). Rejects with the refusal: `conflict` with `raise_to` while its agent works, the
@@ -252,12 +268,33 @@ export function useMarks(store: FleetStore, auth: AuthSession | null, daemon: Da
     async (row: FleetRow, visibility: "team" | "private") => {
       if (row.kind !== "team" || !auth) throw new Error("Only a session on the platform is given to a team");
       const answered = await auth.plane.setSessionVisibility(await auth.token(), row.id, visibility);
+      if (isWaiting(answered)) return waitingSentence(answered);
       const raw = (row.raw && typeof row.raw === "object" ? row.raw : {}) as Record<string, unknown>;
       const now = answered.visibility ?? visibility;
       store.patch(row.id, { visibility: now, raw: { ...raw, visibility: now, team: answered.team ?? raw["team"] ?? null } });
       await store.refreshAfterChange();
+      return null;
     },
     [store, auth],
+  );
+  // Sensitive by hand: a pod session's at the plane, one on this computer at its daemon; the
+  // answer's mark goes on the row at once.
+  const sensitive = useCallback(
+    async (row: FleetRow) => {
+      const answered =
+        row.kind === "team"
+          ? auth
+            ? await auth.plane.setSessionSensitive(await auth.token(), row.id)
+            : null
+          : daemon
+            ? await daemon.setSessionSensitive(row.id)
+            : null;
+      if (!answered) throw new Error(row.kind === "team" ? "Sign in to mark a session on the platform" : "This computer's daemon is not running");
+      const raw = (row.raw && typeof row.raw === "object" ? row.raw : {}) as Record<string, unknown>;
+      store.patch(row.id, { sensitive: sensitiveOf(answered.sensitive), raw: { ...raw, sensitive: answered.sensitive ?? null } });
+      await store.refreshAfterChange();
+    },
+    [store, auth, daemon],
   );
   // Which configuration a pod session runs on: the plane's alone. The answer's versions go
   // on the list's row at once, as a name does; a raise kept for the agent's rest says so too.
@@ -319,7 +356,46 @@ export function useMarks(store: FleetStore, auth: AuthSession | null, daemon: Da
     },
     [store, where],
   );
-  return useMemo(() => ({ rename, keep, share, raise, repository, relive, erase }), [rename, keep, share, raise, repository, relive, erase]);
+  return useMemo(
+    () => ({ rename, keep, share, sensitive, raise, repository, relive, erase }),
+    [rename, keep, share, sensitive, raise, repository, relive, erase],
+  );
+}
+
+/**
+ * Whether the plane knows sensitive sessions (troupe #1239), from its `initialize`, asked
+ * once a sign-in: a pod session is offered to be marked, and a new one the switch, only
+ * then. A session on this computer is never offered it here.
+ */
+export function useSensitive(auth: AuthSession | null): boolean {
+  const [plane, setPlane] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    setPlane(false);
+    if (auth) void planeKnowsSensitive(auth).then((yes) => alive && setPlane(yes));
+    return () => {
+      alive = false;
+    };
+  }, [auth]);
+  return plane;
+}
+
+/**
+ * The person's own triggers through their sign-in (troupe #1235), and whether the plane's
+ * `initialize` says it lets them change them; asked once a sign-in. No sign-in, no source.
+ */
+export function useOwnTriggerSource(auth: AuthSession | null): { source: OwnTriggerSource | undefined; known: boolean } {
+  const [known, setKnown] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    setKnown(false);
+    if (auth) void planeKnowsOwnTriggers(auth).then((yes) => alive && setKnown(yes));
+    return () => {
+      alive = false;
+    };
+  }, [auth]);
+  const source = useMemo(() => (auth ? ownTriggerSource(auth) : undefined), [auth]);
+  return { source, known };
 }
 
 /**

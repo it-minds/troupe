@@ -447,7 +447,7 @@ defmodule Troupe.Plane.Proposals do
   # made once and reused, with the session's profile among its own. Its secret is never
   # shown: nothing signs in as it but the plane's triggers.
   defp own_principal(team, owner, profile) do
-    subject = ServicePrincipal.subject(team.name, own_name(owner.subject))
+    subject = own_subject(team.name, owner.subject)
 
     case Principals.get(subject) do
       nil ->
@@ -510,6 +510,14 @@ defmodule Troupe.Plane.Proposals do
 
   defp own_refusal(team, why),
     do: Error.new(:conflict, %{reason: "your own principal in #{team.name} #{why}"})
+
+  @doc """
+  The subject of a person's own principal in a team, `svc:<team>/own-<handle>`, as a yes
+  makes it; whether it is theirs is its sponsor's question, not its name's.
+  """
+  @spec own_subject(String.t(), String.t()) :: String.t()
+  def own_subject(team_name, person_subject),
+    do: ServicePrincipal.subject(team_name, own_name(person_subject))
 
   defp own_name(subject) do
     handle =

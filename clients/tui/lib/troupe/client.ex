@@ -168,8 +168,11 @@ defmodule Troupe.Client do
               {:ok, String.t()} | {:error, String.t()}
   @callback bundle(session_id(), Troupe.Client.Bundle.verb()) ::
               {:ok, String.t()} | {:error, String.t()}
+  @callback own_triggers(session_id(), Troupe.Client.OwnTriggers.verb()) ::
+              {:ok, String.t()} | {:error, String.t()}
   @callback lifespan(session_id(), Troupe.Client.Lifespan.verb()) ::
               {:ok, String.t()} | {:error, String.t()}
+  @callback sensitive(session_id(), :status | :mark) :: {:ok, String.t()} | {:error, String.t()}
   @callback repositories(session_id(), Troupe.Client.Repositories.verb()) ::
               {:ok, String.t()} | {:error, String.t()}
   @callback archive(session_id(), boolean()) :: {:ok, String.t()} | {:error, String.t()}
@@ -345,7 +348,7 @@ defmodule Troupe.Client do
   Answers an approval. `answer` is what a delegation's answer carries besides its word
   (root Decision 850): `"agent"` to send it to another subagent, `"brief"` with the parts
   the person edited, `"reason"` with a denial; and what a publication's carries, whom it
-  is for and whose (`"visibility"`, `"owner"`).
+  is for and whose (`"visibility"`, `"teams"`, `"owner"`).
   """
   @spec approve(session_id(), String.t(), decision(), map()) :: :ok | {:error, term()}
   def approve(sid, call_id, decision, answer \\ %{}),
@@ -615,6 +618,32 @@ defmodule Troupe.Client do
   @spec lifespan_args(String.t()) :: {:ok, Troupe.Client.Lifespan.verb()} | {:error, String.t()}
   defdelegate lifespan_args(text), to: Troupe.Client.Lifespan, as: :parse
 
+  @doc """
+  Whether a session is sensitive (root #1239): `:status` says it, and for one that is not
+  asks first, since nothing clears the mark; `:mark` marks it, which only its owner may do,
+  at the plane for a session there. Answers the sentence to show.
+  """
+  @spec sensitive(session_id(), :status | :mark) :: {:ok, String.t()} | {:error, String.t()}
+  def sensitive(sid, verb), do: impl(sid).sensitive(sid, verb)
+
+  @doc "A row's sensitive mark: `sensitive`, or empty for a session that is not."
+  @spec sensitive_mark(map() | nil) :: String.t()
+  defdelegate sensitive_mark(value), to: Troupe.Client.Sensitive, as: :mark
+
+  @doc "The word every client marks a sensitive session with."
+  @spec sensitive_word() :: String.t()
+  defdelegate sensitive_word(), to: Troupe.Client.Sensitive, as: :word
+
+  @doc "What `/sensitive` names after the command: nothing, which asks, or `y` to mark it."
+  @spec sensitive_args(String.t()) :: {:ok, :status | :mark} | {:error, String.t()}
+  def sensitive_args(text) do
+    case String.trim(text) do
+      "" -> {:ok, :status}
+      yes when yes in ["y", "yes"] -> {:ok, :mark}
+      other -> {:error, "/sensitive alone asks first, and /sensitive y marks it: not #{other}"}
+    end
+  end
+
   @doc "A row's lifespan mark: `throwaway · goes in 18 h`, `persistent`, or empty for normal."
   @spec lifespan_mark(String.t() | nil, String.t() | nil) :: String.t()
   def lifespan_mark(lifespan, erases_at), do: Troupe.Client.Lifespan.mark(lifespan, erases_at)
@@ -641,6 +670,19 @@ defmodule Troupe.Client do
   @doc "What `/proposal` names after the command: nothing, `yes`, `later` or `never`."
   @spec proposal_args(String.t()) :: {:ok, Troupe.Client.Proposal.verb()} | {:error, String.t()}
   defdelegate proposal_args(text), to: Troupe.Client.Proposal, as: :parse
+
+  @doc """
+  The person's own triggers (root #1235), asked of the plane the session is on: `:list`
+  lists them, `{:off | :on | :remove, name}` changes one. Answers the sentence to show.
+  """
+  @spec own_triggers(session_id(), Troupe.Client.OwnTriggers.verb()) ::
+          {:ok, String.t()} | {:error, String.t()}
+  def own_triggers(sid, verb), do: impl(sid).own_triggers(sid, verb)
+
+  @doc "What `/trigger` names after the command: `off`, `on` or `remove`, and the trigger."
+  @spec own_trigger_args(String.t()) ::
+          {:ok, Troupe.Client.OwnTriggers.verb()} | {:error, String.t()}
+  defdelegate own_trigger_args(text), to: Troupe.Client.OwnTriggers, as: :parse
 
   @doc "What `/bundle` names after the command: nothing or `update`."
   @spec bundle_args(String.t()) :: {:ok, Troupe.Client.Bundle.verb()} | {:error, String.t()}
@@ -895,6 +937,15 @@ defmodule Troupe.Client do
   @doc "Publish one file of this machine (`/publish`): `Troupe.Client.Artifacts.publish/3`."
   @spec publish_file(Path.t(), String.t(), keyword()) :: {:ok, map()} | {:error, String.t()}
   def publish_file(path, visibility, opts \\ []), do: Artifacts.publish(path, visibility, opts)
+
+  @doc "`/publish`'s words after its name, read: `Troupe.Client.Artifacts.publish_args/1`."
+  @spec publish_args([String.t()]) ::
+          {:ok, String.t(), String.t(), keyword()} | {:error, String.t()}
+  def publish_args(words), do: Artifacts.publish_args(words)
+
+  @doc "Who reads a row beside its owner, in words, or nil: `Troupe.Client.Artifacts.readers/1`."
+  @spec artifact_readers(map()) :: String.t() | nil
+  def artifact_readers(row), do: Artifacts.readers(row)
 
   @doc "When a timestamp was, as a person says it: `just now`, `2 h ago`, `yesterday`, or the date."
   @spec ago(String.t() | nil) :: String.t()

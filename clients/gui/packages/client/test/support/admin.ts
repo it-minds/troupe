@@ -433,6 +433,12 @@ export interface FakeTrigger {
   /** On a direct plane, the Trigger resource it was copied from and that resource's generation then. */
   copied_from?: string;
   copied_generation?: number;
+  /** The person whose own trigger it is (troupe #1235), made by their yes under their own principal. */
+  own_by?: string;
+  /** The session and artifact a yes made it from. */
+  made?: { session_id: string; artifact_id: string | null };
+  /** Its last run, as the person's own list says it. */
+  last_run?: { fired_at: string; state: string; session_id: string | null; reason?: string | null };
 }
 
 /**
@@ -507,6 +513,8 @@ export interface FakeSession {
   /** How long it lasts (troupe #1209); normal where a test says nothing. */
   lifespan?: "throwaway" | "normal" | "persistent";
   erases_at?: string | null;
+  /** Since when, and by what, it is sensitive (troupe #1239); not sensitive where a test says nothing. */
+  sensitive?: { at: string; by: string; how: "call" | "person" } | null;
   last_active_at: string;
   parent: string | null;
   origin: "user" | "trigger";
@@ -1539,6 +1547,23 @@ export class FakeAdmin {
         if (rules !== undefined && rules !== null) {
           const why = checkRuleSet(rules);
           if (why.length) return refuse(INVALID_PARAMS, "invalid_params", { field: "spec.permissions", reason: why.join("; ") });
+        }
+        // A sensitive session's lists, read as the permission rules are, and the plane's
+        // refusal of rules that mark a session with nothing refused once marked (troupe #1239).
+        const sensitive = typeof sentSpec === "object" && sentSpec !== null ? (sentSpec as Record<string, unknown>)["sensitive"] : undefined;
+        if (typeof sensitive === "object" && sensitive !== null) {
+          const s = sensitive as Record<string, unknown>;
+          const why = checkRuleSet({ deny: [...(Array.isArray(s["markedBy"]) ? s["markedBy"] : []), ...(Array.isArray(s["deny"]) ? s["deny"] : [])] });
+          if (why.length) return refuse(INVALID_PARAMS, "invalid_params", { field: "spec.sensitive", reason: why.join("; ") });
+          if (s["sharing"] !== undefined && !["allow", "ask", "deny"].includes(String(s["sharing"]))) {
+            return refuse(INVALID_PARAMS, "invalid_params", { field: "spec.sensitive", reason: `sensitive.sharing must be allow, ask or deny, not ${JSON.stringify(s["sharing"])}` });
+          }
+          if (Array.isArray(s["markedBy"]) && s["markedBy"].length > 0 && !(Array.isArray(s["deny"]) && s["deny"].length > 0)) {
+            return refuse(INVALID_PARAMS, "invalid_params", {
+              field: "spec.sensitive",
+              reason: 'sensitive.markedBy is set and sensitive.deny is not: say which tools a sensitive session is refused in sensitive.deny, such as ["publish_artifact", "web_fetch", "remember"], or take markedBy out',
+            });
+          }
         }
         // A write that names a parent, or stops naming one, is the profile in effect.
         const effect =this.inEffect(name, sentAttrs, parent, before);
@@ -3158,6 +3183,7 @@ export class FakeAdmin {
       pinned_by: s.pinned_by,
       lifespan: s.lifespan ?? "normal",
       erases_at: s.erases_at ?? null,
+      sensitive: s.sensitive ?? null,
       last_active_at: s.last_active_at,
       repository: s.repository ?? null,
       github: s.github ?? null,
@@ -3304,7 +3330,8 @@ export class FakeAdmin {
   }
 
   /** The refusal every write to what a repository holds gets on a gitops plane, recorded as the attempt it is. */
-  private heldByRepository(subject: string, action: string, name: string, kind: string): Refusal | null {
+  /** The refusal a write to what a repository holds gets on a gitops plane, the attempt recorded; null on a direct one. */
+  heldByRepository(subject: string, action: string, name: string, kind: string): Refusal | null {
     if (this.mode !== "gitops") return null;
     this.record(subject, action, name, { outcome: "refused", reason: "managed_by_gitops" });
     return refuse(MANAGED_BY_GITOPS, "managed_by_gitops", {
@@ -3482,6 +3509,7 @@ export class FakeAdmin {
       team: row.team,
       name: row.name,
       principal: row.principal,
+      own_by: row.own_by ?? null,
       profile: row.profile,
       agent: row.agent,
       enabled: row.enabled,

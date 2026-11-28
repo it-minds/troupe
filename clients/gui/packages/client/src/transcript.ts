@@ -12,6 +12,8 @@ import { named } from "./people.js";
 import { type ProposalDecision, type ProposalResult, type ProposalState, proposalOf } from "./proposals.js";
 import { when } from "./remote.js";
 import { foldScratch, scratchDocumentOf } from "./scratch.js";
+import { sensitiveLine, sensitiveOf } from "./sensitive.js";
+import type { SensitiveMark } from "./sensitive.js";
 import type { DurableEvent, LlmDeltaData, LoopInfo, ScratchDocument, TroupeEvent } from "./types.js";
 import { isDurable } from "./types.js";
 import { durationWords, moneyWords } from "./words.js";
@@ -75,6 +77,12 @@ export type Entry =
        * from a report from before the parts.
        */
       changed?: string;
+      /**
+       * Why a call that did not run was refused, where a client shows it apart from a
+       * failure: `sensitive`, a sensitive session's rule (troupe #1239), its `content` the
+       * harness's sentence. Absent from every other result.
+       */
+      refused?: string;
     }
   /**
    * What the model thought before it answered, kept where the reply it came before lands
@@ -231,8 +239,12 @@ export type Entry =
    * answers; `localPath` where it already is when the session runs on this machine.
    */
   | { kind: "file"; seq: number; agent: string[]; path: string; size: number; hash: string; title: string | undefined; localPath: string | undefined }
-  /** Lifecycle: started, switched, compacted, done, cancelled, dormant, resumed, errors. */
-  | { kind: "system"; seq: number; agent: string[]; type: string; text: string }
+  /**
+   * Lifecycle: started, switched, compacted, done, cancelled, dormant, resumed, errors.
+   * `mark` on the line that says it became sensitive, for a view that says whose rules hold
+   * it where the session runs (`sensitiveLine` with `here`); `text` says the profile's.
+   */
+  | { kind: "system"; seq: number; agent: string[]; type: string; text: string; mark?: SensitiveMark }
   /**
    * Something the harness offers the session's owner (troupe #1208): a card while it is
    * open, which only the owner answers, and its answer's line once it is not. Nothing waits
@@ -400,6 +412,12 @@ export interface TranscriptState {
    * log says, when the session's row is the word.
    */
   lifespan?: string | undefined;
+  /**
+   * Since when, and by what, the session is sensitive (troupe #1239), from
+   * `session_marked_sensitive` or a checkpoint's facts; undefined until the log says, when
+   * the session's row is the word. Nothing clears it.
+   */
+  sensitive?: SensitiveMark | undefined;
   /**
    * A laptop's session steered through the plane, while its laptop is away and once it is
    * back (troupe #932): `offer_paused` says why it went (`stopped`, its daemon said it was
@@ -660,31 +678,37 @@ export interface DelegationGate {
 
 /**
  * What the gate shows of an agent's publication before it is published: the title, kind
- * and file count the agent sent, whom it proposed it for (`visibility`, null where it said
- * nobody), whose it proposed it be (`owner`, null for the default: the team's for a team,
- * else the publisher's), the artifact it is a new version of, and its note.
+ * and file count the agent sent; for a new artifact the organisation switch it proposed
+ * (`visibility`, null where it said nothing), the teams that would read it (`teams`, those
+ * it named or, where it named none, those the plane ticks by default: the teams granted the
+ * session's profile), and whose it proposed it be (`owner`, null for the publisher's); for a
+ * new version the artifact (`id`) and who reads it now in the plane's words (`access`),
+ * which the version keeps; and its note.
  */
 export interface PublicationGate {
   title: string;
   kind: string;
   files: number;
   visibility: string | null;
+  teams: string[] | null;
   owner: "me" | "team" | null;
   id: string | null;
+  access: string | null;
   note: string | null;
 }
 
 /**
  * What an answer may carry besides its word, as `approval.respond` sends it, each a key
  * beside `decision`: for a delegation the agent it goes to and the parts of the brief
- * edited; for a publication whom it is for (`visibility`: `private`, `organisation`,
- * `team:<name>` or `profile:<name>`) and, for a new artifact, whose it is (`owner`; a new
- * version keeps whose it is, and the harness drops one sent); a word back with a denial.
+ * edited; for a new artifact's publication who reads it (`visibility`, `private` or
+ * `organisation`, and `teams`, the whole set) and whose it is (`owner`); a new version keeps
+ * both, and the harness drops either sent for one; a word back with a denial.
  */
 export interface GateAnswer {
   agent?: string;
   brief?: Partial<Record<(typeof BRIEF_PARTS)[number], string>>;
   visibility?: string;
+  teams?: string[];
   owner?: "me" | "team";
   reason?: string;
   /** With `allow_always`: where the person's rule is kept, the workspace's own file or their `config.yaml` (troupe #920). */
@@ -695,6 +719,7 @@ export interface GateAnswer {
 export interface GateAnswered {
   agent?: string;
   visibility?: string;
+  teams?: string[];
   owner?: "me" | "team";
   edited?: string[];
   reason?: string;
@@ -705,13 +730,16 @@ function publicationOf(raw: unknown): PublicationGate | undefined {
   const p = raw as Record<string, unknown>;
   const text = (v: unknown): string | null => (typeof v === "string" && v !== "" ? v : null);
   const owner = p["owner"] === "me" || p["owner"] === "team" ? p["owner"] : null;
+  const teams = Array.isArray(p["teams"]) ? p["teams"].filter((t): t is string => typeof t === "string" && t !== "") : null;
   return {
     title: str(p["title"]),
     kind: str(p["kind"], "file"),
     files: num(p["files"]) ?? 0,
     visibility: text(p["visibility"]),
+    teams,
     owner,
     id: text(p["id"]),
+    access: text(p["access"]),
     note: text(p["note"]),
   };
 }
@@ -746,6 +774,7 @@ function answeredOf(data: Record<string, unknown>): GateAnswered | undefined {
   const out: GateAnswered = {};
   if (typeof data["agent"] === "string") out.agent = data["agent"];
   if (typeof data["visibility"] === "string") out.visibility = data["visibility"];
+  if (Array.isArray(data["teams"])) out.teams = data["teams"].filter((t): t is string => typeof t === "string");
   if (data["owner"] === "me" || data["owner"] === "team") out.owner = data["owner"];
   if (Array.isArray(data["edited"])) out.edited = data["edited"].filter((p): p is string => typeof p === "string");
   if (typeof data["reason"] === "string") out.reason = data["reason"];
@@ -1537,11 +1566,12 @@ function foldOne(state: TranscriptState, e: TroupeEvent, options: FoldOptions = 
     case "tool_call_completed": {
       const id = str(d.data["call_id"]);
       const ok = Boolean(d.data["ok"]);
+      const refused = str(d.data["refused"]) || undefined;
       return {
         ...next,
         entries: state.entries.map((en) =>
           en.kind === "tool" && en.callId === id
-            ? { ...en, ok, content: contentOf(d.data["content"]), endedAt: writtenAt(d) }
+            ? { ...en, ok, content: contentOf(d.data["content"]), endedAt: writtenAt(d), ...(refused ? { refused } : {}) }
             : en.kind === "scratch" && en.callId === id
               ? { ...en, ok, error: ok ? undefined : errorOf(d.data["content"]) }
               : (en.kind === "approval" || en.kind === "question") && en.callId === id
@@ -1810,6 +1840,14 @@ function foldOne(state: TranscriptState, e: TroupeEvent, options: FoldOptions = 
     case "session_lifespan_changed": {
       const lifespan = str(d.data["to"]) || undefined;
       return { ...next, lifespan, entries: [...state.entries, { kind: "system", ...base, type: d.type, text: lifespanChangedText(d) }] };
+    }
+
+    // The session became sensitive (troupe #1239), once and for good: a durable line, as a
+    // person's tools offered are, and the mark for the head. A second one changes nothing.
+    case "session_marked_sensitive": {
+      const mark = sensitiveOf(d.data);
+      if (!mark || state.sensitive) return next;
+      return { ...next, sensitive: mark, entries: [...state.entries, { kind: "system", ...base, type: d.type, text: sensitiveLine(mark), mark }] };
     }
 
     // A reply the output cap cut, or one with nothing in it (troupe-remote Decision 659).

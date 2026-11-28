@@ -59,6 +59,69 @@ by the daemon in the same way, after the same window (`throwaway_erase_after_hou
 [configuration](configuration.md)); a private one is erased by the plane, which
 holds its key.
 
+## A sensitive session
+
+A team session can become **sensitive** by what it read: your administrator's profile names
+the tools whose data must not leave a session (a patients' records server, a folder of
+personnel files), and the first call to one marks the session before it runs. From then on
+the tools the profile refuses in a sensitive session (publishing an artifact, fetching a
+page, pushing, proposing for the team's memory, whatever it lists) are refused when the
+agent calls them, with a line in the transcript saying since when and by what the session is
+sensitive; the agent is told so, and says what it could not do. Nothing clears the mark, not
+you and not an administrator: the session is sensitive until it is erased. Giving it to your
+team, inviting somebody or sharing what it published may be refused, or wait for a team
+administrator's yes, as the profile says; the people who read it now go on reading it
+([sensitive sessions](../admin/sensitive-sessions.md)).
+
+A sensitive session is marked **sensitive** wherever its other marks are: in the session
+list beside how long it lasts, as a tag in its head with since when and by what (*Sensitive
+since 10:14: mcp.ehr.lookup read from it*), in a line under the head, in the console's lists
+and in the terminal's status line. A call its profile refused is drawn as **refused**, not
+failed, with the harness's sentence saying why.
+
+You may mark one of your own sessions on the platform sensitive yourself, before it reads
+anything or after: **Make it sensitive** in the session's ⋯ or on the console's *Your
+sessions*, the *Sensitive* switch as you start it, `/sensitive` in the terminal (it asks
+first; `/sensitive y` marks it), `/new --sensitive` or `troupe run --profile NAME
+--sensitive`. Each asks once more, since it is one-way.
+
+Where the profile asks a team administrator before a sensitive session is shared wider,
+giving it to the team or inviting somebody answers that it is **waiting on a team
+administrator**: nothing changed yet, and it applies as you asked the moment one of your
+team's administrators allows it on the team's *Waiting shares* in the console. They may also
+refuse it. A link cannot wait, so none is made; invite the person by name instead.
+
+### On your own computer
+
+A session on this computer becomes sensitive the same way, by a call its rules name, and
+stays so. The rules come from two files: what your organisation sets under `enforced:` in
+its managed file, which you cannot change, and a `sensitive:` block in your own
+`config.yaml`, which may add to them and never take from them:
+
+```yaml
+sensitive:
+  marked_by: ["read_file(~/hr/**)"]   # added to the organisation's
+  deny: ["mcp(chat.*)"]               # added to the organisation's
+  sharing: deny                       # tighter than the organisation's word; looser is ignored
+```
+
+A project's `.troupe/config.yaml` sets none of it. *This computer* in the desktop app, and
+`/settings` in the terminal, list the rules in effect with where each came from, and
+`troupe config --explain sensitive` says the same. A sensitive session here is refused what
+`deny` names when its agent calls it, and the daemon refuses on its own side as well:
+
+- publishing an artifact from it, where `deny` names `publish_artifact`, whether its agent or
+  your *Publish…* asks;
+- proposing anything for a team's or the organisation's memory, whatever `deny` says;
+- offering it for steering from another device, or inviting somebody into a private one,
+  where `sharing` is `ask` or `deny`. On this computer `ask` refuses too: no team
+  administrator answers a request from a person's own machine;
+- a call the daemon makes to one of your servers for it, which marks it where `marked_by`
+  names the call and is refused where `deny` does.
+
+You may mark one by hand, one-way: **Make it sensitive** in its ⋯, or `/sensitive` in the
+terminal.
+
 ## Raising a session to the current configuration
 
 A session on the platform runs on the bundle version its profile's channel had when it

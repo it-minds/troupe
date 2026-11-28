@@ -192,6 +192,52 @@ defmodule Troupe.SettingsTest do
       refute "Permission rules" in Settings.help_lines([], Settings.view(%{}).rules)
     end
 
+    test "a sensitive session's rules on this computer are listed with where each came from (root #1239)" do
+      view =
+        Settings.view(%{
+          "keys" => [],
+          "sensitive" => %{
+            "marked_by" => [
+              %{
+                "rule" => "mcp(records.*)",
+                "scope" => "enforced",
+                "source" => "/etc/troupe/managed.yaml"
+              },
+              %{"rule" => "read_file(/srv/hr/**)", "scope" => "user", "source" => "/h/config.yaml"}
+            ],
+            "deny" => [
+              %{
+                "rule" => "publish_artifact",
+                "scope" => "enforced",
+                "source" => "/etc/troupe/managed.yaml"
+              }
+            ],
+            "sharing" => %{
+              "value" => "ask",
+              "scope" => "enforced",
+              "source" => "/etc/troupe/managed.yaml"
+            }
+          }
+        })
+
+      lines = Settings.help_lines([], view.rules, view.sensitive)
+      assert "Sensitive sessions" in lines
+
+      assert "  marks      mcp(records.*)  · set by your organisation (/etc/troupe/managed.yaml)" in lines
+
+      assert "  marks      read_file(/srv/hr/**)  · user (/h/config.yaml)" in lines
+
+      assert "  refuses    publish_artifact  · set by your organisation (/etc/troupe/managed.yaml)" in lines
+
+      assert "  sharing    ask  · set by your organisation (/etc/troupe/managed.yaml)" in lines
+
+      refute "Sensitive sessions" in Settings.help_lines(
+               [],
+               [],
+               Settings.view(%{"keys" => []}).sensitive
+             )
+    end
+
     test "unknown keys are reported, not raised" do
       assert :error = Settings.fetch("nope")
     end

@@ -435,6 +435,13 @@ label code {
   color: var(--queued-fg);
   background: var(--queued-bg);
 }
+/* A sensitive session (troupe #1239): a fact that holds and limits what it may do, in the
+   read-only colours of a session that is not wholly yours to change; never amber, which
+   nothing here waits on. */
+.banner.sensitive {
+  color: var(--readonly-fg);
+  background: var(--readonly-bg);
+}
 /* What the machine did while nobody was reading: its own cyan. */
 .banner.away {
   color: var(--running-fg);
@@ -1095,7 +1102,8 @@ main {
   flex: 1 1 auto;
   min-width: 0;
 }
-.rows .kept {
+.rows .kept,
+.rows .sensitive {
   color: var(--text-label);
 }
 
@@ -1306,18 +1314,32 @@ main {
   flex: 0 1 auto;
   min-width: 0;
   display: flex;
-  flex-wrap: nowrap;
+  /* One line of tags: what does not fit wraps below it, out of sight (see .tag). */
+  flex-wrap: wrap;
+  max-height: calc(1lh + 8px);
   overflow: hidden;
   align-items: center;
-  gap: 6px;
+  gap: 4px 6px;
   font: var(--t-micro);
 }
+/* A tag the head has no room for is left out whole, from the end, never cut mid-word: the
+   row wraps onto a second line the head does not show. The order is deliberate, so the
+   agent's, which the composer says too, goes first and `sensitive`, a fact that limits what
+   the session may do and so drawn first, stays longest. A tag wider than the whole row ends
+   in an ellipsis, its whole word in its title. */
+.session-head .crumbs > * {
+  flex: none;
+  max-width: 100%;
+}
 .session-head .tag {
+  min-width: 0;
   padding: 3px 7px;
   border: var(--bw-hairline) solid var(--border-strong);
   font: var(--t-micro);
   color: var(--text-label);
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .session-head .tag.profile {
   border-color: var(--running-bd);
@@ -2301,6 +2323,12 @@ details.advanced > summary {
 .tool-frame.failed .glyph,
 .tool-frame.failed > summary .fact {
   color: var(--error-fg);
+}
+/* A call a sensitive session's rule refused did not run: the read-only ink, not the error's. */
+.tool-frame.refused .glyph,
+.tool-frame.refused > summary .fact,
+.strip .refused {
+  color: var(--readonly-fg);
 }
 .tool-frame > .frame {
   color: var(--text-secondary);
@@ -7584,4 +7612,45 @@ details.under-hood[open] > summary::before {
   background: var(--bg-sunken);
   border: var(--bw-hairline) solid var(--border-hairline);
   padding: var(--space-3);
+}
+
+/* -- a person's own triggers (troupe #1235) ---------------------------------------- */
+
+.own-trigger-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+.own-trigger {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding-bottom: var(--space-4);
+  border-bottom: var(--bw-hairline) solid var(--border-hairline);
+}
+.own-trigger h2 {
+  margin: 0;
+  font: var(--t-subheading);
+}
+.own-trigger p {
+  margin: 0;
+  max-width: var(--measure-reading);
+}
+.own-trigger-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+.own-trigger-actions button:not(.link) {
+  min-height: var(--touch-target);
+}
+.proposal-record .also.error,
+.own-trigger .also.error {
+  margin: 0;
+  font: var(--t-micro);
+  color: var(--error-fg);
 }

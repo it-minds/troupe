@@ -550,6 +550,51 @@
       },
       "additionalProperties": false
     },
+    "sensitive": {
+      "description": "Sensitive sessions on this computer: which calls mark a session sensitive, what a sensitive one is refused, and whether it may be shared. Read from your own config.yaml and from the organisation's file, whose `enforced:` section holds it beyond your reach: your file adds rules to both lists and may tighten `sharing`, never loosen it. Read only from the user's config.yaml.",
+      "type": [
+        "object",
+        "null"
+      ],
+      "properties": {
+        "marked_by": {
+          "description": "Calls that make a session sensitive, before they run: `mcp(records.*)`, `read_file(/srv/hr/**)`, `shell(psql)`. Nothing clears the mark.",
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string",
+            "pattern": "^\\s*[^()\\s]+(\\(.*\\))?\\s*$"
+          }
+        },
+        "deny": {
+          "description": "Calls refused once the session is sensitive: `publish_artifact`, `web_fetch`, `mcp(chat.*)`, `remember`. Required where `marked_by` is set.",
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string",
+            "pattern": "^\\s*[^()\\s]+(\\(.*\\))?\\s*$"
+          }
+        },
+        "sharing": {
+          "description": "Whether a sensitive session may be offered for steering from another device or invited into: `allow`, or `ask` and `deny`, which on this computer both refuse, since no team administrator answers a laptop's request.",
+          "default": "allow",
+          "enum": [
+            "allow",
+            "ask",
+            "deny",
+            null
+          ]
+        }
+      },
+      "patternProperties": {
+        "^x-": {}
+      },
+      "additionalProperties": false
+    },
     "shell_timeout_ms": {
       "description": "How long a shell command may run before it, and everything it started, is stopped.",
       "default": 120000,

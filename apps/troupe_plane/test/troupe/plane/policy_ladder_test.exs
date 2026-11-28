@@ -81,6 +81,21 @@ defmodule Troupe.Plane.PolicyLadderTest do
 
       refute Enum.any?(opinions, &(&1.rung == :platform))
     end
+
+    test "and the idle timeout a pod is given with no team is the platform's, not none",
+         context do
+      assert Ladder.idle_timeout_seconds(nil) == 1800
+
+      {:ok, _} = Settings.put("default_idle_timeout_seconds", "420", context.root.subject)
+      assert Ladder.idle_timeout_seconds(nil) == 420
+
+      # With a team it is the team's, under the platform's: what `profile.get` and the
+      # activation both read.
+      {:ok, team} = Identity.update_team(context.team, %{idle_timeout_seconds: 300})
+      assert Ladder.idle_timeout_seconds(team) == 300
+      {:ok, team} = Identity.update_team(team, %{idle_timeout_seconds: 7200})
+      assert Ladder.idle_timeout_seconds(team) == 420
+    end
   end
 
   describe "a team that tries to widen" do

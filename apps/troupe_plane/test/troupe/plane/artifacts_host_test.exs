@@ -65,7 +65,7 @@ defmodule Troupe.Plane.ArtifactsHostTest do
         %{
           "title" => "Probe",
           "kind" => "html",
-          "visibility" => "profile:dev",
+          "teams" => ["engineering"],
           "files" => [
             file("index.html", @probe, "text/html"),
             file(
@@ -330,7 +330,6 @@ defmodule Troupe.Plane.ArtifactsHostTest do
             "id" => id,
             "title" => "Probe",
             "kind" => "html",
-            "visibility" => "profile:dev",
             "files" => [file("index.html", "<p>two</p>", "text/html")]
           },
           %{user: context.ada, platform_admin?: false}
@@ -421,7 +420,7 @@ defmodule Troupe.Plane.ArtifactsHostTest do
           %{
             "title" => "Notes",
             "kind" => "markdown",
-            "visibility" => "profile:dev",
+            "teams" => ["engineering"],
             "files" => [file("index.md", markdown, "text/markdown")]
           },
           %{user: context.ada, platform_admin?: false}

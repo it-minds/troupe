@@ -1018,6 +1018,29 @@ defmodule Troupe.Client.Daemon do
 
   # How long a session on this computer lasts (root #1209): the daemon's mark beside its
   # log, which its sweep reads; everything here is the person's own.
+  # A session on this computer marked sensitive by its person, at its daemon, one-way (root
+  # #1239): the mark is a line of its log, which the daemon wakes a dormant one to write. A
+  # daemon from before sensitive sessions answers so.
+  @impl true
+  def sensitive(sid, :status) do
+    case Link.call("session.get", %{session_id: sid}) do
+      {:ok, %{"sensitive" => %{} = mark}} -> {:ok, Troupe.Client.Sensitive.already(mark)}
+      {:ok, %{} = _row} -> {:ok, Troupe.Client.Sensitive.ask(:here)}
+      {:error, reason} -> {:error, refusal(reason)}
+    end
+  end
+
+  def sensitive(sid, :mark) do
+    params = %{session_id: sid, sensitive: true, command_id: Troupe.Remote.RPC.command_id()}
+
+    case Link.call_with_data("session.sensitive.set", params) do
+      {:ok, %{} = row} -> {:ok, Troupe.Client.Sensitive.set(row)}
+      {:error, %{code: "method_not_found"}} -> {:error, Troupe.Client.Sensitive.not_known()}
+      {:error, %{message: said}} when is_binary(said) -> {:error, said}
+      {:error, reason} -> {:error, refusal(reason)}
+    end
+  end
+
   @impl true
   def lifespan(sid, :status) do
     case Link.call("session.get", %{session_id: sid}) do
@@ -1050,6 +1073,10 @@ defmodule Troupe.Client.Daemon do
   # Nothing on this computer schedules, so nothing is proposed here (root #1208).
   @impl true
   def proposal(_sid, _verb), do: {:error, Troupe.Client.Proposal.not_here()}
+
+  # A person's own triggers are the plane's, asked from a session there (root #1235).
+  @impl true
+  def own_triggers(_sid, _verb), do: {:error, Troupe.Client.OwnTriggers.not_here()}
   # A session on this computer works in its own folder, not in a plane's clone (root #1207).
   @impl true
   def repositories(_sid, _verb), do: {:error, Troupe.Client.Repositories.not_here()}
@@ -1920,6 +1947,8 @@ defmodule Troupe.Client.Daemon do
       # from before lifespans.
       lifespan: Troupe.Client.Lifespan.of(row),
       erases_at: row["erases_at"],
+      # Sensitive since when and by what (root #1239); nil from a daemon from before.
+      sensitive: Troupe.Client.Sensitive.of(row["sensitive"]),
       # A daemon from before archiving says nothing, and archived nothing.
       archived: row["archived"] == true
     }

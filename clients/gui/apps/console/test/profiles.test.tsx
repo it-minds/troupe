@@ -224,6 +224,9 @@ describe("the editor", () => {
         denyPaths: "",
         maxPushes: "",
         maxRuns: "",
+        maxRepositories: "",
+        maxAttempts: "",
+        sharing: "",
       },
       [],
       kept,
@@ -278,6 +281,9 @@ describe("the editor", () => {
       denyPaths: "secrets/\n *.tfstate \n",
       maxPushes: "3",
       maxRuns: "",
+      maxRepositories: "",
+      maxAttempts: "",
+      sharing: "",
     };
     // Public repositories turned off: absent, which is off; the cap of runs taken away.
     expect(draftOf(form, [], kept).spec!["github"]).toEqual({ permissions: { contents: "write" }, denyPaths: ["secrets/", "*.tfstate"], maxPushes: 3 });

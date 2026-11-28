@@ -482,6 +482,8 @@ defmodule Troupe.Plane.Control.Connection do
   defp dispatch("session.status", params, state) do
     case Sessions.put_status(params["session_id"], params) do
       {:ok, _count} ->
+        # Sensitive from now on, where the pod says so: written once and audited.
+        :ok = Sessions.Sensitive.reported(params["session_id"], params)
         announce(params)
         {:ok, %{"ok" => true}, state}
 
@@ -797,6 +799,9 @@ defmodule Troupe.Plane.Control.Connection do
         {:error, :throwaway} ->
           {:error, Error.new(:forbidden, %{reason: Memory.Proposals.throwaway_reason()}), state}
 
+        {:error, :sensitive} ->
+          {:error, Error.new(:forbidden, %{reason: Memory.Proposals.sensitive_reason()}), state}
+
         {:error, reason} ->
           {:error, Error.new(:invalid_params, %{reason: own_reason(reason)}), state}
       end
@@ -866,6 +871,21 @@ defmodule Troupe.Plane.Control.Connection do
         {:ok, published} -> {:ok, published, state}
         {:error, %Error{} = error} -> {:error, error, state}
       end
+    else
+      refused -> pod_artifact_refusal(refused, params, state)
+    end
+  end
+
+  # What the gate of a publication on this pod shows before it asks, for the session's
+  # owner: for a new version (`id`), who reads that artifact now, in words, where the
+  # owner owns it; for a new one, the teams granted the session's profile, which it is
+  # given by default. Names of teams, and words of who reads one artifact of the owner's
+  # own, and nothing else.
+  defp dispatch("session.artifact.about", params, state) do
+    with %Session{} = session <- session_of(params["session_id"], state.worker),
+         :ok <- at_epoch(session, params["epoch"]),
+         {:owner, %User{active: true} = owner} <- {:owner, Identity.get_user(session.owner_subject)} do
+      {:ok, publication_about(params["id"], session, owner), state}
     else
       refused -> pod_artifact_refusal(refused, params, state)
     end
@@ -1087,6 +1107,17 @@ defmodule Troupe.Plane.Control.Connection do
 
   defp pod_artifact_refusal(nil, params, state),
     do: {:error, Error.new(:not_found, %{session_id: params["session_id"]}), state}
+
+  # A new version's readers in words, where the session's owner owns it, else nothing; a new
+  # one's default teams, those granted the session's profile.
+  defp publication_about(id, _session, owner) when is_binary(id) do
+    case Artifacts.access(id, owner) do
+      {:ok, access} -> %{"access" => access["words"]}
+      {:error, _not_theirs} -> %{}
+    end
+  end
+
+  defp publication_about(_new, session, _owner), do: %{"teams" => Artifacts.profile_teams(session.profile)}
 
   defp at_epoch(_session, nil), do: :ok
   defp at_epoch(%Session{epoch: epoch}, epoch), do: :ok

@@ -219,7 +219,10 @@ defmodule Troupe.Protocol.Schema do
         "spent" => optional(:object),
         # A `publish_artifact`'s: what it published on the plane (#62), `id`, `version`,
         # `url`, `title` and `visibility`.
-        "artifact" => optional(:object)
+        "artifact" => optional(:object),
+        # Why a call that did not run was refused, where a client shows it apart from a
+        # failure: `sensitive`, a sensitive session's rule. Absent on every other result.
+        "refused" => optional(:string)
       },
       "tool_results" => %{"results" => required(:array)},
       "todo_updated" => %{"items" => required(:array), "source" => optional(:string)},
@@ -459,8 +462,10 @@ defmodule Troupe.Protocol.Schema do
       # A call a per-tool rule of the configuration asks about (#658) carries that `rule`:
       # `action`, `rule` as written, `tool`, `pattern`, `scope` (the layer), `source`.
       # A `publish_artifact` asks with what the person aims under `publication`: `title`,
-      # `kind`, `files` (how many), `visibility` and `owner` as the model proposed them
-      # (null where it proposed none, and then the person must choose), `id` and `note`.
+      # `kind`, `files` (how many), `visibility`, `teams` and `owner` as the model proposed
+      # them, `teams` else those the plane gives a new one by default (null where there are
+      # none, and then the person must choose), `id` and `note`; for a new version, which
+      # keeps who reads it, `access`, who that is in words.
       # A tool's call carries `cwd`, the folder it acts in: the call's own, else the
       # session's workspace, so a person answering from another device sees where.
       "approval_requested" => %{
@@ -476,7 +481,7 @@ defmodule Troupe.Protocol.Schema do
       # A delegation's decision names the `agent` it went to when it was allowed, the
       # `brief` as the person edited it and which parts (`edited`), and the person's word
       # back with a denial (`reason`). `allow_session` lets that agent run unasked for the
-      # session. A publication's names the `visibility` and `owner` it ran with and which of
+      # session. A publication's names the `visibility`, `teams` and `owner` it ran with and which of
       # them the person changed (`edited`). `allow_always`'s names the rule the person kept,
       # its scope and its file (`always`).
       "approval_decided" => %{
@@ -490,6 +495,7 @@ defmodule Troupe.Protocol.Schema do
         "edited" => optional({:array, :string}),
         "reason" => optional(:string),
         "visibility" => optional(:string),
+        "teams" => optional({:array, :string}),
         "owner" => optional(:string),
         "always" => optional(:object)
       },
@@ -751,6 +757,19 @@ defmodule Troupe.Protocol.Schema do
         "actor" => required(:string),
         "display_name" => optional(:string)
       },
+      # The session became sensitive, once and for good: `how` is `call` (a tool call that
+      # matched the profile's `sensitive.markedBy`, written before the call ran; `by` its
+      # tool, `rule` the rule, `call_id` the call, `agent` a subagent's path) or `person` (a
+      # mark by hand; `by` their subject). Nothing clears it, and no event says otherwise.
+      "session_marked_sensitive" => %{
+        "how" => required(:string),
+        "by" => required(:string),
+        "at" => required(:string),
+        "rule" => optional(:string),
+        "call_id" => optional(:string),
+        "agent" => optional({:array, :string}),
+        "display_name" => optional(:string)
+      },
       # Something the harness offers the session's owner, written at the root's rest and
       # never during a turn; nothing waits for it. `kind` says what (`trigger`, a schedule
       # that reruns what the session published), `key` what "the same thing" is
@@ -878,7 +897,9 @@ defmodule Troupe.Protocol.Schema do
         "private" => optional(:boolean),
         "title" => optional(:string),
         # How long it lasts: `throwaway`, `normal` (absent) or `persistent`.
-        "lifespan" => optional(:string)
+        "lifespan" => optional(:string),
+        # Sensitive from its first call, a mark nothing clears: a pod session's, at the plane.
+        "sensitive" => optional(:boolean)
       },
       "session.archive" => %{
         "command_id" => required(:string),
@@ -950,6 +971,28 @@ defmodule Troupe.Protocol.Schema do
         "session_id" => required(:string),
         "lifespan" => required(:string)
       },
+      # A session marked sensitive by its owner, once and for good: a pod session's at the
+      # plane, which the clients ask directly, and one on a person's computer at its daemon.
+      # `sensitive` is `true`; `false` is refused, since nothing clears it.
+      "session.sensitive.set" => %{
+        "command_id" => optional(:string),
+        "session_id" => required(:string),
+        "sensitive" => required(:boolean)
+      },
+      # The shares of sensitive sessions a team administrator is asked to say yes to, and
+      # their answer (`approve` or `decline`): the plane's.
+      "session.share_requests" => %{},
+      "session.share_request.decide" => %{
+        "id" => required(:string),
+        "decision" => required(:string)
+      },
+      # The caller's own triggers, the ones a yes of theirs made under their own sponsored
+      # principal, listed, switched off or on, and removed: the plane's, which the clients ask
+      # directly. `trigger` is an id, a name or `team/name`, as `trigger.fire` takes it.
+      "trigger.own.list" => %{},
+      "trigger.own.disable" => %{"trigger" => required(:string)},
+      "trigger.own.enable" => %{"trigger" => required(:string)},
+      "trigger.own.delete" => %{"trigger" => required(:string)},
       # A pod session raised to its channel's current bundle version by its owner: the
       # plane's, which the clients ask directly.
       "session.bundle.raise" => %{"session_id" => required(:string)},
@@ -1045,8 +1088,9 @@ defmodule Troupe.Protocol.Schema do
       },
       # A delegation's answer (Decision 850) may carry `agent`, a subagent the request offered
       # to send it to instead; `brief`, the parts the person edited, held to the brief's
-      # shape; and `reason`, a word back with `deny`. A publication's carries `visibility`,
-      # whom it is for, and `owner`, whose it is, and `reason` with `deny`. A wrong one is
+      # shape; and `reason`, a word back with `deny`. A publication's carries `visibility`
+      # and `teams`, whom a new one is for, and `owner`, whose it is, and `reason` with
+      # `deny`; a new version's audience is kept, and one answered for it dropped. A wrong one is
       # `invalid_params`, and the request waits on.
       "approval.respond" => %{
         "command_id" => required(:string),
@@ -1057,6 +1101,7 @@ defmodule Troupe.Protocol.Schema do
         "brief" => optional(:object),
         "reason" => optional(:string),
         "visibility" => optional(:string),
+        "teams" => optional({:array, :string}),
         "owner" => optional(:string),
         # With `allow_always`: where the person's rule is kept, `workspace` or `everywhere`.
         "scope" => optional(:string)
@@ -1342,6 +1387,9 @@ defmodule Troupe.Protocol.Schema do
       # What a profile gives a session of the person's before they start one, sent on to the
       # plane as them: its agents, skills, tools, model, reach, limits and team.
       "profile.get" => %{"name" => required(:string), "team" => optional(:string)},
+      # The names of the teams granted a profile, for an artifact's sharing menu: for a person
+      # who may run it or owns an artifact a session on it published.
+      "profile.teams" => %{"profile" => required(:string)},
       # A level of the organisation's memory the person may change (a team admin their team's,
       # a platform admin the organisation's), sent on to the plane as them: the plane's
       # `admin.memory.get`, `admin.memory.preview` and `admin.memory.put`, and its refusal
@@ -1382,14 +1430,16 @@ defmodule Troupe.Protocol.Schema do
       # A page, a document or a file published on the plane as the person (#62), through
       # the daemon's sign-in: `files` each `{path, bytes}` (base64) and an optional
       # `content_type`; `id` republishes one of theirs; `session_id` names where it came from.
-      # No `visibility` is `private`, the owner's alone, for a new one, and as it was for a
-      # republish. `thumbnail`, `{content_type, bytes}`, is a picture of the version for its
+      # `visibility` (`private`, the default, or `organisation`) and `teams` (names) are whom
+      # a new one is for; a republish keeps who reads it. `thumbnail`, `{content_type,
+      # bytes}`, is a picture of the version for its
       # gallery card: PNG, JPEG or WebP, at most 256 KiB.
       "artifact.publish" => %{
         "command_id" => required(:string),
         "title" => required(:string),
         "kind" => required(:string),
         "visibility" => optional(:string),
+        "teams" => optional({:array, :string}),
         "owner" => optional(:string),
         "files" => required(:array),
         "id" => optional(:string),
@@ -1398,12 +1448,13 @@ defmodule Troupe.Protocol.Schema do
         "thumbnail" => optional(:object)
       },
       # The person's own artifacts on the plane (#62), for a client's "Publish a new version
-      # of…": `mine`, `shared`, `teams` or `visibility` narrows it, as the plane's
+      # of…": `mine`, `shared`, `teams`, `team` (one team's name) or `visibility` narrows it, as the plane's
       # `artifact.list`.
       "artifact.list" => %{
         "mine" => optional(:boolean),
         "shared" => optional(:boolean),
         "teams" => optional(:boolean),
+        "team" => optional(:string),
         "visibility" => optional(:string)
       },
       # The desktop app's viewer (#62): each the plane's method of the same name, sent with
@@ -1419,13 +1470,15 @@ defmodule Troupe.Protocol.Schema do
         "path" => optional(:string)
       },
       # A link (`role` view, comment or edit), or with `person` (a subject) the artifact
-      # shared with that person by name at `role`, no link made.
+      # shared with that person by name at `role`, no link made; or with `team` that team
+      # added to who reads it. `artifact.unshare` takes back a link, a person or a team.
       "artifact.share" => %{
         "command_id" => required(:string),
         "id" => required(:string),
         "role" => required(:string),
         "expires" => optional(:string),
-        "person" => optional(:string)
+        "person" => optional(:string),
+        "team" => optional(:string)
       },
       # The artifact's thread, oldest first, for whoever may open it; and a comment written
       # in it by whoever holds comment, edit or owner on it.
@@ -1449,13 +1502,28 @@ defmodule Troupe.Protocol.Schema do
         "body" => required(:string)
       },
       # The share picker's search: people whose name, email or subject starts with `query`,
-      # among those the plane lets the person find, as its `people.search`.
-      "people.search" => %{"query" => required(:string), "limit" => optional(:integer)},
+      # among those the plane lets the person find, as its `people.search`; with `artifact`,
+      # one of theirs, the people its session's profile covers too.
+      "people.search" => %{"query" => required(:string), "limit" => optional(:integer), "artifact" => optional(:string)},
       "artifact.unshare" => %{
         "command_id" => required(:string),
         "id" => required(:string),
         "share" => optional(:string),
-        "person" => optional(:string)
+        "person" => optional(:string),
+        "team" => optional(:string)
+      },
+      # Who reads it, whole, for its owner: `owner`, `owner_team`, `teams` (each `{name,
+      # granted_by, at}`), `people` (each `{subject, display_name, role}`), `organisation`,
+      # `links`, `words` (the same in a sentence) and `may_add`, the teams the owner may add.
+      "artifact.access.get" => %{"id" => required(:string)},
+      # Its owner's change of who reads it: each part named is the whole of that part, applied
+      # as the difference from what is there, one audit row per team or person; no version.
+      "artifact.access.set" => %{
+        "command_id" => required(:string),
+        "id" => required(:string),
+        "teams" => optional({:array, :string}),
+        "people" => optional(:array),
+        "organisation" => optional(:boolean)
       },
       "artifact.rollback" => %{
         "command_id" => required(:string),
@@ -1481,8 +1549,8 @@ defmodule Troupe.Protocol.Schema do
         "id" => required(:string),
         "on" => required(:boolean)
       },
-      # Who may open it moved by its owner, or its title: a version over `base` carrying
-      # every file of it, no files sent.
+      # Private or organisation, moved by its owner, or its title: a version over `base`
+      # carrying every file of it, no files sent. Its teams are `artifact.access.set`'s.
       "artifact.put" => %{
         "command_id" => required(:string),
         "id" => required(:string),

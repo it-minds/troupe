@@ -12,7 +12,8 @@ defmodule Troupe.CLI.RunTarget do
   too, on the profile the screen would pick (the last used with room, else the first with
   room). The title is `--title`, else the task's first line. A platform run is the team's,
   or with `--only-me` its owner's until they invite people; a run on this computer is only
-  its owner's anyway.
+  its owner's anyway. `--sensitive` marks a run on the platform sensitive from its start,
+  which nothing clears (root #1239); a run on this computer is refused it.
 
   `--repo owner/name[@ref]`, as often as it is given, puts the run on the platform too, on
   those GitHub repositories (root #1207); a profile with no `spec.github` takes none, and a
@@ -50,6 +51,11 @@ defmodule Troupe.CLI.RunTarget do
       {:local, true} ->
         {:error,
          "--repo is for a run on the platform: a run on this computer works in its own folder"}
+
+      {:local, false} when args.sensitive ->
+        {:error,
+         "--sensitive is for a run on the platform: name its --profile, since a session on " <>
+           "this computer is not marked sensitive from here"}
 
       {:local, false} ->
         params = Troupe.CLI.Runner.run_params(%{args | task: cleaned})
@@ -98,6 +104,8 @@ defmodule Troupe.CLI.RunTarget do
            visibility: NewSession.visibility(Map.get(args, :only_me, false) == true),
            # `--throwaway` or `--persistent`: how long it lasts; nil says nothing of it.
            lifespan: Map.get(args, :lifespan),
+           # `--sensitive`: sensitive from its start, one-way (root #1239).
+           sensitive: Map.get(args, :sensitive, false) == true,
            title: blank(title),
            prompt: cleaned,
            # `--repo`: the GitHub repositories it starts on, which the plane checks again.

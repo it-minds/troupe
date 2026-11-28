@@ -10,7 +10,7 @@ defmodule Troupe.Tools do
 
   alias Troupe.Agent.{Definition, Server}
   alias Troupe.Config.Permissions
-  alias Troupe.Session.{Approvals, ClientTools}
+  alias Troupe.Session.{Approvals, ClientTools, Sensitive}
   alias Troupe.{Skills, Tool}
   alias Troupe.Tool.{Ctx, Result}
   alias Troupe.Tools.{GoalComplete, PublishArtifact}
@@ -336,18 +336,113 @@ defmodule Troupe.Tools do
 
   defp unless_denied(tool, name, args, ctx) do
     case rule(name, args, ctx) do
-      {:deny, rule} -> {:reject, Result.error(ctx.call_id, name, {:denied_by_rule, name, rule})}
-      _other -> {:run, tool, Tool.mode(tool)}
+      {:deny, rule} ->
+        {:reject, Result.error(ctx.call_id, name, refusal(name, rule, ctx))}
+
+      _other ->
+        mark(name, args, ctx)
+        {:run, tool, Tool.mode(tool)}
     end
   end
 
-  # What the configuration's per-tool rules say about this call (#658), or `nil`.
-  defp rule(name, args, %Ctx{config: %{permissions: [_ | _] = rules}} = ctx) do
+  # A call the profile's `sensitive.markedBy` names marks the session sensitive here, once
+  # the gate has let it through and before it runs: the mark is in the log, and every agent
+  # of the session reads it, before the call can return what it is about. A call refused
+  # above read nothing and marks nothing.
+  defp mark(name, args, %Ctx{config: %{sensitive: %{} = sensitive}} = ctx) do
     root = if ctx.workspace, do: ctx.workspace.root_real
-    Permissions.decide(rules, name, args, root)
+    opts = [root: root, call_id: ctx.call_id, agent_path: ctx.agent_path]
+    _marked = mark_sensitive(sensitive, ctx.session_id, name, args, opts)
+    :ok
+  end
+
+  defp mark(_name, _args, _ctx), do: :ok
+
+  @doc """
+  Mark `session_id` sensitive where a call to `name` with `args` matches a rule of
+  `sensitive`'s `marked_by` (a configuration's `sensitive`), before the call runs: the
+  gate's own mark, and what a host that makes a call outside the gate for a session asks
+  first (the daemon's `mcp.call`). Answers the session's mark, the first one where it was
+  already sensitive, or `nil` where no rule matches or no tree holds the session. Options:
+  `root`, the workspace the rules' paths are read against; `call_id`; `agent_path`.
+  """
+  @spec mark_sensitive(map() | nil, String.t() | nil, String.t(), map(), keyword()) :: map() | nil
+  def mark_sensitive(sensitive, session_id, name, args, opts \\ [])
+
+  def mark_sensitive(%{marked_by: [_ | _] = rules}, session_id, name, args, opts) do
+    case Permissions.match(rules, name, args, opts[:root]) do
+      nil ->
+        nil
+
+      rule ->
+        data = %{"how" => "call", "by" => name, "rule" => rule.text, "call_id" => opts[:call_id]}
+
+        # A call outside any session tree (a tool run alone) has no session to mark.
+        case Sensitive.mark(session_id, data, opts[:agent_path] || ["root"]) do
+          {:ok, mark} -> mark
+          {:error, :no_session} -> nil
+        end
+    end
+  end
+
+  def mark_sensitive(_sensitive, _session_id, _name, _args, _opts), do: nil
+
+  @doc """
+  How the gate refuses a call to `name` with `args` in a sensitive session where a rule of
+  `sensitive`'s `deny` matches: `{:denied_sensitive, name, rule, mark}`, which
+  `Troupe.Tool.Result.describe/1` says, or `nil` where it is not sensitive or nothing matches.
+  `session` is the session's id, whose mark its tree holds, or the mark itself, for a
+  session that is not running here. What a host asks before it does for a session what a
+  tool would (the daemon's publication, its `mcp.call`), so the rule is read once, here.
+  """
+  @spec sensitive_refusal(map() | nil, String.t() | map() | nil, String.t(), map(), Path.t() | nil) ::
+          {:denied_sensitive, String.t(), Permissions.rule(), map()} | nil
+  def sensitive_refusal(sensitive, session, name, args \\ %{}, root \\ nil) do
+    mark = if is_map(session), do: session, else: Sensitive.mark_of(session)
+
+    with %{} <- mark,
+         %{deny: [_ | _] = deny} <- sensitive,
+         {:deny, rule} <- Permissions.decide(deny, name, args, root) do
+      {:denied_sensitive, name, rule, mark}
+    else
+      _none -> nil
+    end
+  end
+
+  # What the configuration's per-tool rules say about this call (#658), or `nil`; in a
+  # sensitive session the profile's `sensitive.deny` with them, a layer above the profile's
+  # own, read from the session's mark at the moment of the call.
+  defp rule(name, args, %Ctx{config: %{} = config} = ctx) do
+    case List.wrap(config.permissions) ++ sensitive_deny(config, ctx.session_id) do
+      [] ->
+        nil
+
+      rules ->
+        root = if ctx.workspace, do: ctx.workspace.root_real
+        Permissions.decide(rules, name, args, root)
+    end
   end
 
   defp rule(_name, _args, _ctx), do: nil
+
+  @doc """
+  The profile's `sensitive.deny` rules where the session is sensitive now, else `[]`: what
+  the gate adds to the rules of a call, and a person's `!` command's, once the mark is set.
+  The mark is asked only of a session whose profile refuses anything when it is set.
+  """
+  @spec sensitive_deny(Troupe.Config.t() | nil, String.t() | nil) :: [Permissions.rule()]
+  def sensitive_deny(%{sensitive: %{deny: [_ | _] = deny}}, session_id) do
+    if Sensitive.mark_of(session_id), do: deny, else: []
+  end
+
+  def sensitive_deny(_config, _session_id), do: []
+
+  # A `deny` of the sensitive layer is said with since when and by what the session is
+  # sensitive; any other with its rule and where it came from.
+  defp refusal(name, %{layer: :sensitive} = rule, ctx),
+    do: {:denied_sensitive, name, rule, Sensitive.mark_of(ctx.session_id)}
+
+  defp refusal(name, rule, _ctx), do: {:denied_by_rule, name, rule}
 
   # An MCP server the session's team is not entitled to (docs/developer/architecture-remote.md section 4): its
   # tools were never offered to this session, so a call to one is unknown, as a
@@ -423,7 +518,7 @@ defmodule Troupe.Tools do
         Result.error(ctx.call_id, name, {:denied_by_policy, name})
 
       {:deny, rule} ->
-        Result.error(ctx.call_id, name, {:denied_by_rule, name, rule})
+        Result.error(ctx.call_id, name, refusal(name, rule, ctx))
     end
   end
 
@@ -484,7 +579,7 @@ defmodule Troupe.Tools do
       }
       |> put_cwd(ctx, args)
       |> put_rule(rule)
-      |> put_publication(name, args)
+      |> put_publication(name, args, ctx)
 
     Server.waiting_on_person(ctx.agent_pid, ctx.call_id, fn -> Approvals.request(ctx.session_id, req) end)
   end
@@ -504,11 +599,12 @@ defmodule Troupe.Tools do
   defp put_rule(req, rule), do: Map.put(req, :rule, Permissions.to_json(rule))
 
   # A publication asks with what the gate shows and the person aims: the title, the kind,
-  # the files' count, and the audience and owner the model proposed, or none.
-  defp put_publication(req, "publish_artifact", args),
-    do: Map.put(req, :publication, PublishArtifact.publication(args))
+  # the files' count, the audience and owner the model proposed or the teams the plane gives
+  # a new one by default, and for a new version who reads it now.
+  defp put_publication(req, "publish_artifact", args, ctx),
+    do: Map.put(req, :publication, PublishArtifact.publication(args, ctx))
 
-  defp put_publication(req, _name, _args), do: req
+  defp put_publication(req, _name, _args, _ctx), do: req
 
   @doc """
   Run a tool and normalise whatever it returns into a `Result`.

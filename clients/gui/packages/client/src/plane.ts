@@ -10,6 +10,8 @@ import type { PlaneDocument } from "./own.js";
 import type { ProfileView } from "./profile.js";
 import type { ProposalResult } from "./proposals.js";
 import type { RemoteListRow } from "./remote.js";
+import type { ShareRequest, ShareWaiting } from "./sensitive.js";
+import type { OwnTrigger, OwnTriggers } from "./ownTriggers.js";
 import type { JsonRpcError, JsonRpcResponse } from "./types.js";
 
 export interface Discovery {
@@ -137,6 +139,12 @@ export interface SessionRow {
   lifespan?: string | null;
   /** When a throwaway session is erased if nothing keeps it; null for any other. */
   erases_at?: string | null;
+  /**
+   * Since when, and by what, it is sensitive (troupe #1239): `{at, by, how}`, `how` `call`
+   * (`by` the tool) or `person` (`by` their subject); null while it is not, and absent from
+   * a plane before sensitive sessions.
+   */
+  sensitive?: { at: string; by: string; how: string } | null;
   epoch: number;
   title: string | null;
   /** The agent it was created as or last switched to; null for the profile's default. Absent from an older plane. */
@@ -290,6 +298,8 @@ export interface CreateSessionParams {
   visibility?: string;
   /** How long it lasts; absent is normal. Send it only to a plane whose `initialize` says `lifespans`. */
   lifespan?: "throwaway" | "normal" | "persistent";
+  /** Sensitive from its start, one-way. Send it only to a plane whose `initialize` says `sensitive`. */
+  sensitive?: true;
   terms?: { budget_micros?: number; max_turns?: number; wall_clock_seconds?: number; approvals?: "wait" | "deny" };
   origin?: { kind?: string; [k: string]: unknown };
   /** The GitHub repositories it starts on, the first cloned at the workspace's root (troupe #1207). */
@@ -523,7 +533,7 @@ export class PlaneClient {
    * (`control`): the session's grant made visible (troupe #765). Owner or team admin only.
    * A private session is invited from the daemon that seals it (`DaemonClient.inviteSession`).
    */
-  inviteToSession(planeToken: string, sessionId: string, subject: string, role: InviteRole): Promise<{ session_id: string; invite: Invitee }> {
+  inviteToSession(planeToken: string, sessionId: string, subject: string, role: InviteRole): Promise<{ session_id: string; invite: Invitee } | ShareWaiting> {
     return this.rpc(planeToken, "session.invite", { session_id: sessionId, subject, role });
   }
 
@@ -587,8 +597,26 @@ export class PlaneClient {
    * (troupe #1169); the answer is its row. Its owner's alone: anybody else is refused
    * `forbidden`. Invitations stay as they are.
    */
-  setSessionVisibility(planeToken: string, sessionId: string, visibility: "team" | "private"): Promise<SessionRow> {
-    return this.rpc<SessionRow>(planeToken, "session.visibility.set", { session_id: sessionId, visibility });
+  setSessionVisibility(planeToken: string, sessionId: string, visibility: "team" | "private"): Promise<SessionRow | ShareWaiting> {
+    return this.rpc<SessionRow | ShareWaiting>(planeToken, "session.visibility.set", { session_id: sessionId, visibility });
+  }
+
+  /**
+   * Mark a pod session sensitive by hand (troupe #1239), one-way: nothing clears it. The
+   * answer is its row. Its owner's alone; a session already sensitive is answered as it is.
+   */
+  setSessionSensitive(planeToken: string, sessionId: string): Promise<SessionRow> {
+    return this.rpc<SessionRow>(planeToken, "session.sensitive.set", { session_id: sessionId, sensitive: true });
+  }
+
+  /** The shares of sensitive sessions waiting on this person, a team administrator, oldest first. */
+  shareRequests(planeToken: string): Promise<{ requests: ShareRequest[] }> {
+    return this.rpc<{ requests: ShareRequest[] }>(planeToken, "session.share_requests", {});
+  }
+
+  /** A team administrator's answer to a held share: `approve` applies it as its owner asked it. */
+  decideShareRequest(planeToken: string, id: string, decision: "approve" | "decline"): Promise<{ share_request: ShareRequest; applied: unknown }> {
+    return this.rpc(planeToken, "session.share_request.decide", { id, decision });
   }
 
   /**
@@ -613,6 +641,25 @@ export class PlaneClient {
    */
   acceptProposal(planeToken: string, sessionId: string, id: string, edits: Record<string, unknown>): Promise<ProposalResult & { edited?: string[] }> {
     return this.rpc<ProposalResult & { edited?: string[] }>(planeToken, "session.proposal.accept", { session_id: sessionId, id, edits });
+  }
+
+  /**
+   * The person's own triggers (troupe #1235): the ones a yes of theirs made under their own
+   * principal, across their teams, each with its next run and its last. Only where the
+   * plane's `initialize` says `own_triggers`.
+   */
+  listOwnTriggers(planeToken: string): Promise<OwnTriggers> {
+    return this.rpc<OwnTriggers>(planeToken, "trigger.own.list");
+  }
+
+  /** Switch one of the person's own triggers off (`false`) or on again (`true`); the answer is it as it now is. Anybody else's is refused `forbidden`. */
+  switchOwnTrigger(planeToken: string, trigger: string, on: boolean): Promise<{ trigger: OwnTrigger }> {
+    return this.rpc<{ trigger: OwnTrigger }>(planeToken, on ? "trigger.own.enable" : "trigger.own.disable", { trigger });
+  }
+
+  /** Remove one of the person's own triggers, for good; its runs' sessions stay. */
+  removeOwnTrigger(planeToken: string, trigger: string): Promise<{ team: string; name: string; deleted: boolean }> {
+    return this.rpc(planeToken, "trigger.own.delete", { trigger });
   }
 
   /**

@@ -633,11 +633,11 @@ defmodule Troupe.UI.TUI.View do
   defp pending_summary(%{kind: :approval, delegation: %{"agent" => agent}}, once?, _where),
     do: "delegation to #{agent} (y / e / s / n#{if once?, do: "", else: " / a"} in the window)"
 
-  # An agent's publication is answered with whom it is for, picked by digit in the window.
+  # An agent's publication: a new one's readers ticked by digit in the window, a new version asked nothing.
   defp pending_summary(%{kind: :approval, publication: %{} = publication}, once?, _where),
     do:
       "publication: #{Model.one_line(publication["title"] || "untitled")} " <>
-        "(a digit picks whom for, y / n#{if once? or publication["visibility"] == nil, do: "", else: " / a"} in the window)"
+        "(#{if is_binary(publication["id"]), do: "", else: "a digit ticks who reads it, "}y / n#{if once? or (publication["id"] == nil and publication["visibility"] == nil), do: "", else: " / a"} in the window)"
 
   defp pending_summary(%{kind: :approval, name: name}, once?, where),
     do: "approval: #{name} (#{if once?, do: "y / n", else: "y / n / a"}#{where})"
@@ -730,7 +730,8 @@ defmodule Troupe.UI.TUI.View do
   desktop app's words (`@troupe/client`'s `syncWords`); `only you` for a pod session of the
   person's own the team cannot open (`@troupe/client`'s `onlyYou`), never "private", which
   is a sealed session's word; empty for any other session. Then how long it lasts, where it
-  is not normal (root #1209): `throwaway · goes in 18 h`, `persistent`.
+  is not normal (root #1209): `throwaway · goes in 18 h`, `persistent`; then `sensitive`,
+  where it is (root #1239).
   """
   @spec kept(map()) :: String.t()
   def kept(entry) do
@@ -742,7 +743,8 @@ defmodule Troupe.UI.TUI.View do
       end
 
     lasts = Client.lifespan_mark(Map.get(entry, :lifespan), Map.get(entry, :erases_at))
-    [whose, lasts] |> Enum.reject(&(&1 == "")) |> Enum.join(" · ")
+    sensitive = Client.sensitive_mark(Map.get(entry, :sensitive))
+    [whose, lasts, sensitive] |> Enum.reject(&(&1 == "")) |> Enum.join(" · ")
   end
 
   @doc "The mark of a pod session only its owner and the people they invite can open."
@@ -1660,7 +1662,15 @@ defmodule Troupe.UI.TUI.View do
 
     %Paragraph{
       text:
-        Enum.join(head ++ Settings.help_lines(state.commands, Map.get(s.view, :rules, [])), "\n"),
+        Enum.join(
+          head ++
+            Settings.help_lines(
+              state.commands,
+              Map.get(s.view, :rules, []),
+              Map.get(s.view, :sensitive)
+            ),
+          "\n"
+        ),
       wrap: true,
       scroll: {s.scroll, 0},
       block: %Block{title: " help — PgUp/PgDn or the wheel scrolls ", borders: [:all]}
@@ -2715,8 +2725,8 @@ defmodule Troupe.UI.TUI.View do
       # A delegation at the gate (TUI Decision 157): run, edit, switch, deny, always.
       {delegation? and once?, ["y/e/s/n delegation", "y/e/s/n", "y/e/s/n"]},
       {delegation? and not once?, ["y/e/s/n/a delegation", "y/e/s/n/a", "y/e/s/n/a"]},
-      # An agent's publication: a digit picks whom it is for, then y publishes.
-      {publication?, ["1-9 whom for · y/n publish", "1-9 · y/n publish", "1-9 y/n"]},
+      # An agent's publication: a digit ticks who reads a new one, then y or Enter publishes.
+      {publication?, ["1-9 who reads · y/n publish", "1-9 · y/n publish", "1-9 y/n"]},
       {armed?(state, w.path, "x"), ["x again cancels & removes", "x again cancels", "x again"]},
       {armed?(state, w.path, "d"), ["d again dismisses", "d again dismisses", "d again"]},
       {not armed?(state, w.path, "x") and w.state in [:running, :needs_input],
@@ -3105,7 +3115,11 @@ defmodule Troupe.UI.TUI.View do
 
   defp remote_note(%{model: %{remote: %{} = remote}}) do
     mine = if remote[:only_me?], do: " · " <> only_you(), else: ""
-    state = " · remote (#{remote[:state] || "?"})" <> mine <> on_github(remote[:repositories])
+    sensitive = if remote[:sensitive?], do: " · " <> Client.sensitive_word(), else: ""
+
+    state =
+      " · remote (#{remote[:state] || "?"})" <>
+        mine <> sensitive <> on_github(remote[:repositories])
 
     case remote[:reason] do
       reason when is_binary(reason) -> state <> " · #{reason}"

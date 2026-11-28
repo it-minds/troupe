@@ -95,19 +95,23 @@ async function openPublish(signIn = true): Promise<HTMLElement> {
 }
 
 describe("Publish…", () => {
-  it("publishes picked files as a new artifact, for a profile's people, and links the gallery", async () => {
+  it("publishes picked files as a new artifact, read by the teams ticked and the organisation, and links the gallery", async () => {
     daemon.artifacts = [];
+    daemon.myTeams = ["core", "design"];
     const d = await openPublish();
-    await waitFor(() => d.querySelector('option[value="profile:dev"]'), "the profiles the plane names");
+    const tick = (label: string): HTMLInputElement | null => [...d.querySelectorAll<HTMLLabelElement>(".readers label")].find((l) => l.textContent?.trim().startsWith(label))?.querySelector("input") ?? null;
+    (await waitFor(() => tick("The design team"), "the teams the plane names")).click();
+    tick("The whole organisation")!.click();
+    await sees("It will be read by the whole organisation and the design team.");
     pick(d.querySelector<HTMLInputElement>('input[type="file"]')!, [new File(["<h1>Weekly</h1>"], "index.html", { type: "text/html" }), new File(["h1 {}"], "site.css", { type: "text/css" })]);
     await sees("A page: index.html, site.css");
     type([...d.querySelectorAll<HTMLInputElement>("label input")].find((i) => i.closest("label")?.textContent?.startsWith("Title"))!, "Weekly");
-    choose([...d.querySelectorAll<HTMLSelectElement>("label select")].find((s) => s.closest("label")?.textContent?.startsWith("Who may open it"))!, "profile:dev");
     (await waitFor(() => (button("Publish", d)?.disabled === false ? button("Publish", d) : null), "the Publish button")).click();
-    await sees("is published as art-fake1, version 1, for the dev profile's people");
+    await sees("is published as art-fake1, version 1, read by the whole organisation and the design team");
 
     const sent = daemon.publishedArtifacts[0]!;
-    expect(sent).toMatchObject({ title: "Weekly", kind: "html", visibility: "profile:dev" });
+    expect(sent).toMatchObject({ title: "Weekly", kind: "html", visibility: "organisation", teams: ["design"] });
+    expect(sent["owner"]).toBeUndefined();
     expect((sent["files"] as Array<{ path: string; bytes: string }>).map((f) => [f.path, atob(f.bytes)])).toEqual([
       ["index.html", "<h1>Weekly</h1>"],
       ["site.css", "h1 {}"],
@@ -141,21 +145,23 @@ describe("Publish…", () => {
     type([...d.querySelectorAll<HTMLInputElement>("label input")].find((i) => i.closest("label")?.textContent?.startsWith("What changed"))!, "October's figures");
     (await waitFor(() => (button("Publish the new version", d)?.disabled === false ? button("Publish the new version", d) : null), "the button")).click();
     await sees("version 3");
-    expect(daemon.publishedArtifacts[0]).toMatchObject({ id: "art-ada-notes", title: "Notes", kind: "markdown", visibility: "organisation", note: "October's figures" });
+    expect(daemon.publishedArtifacts[0]).toMatchObject({ id: "art-ada-notes", title: "Notes", kind: "markdown", note: "October's figures" });
+    // A new version keeps who reads it: neither the switch nor the teams are sent with one.
+    expect(daemon.publishedArtifacts[0]!["visibility"]).toBeUndefined();
+    expect(daemon.publishedArtifacts[0]!["teams"]).toBeUndefined();
   });
 
-  it("publishes for the person alone unless told otherwise, and offers their teams", async () => {
+  it("publishes for the person alone unless told otherwise, and offers their teams unticked", async () => {
     daemon.artifacts = [];
     const d = await openPublish();
-    const who = await waitFor(() => [...d.querySelectorAll<HTMLSelectElement>("label select")].find((s) => s.closest("label")?.textContent?.startsWith("Who may open it")) ?? null, "who may open it");
-    await waitFor(() => d.querySelector('option[value="team:core"]'), "the teams the plane names");
-    expect(who.value).toBe("private");
-    expect(who.querySelector('option[value="team:core"]')?.textContent).toBe("The core team");
+    const core = await waitFor(() => [...d.querySelectorAll<HTMLLabelElement>(".readers label")].find((l) => l.textContent?.trim().startsWith("The core team"))?.querySelector("input") ?? null, "the teams the plane names");
+    expect(core.checked).toBe(false);
+    await sees("Only you, until you share it from its Access tab.");
     pick(d.querySelector<HTMLInputElement>('input[type="file"]')!, [new File(["# Mine"], "notes.md", { type: "text/markdown" })]);
     type([...d.querySelectorAll<HTMLInputElement>("label input")].find((i) => i.closest("label")?.textContent?.startsWith("Title"))!, "Mine");
     (await waitFor(() => (button("Publish", d)?.disabled === false ? button("Publish", d) : null), "the Publish button")).click();
-    await sees("version 1, for only you");
-    expect(daemon.publishedArtifacts[0]).toMatchObject({ title: "Mine", visibility: "private" });
+    await sees("version 1, read by nobody but its owner");
+    expect(daemon.publishedArtifacts[0]).toMatchObject({ title: "Mine", visibility: "private", teams: [] });
   });
 
   it("sends a picture for its card when one is picked, and none when not", async () => {

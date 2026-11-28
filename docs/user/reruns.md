@@ -56,6 +56,27 @@ Your agent is told at its next turn that the rerun exists, so it does not offer 
 ## Afterwards
 
 The rerun is a trigger of your team's, named after the report. A team admin sees it, changes
-it or stops it on the console's Triggers page. Where the platform keeps its triggers in a
-repository, Turn on makes nothing: it gives you the `Trigger` file to commit there, which a
-team admin completes with a principal ([triggers-from-a-repository.md](../admin/triggers-from-a-repository.md)).
+it or stops it on the console's Triggers page, where it is marked as yours. Where the
+platform keeps its triggers in a repository, Turn on makes nothing: it gives you the
+`Trigger` file to commit there, which a team admin completes with a principal
+([triggers-from-a-repository.md](../admin/triggers-from-a-repository.md)).
+
+## Stopping what you turned on
+
+It runs as you and spends your budget, so it is yours to stop without asking anybody:
+
+- **Desktop app and web app**: **Your triggers**, under *On the platform* in the rail, lists
+  each one with whether it is on and when it runs next, how its last run went, and what a
+  run may spend. **Switch off** stops it running until **Switch on**; **Remove** takes it
+  away for good, asked once more, and the sessions its runs made stay. The line in the chat
+  where you said yes says whether it is on, with the same buttons under it.
+- **Console**: **Your triggers** under Your sessions, on Sessions › Mine, with the same
+  controls.
+- **Terminal**: `/triggers` lists them; `/trigger off NAME`, `/trigger on NAME` and
+  `/trigger remove NAME` change one (`TEAM/NAME` where two teams have one). `/proposal`
+  with nothing open says how what you turned on in that session stands.
+
+Only a trigger your own yes made is yours to change; anybody else's, a team admin's among
+them, is refused with whose it is. A removed one no longer counts against the five you may
+hold in a team, switched off or on alike. Where the platform keeps its triggers in a
+repository a switch is refused, as an administrator's is; the change is a commit there.

@@ -49,6 +49,7 @@ defmodule Troupe.CLI do
           team: String.t() | nil,
           only_me: boolean(),
           lifespan: String.t() | nil,
+          sensitive: boolean(),
           repositories: [String.t()],
           title: String.t() | nil,
           task: String.t() | nil,
@@ -141,6 +142,7 @@ defmodule Troupe.CLI do
     only_me: :boolean,
     throwaway: :boolean,
     persistent: :boolean,
+    sensitive: :boolean,
     repo: :keep,
     title: :string
   ]
@@ -174,6 +176,10 @@ defmodule Troupe.CLI do
        ["run", "task", "--headless", "--throwaway"],
        ["run", "task", "--profile", "dev", "--persistent"]
      ]},
+    {~s(troupe run [AGENT] "task" --profile NAME --sensitive ...),
+     "the run's session on the platform is sensitive from its start, and nothing clears " <>
+       "it: its profile refuses what would take what it read out of it, and says who it " <>
+       "may be shared with", [["run", "task", "--profile", "dev", "--sensitive"]]},
     {~s(troupe run [AGENT] "task" --profile NAME [--team TEAM] [--only-me] [--repo OWNER/NAME[@REF]]... [--title "TITLE"] [--headless]),
      "the task on the platform, on that plane profile, as the TUI's /new would start it; " <>
        "a full profile is waited on, a line a wait; @profile #agent /local /platform in " <>
@@ -276,19 +282,20 @@ defmodule Troupe.CLI do
        ["memory", "--status"],
        ["memory", "--blame"]
      ]},
-    {"troupe artifacts list [--scope mine|organisation|team:NAME|profile:NAME|shared|private] [--json]",
+    {"troupe artifacts list [--scope mine|organisation|team:NAME|shared|private] [--json]",
      "your artifacts on the plane, by who can see them, newest first; a version you have not opened here is new",
      [["artifacts", "list"], ["artifacts", "list", "--scope", "team:design", "--json"]]},
     {"troupe artifacts open|show ID [--version N]",
      "open one in the browser, through the plane's one-time address; show prints its text (a Markdown one's source)",
      [["artifacts", "open", "art-1"], ["artifacts", "show", "art-1", "--version", "2"]]},
-    {"troupe artifacts publish FILE [--to SCOPE] [--title TITLE] [--owner me|team]",
-     "publish a file of this machine, as /publish does: for SCOPE (organisation, team:NAME, profile:NAME), only you without one; " <>
-       "a team publication is the team's, every member its owner, unless --owner me",
+    {"troupe artifacts publish FILE [--to private|organisation] [--team NAME]... [--title TITLE] [--owner me|team]",
+     "publish a file of this machine, as /publish does: read by you alone, each --team named, and with --to organisation everyone; " <>
+       "yours unless --owner team makes it the one team's named, every member its owner; who reads it later is changed from its Access tab in the desktop app",
      [
        ["artifacts", "publish", "report.md"],
        ["artifacts", "publish", "report.md", "--to", "organisation", "--title", "Weekly"],
-       ["artifacts", "publish", "report.md", "--to", "team:core", "--owner", "me"]
+       ["artifacts", "publish", "report.md", "--team", "core", "--team", "billing"],
+       ["artifacts", "publish", "report.md", "--team", "core", "--owner", "team"]
      ]},
     {"troupe artifacts transfer ID --to team:NAME|me",
      "hand one of yours to a team you are in, or take a team's back (its admins, or a platform admin); " <>
@@ -494,6 +501,8 @@ defmodule Troupe.CLI do
       # `troupe run --throwaway` or `--persistent` (root #1209): how long it lasts; nil is
       # normal, and the create says nothing of it.
       lifespan: lifespan_of(opts),
+      # `troupe run --sensitive` (root #1239): on the platform, sensitive from its start.
+      sensitive: Keyword.get(opts, :sensitive, false),
       # `troupe run --repo owner/name[@ref]`, as often as it is given: the GitHub
       # repositories a run on the platform starts on.
       repositories: Keyword.get_values(opts, :repo),

@@ -78,7 +78,7 @@ defmodule Troupe.Agent.Server do
   alias Troupe.Protocol.Event
   alias Troupe.Protocol.Principal
   alias Troupe.Protocol.Words
-  alias Troupe.Session.{Approvals, Blobs, Log, Memory, Organisation, Proposals, Questions, Shell}
+  alias Troupe.Session.{Approvals, Blobs, Log, Memory, Organisation, Proposals, Questions, Sensitive, Shell}
   alias Troupe.Session.MCP, as: SessionMCP
   alias Troupe.Sessions.Index
   alias Troupe.Tool.{Ctx, Result}
@@ -2090,7 +2090,11 @@ defmodule Troupe.Agent.Server do
   defp configuration_section(%State{agent_path: ["root"]} = state) do
     lines =
       Enum.reject(
-        [bundle_line(configuration_moved(state)), repositories_lines(state.repositories)],
+        [
+          bundle_line(configuration_moved(state)),
+          repositories_lines(state.repositories),
+          sensitive_line(state)
+        ],
         &(&1 == "")
       )
 
@@ -2105,6 +2109,31 @@ defmodule Troupe.Agent.Server do
         "tools, skills and servers are the new version's."
 
   defp bundle_line(_moved), do: ""
+
+  # A sensitive session (#1239): since when, by what, and what its profile refuses in one,
+  # said from the first turn after the mark, which changes the section, and kept after.
+  defp sensitive_line(%State{session_id: session_id, config: config}) do
+    case Sensitive.mark_of(session_id) do
+      nil ->
+        ""
+
+      mark ->
+        deny = for rule <- List.wrap(config.sensitive && config.sensitive.deny), do: rule.text
+        # A pod's rules are its profile's; this computer's, the organisation's and the user's.
+        whose = if config.sensitive && config.sensitive.profile, do: "its profile", else: "this computer's configuration"
+
+        refused =
+          if deny == [],
+            do: "#{String.capitalize(whose)} refuses nothing more in a sensitive session.",
+            else:
+              "In a sensitive session #{whose} refuses #{Words.and_list(deny)}: a call to one " <>
+                "is refused and does not run, so say what is left undone instead of looking for " <>
+                "another way to do it."
+
+        "This session is sensitive since #{Result.since(mark, :dated)}, and nothing clears " <>
+          "that: what it read must not leave it. " <> refused
+    end
+  end
 
   # What the session holds on GitHub, each repository where its clone is, and what moved
   # last: said when it changes, as the rest of the section is.

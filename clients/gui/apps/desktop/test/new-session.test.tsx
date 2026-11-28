@@ -184,7 +184,8 @@ describe("the new-session screen", () => {
     expect(LINES.waiting_for_a_place as readonly (string | undefined)[]).toContain(asides[1]);
     for (const i of [0, 2]) expect(LINES.casting as readonly (string | undefined)[]).toContain(asides[i]);
     expect(new Set(asides).size).toBe(3);
-    const pending = [...h.plane.rows.values()].find((r) => r.state === "pending")!;
+    // The screen says the wait from its own knowledge that the house is full; the plane makes the row when it answers the create.
+    const pending = await waitFor(() => [...h.plane.rows.values()].find((r) => r.state === "pending"), "the queued row");
     await waitFor(() => h.plane.mints.filter((id) => id === pending.id).length >= 2, "token.mint asked again");
     // at once: still waiting, so nothing has opened.
     expect(document.querySelector('textarea[aria-label="Message"]')).toBeNull();

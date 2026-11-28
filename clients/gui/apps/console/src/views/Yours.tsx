@@ -23,6 +23,13 @@ import {
   lifespanOf,
   lifespanRefusal,
   planeKnowsLifespans,
+  planeKnowsSensitive,
+  sensitiveConfirm,
+  SENSITIVE_ITEM,
+  sensitiveMark,
+  sensitiveOf,
+  sensitiveRefusal,
+  waitingSentence,
   TAKE_BACK_LINE,
   appLink,
   behind,
@@ -44,6 +51,7 @@ import { href } from "../route";
 import { Empty, Field, Loaded, Preview, Region, SessionState, Status, TextDiff, count, when } from "./bits";
 import type { StatusKind } from "./bits";
 import { InvitedToYou } from "./Invited";
+import { YourTriggers } from "./OwnTriggers";
 import { RemoteSessions, useOffered } from "./Remote";
 
 const COMPONENT: Record<string, string> = { tui: "terminal", daemon: "daemon", desktop: "desktop app" };
@@ -54,7 +62,7 @@ const STANDING: Record<string, { kind: StatusKind; glyph: string; word: string; 
   refused: { kind: "denied", glyph: "✕", word: "refused", why: () => "at its next start: update it" },
 };
 
-/** Sessions' Mine: the sessions offered to the person and those they were invited into, then their own on the plane. */
+/** Sessions' Mine: the sessions offered to the person and those they were invited into, then their own on the plane, and their own triggers. */
 export function MySessions(): JSX.Element {
   const [offered, reload, invites] = useOffered();
   return (
@@ -62,6 +70,7 @@ export function MySessions(): JSX.Element {
       <RemoteSessions load={offered} reload={reload} />
       <InvitedToYou load={invites} reload={reload} />
       <YourSessions />
+      <YourTriggers />
     </>
   );
 }
@@ -75,13 +84,18 @@ function Whose({ session, onChanged }: { session: SessionRow; onChanged: () => v
   const { auth, notify } = useConsole();
   const [busy, setBusy] = useState(false);
   const [refused, setRefused] = useState<string | null>(null);
+  const [waiting, setWaiting] = useState<string | null>(null);
   if (session.kind === "private") return <span className="muted">only you, sealed on your computer</span>;
   const team = session.visibility === "team";
   const change = async (): Promise<void> => {
     setBusy(true);
     setRefused(null);
+    setWaiting(null);
     try {
-      await auth.withToken((plane, token) => plane.setSessionVisibility(token, session.id, team ? "private" : "team"));
+      const answer = await auth.withToken((plane, token) => plane.setSessionVisibility(token, session.id, team ? "private" : "team"));
+      // A sensitive session's profile may hold it for a team administrator: nothing changed yet.
+      const held = waitingSentence(answer);
+      if (held) return setWaiting(held);
       notify(team ? `${session.title ?? session.id} is yours again.` : `${session.title ?? session.id} is given to ${teamWords(session.team)}.`);
       onChanged();
     } catch (e) {
@@ -95,6 +109,67 @@ function Whose({ session, onChanged }: { session: SessionRow; onChanged: () => v
       <span title={team ? giveLine(session.team) : TAKE_BACK_LINE}>{sessionWhose(session.visibility, true)}</span>{" "}
       <button type="button" className="link" disabled={busy} title={team ? TAKE_BACK_LINE : giveLine(session.team)} onClick={() => void change()}>
         {team ? "Only me again" : `Give it to ${teamWords(session.team)}`}
+      </button>
+      {refused && (
+        <span className="hint" role="alert">
+          {" "}
+          {refused}
+        </span>
+      )}
+      {waiting && (
+        <span className="hint" role="status">
+          {" "}
+          {waiting}
+        </span>
+      )}
+    </>
+  );
+}
+
+/**
+ * Whether one of the person's own sessions is sensitive (troupe #1239), since when and by
+ * what, and to its owner Make it sensitive where the plane knows the word: one-way, so asked
+ * once more in place with what it means.
+ */
+function Sensitive({ session, knows, onChanged }: { session: SessionRow; knows: boolean; onChanged: () => void }): JSX.Element {
+  const { auth, notify, me } = useConsole();
+  const [asking, setAsking] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [refused, setRefused] = useState<string | null>(null);
+  const mark = sensitiveMark({ sensitive: sensitiveOf(session.sensitive) }, { self: me.subject });
+  if (mark) return <span title={mark.title}>{mark.word}</span>;
+  if (!knows || session.kind === "private") return <span className="muted">—</span>;
+  const make = async (): Promise<void> => {
+    setBusy(true);
+    setRefused(null);
+    try {
+      await auth.withToken((plane, token) => plane.setSessionSensitive(token, session.id));
+      notify(`${session.title ?? session.id} is sensitive now: nothing clears it.`);
+      onChanged();
+    } catch (e) {
+      setRefused(sensitiveRefusal(e));
+    } finally {
+      setBusy(false);
+      setAsking(false);
+    }
+  };
+  return asking ? (
+    <span role="group" aria-label="Make it sensitive?">
+      {sensitiveConfirm()}{" "}
+      <button type="button" className="link" disabled={busy} onClick={() => void make()}>
+        {SENSITIVE_ITEM.title}
+      </button>
+      {" · "}
+      <button type="button" className="link" disabled={busy} onClick={() => setAsking(false)}>
+        Cancel
+      </button>
+    </span>
+  ) : (
+    <>
+      <span className="muted">no</span>
+      {" · "}
+      <button type="button" className="link" title={SENSITIVE_ITEM.line} onClick={() => setAsking(true)}>
+        {SENSITIVE_ITEM.title}
       </button>
       {refused && (
         <span className="hint" role="alert">
@@ -212,13 +287,13 @@ function YourSessions(): JSX.Element {
   const [load, reload] = useLoad(async () => {
     const mine = await auth.withToken((plane, token) => plane.listSessions(token)).then((r) => r.sessions.filter((s) => s.owner === me.subject));
     const seen = role === "member" || mine.length === 0 ? [] : await admin.sessions().catch(() => []);
-    return { rows: mine, onSessions: new Set(seen.map((s) => s.id)), knows: await planeKnowsLifespans(auth) };
+    return { rows: mine, onSessions: new Set(seen.map((s) => s.id)), knows: await planeKnowsLifespans(auth), sensitive: await planeKnowsSensitive(auth) };
   }, [auth, admin, me.subject, role]);
   return (
     <section aria-label="Your sessions">
       <Region>Your sessions</Region>
       <Loaded load={load} what="your sessions" retry={reload}>
-        {({ rows, onSessions, knows }) =>
+        {({ rows, onSessions, knows, sensitive }) =>
           rows.length === 0 ? (
             <Empty title="No session of yours on the plane">One you start on the platform, from the desktop app or the terminal, is listed here.</Empty>
           ) : (
@@ -233,6 +308,7 @@ function YourSessions(): JSX.Element {
                     <th>Last active</th>
                     <th>Who opens it</th>
                     <th>How long it lasts</th>
+                    {sensitive && <th>Sensitive</th>}
                     <th>Configuration</th>
                     <th>Where it opens</th>
                   </tr>
@@ -254,6 +330,11 @@ function YourSessions(): JSX.Element {
                       <td>
                         <Lasts session={s} knows={knows} onChanged={reload} />
                       </td>
+                      {sensitive && (
+                        <td>
+                          <Sensitive session={s} knows={sensitive} onChanged={reload} />
+                        </td>
+                      )}
                       <td>
                         <Configuration session={s} onChanged={reload} />
                       </td>

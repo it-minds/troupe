@@ -50,6 +50,11 @@ const plane = await FakePlane.start({
   github: { repositories: ["example-org/widgets", "example-org/gadgets", "example-docs/*"], profiles: { dev: 3 } },
   // UNPRICED=dev: some of the dev profile's calls this month had no price, which its page says.
   ...(process.env["UNPRICED"] ? { profileSpecs: exampleProfiles().map((p) => (p.name === process.env["UNPRICED"] ? { ...p, unpriced: { calls: 14, tokens: 182_400 } } : p)) } : {}),
+  // SENSITIVE_SHARING=ask|deny: what the profiles say of sharing a sensitive session (#1239);
+  // under ask a share waits for Bob, who administers the team.
+  ...(process.env["SENSITIVE_SHARING"] === "ask" || process.env["SENSITIVE_SHARING"] === "deny"
+    ? { sensitiveSharing: process.env["SENSITIVE_SHARING"], teamAdmins: ["bob@example.com"] }
+    : {}),
   // The person's memory and artifacts are the ones the daemon below keeps, so the app shows
   // the same signed in, when it asks the plane, and offline, when it asks the daemon.
   keeper: (method, params) => keptBy(daemon)(method, params),
@@ -80,6 +85,28 @@ plane.seed("alice@example.com", { title: "Draft the pricing memo", profile: "dev
 // offers Erase now and Keep it; either is changed from its ⋯.
 plane.seed("alice@example.com", { title: "Which port does the gateway listen on?", profile: "dev", lifespan: "throwaway" });
 plane.seed("alice@example.com", { title: "Quarterly cost report", profile: "dev", lifespan: "persistent" });
+// A session a records lookup made sensitive (#1239), where a publish was then refused: its row
+// and head are marked, its transcript says when and draws the refusal; giving it to the team
+// is refused or waits as SENSITIVE_SHARING says. Make it sensitive is on any other's ⋯.
+const record = plane.seed("alice@example.com", {
+  title: "Look Ann up in the records",
+  profile: "dev",
+  visibility: "private",
+  sensitive: { at: new Date(Date.now() - 20 * 60_000).toISOString().replace(/\.\d+Z$/, "Z"), by: "mcp.records.lookup", how: "call" },
+});
+{
+  const log = worker.sessions.get(record.id)!.log;
+  log.append("tool_call_started", { call_id: "call_seed", name: "mcp.records.lookup", args: { name: "Ann" } });
+  log.append("tool_call_completed", { call_id: "call_seed", name: "mcp.records.lookup", ok: true, content: "Ann Example, born 1980" });
+  log.append("tool_call_started", { call_id: "call_pub", name: "publish_artifact", args: { title: "Ann" } });
+  log.append("tool_call_completed", {
+    call_id: "call_pub",
+    name: "publish_artifact",
+    ok: false,
+    refused: "sensitive",
+    content: "This session is sensitive since mcp.records.lookup read from it: publish_artifact is refused in a sensitive session by the profile dev (deny publish_artifact). It did not run. Say what is left undone; do not try to get around it.",
+  });
+}
 // A report built from a fetched page and published, which the harness proposes to rerun
 // every Monday (#1208): the card to answer. `report: daily` in any team session makes
 // another; `report: unavailable` one its profile would stop. PROPOSALS_GITOPS=1 plays a
@@ -87,6 +114,14 @@ plane.seed("alice@example.com", { title: "Quarterly cost report", profile: "dev"
 const numbers = plane.seed("alice@example.com", { title: "Weekly numbers", profile: "dev", visibility: "private" });
 await worker.seedReport(numbers.id, "alice@example.com", "every Monday");
 plane.proposalsGitops = Boolean(process.env["PROPOSALS_GITOPS"]);
+// One a yes turned on before (#1235): on Your triggers, to switch off or remove; the card's
+// yes adds another. OWN_TRIGGERS_GITOPS=1 refuses a change as a gitops plane does.
+plane.seedOwnTrigger("alice@example.com", {
+  name: "rerun-licence-audit",
+  team: "core",
+  last_run: { fired_at: new Date(Date.now() - 2 * 86_400_000).toISOString().replace(/\.\d+Z$/, "Z"), state: "done", session_id: stopped.id },
+});
+plane.ownTriggersGitops = Boolean(process.env["OWN_TRIGGERS_GITOPS"]);
 // The people the identity record names, as SCIM or a sign-in left them (troupe #931).
 plane.names.set("alice@example.com", "Alice Example");
 plane.names.set("bob@example.com", "Bob Example");
@@ -123,6 +158,9 @@ daemon.memory["/home/ada/repo"] = { status: "fresh", built_at: "2026-10-08T09:00
 daemon.memory["/home/ada/project"] = { status: "absent" };
 // The person's artifacts and memory, for the app's Artifacts and Memory views (troupe #62,
 // #55): one of each audience, and memory at three levels with a topic two of them share.
+// Who reads each is a set (troupe #1238): its teams and the organisation switch; the person
+// is in core and design, and the dev profile is granted to core and clinics, so an artifact
+// a dev session published may be given to clinics too, and its picker finds Dana, whom dev covers.
 const day = (n: number): string => new Date(Date.now() - n * 24 * 3600 * 1000).toISOString();
 const artifact = (over: Record<string, unknown>): Record<string, unknown> => ({
   kind: "html",
@@ -155,12 +193,15 @@ daemon.artifacts = [
       { path: "packages.csv", text: "package,before,after\nleft-pad,MIT,MIT\nfast-json,BSD-2,MIT\n" },
     ],
   }),
-  artifact({ id: "art-ledger", title: "Ledger migration plan", visibility: "profile:dev", published_at: day(2) }),
+  artifact({ id: "art-ledger", title: "Ledger migration plan", visibility: "private", teams: ["core", "clinics"], scope: "team:core", published_at: day(2) }),
   // A second of the person's teams under Your teams, so it offers a chip per team (#978).
-  artifact({ id: "art-oncall", title: "On-call handover", kind: "markdown", visibility: "team:core", published_at: day(5) }),
-  artifact({ id: "art-interviews", title: "Field interview guide", kind: "file", visibility: "profile:ux", shared: true, role: "view", published_at: day(4) }),
-  artifact({ id: "art-mine", title: "Placement loop benchmarks", mine: true, role: "owner", owner: { subject: "alice@example.com", display_name: "Alice" }, version: 2, current: 2, published_at: day(12), may_delete: true }),
+  artifact({ id: "art-oncall", title: "On-call handover", kind: "markdown", visibility: "private", teams: ["design"], scope: "team:design", published_at: day(5) }),
+  artifact({ id: "art-interviews", title: "Field interview guide", kind: "file", visibility: "private", shared: true, role: "view", published_at: day(4) }),
+  artifact({ id: "art-mine", title: "Placement loop benchmarks", mine: true, role: "owner", owner: { subject: "alice@example.com", display_name: "Alice" }, teams: ["core"], version: 2, current: 2, published_at: day(12), may_delete: true }),
 ];
+daemon.myTeams = ["core", "design"];
+daemon.profileTeams = { dev: ["core", "clinics"] };
+daemon.coveredPeople = [{ subject: "dana@example.com", display_name: "Dana Example", email: "dana@example.com" }];
 // A picture its publisher sent for one card (troupe #977), served by the fake plane as the
 // artifacts host would serve it; the others keep the placeholder.
 plane.pictures.set("art-ledger", SAMPLE_PICTURE);
@@ -224,6 +265,12 @@ daemon.todos(notes.id, [
 // An approval of a plain tool, which "Always allow" answers with a rule of the person's
 // (troupe #920): the Rules panel under This computer lists it afterwards.
 daemon.askTool(notes.id, "write_file", { path: "plan.md" });
+// The publication gate (troupe #1238), in a session of its own: a new version of one of the
+// person's, which keeps who reads it and asks nothing of it, and a new artifact, whose
+// sharing menu has the teams granted the session's profile ticked.
+const publishing = daemon.seed("/home/ada/reports");
+daemon.askPublish(publishing.id, { title: "Placement loop benchmarks", kind: "html", files: 2, id: "art-mine", access: "the core team and 2 people; a view link", note: "November's run" });
+daemon.askPublish(publishing.id, { title: "Clinic capacity", kind: "markdown", files: 1, teams: ["core", "clinics"] });
 // Frames (issue #474): a turn to read in /home/ada/parser, its working one strip above an
 // answer with a table, a nested list and fenced code, a diff and a csv; and the same turn
 // played live whenever something is sent there, so its reasoning streams and the curtain
