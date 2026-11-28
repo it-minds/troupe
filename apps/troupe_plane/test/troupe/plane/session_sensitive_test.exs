@@ -13,7 +13,7 @@ defmodule Troupe.Plane.SessionSensitiveTest do
   use Troupe.Plane.DataCase, async: false
 
   alias Troupe.ObjectStore
-  alias Troupe.Plane.{Audit, Bundles, FakePod, Fleet, Harness, Identity, Memory, Sessions}
+  alias Troupe.Plane.{Admin, Audit, Bundles, FakePod, Fleet, Harness, Identity, Memory, Sessions}
   alias Troupe.Plane.Control.{Connections, Listener}
   alias Troupe.Plane.Sessions.Sensitive
   alias Troupe.Protocol.SessionId
@@ -90,7 +90,7 @@ defmodule Troupe.Plane.SessionSensitiveTest do
 
   describe "the mark" do
     test "the pod's report marks the row once, audited as the harness with the tool and rule",
-         %{ada: ada, team: team, pod: pod} do
+         %{ada: ada, team: team, pod: pod, lead: lead} do
       session = running(ada, team, pod)
       assert Sensitive.json(session) == nil
       assert {:ok, %{"sensitive" => nil}} = get(session.id, ada)
@@ -122,6 +122,12 @@ defmodule Troupe.Plane.SessionSensitiveTest do
 
       assert {:ok, %{"sessions" => [%{"sensitive" => %{"how" => "call"}}]}} =
                Harness.call("sessions.list", %{}, as(ada))
+
+      # The team administrator's list of its sessions says it as the session's own row does.
+      assert {:ok, listed} = Admin.sessions_list(Admin.actor_for(lead))
+
+      assert %{sensitive: %{"how" => "call", "by" => "mcp.records.lookup"}} =
+               Enum.find(listed, &(&1.id == session.id))
     end
 
     test "comes through the pod's session.status", %{ada: ada, team: team, pod: pod} do
@@ -422,7 +428,7 @@ defmodule Troupe.Plane.SessionSensitiveTest do
       assert {:error, %{message: "forbidden", data: %{reason: why}}} =
                Harness.call(
                  "artifact.put",
-                 %{"id" => artifact, "visibility" => "team:eng", "files" => files},
+                 %{"id" => artifact, "visibility" => "organisation", "files" => files},
                  as(ada)
                )
 
@@ -431,7 +437,7 @@ defmodule Troupe.Plane.SessionSensitiveTest do
       assert {:ok, %{"waiting" => true, "share_request" => request}} =
                Harness.call(
                  "artifact.put",
-                 %{"id" => artifact, "visibility" => "team:eng", "base" => version},
+                 %{"id" => artifact, "visibility" => "organisation", "base" => version},
                  as(ada)
                )
 
@@ -440,9 +446,61 @@ defmodule Troupe.Plane.SessionSensitiveTest do
       assert {:error, %{message: "forbidden"}} =
                Harness.call("artifact.share", %{"id" => artifact, "role" => "view"}, as(ada))
 
-      assert {:ok, %{"applied" => %{"visibility" => "team:eng"}}} =
+      assert {:ok, %{"applied" => %{"visibility" => "organisation"}}} =
                decide(request["id"], lead, "approve")
     end
+
+    test "deny refuses adding a team or a person to who reads its artifact; taking one off is the owner's",
+         %{ada: ada, bea: bea, team: team, pod: pod} do
+      sharing_profile("deny")
+      session = running(ada, team, pod)
+      assert {:ok, %{"id" => artifact}} = publish(ada, session.id)
+      _ = marked_by_pod(session)
+
+      for change <- [%{"teams" => ["eng"]}, %{"people" => [%{"subject" => bea.subject, "role" => "view"}]}] do
+        assert {:error, %{message: "forbidden", data: %{setting: "sensitive.sharing"}}} =
+                 Harness.call("artifact.access.set", Map.put(change, "id", artifact), as(ada))
+      end
+
+      assert {:error, %{message: "forbidden"}} =
+               Harness.call("artifact.share", %{"id" => artifact, "team" => "eng"}, as(ada))
+
+      assert {:ok, %{"teams" => [], "people" => []}} =
+               Harness.call("artifact.access.set", %{"id" => artifact, "teams" => [], "people" => []}, as(ada))
+
+      assert {:error, %{message: "not_found"}} = Harness.call("artifact.get", %{"id" => artifact}, as(bea))
+    end
+
+    test "ask holds adding a team to who reads its artifact, whole, until a team administrator's yes",
+         %{ada: ada, bea: bea, lead: lead, team: team, pod: pod} do
+      sharing_profile("ask")
+      session = running(ada, team, pod)
+      assert {:ok, %{"id" => artifact}} = publish(ada, session.id)
+      _ = marked_by_pod(session)
+
+      assert {:ok, %{"waiting" => true, "share_request" => request}} =
+               Harness.call("artifact.access.set", %{"id" => artifact, "teams" => ["eng"]}, as(ada))
+
+      assert request["kind"] == "artifact"
+      assert {:ok, %{"teams" => []}} = Harness.call("artifact.access.get", %{"id" => artifact}, as(ada))
+      assert {:error, %{message: "not_found"}} = Harness.call("artifact.get", %{"id" => artifact}, as(bea))
+
+      assert {:ok, %{"applied" => %{"teams" => [%{"name" => "eng"}]}}} =
+               decide(request["id"], lead, "approve")
+
+      assert {:ok, %{"role" => "view"}} = Harness.call("artifact.get", %{"id" => artifact}, as(bea))
+    end
+  end
+
+  # A profile whose sensitive sessions may still publish, sharing as `sharing` says.
+  defp sharing_profile(sharing) do
+    {:ok, _profile} =
+      Fleet.put_profile(%{
+        name: "dev",
+        config_bundle_channel: "stable",
+        replicas: 1,
+        spec: %{"sensitive" => %{"markedBy" => ["mcp(records.*)"], "deny" => ["web_fetch"], "sharing" => sharing}}
+      })
   end
 
   defp publish(user, session_id) do

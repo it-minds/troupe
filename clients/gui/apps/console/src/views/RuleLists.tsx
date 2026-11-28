@@ -23,13 +23,17 @@ export interface RuleRow {
   pattern: string;
 }
 
-export type RuleDraft = Record<RuleAction, RuleRow[]>;
+/**
+ * The rows of each list. The lists are deny, ask and allow for permission rules; a sensitive
+ * session's are markedBy and deny (troupe #1239), rules in the same grammar.
+ */
+export type RuleDraft<K extends string = RuleAction> = Record<K, RuleRow[]>;
 
 /** Each action's rules, empty where it has none. */
-export type RuleLists = Record<RuleAction, string[]>;
+export type RuleLists<K extends string = RuleAction> = Record<K, string[]>;
 
 /** How a screen heads an action's list and says what it does there. */
-export type ActionWords = Record<RuleAction, { title: string; does: string; article: string }>;
+export type ActionWords<K extends string = RuleAction> = Record<K, { title: string; does: string; article: string }>;
 
 /** The rules a stored value holds: each action's list, empty where it has none or the value is not a set. */
 export function rulesIn(value: unknown): RuleLists {
@@ -46,9 +50,15 @@ export function ruleSetOf(lists: RuleLists): RuleSet {
 let nextKey = 0;
 const rowOf = (tool = "", pattern = ""): RuleRow => ({ key: nextKey++, tool, pattern });
 
-/** Rows to edit, one per rule, split into its tool and pattern as written. */
-export function draftOfRules(lists: RuleLists): RuleDraft {
-  return Object.fromEntries(RULE_ACTIONS.map((a) => [a, lists[a].map((r) => ruleParts(r)).map((p) => rowOf(p.tool, p.pattern))])) as RuleDraft;
+/** Rows to edit, one per rule, split into its tool and pattern as written, list by list in the order `lists` has them. */
+export function draftOfRules<K extends string = RuleAction>(lists: RuleLists<K>): RuleDraft<K> {
+  return Object.fromEntries((Object.keys(lists) as K[]).map((a) => [a, lists[a].map((r) => ruleParts(r)).map((p) => rowOf(p.tool, p.pattern))])) as RuleDraft<K>;
+}
+
+/** Each list of a stored value that names its lists (`sensitive`'s markedBy and deny): its rules, empty where it has none. */
+export function listsIn<K extends string>(value: unknown, keys: readonly K[]): RuleLists<K> {
+  const set = typeof value === "object" && value !== null && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
+  return Object.fromEntries(keys.map((k) => [k, Array.isArray(set[k]) ? (set[k] as unknown[]).filter((r): r is string => typeof r === "string") : []])) as RuleLists<K>;
 }
 
 /** A row's rule as written: the tool alone, or with its pattern in brackets. */
@@ -70,14 +80,15 @@ function problems(row: RuleRow): { tool: string | null; pattern: string | null }
 }
 
 /** Whether any row is one the plane would refuse. */
-export function draftInvalid(draft: RuleDraft): boolean {
-  return RULE_ACTIONS.some((a) => draft[a].some((r) => problems(r).tool !== null || problems(r).pattern !== null));
+export function draftInvalid<K extends string>(draft: RuleDraft<K>): boolean {
+  return (Object.keys(draft) as K[]).some((a) => draft[a].some((r) => problems(r).tool !== null || problems(r).pattern !== null));
 }
 
 /** The rows as the rules will be written: each as the plane reads it, blank rows left out, none twice. */
-export function rulesOfDraft(draft: RuleDraft): RuleLists {
-  const out: RuleLists = { deny: [], ask: [], allow: [] };
-  for (const action of RULE_ACTIONS) {
+export function rulesOfDraft<K extends string = RuleAction>(draft: RuleDraft<K>): RuleLists<K> {
+  const keys = Object.keys(draft) as K[];
+  const out = Object.fromEntries(keys.map((k) => [k, [] as string[]])) as RuleLists<K>;
+  for (const action of keys) {
     for (const row of draft[action]) {
       if (blank(row)) continue;
       const read = parseRule(textOf(row));
@@ -110,20 +121,20 @@ function patternHint(tool: string): string {
  * React applies it, so two clicks before a render (remove one row, then another) are two
  * changes rather than the second undoing the first.
  */
-export function RuleListsEditor({
+export function RuleListsEditor<K extends string = RuleAction>({
   draft,
   onChange,
   words,
   also,
 }: {
-  draft: RuleDraft;
-  onChange: (change: (draft: RuleDraft) => RuleDraft) => void;
-  words: ActionWords;
+  draft: RuleDraft<K>;
+  onChange: (change: (draft: RuleDraft<K>) => RuleDraft<K>) => void;
+  words: ActionWords<K>;
   /** Anything more a screen says under an action's heading, such as the rules it has from elsewhere. */
-  also?: ((action: RuleAction) => ReactNode) | undefined;
+  also?: ((action: K) => ReactNode) | undefined;
 }): JSX.Element {
   const tools = useId();
-  const setRows = (action: RuleAction, change: (rows: RuleRow[]) => RuleRow[]) => onChange((d) => ({ ...d, [action]: change(d[action]) }));
+  const setRows = (action: K, change: (rows: RuleRow[]) => RuleRow[]) => onChange((d) => ({ ...d, [action]: change(d[action]) }));
   return (
     <div className="rule-lists">
       <datalist id={tools}>
@@ -131,7 +142,7 @@ export function RuleListsEditor({
           <option key={t} value={t} />
         ))}
       </datalist>
-      {RULE_ACTIONS.map((a) => (
+      {(Object.keys(draft) as K[]).map((a) => (
         <fieldset key={a} className="rule-action">
           <legend>
             {words[a].title} <code>{a}</code>

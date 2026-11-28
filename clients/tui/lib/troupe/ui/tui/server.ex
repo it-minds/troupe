@@ -1305,7 +1305,7 @@ defmodule Troupe.UI.TUI.Server do
   # 698); this is only which of them the TUI implements, and the suite holds the two
   # equal, so a command added to the table without a clause here fails a test rather
   # than being dispatched as an agent.
-  @builtins ~w(new cancel dismiss merge discard compact goal loop steer invite uninvite share lifespan proposal bundle repo sessions archive
+  @builtins ~w(new cancel dismiss merge discard compact goal loop steer invite uninvite share lifespan sensitive proposal bundle repo sessions archive
                unarchive rename keep back hq observer files
                scratch upload save publish artifacts profiles profile copy memory context watch settings
                models mcp
@@ -1732,6 +1732,15 @@ defmodule Troupe.UI.TUI.Server do
   defp builtin("share", args, state, _target) do
     case Client.share_args(args) do
       {:ok, verb} -> notice_of(Client.share(state.session_id, verb))
+      {:error, sentence} -> {:error, sentence}
+    end
+  end
+
+  # A sensitive session (root #1239): alone it says whether it is, and for one that is not
+  # asks first, since nothing clears the mark; `y` marks it, at the plane, its owner's alone.
+  defp builtin("sensitive", args, state, _target) do
+    case Client.sensitive_args(args) do
+      {:ok, verb} -> notice_of(Client.sensitive(state.session_id, verb))
       {:error, sentence} -> {:error, sentence}
     end
   end
@@ -2555,7 +2564,7 @@ defmodule Troupe.UI.TUI.Server do
   # forks what is on screen at once, as it always did. `--throwaway` and `--persistent` say
   # how long it lasts (root #1209), with any of the others but `--branch`. `--repo` names a
   # GitHub repository the session on the platform starts on, as often as it is given.
-  @new_usage "/new [--private | --remote PROFILE | --only-me | --branch] [--throwaway | --persistent] [--repo OWNER/NAME[@REF]]..."
+  @new_usage "/new [--private | --remote PROFILE | --only-me | --branch] [--throwaway | --persistent] [--sensitive] [--repo OWNER/NAME[@REF]]..."
 
   defp new_session(state, args) do
     case new_repositories(String.split(args)) do
@@ -2607,8 +2616,15 @@ defmodule Troupe.UI.TUI.Server do
     end
   end
 
-  defp lasting(opts, nil), do: opts
-  defp lasting(opts, lifespan), do: Keyword.put(opts, :lifespan, lifespan)
+  # How long it lasts, and whether it is sensitive from its start (root #1239), which only a
+  # session on the platform is from here: `--sensitive` puts it there.
+  defp lasting(opts, extras) do
+    opts = if extras[:lifespan], do: Keyword.put(opts, :lifespan, extras[:lifespan]), else: opts
+
+    if extras[:sensitive],
+      do: Keyword.merge(opts, where: :platform, sensitive: true),
+      else: opts
+  end
 
   # `--repo owner/name[@ref]`, as often as it is given (root #1207): the GitHub
   # repositories a session on the platform starts on, taken out before the rest is read.
@@ -2783,20 +2799,25 @@ defmodule Troupe.UI.TUI.Server do
   defp new_flag("--only-me"), do: {:only_me, true}
   defp new_flag("--throwaway"), do: {:lifespan, "throwaway"}
   defp new_flag("--persistent"), do: {:lifespan, "persistent"}
+  defp new_flag("--sensitive"), do: {:sensitive, true}
   defp new_flag(_word), do: nil
 
   defp new_shape(%{branch: true} = flags) when map_size(flags) == 1, do: {:ok, :branch, nil}
   defp new_shape(%{branch: true}), do: :usage
   defp new_shape(%{private: true} = flags) when is_map_key(flags, :remote), do: :usage
   defp new_shape(%{private: true, only_me: true}), do: :usage
-  defp new_shape(%{private: true} = flags), do: {:ok, :private, flags[:lifespan]}
+  # A sealed session is this computer's, which is not marked sensitive from here yet.
+  defp new_shape(%{private: true, sensitive: true}), do: :usage
+  defp new_shape(%{private: true} = flags), do: {:ok, :private, extras(flags)}
 
   defp new_shape(%{only_me: true, remote: profile} = flags),
-    do: {:ok, {:only_me, profile}, flags[:lifespan]}
+    do: {:ok, {:only_me, profile}, extras(flags)}
 
-  defp new_shape(%{only_me: true} = flags), do: {:ok, :only_me, flags[:lifespan]}
-  defp new_shape(%{remote: profile} = flags), do: {:ok, {:remote, profile}, flags[:lifespan]}
-  defp new_shape(flags), do: {:ok, :local, flags[:lifespan]}
+  defp new_shape(%{only_me: true} = flags), do: {:ok, :only_me, extras(flags)}
+  defp new_shape(%{remote: profile} = flags), do: {:ok, {:remote, profile}, extras(flags)}
+  defp new_shape(flags), do: {:ok, :local, extras(flags)}
+
+  defp extras(flags), do: Map.take(flags, [:lifespan, :sensitive])
 
   # Here: the session on screen's directory, or with a plane's on screen the one this
   # window was opened in, which is also the directory the picker lists. A branch is a fork

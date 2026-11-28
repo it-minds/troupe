@@ -60,7 +60,7 @@ import { MemberView } from "./MemberView";
 import { MemoryEditor } from "./Memory";
 import { ProfileAgentsList } from "./ProfileAgents";
 import { STATES, profileState } from "./Overview";
-import { RuleListsEditor, draftInvalid, draftOfRules, ruleSetOf, rulesIn, rulesOfDraft } from "./RuleLists";
+import { RuleListsEditor, draftInvalid, draftOfRules, listsIn, ruleSetOf, rulesIn, rulesOfDraft } from "./RuleLists";
 import type { ActionWords, RuleDraft, RuleLists } from "./RuleLists";
 
 /** Which teams are granted each profile, from the teams this person may see. */
@@ -326,7 +326,10 @@ const READ_HERE = [
   "github.denyPaths",
   "github.maxPushes",
   "github.maxRuns",
+  "github.maxRepositories",
+  "github.maxAttempts",
   "permissions",
+  "sensitive",
   "agents",
   "configBundleChannel",
   "orgMount",
@@ -358,6 +361,78 @@ export function agentsWords(rule: unknown): string {
   const deny = names(rule["deny"]);
   if (Array.isArray(rule["allow"])) return `only ${allow.length ? allow.join(", ") : "none"}${deny.length ? `; not ${deny.join(", ")}` : ""}`;
   return deny.length ? `all but ${deny.join(", ")}` : "every agent its bundle and Troupe give";
+}
+
+/**
+ * What the plane holds a session to where a profile with GitHub settings names no cap
+ * (`Troupe.Plane.GitHub.Policy`): three repositories at once, of at most ten a profile may
+ * allow, and one run on an issue before it is left for a person.
+ */
+const HELD_DEFAULT = 3;
+const HELD_MOST = 10;
+const ATTEMPTS_DEFAULT = 1;
+
+/** A sensitive session's two lists (troupe #1239): what marks a session, and what it is refused once marked. */
+const SENSITIVE_LISTS = ["markedBy", "deny"] as const;
+type SensitiveList = (typeof SENSITIVE_LISTS)[number];
+
+/** Each list, as the page and the editor head it and say what it does. */
+const SENSITIVE_ACTION: ActionWords<SensitiveList> = {
+  markedBy: {
+    title: "Marks it sensitive",
+    does: "A call one of these matches makes its session sensitive before it runs, and nothing clears that: mcp(records.*), read_file(/mnt/records/**), shell(psql).",
+    article: "a",
+  },
+  deny: {
+    title: "Refused once sensitive",
+    does: "A call one of these matches is refused in a sensitive session, with a sentence saying why: publish_artifact, web_fetch, git_push, remember.",
+    article: "a",
+  },
+};
+
+/** What `sensitive.sharing` lets a person do with a sensitive session beyond who reads it now. */
+const SHARING_WORDS: Record<string, string> = {
+  allow: "allowed, as any session's",
+  ask: "waits on a team administrator's yes",
+  deny: "refused: only those who read it now",
+};
+
+/** The plane's rule, said at the field: rules that mark a session with nothing refused once marked is a mark that does nothing. */
+export function sensitiveProblem(lists: RuleLists<SensitiveList>): string | null {
+  return lists.markedBy.length > 0 && lists.deny.length === 0
+    ? "Say which tools a sensitive session is refused, such as publish_artifact, web_fetch and remember, or take out the rules that mark it."
+    : null;
+}
+
+/** A profile's sensitive-session settings as its pods run them. */
+function SensitiveInEffect({ spec }: { spec: Record<string, unknown> }): JSX.Element {
+  const lists = listsIn(spec["sensitive"], SENSITIVE_LISTS);
+  const sharing = at(spec, "sensitive.sharing");
+  const rules = (list: string[]): JSX.Element =>
+    list.length === 0 ? (
+      <span className="muted">none</span>
+    ) : (
+      <>
+        {list.map((r, i) => (
+          <span key={r}>
+            {i > 0 && ", "}
+            <code>{r}</code>
+          </span>
+        ))}
+      </>
+    );
+  if (lists.markedBy.length === 0 && lists.deny.length === 0 && sharing === undefined) {
+    return <p className="hint">None: no call marks a session here sensitive, and one its owner marks by hand is refused nothing more than any other.</p>;
+  }
+  return (
+    <Fields
+      rows={[
+        [SENSITIVE_ACTION.markedBy.title, lists.markedBy.length === 0 ? <span className="muted">no call: only its owner, by hand</span> : rules(lists.markedBy)],
+        [SENSITIVE_ACTION.deny.title, rules(lists.deny)],
+        ["Sharing it wider", SHARING_WORDS[typeof sharing === "string" ? sharing : "allow"] ?? show(sharing)],
+      ]}
+    />
+  );
 }
 
 /** What every profile denies a push, which `github.denyPaths` adds to and cannot take from. */
@@ -469,12 +544,27 @@ function ProfileReading({ detail, granted }: { detail: ProfileDetail; granted: s
           ],
           ["Pushes a run may make", at(spec, "github.maxPushes") === undefined ? "no cap of the profile's" : show(at(spec, "github.maxPushes"))],
           ["Runs on a repository at once", at(spec, "github.maxRuns") === undefined ? "no cap of the profile's" : show(at(spec, "github.maxRuns"))],
+          [
+            "Repositories a session may hold",
+            !isPlain(spec["github"])
+              ? "none: without GitHub settings a session here is offered no repository"
+              : at(spec, "github.maxRepositories") === undefined
+                ? `${HELD_DEFAULT}, Troupe's default`
+                : show(at(spec, "github.maxRepositories")),
+          ],
+          [
+            "Runs on one issue before it is left for a person",
+            at(spec, "github.maxAttempts") === undefined ? `${ATTEMPTS_DEFAULT}, Troupe's default, or a team's lower cap` : show(at(spec, "github.maxAttempts")),
+          ],
         ]}
       />
       <p className="note">A team's own caps hold where they are lower, and a team's list says which repositories its sessions may name.</p>
 
       <Region>Permission rules</Region>
       <RulesInEffect name={p.name} parent={parent} spec={spec} fields={parent ? (effective?.fields ?? null) : null} />
+
+      <Region>Sensitive sessions</Region>
+      <SensitiveInEffect spec={spec} />
 
       <Region>MCP servers</Region>
       {servers.length === 0 ? (
@@ -870,7 +960,10 @@ const FORM_PATHS = [
   ["github", "denyPaths"],
   ["github", "maxPushes"],
   ["github", "maxRuns"],
+  ["github", "maxRepositories"],
+  ["github", "maxAttempts"],
   ["permissions"],
+  ["sensitive"],
 ];
 
 /** What the plane writes into the resource itself: never sent back, and refused if it were. */
@@ -976,6 +1069,11 @@ interface Form {
   denyPaths: string;
   maxPushes: string;
   maxRuns: string;
+  /** How many repositories a session may hold, and runs on one issue, as typed; empty is Troupe's default, or the parent's. */
+  maxRepositories: string;
+  maxAttempts: string;
+  /** `sensitive.sharing`: `allow`, `ask` or `deny`; empty is allow, or the parent's. */
+  sharing: string;
 }
 
 const SERVER_FIELDS = ["name", "url", "credentialRef", "header", "timeoutMs"] as const;
@@ -1016,6 +1114,9 @@ function formOf(detail: ProfileDetail | null): Form {
     denyPaths: lines(at(spec, "github.denyPaths")),
     maxPushes: text(at(spec, "github.maxPushes")),
     maxRuns: text(at(spec, "github.maxRuns")),
+    maxRepositories: text(at(spec, "github.maxRepositories")),
+    maxAttempts: text(at(spec, "github.maxAttempts")),
+    sharing: text(at(spec, "sensitive.sharing")),
   };
 }
 
@@ -1024,7 +1125,13 @@ function formOf(detail: ProfileDetail | null): Form {
  * merged key by key over what was loaded without the form's paths, so nothing the form
  * has no field for is lost. Exported for the test that holds the mapping.
  */
-export function draftOf(form: Form, servers: Plain[], kept: Plain, rules: RuleLists = { deny: [], ask: [], allow: [] }): ProfileWrite {
+export function draftOf(
+  form: Form,
+  servers: Plain[],
+  kept: Plain,
+  rules: RuleLists = { deny: [], ask: [], allow: [] },
+  sensitive: RuleLists<SensitiveList> = { markedBy: [], deny: [] },
+): ProfileWrite {
   const typed = compact({
     llm: compact({
       endpoint: form.endpoint.trim(),
@@ -1056,9 +1163,13 @@ export function draftOf(form: Form, servers: Plain[], kept: Plain, rules: RuleLi
         .filter(Boolean),
       maxPushes: whole(form.maxPushes),
       maxRuns: whole(form.maxRuns),
+      maxRepositories: whole(form.maxRepositories),
+      maxAttempts: whole(form.maxAttempts),
     }),
     // Only the lists that hold a rule, and no key at all when none does.
     permissions: ruleSetOf(rules),
+    // A sensitive session's lists and sharing rule; absent sharing is allow, or the parent's.
+    sensitive: compact({ markedBy: sensitive.markedBy, deny: sensitive.deny, sharing: form.sharing || undefined }),
   });
   return {
     name: form.name.trim(),
@@ -1118,6 +1229,8 @@ export function ProfileEditor({
   // The profile's own rules, as it wrote them: for one that extends another, not its parent's.
   const [had] = useState<RuleLists>(() => rulesIn(detail?.spec?.["permissions"]));
   const [rules, setRules] = useState<RuleDraft>(() => draftOfRules(had));
+  // A sensitive session's two lists, as the profile wrote them (troupe #1239).
+  const [sensitive, setSensitive] = useState<RuleDraft<SensitiveList>>(() => draftOfRules(listsIn(detail?.spec?.["sensitive"], SENSITIVE_LISTS)));
   const [checked, setChecked] = useState<Record<number, { host: string; allowed: boolean } | string>>({});
   const [preview, setPreview] = useState<{ lines: DiffLine[]; effects: string[] } | null>(null);
   const [asking, setAsking] = useState(false);
@@ -1135,7 +1248,8 @@ export function ProfileEditor({
   const parent = form.extends.trim();
   const theirs = parent ? `empty: ${parent}'s` : null;
 
-  const draft = draftOf(form, servers, kept, rulesOfDraft(rules));
+  const draft = draftOf(form, servers, kept, rulesOfDraft(rules), rulesOfDraft(sensitive));
+  const markedProblem = sensitiveProblem(rulesOfDraft(sensitive));
   const llm = (draft.spec?.["llm"] ?? {}) as Plain;
   // A profile that extends another may have its endpoint from it; the plane judges the profile in effect.
   const llmProblem = parent ? null : llmWithoutEndpoint(llm);
@@ -1149,7 +1263,8 @@ export function ProfileEditor({
           : "Lowercase letters, digits and dashes, starting and ending with a letter or digit: it is the name of a resource in the cluster."
     : null;
   const budgetProblem = Number.isNaN(draft.budget_micros) ? "An amount in dollars, like 500 or 120.50." : null;
-  const blocked = Boolean(llmProblem || nameProblem || budgetProblem) || draftInvalid(rules) || draft.name === "" || (draft.image === "" && !parent);
+  const blocked =
+    Boolean(llmProblem || nameProblem || budgetProblem || markedProblem) || draftInvalid(rules) || draftInvalid(sensitive) || draft.name === "" || (draft.image === "" && !parent);
   // The rules it has from the profile it extends, as the page loaded them: only while it still extends that one.
   const inherited = parent && detail?.written?.extends === parent ? rulesFrom(detail.effective?.fields ?? null) : null;
   const set = (patch: Partial<Form>) => {
@@ -1348,6 +1463,22 @@ export function ProfileEditor({
       <Field label="Runs on a repository at once" hint={`1 to 1000, across every trigger on this profile; a firing over it is skipped.${parent ? ` Empty is ${parent}'s.` : " Empty is no cap of the profile's."}`}>
         {(p) => <input {...p} value={form.maxRuns} placeholder={theirs ?? undefined} onChange={(e) => set({ maxRuns: e.target.value })} inputMode="numeric" />}
       </Field>
+      <Field
+        label="Repositories a session may hold"
+        hint={`1 to ${HELD_MOST}: each is a clone on the pod's disk.${parent ? ` Empty is ${parent}'s; a number above ${parent}'s has ${parent}'s in effect.` : ` Empty is Troupe's default, ${HELD_DEFAULT}.`}`}
+      >
+        {(p) => (
+          <input {...p} value={form.maxRepositories} placeholder={theirs ?? String(HELD_DEFAULT)} onChange={(e) => set({ maxRepositories: e.target.value })} inputMode="numeric" />
+        )}
+      </Field>
+      <Field
+        label="Runs on one issue before it is left for a person"
+        hint={`1 to 1000; a person asking again starts the count again. A team's lower cap holds.${parent ? ` Empty is ${parent}'s.` : ` Empty is Troupe's default, ${ATTEMPTS_DEFAULT}.`}`}
+      >
+        {(p) => (
+          <input {...p} value={form.maxAttempts} placeholder={theirs ?? String(ATTEMPTS_DEFAULT)} onChange={(e) => set({ maxAttempts: e.target.value })} inputMode="numeric" />
+        )}
+      </Field>
 
       <Region>Permission rules</Region>
       <p className="note">
@@ -1387,6 +1518,38 @@ export function ProfileEditor({
             : undefined
         }
       />
+
+      <Region>Sensitive sessions</Region>
+      <p className="note">
+        A session becomes sensitive by a call the first list names, or by its owner's hand, and nothing clears it: from then on the second list is refused in it, and sharing it beyond the people who read
+        it follows the rule below.{parent ? ` These are added to ${parent}'s; sharing may only be stricter than ${parent}'s.` : ""}
+      </p>
+      <RuleListsEditor
+        draft={sensitive}
+        onChange={(change) => {
+          setSensitive(change);
+          setError(null);
+        }}
+        words={SENSITIVE_ACTION}
+      />
+      {markedProblem && (
+        <p className="field-error" role="alert">
+          {markedProblem}
+        </p>
+      )}
+      <Field
+        label="Sharing a sensitive session"
+        hint={`Giving it to the team, inviting somebody, a link, or sharing what it published wider. Asked, a team administrator's yes applies it; a link cannot wait and is refused.${parent ? ` A looser word than ${parent}'s does nothing.` : ""}`}
+      >
+        {(p) => (
+          <select {...p} value={form.sharing} onChange={(e) => set({ sharing: e.target.value })}>
+            <option value="">{parent ? `${parent}'s` : "allowed (the default)"}</option>
+            <option value="allow">allowed, as any session's</option>
+            <option value="ask">waits on a team administrator's yes</option>
+            <option value="deny">refused: only those who read it now</option>
+          </select>
+        )}
+      </Field>
 
       <Region>MCP servers</Region>
       <div className="servers">

@@ -876,6 +876,21 @@ defmodule Troupe.Plane.Control.Connection do
     end
   end
 
+  # What the gate of a publication on this pod shows before it asks, for the session's
+  # owner: for a new version (`id`), who reads that artifact now, in words, where the
+  # owner owns it; for a new one, the teams granted the session's profile, which it is
+  # given by default. Names of teams, and words of who reads one artifact of the owner's
+  # own, and nothing else.
+  defp dispatch("session.artifact.about", params, state) do
+    with %Session{} = session <- session_of(params["session_id"], state.worker),
+         :ok <- at_epoch(session, params["epoch"]),
+         {:owner, %User{active: true} = owner} <- {:owner, Identity.get_user(session.owner_subject)} do
+      {:ok, publication_about(params["id"], session, owner), state}
+    else
+      refused -> pod_artifact_refusal(refused, params, state)
+    end
+  end
+
   # The files of a version too large for one message, sent to the object store first: an
   # upload handle for the session's owner, which `session.artifact.publish` then names.
   defp dispatch("session.artifact.upload.begin", params, state) do
@@ -1092,6 +1107,17 @@ defmodule Troupe.Plane.Control.Connection do
 
   defp pod_artifact_refusal(nil, params, state),
     do: {:error, Error.new(:not_found, %{session_id: params["session_id"]}), state}
+
+  # A new version's readers in words, where the session's owner owns it, else nothing; a new
+  # one's default teams, those granted the session's profile.
+  defp publication_about(id, _session, owner) when is_binary(id) do
+    case Artifacts.access(id, owner) do
+      {:ok, access} -> %{"access" => access["words"]}
+      {:error, _not_theirs} -> %{}
+    end
+  end
+
+  defp publication_about(_new, session, _owner), do: %{"teams" => Artifacts.profile_teams(session.profile)}
 
   defp at_epoch(_session, nil), do: :ok
   defp at_epoch(%Session{epoch: epoch}, epoch), do: :ok

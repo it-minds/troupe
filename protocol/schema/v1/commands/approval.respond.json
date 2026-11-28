@@ -30,6 +30,12 @@
     "session_id": {
       "type": "string"
     },
+    "teams": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
     "visibility": {
       "type": "string"
     }

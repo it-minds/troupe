@@ -50,7 +50,7 @@ defmodule Troupe.Session.ProposalsTest do
               "title" => "Weekly numbers",
               "kind" => "html",
               "files" => ["index.html"],
-              "visibility" => "team:reports"
+              "teams" => ["reports"]
             }}
 
   defp reporting(context, steps) do

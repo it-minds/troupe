@@ -6,10 +6,10 @@ defmodule Troupe.Tools.PublishArtifactTest do
   naming the file, where the person is signed out; asked about by default; and on the call's
   own event, what it published.
 
-  Whom it is for is the person's to say: a call that names no `visibility` asks whatever
+  Whom a new one is for is the person's to say: a call that names no `visibility` or `teams` asks whatever
   `auto_approve` says, with the publication for the gate to show, and runs for the audience
   and owner the person answers; an allow that names nobody is refused and the request waits
-  on. `async: false`, as it installs the host's function in the application environment.
+  on; a new version keeps who reads it, and its gate shows who that is. `async: false`, as it installs the host's function in the application environment.
   """
 
   use Troupe.SessionCase, async: false
@@ -29,6 +29,7 @@ defmodule Troupe.Tools.PublishArtifactTest do
       "title" => params["title"],
       "kind" => params["kind"],
       "visibility" => params["visibility"],
+      "teams" => params["teams"],
       "url" => "https://artifacts.example.test/a/art-abcdefghijklmnop/"
     }
   end
@@ -53,7 +54,7 @@ defmodule Troupe.Tools.PublishArtifactTest do
                %{
                  "title" => "Weekly",
                  "kind" => "html",
-                 "visibility" => "profile:dev",
+                 "teams" => ["dev"],
                  "files" => ["out/report/index.html", "out/report/assets/site.css"]
                },
                ctx(session, context)
@@ -61,7 +62,7 @@ defmodule Troupe.Tools.PublishArtifactTest do
 
     assert_received {:published, params, id} when id == session.id
     assert params["title"] == "Weekly"
-    assert params["visibility"] == "profile:dev"
+    assert params["teams"] == ["dev"]
 
     assert Enum.map(params["files"], &{&1["path"], Base.decode64!(&1["bytes"])}) == [
              {"index.html", "<h1>Weekly</h1>"},
@@ -69,7 +70,7 @@ defmodule Troupe.Tools.PublishArtifactTest do
            ]
 
     assert said =~ "version 1"
-    assert said =~ "profile dev's people"
+    assert said =~ "the members of team dev"
     assert said =~ "https://artifacts.example.test/a/art-abcdefghijklmnop/"
     assert fields["id"] == "art-abcdefghijklmnop"
     assert fields["url"] =~ "artifacts.example.test"
@@ -92,7 +93,6 @@ defmodule Troupe.Tools.PublishArtifactTest do
                %{
                  "title" => "Notes",
                  "kind" => "markdown",
-                 "visibility" => "organisation",
                  "files" => ["docs/notes.md"],
                  "id" => "art-abcdefghijklmnop",
                  "note" => "the figures for October"
@@ -112,7 +112,7 @@ defmodule Troupe.Tools.PublishArtifactTest do
     assert PublishArtifact.description() =~ "edit link"
 
     assert said =~ "version 2"
-    assert said =~ "the whole organisation"
+    assert said =~ "the readers it already had"
   end
 
   test "sends a picture of the page for its card when given one, and refuses one that is not a picture",
@@ -303,15 +303,27 @@ defmodule Troupe.Tools.PublishArtifactTest do
     assert_received {:published, again}
     refute Map.has_key?(again, "visibility")
 
-    # Whose an artifact is does not change with a version: a republish sends no owner, and
-    # the gate shows none to choose; a new one sends what was said.
+    # A new version keeps who reads it and whose it is: one that names an audience is
+    # refused, saying where readers are changed, and the gate shows none to choose.
+    assert {:error, {:invalid_args, reason}} =
+             PublishArtifact.run(
+               Map.merge(args, %{"id" => "art-abcdefghijklmnop", "visibility" => "organisation"}),
+               ctx(session, context)
+             )
+
+    assert reason =~ "Access menu"
+
+    assert {:error, {:invalid_args, _}} =
+             PublishArtifact.run(
+               Map.merge(args, %{"id" => "art-abcdefghijklmnop", "teams" => ["core"]}),
+               ctx(session, context)
+             )
+
+    refute_received {:published, _}
+
     assert {:ok, _, _} =
              PublishArtifact.run(
-               Map.merge(args, %{
-                 "id" => "art-abcdefghijklmnop",
-                 "owner" => "me",
-                 "visibility" => "team:core"
-               }),
+               Map.merge(args, %{"id" => "art-abcdefghijklmnop", "owner" => "me"}),
                ctx(session, context)
              )
 
@@ -319,29 +331,35 @@ defmodule Troupe.Tools.PublishArtifactTest do
     refute Map.has_key?(republished, "owner")
 
     assert PublishArtifact.publication(
-             Map.merge(args, %{"id" => "art-abcdefghijklmnop", "owner" => "me"})
-           )["owner"] == nil
+             Map.merge(args, %{"id" => "art-abcdefghijklmnop", "owner" => "me", "teams" => ["core"]})
+           )
+           |> Map.take(["owner", "teams", "visibility"]) == %{"owner" => nil, "teams" => nil, "visibility" => nil}
 
     assert PublishArtifact.publication(Map.put(args, "owner", "me"))["owner"] == "me"
 
     assert {:ok, _, _} =
              PublishArtifact.run(
-               Map.merge(args, %{"owner" => "me", "visibility" => "team:core"}),
+               Map.merge(args, %{"owner" => "me", "teams" => ["core"]}),
                ctx(session, context)
              )
 
-    assert_received {:published, %{"owner" => "me", "visibility" => "team:core"}}
+    assert_received {:published, %{"owner" => "me", "teams" => ["core"], "visibility" => "private"}}
 
     assert {:ok, said, _} =
-             PublishArtifact.run(Map.put(args, "visibility", "team:core"), ctx(session, context))
+             PublishArtifact.run(Map.put(args, "teams", ["core", "ops"]), ctx(session, context))
 
-    assert said =~ "team core's members"
+    assert said =~ "the members of team core and team ops"
+
+    # The single audience of before is not a visibility now.
+    assert {:error, {:invalid_args, _}} =
+             PublishArtifact.run(Map.put(args, "visibility", "team:core"), ctx(session, context))
 
     schema = PublishArtifact.schema()
     refute "visibility" in schema["required"]
-    assert schema["properties"]["visibility"]["description"] =~ "team:<name>"
+    assert schema["properties"]["visibility"]["enum"] == ["private", "organisation"]
+    assert schema["properties"]["teams"]["type"] == "array"
     assert schema["properties"]["owner"]["enum"] == ["me", "team"]
-    assert PublishArtifact.description() =~ "leave it out and they choose at the approval"
+    assert PublishArtifact.description() =~ "leave them out and they choose at the approval"
     assert PublishArtifact.description() =~ "`owner`"
   end
 
@@ -449,54 +467,98 @@ defmodule Troupe.Tools.PublishArtifactTest do
       |> Enum.find(&(&1.data["name"] == "publish_artifact"))
     end
 
-    test "a call naming no visibility must ask, past auto_approve, with the publication",
+    test "a new one naming no audience must ask, past auto_approve, with the teams the plane ticks",
          context do
       refute PublishArtifact.must_ask?(%{"title" => "x", "visibility" => "organisation"})
+      refute PublishArtifact.must_ask?(%{"title" => "x", "teams" => ["core"]})
       assert PublishArtifact.must_ask?(%{"title" => "x"})
-      assert PublishArtifact.must_ask?(%{"title" => "x", "visibility" => ""})
+      assert PublishArtifact.must_ask?(%{"title" => "x", "visibility" => "", "teams" => []})
+
+      test = self()
+
+      :ok =
+        Troupe.Artifacts.install_about(fn ask, _ctx ->
+          send(test, {:about, ask})
+          {:ok, %{"teams" => ["clinics", "billing"]}}
+        end)
 
       # `SessionCase` starts every session with `auto_approve` on; it does not answer this.
-      %{session: session} =
-        publishing(context, %{"id" => "art-abcdefghijklmnop", "note" => "October"})
-
+      %{session: session} = publishing(context, %{})
       request = asked(session)
 
       assert request.data["tool"] == "publish_artifact"
+      assert_received {:about, ask} when ask == %{"id" => nil}
 
       assert request.data["publication"] == %{
                "title" => "Findings",
                "kind" => "markdown",
                "files" => 1,
                "visibility" => nil,
+               "teams" => ["clinics", "billing"],
                "owner" => nil,
-               "id" => "art-abcdefghijklmnop",
-               "note" => "October"
+               "id" => nil,
+               "note" => nil
              }
 
-      assert [%{publication: %{"visibility" => nil}}] = Approvals.pending(session.id)
-      refute_received {:published, _}
+      # A plain allow takes the ticked teams, the artifact private beside them.
+      assert :ok = Troupe.approve(session.id, request.data["call_id"], :allow)
+      assert completed(session.id).data["ok"]
+      assert_received {:published, %{"visibility" => "private", "teams" => ["clinics", "billing"]}}
+    end
 
-      # A republish keeps its owner: one answered at the gate is dropped, not sent.
-      call_id = request.data["call_id"]
+    test "a new version is not asked about its audience, and the gate shows who reads it", context do
+      refute PublishArtifact.must_ask?(%{"title" => "x", "id" => "art-abcdefghijklmnop"})
+
+      :ok =
+        Troupe.Artifacts.install_about(fn %{"id" => "art-abcdefghijklmnop"}, _ctx ->
+          {:ok, %{"access" => "the clinics and billing teams and 3 people; a view link"}}
+        end)
+
+      # With auto_approve on and nothing to choose, it runs unasked.
+      %{session: session} = publishing(context, %{"id" => "art-abcdefghijklmnop", "note" => "October"})
+      :ok = Troupe.subscribe(session.id)
+      Troupe.send_input(session.id, "publish the findings")
+      assert completed(session.id).data["content"] =~ "for the readers it already had"
+      assert events_of_type(session.id, "approval_requested") == []
+      assert_received {:published, %{"id" => "art-abcdefghijklmnop"} = params}
+      refute Map.has_key?(params, "visibility")
+      refute Map.has_key?(params, "teams")
+
+      # Asked as any `ask` tool's where auto_approve is off: its readers in words, nothing to
+      # aim, and an audience or owner answered for it dropped, not sent.
+      %{session: session} =
+        publishing(context, %{"id" => "art-abcdefghijklmnop", "note" => "October"},
+          config_overrides: [auto_approve: false]
+        )
+
+      request = asked(session)
+
+      assert request.data["publication"] == %{
+               "title" => "Findings",
+               "kind" => "markdown",
+               "files" => 1,
+               "visibility" => nil,
+               "teams" => nil,
+               "owner" => nil,
+               "id" => "art-abcdefghijklmnop",
+               "note" => "October",
+               "access" => "the clinics and billing teams and 3 people; a view link"
+             }
 
       assert :ok =
-               Troupe.approve(session.id, call_id, :allow, nil, %{
-                 "visibility" => "team:core",
+               Troupe.approve(session.id, request.data["call_id"], :allow, nil, %{
+                 "visibility" => "organisation",
                  "owner" => "me"
                })
 
-      result = completed(session.id)
-      assert result.data["content"] =~ "for team core's members, as the person chose"
-
-      assert_received {:published,
-                       %{"visibility" => "team:core", "id" => "art-abcdefghijklmnop"} = params}
-
+      assert completed(session.id).data["ok"]
+      assert_received {:published, %{"id" => "art-abcdefghijklmnop"} = params}
+      refute Map.has_key?(params, "visibility")
       refute Map.has_key?(params, "owner")
 
       assert [decided] = events_of_type(session.id, "approval_decided")
-      assert decided.data["visibility"] == "team:core"
-      refute Map.has_key?(decided.data, "owner")
-      assert decided.data["edited"] == ["visibility"]
+      refute Map.has_key?(decided.data, "visibility")
+      assert decided.data["edited"] == []
     end
 
     test "an allow naming nobody is refused and waits on; the person's audience and owner run it",
@@ -505,19 +567,21 @@ defmodule Troupe.Tools.PublishArtifactTest do
       call_id = asked(session).data["call_id"]
 
       assert {:error,
-              "say whom it is for: visibility is private, organisation, team:<name> or profile:<name>"} =
+              "say whom it is for: visibility is private or organisation, and teams the names of the teams that read it"} =
                Troupe.approve(session.id, call_id, :allow)
 
       assert {:error, why} =
                Troupe.approve(session.id, call_id, :allow, nil, %{"visibility" => "everyone"})
 
-      assert why =~
-               "visibility is private, organisation, team:<name> or profile:<name>, not \"everyone\""
+      assert why =~ "not visibility \"everyone\""
 
       assert {:error, why} =
-               Troupe.approve(session.id, call_id, :allow, nil, %{"visibility" => "team:"})
+               Troupe.approve(session.id, call_id, :allow, nil, %{"visibility" => "profile:dev"})
 
-      assert why =~ "not \"team:\""
+      assert why =~ "not visibility \"profile:dev\""
+
+      assert {:error, why} = Troupe.approve(session.id, call_id, :allow, nil, %{"teams" => "core"})
+      assert why =~ "not teams \"core\""
 
       assert {:error, "owner is me or team, not \"them\""} =
                Troupe.approve(session.id, call_id, :allow, nil, %{
@@ -525,7 +589,7 @@ defmodule Troupe.Tools.PublishArtifactTest do
                  "owner" => "them"
                })
 
-      assert {:error, "a publication's answer takes visibility, owner and reason, not agent"} =
+      assert {:error, "a publication's answer takes visibility, teams, owner and reason, not agent"} =
                Troupe.approve(session.id, call_id, :allow, nil, %{"agent" => "explore"})
 
       assert {:error, "a word back goes with a denial"} =
@@ -537,6 +601,7 @@ defmodule Troupe.Tools.PublishArtifactTest do
       assert [%{call_id: ^call_id}] = Approvals.pending(session.id)
       assert events_of_type(session.id, "approval_decided") == []
 
+      # A client of before answers one team as `team:<name>`: that team, the artifact private.
       assert :ok =
                Troupe.approve(session.id, call_id, :allow, nil, %{
                  "visibility" => "team:core",
@@ -545,15 +610,15 @@ defmodule Troupe.Tools.PublishArtifactTest do
 
       result = completed(session.id)
       assert result.data["ok"]
-      assert result.data["content"] =~ "for team core's members, as the person chose"
-      assert result.data["artifact"]["visibility"] == "team:core"
-      assert_received {:published, %{"visibility" => "team:core", "owner" => "team"}}
+      assert result.data["content"] =~ "for the members of team core, as the person chose"
+      assert result.data["artifact"]["teams"] == ["core"]
+      assert_received {:published, %{"visibility" => "private", "teams" => ["core"], "owner" => "team"}}
 
       assert [decided] = events_of_type(session.id, "approval_decided")
       assert decided.data["decision"] == "allow"
-      assert decided.data["visibility"] == "team:core"
+      assert {decided.data["visibility"], decided.data["teams"]} == {"private", ["core"]}
       assert decided.data["owner"] == "team"
-      assert decided.data["edited"] == ["visibility", "owner"]
+      assert decided.data["edited"] == ["visibility", "teams", "owner"]
     end
 
     test "allow_session on a call that named nobody is this call's allow, and nothing standing",
@@ -607,18 +672,18 @@ defmodule Troupe.Tools.PublishArtifactTest do
     test "a plain allow keeps the model's proposal, and the answer does not say the person chose",
          context do
       %{session: session} =
-        publishing(context, %{"visibility" => "profile:dev"},
+        publishing(context, %{"teams" => ["dev"]},
           config_overrides: [auto_approve: false]
         )
 
       assert :ok = Troupe.approve(session.id, asked(session).data["call_id"], :allow)
 
       result = completed(session.id)
-      assert result.data["content"] =~ "for profile dev's people, at"
+      assert result.data["content"] =~ "for the members of team dev, at"
       refute result.data["content"] =~ "as the person chose"
 
       assert [decided] = events_of_type(session.id, "approval_decided")
-      assert decided.data["visibility"] == "profile:dev"
+      assert decided.data["teams"] == ["dev"]
       assert decided.data["edited"] == []
     end
 
@@ -654,7 +719,7 @@ defmodule Troupe.Tools.PublishArtifactTest do
       call_id = await_event(session.id, "approval_requested", 10_000).data["call_id"]
 
       assert {:error,
-              "visibility, owner and reason answer a publication, and this asks about needs_approval"} =
+              "visibility, teams, owner and reason answer a publication, and this asks about needs_approval"} =
                Troupe.approve(session.id, call_id, :allow, nil, %{"visibility" => "private"})
 
       assert [%{call_id: ^call_id}] = Approvals.pending(session.id)

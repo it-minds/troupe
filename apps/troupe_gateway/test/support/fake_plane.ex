@@ -646,10 +646,10 @@ defmodule Troupe.Gateway.FakePlane do
   # An artifact published (#62): the plane's answer, as its id, the next version of one
   # named, and an address on an artifacts host; a page with no title is refused, as the
   # plane refuses it, and one for a team the person is not in is forbidden.
-  defp dispatch(_state, "artifact.publish", %{"visibility" => "team:research"}),
+  defp dispatch(_state, "artifact.publish", %{"teams" => ["research"]}),
     do:
       {:rpc_error, -32_004, "forbidden",
-       %{"reason" => "you are not in team research", "teams" => ["engineering"]}}
+       %{"reason" => "you may not give it to team research", "teams" => ["engineering"]}}
 
   defp dispatch(_state, "artifact.publish", %{"title" => title} = params)
        when is_binary(title) and title != "" do
@@ -881,6 +881,19 @@ defmodule Troupe.Gateway.FakePlane do
        "share" => %{"id" => "sh-1", "role" => role, "public" => false, "state" => "live"}
      }}
   end
+
+  # Who reads one, for its owner, in the plane's shape.
+  defp dispatch(_state, "artifact.access.get", %{"id" => id}),
+    do:
+      {:ok,
+       %{
+         "id" => id,
+         "teams" => [%{"name" => "engineering"}],
+         "people" => [],
+         "organisation" => false,
+         "links" => [],
+         "words" => "the engineering team"
+       }}
 
   defp dispatch(_state, "artifact.unshare", %{"id" => id} = params),
     do: {:ok, Map.merge(%{"revoked" => true, "id" => id}, Map.take(params, ["share", "person"]))}

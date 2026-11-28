@@ -35,7 +35,7 @@ defmodule Troupe.Plane.ArtifactSharesTest do
       call(ada, "artifact.publish", %{
         "title" => "Plan",
         "kind" => "html",
-        "visibility" => "profile:dev",
+        "teams" => ["engineering"],
         "files" => [%{"path" => "index.html", "bytes" => Base.encode64("<h1>Plan</h1>")}]
       })
 

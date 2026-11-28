@@ -10,6 +10,7 @@
 
 import { TroupeRpcError } from "./connection.js";
 import { when } from "./remote.js";
+import { sharingRefusal } from "./sensitive.js";
 import { errorText } from "./words.js";
 
 /** What an invitation lets a person do: follow the session, or steer it as well. */
@@ -113,6 +114,8 @@ export function removedSentence(owner?: string | null): string {
 
 /** Why an invitation was refused, in words a person can act on. */
 export function inviteRefusal(e: unknown): string {
+  const sensitive = sharingRefusal(e);
+  if (sensitive) return sensitive;
   if (e instanceof TroupeRpcError) {
     const reason = e.data?.["reason"];
     if (typeof reason === "string" && reason === "not on this profile's teams") {

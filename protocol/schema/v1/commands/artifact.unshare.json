@@ -14,6 +14,9 @@
     },
     "share": {
       "type": "string"
+    },
+    "team": {
+      "type": "string"
     }
   },
   "required": [

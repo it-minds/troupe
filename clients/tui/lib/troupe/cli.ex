@@ -49,6 +49,7 @@ defmodule Troupe.CLI do
           team: String.t() | nil,
           only_me: boolean(),
           lifespan: String.t() | nil,
+          sensitive: boolean(),
           repositories: [String.t()],
           title: String.t() | nil,
           task: String.t() | nil,
@@ -141,6 +142,7 @@ defmodule Troupe.CLI do
     only_me: :boolean,
     throwaway: :boolean,
     persistent: :boolean,
+    sensitive: :boolean,
     repo: :keep,
     title: :string
   ]
@@ -174,6 +176,10 @@ defmodule Troupe.CLI do
        ["run", "task", "--headless", "--throwaway"],
        ["run", "task", "--profile", "dev", "--persistent"]
      ]},
+    {~s(troupe run [AGENT] "task" --profile NAME --sensitive ...),
+     "the run's session on the platform is sensitive from its start, and nothing clears " <>
+       "it: its profile refuses what would take what it read out of it, and says who it " <>
+       "may be shared with", [["run", "task", "--profile", "dev", "--sensitive"]]},
     {~s(troupe run [AGENT] "task" --profile NAME [--team TEAM] [--only-me] [--repo OWNER/NAME[@REF]]... [--title "TITLE"] [--headless]),
      "the task on the platform, on that plane profile, as the TUI's /new would start it; " <>
        "a full profile is waited on, a line a wait; @profile #agent /local /platform in " <>
@@ -494,6 +500,8 @@ defmodule Troupe.CLI do
       # `troupe run --throwaway` or `--persistent` (root #1209): how long it lasts; nil is
       # normal, and the create says nothing of it.
       lifespan: lifespan_of(opts),
+      # `troupe run --sensitive` (root #1239): on the platform, sensitive from its start.
+      sensitive: Keyword.get(opts, :sensitive, false),
       # `troupe run --repo owner/name[@ref]`, as often as it is given: the GitHub
       # repositories a run on the platform starts on.
       repositories: Keyword.get_values(opts, :repo),

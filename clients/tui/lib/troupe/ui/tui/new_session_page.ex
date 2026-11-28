@@ -85,6 +85,9 @@ defmodule Troupe.UI.TUI.NewSessionPage do
       # `/new --throwaway` or `--persistent` (root #1209): how long it lasts, said at the
       # sentence's end and sent with the create; nil is normal, and sends nothing.
       lifespan: Keyword.get(opts, :lifespan),
+      # `/new --sensitive` (root #1239): on the platform, sensitive from its start, said at
+      # the sentence's end and sent with the create; one-way.
+      sensitive: Keyword.get(opts, :sensitive, false),
       # `/new --repo owner/name[@ref]`: the GitHub repositories a session on the platform
       # starts on, said on the sentence and sent with the create (root #1207).
       repositories: Keyword.get(opts, :repositories, []),
@@ -751,6 +754,7 @@ defmodule Troupe.UI.TUI.NewSessionPage do
            team: r.team || page.team,
            visibility: NewSession.visibility(page.only_me),
            lifespan: page.lifespan,
+           sensitive: page.sensitive,
            repositories: r.repositories
          }}
     end
@@ -1050,9 +1054,19 @@ defmodule Troupe.UI.TUI.NewSessionPage do
       middle,
       Span.new(on_repositories(r.repositories) <> " as "),
       chip.(2, r.agent_label, nil)
-      | who_spans(r, chip) ++ lasts_spans(page.lifespan)
+      | who_spans(r, chip) ++ lasts_spans(page.lifespan) ++ sensitive_spans(page, r.where)
     ])
   end
+
+  # `--sensitive`: what it means on the platform, since nothing clears it; on this computer,
+  # that the session started there will not be.
+  defp sensitive_spans(%{sensitive: true}, :local),
+    do: [Span.new(" · not sensitive: only a session on the platform is marked from here")]
+
+  defp sensitive_spans(%{sensitive: true}, _platform),
+    do: [Span.new(" · sensitive from its start: nothing clears it")]
+
+  defp sensitive_spans(_page, _where), do: []
 
   # How long it lasts, where `/new` said: the picker's word and what it means.
   defp lasts_spans(nil), do: []
