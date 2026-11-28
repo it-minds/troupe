@@ -2,7 +2,8 @@
 // whose it is, a member has the owner's controls, an admin of the team takes it back and
 // the owning person gives one of theirs to a team, each asked of the plane as
 // `artifact.transfer`; a refusal is said in the Info dialog. The Publish dialog publishes one
-// for a team as the team's unless the person unticks it. Against a fake plane whose artifacts the fake daemon keeps; the dialog publishes through the daemon.
+// the person's own, read by the teams they tick, and the one team's only where they say so
+// (troupe #1238: readers are not ownership). Against a fake plane whose artifacts the fake daemon keeps; the dialog publishes through the daemon.
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { WebSocket as NodeWebSocket } from "ws";
@@ -137,41 +138,42 @@ describe("a team's artifact in the gallery", () => {
 });
 
 describe("publishing for a team", () => {
-  it("makes the artifact the team's unless the person unticks it", async () => {
+  it("makes the artifact the one team's ticked only where the person says so", async () => {
     daemon.linked = { subject: "alice@example.com", display_name: "Alice", plane_url: "https://plane.example.test" };
     client = new DaemonClient({ transport: "ws", port: daemon.port, token: daemon.token });
     unmount = render(<Publish daemon={client} onClose={() => undefined} />).unmount;
     const dialog = await waitFor(() => document.querySelector<HTMLElement>('[role="dialog"][aria-label="Publish"]'), "the dialog");
-    await waitFor(() => dialog.querySelector('option[value="team:core"]'), "the person's teams offered");
+    const core = await waitFor(() => [...dialog.querySelectorAll<HTMLLabelElement>(".readers label")].find((l) => l.textContent?.trim().startsWith("The core team"))?.querySelector("input") ?? null, "the person's teams offered");
 
     const file = dialog.querySelector<HTMLInputElement>('input[type="file"]')!;
     Object.defineProperty(file, "files", { value: [new File(["<h1>Hi</h1>"], "index.html", { type: "text/html" })], configurable: true });
     file.dispatchEvent(new Event("change", { bubbles: true }));
     type(dialog.querySelector<HTMLInputElement>("input[maxlength='200']")!, "Core's figures");
-    expect(says("Owned by the team")).toBe(false);
-    choose(dialog.querySelector<HTMLSelectElement>("select")!, "team:core");
-    const owned = await waitFor(() => dialog.querySelector<HTMLInputElement>('input[type="checkbox"]'), "the owner tick");
-    expect(owned.checked).toBe(true);
+    expect(says("Owned by the core team")).toBe(false);
+    core.click();
+    const owned = await waitFor(() => [...dialog.querySelectorAll<HTMLLabelElement>("label")].find((l) => l.textContent?.includes("Owned by the core team"))?.querySelector("input") ?? null, "the owner tick");
+    expect(owned.checked).toBe(false);
+    owned.click();
     (await seesButton("Publish", dialog)).click();
     await waitFor(() => daemon.publishedArtifacts.length === 1, "the publish");
-    expect(daemon.publishedArtifacts[0]!["owner"]).toBe("team");
+    expect(daemon.publishedArtifacts[0]).toMatchObject({ teams: ["core"], owner: "team" });
     await sees("owned by the core team");
   });
 
-  it("sends me where the person keeps it their own", async () => {
+  it("sends no owner where the person keeps it their own, read by the team ticked", async () => {
     daemon.linked = { subject: "alice@example.com", display_name: "Alice", plane_url: "https://plane.example.test" };
     client = new DaemonClient({ transport: "ws", port: daemon.port, token: daemon.token });
     unmount = render(<Publish daemon={client} onClose={() => undefined} />).unmount;
     const dialog = await waitFor(() => document.querySelector<HTMLElement>('[role="dialog"][aria-label="Publish"]'), "the dialog");
-    await waitFor(() => dialog.querySelector('option[value="team:core"]'), "the person's teams offered");
+    const core = await waitFor(() => [...dialog.querySelectorAll<HTMLLabelElement>(".readers label")].find((l) => l.textContent?.trim().startsWith("The core team"))?.querySelector("input") ?? null, "the person's teams offered");
     const file = dialog.querySelector<HTMLInputElement>('input[type="file"]')!;
     Object.defineProperty(file, "files", { value: [new File(["# Notes"], "notes.md", { type: "text/markdown" })], configurable: true });
     file.dispatchEvent(new Event("change", { bubbles: true }));
     type(dialog.querySelector<HTMLInputElement>("input[maxlength='200']")!, "Notes");
-    choose(dialog.querySelector<HTMLSelectElement>("select")!, "team:core");
-    (await waitFor(() => dialog.querySelector<HTMLInputElement>('input[type="checkbox"]'), "the owner tick")).click();
+    core.click();
     (await seesButton("Publish", dialog)).click();
     await waitFor(() => daemon.publishedArtifacts.length === 1, "the publish");
-    expect(daemon.publishedArtifacts[0]!["owner"]).toBe("me");
+    expect(daemon.publishedArtifacts[0]).toMatchObject({ teams: ["core"], visibility: "private" });
+    expect(daemon.publishedArtifacts[0]!["owner"]).toBeUndefined();
   });
 });

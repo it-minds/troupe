@@ -123,6 +123,9 @@ daemon.memory["/home/ada/repo"] = { status: "fresh", built_at: "2026-10-08T09:00
 daemon.memory["/home/ada/project"] = { status: "absent" };
 // The person's artifacts and memory, for the app's Artifacts and Memory views (troupe #62,
 // #55): one of each audience, and memory at three levels with a topic two of them share.
+// Who reads each is a set (troupe #1238): its teams and the organisation switch; the person
+// is in core and design, and the dev profile is granted to core and clinics, so an artifact
+// a dev session published may be given to clinics too, and its picker finds Dana, whom dev covers.
 const day = (n: number): string => new Date(Date.now() - n * 24 * 3600 * 1000).toISOString();
 const artifact = (over: Record<string, unknown>): Record<string, unknown> => ({
   kind: "html",
@@ -155,12 +158,15 @@ daemon.artifacts = [
       { path: "packages.csv", text: "package,before,after\nleft-pad,MIT,MIT\nfast-json,BSD-2,MIT\n" },
     ],
   }),
-  artifact({ id: "art-ledger", title: "Ledger migration plan", visibility: "profile:dev", published_at: day(2) }),
+  artifact({ id: "art-ledger", title: "Ledger migration plan", visibility: "private", teams: ["core", "clinics"], scope: "team:core", published_at: day(2) }),
   // A second of the person's teams under Your teams, so it offers a chip per team (#978).
-  artifact({ id: "art-oncall", title: "On-call handover", kind: "markdown", visibility: "team:core", published_at: day(5) }),
-  artifact({ id: "art-interviews", title: "Field interview guide", kind: "file", visibility: "profile:ux", shared: true, role: "view", published_at: day(4) }),
-  artifact({ id: "art-mine", title: "Placement loop benchmarks", mine: true, role: "owner", owner: { subject: "alice@example.com", display_name: "Alice" }, version: 2, current: 2, published_at: day(12), may_delete: true }),
+  artifact({ id: "art-oncall", title: "On-call handover", kind: "markdown", visibility: "private", teams: ["design"], scope: "team:design", published_at: day(5) }),
+  artifact({ id: "art-interviews", title: "Field interview guide", kind: "file", visibility: "private", shared: true, role: "view", published_at: day(4) }),
+  artifact({ id: "art-mine", title: "Placement loop benchmarks", mine: true, role: "owner", owner: { subject: "alice@example.com", display_name: "Alice" }, teams: ["core"], version: 2, current: 2, published_at: day(12), may_delete: true }),
 ];
+daemon.myTeams = ["core", "design"];
+daemon.profileTeams = { dev: ["core", "clinics"] };
+daemon.coveredPeople = [{ subject: "dana@example.com", display_name: "Dana Example", email: "dana@example.com" }];
 // A picture its publisher sent for one card (troupe #977), served by the fake plane as the
 // artifacts host would serve it; the others keep the placeholder.
 plane.pictures.set("art-ledger", SAMPLE_PICTURE);
@@ -224,6 +230,12 @@ daemon.todos(notes.id, [
 // An approval of a plain tool, which "Always allow" answers with a rule of the person's
 // (troupe #920): the Rules panel under This computer lists it afterwards.
 daemon.askTool(notes.id, "write_file", { path: "plan.md" });
+// The publication gate (troupe #1238), in a session of its own: a new version of one of the
+// person's, which keeps who reads it and asks nothing of it, and a new artifact, whose
+// sharing menu has the teams granted the session's profile ticked.
+const publishing = daemon.seed("/home/ada/reports");
+daemon.askPublish(publishing.id, { title: "Placement loop benchmarks", kind: "html", files: 2, id: "art-mine", access: "the core team and 2 people; a view link", note: "November's run" });
+daemon.askPublish(publishing.id, { title: "Clinic capacity", kind: "markdown", files: 1, teams: ["core", "clinics"] });
 // Frames (issue #474): a turn to read in /home/ada/parser, its working one strip above an
 // answer with a table, a nested list and fenced code, a diff and a csv; and the same turn
 // played live whenever something is sent there, so its reasoning streams and the curtain
