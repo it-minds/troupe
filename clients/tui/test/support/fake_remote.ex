@@ -1736,7 +1736,7 @@ defmodule Troupe.FakeRemote do
     {{:ok,
       %{
         "enabled" => state.artifacts_enabled,
-        "profiles" => ["dev"],
+        "profiles" => [],
         "teams" => Enum.map(state.teams, & &1["name"]),
         "organisation" => "Example",
         "artifacts" => rows
@@ -1753,14 +1753,27 @@ defmodule Troupe.FakeRemote do
       }}, state}
   end
 
-  # A publication is the person's, or a team's where it is for a team and `owner` does not
-  # say `me` (the plane's default), and then every member of the team owns it.
+  # The single team a visibility named before the set is refused, naming the set's method.
+  defp dispatch(state, _kind, "artifact.publish", %{"visibility" => visibility}, _pid)
+       when visibility not in [nil, "private", "organisation"] do
+    {{:error, -32_602, "invalid_params",
+      %{
+        "reason" =>
+          "visibility is private or organisation, not #{inspect(visibility)}; " <>
+            "the teams that read it are teams, and artifact.access.set changes them"
+      }}, state}
+  end
+
+  # A publication is the person's whatever teams read it, or the one team's in `teams`
+  # where `owner` says `team`, and then every member of the team owns it.
   defp dispatch(state, _kind, "artifact.publish", params, _pid) do
     id = "art-new#{length(state.artifacts)}"
+    teams = List.wrap(params["teams"])
+    visibility = params["visibility"] || "private"
 
     owner_team =
-      case {params["visibility"], params["owner"]} do
-        {"team:" <> team, owner} when owner != "me" -> team
+      case {teams, params["owner"]} do
+        {[team], "team"} -> team
         _ -> nil
       end
 
@@ -1768,8 +1781,9 @@ defmodule Troupe.FakeRemote do
       "id" => id,
       "title" => params["title"],
       "kind" => params["kind"],
-      "visibility" => params["visibility"],
-      "scope" => if(params["visibility"] == "private", do: "private", else: "mine"),
+      "visibility" => visibility,
+      "teams" => teams,
+      "scope" => if(visibility == "private" and teams == [], do: "private", else: "mine"),
       "version" => 1,
       "mine" => true,
       "role" => "owner",

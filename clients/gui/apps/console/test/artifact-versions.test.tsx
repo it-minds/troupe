@@ -21,7 +21,7 @@ function artifacts(): FakeArtifact[] {
     artifact("art-carol-notes", carol, {
       title: "Carol's notes",
       kind: "markdown",
-      visibility: "profile:dev",
+      visibility: "team:core",
       versions: [
         { n: 1, files: [{ path: "index.md", content_type: "text/markdown", content: "# One" }], published_by: carol, published_at: "2026-10-24T09:00:00Z" },
         {
@@ -36,8 +36,8 @@ function artifacts(): FakeArtifact[] {
         },
       ],
     }),
-    // For a profile nobody here works in: only a link opens it to anybody but Carol.
-    artifact("art-carol-private", carol, { title: "Carol's plan", visibility: "profile:research" }),
+    // For a team nobody here is in: only a link opens it to anybody but Carol.
+    artifact("art-carol-private", carol, { title: "Carol's plan", visibility: "team:research" }),
   ];
 }
 

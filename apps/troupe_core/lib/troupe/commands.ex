@@ -659,20 +659,23 @@ defmodule Troupe.Commands do
       ),
       entry("publish", "workspace", "Publish a page, a document or a file for others to read",
         usage:
-          "/publish <path> [private | organisation]",
+          "/publish <path> [private | organisation] [--team <name>]... [--owner me | team]",
         args: [
           arg("path", true, "file"),
           arg("visibility", false, "text"),
+          arg("team", false, "text"),
           arg("owner", false, "text")
         ],
         availability: "plane",
         detail:
           "The file is read on this machine and published on your Troupe plane as an artifact, " <>
             "as the person this computer's daemon is signed in as: a page (.html), a Markdown " <>
-            "document (.md) or any other file. Yours alone unless you say otherwise, until you " <>
-            "share it; or the whole organisation reads it, served from a host that can reach " <>
-            "nothing of yours. Teams and people are added from the artifact's Access menu, and " <>
-            "a new version keeps them. A page with stylesheets or scripts of its own is an " <>
+            "document (.md) or any other file. Read by you alone unless you say otherwise: " <>
+            "--team for each team that reads it, organisation for everyone; served from a host " <>
+            "that can reach nothing of yours. It is yours unless --owner team makes it the one " <>
+            "team's named. Teams and people are changed later from the artifact's Access menu " <>
+            "in the desktop app or the console, and a new version keeps them. A page with " <>
+            "stylesheets or scripts of its own is an " <>
             "agent's to publish, with publish_artifact.",
         example: "/publish report.html organisation"
       ),

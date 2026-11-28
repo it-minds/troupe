@@ -43,7 +43,7 @@ describe("an artifact a team owns", () => {
     await open("#/artifacts/art-team", PEOPLE.carol);
     await sees("the core team (you are a member); Ada (ada@example.com) first published it");
     await sees("an owner, as every member of core is");
-    await sees("the core team, whose it is, and whoever you give a link");
+    await sees("the core team, whose it is, and whoever you share it with");
     await seesButton("Pin version 1");
     expect(button("Take back")).toBeNull();
 

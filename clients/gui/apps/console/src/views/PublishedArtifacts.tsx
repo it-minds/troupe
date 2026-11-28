@@ -1,17 +1,17 @@
 // Every artifact, the first tab of an administrator's Artifacts: the table of what people
 // and their agents have published, and a takedown for each. A platform admin sees every one,
 // a person's private ones too, since taking one down is theirs; a team admin sees the
-// artifacts of the teams they administer (`team:<name>`) and those the teams own.
+// artifacts the teams they administer read and those the teams own.
 //
 // A table rather than cards, since an administrator reads it for whose each is, where and
-// how much it stores: a row is a title, a kind, who it is for, whose it is (a team's, where a
+// how much it stores: a row is a title, a kind, who reads it (its teams, the organisation), whose it is (a team's, where a
 // team owns it), its team and its size, never what it holds. Its title opens the artifact's
 // page, as its administrator reads it. A takedown deletes every version and stops every link
 // without asking its owner, so it is typed by the artifact's id.
 
 import { useState } from "react";
 import type { JSX } from "react";
-import { bytes, goesDate, visibilityWords } from "@troupe/client";
+import { artifactAccessWords, bytes, goesDate } from "@troupe/client";
 import type { AdminArtifact } from "@troupe/client";
 import { useConsole, useLoad } from "../console";
 import { href } from "../route";
@@ -44,7 +44,7 @@ export function PublishedArtifacts(): JSX.Element {
                   <tr>
                     <th>Title</th>
                     <th>Kind</th>
-                    <th>For</th>
+                    <th>Read by</th>
                     <th>Owner</th>
                     <th>Team</th>
                     <th className="num">Versions</th>
@@ -60,7 +60,7 @@ export function PublishedArtifacts(): JSX.Element {
                         <a href={href({ page: "artifacts", path: [a.id] })}>{a.title}</a> <span className="mono muted">{a.id}</span>
                       </td>
                       <td>{kindWords(a.kind)}</td>
-                      <td>{a.visibility === "private" ? "its owner alone" : visibilityWords(a.visibility)}</td>
+                      <td>{(a.teams ?? []).length === 0 && a.visibility !== "organisation" ? "its owner alone" : artifactAccessWords({ teams: a.teams ?? [], organisation: a.visibility === "organisation" }).replace(/^read by /, "")}</td>
                       <td>{ownerWords(a)}</td>
                       <td>{a.team ?? "—"}</td>
                       <td className="num">{a.version}</td>

@@ -308,8 +308,8 @@ export class SessionView {
   /**
    * `approval.respond`. First response wins; a later one is answered with a resolution.
    * A delegation's answer may carry the agent it goes to instead and the parts of the
-   * brief the person edited; a publication's carries `visibility` and `owner`, whom it is
-   * for and whose it is; either may carry a word back with a denial. Each is a key beside
+   * brief the person edited; a new artifact's publication carries `visibility`, `teams` and
+   * `owner`, who reads it and whose it is; either may carry a word back with a denial. Each is a key beside
    * `decision`. A wrong one is refused with why, and the request waits on.
    */
   async respondApproval(callId: string, decision: ApprovalDecision, answer: GateAnswer = {}): Promise<void> {

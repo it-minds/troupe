@@ -32,7 +32,8 @@ defmodule Troupe.ArtifactsCLITest do
       "id" => "a-team",
       "title" => "Design notes",
       "kind" => "markdown",
-      "visibility" => "team:design",
+      "visibility" => "private",
+      "teams" => ["design"],
       "scope" => "team:design",
       "version" => 3,
       "mine" => true,
@@ -70,14 +71,21 @@ defmodule Troupe.ArtifactsCLITest do
     assert {:ok, %{artifacts: %{verb: :publish, file: "r.md", to: "organisation", title: "Weekly"}}} =
              CLI.parse(~w(artifacts publish r.md --to organisation --title Weekly))
 
-    assert {:ok, %{artifacts: %{verb: :publish, file: "r.md", to: "team:core", owner: "me"}}} =
-             CLI.parse(~w(artifacts publish r.md --to team:core --owner me))
+    assert {:ok,
+            %{artifacts: %{verb: :publish, file: "r.md", teams: ["core", "billing"], owner: "me"}}} =
+             CLI.parse(~w(artifacts publish r.md --team core --team billing --owner me))
 
-    assert {:error, "--owner team needs --to team:<name>" <> _} =
+    assert {:ok, %{artifacts: %{verb: :publish, teams: ["core"], owner: "team"}}} =
+             CLI.parse(~w(artifacts publish r.md --team core --owner team))
+
+    assert {:error, "--owner team needs one --team NAME" <> _} =
              CLI.parse(~w(artifacts publish r.md --owner team))
 
+    assert {:error, "--to is private or organisation, not \"team:core\"" <> _} =
+             CLI.parse(~w(artifacts publish r.md --to team:core))
+
     assert {:error, "--owner is me or team" <> _} =
-             CLI.parse(~w(artifacts publish r.md --to team:core --owner them))
+             CLI.parse(~w(artifacts publish r.md --team core --owner them))
 
     assert {:ok, %{artifacts: %{verb: :transfer, id: "a-1", to: "team:core"}}} =
              CLI.parse(~w(artifacts transfer a-1 --to team:core))
@@ -153,7 +161,7 @@ defmodule Troupe.ArtifactsCLITest do
 
     ws = tmp_workspace(%{"report.md" => "# Weekly\nAll well.\n"})
     {0, said} = run(%{verb: :publish, file: Path.join(ws, "report.md")})
-    assert said =~ "report.md as art-new3 version 1"
+    assert said =~ "report.md as art-new3 version 1, read by you alone"
 
     {"artifact.publish", sent} =
       FakeRemote.calls(remote) |> Enum.find(&match?({"artifact.publish", _}, &1))
@@ -161,16 +169,28 @@ defmodule Troupe.ArtifactsCLITest do
     assert %{"visibility" => "private", "title" => "Weekly", "kind" => "markdown"} = sent
     refute Map.has_key?(sent, "owner")
 
-    # For a team it is the team's unless --owner me, and the line says whose it became.
-    {0, said} = run(%{verb: :publish, file: Path.join(ws, "report.md"), to: "team:Core"})
-    assert said =~ "report.md as art-new4 version 1 (team Core's)"
-    assert %{"owner" => "team"} = last_publish(remote)
+    # Read by the teams named, the person's unless --owner team, and the line says who reads it and whose it became.
+    {0, said} =
+      run(%{
+        verb: :publish,
+        file: Path.join(ws, "report.md"),
+        teams: ["Core", "ops"],
+        to: "organisation"
+      })
+
+    assert said =~
+             "report.md as art-new4 version 1, read by the whole organisation and the Core and ops teams:"
+
+    assert %{"teams" => ["Core", "ops"], "visibility" => "organisation"} =
+             sent = last_publish(remote)
+
+    refute Map.has_key?(sent, "owner")
 
     {0, said} =
-      run(%{verb: :publish, file: Path.join(ws, "report.md"), to: "team:Core", owner: "me"})
+      run(%{verb: :publish, file: Path.join(ws, "report.md"), teams: ["Core"], owner: "team"})
 
-    assert said =~ "report.md as art-new5 version 1:"
-    assert %{"owner" => "me"} = last_publish(remote)
+    assert said =~ "report.md as art-new5 version 1, read by the Core team (team Core's)"
+    assert %{"owner" => "team", "teams" => ["Core"]} = last_publish(remote)
 
     # transfer: to a team the person is in, and back; whose it is follows in the listing.
     {0, said} = run(%{verb: :transfer, id: "a-mine", to: "team:Core"})

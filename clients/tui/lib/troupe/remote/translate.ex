@@ -532,8 +532,8 @@ defmodule Troupe.Remote.Translate do
              name: data["name"] || data["tool"] || "tool",
              preview: preview(data),
              delegation: if(is_map(data["delegation"]), do: data["delegation"]),
-             # An agent's publication, for the person to say whom it is for: its title,
-             # kind, how many files, whom the agent proposed it for and whose, its note.
+             # An agent's publication: its title, kind, how many files, the teams and switch
+             # proposed for a new one and whose, a new version's readers (`access`), its note.
              publication: if(is_map(data["publication"]), do: data["publication"]),
              # The per-tool rule of the configuration that asked, when one did (root #658).
              rule: if(is_map(data["rule"]), do: data["rule"])

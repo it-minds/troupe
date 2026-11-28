@@ -250,7 +250,8 @@ export type {
   RemoteOffer,
   RemotePerson,
 } from "./fleet.js";
-export { ArtifactApi, audienceName, audienceOf, blockedKindWords, blockedWords, ownerWords, teamOwned, textBytes, visibilityWords } from "./artifacts.js";
+export { ArtifactApi, accessChanges, accessWaiting, artifactAccessWords, audienceOf, audienceTeams, offeredTeams, publishAnswer, blockedKindWords, blockedWords, ownerWords, teamOwned, textBytes, visibilityWords } from "./artifacts.js";
+export type { ArtifactAccess, ArtifactAccessChange, ArtifactAccessPerson, ArtifactAccessTeam, ArtifactAccessWaiting, ArtifactReaders } from "./artifacts.js";
 export { besideRows, renderEntries, replacedBy, topicKey, writtenBy } from "./entries.js";
 export type { EntryDraft, EntryLevel, InEffect, MemoryEntry, MemoryInEffect } from "./entries.js";
 export type { ArtifactComment, ArtifactPersonShare, ArtifactShareRole, ArtifactThread } from "./artifacts.js";
