@@ -61,7 +61,7 @@ describe("Your triggers", () => {
     expect(row.textContent).toMatch(/On, every Monday at 06:00 UTC; next \w{3} \d+ \w{3}, 06:00 UTC\./);
     expect(row.textContent).toContain("Last ran Mon 23 Nov, 06:00 UTC: finished");
     expect(row.textContent).toContain("It runs as you, up to $1.00 a run.");
-    await seesButton("Open the run", row);
+    await seesButton("Open the last run", row);
 
     button("Switch off", row)!.click();
     await waitFor(() => rowOf("rerun-weekly-numbers")?.textContent?.includes("Off: it does not run until you switch it on"), "switched off");

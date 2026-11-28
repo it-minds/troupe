@@ -7,7 +7,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import type { JSX } from "react";
-import { OWN_TRIGGER_ACTIONS, errorText, lastRunWords, ownBudgetWords, ownTriggerRefusal, ownTriggerState, removeConfirm } from "@troupe/client";
+import { OWN_TRIGGER_ACTIONS, countWords, errorText, lastRunWords, ownBudgetWords, ownTriggerRefusal, ownTriggerState, removeConfirm } from "@troupe/client";
 import type { AuthSession, OwnTrigger, OwnTriggerAction } from "@troupe/client";
 import { Loading } from "./bits";
 
@@ -105,7 +105,7 @@ export function OwnTriggers({ source, known, onOpen }: { source: OwnTriggerSourc
   return (
     <>
       <header className="screen-head">
-        <span className="count">{known && triggers ? `${triggers.length} of yours` : "Yours"}</span>
+        <span className="count">{known && triggers ? countWords(triggers.length, "trigger") : "Yours"}</span>
         <h1>Your triggers</h1>
       </header>
       <div className="listing own-triggers">
@@ -137,16 +137,15 @@ export function OwnTriggers({ source, known, onOpen }: { source: OwnTriggerSourc
                 </h2>
                 <p className="note">{ownTriggerState(t)}.</p>
                 <p className="note">
-                  {lastRunWords(t)}
+                  {lastRunWords(t)}. It runs as you, {ownBudgetWords(t)}.
                   {t.last_run?.session_id && (
                     <>
                       {" "}
                       <button type="button" className="link" onClick={() => onOpen(t.last_run!.session_id!)}>
-                        Open the run
+                        Open the last run
                       </button>
                     </>
                   )}
-                  . It runs as you, {ownBudgetWords(t)}.
                 </p>
                 <OwnTriggerControls trigger={t} source={source} onChanged={reload} />
               </li>
