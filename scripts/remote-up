@@ -73,7 +73,16 @@ images="${TROUPE_IMAGES:-build}"
 published=false
 if [ ! -d "$chart" ]; then published=true; fi
 
-step() { echo; echo "==> $*"; }
+# Each step's time, said as the next one starts, so a slow run shows where it went.
+step_name=""
+step_start=$SECONDS
+step() {
+  if [ -n "$step_name" ]; then echo "phase time: ${step_name} $((SECONDS - step_start))s"; fi
+  step_name="$*"
+  step_start=$SECONDS
+  echo
+  echo "==> $*"
+}
 
 # -- the cluster --------------------------------------------------------------
 
