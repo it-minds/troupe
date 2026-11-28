@@ -24,20 +24,20 @@ defmodule Troupe.Plane.ArtifactKeepsTest do
     _engineering = team_with_grant("engineering", "dev", name: "engineering")
     ada = person("ada@example.test", ["engineering"])
 
-    publish = fn title, visibility ->
+    publish = fn title, team ->
       {:ok, artifact} =
         call(ada, "artifact.publish", %{
           "title" => title,
           "kind" => "html",
-          "visibility" => visibility,
+          "teams" => [team],
           "files" => [%{"path" => "index.html", "bytes" => Base.encode64("<h1>#{title}</h1>")}]
         })
 
       artifact
     end
 
-    older = publish.("Older", "team:engineering")
-    newer = publish.("Newer", "team:engineering")
+    older = publish.("Older", "engineering")
+    newer = publish.("Newer", "engineering")
 
     %{ada: ada, bo: person("bo@example.test", ["engineering"]), older: older, newer: newer}
   end

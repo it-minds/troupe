@@ -75,3 +75,5 @@ not ask.
   addition, and one that should be the person's or the organisation's setting rather than
   the model's guess, so nothing here forecloses it; until then the person chooses each
   time, which is the safe default for something other people read.
+
+> Narrowed by Decision 1121: the must-ask holds for a new artifact only; a new version keeps who reads it, is not must-ask, and its gate shows who that is.

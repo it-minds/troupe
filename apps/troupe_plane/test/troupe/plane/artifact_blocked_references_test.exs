@@ -59,7 +59,7 @@ defmodule Troupe.Plane.ArtifactBlockedReferencesTest do
         %{
           "title" => "Report",
           "kind" => "html",
-          "visibility" => "team:engineering",
+          "teams" => ["engineering"],
           "files" => files
         },
         attrs
