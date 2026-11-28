@@ -92,6 +92,8 @@ interface Session {
   pinned?: boolean;
   /** How long it lasts (troupe #1209), as `session.list` says it; normal where nothing set it. */
   lifespan?: "throwaway" | "normal" | "persistent";
+  /** Sensitive since when and by what (troupe #1239), as a row says it; nothing clears it. */
+  sensitive?: Record<string, unknown> | null;
   /** The task list, as the last `todo_updated` in its log left it. */
   todos?: Array<{ id: string; content: string; status: string }>;
   /** How a private session's sealing stands here, as `session.list` says it. */
@@ -605,6 +607,8 @@ export class FakeDaemon {
   projects: Record<string, Record<string, unknown>> = {};
   /** Every file's per-tool rules (troupe #658), as `config.get` answers them. */
   permissions: Array<Record<string, unknown>> = [];
+  /** A sensitive session's rules on this computer (troupe #1239), as `config.get` answers them, or none. */
+  sensitiveRules: Record<string, unknown> | null = null;
   /** The two layers of `mcp.json` and `skills/`, as the seven `mcp.*`/`skills.*` methods keep them. */
   servers: FakeServer[] = [];
   /** Files of the sessions' workspaces `fs.read` answers, by path, beside the scratchpad's. */
@@ -1516,6 +1520,23 @@ evoked where nothing is set and there was a sign-in. */
         }
         const row = this.rowOf(session);
         return reply(ws, id, { session_id: session.id, lifespan: to, erases_at: row["erases_at"] ?? null });
+      }
+
+      // Marked sensitive by hand (troupe #1239), one-way: a line in the log, which every
+      // client attached hears, and the row's mark. Only where `initialize` says `sensitive`.
+      case "session.sensitive.set": {
+        if (this.capabilities["sensitive"] !== true) return reply(ws, id, null, { code: -32601, message: "method_not_found" });
+        const session = this.sessions.get(String(params["session_id"] ?? ""));
+        if (!session) return reply(ws, id, null, { code: -32005, message: "not_found" });
+        if (params["sensitive"] !== true) {
+          return reply(ws, id, null, { code: -32602, message: "invalid_params", data: { field: "sensitive", reason: "nothing clears a sensitive session's mark" } });
+        }
+        if (!session.sensitive) {
+          const by = this.linked?.subject ?? "local:me";
+          session.sensitive = { at: new Date().toISOString(), by, how: "person" };
+          session.log.append("session_marked_sensitive", session.sensitive, { kind: "user", subject: by });
+        }
+        return reply(ws, id, this.rowOf(session));
       }
 
       // Kept at the top of the list, running or dormant; the mark outlives both.
@@ -3305,6 +3326,7 @@ evoked where nothing is set and there was a sign-in. */
         key("transcript.detail", this.transcript["transcript.detail"], "quiet", "transcript detail"),
       ].map(layered),
       permissions: this.permissions,
+      sensitive: this.sensitiveRules,
       warnings: [],
       errors: [],
     };
@@ -3358,6 +3380,7 @@ evoked where nothing is set and there was a sign-in. */
       failed: this.failedOf(s),
       config: { watch: s.watch },
       remote: s.remote ?? null,
+      sensitive: s.sensitive ?? null,
     };
   }
 }

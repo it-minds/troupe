@@ -281,6 +281,23 @@ defmodule Troupe.SensitiveCommandTest do
     end
   end
 
+  test "a session on this computer is marked at its daemon, one-way, and its row says so" do
+    {sid, _fake, ws} = start_session!(script: [{:text, "ok"}])
+
+    assert {:ok, asked} = Client.sensitive(sid, :status)
+    assert asked == Sensitive.ask()
+
+    assert {:ok, said} = Client.sensitive(sid, :mark)
+    assert said =~ "Sensitive since"
+    assert said =~ "nothing clears it"
+
+    assert {:ok, already} = Client.sensitive(sid, :status)
+    assert already =~ "This session is sensitive since"
+
+    {:ok, rows} = Client.sessions({:local, ws})
+    assert View.kept(Enum.find(rows, &(&1.id == sid))) =~ "sensitive"
+  end
+
   test "the session list marks a sensitive session beside its other marks" do
     marked = FakeRemote.session(id: "s-marked", sensitive: @by_call)
     usual = FakeRemote.session(id: "s-usual", visibility: "team")

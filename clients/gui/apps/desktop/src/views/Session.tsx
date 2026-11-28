@@ -348,8 +348,10 @@ export function Session({
       : undefined;
   // Sensitive (troupe #1239): the log's mark, else the row's, else the answer to a mark made
   // here. Nothing clears it, so whichever says it first holds. Its owner marks a pod session
-  // from the ⋯, asked once more, where the plane knows sensitive sessions.
+  // from the ⋯, asked once more, where the plane knows sensitive sessions; a session on this
+  // computer, where its daemon does.
   const knowsSensitive = useSensitive(auth);
+  const marksHere = (daemon?.supportsSensitive ?? false) && (marking?.row.kind === "local" || marking?.row.kind === "private");
   const [sensitiveError, setSensitiveError] = useState<string | null>(null);
   const [askSensitive, setAskSensitive] = useState(false);
   useEffect(() => {
@@ -360,7 +362,7 @@ export function Session({
   const markWords = { self: self ?? null, nameOf: (s: string) => (s === row?.owner ? row?.ownerName : null) };
   const sensitiveTag = sensitiveMark({ sensitive }, markWords);
   const makeSensitive =
-    marking && marking.row.kind === "team" && marking.row.yourRole === "owner" && knowsSensitive && !sensitive
+    marking && ((marking.row.kind === "team" && marking.row.yourRole === "owner" && knowsSensitive) || marksHere) && !sensitive
       ? async (): Promise<void> => {
           setSensitiveError(null);
           try {

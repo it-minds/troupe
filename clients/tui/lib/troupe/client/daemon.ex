@@ -1018,10 +1018,28 @@ defmodule Troupe.Client.Daemon do
 
   # How long a session on this computer lasts (root #1209): the daemon's mark beside its
   # log, which its sweep reads; everything here is the person's own.
-  # A session on this computer is not marked sensitive from here yet: its daemon has no such
-  # mark until the organisation's enforced file says what marks one.
+  # A session on this computer marked sensitive by its person, at its daemon, one-way (root
+  # #1239): the mark is a line of its log, which the daemon wakes a dormant one to write. A
+  # daemon from before sensitive sessions answers so.
   @impl true
-  def sensitive(_sid, _verb), do: {:error, Troupe.Client.Sensitive.not_here()}
+  def sensitive(sid, :status) do
+    case Link.call("session.get", %{session_id: sid}) do
+      {:ok, %{"sensitive" => %{} = mark}} -> {:ok, Troupe.Client.Sensitive.already(mark)}
+      {:ok, %{} = _row} -> {:ok, Troupe.Client.Sensitive.ask()}
+      {:error, reason} -> {:error, refusal(reason)}
+    end
+  end
+
+  def sensitive(sid, :mark) do
+    params = %{session_id: sid, sensitive: true, command_id: Troupe.Remote.RPC.command_id()}
+
+    case Link.call_with_data("session.sensitive.set", params) do
+      {:ok, %{} = row} -> {:ok, Troupe.Client.Sensitive.set(row)}
+      {:error, %{code: "method_not_found"}} -> {:error, Troupe.Client.Sensitive.not_known()}
+      {:error, %{message: said}} when is_binary(said) -> {:error, said}
+      {:error, reason} -> {:error, refusal(reason)}
+    end
+  end
 
   @impl true
   def lifespan(sid, :status) do
@@ -1925,6 +1943,8 @@ defmodule Troupe.Client.Daemon do
       # from before lifespans.
       lifespan: Troupe.Client.Lifespan.of(row),
       erases_at: row["erases_at"],
+      # Sensitive since when and by what (root #1239); nil from a daemon from before.
+      sensitive: Troupe.Client.Sensitive.of(row["sensitive"]),
       # A daemon from before archiving says nothing, and archived nothing.
       archived: row["archived"] == true
     }

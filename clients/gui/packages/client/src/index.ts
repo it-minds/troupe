@@ -471,6 +471,7 @@ export type {
   ModelsParams,
   PermissionRule,
   ProviderTypeInfo,
+  SensitiveConfig,
   SessionConfig,
 } from "./config.js";
 export { PATH_TOOLS, RULE_ACTIONS, checkRuleSet, parseRule, ruleKind, ruleParts } from "./rules.js";

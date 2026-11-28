@@ -140,6 +140,19 @@ export function ruleScope(rule: Pick<PermissionRule, "scope" | "source">): strin
   return whose[rule.scope] ?? rule.scope;
 }
 
+/**
+ * A sensitive session's rules on this computer, as `config.get` answers them (troupe #1239):
+ * the calls that mark a session sensitive and those a sensitive one is refused, each rule
+ * with its file (`scope` `enforced` for the organisation's, beyond the person's reach, or
+ * `user` for their own config.yaml), and the `sharing` word in force with whose it is (no
+ * scope for the default). Shown, never set by a client.
+ */
+export interface SensitiveConfig {
+  marked_by: PermissionRule[];
+  deny: PermissionRule[];
+  sharing: { value: "allow" | "ask" | "deny"; scope: string | null; source: string | null };
+}
+
 /** `config.get`, and what `config.set` answers with. */
 export interface ModelConfig {
   config_dir: string;
@@ -162,6 +175,8 @@ export interface ModelConfig {
   files?: Array<{ scope: ConfigScope; path: string; exists: boolean }>;
   /** Every file's per-tool rules; absent from a daemon older than troupe #658. */
   permissions?: PermissionRule[];
+  /** A sensitive session's rules on this computer (troupe #1239); null where none are set, absent from an older daemon. */
+  sensitive?: SensitiveConfig | null;
   workspace?: string | null;
   trusted?: boolean;
   warnings?: string[];

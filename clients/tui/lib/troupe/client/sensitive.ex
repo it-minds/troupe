@@ -98,11 +98,6 @@ defmodule Troupe.Client.Sensitive do
   @spec not_known() :: String.t()
   def not_known, do: "this server does not know sensitive sessions yet"
 
-  @doc "Why a session on this computer is not marked here."
-  @spec not_here() :: String.t()
-  def not_here,
-    do: "only a session on the platform is marked sensitive from here: this one is on this computer"
-
   @doc """
   A share a sensitive session's profile refused (`forbidden`, `setting` `sensitive` or
   `sensitive.sharing`): the plane's own sentence, which names who reads it now; nil for any
