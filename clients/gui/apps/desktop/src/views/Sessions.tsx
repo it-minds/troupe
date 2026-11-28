@@ -28,6 +28,7 @@ import {
   markRefusal,
   mayArchive,
   repositoriesSummary,
+  sensitiveMark,
 } from "@troupe/client";
 import type { FleetRow, Lifespan, SessionKind } from "@troupe/client";
 import type { Archived, Marks } from "../hooks";
@@ -371,6 +372,7 @@ function Rows({
         const marked = mark && !r.archived && mayArchive(r) ? mark : undefined;
         const relive = marked?.relive && marked.lives?.(r.kind) ? marked.relive : undefined;
         const lasts = lifespanMark(r);
+        const sensitive = sensitiveMark(r, { nameOf: (s) => (s === r.owner ? r.ownerName : null) });
         if (marked && renaming === r.id) {
           return (
             <li key={r.id} className="markable">
@@ -404,6 +406,11 @@ function Rows({
                 {lasts && (
                   <span className="micro lasts" title={lasts === "persistent" ? "Kept until its owner erases it" : "Erased a while after it goes quiet, unless somebody keeps it"}>
                     {lasts}
+                  </span>
+                )}
+                {sensitive && (
+                  <span className="micro sensitive" title={sensitive.title}>
+                    {sensitive.word}
                   </span>
                 )}
                 <Unread row={r} />

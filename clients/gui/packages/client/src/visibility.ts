@@ -5,6 +5,7 @@
 
 import { TroupeRpcError } from "./connection.js";
 import { ONLY_YOU_MARK } from "./fleet.js";
+import { sharingRefusal } from "./sensitive.js";
 import { ErrorCodes } from "./types.js";
 import { errorText } from "./words.js";
 
@@ -38,6 +39,9 @@ export function whoseSentence(visibility: string | null | undefined, team: strin
 /** Why the plane would not give it to the team or take it back, in words for the view's banner. */
 export function visibilityRefusal(e: unknown, give: boolean): string {
   const lead = give ? "It was not given to the team" : "It was not taken back";
+  // A sensitive session's profile refused it: its sentence names who reads it now.
+  const sensitive = sharingRefusal(e);
+  if (sensitive) return sensitive;
   if (e instanceof TroupeRpcError && e.code === ErrorCodes.method_not_found) return `${lead}: this plane does not give a session to a team after it started yet.`;
   if (e instanceof TroupeRpcError && e.code === ErrorCodes.forbidden && typeof e.data?.["reason"] !== "string") {
     return `${lead}: only the session's owner gives it to the team or takes it back.`;

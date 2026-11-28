@@ -730,7 +730,8 @@ defmodule Troupe.UI.TUI.View do
   desktop app's words (`@troupe/client`'s `syncWords`); `only you` for a pod session of the
   person's own the team cannot open (`@troupe/client`'s `onlyYou`), never "private", which
   is a sealed session's word; empty for any other session. Then how long it lasts, where it
-  is not normal (root #1209): `throwaway · goes in 18 h`, `persistent`.
+  is not normal (root #1209): `throwaway · goes in 18 h`, `persistent`; then `sensitive`,
+  where it is (root #1239).
   """
   @spec kept(map()) :: String.t()
   def kept(entry) do
@@ -742,7 +743,8 @@ defmodule Troupe.UI.TUI.View do
       end
 
     lasts = Client.lifespan_mark(Map.get(entry, :lifespan), Map.get(entry, :erases_at))
-    [whose, lasts] |> Enum.reject(&(&1 == "")) |> Enum.join(" · ")
+    sensitive = Client.sensitive_mark(Map.get(entry, :sensitive))
+    [whose, lasts, sensitive] |> Enum.reject(&(&1 == "")) |> Enum.join(" · ")
   end
 
   @doc "The mark of a pod session only its owner and the people they invite can open."
@@ -3105,7 +3107,11 @@ defmodule Troupe.UI.TUI.View do
 
   defp remote_note(%{model: %{remote: %{} = remote}}) do
     mine = if remote[:only_me?], do: " · " <> only_you(), else: ""
-    state = " · remote (#{remote[:state] || "?"})" <> mine <> on_github(remote[:repositories])
+    sensitive = if remote[:sensitive?], do: " · " <> Client.sensitive_word(), else: ""
+
+    state =
+      " · remote (#{remote[:state] || "?"})" <>
+        mine <> sensitive <> on_github(remote[:repositories])
 
     case remote[:reason] do
       reason when is_binary(reason) -> state <> " · #{reason}"
