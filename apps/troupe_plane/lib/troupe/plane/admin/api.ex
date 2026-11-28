@@ -1111,7 +1111,7 @@ defmodule Troupe.Plane.Admin.API do
       name: "admin.sessions.list",
       function: :sessions_list,
       summary:
-        "Session metadata: who, which profile, what state, what it cost, which pod an active session is on (pod, null for none), and for a running pod session whether its last turn read the memory in force for it (memory: current or behind). Never content — there is no method that returns content.",
+        "Session metadata: who, which profile, what state, what it cost, which pod an active session is on (pod, null for none), and for a running pod session whether its last turn read the memory in force for it (memory: current or behind), and whether it is sensitive (sensitive: {at, by, how} as a session's own row says it, or null). Never content — there is no method that returns content.",
       risk: :read,
       arguments: [
         %Argument{
