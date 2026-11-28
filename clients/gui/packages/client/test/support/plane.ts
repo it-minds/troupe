@@ -1445,6 +1445,11 @@ export class FakePlane {
     json(404, { error: "not_found" });
   }
 
+  /** A method asked as `subject`, as their client would, for a test to set the scene another person's client made. */
+  rpcAs(subject: string, method: string, params: Record<string, unknown>): { result: unknown } | { error: { code: number; message: string; data?: unknown } } {
+    return this.rpc(subject, this.nameOf(subject) ?? subject, method, params);
+  }
+
   private rpc(
     subject: string,
     name: string,

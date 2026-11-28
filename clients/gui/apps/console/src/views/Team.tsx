@@ -1,6 +1,7 @@
-// One team, in six tabs: who is in it and from which groups, which profiles it may use,
-// who administers it, its limits, the GitHub repositories its sessions may name with its
-// fix loop's caps, and what removing it would take with it.
+// One team, in seven tabs: who is in it and from which groups, which profiles it may use,
+// who administers it, its limits, the shares of its sensitive sessions waiting on its
+// administrators, the GitHub repositories its sessions may name with its fix loop's caps,
+// and what removing it would take with it.
 //
 // Every tab reads, and every tab changes what it shows: a group linked or unlinked, a
 // profile granted or revoked, an administrator named or removed, a limit narrowed, the
@@ -17,7 +18,7 @@
 
 import { useState } from "react";
 import type { JSX } from "react";
-import type { AdminProfile, AdminTeam, LadderValue, TeamDisableEffect, TeamUnlinkEffect } from "@troupe/client";
+import type { AdminProfile, AdminTeam, LadderValue, ShareRequest, TeamDisableEffect, TeamUnlinkEffect } from "@troupe/client";
 import { TEAM_TABS, href } from "../route";
 import type { TeamTab } from "../route";
 import { recorded, show, useConsole, useLoad } from "../console";
@@ -25,13 +26,14 @@ import type { Load } from "../console";
 import { AuditNote, Empty, Field, Loaded, Locked, Preview, Region, Status, changed, count, useChange, when } from "./bits";
 import type { DiffLine, Done, FieldProps } from "./bits";
 import { Spend, Twice } from "./Teams";
-import { bytes, durationWords, moneyWords } from "@troupe/client";
+import { bytes, durationWords, errorText, moneyWords, shareRequestLine } from "@troupe/client";
 
 const TAB_LABELS: Record<TeamTab, string> = {
   members: "Members and groups",
   access: "Access",
   admins: "Admins",
   limits: "Limits",
+  shares: "Waiting shares",
   github: "GitHub",
   danger: "Danger zone",
 };
@@ -71,6 +73,7 @@ export function Team({ name, tab }: { name: string; tab: TeamTab }): JSX.Element
               {tab === "access" && <Access team={team} onApplied={reload} />}
               {tab === "admins" && <Admins team={team} onApplied={reload} />}
               {tab === "limits" && <Limits team={team} onApplied={reload} />}
+              {tab === "shares" && <Shares team={team} />}
               {tab === "github" && <GitHub team={team} onApplied={reload} />}
               {tab === "danger" && role === "platform_admin" && <Danger team={team} />}
             </>
@@ -712,6 +715,87 @@ function Limits({ team, onApplied }: { team: AdminTeam; onApplied: () => void })
           }}
         />
       )}
+    </section>
+  );
+}
+
+// -- waiting shares ----------------------------------------------------------------------
+
+/**
+ * The shares of the team's sensitive sessions that wait on its administrators (troupe
+ * #1239): a session whose profile says `sensitive.sharing: ask` holds giving it to the team,
+ * an invitation, a grant or an artifact's share until one of them says yes. On the team's
+ * page because a request belongs to one team and only its administrators may answer it;
+ * not with the runs to review, which are a run's outcome and not a share waiting to apply.
+ * Asked as the person (`session.share_requests`), not an administrative call: a platform
+ * administrator who does not administer the team is answered none.
+ */
+function Shares({ team }: { team: AdminTeam }): JSX.Element {
+  const { auth, notify } = useConsole();
+  const [load, reload] = useLoad(
+    () =>
+      auth
+        .withToken((plane, token) => plane.shareRequests(token))
+        .then((r) => r.requests.filter((q) => q.team === team.name))
+        .catch((e: unknown) => {
+          // A plane from before sensitive sessions holds no share for anybody.
+          if ((e as { code?: unknown }).code === -32601) return null;
+          throw e;
+        }),
+    [auth, team.name],
+  );
+  const [busy, setBusy] = useState<string | null>(null);
+  const [refused, setRefused] = useState<string | null>(null);
+  const decide = async (request: ShareRequest, decision: "approve" | "decline"): Promise<void> => {
+    setBusy(request.id);
+    setRefused(null);
+    try {
+      await auth.withToken((plane, token) => plane.decideShareRequest(token, request.id, decision));
+      notify(decision === "approve" ? `Allowed: ${shareRequestLine(request).toLowerCase()}.` : `Refused: ${shareRequestLine(request).toLowerCase()}.`);
+      reload();
+    } catch (e) {
+      setRefused(errorText(e));
+    } finally {
+      setBusy(null);
+    }
+  };
+  return (
+    <section className="tab">
+      <p className="lead">
+        A sensitive session read what must not leave it. Where its profile asks first, giving it to the team, inviting somebody or sharing what it published waits here for a yes from one of{" "}
+        {team.name}'s administrators, and the people who read it now go on reading it.
+      </p>
+      {refused && (
+        <p className="field-error" role="alert">
+          {refused}
+        </p>
+      )}
+      <Loaded load={load} what={`the shares waiting on ${team.name}`} retry={reload}>
+        {(requests) =>
+          requests === null ? (
+            <Empty title="Nothing waits here">This plane does not know sensitive sessions yet.</Empty>
+          ) : requests.length === 0 ? (
+            <Empty title="Nothing waits on you">A share of one of {team.name}'s sensitive sessions that its profile asks about first is listed here.</Empty>
+          ) : (
+            <ul className="plain share-requests" aria-label="Waiting shares">
+              {requests.map((r) => (
+                <li key={r.id}>
+                  <span>
+                    {shareRequestLine(r)}: <span className="mono">{r.session_id}</span>
+                  </span>{" "}
+                  <span className="muted">· asked {when(r.at)}</span>{" "}
+                  <button type="button" className="primary" disabled={busy !== null} onClick={() => void decide(r, "approve")}>
+                    Allow
+                  </button>{" "}
+                  <button type="button" disabled={busy !== null} onClick={() => void decide(r, "decline")}>
+                    Refuse
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )
+        }
+      </Loaded>
     </section>
   );
 }
