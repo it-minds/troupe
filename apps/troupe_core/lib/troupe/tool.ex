@@ -106,9 +106,43 @@ defmodule Troupe.Tool.Result do
       name: name,
       ok?: false,
       content: describe(reason),
-      meta: %{}
+      meta: refused(reason)
     }
   end
+
+  # A refusal a client shows apart from a failure says why in `tool_call_completed`'s
+  # `refused`; every other error result carries nothing beside its words.
+  defp refused({:denied_sensitive, _tool, _rule, _mark}), do: %{fields: %{"refused" => "sensitive"}}
+  defp refused(_reason), do: %{}
+
+  @doc """
+  Since when and by what a session is sensitive, as a refusal says it: "mcp.records.lookup
+  read from it at 10:14 UTC", "Ann marked it at 10:14 UTC", with the day where it was not
+  today.
+  """
+  @spec since(map() | nil) :: String.t()
+  def since(%{"how" => "call", "by" => tool} = mark), do: "#{tool} read from it #{at(mark["at"])}"
+
+  def since(%{"by" => by} = mark),
+    do: "#{mark["display_name"] || by} marked it #{at(mark["at"])}"
+
+  def since(_none), do: "a call its profile names read from it"
+
+  defp at(iso) when is_binary(iso) do
+    case DateTime.from_iso8601(iso) do
+      {:ok, at, _offset} ->
+        time = Calendar.strftime(at, "%H:%M UTC")
+
+        if DateTime.to_date(at) == Date.utc_today(),
+          do: "at #{time}",
+          else: "on #{Date.to_iso8601(DateTime.to_date(at))} at #{time}"
+
+      _error ->
+        "at #{iso}"
+    end
+  end
+
+  defp at(_none), do: "earlier"
 
   @doc """
   Turn a failure into prose the model can act on.
@@ -175,6 +209,15 @@ defmodule Troupe.Tool.Result do
     do:
       "This call to #{tool} was refused by the rule #{Permissions.describe(rule)}. " <>
         "It did not run. Do the work another way, or say what is left undone; do not try to get around the rule."
+
+  # A sensitive session's refusal (#1239): since when and by what it is sensitive, and whose
+  # rule refuses the call, so the model says what is left undone rather than look for
+  # another way out with the data.
+  def describe({:denied_sensitive, tool, rule, mark}),
+    do:
+      "This session is sensitive since #{since(mark)}: #{tool} is refused in a sensitive " <>
+        "session by the profile #{rule.source} (#{rule.action} #{rule.text}). It did not run. " <>
+        "Say what is left undone; do not try to get around it."
 
   def describe({:enoent, path}), do: "No such file: #{path}"
 

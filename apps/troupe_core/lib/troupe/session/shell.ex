@@ -25,7 +25,7 @@ defmodule Troupe.Session.Shell do
   alias Troupe.Config.Permissions
   alias Troupe.{Events, Registry, Session}
   alias Troupe.Protocol.Words
-  alias Troupe.Session.Log
+  alias Troupe.Session.{Log, Sensitive}
   alias Troupe.Tool.Ctx
   alias Troupe.Tools.{Output, Shell}
 
@@ -57,7 +57,7 @@ defmodule Troupe.Session.Shell do
     with {:ok, agent} <- root(session_id),
          {:ok, setup} <- setup(agent),
          nil <- refusal(setup.config, setup.definitions),
-         nil <- denied(setup.config, command, setup.workspace) do
+         nil <- denied(setup.config, command, setup.workspace, session_id) do
       start(session_id, command, setup, opts)
     else
       {setting, sentence} when is_binary(setting) -> {:error, {:forbidden, setting, sentence}}
@@ -109,13 +109,23 @@ defmodule Troupe.Session.Shell do
   own call would be. A person's command is not a tool call, and no other scope's rule
   applies to it, since the person could change their own files; the profile's are the
   platform's, and on its pods a command typed with `!` obeys them as the agent does. An
-  `ask` is not asked: the person who typed it is who it would ask.
+  `ask` is not asked: the person who typed it is who it would ask. In a sensitive session
+  (`session_id`'s mark) the profile's `sensitive.deny` rules for `shell` refuse it too.
   """
-  @spec denied(Troupe.Config.t(), String.t(), Path.t() | nil) :: {String.t(), String.t()} | nil
-  def denied(config, command, workspace) do
+  @spec denied(Troupe.Config.t(), String.t(), Path.t() | nil, String.t() | nil) ::
+          {String.t(), String.t()} | nil
+  def denied(config, command, workspace, session_id \\ nil) do
     profile = Enum.filter(config.permissions, &(&1.layer == :profile))
+    rules = profile ++ Troupe.Tools.sensitive_deny(config, session_id)
 
-    case Permissions.decide(profile, "shell", %{"command" => command}, workspace) do
+    case Permissions.decide(rules, "shell", %{"command" => command}, workspace) do
+      {:deny, %{layer: :sensitive} = rule} ->
+        {"sensitive",
+         "this command was refused: this session is sensitive since " <>
+           Troupe.Tool.Result.since(Sensitive.mark_of(session_id)) <>
+           ", and the rule #{Permissions.describe(rule)} refuses it there, for a command typed " <>
+           "with ! as for the agent's"}
+
       {:deny, rule} ->
         {"permissions",
          "this command was refused by the rule #{Permissions.describe(rule)}: on the platform a " <>

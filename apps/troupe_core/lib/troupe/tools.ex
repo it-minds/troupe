@@ -337,7 +337,7 @@ defmodule Troupe.Tools do
   defp unless_denied(tool, name, args, ctx) do
     case rule(name, args, ctx) do
       {:deny, rule} ->
-        {:reject, Result.error(ctx.call_id, name, {:denied_by_rule, name, rule})}
+        {:reject, Result.error(ctx.call_id, name, refusal(name, rule, ctx))}
 
       _other ->
         mark(name, args, ctx)
@@ -366,13 +366,40 @@ defmodule Troupe.Tools do
 
   defp mark(_name, _args, _ctx), do: :ok
 
-  # What the configuration's per-tool rules say about this call (#658), or `nil`.
-  defp rule(name, args, %Ctx{config: %{permissions: [_ | _] = rules}} = ctx) do
-    root = if ctx.workspace, do: ctx.workspace.root_real
-    Permissions.decide(rules, name, args, root)
+  # What the configuration's per-tool rules say about this call (#658), or `nil`; in a
+  # sensitive session the profile's `sensitive.deny` with them, a layer above the profile's
+  # own, read from the session's mark at the moment of the call.
+  defp rule(name, args, %Ctx{config: %{} = config} = ctx) do
+    case List.wrap(config.permissions) ++ sensitive_deny(config, ctx.session_id) do
+      [] ->
+        nil
+
+      rules ->
+        root = if ctx.workspace, do: ctx.workspace.root_real
+        Permissions.decide(rules, name, args, root)
+    end
   end
 
   defp rule(_name, _args, _ctx), do: nil
+
+  @doc """
+  The profile's `sensitive.deny` rules where the session is sensitive now, else `[]`: what
+  the gate adds to the rules of a call, and a person's `!` command's, once the mark is set.
+  The mark is asked only of a session whose profile refuses anything when it is set.
+  """
+  @spec sensitive_deny(Troupe.Config.t() | nil, String.t() | nil) :: [Permissions.rule()]
+  def sensitive_deny(%{sensitive: %{deny: [_ | _] = deny}}, session_id) do
+    if Sensitive.mark_of(session_id), do: deny, else: []
+  end
+
+  def sensitive_deny(_config, _session_id), do: []
+
+  # A `deny` of the sensitive layer is said with since when and by what the session is
+  # sensitive; any other with its rule and where it came from.
+  defp refusal(name, %{layer: :sensitive} = rule, ctx),
+    do: {:denied_sensitive, name, rule, Sensitive.mark_of(ctx.session_id)}
+
+  defp refusal(name, rule, _ctx), do: {:denied_by_rule, name, rule}
 
   # An MCP server the session's team is not entitled to (docs/developer/architecture-remote.md section 4): its
   # tools were never offered to this session, so a call to one is unknown, as a
@@ -448,7 +475,7 @@ defmodule Troupe.Tools do
         Result.error(ctx.call_id, name, {:denied_by_policy, name})
 
       {:deny, rule} ->
-        Result.error(ctx.call_id, name, {:denied_by_rule, name, rule})
+        Result.error(ctx.call_id, name, refusal(name, rule, ctx))
     end
   end
 

@@ -219,7 +219,10 @@ defmodule Troupe.Protocol.Schema do
         "spent" => optional(:object),
         # A `publish_artifact`'s: what it published on the plane (#62), `id`, `version`,
         # `url`, `title` and `visibility`.
-        "artifact" => optional(:object)
+        "artifact" => optional(:object),
+        # Why a call that did not run was refused, where a client shows it apart from a
+        # failure: `sensitive`, a sensitive session's rule. Absent on every other result.
+        "refused" => optional(:string)
       },
       "tool_results" => %{"results" => required(:array)},
       "todo_updated" => %{"items" => required(:array), "source" => optional(:string)},

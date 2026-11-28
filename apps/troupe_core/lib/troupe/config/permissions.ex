@@ -47,8 +47,9 @@ defmodule Troupe.Config.Permissions do
         }
 
   # Which file's rule is named when several of one kind hold: the platform's first, the
-  # worker profile's on a pod and the organisation's elsewhere.
-  @priority %{profile: 6, enforced: 5, org: 4, user: 3, project: 2, local: 1}
+  # worker profile's rules for a sensitive session above its own, then the worker profile's
+  # on a pod and the organisation's elsewhere.
+  @priority %{sensitive: 7, profile: 6, enforced: 5, org: 4, user: 3, project: 2, local: 1}
 
   # The layers whose `allow` stands under `managed_permission_rules_only`: what a platform
   # set, not anything a session's own files say.
@@ -398,11 +399,15 @@ defmodule Troupe.Config.Permissions do
 
   @doc """
   Where a rule came from, in words: "your organisation (managed.yaml)", "your config.yaml",
-  "this project's .troupe/config.yaml", and on the platform "the profile fixing".
+  "this project's .troupe/config.yaml", and on the platform "the profile fixing", or "the
+  profile records, in a sensitive session" for a rule of its `sensitive.deny`.
   """
   @spec scope(rule()) :: String.t()
   # A worker profile's rules are its name's, not a file's.
   def scope(%{layer: :profile, source: profile}), do: "the profile #{profile}"
+  # A worker profile's `sensitive.deny`, which holds only once the session is sensitive.
+  def scope(%{layer: :sensitive, source: profile}),
+    do: "the profile #{profile}, in a sensitive session"
   # A trigger's terms allow what its runs need, named by the trigger that runs them.
   def scope(%{layer: :trigger, source: trigger}), do: "the terms of the trigger #{trigger}"
 
@@ -438,6 +443,7 @@ defmodule Troupe.Config.Permissions do
   end
 
   defp source(%{layer: :profile, source: profile}), do: profile
+  defp source(%{layer: :sensitive, source: profile}), do: profile
   defp source(%{layer: :trigger, source: trigger}), do: trigger
   defp source(%{source: nil}), do: nil
   defp source(%{source: path}), do: Troupe.Paths.display(path)
