@@ -25,7 +25,8 @@ defmodule Troupe.FakeRemote do
 
   use GenServer
 
-  alias Troupe.Protocol.ClientUpdate
+  alias Troupe.Protocol.{ClientUpdate, Event}
+  alias Troupe.Session.History
 
   @guid "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 
@@ -1347,7 +1348,9 @@ defmodule Troupe.FakeRemote do
     {{:ok, %{"head_seq" => head}}, put_in(state.subscriptions[pid], id)}
   end
 
-  # A page of the history before a seq, oldest first, at most `limit` (500 when absent).
+  # A page of the history before a seq, oldest first, about `limit` (500 when absent), cut
+  # at a turn by the rule the plane's own `session.events` cuts by: it may be shorter than
+  # asked, or longer for a turn longer than the page.
   defp dispatch(
          state,
          _kind,
@@ -1356,9 +1359,15 @@ defmodule Troupe.FakeRemote do
          _pid
        )
        when is_integer(before) and before >= 1 do
-    above = Enum.filter(state.sessions[id][:events] || [], &(&1["seq"] < before))
-    page = Enum.take(above, -min(params["limit"] || 500, state.events_page))
-    {{:ok, %{"events" => page, "more" => length(above) > length(page)}}, state}
+    events = state.sessions[id][:events] || []
+    by_seq = Map.new(events, &{&1["seq"], &1})
+
+    read = fn from, below ->
+      for e <- events, e["seq"] > from and e["seq"] < below, do: Event.from_json(e)
+    end
+
+    {page, more} = History.page(read, before, min(params["limit"] || 500, state.events_page))
+    {{:ok, %{"events" => Enum.map(page, &by_seq[&1.seq]), "more" => more}}, state}
   end
 
   defp dispatch(state, _kind, "unsubscribe", _params, pid),
