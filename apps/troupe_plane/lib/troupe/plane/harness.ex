@@ -4252,12 +4252,9 @@ defmodule Troupe.Plane.Harness do
   # client is told. Read at every activation, as the platform's switches are, so a team
   # that changes it reaches a session awake now at its next wake.
   defp idle_params(team) do
-    case Ladder.effective("default_idle_timeout_seconds", team) do
-      %{value: seconds} when is_integer(seconds) and seconds > 0 ->
-        %{"idle_timeout_seconds" => seconds}
-
-      _none ->
-        %{}
+    case Ladder.idle_timeout_seconds(team) do
+      nil -> %{}
+      seconds -> %{"idle_timeout_seconds" => seconds}
     end
   end
 

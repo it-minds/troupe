@@ -79,6 +79,8 @@ export const PERSON_BUDGET: number | null = 150_000_000;
 
 /** How long each team's sessions rest before they sleep, in seconds, and its budget's period. */
 export const TEAM_IDLE: Record<string, number> = { core: 1800, design: 900 };
+/** What the platform gives a session with no team, and a team that sets none. */
+export const PLATFORM_IDLE = 1800;
 export const TEAM_PERIOD: Record<string, string> = { core: "monthly", design: "never" };
 
 /** The harness's own tools, as the plane lists them from the agent check. */
@@ -265,7 +267,7 @@ export function composeProfile(
       active_sessions: live.active_sessions,
       max_tokens: cap,
       session: { ...ALLOWANCE },
-      idle_seconds: team ? (TEAM_IDLE[team] ?? 1800) : null,
+      idle_seconds: team ? (TEAM_IDLE[team] ?? PLATFORM_IDLE) : PLATFORM_IDLE,
       budgets: { profile: spec.budget_micros, team: team ? (TEAM_BUDGETS[team] ?? null) : null, you: PERSON_BUDGET, team_period: team ? (TEAM_PERIOD[team] ?? "monthly") : null },
       unpriced: spec.unpriced ? { ...spec.unpriced, since: monthStart() } : null,
     },

@@ -85,8 +85,8 @@ describe("what a member sees of the limits", () => {
       ["Input tokens before an agent asks to go on", "2,000,000 tokens", "Troupe's default"],
       ["Output tokens before an agent asks to go on", "400,000 tokens", "Troupe's default"],
       ["Delegation", "at most 3 levels deep", "Troupe's default"],
-      // Asked as the administrator, for no team: the rest before a session sleeps is each team's.
-      ["Rest before a session sleeps", "each team's own; asked for no team, so not said", "the team"],
+      // Asked as the administrator, for no team: the rest before a session sleeps is the platform's.
+      ["Rest before a session sleeps", "30 minutes", "the platform"],
     ]);
   });
 
@@ -143,6 +143,24 @@ describe("what a member sees of the limits", () => {
       ["A person's own tools", "off: a person may not offer a session here their own signed-in tools"],
       ["Memory proposals", "off: its agents may not propose to a team's or the organisation's memory"],
     ]);
+  });
+
+  it("says a plane's null rest for no team as not said, not as a number", async () => {
+    const original = globalThis.fetch;
+    globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const answer = await original(input, init);
+      if (typeof init?.body !== "string" || !init.body.includes('"profile.get"')) return answer;
+      const body = (await answer.json()) as { result?: { limits: Record<string, unknown> } };
+      if (body.result) body.result.limits["idle_seconds"] = null;
+      return new Response(JSON.stringify(body), { status: answer.status, headers: { "content-type": "application/json" } });
+    };
+    try {
+      await open("#/profiles/dev");
+      const limits = await table("Limits");
+      expect(limits.at(-1)).toEqual(["Rest before a session sleeps", "each team's own; asked for no team, so not said", "the platform"]);
+    } finally {
+      globalThis.fetch = original;
+    }
   });
 
   it("draws an older plane's answer, without them, as before", async () => {

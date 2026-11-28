@@ -500,8 +500,8 @@ defmodule Troupe.Plane.ProfileView do
   # Then what each agent of the session is held to: the output cap of one model call, the
   # profile's in effect or Troupe's; and the harness's allowance, Troupe's own, since a pod
   # reads no organisation layer and a profile sets none of it. And the team's: how long a
-  # session rests before it sleeps, and the period its budget runs over, as resolved under
-  # the platform's settings; neither without a team.
+  # session rests before it sleeps, as the ladder resolves it and so as a pod is given it,
+  # the platform's own with no team; and the period its budget runs over, the team's only.
   defp limits(user, name, row, team, cap) do
     room = Fleet.room(name, row)
     resolved = Ladder.resolve(team)
@@ -519,7 +519,7 @@ defmodule Troupe.Plane.ProfileView do
         "max_output_tokens" => Allowance.max_output_tokens(),
         "max_depth" => Allowance.max_depth()
       },
-      "idle_seconds" => resolved && resolved.idle_timeout_seconds,
+      "idle_seconds" => Ladder.idle_timeout_seconds(team),
       "budgets" => %{
         "profile" => ceiling(row && row.budget_micros),
         "team" => ceiling(team && Ledger.budget_micros(team.id)),
