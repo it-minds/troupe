@@ -633,6 +633,10 @@ defmodule Troupe.Gateway.Connection do
       # throwaway session here is erased by this daemon's sweep. Not a pod's, whose
       # sessions' lifespans are the plane's, nor a relayed connection's.
       "lifespans" => true,
+      # A row's `sensitive`, `session.sensitive.set` and `session.create`'s `sensitive` (#1239):
+      # a session here is marked by this computer's `sensitive` rules or its person's hand. A
+      # pod's are its plane's, and a relayed connection marks nothing.
+      "sensitive" => true,
       # `approval.respond` takes `allow_always`: the person's own rule for the tool, written
       # into their file on this computer. Not a pod's (its rules are its worker profile's)
       # nor a relayed connection's (the laptop's file is the laptop's person's).

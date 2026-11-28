@@ -392,10 +392,15 @@ defmodule Troupe.Gateway.LocalSources do
 
   # What a session's own tool would answer: the text, or the `sign_in_required` note when
   # the sign-in has run out. A call the server could not take is `unavailable`, saying why.
+  # For a session running here (`session_id`) the call is its gate's to judge as its own
+  # agents' are (#1239): it marks the session where this computer's `sensitive.marked_by`
+  # names it, before it is made, and is refused once the session is sensitive where `deny`
+  # does. A pod session's calls are judged by its pod's gate, against its profile.
   defp call_tool(params) do
     with {:ok, server} <- callable(params),
          {:ok, tool} <- fetch(params, "tool"),
-         {:ok, arguments} <- arguments_of(params) do
+         {:ok, arguments} <- arguments_of(params),
+         :ok <- gated(params["session_id"], Troupe.MCP.tool_name(server.name, tool), arguments) do
       case server |> LocalMCP.server() |> Tool.invoke(tool, arguments, %{}) do
         {:ok, content} ->
           {:ok, %{"server" => server.name, "tool" => tool, "content" => content}}
@@ -403,6 +408,13 @@ defmodule Troupe.Gateway.LocalSources do
         {:error, why} ->
           {:error, Error.new(:unavailable, %{server: server.name, reason: why})}
       end
+    end
+  end
+
+  defp gated(session_id, name, arguments) do
+    case Troupe.Gateway.Sensitive.call(session_id, name, arguments) do
+      :ok -> :ok
+      {:refused, sentence} -> {:error, Error.new(:forbidden, %{reason: sentence, sensitive: true})}
     end
   end
 
