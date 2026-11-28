@@ -3494,8 +3494,8 @@ defmodule Troupe.UI.TUI.Model do
           %{kind: :approval, delegation: %{} = _delegation} ->
             gate_lines(item, who, gate, once_only)
 
-          # An agent's publication: whom it is for is the person's to say, from what this
-          # terminal knows of their teams and profiles (`view.audience`).
+          # An agent's publication: who reads a new one is the person's to say, from what this
+          # terminal knows of their teams (`view.audience`); a new version keeps its readers.
           %{kind: :approval, publication: %{} = _publication} ->
             publish_lines(item, who, gate, Map.get(view, :audience), once_only)
 
@@ -3730,108 +3730,98 @@ defmodule Troupe.UI.TUI.Model do
   ## The publication gate
 
   @doc """
-  Whom an agent's publication can be for, as `{visibility, owner, words}`: only the person,
-  everyone at the organisation, each of their teams twice (the team's, and their own), and
-  each profile they are granted, from `audience` (`%{teams, profiles, organisation}`, what
-  `artifact.list` says of them; nil where nothing was learnt). What the agent proposed is
-  among them even where this terminal does not know the team, so it can be chosen. A new
-  version of an artifact (`id` set) offers no ownership, each team once with `owner` nil:
-  whose an artifact is does not change with a version, and the plane refuses a version
-  that says.
+  What a new artifact's sharing menu at the gate offers, in order, each `{toggle, words}`:
+  the teams the publication names (the agent's, or where it named none the teams granted
+  the session's profile, which the plane ticks), then every other team of the person's from
+  `audience` (`%{teams, organisation}`, what `artifact.list` says of them; nil where nothing
+  was learnt), each `{:team, name}`; then the organisation switch (`:organisation`) and the
+  one team's ownership (`:owner`). A new version of an artifact (`id` set) offers nothing:
+  it keeps who reads it and whose it is.
   """
-  @spec publish_choices(map() | nil, map()) :: [{String.t(), String.t() | nil, String.t()}]
+  @spec publish_choices(map() | nil, map()) :: [
+          {{:team, String.t()} | :organisation | :owner, String.t()}
+        ]
+  def publish_choices(_audience, %{"id" => id}) when is_binary(id), do: []
+
   def publish_choices(audience, publication) do
     audience = audience || %{}
     org = Map.get(audience, :organisation)
-    new? = publication["id"] == nil
-    me = if new?, do: "me"
+    named = List.wrap(publication["teams"])
+    teams = named ++ Enum.reject(List.wrap(Map.get(audience, :teams)), &(&1 in named))
 
-    known =
+    Enum.map(teams, &{{:team, &1}, "team #{&1}"}) ++
       [
-        {"private", me, "only you"},
-        {"organisation", me,
-         if(is_binary(org) and org != "", do: "everyone at #{org}", else: "the organisation")}
-      ] ++
-        Enum.flat_map(List.wrap(Map.get(audience, :teams)), &team_choices(&1, new?)) ++
-        Enum.map(List.wrap(Map.get(audience, :profiles)), &{"profile:#{&1}", me, "profile #{&1}"})
-
-    case publication["visibility"] do
-      nil ->
-        known
-
-      visibility ->
-        if Enum.any?(known, &(elem(&1, 0) == visibility)),
-          do: known,
-          else: known ++ proposed_choices(visibility, new?)
-    end
+        {:organisation,
+         if(is_binary(org) and org != "", do: "everyone at #{org}", else: "the whole organisation")},
+        {:owner, "the one team ticked owns it, every member its owner"}
+      ]
   end
 
-  defp team_choices(team, true),
-    do: [
-      {"team:#{team}", "team", "team #{team}, owned by the team"},
-      {"team:#{team}", "me", "team #{team}, owned by you"}
-    ]
-
-  defp team_choices(team, false), do: [{"team:#{team}", nil, "team #{team}"}]
-
-  defp proposed_choices("team:" <> team, new?), do: team_choices(team, new?)
-
-  defp proposed_choices("profile:" <> profile, new?),
-    do: [{"profile:#{profile}", if(new?, do: "me"), "profile #{profile}"}]
-
-  defp proposed_choices(other, new?), do: [{other, if(new?, do: "me"), other}]
-
   @doc """
-  The person's draft of an answer to the publication the gate shows: the choices and the
-  one picked (`choice`, an index; nil until one is, and from the start where the agent
-  named nobody), the agent's proposal picked first. A draft for another call is a fresh one.
+  The person's draft of an answer to the publication the gate shows: the choices, the teams
+  ticked (those the publication names, to start), the organisation switch (on where the
+  agent proposed it) and whose it is (`"team"` where the agent said so). A draft for another
+  call is a fresh one.
   """
   @spec publish_draft(map() | nil, map(), map() | nil) :: map()
   def publish_draft(%{call_id: id, choices: _} = draft, %{call_id: id}, _audience), do: draft
 
   def publish_draft(_draft, item, audience) do
     publication = item.publication
-    choices = publish_choices(audience, publication)
 
-    choice =
-      case publication["visibility"] do
-        nil ->
-          nil
-
-        visibility ->
-          owner = proposed_owner(publication)
-          Enum.find_index(choices, fn {v, o, _words} -> v == visibility and o == owner end)
-      end
-
-    %{call_id: item.call_id, choices: choices, choice: choice, step: nil}
+    %{
+      call_id: item.call_id,
+      choices: publish_choices(audience, publication),
+      teams: if(is_binary(publication["id"]), do: [], else: List.wrap(publication["teams"])),
+      organisation: publication["visibility"] == "organisation",
+      owner: if(publication["owner"] == "team", do: "team", else: "me"),
+      step: nil
+    }
   end
 
-  # Whose the agent proposed it be: as it said; a team's where it said nothing of a team's;
-  # nothing for a new version, whose owner is settled.
-  defp proposed_owner(%{"id" => id}) when is_binary(id), do: nil
-
-  defp proposed_owner(publication),
-    do: publication["owner"] || default_owner(publication["visibility"])
-
-  # A team's publication is the team's unless the agent, or the person, says otherwise.
-  defp default_owner("team:" <> _), do: "team"
-  defp default_owner(_visibility), do: "me"
-
   @doc """
-  What `approval.respond` carries for a publication besides its word, beside it as a
-  delegation's `agent` and `brief` go: the `visibility` picked and, for a new artifact,
-  its `owner`; nil while none is, which is not an answer.
+  The draft with choice `n` (from 0) toggled: a team ticked or unticked, the organisation
+  switch, or the one team's ownership; past the choices, the draft as it is.
   """
-  @spec publish_answer(map()) :: map() | nil
-  def publish_answer(%{choice: n, choices: choices}) when is_integer(n) do
-    case Enum.at(choices, n) do
-      {visibility, nil, _words} -> %{"visibility" => visibility}
-      {visibility, owner, _words} -> %{"visibility" => visibility, "owner" => owner}
-      nil -> nil
+  @spec publish_toggle(map(), non_neg_integer()) :: map()
+  def publish_toggle(draft, n) do
+    case Enum.at(draft.choices, n) do
+      {{:team, team}, _words} ->
+        teams =
+          if team in draft.teams, do: List.delete(draft.teams, team), else: draft.teams ++ [team]
+
+        %{draft | teams: teams}
+
+      {:organisation, _words} ->
+        %{draft | organisation: not draft.organisation}
+
+      {:owner, _words} ->
+        %{draft | owner: if(draft.owner == "team", do: "me", else: "team")}
+
+      nil ->
+        draft
     end
   end
 
-  def publish_answer(_draft), do: nil
+  @doc """
+  What `approval.respond` carries for a publication besides its word, beside it as a
+  delegation's `agent` and `brief` go: for a new artifact who reads it (`visibility`, the
+  organisation switch, and `teams`, the whole set, in the menu's order) and whose it is
+  (`owner`, the team's only with one team ticked); for a new version nothing, since it keeps
+  both.
+  """
+  @spec publish_answer(map()) :: map()
+  def publish_answer(%{choices: []}), do: %{}
+
+  def publish_answer(%{choices: choices, teams: ticked} = draft) do
+    teams = for {{:team, team}, _} <- choices, team in ticked, do: team
+
+    %{
+      "visibility" => if(draft.organisation, do: "organisation", else: "private"),
+      "teams" => teams,
+      "owner" => if(draft.owner == "team" and length(teams) == 1, do: "team", else: "me")
+    }
+  end
 
   @doc "One line saying what the publication is: its title, kind, files, and the artifact it is a new version of."
   @spec publication_words(map()) :: String.t()
@@ -3853,45 +3843,74 @@ defmodule Troupe.UI.TUI.Model do
   defp kind_words("markdown"), do: "a document"
   defp kind_words(_file), do: "a file"
 
-  @doc "Whom the agent proposed a publication for, in the chooser's words; or that it named nobody."
-  @spec proposal_words(map()) :: String.t()
-  def proposal_words(%{"visibility" => nil}), do: "the agent named nobody: say whom it is for"
+  @doc """
+  Who would read the publication, in the menu's words: for a new version who reads it now,
+  which it keeps; for a new one the draft's set, or the person alone.
+  """
+  @spec readers_words(map(), map()) :: String.t()
+  def readers_words(%{"id" => id} = publication, _draft) when is_binary(id),
+    do:
+      "read by #{publication["access"] || "whoever reads it now"}, as now: a new version keeps who reads it"
 
-  def proposal_words(publication) do
-    visibility = publication["visibility"]
-    owner = proposed_owner(publication)
+  def readers_words(_publication, draft) do
+    %{"visibility" => visibility, "teams" => teams, "owner" => owner} = publish_answer(draft)
 
-    words =
-      publish_choices(nil, publication)
-      |> Enum.find_value(fn {v, o, words} -> if v == visibility and o == owner, do: words end)
+    parts =
+      Enum.reject(
+        [
+          if(visibility == "organisation", do: "the whole organisation"),
+          case teams do
+            [] -> nil
+            [one] -> "the #{one} team"
+            many -> "the #{Words.and_list(many)} teams"
+          end
+        ],
+        &is_nil/1
+      )
 
-    "proposed for " <> (words || visibility)
+    readers = if parts == [], do: "you alone", else: Words.and_list(parts)
+
+    "it will be read by #{readers}" <>
+      if(owner == "team", do: ", the #{hd(teams)} team's", else: ", yours")
   end
 
-  # The publication before it goes anywhere: what it is, whom the agent proposed it for, its
-  # note, then the choices numbered with the one picked marked, and what the keys do now.
+  # The publication before it goes anywhere: what it is, who would read it, its note, then
+  # for a new one the menu numbered with what is ticked marked, and what the keys do now. A
+  # new version asks nothing: `y` publishes it, read by whoever reads it now.
   defp publish_lines(item, who, draft, audience, once_only) do
     publication = item.publication
     draft = publish_draft(draft, item, audience)
-    always = if once_only or publication["visibility"] == nil, do: "", else: " · a always"
+    republish? = is_binary(publication["id"])
+    # The harness allows once a new one whose agent named no visibility, whatever teams were ticked.
+    always =
+      if once_only or (not republish? and publication["visibility"] == nil),
+        do: "",
+        else: " · a always"
 
     choices =
       draft.choices
       |> Enum.with_index(1)
-      |> Enum.map(fn {{_v, _o, words}, n} ->
-        if n - 1 == draft.choice,
-          do: {:diff_add, "  ▸ #{n}. #{words}"},
-          else: {:body, "    #{n}. #{words}"}
+      |> Enum.map(fn {{choice, words}, n} ->
+        if ticked?(draft, choice),
+          do: {:diff_add, "  [x] #{n}. #{words}"},
+          else: {:body, "  [ ] #{n}. #{words}"}
       end)
+
+    question =
+      if republish?,
+        do: "publish it? (y or Enter publish · n deny#{always})",
+        else: "who reads it? (a digit ticks · y or Enter publish · n deny#{always})"
 
     [
       {:blank, ""},
-      {:pending,
-       "#{who}PUBLISH #{publication_words(publication)}: whom is it for? " <>
-         "(a digit picks · y publish · n deny#{always})"},
-      {:system, "  " <> proposal_words(publication)}
+      {:pending, "#{who}PUBLISH #{publication_words(publication)}: " <> question},
+      {:system, "  " <> readers_words(publication, draft)}
     ] ++ note_lines(publication) ++ choices
   end
+
+  defp ticked?(draft, {:team, team}), do: team in draft.teams
+  defp ticked?(draft, :organisation), do: draft.organisation
+  defp ticked?(draft, :owner), do: draft.owner == "team"
 
   defp note_lines(%{"note" => note}) when is_binary(note) and note != "",
     do: [{:system, "  note: " <> one_line(note)}]

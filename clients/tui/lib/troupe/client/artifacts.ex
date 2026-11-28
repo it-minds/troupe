@@ -5,21 +5,23 @@ defmodule Troupe.Client.Artifacts do
   artifacts` and the desktop app see the same and Local only is the daemon's to keep.
 
   The list is grouped by who can see each one, in the words the desktop app's gallery uses:
-  *Everyone at* the organisation (◉), *Your teams* (◎, a team's or a profile's), *Shared with
-  you* (◐, reached through a link) and *Only you* (○), as the plane says each row's `scope`:
-  the person's own are under who they are for. A version the person has not opened on this
+  *Everyone at* the organisation (◉), *Your teams* (◎, a team of theirs reads it), *Shared
+  with you* (◐, reached through a link or a grant by name) and *Only you* (○), as the plane
+  says each row's `scope`: the person's own are under the widest that reads them. A version the person has not opened on this
   machine is *new to you*, kept in the state directory (`artifacts-seen.json`), never on the
   plane.
 
   `publish/3` is `/publish`'s and `troupe artifacts publish`'s: one file of this machine as a
   page (`.html`), a document (`.md`) or a file, titled by its own heading or title, else its
-  name.
+  name, read by the teams named (`--team`) and the whole organisation where it says so.
+  Who reads one already is its Access menu's, in the desktop app and the console: the
+  terminal shares by link alone.
 
   An artifact may be a team's rather than one person's: every member of the owning team is
   its owner, and a person leaving changes nothing. A row says so in `owner_team`, and
   `may_transfer` whether this person may hand it to a team they are in or take it back
-  (`transfer/2`). A publication for a team is the team's unless the person says `owner:
-  "me"`; `owner/1` is the words a row's owner is shown by.
+  (`transfer/2`). A publication is the person's unless they say `owner: "team"`, the one
+  team named; `owner/1` is the words a row's owner is shown by.
   """
 
   alias Troupe.Client.Daemon.Link
@@ -35,14 +37,13 @@ defmodule Troupe.Client.Artifacts do
   def audiences, do: @audiences
 
   @doc """
-  What the person may see, newest first: `%{artifacts, organisation, profiles, teams,
-  gallery_url}`, each row with `new` beside what the plane said of it; `teams` and
-  `profiles` are the person's own, by name, whom a publication can be for.
+  What the person may see, newest first: `%{artifacts, organisation, teams, gallery_url}`,
+  each row with `new` beside what the plane said of it; `teams` are the person's own, by
+  name, which may read what they publish.
   """
   @spec list(map()) :: {:ok, map()} | {:error, String.t()}
   def list(params \\ %{}) do
     with {:ok, answer} <- call("artifact.list", params) do
-      profiles = List.wrap(answer["profiles"])
       teams = List.wrap(answer["teams"])
       seen = seen()
       rows = for row <- List.wrap(answer["artifacts"]), do: Map.put(row, "new", new?(row, seen))
@@ -51,7 +52,6 @@ defmodule Troupe.Client.Artifacts do
        %{
          artifacts: rows,
          organisation: answer["organisation"],
-         profiles: profiles,
          teams: teams,
          gallery_url: answer["gallery_url"],
          enabled: answer["enabled"] != false
@@ -59,21 +59,50 @@ defmodule Troupe.Client.Artifacts do
     end
   end
 
-  @doc "The audience a scope is shown under; the person's own are under who they are for."
-  @spec audience(String.t(), String.t() | nil) :: audience()
-  def audience(scope, visibility \\ nil)
-  def audience("mine", visibility), do: audience(visibility || "private", nil)
-  def audience("organisation", _visibility), do: :organisation
-  def audience("team:" <> _, _visibility), do: :team
-  def audience("profile:" <> _, _visibility), do: :team
-  def audience("private", _visibility), do: :private
-  def audience(_shared, _visibility), do: :shared
+  @doc "The audience a scope is shown under."
+  @spec audience(String.t()) :: audience()
+  def audience("organisation"), do: :organisation
+  def audience("team:" <> _), do: :team
+  def audience("private"), do: :private
+  def audience(_shared), do: :shared
 
-  @doc "A row's audience, its own `visibility` deciding for the person's own."
+  @doc """
+  A row's audience, as its `scope` says: the person's own that others read (`mine`) is under
+  the widest that does, the organisation, else its teams, else only them.
+  """
   @spec audience_of(map()) :: audience()
-  def audience_of(%{"scope" => "mine"} = row), do: audience("mine", row["visibility"])
-  def audience_of(%{"scope" => scope}), do: audience(scope)
+  def audience_of(%{"scope" => "mine"} = row) do
+    cond do
+      row["visibility"] == "organisation" or row["organisation"] == true -> :organisation
+      List.wrap(row["teams"]) != [] -> :team
+      true -> :private
+    end
+  end
+
+  def audience_of(%{"scope" => scope}) when is_binary(scope), do: audience(scope)
   def audience_of(_row), do: :shared
+
+  @doc """
+  Who reads a row beside its owner, in words: "the core and billing teams", "the whole
+  organisation and the core team"; nil where nobody but its owner does, by team or as the
+  organisation.
+  """
+  @spec readers(map()) :: String.t() | nil
+  def readers(row) do
+    teams =
+      case List.wrap(row["teams"]) do
+        [] -> nil
+        [one] -> "the #{one} team"
+        many -> "the #{Words.and_list(many)} teams"
+      end
+
+    org = if row["visibility"] == "organisation", do: "the whole organisation"
+
+    case Enum.reject([org, teams], &is_nil/1) do
+      [] -> nil
+      parts -> Words.and_list(parts)
+    end
+  end
 
   @doc "An audience's glyph and its name, as the desktop app's gallery says them."
   @spec label(audience(), String.t() | nil) :: {String.t(), String.t()}
@@ -90,18 +119,15 @@ defmodule Troupe.Client.Artifacts do
   def scope_param("mine"), do: {:ok, %{"mine" => true}, fn _ -> true end}
   def scope_param("shared"), do: {:ok, %{"shared" => true}, fn _ -> true end}
   def scope_param("organisation"), do: {:ok, %{}, &(audience_of(&1) == :organisation)}
-  def scope_param("private"), do: {:ok, %{"mine" => true}, &(&1["visibility"] == "private")}
+  def scope_param("private"), do: {:ok, %{"mine" => true}, &(audience_of(&1) == :private)}
 
-  def scope_param("team:" <> name = scope) when name != "",
-    do: {:ok, %{}, &(&1["visibility"] == scope)}
-
-  def scope_param("profile:" <> name = scope) when name != "",
-    do: {:ok, %{}, &(&1["visibility"] == scope)}
+  def scope_param("team:" <> name) when name != "",
+    do: {:ok, %{"team" => name}, &(name in List.wrap(&1["teams"]))}
 
   def scope_param(other),
     do:
       {:error,
-       "--scope is mine, organisation, team:<name>, profile:<name>, shared or private, not #{inspect(other)}"}
+       "--scope is mine, organisation, team:<name>, shared or private, not #{inspect(other)}"}
 
   @doc "One artifact with its versions."
   @spec get(String.t()) :: {:ok, map()} | {:error, String.t()}
@@ -169,13 +195,46 @@ defmodule Troupe.Client.Artifacts do
     end
   end
 
+  @usage "<path> [private | organisation] [--team <name>]... [--owner me | team]"
+
   @doc """
-  Publish one file of this machine (`/publish`, `troupe artifacts publish`) for `visibility`
-  (`private`, `organisation`, `team:<name>` or `profile:<name>`). `opts`: `title` instead of
-  the file's own; `session_id`, the session it came from; and `owner`, `"me"` or `"team"`,
-  whose the artifact is: sent as given, and for a team's visibility `"team"` where nothing
-  is given, which is the plane's default too, said here so the listing agrees with what
-  was asked.
+  What `/publish` takes after its name, read into `{path, visibility, opts}`: a path, then
+  in any order `private` or `organisation` (only the person and those the teams named, or
+  every signed-in person too), `--team <name>` once for each team that reads it, and
+  `--owner team` to make it the one team's named. Anything else is the usage.
+  """
+  @spec publish_args([String.t()]) ::
+          {:ok, String.t(), String.t(), keyword()} | {:error, String.t()}
+  def publish_args([path | rest]) when path != "", do: publish_args(rest, {path, "private", []})
+  def publish_args(_words), do: {:error, "usage: /publish " <> @usage}
+
+  defp publish_args([], {path, visibility, opts}),
+    do: {:ok, path, visibility, Keyword.update(opts, :teams, [], &Enum.reverse/1)}
+
+  defp publish_args([visibility | rest], {path, _v, opts})
+       when visibility in ["private", "organisation"],
+       do: publish_args(rest, {path, visibility, opts})
+
+  defp publish_args(["--team", team | rest], {path, visibility, opts}) when team != "",
+    do: publish_args(rest, {path, visibility, Keyword.update(opts, :teams, [team], &[team | &1])})
+
+  defp publish_args(["--owner", owner | rest], {path, visibility, opts})
+       when owner in ["me", "team"],
+       do: publish_args(rest, {path, visibility, Keyword.put(opts, :owner, owner)})
+
+  defp publish_args([other | _rest], _acc),
+    do: {:error, "/publish takes #{inspect(other)} nowhere; usage: /publish " <> @usage}
+
+  @doc "`/publish`'s usage, after its name."
+  @spec publish_usage() :: String.t()
+  def publish_usage, do: @usage
+
+  @doc """
+  Publish one file of this machine (`/publish`, `troupe artifacts publish`), read by the
+  person and, with `visibility` `organisation`, every signed-in person. `opts`: `teams`, the
+  teams that read it besides; `title` instead of the file's own; `session_id`, the session it
+  came from; and `owner`, `"me"` or `"team"` (the one team in `teams`), whose it is, the
+  person's where nothing is said.
   """
   @spec publish(Path.t(), String.t(), keyword()) :: {:ok, map()} | {:error, String.t()}
   def publish(path, visibility, opts \\ []) do
@@ -194,7 +253,10 @@ defmodule Troupe.Client.Artifacts do
         }
         |> then(&if(opts[:session_id], do: Map.put(&1, "session_id", opts[:session_id]), else: &1))
         |> then(
-          &if(owner = owner_of(visibility, opts[:owner]), do: Map.put(&1, "owner", owner), else: &1)
+          &if(opts[:teams] not in [nil, []], do: Map.put(&1, "teams", opts[:teams]), else: &1)
+        )
+        |> then(
+          &if(opts[:owner] in ["me", "team"], do: Map.put(&1, "owner", opts[:owner]), else: &1)
         )
         |> Map.put("command_id", RPC.command_id())
         |> then(&call("artifact.publish", &1))
@@ -203,11 +265,6 @@ defmodule Troupe.Client.Artifacts do
         {:error, "#{path}: #{:file.format_error(reason)}"}
     end
   end
-
-  # Whose a publication is: as asked; for a team, the team's where nothing was asked.
-  defp owner_of(_visibility, owner) when owner in ["me", "team"], do: owner
-  defp owner_of("team:" <> _, nil), do: "team"
-  defp owner_of(_visibility, _owner), do: nil
 
   @doc "A file's kind, by its name: a page, a Markdown document or a file."
   @spec kind(String.t()) :: String.t()

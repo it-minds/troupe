@@ -2,7 +2,7 @@ defmodule Troupe.UI.TUI.ArtifactsPage do
   @moduledoc """
   `/artifacts` (root #62): the person's artifacts on the plane, by who can
   see them, in the desktop app's words and glyphs — All, ◉ Everyone at the organisation,
-  ◎ Your teams (a team's and a profile's), ◐ Shared with you (by name or through a link),
+  ◎ Your teams (a team of yours reads it), ◐ Shared with you (by name or through a link),
   ○ Only you —
   each row its title, kind, version, whose it is (`team finance` for a team's, which every
   member of the team owns; `you`; or who published it) and when, with *new* on a version
@@ -121,7 +121,16 @@ defmodule Troupe.UI.TUI.ArtifactsPage do
   end
 
   defp haystack(row),
-    do: Enum.join([row["title"], row["kind"], Client.artifact_owner(row), row["visibility"]], " ")
+    do:
+      Enum.join(
+        [
+          row["title"],
+          row["kind"],
+          Client.artifact_owner(row),
+          row["visibility"] | Elixir.List.wrap(row["teams"])
+        ],
+        " "
+      )
 
   defp selected(page), do: Enum.at(visible(page), page.cursor)
 
@@ -346,9 +355,9 @@ defmodule Troupe.UI.TUI.ArtifactsPage do
 
   ## Publishing and links
 
-  # `p`: `/publish`'s line, typed on the page — a path in the workspace, who it is for,
-  # Only you where nothing is named, and `me` where a team publication is to stay the
-  # person's own rather than the team's.
+  # `p`: `/publish`'s line, typed on the page — a path in the workspace, then who reads it
+  # (`organisation`, `--team <name>` for each team), Only you where nothing is named, and
+  # `--owner team` to make it the one team's named.
   # What the artifacts host will block of what was just published: an artifact may load only
   # its own files.
   defp blocked_words([_ | _] = found),
@@ -368,20 +377,20 @@ defmodule Troupe.UI.TUI.ArtifactsPage do
       [] ->
         {:ok, %{page | prompt: nil}}
 
-      [path | rest] ->
-        visibility = Elixir.List.first(rest) || "private"
-        owner = Enum.at(rest, 1)
-        local = Path.expand(path, page.workspace)
-
+      words ->
         status =
-          case Client.publish_file(local, visibility, session_id: page.session_id, owner: owner) do
-            {:ok, artifact} ->
-              "published #{path} as #{artifact["id"]} version #{artifact["version"]}" <>
-                if(artifact["owner_team"], do: " (team #{artifact["owner_team"]}'s)", else: "") <>
-                blocked_words(artifact["blocked"])
-
-            {:error, reason} ->
-              "#{path} not published: #{reason}"
+          with {:ok, path, visibility, opts} <- Client.publish_args(words),
+               local = Path.expand(path, page.workspace),
+               {:ok, artifact} <-
+                 Client.publish_file(local, visibility, [session_id: page.session_id] ++ opts) do
+            "published #{path} as #{artifact["id"]} version #{artifact["version"]}" <>
+              readers_words(artifact) <>
+              if(artifact["owner_team"], do: " (team #{artifact["owner_team"]}'s)", else: "") <>
+              blocked_words(artifact["blocked"])
+          else
+            {:error, "usage: " <> _ = usage} -> usage
+            {:error, "/publish " <> _ = usage} -> usage
+            {:error, reason} -> "#{hd(words)} not published: #{reason}"
           end
 
         {:ok, %{load(%{page | prompt: nil}) | status: status}}
@@ -393,6 +402,13 @@ defmodule Troupe.UI.TUI.ArtifactsPage do
   end
 
   defp prompt_key(page, _key), do: {:ok, page}
+
+  defp readers_words(artifact) do
+    case Client.artifact_readers(artifact) do
+      nil -> ", read by you alone"
+      readers -> ", read by " <> readers
+    end
+  end
 
   # A view link is the owner's to make; it is copied where the person can paste it, and
   # shown whole whichever way, since a terminal may take the copy and say nothing.
@@ -637,16 +653,16 @@ defmodule Troupe.UI.TUI.ArtifactsPage do
   defp where(%{"scope" => "shared", "role" => role}) when role in ["comment", "edit"],
     do: "you may " <> role
 
-  defp where(%{"visibility" => "team:" <> team}), do: team
-  defp where(%{"visibility" => "profile:" <> profile}), do: "profile " <> profile
+  defp where(%{"scope" => "team:" <> team}), do: team
+  defp where(%{"teams" => [_ | _] = teams}), do: Enum.join(teams, ", ")
   defp where(_row), do: ""
 
   defp status_text(%{prompt: text}) when is_binary(text),
     do:
       "publish: " <>
         text <>
-        "▏  (a path, then private, organisation, team:<name> or profile:<name>; Only you when none; " <>
-        "then me where a team's is to stay yours)"
+        "▏  (a path, then organisation and --team <name> for each team that reads it; Only you when none; " <>
+        "--owner team for the one team's)"
 
   defp status_text(%{filtering: true} = page), do: "/" <> page.filter <> "▏"
   defp status_text(%{status: status}) when is_binary(status), do: status

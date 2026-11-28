@@ -41,7 +41,7 @@ defmodule Troupe.HQInboxTest do
       "id" => "a-1",
       "title" => "Interview guide",
       "kind" => "markdown",
-      "visibility" => "profile:ops",
+      "visibility" => "private",
       "scope" => "shared",
       "version" => 1
     },

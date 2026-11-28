@@ -328,8 +328,8 @@ defmodule Troupe.UI.TUI.Server do
       settings: nil,
       answer: nil,
       # The draft of an answer to a delegation at the gate (TUI Decision 157), or to an
-      # agent's publication: whom it is for, picked from `audience`, the person's teams
-      # and profiles as the daemon last said them when an agent asked.
+      # agent's publication: who reads a new one, ticked from `audience`, the person's
+      # teams as the daemon last said them when an agent asked.
       gate: nil,
       # The call whose Always allow is asking where its rule goes (`w`): this workspace
       # or everywhere, one more key on the box.
@@ -2060,38 +2060,31 @@ defmodule Troupe.UI.TUI.Server do
   # path is read here rather than on the worker: the worker has no access to this machine.
   # Its size is asked first, so a file larger than the daemon takes in a message is
   # refused without being read.
-  # `/publish <path> [private | organisation | team:<name> | profile:<name>]` publishes one
-  # file from this machine as an artifact on the plane (root #62), as the person this
-  # computer's daemon is signed in as: a page (`.html`), a document (`.md`) or a file, titled
-  # by its own heading or title, else its name, and named as coming from this session; theirs
-  # alone where it says nothing else. Read here, as `/upload` reads it. A team they are not
-  # in is the plane's to refuse, naming theirs.
-  @publish_usage "/publish <path> [private | organisation | team:<name> | profile:<name>] [me | team]"
-
+  # `/publish <path> [private | organisation] [--team <name>]... [--owner me | team]`
+  # publishes one file from this machine as an artifact on the plane (root #62), as the
+  # person this computer's daemon is signed in as: a page (`.html`), a document (`.md`) or a
+  # file, titled by its own heading or title, else its name, and named as coming from this
+  # session; read by them alone where it says nothing else, by each team named, and by the
+  # whole organisation with `organisation` (#1238). It is theirs unless `--owner team` makes
+  # it the one team's named. Read here, as `/upload` reads it. A team they may not give it
+  # to is the plane's to refuse, naming those they may.
   defp publish(sid, args) do
-    case String.split(args, ~r/\s+/, trim: true) do
-      [path, visibility, owner | _] when owner in ["me", "team"] ->
-        publish(sid, path, visibility, owner)
-
-      [path, visibility | _] ->
-        publish(sid, path, visibility, nil)
-
-      [path] ->
-        publish(sid, path, "private", nil)
-
-      _usage ->
-        {:error, "usage: " <> @publish_usage}
+    case Client.publish_args(String.split(args, ~r/\s+/, trim: true)) do
+      {:ok, path, visibility, opts} -> publish(sid, path, visibility, opts)
+      {:error, usage} -> {:error, usage}
     end
   end
 
   # Read, titled and kinded as `troupe artifacts` and the gallery's `p` do it
-  # (`Client.publish_file/3`), named as coming from this session. A team's publication is
-  # the team's unless `me` was said, so the answer says whose it became.
-  defp publish(sid, path, visibility, owner) do
-    case Client.publish_file(path, visibility, session_id: sid, owner: owner) do
+  # (`Client.publish_file/3`), named as coming from this session; the answer says who reads
+  # it and, where a team was made its owner, whose it became.
+  defp publish(sid, path, visibility, opts) do
+    case Client.publish_file(path, visibility, [session_id: sid] ++ opts) do
       {:ok, artifact} ->
         {:ok,
          "published #{path} as #{artifact["id"]} version #{artifact["version"]}" <>
+           ", read by " <>
+           (Client.artifact_readers(artifact) || "you alone") <>
            if(artifact["owner_team"], do: " (team #{artifact["owner_team"]}'s)", else: "") <>
            if(artifact["url"], do: ": #{artifact["url"]}", else: "")}
 
@@ -4718,9 +4711,16 @@ defmodule Troupe.UI.TUI.Server do
 
   # An attached artifact goes with nothing typed too, and Backspace in the empty box takes
   # it off the message.
-  defp window_key(%Key{code: "enter"}, path, %{win_text: "", attached: attached} = state)
-       when is_map_key(attached, path),
-       do: window_line(state, "")
+  # Enter with nothing typed publishes an agent's publication as its menu has it, as `y`
+  # does; else it sends what is attached to the window's next message, or is the box's.
+  defp window_key(%Key{code: "enter"} = key, path, %{win_text: ""} = state) do
+    w = Map.fetch!(state.model.windows, path)
+
+    case answerable(w, state.pane.agent || path) do
+      %{publication: %{}} = item -> publish_key(state, item, "y")
+      _other -> empty_enter(key, path, state)
+    end
+  end
 
   defp window_key(%Key{code: "backspace"}, path, %{win_text: "", attached: attached} = state)
        when is_map_key(attached, path),
@@ -4734,6 +4734,11 @@ defmodule Troupe.UI.TUI.Server do
   end
 
   defp window_key(key, _path, state), do: editing_key(key, state)
+
+  defp empty_enter(_key, path, %{attached: attached} = state) when is_map_key(attached, path),
+    do: window_line(state, "")
+
+  defp empty_enter(key, _path, state), do: editing_key(key, state)
 
   # `/todo` edits this window's own task list, which no table lists: it is the window's.
   defp window_command?(state, line) do
@@ -4856,41 +4861,36 @@ defmodule Troupe.UI.TUI.Server do
     end
   end
 
-  # An agent's publication: `y` publishes it for whom the person picked (the agent's
-  # proposal until they pick), `a` the same and unasked for the session, which an agent that
-  # named nobody is not given, since there is nothing to repeat; `n` denies it. With nobody
-  # picked there is no answer to send: the harness would refuse it, so it is refused here.
+  # An agent's publication: `y` (or Enter) publishes a new one read by whom the menu has
+  # ticked, the teams the plane named to start, and a new version read by whoever reads it
+  # now, asking nothing; `a` the same and unasked for the session, which a new one whose
+  # agent named no visibility is not given, since the harness allows that once; `n` denies it.
   defp publish_key(state, item, code) do
     draft = Model.publish_draft(Map.get(state, :gate), item, Map.get(state, :audience))
-    nameless? = item.publication["visibility"] == nil
+    once? = item.publication["id"] == nil and item.publication["visibility"] == nil
 
-    case {code, Model.publish_answer(draft)} do
-      {"n", _answer} ->
+    case code do
+      "n" ->
         answer_gate(state, item, draft, :deny, %{})
 
-      {_yes, nil} ->
+      "a" when once? ->
         notice(
           state,
-          "say whom it is for: a digit picks one of the audiences in the window, then y"
+          "an agent that named nobody is answered once: y publishes it as the menu has it"
         )
 
-      {"a", _answer} when nameless? ->
-        notice(state, "an agent that named nobody is answered once: a digit picks whom for, then y")
+      "a" ->
+        answer_gate(state, item, draft, :allow_session, Model.publish_answer(draft))
 
-      {"y", answer} ->
-        answer_gate(state, item, draft, :allow, answer)
-
-      {"a", answer} ->
-        answer_gate(state, item, draft, :allow_session, answer)
+      _yes ->
+        answer_gate(state, item, draft, :allow, Model.publish_answer(draft))
     end
   end
 
+  # A digit ticks or unticks a choice of the menu: a team, the organisation, the one team's ownership.
   defp publish_pick(state, item, n) do
     draft = Model.publish_draft(Map.get(state, :gate), item, Map.get(state, :audience))
-
-    if n < length(draft.choices),
-      do: Map.put(state, :gate, %{draft | choice: n}),
-      else: state
+    Map.put(state, :gate, Model.publish_toggle(draft, n))
   end
 
   # A part to edit goes into the box as it stands, to be changed in place; an agent to
@@ -5338,18 +5338,17 @@ defmodule Troupe.UI.TUI.Server do
     if event.type == :remote_status, do: recheck_loop(state), else: state
   end
 
-  # An agent's publication asks whom it is for, which is chosen from the person's teams and
-  # profiles: read from the daemon as the request arrives, so the box can offer them with
-  # the proposal picked, and read again at each request, since teams change. Where the
-  # daemon cannot say (signed out, Local only) the box offers only you, the organisation
-  # and what the agent proposed.
+  # An agent's publication asks who reads a new one, ticked from the person's teams: read
+  # from the daemon as the request arrives, so the box can offer them beside the teams the
+  # plane named, and read again at each request, since teams change. Where the daemon
+  # cannot say (signed out, Local only) the box offers the named teams and the organisation.
   defp audience_asked(state, %{type: :approval_requested, data: %{publication: %{}}}) do
     case Client.artifacts() do
-      {:ok, %{teams: teams, profiles: profiles, organisation: organisation}} ->
-        %{state | audience: %{teams: teams, profiles: profiles, organisation: organisation}}
+      {:ok, %{teams: teams, organisation: organisation}} ->
+        %{state | audience: %{teams: teams, organisation: organisation}}
 
       {:error, _reason} ->
-        %{state | audience: %{teams: [], profiles: [], organisation: nil}}
+        %{state | audience: %{teams: [], organisation: nil}}
     end
   end
 
