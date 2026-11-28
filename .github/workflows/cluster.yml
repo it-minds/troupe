@@ -11,7 +11,8 @@
 # this one upgraded to this one (`upgrade`), which is what a deployment does with every
 # release and what nothing else tests.
 #
-# About twenty-five minutes, most of it building the five images and the suite itself. So
+# About twenty-five to thirty minutes, most of it the suite (about fourteen) and building the
+# five images (about six with the cache warm, seven with none, eleven filling it). So
 # the CRDs and the admission policy go to the API server first, before anything is built:
 # a rule the API server refuses fails the job in a minute, which is the failure a release
 # once met ten minutes into this job, and no check before it had.
@@ -26,8 +27,12 @@ env:
   # Both jobs build the five images through `scripts/build-images` with GitHub Actions'
   # cache as the layer cache, one scope per image under this name, shared between them.
   # A new name is a cold cache: the way to start from nothing (`docs/developer/ci.md`).
+  # Only a run outside a pull request writes it (the nightly, a push, a release): a pull
+  # request reads what its base and `main` wrote, and its own copy would be 2.4 GiB of a
+  # repository's cache for a minute or two saved on its next run.
   TROUPE_BUILD_CACHE: gha
   TROUPE_BUILD_CACHE_SCOPE: cluster-v1
+  TROUPE_BUILD_CACHE_WRITE: ${{ github.event_name != 'pull_request' && '1' || '' }}
 
 jobs:
   kind:
