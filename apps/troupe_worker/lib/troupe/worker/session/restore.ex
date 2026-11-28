@@ -390,6 +390,7 @@ defmodule Troupe.Worker.Session.Restore do
         rules(profile_rules(Keyword.get(opts, :permission_rules)), trigger_rules(allow, Keyword.get(opts, :origin)))
       )
       |> Keyword.merge(plane_memory(Keyword.get(opts, :memory)))
+      |> Keyword.merge(sensitive_rules(Keyword.get(opts, :sensitive_rules), context.profile))
 
     Troupe.resume(context.session_id,
       workspace: root,
@@ -402,6 +403,7 @@ defmodule Troupe.Worker.Session.Restore do
       kind: :team,
       origin: Keyword.get(opts, :origin),
       lifespan: Keyword.get(opts, :lifespan),
+      sensitive: sensitive_mark(Keyword.get(opts, :sensitive)),
       fake: Keyword.get(opts, :fake),
       config_overrides: overrides,
       config_sources: sources(context.profile)
@@ -461,6 +463,43 @@ defmodule Troupe.Worker.Session.Restore do
     do: [personal_tools_forbidden_by: profile || "of this pod"]
 
   defp personal_tools(_setting, _profile), do: []
+
+  # The worker profile's `spec.sensitive` in effect, which the plane reads at every
+  # activation and sends beside the pin: which calls mark the session sensitive and which a
+  # sensitive one is refused, each a rule of the `:sensitive` layer named for the profile,
+  # so a refusal says whose rule it is. A rule the pod cannot read is dropped and said, since
+  # the plane checked it when it was written. Nothing, and nothing marks a session.
+  defp sensitive_rules(%{} = given, profile) do
+    name = given["profile"] || profile || "of this pod"
+    marked_by = sensitive_list(given["markedBy"], name, "markedBy")
+    deny = sensitive_list(given["deny"], name, "deny")
+
+    if marked_by == [] and deny == [],
+      do: [],
+      else: [sensitive: %{marked_by: marked_by, deny: deny, profile: name}]
+  end
+
+  defp sensitive_rules(_none, _profile), do: []
+
+  defp sensitive_list(texts, profile, key) when is_list(texts) do
+    Enum.flat_map(texts, fn text ->
+      case Permissions.from(%{"deny" => [text]}, :sensitive, profile) do
+        [] ->
+          Logger.warning("troupe worker: the worker profile #{profile}'s sensitive.#{key} rule #{inspect(text)} is not read")
+          []
+
+        read ->
+          read
+      end
+    end)
+  end
+
+  defp sensitive_list(_none, _profile, _key), do: []
+
+  # The plane's mark, as its row holds it: since when and by whom or what. Anything without
+  # a time is no mark.
+  defp sensitive_mark(%{"at" => at} = mark) when is_binary(at), do: mark
+  defp sensitive_mark(_none), do: nil
 
   # The worker profile's per-tool rules, and those of every profile it extends, which the
   # plane reads at every activation and sends beside the pin: an enforced layer, each

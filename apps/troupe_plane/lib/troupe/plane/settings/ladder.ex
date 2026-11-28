@@ -112,6 +112,21 @@ defmodule Troupe.Plane.Settings.Ladder do
   def effective(_key, _team), do: nil
 
   @doc """
+  How long a session rests with nothing to do before its pod puts it to sleep, in seconds:
+  the team's as the ladder resolves it, the platform's own with no team, `nil` where
+  neither is a positive number.
+
+  The one value a pod is given at activation and a client is told, so the two cannot differ.
+  """
+  @spec idle_timeout_seconds(Team.t() | nil) :: pos_integer() | nil
+  def idle_timeout_seconds(team) do
+    case effective("default_idle_timeout_seconds", team) do
+      %{value: seconds} when is_integer(seconds) and seconds > 0 -> seconds
+      _none -> nil
+    end
+  end
+
+  @doc """
   The team with every laddered field replaced by what the ladder resolves.
 
   What anything that *acts* on one of these values reads, rather than the column. The

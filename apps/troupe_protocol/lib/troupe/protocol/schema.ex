@@ -219,7 +219,10 @@ defmodule Troupe.Protocol.Schema do
         "spent" => optional(:object),
         # A `publish_artifact`'s: what it published on the plane (#62), `id`, `version`,
         # `url`, `title` and `visibility`.
-        "artifact" => optional(:object)
+        "artifact" => optional(:object),
+        # Why a call that did not run was refused, where a client shows it apart from a
+        # failure: `sensitive`, a sensitive session's rule. Absent on every other result.
+        "refused" => optional(:string)
       },
       "tool_results" => %{"results" => required(:array)},
       "todo_updated" => %{"items" => required(:array), "source" => optional(:string)},
@@ -754,6 +757,19 @@ defmodule Troupe.Protocol.Schema do
         "actor" => required(:string),
         "display_name" => optional(:string)
       },
+      # The session became sensitive, once and for good: `how` is `call` (a tool call that
+      # matched the profile's `sensitive.markedBy`, written before the call ran; `by` its
+      # tool, `rule` the rule, `call_id` the call, `agent` a subagent's path) or `person` (a
+      # mark by hand; `by` their subject). Nothing clears it, and no event says otherwise.
+      "session_marked_sensitive" => %{
+        "how" => required(:string),
+        "by" => required(:string),
+        "at" => required(:string),
+        "rule" => optional(:string),
+        "call_id" => optional(:string),
+        "agent" => optional({:array, :string}),
+        "display_name" => optional(:string)
+      },
       # Something the harness offers the session's owner, written at the root's rest and
       # never during a turn; nothing waits for it. `kind` says what (`trigger`, a schedule
       # that reruns what the session published), `key` what "the same thing" is
@@ -881,7 +897,9 @@ defmodule Troupe.Protocol.Schema do
         "private" => optional(:boolean),
         "title" => optional(:string),
         # How long it lasts: `throwaway`, `normal` (absent) or `persistent`.
-        "lifespan" => optional(:string)
+        "lifespan" => optional(:string),
+        # Sensitive from its first call, a mark nothing clears: a pod session's, at the plane.
+        "sensitive" => optional(:boolean)
       },
       "session.archive" => %{
         "command_id" => required(:string),
@@ -952,6 +970,19 @@ defmodule Troupe.Protocol.Schema do
         "command_id" => optional(:string),
         "session_id" => required(:string),
         "lifespan" => required(:string)
+      },
+      # A pod session marked sensitive by its owner, once and for good: the plane's, which the
+      # clients ask directly. `sensitive` is `true`; `false` is refused, since nothing clears it.
+      "session.sensitive.set" => %{
+        "session_id" => required(:string),
+        "sensitive" => required(:boolean)
+      },
+      # The shares of sensitive sessions a team administrator is asked to say yes to, and
+      # their answer (`approve` or `decline`): the plane's.
+      "session.share_requests" => %{},
+      "session.share_request.decide" => %{
+        "id" => required(:string),
+        "decision" => required(:string)
       },
       # A pod session raised to its channel's current bundle version by its owner: the
       # plane's, which the clients ask directly.

@@ -295,7 +295,8 @@ the reader's sentence. The rules ride the activation like `personalTools`. A pro
 extends another has its parent's rules as well as its own, each a scope of its own on the
 pods, so a child adds rules and cannot loosen or drop its parent's. The console's profile
 editor edits a profile's own rules, and its page lists every rule in effect with the
-profile it came from.
+profile it came from. `spec.sensitive` uses the same rules to say which calls make a session
+sensitive and what it is refused after: [sensitive sessions](sensitive-sessions.md).
 
 ## Which agents a profile has
 

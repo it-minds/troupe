@@ -24,6 +24,9 @@
     "prompt": {
       "type": "string"
     },
+    "sensitive": {
+      "type": "boolean"
+    },
     "title": {
       "type": "string"
     },

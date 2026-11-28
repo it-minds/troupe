@@ -101,7 +101,7 @@ export interface ProfileViewLimits {
   /** The output cap of one model call. This and the three below are absent from a plane before them. */
   max_tokens?: number;
   session?: ProfileViewAllowance;
-  /** How long a session rests with nothing to do before it sleeps; null with no team. */
+  /** How long a session rests with nothing to do before it sleeps: the team's, the platform's with no team; null from a plane before that. */
   idle_seconds?: number | null;
   /** In micros; null where there is none. `team_period` is what the team's runs over, null with no team. */
   budgets: { profile: number | null; team: number | null; you: number | null; team_period?: "monthly" | "never" | string | null };

@@ -24,7 +24,7 @@ defmodule Troupe.Session.Proposals do
 
   alias Troupe.Events
   alias Troupe.Protocol.Event
-  alias Troupe.Session.{Checkpoint, Log}
+  alias Troupe.Session.{Checkpoint, Log, Sensitive}
   alias Troupe.Session.Proposals.TriggerRule
 
   require Logger
@@ -279,6 +279,9 @@ defmodule Troupe.Session.Proposals do
 
     cond do
       is_nil(draft) -> state
+      # A sensitive session proposes nothing: a trigger made from it would rerun what read
+      # the data, and publish where it may not.
+      Sensitive.mark_of(state.session_id) -> state
       MapSet.member?(state.made, draft["kind"]) -> state
       MapSet.member?(state.checked, draft["key"]) -> state
       true -> propose(%{state | checked: MapSet.put(state.checked, draft["key"])}, draft)

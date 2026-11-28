@@ -285,6 +285,13 @@ defmodule Troupe.Session.Summary do
     Map.update(snapshot, "taint", [entry], &(&1 ++ [entry]))
   end
 
+  # A session sensitive by what it read, or by a person's mark: since when and by what,
+  # the first mark holding, since nothing clears it. Added only once a log says it, as the
+  # taint is, so every recorded fixture hash still holds.
+  def fold(snapshot, %Event{type: "session_marked_sensitive", data: data}) do
+    Map.put_new(snapshot, "sensitive", Map.take(data, ~w(how by rule at)))
+  end
+
   def fold(snapshot, %Event{}), do: snapshot
 
   # Only where there is a list to close them in: `tool_call_completed` is in every log,

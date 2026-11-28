@@ -18,7 +18,7 @@ defmodule Troupe.Worker.Plane.Commands do
   alias Troupe.Protocol.Lifespan
   alias Troupe.Protocol.SessionId
   alias Troupe.Session.Log
-  alias Troupe.Session.Proposals
+  alias Troupe.Session.{Proposals, Sensitive}
   alias Troupe.Sessions.Fork
   alias Troupe.Sessions.Sealer
   alias Troupe.Sessions.Storage
@@ -78,6 +78,12 @@ defmodule Troupe.Worker.Plane.Commands do
             personal_tools: params["personal_tools"],
             # The worker profile's per-tool rules, each with the profile that wrote it.
             permission_rules: params["permission_rules"],
+            # What makes the session sensitive and what a sensitive one is refused: the
+            # profile's `spec.sensitive` in effect, with the profile's name.
+            sensitive_rules: params["sensitive_rules"],
+            # The plane's word that the session is sensitive already (`at`, `by`, `how`),
+            # so the gate holds before the log is read; absent where it is not.
+            sensitive: params["sensitive"],
             # The organisation's, the team's and the profile's memory documents, which the
             # session reads as instructions before every file.
             memory: params["memory"],
@@ -411,6 +417,31 @@ defmodule Troupe.Worker.Plane.Commands do
 
         {:ok, seq} = Log.append(session_id, [], "session_lifespan_changed", data)
         {:ok, %{"session_id" => session_id, "recorded" => true, "seq" => seq}}
+    end
+  end
+
+  # A person marked the session sensitive at the plane, whose row is the word on it and what
+  # an activation carries. A session up here is marked now, so its gate holds from its next
+  # call and its log says it; a dormant one learns at its wake.
+  defp dispatch("sensitive.changed", params) do
+    session_id = params["session_id"]
+
+    data =
+      %{"how" => "person", "by" => params["by"], "at" => params["at"]}
+      |> put_present("display_name", params["by_name"])
+
+    case {is_binary(params["by"]) and is_binary(params["at"]), Sessions.whereis(session_id)} do
+      {false, _tree} ->
+        {:error, Error.new(:invalid_params, %{field: "by"})}
+
+      {true, nil} ->
+        {:ok, %{"session_id" => session_id, "recorded" => false, "reason" => "dormant"}}
+
+      {true, _tree} ->
+        case Sensitive.mark(session_id, data) do
+          {:ok, mark} -> {:ok, %{"session_id" => session_id, "recorded" => true, "sensitive" => mark}}
+          {:error, :no_session} -> {:ok, %{"session_id" => session_id, "recorded" => false, "reason" => "dormant"}}
+        end
     end
   end
 

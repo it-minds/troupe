@@ -66,7 +66,7 @@ defmodule Troupe.Plane.Artifacts do
   alias Troupe.Plane.Artifacts.{Artifact, Blocked, Comments, Keeps, Markdown, People, Previews}
   alias Troupe.Plane.Artifacts.{Retention, Shares, Teams, Uploads, Version}
   alias Troupe.Plane.Identity.User
-  alias Troupe.Plane.Sessions.Session
+  alias Troupe.Plane.Sessions.{Sensitive, Session}
   alias Troupe.Protocol.Digest
   alias Troupe.Protocol.Error
   alias Troupe.Protocol.Words
@@ -161,6 +161,7 @@ defmodule Troupe.Plane.Artifacts do
     profile = opts[:session] && opts[:session].profile
 
     with :ok <- on(),
+         :ok <- Sensitive.publishable(origin(opts)["session_id"]),
          {:ok, title} <- title(params["title"]),
          {:ok, kind} <- kind(params["kind"]),
          {:ok, visibility} <- new_visibility(params["visibility"]),
@@ -212,6 +213,8 @@ defmodule Troupe.Plane.Artifacts do
          :ok <- same_kind(artifact, params["kind"]),
          {:ok, visibility} <- visibility(params["visibility"] || artifact.visibility),
          :ok <- may_move(artifact, visibility, role, user, admin?),
+         :ok <- Sensitive.publishable(opts[:session] && opts[:session].id),
+         :ok <- sensitive(artifact, moved(artifact, visibility, params), user, opts),
          {:ok, note} <- note(params["note"]),
          {:ok, thumbnail} <- sent_thumbnail(params["thumbnail"]),
          {:ok, base} <- base(artifact, params["base"]),
@@ -326,7 +329,8 @@ defmodule Troupe.Plane.Artifacts do
     admin? = Keyword.get(opts, :platform_admin?, false)
 
     with :ok <- on(),
-         {:ok, artifact} <- owned(id, user, admin?, "switches the public links of") do
+         {:ok, artifact} <- owned(id, user, admin?, "switches the public links of"),
+         :ok <- if(enabled, do: sensitive(artifact, {"link", %{}}, user, opts), else: :ok) do
       artifact = artifact |> Ecto.Changeset.change(public_links: enabled) |> Repo.update!()
       {:ok, _event} = Audit.record(user.subject, "artifact.public", artifact.id, %{"enabled" => enabled})
       {:ok, answer(artifact, user, admin?)}
@@ -1096,6 +1100,29 @@ defmodule Troupe.Plane.Artifacts do
     |> Map.reject(fn {_key, value} -> is_nil(value) end)
   end
 
+  # An artifact a sensitive session published is shared wider only as its profile's
+  # `sensitive.sharing` says (`Troupe.Plane.Sessions.Sensitive`): moved to a wider
+  # audience, shared with a person, or given a link. A team administrator's yes to a held
+  # share comes back with `sensitive: :approved`.
+  defp sensitive(_artifact, nil, _user, _opts), do: :ok
+
+  defp sensitive(artifact, {kind, params}, user, opts) do
+    if Keyword.get(opts, :sensitive) == :approved,
+      do: :ok,
+      else: Sensitive.check_artifact(artifact, kind, params, user)
+  end
+
+  # A visibility other than the one it has and other than the owner's alone is wider. What
+  # waits is the move alone, onto the version it was asked on (`base`): a new version's
+  # files sent with it do not wait, and are refused with the move.
+  defp moved(%{visibility: visibility}, visibility, _params), do: nil
+  defp moved(_artifact, "private", _params), do: nil
+
+  defp moved(_artifact, visibility, params) do
+    files? = Map.has_key?(params, "files") or Map.has_key?(params, "upload")
+    {"artifact", %{"visibility" => visibility, "base" => params["base"], "with_files" => files?}}
+  end
+
   defp string_or_nil(value) when is_binary(value) and byte_size(value) in 1..200, do: value
   defp string_or_nil(_value), do: nil
 
@@ -1767,7 +1794,7 @@ defmodule Troupe.Plane.Artifacts do
          {:ok, team_change} <- team_change(artifact, user, params["teams"], admin?),
          {:ok, people_change} <- people_change(artifact, params["people"]),
          {:ok, visibility} <- organisation_change(artifact, user, params["organisation"], admin?),
-         :ok <- widening(artifact, user),
+         :ok <- widening(artifact, user, {team_change, people_change, visibility}, params, opts),
          {:ok, :ok} <- Repo.transaction(fn -> changed(artifact, user, team_change, people_change, visibility) end) do
       People.told(artifact, user, Enum.map(elem(people_change, 0), &elem(&1, 0)))
       access(artifact.id, user, opts)
@@ -1872,9 +1899,18 @@ defmodule Troupe.Plane.Artifacts do
     :ok
   end
 
-  # Whether readers may be added to `artifact` by `user`, beside who they are: every owner
-  # may, of every artifact.
-  defp widening(_artifact, _user), do: :ok
+  # A change that adds readers (a team, a person or a role, the organisation) to an
+  # artifact a sensitive session published goes through that session's sharing rule, as a
+  # share with a person does; held, it waits whole for a team administrator's yes, and the
+  # answer says so. A change that only takes readers off is the owner's alone.
+  defp widening(artifact, user, {{added, _removed}, {granted, _taken}, visibility}, params, opts) do
+    if added != [] or granted != [] or visibility == "organisation" do
+      access = Map.take(params, ["teams", "people", "organisation"])
+      sensitive(artifact, {"artifact", %{"access" => access}}, user, opts)
+    else
+      :ok
+    end
+  end
 
   @doc """
   The profile artifact `id` came from, for the people search of its owner's sharing menu:
@@ -2449,7 +2485,7 @@ defmodule Troupe.Plane.Artifacts do
   def share(id, %User{} = user, %{"person" => subject} = params, opts) do
     with :ok <- on(),
          {:ok, artifact} <- owned(id, user, Keyword.get(opts, :platform_admin?, false), "shares"),
-         :ok <- widening(artifact, user),
+         :ok <- sensitive(artifact, {"artifact", %{"person" => subject, "role" => params["role"]}}, user, opts),
          {:ok, granted} <- People.grant(artifact, user, subject, params["role"]) do
       People.told(artifact, user, [subject])
       {:ok, granted}
@@ -2466,6 +2502,7 @@ defmodule Troupe.Plane.Artifacts do
   def share(id, %User{} = user, params, opts) do
     with :ok <- on(),
          {:ok, artifact} <- owned(id, user, Keyword.get(opts, :platform_admin?, false), "shares"),
+         :ok <- sensitive(artifact, {"link", %{}}, user, opts),
          host when is_binary(host) <- host_url() || {:error, no_host()} do
       Shares.share(artifact, user, params, host)
     end

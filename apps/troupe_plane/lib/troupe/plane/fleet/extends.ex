@@ -20,6 +20,8 @@ defmodule Troupe.Plane.Fleet.Extends do
   | `github.denyPaths` | **added**, as the egress lists are |
   | `github.maxPushes`, `github.maxRuns`, `github.maxAttempts`, `github.maxRepositories`, `llm.maxTokens` | **narrow only**, as `max_sessions` is, and a child that says more is told so in `problems` |
   | `permissions.deny`, `permissions.ask`, `permissions.allow` | **added**: a child adds rules and drops none of its parent's; each profile's are its own scope on the pods (`rules/1`), so the strictest holds and no child loosens a parent's `deny` or `ask` |
+  | `sensitive.markedBy`, `sensitive.deny` | **added**, as the egress lists are: every rule only marks or only refuses, so one list in effect says what the chain's do |
+  | `sensitive.sharing` | **tighten only**: `allow` < `ask` < `deny`, the tighter of the two holding, and a child that says looser is told so in `problems` |
   | `agents.allow`, `agents.deny` | **narrow only**: the child's `allow` is cut to the parent's where the parent has one (an empty cut stands), its `deny` is added, and a denied name leaves the `allow`, so a child never offers an agent its parent said is not there |
   | `image`, `size_class`, `provisioner`, every `llm` field but `secretRef` and `maxTokens`, `storage.storageClassName`, `configBundleChannel`, and any other spec field | **replaced** where the child sets it, the parent's where it does not |
   | `llm.secretRef`, `mcpIdentities` | **never inherited**: credentials are each profile's own, in its own namespace |
@@ -43,7 +45,7 @@ defmodule Troupe.Plane.Fleet.Extends do
   alias Troupe.Plane.{Bundles, Fleet, Provision, Repo}
   alias Troupe.Plane.Bundles.Effective
   alias Troupe.Plane.Fleet.Profile
-  alias Troupe.Protocol.AgentRule
+  alias Troupe.Protocol.{AgentRule, Sensitive}
 
   @max_depth 4
 
@@ -91,6 +93,9 @@ defmodule Troupe.Plane.Fleet.Extends do
     # Per-tool rules: a child's are added to its parent's, and on the pods each profile's
     # are a scope of their own, the strictest holding (`rules/1`).
     "permissions" => {:each, %{"deny" => :added, "ask" => :added, "allow" => :added}},
+    # What makes a session sensitive and what a sensitive one is refused: a child adds
+    # rules to both, and may only tighten what a person may do with one beyond its readers.
+    "sensitive" => {:each, %{"markedBy" => :added, "deny" => :added, "sharing" => :tighten}},
     # Which agents exist on the pods: a child can only narrow. Its `allow` is cut to the
     # parent's where the parent has one, and its `deny` adds to the parent's, so no child
     # offers an agent its parent said is not there (`Troupe.Protocol.AgentRule.compose/2`).
@@ -632,6 +637,17 @@ defmodule Troupe.Plane.Fleet.Extends do
            "#{parent} holds: a profile cannot raise a limit of the profile it extends"
        ]
 
+  # And a child's word looser than its parent's in an order, which the parent's holds over.
+  defp held(:tighten, path, parent, own, source, name)
+       when is_binary(parent) and is_binary(own) do
+    if Sensitive.looser?(own, parent),
+      do: [
+        "#{name} sets #{String.replace_prefix(path, "spec.", "")} to #{own}, and #{source}'s " <>
+          "#{parent} holds: a profile can only tighten it"
+      ],
+      else: []
+  end
+
   defp held(_rule, _path, _parent, _own, _source, _name), do: []
 
   defp word(value) when is_binary(value), do: value
@@ -660,6 +676,16 @@ defmodule Troupe.Plane.Fleet.Extends do
     cond do
       parent == held -> {held, parent_from}
       set?(own) -> {own, name}
+      true -> {parent, parent_from}
+    end
+  end
+
+  # `sensitive.sharing`: the tighter of the two, from whichever said it.
+  defp field(:tighten, parent, parent_from, own, name) do
+    cond do
+      not set?(own) -> {parent, parent_from}
+      not set?(parent) -> {own, name}
+      Sensitive.tighter(parent, own) == own -> {own, name}
       true -> {parent, parent_from}
     end
   end
