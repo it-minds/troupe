@@ -481,28 +481,6 @@ defmodule Troupe.Commands do
             "this session; /proposal never stops it being proposed for that report again.",
         example: "/proposal yes"
       ),
-      entry("triggers", "session", "List the triggers you turned on, and how each stands",
-        usage: "/triggers",
-        availability: "tui",
-        detail:
-          "From a session on the platform. Each rerun you turned on with /proposal yes, in " <>
-            "every team of yours: whether it is on and when it runs next, how its last run " <>
-            "went, and what a run may spend. They run as you, on your budget, so they are " <>
-            "yours to switch off and remove: /trigger does it.",
-        example: "/triggers"
-      ),
-      entry("trigger", "session", "Switch one of your triggers off or on, or remove it",
-        usage: "/trigger off|on|remove NAME",
-        args: [arg("verb", true, "text"), arg("name", true, "text")],
-        availability: "tui",
-        detail:
-          "From a session on the platform, and only for a trigger you turned on with " <>
-            "/proposal yes: /trigger off stops it running until /trigger on; /trigger remove " <>
-            "takes it away for good, its runs' sessions staying, and frees one of the five you " <>
-            "may turn on in a team. NAME is its name, or TEAM/NAME where two teams have one. " <>
-            "Anybody else's trigger is a team admin's to change.",
-        example: "/trigger off rerun-weekly-numbers"
-      ),
       entry("bundle", "session", "Say which configuration this session runs on, or update it",
         usage: "/bundle [update]",
         args: [arg("verb", false, "text")],
@@ -711,6 +689,28 @@ defmodule Troupe.Commands do
             "the model; the hosts it reaches; its limits and budgets; and which of your teams it " <>
             "runs under. What the plane does not say is shown as not said. q or Esc closes it.",
         example: "/profile code"
+      ),
+      entry("triggers", "workspace", "List the triggers you turned on, and how each stands",
+        usage: "/triggers",
+        availability: "tui",
+        detail:
+          "From a session on the platform. Each rerun you turned on with /proposal yes, in " <>
+            "every team of yours: whether it is on and when it runs next, how its last run " <>
+            "went, and what a run may spend. They run as you, on your budget, so they are " <>
+            "yours to switch off and remove: /trigger does it.",
+        example: "/triggers"
+      ),
+      entry("trigger", "workspace", "Switch one of your triggers off or on, or remove it",
+        usage: "/trigger off|on|remove NAME",
+        args: [arg("verb", true, "text"), arg("name", true, "text")],
+        availability: "tui",
+        detail:
+          "From a session on the platform, and only for a trigger you turned on with " <>
+            "/proposal yes: /trigger off stops it running until /trigger on; /trigger remove " <>
+            "takes it away for good, its runs' sessions staying, and frees one of the five you " <>
+            "may turn on in a team. NAME is its name, or TEAM/NAME where two teams have one. " <>
+            "Anybody else's trigger is a team admin's to change.",
+        example: "/trigger off rerun-weekly-numbers"
       ),
       entry("copy", "workspace", "Copy a transcript to the clipboard",
         usage: "/copy [window]",

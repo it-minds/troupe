@@ -74,7 +74,7 @@ defmodule Troupe.Client.OwnTriggers do
   @spec not_known() :: String.t()
   def not_known,
     do:
-      "this plane does not let you change your own triggers yet; a team admin can, on the console's Triggers page"
+      "this plane does not let you change your own triggers yet; a team administrator can, on the console's Configure → Triggers"
 
   @doc "Why a session on this computer has no triggers to list."
   @spec not_here() :: String.t()
