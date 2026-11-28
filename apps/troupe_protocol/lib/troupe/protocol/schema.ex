@@ -1391,7 +1391,8 @@ defmodule Troupe.Protocol.Schema do
       # the daemon's sign-in: `files` each `{path, bytes}` (base64) and an optional
       # `content_type`; `id` republishes one of theirs; `session_id` names where it came from.
       # `visibility` (`private`, the default, or `organisation`) and `teams` (names) are whom
-      # a new one is for; a republish keeps who reads it. `thumbnail`, `{content_type, bytes}`, is a picture of the version for its
+      # a new one is for; a republish keeps who reads it. `thumbnail`, `{content_type,
+      # bytes}`, is a picture of the version for its
       # gallery card: PNG, JPEG or WebP, at most 256 KiB.
       "artifact.publish" => %{
         "command_id" => required(:string),

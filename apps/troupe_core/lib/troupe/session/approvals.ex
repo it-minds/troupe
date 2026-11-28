@@ -598,7 +598,6 @@ defmodule Troupe.Session.Approvals do
     end
   end
 
-
   defp check_owner(_publication, :deny, _owner), do: {:ok, nil}
 
   # Whose an artifact is does not change with a version, so a republish takes no owner:

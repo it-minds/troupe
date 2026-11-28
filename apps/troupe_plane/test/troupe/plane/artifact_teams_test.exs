@@ -189,7 +189,6 @@ defmodule Troupe.Plane.ArtifactTeamsTest do
     end
   end
 
-
   describe "who sees a team's" do
     test "its members list, get and open it; nobody else", context do
       # Ada's own, for the team: published as hers, not the team's.

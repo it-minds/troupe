@@ -687,7 +687,6 @@ defmodule Troupe.Tools.PublishArtifactTest do
       assert decided.data["edited"] == []
     end
 
-
     test "a denial carries the person's word back to the model", context do
       %{session: session} = publishing(context, %{})
       call_id = asked(session).data["call_id"]

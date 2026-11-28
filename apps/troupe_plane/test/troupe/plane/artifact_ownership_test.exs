@@ -141,7 +141,6 @@ defmodule Troupe.Plane.ArtifactOwnershipTest do
                publish(context.ada, %{"owner" => "team:Not A Team"})
     end
 
-
     test "a new version does not move whose it is", context do
       {:ok, artifact} = publish(context.ada, %{"teams" => ["engineering"], "owner" => "team"})
 

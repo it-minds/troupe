@@ -63,9 +63,8 @@ defmodule Troupe.Plane.Artifacts do
 
   alias Troupe.ObjectStore
   alias Troupe.Plane.{Admin, Audit, Identity, Repo, Settings}
-  alias Troupe.Plane.Artifacts.{Artifact, Blocked, Comments, People, Previews, Retention, Shares, Teams, Uploads, Version}
-  alias Troupe.Plane.Artifacts.Keeps
-  alias Troupe.Plane.Artifacts.Markdown
+  alias Troupe.Plane.Artifacts.{Artifact, Blocked, Comments, Keeps, Markdown, People, Previews}
+  alias Troupe.Plane.Artifacts.{Retention, Shares, Teams, Uploads, Version}
   alias Troupe.Plane.Identity.User
   alias Troupe.Plane.Sessions.Session
   alias Troupe.Protocol.Digest
@@ -1117,7 +1116,7 @@ defmodule Troupe.Plane.Artifacts do
       artifact = lock(existing) || new_artifact(user, attrs, now)
       n = (existing && artifact.version + 1) || 1
       # A new one's readers, given with it; a version's are the artifact's, kept as they are.
-      :ok = Teams.add(artifact.id, (existing == nil && attrs[:teams]) || [], user.subject)
+      :ok = Teams.add(artifact.id, given_teams(existing, attrs), user.subject)
 
       with :ok <- republishable(existing, attrs),
            :ok <- within_version(bytes),
@@ -1192,6 +1191,9 @@ defmodule Troupe.Plane.Artifacts do
 
   defp in_force(_artifact, bytes, thumbnail, blocked),
     do: %{bytes: bytes, thumbnail: thumbnail_json(thumbnail), blocked: length(blocked)}
+
+  defp given_teams(nil, attrs), do: attrs[:teams] || []
+  defp given_teams(_existing, _attrs), do: []
 
   # An artifact moved to another team takes what it already holds to that team's quota.
   defp moved_bytes(%Artifact{team_id: from, total_bytes: bytes}, to) when from != to, do: bytes
@@ -1385,7 +1387,6 @@ defmodule Troupe.Plane.Artifacts do
   defp key(id, n, path), do: "artifacts/#{id}/#{n}/#{path}"
 
   # -- reading --------------------------------------------------------------------
-
 
   @doc """
   What `user` may see, newest published first, narrowed by `mine`, `shared` (the ones a link
@@ -1684,9 +1685,7 @@ defmodule Troupe.Plane.Artifacts do
   end
 
   # Its owner's to read, and a platform administrator's, whose takedowns are read from it.
-  defp reader_keeper(id, user, true) do
-    with {:ok, artifact} <- findable(id, user, true), do: {:ok, artifact}
-  end
+  defp reader_keeper(id, user, true), do: findable(id, user, true)
 
   defp reader_keeper(id, user, false), do: owned(id, user, false, "reads who reads")
 
@@ -1712,27 +1711,23 @@ defmodule Troupe.Plane.Artifacts do
   """
   @spec readers_words(Artifact.t()) :: String.t()
   def readers_words(%Artifact{} = artifact) do
-    teams = Teams.names(artifact)
-    people = length(People.list(artifact))
-    links = artifact |> Shares.list() |> Enum.filter(&(&1["state"] == "live")) |> Enum.map(& &1["role"])
-
     readers =
-      [
-        if(artifact.visibility == "organisation", do: "the whole organisation"),
-        case teams do
-          [] -> nil
-          [one] -> "the #{one} team"
-          many -> "the #{Words.and_list(many)} teams"
-        end,
-        if(people > 0, do: Words.count(people, "person", "people"))
-      ]
-      |> Enum.reject(&is_nil/1)
+      Enum.reject(
+        [
+          organisation_words(artifact.visibility),
+          teams_words(Teams.names(artifact)),
+          people_words(length(People.list(artifact)))
+        ],
+        &is_nil/1
+      )
 
     linked =
-      links
-      |> Enum.frequencies()
+      artifact
+      |> Shares.list()
+      |> Enum.filter(&(&1["state"] == "live"))
+      |> Enum.frequencies_by(& &1["role"])
       |> Enum.sort()
-      |> Enum.map(fn {role, n} -> if(n == 1, do: "a #{role} link", else: "#{n} #{role} links") end)
+      |> Enum.map(fn {role, n} -> Words.count(n, "#{role} link") |> String.replace(~r/\A1 /, "a ") end)
 
     case {readers, linked} do
       {[], []} -> "nobody else"
@@ -1741,6 +1736,16 @@ defmodule Troupe.Plane.Artifacts do
       {readers, linked} -> Words.and_list(readers) <> "; " <> Words.and_list(linked)
     end
   end
+
+  defp organisation_words("organisation"), do: "the whole organisation"
+  defp organisation_words(_private), do: nil
+
+  defp teams_words([]), do: nil
+  defp teams_words([one]), do: "the #{one} team"
+  defp teams_words(many), do: "the #{Words.and_list(many)} teams"
+
+  defp people_words(0), do: nil
+  defp people_words(n), do: Words.count(n, "person", "people")
 
   @doc """
   Change who reads artifact `id`, its owner's alone: `teams`, the names of every team that
@@ -1762,24 +1767,21 @@ defmodule Troupe.Plane.Artifacts do
          {:ok, team_change} <- team_change(artifact, user, params["teams"], admin?),
          {:ok, people_change} <- people_change(artifact, params["people"]),
          {:ok, visibility} <- organisation_change(artifact, user, params["organisation"], admin?),
-         :ok <- widening(artifact, user) do
-      Repo.transaction(fn ->
-        :ok = apply_teams(artifact, user, team_change)
-        :ok = apply_visibility(artifact, user, visibility)
+         :ok <- widening(artifact, user),
+         {:ok, :ok} <- Repo.transaction(fn -> changed(artifact, user, team_change, people_change, visibility) end) do
+      People.told(artifact, user, Enum.map(elem(people_change, 0), &elem(&1, 0)))
+      access(artifact.id, user, opts)
+    end
+  end
 
-        case apply_people(artifact, user, people_change) do
-          :ok -> :ok
-          {:error, error} -> Repo.rollback(error)
-        end
-      end)
-      |> case do
-        {:ok, :ok} ->
-          People.told(artifact, user, Enum.map(elem(people_change, 0), &elem(&1, 0)))
-          access(artifact.id, user, opts)
+  # Every part of a change at once, or none of it where a person is refused.
+  defp changed(artifact, user, team_change, people_change, visibility) do
+    :ok = apply_teams(artifact, user, team_change)
+    :ok = apply_visibility(artifact, user, visibility)
 
-        {:error, %Error{} = error} ->
-          {:error, error}
-      end
+    case apply_people(artifact, user, people_change) do
+      :ok -> :ok
+      {:error, error} -> Repo.rollback(error)
     end
   end
 
@@ -2491,7 +2493,6 @@ defmodule Troupe.Plane.Artifacts do
       Shares.unshare(artifact, user, params)
     end
   end
-
 
   # -- comments ---------------------------------------------------------------------
 

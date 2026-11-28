@@ -31,8 +31,8 @@ defmodule Troupe.Plane.Remote.Watch do
 
   @behaviour WebSock
 
-  alias Troupe.Plane.{Identity, Invites, Remote}
   alias Troupe.Plane.Artifacts.People
+  alias Troupe.Plane.{Identity, Invites, Remote}
   alias Troupe.Plane.Identity.User
   alias Troupe.Plane.Remote.Auth
   alias Troupe.Protocol.{Error, JSONRPC}
