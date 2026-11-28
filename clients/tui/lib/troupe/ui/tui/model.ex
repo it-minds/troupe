@@ -1172,6 +1172,8 @@ defmodule Troupe.UI.TUI.Model do
 
     status = if d.ok, do: :ok, else: :error
     t = %{t | status: status, result: result, lines: String.split(result, "\n")}
+    # Refused by a rule, it did not run: drawn open as a failure is, said as a refusal.
+    t = if is_binary(d[:refused]), do: Map.put(t, :refused, d[:refused]), else: t
     t = t |> Map.put(:ended_at, ts) |> then(&%{&1 | summary: summary(&1)})
     {:tool, %{t | body: t |> build_body() |> frame()}}
   end
@@ -1449,7 +1451,11 @@ defmodule Troupe.UI.TUI.Model do
   defp describe(nil), do: nil
   defp describe(text), do: one_line(text)
 
-  # What a collapsed tool line says after `name input`: the outcome, in a few words.
+  # What a collapsed tool line says after `name input`: the outcome, in a few words. A call a
+  # sensitive session's rule refused says so; its body is the harness's sentence.
+  defp summary(%{refused: "sensitive"}), do: "refused: the session is sensitive"
+  defp summary(%{refused: refused}) when is_binary(refused), do: "refused (#{refused})"
+
   defp summary(%{status: :error, lines: lines}) do
     first = lines |> Enum.map(&String.trim/1) |> Enum.find("", &(&1 != ""))
     n = length(lines)
@@ -2528,7 +2534,9 @@ defmodule Troupe.UI.TUI.Model do
   # open (▾) above the frames it stands for otherwise.
   defp strip_line(steps, level, now) do
     n = length(steps)
-    failed = Enum.count(steps, &(&1.status == :error))
+    # A refused call did not run: counted apart, never as failed.
+    refused = Enum.count(steps, &is_binary(Map.get(&1, :refused)))
+    failed = Enum.count(steps, &(&1.status == :error)) - refused
     names = steps |> Enum.map(& &1.name) |> Enum.uniq()
     shown = Enum.take(names, 4)
     more = length(names) - length(shown)
@@ -2539,6 +2547,7 @@ defmodule Troupe.UI.TUI.Model do
        {:strip, "#{Words.count(n, "step")}"}
      ] ++
        if(failed > 0, do: [{:strip_failed, " · #{failed} failed"}], else: []) ++
+       if(refused > 0, do: [{:strip, " · #{refused} refused"}], else: []) ++
        [
          {:strip,
           " · " <> Enum.join(shown, ", ") <> if(more > 0, do: " and #{more} more", else: "")}

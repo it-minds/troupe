@@ -1018,6 +1018,11 @@ defmodule Troupe.Client.Daemon do
 
   # How long a session on this computer lasts (root #1209): the daemon's mark beside its
   # log, which its sweep reads; everything here is the person's own.
+  # A session on this computer is not marked sensitive from here yet: its daemon has no such
+  # mark until the organisation's enforced file says what marks one.
+  @impl true
+  def sensitive(_sid, _verb), do: {:error, Troupe.Client.Sensitive.not_here()}
+
   @impl true
   def lifespan(sid, :status) do
     case Link.call("session.get", %{session_id: sid}) do
