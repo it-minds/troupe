@@ -106,7 +106,7 @@ describe("every session", () => {
     const marked = await waitFor(() => rows().find((r) => r.textContent?.includes("s-7f3a9c21")), "the row");
     const mark = await waitFor(() => [...marked.querySelectorAll<HTMLElement>("span[title]")].find((s) => s.textContent === "sensitive"), "the mark");
     expect(mark.title).toContain("mcp.records.lookup read from it");
-    expect(says("Sensitive", document.querySelector("table.sessions thead")!)).toBe(true);
+    await sees("Sensitive", () => document.querySelector("table.sessions thead"));
   });
 });
 
@@ -208,6 +208,7 @@ describe("the profile editor", () => {
     type(marked.querySelector<HTMLInputElement>("input")!, "mcp");
     type(marked.querySelectorAll<HTMLInputElement>("input")[1]!, "records.*");
     await sees("Say which tools a sensitive session is refused");
+    // at once: the problem above is said by the same render that disables Preview
     expect(button("Preview")!.disabled).toBe(true);
     button("Add a deny rule", fieldset("Refused once sensitive"))!.click();
     const denied = await waitFor(() => fieldset("Refused once sensitive").querySelector<HTMLElement>(".rule-row"), "the deny row");
