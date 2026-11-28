@@ -91,6 +91,37 @@ administrator**: nothing changed yet, and it applies as you asked the moment one
 team's administrators allows it on the team's *Waiting shares* in the console. They may also
 refuse it. A link cannot wait, so none is made; invite the person by name instead.
 
+### On your own computer
+
+A session on this computer becomes sensitive the same way, by a call its rules name, and
+stays so. The rules come from two files: what your organisation sets under `enforced:` in
+its managed file, which you cannot change, and a `sensitive:` block in your own
+`config.yaml`, which may add to them and never take from them:
+
+```yaml
+sensitive:
+  marked_by: ["read_file(~/hr/**)"]   # added to the organisation's
+  deny: ["mcp(chat.*)"]               # added to the organisation's
+  sharing: deny                       # tighter than the organisation's word; looser is ignored
+```
+
+A project's `.troupe/config.yaml` sets none of it. *This computer* in the desktop app, and
+`/settings` in the terminal, list the rules in effect with where each came from, and
+`troupe config --explain sensitive` says the same. A sensitive session here is refused what
+`deny` names when its agent calls it, and the daemon refuses on its own side as well:
+
+- publishing an artifact from it, where `deny` names `publish_artifact`, whether its agent or
+  your *Publish…* asks;
+- proposing anything for a team's or the organisation's memory, whatever `deny` says;
+- offering it for steering from another device, or inviting somebody into a private one,
+  where `sharing` is `ask` or `deny`. On this computer `ask` refuses too: no team
+  administrator answers a request from a person's own machine;
+- a call the daemon makes to one of your servers for it, which marks it where `marked_by`
+  names the call and is refused where `deny` does.
+
+You may mark one by hand, one-way: **Make it sensitive** in its ⋯, or `/sensitive` in the
+terminal.
+
 ## Raising a session to the current configuration
 
 A session on the platform runs on the bundle version its profile's channel had when it
