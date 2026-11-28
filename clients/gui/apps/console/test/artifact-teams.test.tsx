@@ -50,7 +50,7 @@ describe("a team's artifacts in the gallery", () => {
 
     (await seesLink("Mine", document.querySelector('nav[aria-label="Whose artifacts"]')!)).click();
     await sees("Carol's draft", cards);
-    await sees("for only you, and whoever you give a link", cards);
+    await sees("for only you, and whoever you share it with", cards);
     expect(document.body.textContent).not.toContain("Ada's diary");
   });
 });

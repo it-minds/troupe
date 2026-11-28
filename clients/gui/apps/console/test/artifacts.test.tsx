@@ -1,5 +1,5 @@
-// Artifacts: the pages and files a person, their organisation and their profiles' people
-// published, for everybody who signs in. A tab per profile the plane names, a card that is
+// Artifacts: the pages and files a person, their organisation and their teams
+// published, for everybody who signs in. A tab each for theirs, the shared, the organisation's and their teams', a card that is
 // a title and a kind and never what the artifact holds, a link asked for at the click and
 // opened in a tab of its own, one artifact's versions at its own address, and a delete
 // that is its owner's or a platform admin's takedown. Beside them, a team's storage for
@@ -46,18 +46,18 @@ function artifacts(): FakeArtifact[] {
     artifact("art-alice-notes", alice, {
       title: "Release notes",
       kind: "markdown",
-      visibility: "profile:dev",
+      visibility: "team:core",
       versions: [{ n: 1, files: [{ path: "notes.md", content_type: "text/markdown", content: "# Released" }], published_by: alice, published_at: "2026-10-25T08:00:00Z" }],
     }),
     artifact("art-ada-sketches", ada, {
       title: "Sketches",
       kind: "file",
-      visibility: "profile:ux",
+      visibility: "team:design",
       versions: [{ n: 1, files: [{ path: "sketches.zip", content_type: "application/zip", content: "zip" }], published_by: ada, published_at: "2026-10-25T07:00:00Z" }],
     }),
     artifact("art-ada-bold", ada, { title: "<b>Bold claims</b>", versions: [{ n: 1, files: [{ path: "index.html", content_type: "text/html", content: PAGE }], published_by: ada, published_at: "2026-10-25T06:00:00Z" }] }),
-    // For a profile nobody here works in: listed to nobody of them.
-    artifact("art-research", ada, { title: "Research only", visibility: "profile:research" }),
+    // For a team nobody here is in: listed to nobody of them.
+    artifact("art-research", ada, { title: "Research only", visibility: "team:research" }),
   ];
 }
 
@@ -90,14 +90,14 @@ afterEach(async () => {
 });
 
 describe("artifacts", () => {
-  it("gives a member a tab for each profile the plane names, of cards that are a title and a kind and never what the artifact holds, through no administrative call", async () => {
+  it("gives a member the tabs, of cards that are a title and a kind and never what the artifact holds, through no administrative call", async () => {
     const recorded = recordCalls();
     restore = recorded.restore;
     await open("#/artifacts/organisation", PEOPLE.carol);
 
     await sees("Carol's weekly", cards);
     await seesLink("Artifacts", rail());
-    await waitFor(() => tabs().join(",") === "Mine,Shared with you,Organisation,Teams,dev,ux", "a tab for each profile");
+    await waitFor(() => tabs().join(",") === "Mine,Shared with you,Organisation,Teams", "the tabs, none per profile");
     await sees("HTML page", cards);
     await sees("version 2", cards);
     // A title is words, whatever it looks like.
@@ -108,7 +108,7 @@ describe("artifacts", () => {
     expect(document.body.innerHTML).not.toContain("Week forty-three in full");
     expect((globalThis as { reached?: unknown }).reached).toBeUndefined();
 
-    (await seesLink("dev", document.querySelector('nav[aria-label="Whose artifacts"]')!)).click();
+    (await seesLink("Teams", document.querySelector('nav[aria-label="Whose artifacts"]')!)).click();
     await sees("Release notes", cards);
     await sees("Markdown", cards);
     expect(cards()!.textContent).not.toContain("Carol's weekly");

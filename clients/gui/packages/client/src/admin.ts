@@ -1372,8 +1372,10 @@ export interface AdminArtifact {
   id: string;
   title: string;
   kind: "html" | "markdown" | "file";
-  /** `private`, `organisation`, `team:<name>` or `profile:<name>`. */
+  /** `organisation` while every signed-in person reads it, else `private`. */
   visibility: string;
+  /** The teams that read it, by name. Absent from a plane from before the set. */
+  teams?: string[];
   owner: { subject: string; display_name?: string | null } | null;
   /** The team that owns it, every member its owner; null for a person's. */
   owner_team?: string | null;

@@ -13,7 +13,7 @@
 import { TroupeRpcError } from "./connection.js";
 import { planeReadsOnlyText } from "./daemon.js";
 import type { EntriesOrText } from "./daemon.js";
-import type { ArtifactComment, ArtifactDetail, ArtifactFilter, ArtifactList, ArtifactNewLink, ArtifactPersonShare, ArtifactShareRole, ArtifactThread, ArtifactTicket, ArtifactTransferTo } from "./artifacts.js";
+import type { ArtifactAccess, ArtifactAccessChange, ArtifactAccessWaiting, ArtifactComment, ArtifactDetail, ArtifactFilter, ArtifactList, ArtifactNewLink, ArtifactPersonShare, ArtifactShareRole, ArtifactThread, ArtifactTicket, ArtifactTransferTo } from "./artifacts.js";
 import type { Person } from "./invites.js";
 import type { MemoryDocument, MemoryPreview, MemorySaved } from "./admin.js";
 import { renderEntries } from "./entries.js";
@@ -40,7 +40,12 @@ export interface OwnPlane {
   shareArtifact(id: string, role?: "view" | "edit"): Promise<ArtifactNewLink>;
   unshareArtifact(id: string, which: { share: string } | { person: string }): Promise<{ revoked: boolean }>;
   rollbackArtifact(id: string, version: number): Promise<ArtifactDetail>;
-  moveArtifact(id: string, base: number, visibility: string): Promise<ArtifactDetail>;
+  /** Who reads it: the owner's to read. */
+  artifactAccess(id: string): Promise<ArtifactAccess>;
+  /** Change who reads it, each part named the whole of that part, no version made; or the change waits on a team administrator. */
+  setArtifactAccess(id: string, change: ArtifactAccessChange): Promise<ArtifactAccess | ArtifactAccessWaiting>;
+  /** The names of every team granted a profile, for the sharing menu. */
+  profileTeams(profile: string): Promise<{ profile: string; teams: string[] }>;
   pinArtifact(id: string, version: number | null): Promise<ArtifactDetail>;
   transferArtifact(id: string, to: ArtifactTransferTo): Promise<ArtifactDetail>;
   /** Keep it at the top of the person's own gallery, or let it go: theirs, on the plane. */
@@ -55,8 +60,8 @@ export interface OwnPlane {
   deleteArtifactComment(id: string, comment: string): Promise<{ id: string; comment: string; deleted: boolean }>;
   /** A comment's text replaced by its author, marked edited. */
   editArtifactComment(id: string, comment: string, body: string): Promise<{ id: string; comment: ArtifactComment }>;
-  /** The share picker's search: people whose name, email or subject starts with `query`. */
-  searchPeople(query: string): Promise<{ people: Person[] }>;
+  /** The share picker's search: people whose name, email or subject starts with `query`; with `artifact`, among the people its session's profile covers too. */
+  searchPeople(query: string, opts?: { artifact?: string }): Promise<{ people: Person[] }>;
 }
 
 /** The order the levels come in, lowest first, as the plane and the daemon sort them. */
@@ -159,8 +164,16 @@ export class PlaneOwn implements OwnPlane {
     return this.ask<ArtifactDetail>("artifact.rollback", { id, version });
   }
 
-  moveArtifact(id: string, base: number, visibility: string): Promise<ArtifactDetail> {
-    return this.ask<ArtifactDetail>("artifact.put", { id, base, visibility });
+  artifactAccess(id: string): Promise<ArtifactAccess> {
+    return this.ask<ArtifactAccess>("artifact.access.get", { id });
+  }
+
+  setArtifactAccess(id: string, change: ArtifactAccessChange): Promise<ArtifactAccess | ArtifactAccessWaiting> {
+    return this.ask<ArtifactAccess | ArtifactAccessWaiting>("artifact.access.set", { id, ...change });
+  }
+
+  profileTeams(profile: string): Promise<{ profile: string; teams: string[] }> {
+    return this.ask<{ profile: string; teams: string[] }>("profile.teams", { profile });
   }
 
   pinArtifact(id: string, version: number | null): Promise<ArtifactDetail> {
@@ -195,8 +208,8 @@ export class PlaneOwn implements OwnPlane {
     return this.ask<{ id: string; comment: ArtifactComment }>("artifact.comment.edit", { id, comment, body });
   }
 
-  searchPeople(query: string): Promise<{ people: Person[] }> {
-    return this.ask<{ people: Person[] }>("people.search", { query });
+  searchPeople(query: string, opts: { artifact?: string } = {}): Promise<{ people: Person[] }> {
+    return this.ask<{ people: Person[] }>("people.search", { query, ...opts });
   }
 }
 

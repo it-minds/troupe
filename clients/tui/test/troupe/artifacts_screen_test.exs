@@ -38,7 +38,8 @@ defmodule Troupe.ArtifactsScreenTest do
       "id" => "a-team",
       "title" => "Design notes",
       "kind" => "markdown",
-      "visibility" => "team:design",
+      "visibility" => "private",
+      "teams" => ["design"],
       "scope" => "team:design",
       "version" => 3,
       "mine" => true,
@@ -48,12 +49,12 @@ defmodule Troupe.ArtifactsScreenTest do
       "may_transfer" => true,
       "published_at" => @now
     },
-    # A profile the person is not on is one a link gave them.
+    # One no team of the person's reads is one a link gave them.
     %{
       "id" => "a-shared",
       "title" => "Interview guide",
       "kind" => "markdown",
-      "visibility" => "profile:ops",
+      "visibility" => "private",
       "scope" => "shared",
       "version" => 1,
       "owner" => %{"display_name" => "Dee"},
@@ -195,7 +196,8 @@ defmodule Troupe.ArtifactsScreenTest do
     press(pid, "enter")
 
     assert eventually(fn ->
-             screen_text(pid, session) =~ "published notes.md as art-new4 version 1"
+             screen_text(pid, session) =~
+               "published notes.md as art-new4 version 1, read by you alone"
            end)
 
     {"artifact.publish", sent} =
@@ -207,26 +209,30 @@ defmodule Troupe.ArtifactsScreenTest do
     assert screen_text(pid, session) =~ "5 ○ Only you 2"
     assert File.exists?(Path.join(ws, "notes.md"))
 
-    # For a team it is the team's, and the line says so, unless `me` follows.
+    # Read by each team named, and the one team's where `--owner team` says so; the line
+    # says who reads it and whose it became.
     press(pid, "p")
-    type(pid, "notes.md team:Core")
+    type(pid, "notes.md --team Core --owner team")
     press(pid, "enter")
 
     assert eventually(fn ->
-             screen_text(pid, session) =~ "published notes.md as art-new5 version 1 (team Core's)"
+             screen_text(pid, session) =~
+               "published notes.md as art-new5 version 1, read by the Core team (team Core's)"
            end)
 
-    assert %{"owner" => "team", "visibility" => "team:Core"} = last_publish(remote)
+    assert %{"owner" => "team", "teams" => ["Core"], "visibility" => "private"} =
+             last_publish(remote)
 
     press(pid, "p")
-    type(pid, "notes.md team:Core me")
+    type(pid, "notes.md --team Core")
     press(pid, "enter")
 
     assert eventually(fn ->
-             screen_text(pid, session) =~ "published notes.md as art-new6 version 1\n"
+             screen_text(pid, session) =~
+               "published notes.md as art-new6 version 1, read by the Core team\n"
            end)
 
-    assert %{"owner" => "me"} = last_publish(remote)
+    refute Map.has_key?(last_publish(remote), "owner")
     assert screen_text(pid, session) =~ "3 ◎ Your teams 3"
 
     press(pid, "esc")

@@ -1,17 +1,17 @@
 // "Publish…": files from this computer published on the plane as an artifact (troupe #62),
 // as the person this computer's daemon is signed in as, through the daemon's sign-in, as
-// the terminal client's /publish does. A new artifact, the person's alone until they share a
-// link (the default), or for the whole organisation, a team they are in or a profile's
-// people; one for a team is the team's, every member its owner, unless the person keeps it
-// their own. Or "Publish a new version of…" one of the person's own, the next version
-// at the same address with a note, the earlier ones kept. The daemon sends what is too large
+// the terminal client's /publish does. A new artifact, read by the person alone until they
+// share it (the default), or by the teams of theirs they tick and the whole organisation;
+// the person's own unless they make it the one team's they ticked, every member its owner.
+// Or "Publish a new version of…" one of the person's own, the next version at the same
+// address with a note, the earlier ones kept, read by whoever reads it now. The daemon sends what is too large
 // for one call by an upload handle. The gallery, in the console, is a link away.
 //
 // The files are read here, in the app, by a file picker; nothing of what they hold is drawn.
 
 import { useEffect, useState } from "react";
 import type { JSX } from "react";
-import { blockedKindWords, blockedWords, errorText, visibilityWords } from "@troupe/client";
+import { artifactAccessWords, blockedKindWords, blockedWords, errorText } from "@troupe/client";
 import type { Artifact, ArtifactBlocked, ArtifactKind, ArtifactList, ArtifactThumbnail, ArtifactUpload, DaemonClient } from "@troupe/client";
 import { shell } from "../shell";
 
@@ -48,29 +48,6 @@ export function replyTitle(text: string): string {
   return plain.length > 80 ? `${plain.slice(0, 79)}…` : plain;
 }
 
-/**
- * Who may open an artifact, as a person chooses it here and in the gallery: only them, the
- * organisation, each of their teams and each profile the plane names for them.
- */
-export function VisibilityOptions({ teams, profiles }: { teams?: string[] | undefined; profiles?: string[] | undefined }): JSX.Element {
-  return (
-    <>
-      <option value="private">Only you, until you share it</option>
-      <option value="organisation">The whole organisation</option>
-      {(teams ?? []).map((t) => (
-        <option key={`team:${t}`} value={`team:${t}`}>
-          The {t} team
-        </option>
-      ))}
-      {(profiles ?? []).map((p) => (
-        <option key={p} value={`profile:${p}`}>
-          The {p} profile's people
-        </option>
-      ))}
-    </>
-  );
-}
-
 export function Publish({
   daemon,
   sessionId,
@@ -92,9 +69,11 @@ export function Publish({
   const [target, setTarget] = useState<string>(chosenTarget ?? "");
   const [files, setFiles] = useState<File[]>(() => (reply ? [new File([reply], "reply.md", { type: "text/markdown" })] : []));
   const [title, setTitle] = useState(() => (reply ? replyTitle(reply) : ""));
-  const [visibility, setVisibility] = useState("private");
-  // Whether one published for a team is the team's: on unless the person says otherwise.
-  const [teamOwned, setTeamOwned] = useState(true);
+  // Who reads a new one: the teams of theirs ticked, and the organisation switch.
+  const [teams, setTeams] = useState<string[]>([]);
+  const [organisation, setOrganisation] = useState(false);
+  // Whether it is the one team's ticked rather than the person's: off unless they say so.
+  const [teamOwned, setTeamOwned] = useState(false);
   const [note, setNote] = useState("");
   // A picture of it for its gallery card, which the plane keeps with this version alone.
   const [picture, setPicture] = useState<File | null>(null);
@@ -118,7 +97,7 @@ export function Publish({
   const paths = files.map((f) => f.name);
   const kind = chosen ? chosen.kind : kindOf(paths);
   const ready = files.length > 0 && (mode === "version" ? chosen !== null : title.trim() !== "");
-  const forTeam = !chosen && visibility.startsWith("team:");
+  const forTeam = !chosen && teams.length === 1;
 
   const publish = async (): Promise<void> => {
     setBusy(true);
@@ -128,9 +107,10 @@ export function Publish({
       const published = await daemon.publishArtifact({
         title: chosen ? chosen.title : title.trim(),
         kind,
-        visibility: chosen ? chosen.visibility : visibility,
+        // A new version keeps who reads it: neither the switch nor the teams go with one.
+        ...(chosen ? {} : { visibility: organisation ? "organisation" : "private", teams }),
         files: sent,
-        ...(forTeam ? { owner: teamOwned ? "team" : "me" } : {}),
+        ...(forTeam && teamOwned ? { owner: "team" } : {}),
         ...(chosen ? { id: chosen.id } : {}),
         ...(chosen && note.trim() ? { note: note.trim() } : {}),
         ...(sessionId ? { session_id: sessionId } : {}),
@@ -153,7 +133,7 @@ export function Publish({
         {done ? (
           <>
             <p className="copy">
-              {done.title} is published as {done.id}, version {done.version}, for {visibilityWords(done.visibility)}
+              {done.title} is published as {done.id}, version {done.version}, {artifactAccessWords({ teams: done.teams ?? [], organisation: done.visibility === "organisation" })}
               {done.owner_team ? `, owned by the ${done.owner_team} team` : ""}.
             </p>
             {/* What the artifacts host will block in it, as the plane read the files. */}
@@ -222,15 +202,23 @@ export function Publish({
                   Title
                   <input value={title} onChange={(e) => setTitle(e.target.value)} maxLength={200} />
                 </label>
-                <label>
-                  Who may open it
-                  <select value={visibility} onChange={(e) => setVisibility(e.target.value)}>
-                    <VisibilityOptions teams={list?.teams} profiles={list?.profiles} />
-                  </select>
-                </label>
+                <fieldset className="readers">
+                  <legend>Who reads it</legend>
+                  {(list?.teams ?? []).map((t) => (
+                    <label key={t} className="inline">
+                      <input type="checkbox" checked={teams.includes(t)} onChange={(e) => setTeams((now) => (e.target.checked ? [...now, t] : now.filter((x) => x !== t)))} /> The {t} team
+                    </label>
+                  ))}
+                  {(list?.publish_organisation !== "platform_admins" || organisation) && (
+                    <label className="inline">
+                      <input type="checkbox" checked={organisation} onChange={(e) => setOrganisation(e.target.checked)} /> The whole organisation
+                    </label>
+                  )}
+                  <p className="muted">{teams.length === 0 && !organisation ? "Only you, until you share it from its Access tab." : `It will be ${artifactAccessWords({ teams, organisation })}.`}</p>
+                </fieldset>
                 {forTeam && (
                   <label className="inline">
-                    <input type="checkbox" checked={teamOwned} onChange={(e) => setTeamOwned(e.target.checked)} /> Owned by the team: anyone on it can change or delete it
+                    <input type="checkbox" checked={teamOwned} onChange={(e) => setTeamOwned(e.target.checked)} /> Owned by the {teams[0]} team: anyone on it can change or delete it
                   </label>
                 )}
               </>

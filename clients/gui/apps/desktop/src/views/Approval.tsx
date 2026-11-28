@@ -11,7 +11,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { JSX } from "react";
-import { BRIEF_PARTS, callConsequence as consequence, callEvidence, callHeadline as headline, callScopedLabel as scopedLabel, decisionWords, errorText, ruleScope, visibilityWords } from "@troupe/client";
+import { BRIEF_PARTS, artifactAccessWords, offeredTeams, publishAnswer, callConsequence as consequence, callEvidence, callHeadline as headline, callScopedLabel as scopedLabel, decisionWords, errorText, ruleScope } from "@troupe/client";
 import type { ApprovalDecision, DelegationGate, Entry, GateAnswer, PublicationGate } from "@troupe/client";
 import { Pill } from "./bits";
 import { Mask } from "./brand";
@@ -21,10 +21,14 @@ export type Decision = ApprovalDecision;
 type RuleScope = "workspace" | "everywhere";
 type Approval = Extract<Entry, { kind: "approval" }>;
 
-/** The audiences a person may publish for: their teams and the profiles they are covered by, as the plane names them. */
+/**
+ * Who a person may have read a new artifact, as the plane names it: their teams, and whether
+ * they may publish to the whole organisation (false where only a platform admin may and they
+ * are not one).
+ */
 export interface Audiences {
   teams: string[];
-  profiles: string[];
+  organisation: boolean;
 }
 
 /** A brief's parts by the names a person reads them by (troupe Decision 847). */
@@ -96,10 +100,10 @@ export function ApprovalPanel({
    * server that does not (a pod, whose rules are its profile's) is not offered it.
    */
   alwaysAllow?: boolean;
-  /** Whom a publication may be for: the person's teams and profiles, once the plane said them. */
+  /** Who may read a new artifact: the person's teams and the organisation switch, once the plane said them. */
   audiences?: Audiences | null | undefined;
 }): JSX.Element {
-  // An agent's publication asks whom it is for and whose it is before anything is published.
+  // An agent's publication: a new one asks who reads it and whose it is; a new version says who reads it.
   if (entry.publication && entry.decision === undefined) {
     return <PublishPanel entry={entry} publication={entry.publication} audiences={audiences ?? null} canAnswer={canAnswer} others={others} onAnswer={onAnswer} onceOnly={onceOnly} />;
   }
@@ -503,63 +507,17 @@ function DelegationPanel({
   );
 }
 
-/** One choice of whom a publication is for and, for a new artifact, whose it is, keyed as `visibility|owner`. */
-interface AudienceChoice {
-  key: string;
-  visibility: string;
-  /** Absent for a new version, whose owner a version never changes. */
-  owner: "me" | "team" | undefined;
-  label: string;
-}
-
-/** What the owner of a new artifact is when the agent said nothing: the team's for a team, else the publisher's. */
-function defaultOwner(visibility: string | null): "me" | "team" {
-  return visibility !== null && visibility.startsWith("team:") ? "team" : "me";
-}
-
-/** A choice's key: the visibility, and for a new artifact whose it is. */
-function keyOf(visibility: string, owner: "me" | "team" | undefined): string {
-  return owner === undefined ? visibility : `${visibility}|${owner}`;
-}
-
-/**
- * The choices a person has: only them, the organisation, each team they are in (for a new
- * artifact, the team's own or theirs alone; a new version keeps whose it is, so one choice
- * a team), each profile; and whatever the agent proposed, even one the plane has not
- * named for them yet, so the proposal is never lost while the list loads.
- */
-export function audienceChoices(audiences: Audiences | null, proposed: { visibility: string | null; owner: "me" | "team" | null }, republish = false): AudienceChoice[] {
-  const me = republish ? undefined : "me";
-  const choices: AudienceChoice[] = [
-    { key: keyOf("private", me), visibility: "private", owner: me, label: "Only you" },
-    { key: keyOf("organisation", me), visibility: "organisation", owner: me, label: "The whole organisation" },
-  ];
-  for (const t of audiences?.teams ?? []) {
-    if (republish) choices.push({ key: `team:${t}`, visibility: `team:${t}`, owner: undefined, label: `Team ${t}` });
-    else {
-      choices.push({ key: `team:${t}|team`, visibility: `team:${t}`, owner: "team", label: `Team ${t}, owned by the team` });
-      choices.push({ key: `team:${t}|me`, visibility: `team:${t}`, owner: "me", label: `Team ${t}, owned by you` });
-    }
-  }
-  for (const p of audiences?.profiles ?? []) choices.push({ key: keyOf(`profile:${p}`, me), visibility: `profile:${p}`, owner: me, label: `The ${p} profile's people` });
-  if (proposed.visibility !== null) {
-    const owner = republish ? undefined : (proposed.owner ?? defaultOwner(proposed.visibility));
-    const key = keyOf(proposed.visibility, owner);
-    if (!choices.some((c) => c.key === key)) {
-      const v = proposed.visibility;
-      const label = v.startsWith("team:") ? `Team ${v.slice("team:".length)}${owner === undefined ? "" : `, owned by ${owner === "team" ? "the team" : "you"}`}` : visibilityWords(v).replace(/^(\w)/, (m) => m.toUpperCase());
-      choices.push({ key, visibility: v, owner, label });
-    }
-  }
-  return choices;
-}
 
 /**
  * An agent's publication before it is published: what it is (its title, kind and how many
- * files), and whom it is for as a choice the person makes. The agent's proposal is chosen
- * already; where it proposed nobody, nothing is, and Allow waits for a choice. Allow sends
- * the choice; Deny sends nothing; letting the agent publish unasked for the session is
- * offered only where it proposed an audience, since there is nothing to allow again.
+ * files) and who would read it. A new version keeps who reads the artifact, so the panel says
+ * who does, in the plane's words, and Allow is offered at once: the gate never re-aims one,
+ * and who reads it is changed in its Access tab. A new artifact's panel is its sharing menu:
+ * the teams the plane named ticked (those granted the session's profile), the person's other
+ * teams unticked, the organisation switch where the plane allows it, and whose it is. Allow
+ * sends the choice; Deny sends nothing; letting the agent publish unasked for the session is
+ * offered where the agent proposed an audience or for a new version, since there is
+ * something to allow again.
  */
 function PublishPanel({
   entry,
@@ -578,14 +536,16 @@ function PublishPanel({
   onAnswer: (decision: Decision, answer?: GateAnswer) => Promise<void>;
   onceOnly: boolean;
 }): JSX.Element {
-  // A new version keeps whose the artifact is: only whom it is for is asked.
   const republish = publication.id !== null;
-  const proposedKey = publication.visibility === null ? null : keyOf(publication.visibility, republish ? undefined : (publication.owner ?? defaultOwner(publication.visibility)));
-  const [chosen, setChosen] = useState<string | null>(proposedKey);
+  const [ticked, setTicked] = useState<string[]>(publication.teams ?? []);
+  const [organisation, setOrganisation] = useState(publication.visibility === "organisation");
+  const [owner, setOwner] = useState<"me" | "team">(publication.owner ?? "me");
   const [busy, setBusy] = useState<Decision | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const choices = audienceChoices(audiences, publication, republish);
-  const choice = choices.find((c) => c.key === chosen) ?? null;
+  const teams = offeredTeams(publication, audiences?.teams ?? []);
+  // The organisation switch is offered where the plane lets this person publish to it, and
+  // always where the agent proposed it, so the proposal is never lost.
+  const mayOrganisation = audiences?.organisation !== false || publication.visibility === "organisation";
 
   const send = async (decision: Decision, answer: GateAnswer = {}): Promise<void> => {
     if (busy) return;
@@ -602,8 +562,11 @@ function PublishPanel({
 
   const what = publication.kind === "html" ? "A page" : publication.kind === "markdown" ? "A document" : "A file";
   const files = publication.files === 1 ? "1 file" : `${publication.files} files`;
-  // Whom it is for and whose it is, as keys beside the decision, as a delegation's answer is sent.
-  const answerOf: GateAnswer | undefined = choice ? { visibility: choice.visibility, ...(choice.owner === undefined ? {} : { owner: choice.owner }) } : undefined;
+  // A new version's answer carries nothing: it keeps who reads it and whose it is.
+  const answerOf: GateAnswer = republish ? {} : publishAnswer({ organisation, teams: ticked, owner });
+  const toggle = (team: string): void => setTicked((now) => (now.includes(team) ? now.filter((t) => t !== team) : [...now, team]));
+  // The harness allows a new one the agent named no visibility for once, whatever teams the plane ticked.
+  const again = republish || publication.visibility !== null;
 
   return (
     <section className="approval publication" aria-label={`Publish ${publication.title}`}>
@@ -614,8 +577,9 @@ function PublishPanel({
       </header>
       <div className="panel-body">
         <p className="consequence">
-          {publication.id ? "The session wants to publish a new version of an artifact. " : "The session wants to publish an artifact. "}
-          Nothing is published until you say whom it is for.
+          {republish
+            ? "The session wants to publish a new version of an artifact. It keeps who reads the artifact: nothing about that is asked here."
+            : "The session wants to publish an artifact. Nothing is published until you allow it, read by whom you choose below."}
         </p>
         <dl className="facts gate">
           <dt>Title</dt>
@@ -628,6 +592,8 @@ function PublishPanel({
             <>
               <dt>Of</dt>
               <dd>{publication.id}</dd>
+              <dt>Read by</dt>
+              <dd>{publication.access ? `${publication.access}, as now` : "who reads it now"}</dd>
             </>
           )}
           {publication.note && (
@@ -637,29 +603,47 @@ function PublishPanel({
             </>
           )}
         </dl>
-        <fieldset className="audience-choices" disabled={!canAnswer || busy !== null}>
-          <legend>Who may open it</legend>
-          {choices.map((c) => (
-            <label key={c.key} className="inline">
-              <input type="radio" name={`publish-${entry.callId}`} value={c.key} checked={chosen === c.key} onChange={() => setChosen(c.key)} /> {c.label}
+        {republish ? (
+          <p className="also">To change who reads it, open it in Artifacts once it is published: its Info has an Access tab.</p>
+        ) : (
+          <fieldset className="audience-choices" disabled={!canAnswer || busy !== null}>
+            <legend>Who reads it</legend>
+            <p className="also">Its owner reads it, and whoever you share it with later from its Access tab.</p>
+            {teams.map((t) => (
+              <label key={t} className="inline">
+                <input type="checkbox" checked={ticked.includes(t)} onChange={() => toggle(t)} /> The {t} team
+                {(publication.teams ?? []).includes(t) && <span className="also"> · proposed</span>}
+              </label>
+            ))}
+            {teams.length === 0 && <p className="also">No team of yours is known here, so only you and the organisation are offered.</p>}
+            {mayOrganisation && (
+              <label className="inline">
+                <input type="checkbox" checked={organisation} onChange={(e) => setOrganisation(e.target.checked)} /> The whole organisation
+              </label>
+            )}
+            {!mayOrganisation && <p className="also">Only a platform admin may publish to the whole organisation here.</p>}
+            <p className="also readers">{ticked.length === 0 && !organisation ? "Only you will read it." : `It will be ${artifactAccessWords({ teams: ticked, organisation })}.`}</p>
+            <label className="inline">
+              <input type="radio" name={`publish-owner-${entry.callId}`} checked={owner === "me" || ticked.length !== 1} onChange={() => setOwner("me")} /> Yours
             </label>
-          ))}
-          {publication.visibility === null && <p className="also">The agent did not say whom it is for.</p>}
-          {publication.visibility !== null && chosen !== proposedKey && <p className="also">The agent proposed {choices.find((c) => c.key === proposedKey)?.label.toLowerCase() ?? visibilityWords(publication.visibility)}.</p>}
-        </fieldset>
+            <label className="inline">
+              <input type="radio" name={`publish-owner-${entry.callId}`} checked={owner === "team" && ticked.length === 1} disabled={ticked.length !== 1} onChange={() => setOwner("team")} /> {ticked.length === 1 ? `The ${ticked[0]} team's, every member its owner` : "A team's, every member its owner (tick one team)"}
+            </label>
+          </fieldset>
+        )}
         {others.length > 0 && <p className="also">{others.join(", ")} can answer this too. The first answer counts.</p>}
       </div>
       {error && <p className="also error">{error}</p>}
       {canAnswer ? (
         <div className="answers">
-          <button className="allow" disabled={busy !== null || !answerOf} onClick={() => void send("allow", answerOf)}>
+          <button className="allow" disabled={busy !== null} onClick={() => void send("allow", answerOf)}>
             {busy === "allow" ? "Publishing…" : onceOnly ? "Allow once" : "Allow"}
           </button>
           <button className="deny" disabled={busy !== null} onClick={() => void send("deny")}>
             {busy === "deny" ? "Denying…" : "Deny"}
           </button>
-          {!onceOnly && publication.visibility !== null && (
-            <button className="scoped" disabled={busy !== null || !answerOf} onClick={() => void send("allow_session", answerOf)}>
+          {!onceOnly && again && (
+            <button className="scoped" disabled={busy !== null} onClick={() => void send("allow_session", answerOf)}>
               Allow, and let it publish unasked for this session
             </button>
           )}
@@ -678,11 +662,11 @@ export function DecisionRecord({ entry, self }: { entry: Approval; self: string 
   const verb = decisionWords(entry.decision);
   const said = entry.answered;
   // A delegation's answer says what it changed: where it went, which parts, the word back.
-  // A publication's says whom it went to and whose it is.
+  // A new artifact's says who reads it and whose it is.
   const detail = said
     ? [
         said.agent && entry.delegation && said.agent !== entry.delegation.agent ? `sent to ${said.agent}` : null,
-        said.visibility && entry.publication ? `for ${visibilityWords(said.visibility)}${said.owner === "team" ? ", the team's" : ""}` : null,
+        entry.publication && (said.visibility || said.teams) ? `${artifactAccessWords({ teams: said.teams ?? (said.visibility?.startsWith("team:") ? [said.visibility.slice("team:".length)] : []), organisation: said.visibility === "organisation" })}${said.owner === "team" ? ", the team's" : ""}` : null,
         said.edited && said.edited.length > 0 ? `edited ${said.edited.map((p) => PART_NAMES[p] ?? p).join(", ").toLowerCase()}` : null,
         said.reason ? `said: ${said.reason}` : null,
       ].filter(Boolean)

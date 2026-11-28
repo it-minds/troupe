@@ -346,7 +346,7 @@ defmodule Troupe.Client do
   Answers an approval. `answer` is what a delegation's answer carries besides its word
   (root Decision 850): `"agent"` to send it to another subagent, `"brief"` with the parts
   the person edited, `"reason"` with a denial; and what a publication's carries, whom it
-  is for and whose (`"visibility"`, `"owner"`).
+  is for and whose (`"visibility"`, `"teams"`, `"owner"`).
   """
   @spec approve(session_id(), String.t(), decision(), map()) :: :ok | {:error, term()}
   def approve(sid, call_id, decision, answer \\ %{}),
@@ -922,6 +922,15 @@ defmodule Troupe.Client do
   @doc "Publish one file of this machine (`/publish`): `Troupe.Client.Artifacts.publish/3`."
   @spec publish_file(Path.t(), String.t(), keyword()) :: {:ok, map()} | {:error, String.t()}
   def publish_file(path, visibility, opts \\ []), do: Artifacts.publish(path, visibility, opts)
+
+  @doc "`/publish`'s words after its name, read: `Troupe.Client.Artifacts.publish_args/1`."
+  @spec publish_args([String.t()]) ::
+          {:ok, String.t(), String.t(), keyword()} | {:error, String.t()}
+  def publish_args(words), do: Artifacts.publish_args(words)
+
+  @doc "Who reads a row beside its owner, in words, or nil: `Troupe.Client.Artifacts.readers/1`."
+  @spec artifact_readers(map()) :: String.t() | nil
+  def artifact_readers(row), do: Artifacts.readers(row)
 
   @doc "When a timestamp was, as a person says it: `just now`, `2 h ago`, `yesterday`, or the date."
   @spec ago(String.t() | nil) :: String.t()
