@@ -19,6 +19,9 @@ defmodule Troupe.Plane.Remote.Watch do
   (`Troupe.Plane.Invites.changed/1`). A client that does not know the notification ignores
   it. A private session's invitation says whether it is offered now (`offered`), so a change
   to its offer is told as both: the laptop's list and the invitations, each where it moved.
+  An artifact shared with the person by name is told as `artifacts.changed {shared: {id,
+  title, role, by}}`, once, as it happens (`Troupe.Plane.Artifacts.People.told/3`): the
+  gallery asks `artifact.list` again.
 
   It carries nothing of a session, and asks nothing of a laptop: what it sends is the
   listing's metadata. It is renewed on the open socket (`auth.refresh`), warned two
@@ -29,6 +32,7 @@ defmodule Troupe.Plane.Remote.Watch do
   @behaviour WebSock
 
   alias Troupe.Plane.{Identity, Invites, Remote}
+  alias Troupe.Plane.Artifacts.People
   alias Troupe.Plane.Identity.User
   alias Troupe.Plane.Remote.Auth
   alias Troupe.Protocol.{Error, JSONRPC}
@@ -62,7 +66,8 @@ defmodule Troupe.Plane.Remote.Watch do
   defp handle_message({:request, id, "initialize", params}, %{user: nil} = state) do
     with {:ok, user, claims} <- Auth.person(get_in(params, ["auth", "token"]) || state.bearer),
          :ok <- Remote.subscribe(),
-         :ok <- Invites.subscribe() do
+         :ok <- Invites.subscribe(),
+         :ok <- People.subscribe() do
       rows = Remote.rows(user)
       invites = Invites.to(user)
       state = expiry(%{state | user: user, sent: rows, invites: invites}, claims["exp"])
@@ -74,7 +79,7 @@ defmodule Troupe.Plane.Remote.Watch do
         "server_info" => %{"name" => "troupe-plane", "watch" => "remote"},
         "principal" => %{"subject" => user.subject, "display_name" => user.display_name},
         "scopes" => [],
-        "capabilities" => %{"remote_changed" => true, "invites_changed" => true},
+        "capabilities" => %{"remote_changed" => true, "invites_changed" => true, "artifacts_changed" => true},
         "auth" => %{"expires_at" => claims["exp"]},
         "sessions" => rows,
         "invites" => invites
@@ -124,6 +129,10 @@ defmodule Troupe.Plane.Remote.Watch do
       when changed in [:remote_changed, :invites_changed] do
     if subject in subjects, do: tell(Identity.get_user(subject), state), else: {:ok, state}
   end
+
+  # An artifact shared with the person by name: told once, as it happened.
+  def handle_info({:artifact_shared, subject, shared}, %{user: %User{subject: subject}} = state),
+    do: {:push, frame({:notification, "artifacts.changed", %{"shared" => shared}}), state}
 
   def handle_info(:auth_expiring, state) do
     {:push, frame({:notification, "auth.expiring", %{"expires_at" => state.expires_at}}), state}

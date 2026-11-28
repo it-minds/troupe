@@ -1,9 +1,9 @@
 defmodule Troupe.Plane.ArtifactTeamsTest do
   @moduledoc """
-  An artifact may be a team's (#62): `visibility: team:<name>`. Its publisher is in the team
+  An artifact read by teams (#62, #1238): `teams: [<name>]`. Its publisher is in each team
   (a platform administrator publishes to any); its members list, get and open it; a team
   administrator of that team or a platform administrator takes it down; nobody else sees it;
-  its bytes count against that team's quota. Every row of `artifact.list` says which scope
+  its bytes count against the quota of the team that owns it. Every row of `artifact.list` says which scope
   it is in, and `admin.artifacts.list` is the administrators' table of them. Through
   `Harness`, as `/rpc` reaches them, and the admin API as the console's Operate area calls it.
   """
@@ -67,37 +67,44 @@ defmodule Troupe.Plane.ArtifactTeamsTest do
 
   describe "publishing to a team" do
     test "is a member's, or a platform administrator's to any team", context do
-      assert {:ok, artifact} = publish(context.ada, %{"visibility" => "team:engineering"})
-      assert artifact["visibility"] == "team:engineering"
+      assert {:ok, artifact} = publish(context.ada, %{"teams" => ["engineering"]})
+      assert artifact["visibility"] == "private"
+      assert artifact["teams"] == ["engineering"]
+      assert artifact["organisation"] == false
       assert artifact["team"] == "engineering"
       assert artifact["scope"] == "mine"
+      # Who reads it does not make it the team's.
+      assert artifact["owner_team"] == nil
 
-      assert {:ok, %{"team" => "research"}} =
-               publish(context.root, %{"visibility" => "team:research"})
+      assert {:ok, %{"teams" => ["research"]}} = publish(context.root, %{"teams" => ["research"]})
     end
 
-    test "a team the publisher is not in is refused with a sentence naming theirs", context do
+    test "a team the publisher may not give it to is refused with a sentence naming theirs", context do
       assert {:error, %{message: "forbidden", data: %{reason: reason}}} =
-               publish(context.ada, %{"visibility" => "team:research"})
+               publish(context.ada, %{"teams" => ["research"]})
 
-      assert reason =~ "not in team research"
+      assert reason =~ "may not give it to team research"
       assert reason =~ "engineering"
 
-      # A team that is not there is told as one they are not in: whether it exists is not
-      # theirs to learn.
-      assert {:error, %{message: "forbidden"}} =
-               publish(context.ada, %{"visibility" => "team:nowhere"})
-
-      assert {:error, %{message: "not_found"}} =
-               publish(context.root, %{"visibility" => "team:nowhere"})
+      # A team that is not there is told as one they may not give it to: whether it exists is
+      # not theirs to learn.
+      assert {:error, %{message: "forbidden"}} = publish(context.ada, %{"teams" => ["nowhere"]})
+      assert {:error, %{message: "not_found"}} = publish(context.root, %{"teams" => ["nowhere"]})
 
       assert {:error, %{message: "invalid_params"}} =
-               publish(context.ada, %{"visibility" => "team:Not A Team"})
+               publish(context.ada, %{"teams" => ["Not A Team"]})
+
+      # The audience of before, one team in the visibility, is refused naming the new way.
+      assert {:error, %{message: "invalid_params", data: %{reason: old}}} =
+               publish(context.ada, %{"visibility" => "team:engineering"})
+
+      assert old =~ "artifact.access.set"
 
       assert {:ok, %{"artifacts" => []}} = call(context.ada, "artifact.list", %{})
     end
 
-    test "counts against that team's quota, whatever team the publisher is in first", context do
+    test "counts against the quota of the team that owns it, whatever team the publisher is in first",
+         context do
       both = person("fay@example.test", ["engineering", "research"])
 
       {:ok, _} =
@@ -105,69 +112,88 @@ defmodule Troupe.Plane.ArtifactTeamsTest do
           "artifact_quota_bytes" => 15
         })
 
-      assert {:ok, %{"team" => "research"}} = publish(both, %{"visibility" => "team:research"})
+      assert {:ok, %{"team" => "research", "owner_team" => "research"}} =
+               publish(both, %{"teams" => ["research"], "owner" => "team"})
+
       assert Artifacts.usage(context.research) == 11
       assert Artifacts.usage(context.engineering) == 0
 
       assert {:error, %{message: "payload_too_large", data: %{quota: 15}}} =
-               publish(both, %{"visibility" => "team:research"})
+               publish(both, %{"teams" => ["research"], "owner" => "team"})
 
-      # Engineering's quota is not research's.
-      assert {:ok, %{"team" => "engineering"}} =
-               publish(both, %{"visibility" => "team:engineering"})
+      # Engineering's quota is not research's, and a team that only reads it counts nothing.
+      assert {:ok, %{"team" => "engineering"}} = publish(both, %{"teams" => ["research"]})
+      assert Artifacts.usage(context.research) == 11
+
+      # `team` is whose it is only where one team reads it.
+      assert {:error, %{message: "invalid_params"}} =
+               publish(both, %{"teams" => ["research", "engineering"], "owner" => "team"})
     end
 
-    test "moving one to a team takes its bytes to that team", context do
+    test "a version keeps who reads it: one naming teams is refused, and a change of readers moves no bytes",
+         context do
       both = person("fay@example.test", ["engineering", "research"])
       {:ok, artifact} = publish(both, %{"visibility" => "organisation"})
 
-      # An organisation's counts against the first of its publisher's teams by name; moved to
-      # the other, every byte of it goes there.
+      # An organisation's counts against the first of its publisher's teams by name.
       assert artifact["team"] == "engineering"
-      {from, to} = {context.engineering, context.research}
 
-      assert {:ok, moved} =
-               publish(both, %{"id" => artifact["id"], "visibility" => "team:#{to.name}"})
+      assert {:error, %{message: "invalid_params", data: %{reason: reason}}} =
+               publish(both, %{"id" => artifact["id"], "teams" => ["research"]})
 
-      assert moved["team"] == to.name
-      assert Artifacts.usage(to) == 22
-      assert Artifacts.usage(from) == 0
+      assert reason =~ "artifact.access.set"
+
+      assert {:ok, %{"teams" => [%{"name" => "research"}]}} =
+               call(both, "artifact.access.set", %{"id" => artifact["id"], "teams" => ["research"]})
+
+      assert {:ok, %{"team" => "engineering", "version" => 1}} =
+               call(both, "artifact.get", %{"id" => artifact["id"]})
+
+      assert Artifacts.usage(context.engineering) == 11
+      assert Artifacts.usage(context.research) == 0
     end
 
-    test "its owner moves it with a put that sends no files, as a version carrying them all",
+    test "its owner moves it between private and organisation with a put that sends no files, as a version carrying them all",
          context do
       {:ok, artifact} = publish(context.ada, %{"visibility" => "organisation"})
       id = artifact["id"]
 
       assert {:ok, moved} =
-               call(context.ada, "artifact.put", %{"id" => id, "base" => 1, "visibility" => "team:engineering"})
+               call(context.ada, "artifact.put", %{"id" => id, "base" => 1, "visibility" => "private"})
 
-      assert moved["visibility"] == "team:engineering"
+      assert moved["visibility"] == "private"
       assert moved["version"] == 2
 
       assert {:ok, %{"versions" => [second, first]}} = call(context.ada, "artifact.get", %{"id" => id})
       assert Enum.map(second["files"], & &1["sha256"]) == Enum.map(first["files"], & &1["sha256"])
 
+      # The single audience of before is refused, naming where the teams went.
+      assert {:error, %{message: "invalid_params", data: %{reason: reason}}} =
+               call(context.ada, "artifact.put", %{"id" => id, "base" => 2, "visibility" => "team:engineering"})
+
+      assert reason =~ "artifact.access.set"
+
       # Without a base there is nothing to carry, and a put with no files is refused as before;
       # and an edit made on a version since replaced is a conflict, as any put's is.
       assert {:error, %{message: "invalid_params"}} =
-               call(context.ada, "artifact.put", %{"id" => id, "visibility" => "private"})
+               call(context.ada, "artifact.put", %{"id" => id, "visibility" => "organisation"})
 
       assert {:error, %{message: "conflict"}} =
-               call(context.ada, "artifact.put", %{"id" => id, "base" => 1, "visibility" => "private"})
+               call(context.ada, "artifact.put", %{"id" => id, "base" => 1, "visibility" => "organisation"})
 
       # Only its owner moves it.
       assert {:error, %{message: message}} =
-               call(context.bo, "artifact.put", %{"id" => id, "base" => 2, "visibility" => "private"})
+               call(context.bo, "artifact.put", %{"id" => id, "base" => 2, "visibility" => "organisation"})
 
       assert message in ["forbidden", "not_found"]
     end
   end
 
+
   describe "who sees a team's" do
     test "its members list, get and open it; nobody else", context do
       # Ada's own, for the team: published as hers, not the team's.
-      {:ok, artifact} = publish(context.ada, %{"visibility" => "team:engineering", "owner" => "me"})
+      {:ok, artifact} = publish(context.ada, %{"teams" => ["engineering"], "owner" => "me"})
       id = artifact["id"]
 
       assert {:ok,
@@ -200,11 +226,11 @@ defmodule Troupe.Plane.ArtifactTeamsTest do
     end
 
     test "every row says its scope, and teams narrows to the teams' own", context do
-      {:ok, team} = publish(context.ada, %{"title" => "Team", "visibility" => "team:engineering", "owner" => "me"})
+      {:ok, team} = publish(context.ada, %{"title" => "Team", "teams" => ["engineering"], "owner" => "me"})
       {:ok, org} = publish(context.ada, %{"title" => "Org", "visibility" => "organisation"})
-      {:ok, dev} = publish(context.ada, %{"title" => "Dev", "visibility" => "profile:dev"})
-      {:ok, own} = publish(context.bo, %{"title" => "Bo's", "visibility" => "team:engineering"})
-      {:ok, lab} = publish(context.cy, %{"title" => "Lab", "visibility" => "team:research"})
+      {:ok, dev} = publish(context.ada, %{"title" => "Dev", "visibility" => "organisation", "teams" => ["engineering"]})
+      {:ok, own} = publish(context.bo, %{"title" => "Bo's", "teams" => ["engineering"]})
+      {:ok, lab} = publish(context.cy, %{"title" => "Lab", "teams" => ["research"]})
 
       {:ok, %{"token" => token}} =
         call(context.cy, "artifact.share", %{"id" => lab["id"], "role" => "view"})
@@ -217,7 +243,7 @@ defmodule Troupe.Plane.ArtifactTeamsTest do
       assert scopes == %{
                team["id"] => "team:engineering",
                org["id"] => "organisation",
-               dev["id"] => "profile:dev",
+               dev["id"] => "team:engineering",
                own["id"] => "mine",
                lab["id"] => "shared"
              }
@@ -225,23 +251,23 @@ defmodule Troupe.Plane.ArtifactTeamsTest do
       assert {:ok, %{"artifacts" => teams}} =
                call(context.bo, "artifact.list", %{"teams" => true})
 
-      assert Enum.sort(Enum.map(teams, & &1["title"])) == ["Bo's", "Team"]
+      assert Enum.sort(Enum.map(teams, & &1["title"])) == ["Bo's", "Dev", "Team"]
 
       assert {:ok, %{"artifacts" => [%{"title" => "Lab"}]}} =
-               call(context.cy, "artifact.list", %{"visibility" => "team:research"})
+               call(context.cy, "artifact.list", %{"team" => "research"})
 
       # A platform administrator sees every team's, each in its team's scope.
       {:ok, %{"artifacts" => all}} = call(context.root, "artifact.list", %{"teams" => true})
 
       assert all |> Enum.map(& &1["scope"]) |> Enum.sort() ==
-               ["team:engineering", "team:engineering", "team:research"]
+               ["organisation", "team:engineering", "team:engineering", "team:research"]
     end
   end
 
   describe "taking a team's down" do
     test "is its owner's, the team's administrator's or a platform administrator's", context do
-      {:ok, first} = publish(context.ada, %{"visibility" => "team:engineering", "owner" => "me"})
-      {:ok, second} = publish(context.ada, %{"visibility" => "team:engineering", "owner" => "me"})
+      {:ok, first} = publish(context.ada, %{"teams" => ["engineering"], "owner" => "me"})
+      {:ok, second} = publish(context.ada, %{"teams" => ["engineering"], "owner" => "me"})
 
       # A member who is not its owner may not, since Ada kept it hers; another team's
       # administrator does not see it.
@@ -268,7 +294,7 @@ defmodule Troupe.Plane.ArtifactTeamsTest do
     end
 
     test "a team's administrator takes down no other kind of artifact", context do
-      {:ok, dev} = publish(context.ada, %{"visibility" => "profile:dev"})
+      {:ok, dev} = publish(context.ada, %{"visibility" => "private"})
       {:ok, org} = publish(context.ada, %{"visibility" => "organisation"})
 
       assert {:error, %{message: "not_found"}} =
@@ -351,9 +377,9 @@ defmodule Troupe.Plane.ArtifactTeamsTest do
   describe "admin.artifacts.list" do
     test "is every artifact for a platform administrator, and a team's for its administrator",
          context do
-      {:ok, team} = publish(context.ada, %{"title" => "Eng", "visibility" => "team:engineering"})
-      {:ok, _dev} = publish(context.ada, %{"title" => "Dev", "visibility" => "profile:dev"})
-      {:ok, _lab} = publish(context.cy, %{"title" => "Lab", "visibility" => "team:research"})
+      {:ok, team} = publish(context.ada, %{"title" => "Eng", "teams" => ["engineering"]})
+      {:ok, _dev} = publish(context.ada, %{"title" => "Dev", "visibility" => "private"})
+      {:ok, _lab} = publish(context.cy, %{"title" => "Lab", "teams" => ["research"]})
 
       assert {:ok, rows} = API.call("admin.artifacts.list", %{}, Admin.actor_for(context.root))
       assert rows |> Enum.map(& &1["title"]) |> Enum.sort() == ["Dev", "Eng", "Lab"]
@@ -361,7 +387,7 @@ defmodule Troupe.Plane.ArtifactTeamsTest do
 
       eng = Enum.find(rows, &(&1["title"] == "Eng"))
       assert eng["team"] == "engineering"
-      assert eng["visibility"] == "team:engineering"
+      assert {eng["visibility"], eng["teams"]} == {"private", ["engineering"]}
       assert eng["owner"]["subject"] == "ada@example.test"
 
       assert {:ok, [%{"title" => "Eng"}]} =
@@ -416,7 +442,7 @@ defmodule Troupe.Plane.ArtifactTeamsTest do
     end
 
     test "is a team administrator's for their teams' alone, and nobody else's", context do
-      {:ok, eng} = publish(context.ada, %{"title" => "Eng", "visibility" => "team:engineering"})
+      {:ok, eng} = publish(context.ada, %{"title" => "Eng", "teams" => ["engineering"]})
       {:ok, mine} = publish(context.ada, %{"title" => "Hers", "visibility" => "private"})
 
       assert {:ok, %{"title" => "Eng", "may_open" => true}} =

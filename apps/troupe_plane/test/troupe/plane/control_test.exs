@@ -375,7 +375,7 @@ defmodule Troupe.Plane.ControlTest do
       page = %{
         "title" => "Pod report",
         "kind" => "html",
-        "visibility" => "profile:dev",
+        "teams" => ["engineering"],
         "files" => [%{"path" => "index.html", "bytes" => Base.encode64("<h1>From a pod</h1>")}]
       }
 
@@ -398,7 +398,7 @@ defmodule Troupe.Plane.ControlTest do
                call(mine, "session.artifact.publish", Map.merge(page, %{"session_id" => "s-ada-a", "epoch" => 9}))
 
       assert {:error, %{"message" => "forbidden"}} =
-               call(mine, "session.artifact.publish", Map.merge(page, %{"session_id" => "s-ada-a", "visibility" => "profile:lab"}))
+               call(mine, "session.artifact.publish", Map.merge(page, %{"session_id" => "s-ada-a", "teams" => ["research"]}))
     end
 
     # Issue #920: a person attaching one of their artifacts to a message in a pod's session.

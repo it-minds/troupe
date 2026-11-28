@@ -153,6 +153,8 @@ defmodule Troupe.Plane.Harness do
     "profiles.list" => :observe,
     # What one profile gives a session of the caller's, before they start one.
     "profile.get" => :observe,
+    # The names of the teams granted one profile, for an artifact's sharing menu.
+    "profile.teams" => :observe,
     "sessions.list" => :observe,
     "session.get" => :observe,
     "session.open" => :observe,
@@ -236,6 +238,9 @@ defmodule Troupe.Plane.Harness do
     "artifact.upload.begin" => :control,
     "artifact.share" => :control,
     "artifact.unshare" => :control,
+    # Who reads one, whole, and its owner's change of it.
+    "artifact.access.get" => :observe,
+    "artifact.access.set" => :control,
     "artifact.public" => :control,
     # One kept at the top of the caller's own gallery, or let go: theirs alone.
     "artifact.keep" => :control,
@@ -627,7 +632,7 @@ defmodule Troupe.Plane.Harness do
   # came from as provenance; a pod's agent publishes over its control link instead, where
   # the plane reads the session off its own row.
   defp handle("artifact.list", params, %{user: user} = context) do
-    Artifacts.list(user, Map.take(params, ["mine", "shared", "teams", "visibility"]),
+    Artifacts.list(user, Map.take(params, ["mine", "shared", "teams", "team", "visibility"]),
       platform_admin?: admin?(context)
     )
   end
@@ -658,6 +663,17 @@ defmodule Troupe.Plane.Harness do
 
   defp handle("artifact.unshare", %{"id" => id} = params, %{user: user} = context),
     do: Artifacts.unshare(id, user, params, platform_admin?: admin?(context))
+
+  # Who reads it, whole, for its owner; and its owner's change of that, each part named
+  # applied as the difference from what is there.
+  defp handle("artifact.access.get", %{"id" => id}, %{user: user} = context) when is_binary(id),
+    do: Artifacts.access(id, user, platform_admin?: admin?(context))
+
+  defp handle("artifact.access.set", %{"id" => id} = params, %{user: user} = context) when is_binary(id),
+    do:
+      Artifacts.set_access(id, user, Map.take(params, ["teams", "people", "organisation"]),
+        platform_admin?: admin?(context)
+      )
 
   defp handle("artifact.public", %{"id" => id, "enabled" => enabled}, %{user: user} = context)
        when is_boolean(enabled),
@@ -721,7 +737,8 @@ defmodule Troupe.Plane.Harness do
        when method in ~w(artifact.get artifact.open artifact.delete artifact.rollback artifact.pin
                          artifact.read artifact.preview artifact.share artifact.unshare
                          artifact.transfer artifact.comments artifact.comment
-                         artifact.comment.delete artifact.comment.edit),
+                         artifact.comment.delete artifact.comment.edit artifact.access.get
+                         artifact.access.set),
        do: {:error, Error.new(:invalid_params, %{reason: "#{method} takes an artifact's id"})}
 
   # Which version each of the caller's own clients last ran, and how that stands against
@@ -1382,11 +1399,22 @@ defmodule Troupe.Plane.Harness do
 
   # A picker's prefix search: people who share a team with the caller, and, for a session
   # they may invite into, the people its profile covers. Nobody else.
-  defp handle("people.search", params, %{user: user}) do
+  defp handle("people.search", params, %{user: user} = context) do
     with {:ok, query} <- required_string(params, "query"),
-         {:ok, session} <- searched_session(params["session_id"], user) do
+         {:ok, within} <- searched_within(params, user, context) do
       limit = if is_integer(params["limit"]), do: params["limit"], else: nil
-      {:ok, %{"people" => Invites.search(user, query, session, limit)}}
+      {:ok, %{"people" => Invites.search(user, query, within, limit)}}
+    end
+  end
+
+  # The names of the teams granted `profile`: for a person who may run it, or who owns an
+  # artifact a session on it published, whose sharing menu offers those teams. Anybody
+  # else is told there is no such profile, as for one that is not there.
+  defp handle("profile.teams", params, %{user: user}) do
+    with {:ok, profile} <- required_string(params, "profile") do
+      if profile in granted_profiles(user) or Artifacts.owns_from?(user, profile),
+        do: {:ok, %{"profile" => profile, "teams" => Artifacts.profile_teams(profile)}},
+        else: {:error, Error.new(:not_found, %{profile: profile})}
     end
   end
 
@@ -2800,7 +2828,18 @@ defmodule Troupe.Plane.Harness do
     end
   end
 
-  # A search names a session only where the caller may invite into it.
+  # A search names a session only where the caller may invite into it, and an artifact only
+  # where they own it: then the people its session's profile covers are found too.
+  defp searched_within(%{"artifact" => id}, user, context) when is_binary(id) do
+    case Artifacts.profile_of(id, user, platform_admin?: admin?(context)) do
+      {:ok, nil} -> {:ok, nil}
+      {:ok, profile} -> {:ok, {:profile, profile}}
+      {:error, _} = error -> error
+    end
+  end
+
+  defp searched_within(params, user, _context), do: searched_session(params["session_id"], user)
+
   defp searched_session(nil, _user), do: {:ok, nil}
   defp searched_session(session_id, user), do: inviting(session_id, user)
 

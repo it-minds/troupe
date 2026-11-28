@@ -788,7 +788,7 @@ defmodule Troupe.Plane.Admin.API do
       name: "admin.artifacts.list",
       function: :artifacts_list,
       summary:
-        "Published artifacts, newest first: every one for a platform admin, private ones included, and for a team admin the artifacts for the teams they administer (visibility team:<name>) and those the teams own (owner_team). Each its title, kind, visibility, owner, owner_team, team, version, bytes and when the retention pass removes it (goes_at), never its content; none while artifacts are off.",
+        "Published artifacts, newest first: every one for a platform admin, private ones included, and for a team admin the artifacts the teams they administer read (teams) and those the teams own (owner_team). Each its title, kind, visibility, teams, owner, owner_team, team, version, bytes and when the retention pass removes it (goes_at), never its content; none while artifacts are off.",
       risk: :read
     },
     %Method{

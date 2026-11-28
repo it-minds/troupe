@@ -39,7 +39,7 @@ defmodule Troupe.Plane.ArtifactRetentionTest do
       call(ada, "artifact.publish", %{
         "title" => "Notes",
         "kind" => "markdown",
-        "visibility" => "profile:dev",
+        "teams" => ["engineering"],
         "files" => [file("index.md", "# One"), file("figure.svg", "<svg/>")]
       })
 
@@ -135,7 +135,7 @@ defmodule Troupe.Plane.ArtifactRetentionTest do
         call(context.ada, "artifact.publish", %{
           "title" => "Read often",
           "kind" => "markdown",
-          "visibility" => "profile:dev",
+          "teams" => ["engineering"],
           "files" => [file("index.md", "# Kept")]
         })
 

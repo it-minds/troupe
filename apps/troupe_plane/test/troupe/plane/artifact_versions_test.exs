@@ -37,7 +37,7 @@ defmodule Troupe.Plane.ArtifactVersionsTest do
       call(ada, "artifact.publish", %{
         "title" => "Notes",
         "kind" => "markdown",
-        "visibility" => "profile:dev",
+        "teams" => ["engineering"],
         "files" => [file("index.md", "# One"), file("figure.svg", "<svg/>", "image/svg+xml")]
       })
 
@@ -80,7 +80,7 @@ defmodule Troupe.Plane.ArtifactVersionsTest do
       assert two["url"] == context.doc["url"]
       assert two["version"] == 2
       assert two["current"] == 2
-      assert two["visibility"] == "profile:dev"
+      assert {two["visibility"], two["teams"]} == {"private", ["engineering"]}
       assert two["title"] == "Notes"
 
       assert [%{"n" => 2, "note" => "the second draft"} = v2, %{"n" => 1}] = two["versions"]
@@ -182,7 +182,6 @@ defmodule Troupe.Plane.ArtifactVersionsTest do
                  "id" => id,
                  "title" => "Notes",
                  "kind" => "markdown",
-                 "visibility" => "profile:dev",
                  "files" => [file("index.md", "# By Cy")]
                })
 
@@ -375,7 +374,7 @@ defmodule Troupe.Plane.ArtifactVersionsTest do
                call(context.bo, "artifact.publish", %{
                  "title" => "Big",
                  "kind" => "html",
-                 "visibility" => "profile:dev",
+                 "teams" => ["engineering"],
                  "upload" => handle
                })
 
@@ -383,7 +382,7 @@ defmodule Troupe.Plane.ArtifactVersionsTest do
                call(context.ada, "artifact.publish", %{
                  "title" => "Big",
                  "kind" => "html",
-                 "visibility" => "profile:dev",
+                 "teams" => ["engineering"],
                  "upload" => handle
                })
 
@@ -399,7 +398,7 @@ defmodule Troupe.Plane.ArtifactVersionsTest do
                call(context.ada, "artifact.publish", %{
                  "title" => "Big",
                  "kind" => "html",
-                 "visibility" => "profile:dev",
+                 "teams" => ["engineering"],
                  "upload" => handle
                })
     end

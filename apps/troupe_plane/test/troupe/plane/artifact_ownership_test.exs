@@ -1,7 +1,7 @@
 defmodule Troupe.Plane.ArtifactOwnershipTest do
   @moduledoc """
-  An artifact may be a team's, whose members own it (#62). One published to a team is the
-  team's unless its publisher says `owner: "me"`; every member and administrator of the
+  An artifact may be a team's, whose members own it (#62). A new one is a team's where its
+  publisher says `owner: "team"` or `"team:<name>"`, whoever reads it; every member and administrator of the
   owning team publishes versions, pins, moves, shares and deletes it as an owner, whatever
   its visibility; nobody else sees a private one; `artifact.transfer` gives a person's own
   to a team they are in (a platform administrator any to any), and an administrator of the
@@ -74,20 +74,24 @@ defmodule Troupe.Plane.ArtifactOwnershipTest do
   defp audited(action), do: Enum.filter(Audit.list(), &(&1.action == action))
 
   describe "publishing" do
-    test "to a team makes the artifact the team's, unless the publisher says owner: me",
+    test "makes the artifact a team's only where the publisher says so: who reads it is not whose it is",
          context do
-      assert {:ok, artifact} = publish(context.ada, %{"visibility" => "team:engineering"})
+      assert {:ok, artifact} =
+               publish(context.ada, %{"teams" => ["engineering"], "owner" => "team"})
+
       assert artifact["owner_team"] == "engineering"
       assert artifact["owner"]["subject"] == "ada@example.test"
       assert artifact["role"] == "owner"
       assert artifact["mine"]
       assert artifact["scope"] == "mine"
 
-      assert {:ok, own} =
-               publish(context.ada, %{"visibility" => "team:engineering", "owner" => "me"})
-
+      # Given to the team and said nothing of whose it is: its publisher's own.
+      assert {:ok, own} = publish(context.ada, %{"teams" => ["engineering"]})
       assert own["owner_team"] == nil
       assert own["owner"]["subject"] == "ada@example.test"
+
+      assert {:ok, %{"owner_team" => nil}} =
+               publish(context.ada, %{"teams" => ["engineering"], "owner" => "me"})
 
       # One published to nobody in particular is its publisher's own.
       assert {:ok, %{"owner_team" => nil}} = publish(context.ada, %{})
@@ -97,27 +101,27 @@ defmodule Troupe.Plane.ArtifactOwnershipTest do
       assert first.actor == "ada@example.test"
     end
 
-    test "owner: team names the team it is for, and owner: team:<name> one the publisher is in",
+    test "owner: team names the one team that reads it, and owner: team:<name> one the publisher is in",
          context do
       assert {:ok, %{"owner_team" => "engineering"}} =
-               publish(context.ada, %{"visibility" => "team:engineering", "owner" => "team"})
+               publish(context.ada, %{"teams" => ["engineering"], "owner" => "team"})
 
       assert {:error, %{message: "invalid_params", data: %{reason: reason}}} =
                publish(context.ada, %{"visibility" => "private", "owner" => "team"})
 
-      assert reason =~ "owner is \"team\" only for an artifact published to a team"
+      assert reason =~ "owner is \"team\" only for an artifact one team reads"
 
       # A private artifact that a team owns: its members open it, nobody else.
       assert {:ok,
               %{"owner_team" => "engineering", "visibility" => "private", "scope" => "private"}} =
                publish(context.ada, %{"owner" => "team:engineering"})
 
-      # A team the publisher is not in is refused in the words a publish to it is refused.
+      # A team the publisher is not in is refused, naming the teams they are in.
       assert {:error, %{message: "forbidden", data: %{reason: reason}}} =
                publish(context.ada, %{"owner" => "team:research"})
 
       assert reason ==
-               "you are not in team research, so you cannot publish to its people; you are in team:engineering"
+               "you are not in team research, so you cannot give it an artifact; you are in team:engineering"
 
       assert {:error, %{message: "forbidden"}} =
                publish(context.ada, %{"owner" => "team:nowhere"})
@@ -137,8 +141,9 @@ defmodule Troupe.Plane.ArtifactOwnershipTest do
                publish(context.ada, %{"owner" => "team:Not A Team"})
     end
 
+
     test "a new version does not move whose it is", context do
-      {:ok, artifact} = publish(context.ada, %{"visibility" => "team:engineering"})
+      {:ok, artifact} = publish(context.ada, %{"teams" => ["engineering"], "owner" => "team"})
 
       assert {:error, %{message: "invalid_params", data: %{reason: reason}}} =
                publish(context.ada, %{"id" => artifact["id"], "owner" => "me"})
@@ -160,7 +165,7 @@ defmodule Troupe.Plane.ArtifactOwnershipTest do
 
   describe "a team's artifact" do
     test "is every member's to publish, pin, move, share and delete, as an owner", context do
-      {:ok, artifact} = publish(context.ada, %{"visibility" => "team:engineering"})
+      {:ok, artifact} = publish(context.ada, %{"teams" => ["engineering"], "owner" => "team"})
       id = artifact["id"]
 
       assert {:ok, row} = call(context.bo, "artifact.get", %{"id" => id})
@@ -276,7 +281,7 @@ defmodule Troupe.Plane.ArtifactOwnershipTest do
       {:ok, own} =
         publish(context.ada, %{
           "title" => "Own",
-          "visibility" => "team:engineering",
+          "teams" => ["engineering"],
           "owner" => "me"
         })
 
@@ -324,7 +329,7 @@ defmodule Troupe.Plane.ArtifactOwnershipTest do
       {:ok, _} =
         publish(context.ada, %{
           "title" => "Own",
-          "visibility" => "team:engineering",
+          "teams" => ["engineering"],
           "owner" => "me"
         })
 
@@ -406,7 +411,7 @@ defmodule Troupe.Plane.ArtifactOwnershipTest do
     end
 
     test "is taken back by an administrator of the owning team, not by a member", context do
-      {:ok, artifact} = publish(context.ada, %{"visibility" => "team:engineering"})
+      {:ok, artifact} = publish(context.ada, %{"teams" => ["engineering"], "owner" => "team"})
       id = artifact["id"]
 
       assert {:error, %{message: "forbidden", data: %{reason: reason}}} =

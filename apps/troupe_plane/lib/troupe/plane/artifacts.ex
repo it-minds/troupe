@@ -12,29 +12,34 @@ defmodule Troupe.Plane.Artifacts do
 
   **Whose it is.** The person who published it, or a team (`owner_team`): then every
   member and administrator of that team is its owner, with everything an owner does, and a
-  person leaving the team changes nothing for the artifact. One published to a team
-  (`team:<name>`) is that team's unless its publisher says `owner: "me"`; a person gives
-  their own to a team they are in with `transfer/4`, and an administrator of the owning
-  team, or a platform administrator, takes it back, which makes them its person. The person
-  who published it stays on the row, and a team that is deleted hands its artifacts back to
-  each one's person. Who published each version is the version's own record.
+  person leaving the team changes nothing for the artifact. A new one is its publisher's
+  unless they say `owner: "team"` (the one team it is read by) or `owner: "team:<name>"`;
+  who reads it does not decide whose it is. A person gives their own to a team they are in
+  with `transfer/4`, and an administrator of the owning team, or a platform administrator,
+  takes it back, which makes them its person. The person who published it stays on the
+  row, and a team that is deleted hands its artifacts back to each one's person. Who
+  published each version is the version's own record.
 
-  **Who sees it.** Its owners, and whoever a link of theirs gave it to; nobody else, for
-  `private`, the default; everybody, for `organisation`; a team's members, for
-  `team:<name>`; the people a profile's grants cover, for `profile:<name>`. A platform
-  administrator sees every one but another person's private ones, and a team's
-  administrator their team's, since taking one down is theirs. Anybody else is told there is
-  no such artifact, as for one that does not exist. Visibility is read again at every
-  request, the artifacts host's included, so a person who leaves a team stops seeing its
-  artifacts at their next request.
+  **Who reads it.** A set, kept across its versions: its owners; the teams it is given to
+  (`Teams`), whose members open it; the people it is shared with by name (`People`); every
+  signed-in person, while `visibility` is `organisation`; and whoever a link of an owner's
+  gave it to (`Shares`). `private`, the default, is that set without the organisation. A
+  platform administrator sees every one but a person's own that no team or organisation
+  reads, and a team's administrator those their teams read, since taking one down is
+  theirs. Anybody else is told there is no such artifact, as for one that does not exist.
+  The set is read again at every request, the artifacts host's included, so a person who
+  leaves a team stops seeing what it reads at their next request. An owner changes the set
+  with `set_access/4` and reads it whole with `access/3`; a new version changes nothing of it.
 
-  **Who publishes it.** Anybody signed in, privately, to a team they are in or a profile they
-  are covered by (a platform administrator to any team); for the organisation, anybody or
-  only platform administrators as `artifacts_publish_organisation` says. Only an owner
-  republishes or deletes one; a platform administrator takes any down, a private one too,
-  and a team's administrator their team's. A team's artifact counts against that team's
-  quota. Every publish, republish, transfer and delete is in the audit trail with who did it
-  and the session it came from; never the content.
+  **Who publishes it.** Anybody signed in, for themselves, giving it to the teams they are in
+  and the teams granted the profile its session ran on (a platform administrator to any
+  team); for the organisation, anybody or only platform administrators as
+  `artifacts_publish_organisation` says. Only an owner republishes or deletes one, or an
+  edit grant's holder republishes it; a platform administrator takes any down, a private one
+  too, and a team's administrator those their team reads or owns. Its bytes count against
+  the quota of the team that owns it, else the pod session's team, else its publisher's
+  first. Every publish, republish, change of readers, transfer and delete is in the audit
+  trail with who did it and the session it came from; never the content.
 
   **What it may hold.** A file is at most 16 MiB and a version 64 MiB, and a team's artifacts
   together at most its `artifact_quota_bytes`, every version counted (zero is no quota). What
@@ -58,13 +63,14 @@ defmodule Troupe.Plane.Artifacts do
 
   alias Troupe.ObjectStore
   alias Troupe.Plane.{Admin, Audit, Identity, Repo, Settings}
-  alias Troupe.Plane.Artifacts.{Artifact, Blocked, Comments, People, Previews, Retention, Shares, Uploads, Version}
+  alias Troupe.Plane.Artifacts.{Artifact, Blocked, Comments, People, Previews, Retention, Shares, Teams, Uploads, Version}
   alias Troupe.Plane.Artifacts.Keeps
   alias Troupe.Plane.Artifacts.Markdown
   alias Troupe.Plane.Identity.User
   alias Troupe.Plane.Sessions.Session
   alias Troupe.Protocol.Digest
   alias Troupe.Protocol.Error
+  alias Troupe.Protocol.Words
 
   @kinds ~w(html markdown file)
   @max_file_bytes 16 * 1024 * 1024
@@ -125,10 +131,12 @@ defmodule Troupe.Plane.Artifacts do
   # -- publishing -----------------------------------------------------------------
 
   @doc """
-  Publish `params` (`title`, `kind`, `visibility`, `owner`, `files`, and `id` to republish)
-  as `user`. `owner` is `me`, `team` (the team of a `team:<name>` visibility) or
-  `team:<name>`, a team the publisher is in; unsaid, one published to a team is the team's
-  and any other the publisher's own.
+  Publish `params` (`title`, `kind`, `visibility`, `teams`, `owner`, `files`, and `id` to
+  republish) as `user`. `visibility` is `private` (the default) or `organisation`; `teams`
+  the names of the teams that read it, each one the publisher is in or one granted the pod
+  session's profile. `owner` is `me` (the default), `team` (the one team in `teams`) or
+  `team:<name>`, a team the publisher is in. A republish keeps who reads it: `teams` there
+  is refused, as on `put/3`.
 
   `opts`: `:session`, the pod's session it came from, whose team its bytes count against
   and whose profile it records; `:agent`, the agent that called the tool; `:origin`, what a
@@ -151,27 +159,32 @@ defmodule Troupe.Plane.Artifacts do
   def publish(%User{} = user, params, opts) when is_map(params) do
     admin? = Keyword.get(opts, :platform_admin?, false)
 
+    profile = opts[:session] && opts[:session].profile
+
     with :ok <- on(),
          {:ok, title} <- title(params["title"]),
          {:ok, kind} <- kind(params["kind"]),
          {:ok, visibility} <- new_visibility(params["visibility"]),
          :ok <- may_publish(user, visibility, admin?),
-         {:ok, owner_team} <- owner_for(user, params["owner"], visibility, admin?),
+         {:ok, teams} <- team_names(params["teams"]),
+         {:ok, teams} <- may_give(user, teams, profile, admin?),
+         {:ok, owner_team} <- owner_for(user, params["owner"], teams, admin?),
          {:ok, note} <- note(params["note"]),
          {:ok, thumbnail} <- sent_thumbnail(params["thumbnail"]),
          {:ok, files} <- incoming(params, user),
          {:ok, _entry} <- entry(kind, files),
-         {:ok, team_id} <- team_for(user, visibility, opts[:session]) do
+         {:ok, team_id} <- team_for(user, owner_team, opts[:session]) do
       write(user, nil, %{
         title: title,
         kind: kind,
         visibility: visibility,
+        teams: teams,
         files: files,
         thumbnail: thumbnail,
         team_id: team_id,
         owner_team_id: owner_team && owner_team.id,
         origin: origin(opts),
-        profile: opts[:session] && opts[:session].profile,
+        profile: profile,
         note: note,
         admin?: admin?
       })
@@ -183,8 +196,10 @@ defmodule Troupe.Plane.Artifacts do
   A new version of artifact `params["id"]` at the same address: `files` (or `upload`, a
   handle from `begin_upload/2`), `note`, and `title`; with `base`, the version the files
   were edited on, whose files not sent are carried as they are, and which must still be the
-  newest. An owner's, or an `edit` link's holder's; `visibility` moves it, an owner's alone.
-  Whose it is does not move here: that is `transfer/4`, so a put naming `owner` is refused.
+  newest. An owner's, or an `edit` link's holder's. Whose it is and who reads it do not move
+  here: a put naming `owner` is refused (`transfer/4` moves it), and so is one naming
+  `teams` (`set_access/4`). `visibility`, an owner's alone, still moves it between
+  `private` and `organisation` as a version of its own, for the clients that move it so.
   """
   @spec put(User.t(), map(), keyword()) :: {:ok, map()} | {:error, Error.t()}
   def put(%User{} = user, params, opts \\ []) when is_map(params) do
@@ -192,6 +207,7 @@ defmodule Troupe.Plane.Artifacts do
 
     with :ok <- on(),
          :ok <- owner_kept(params["owner"]),
+         :ok <- readers_kept(params["teams"]),
          {:ok, artifact, role} <- editable(params["id"], user, admin?),
          {:ok, title} <- title(params["title"] || artifact.title),
          :ok <- same_kind(artifact, params["kind"]),
@@ -203,7 +219,7 @@ defmodule Troupe.Plane.Artifacts do
          {:ok, sent} <- incoming_over(base, params, user),
          files = carry(base, sent),
          {:ok, _entry} <- entry(artifact.kind, files),
-         {:ok, team_id} <- team_of(artifact, user, visibility, opts[:session]) do
+         {:ok, team_id} <- team_of(artifact, user, opts[:session]) do
       write(user, artifact, %{
         title: title,
         kind: artifact.kind,
@@ -240,7 +256,7 @@ defmodule Troupe.Plane.Artifacts do
     with :ok <- on(),
          {:ok, artifact, role} <- editable(id, user, admin?),
          %Version{} = old <- (is_integer(n) && version_of(artifact, n)) || nil,
-         {:ok, team_id} <- team_of(artifact, user, artifact.visibility, nil) do
+         {:ok, team_id} <- team_of(artifact, user, nil) do
       write(user, artifact, %{
         title: artifact.title,
         kind: artifact.kind,
@@ -375,24 +391,37 @@ defmodule Troupe.Plane.Artifacts do
   def visibility("organisation"), do: {:ok, "organisation"}
   def visibility("private"), do: {:ok, "private"}
 
-  def visibility("profile:" <> name = visibility) when name != "" do
-    if name =~ ~r/\A[a-z0-9]([a-z0-9-]*[a-z0-9])?\z/,
-      do: {:ok, visibility},
-      else: {:error, invalid("#{inspect(name)} is not a profile's name")}
-  end
-
-  def visibility("team:" <> name = visibility) when name != "" do
-    if name =~ ~r/\A[a-z0-9]([a-z0-9-]*[a-z0-9])?\z/,
-      do: {:ok, visibility},
-      else: {:error, invalid("#{inspect(name)} is not a team's name")}
-  end
+  # The single audiences an artifact had before its readers were a set: a client from then
+  # is told where the teams went rather than having its move taken for something else.
+  def visibility("team:" <> _name = other), do: {:error, invalid(set_now(other))}
+  def visibility("profile:" <> _name = other), do: {:error, invalid(set_now(other))}
 
   def visibility(other),
+    do: {:error, invalid("visibility is private or organisation, not #{inspect(other)}")}
+
+  defp set_now(other),
+    do:
+      "visibility is private or organisation, not #{inspect(other)}: the teams that read an artifact " <>
+        "are a set now, given with teams when it is published and changed with artifact.access.set"
+
+  # The teams a publish or an access change names, by name, each once.
+  defp team_names(nil), do: {:ok, []}
+
+  defp team_names(names) when is_list(names) do
+    if Enum.all?(names, &(is_binary(&1) and &1 =~ ~r/\A[a-z0-9]([a-z0-9-]*[a-z0-9])?\z/)),
+      do: {:ok, Enum.uniq(names)},
+      else: {:error, invalid("teams is a list of teams' names, not #{inspect(names)}")}
+  end
+
+  defp team_names(other), do: {:error, invalid("teams is a list of teams' names, not #{inspect(other)}")}
+
+  # Who reads an artifact does not change with a version: `set_access/4` changes it.
+  defp readers_kept(nil), do: :ok
+
+  defp readers_kept(_teams),
     do:
       {:error,
-       invalid(
-         "visibility is private, organisation, team:<name> or profile:<name>, not #{inspect(other)}"
-       )}
+       invalid("who reads an artifact does not change with a version; artifact.access.set changes its teams")}
 
   # Who a new artifact is for when its publisher says nothing: its owner alone.
   defp new_visibility(nil), do: visibility("private")
@@ -402,30 +431,33 @@ defmodule Troupe.Plane.Artifacts do
   defp kept_visibility(nil), do: {:ok, nil}
   defp kept_visibility(visibility), do: visibility(visibility)
 
-  # Whose a new artifact is: the team it is published to, unless its publisher says `me`;
-  # or a team they name and are in (a platform administrator any team there is). `team`
-  # with no team to be for is not a choice.
-  defp owner_for(_user, nil, "team:" <> name, _admin?), do: team_named(name)
-  defp owner_for(_user, nil, _visibility, _admin?), do: {:ok, nil}
-  defp owner_for(_user, "me", _visibility, _admin?), do: {:ok, nil}
-  defp owner_for(_user, "team", "team:" <> name, _admin?), do: team_named(name)
+  # Whose a new artifact is: its publisher's, unless they say `team`, the one team that
+  # reads it, or name a team they are in (a platform administrator any team there is). Who
+  # reads it does not make it a team's: a team given it may be one its publisher is not in.
+  defp owner_for(_user, nil, _teams, _admin?), do: {:ok, nil}
+  defp owner_for(_user, "me", _teams, _admin?), do: {:ok, nil}
+  defp owner_for(user, "team", [team], admin?), do: owner_for(user, "team:" <> team.name, [team], admin?)
 
-  defp owner_for(_user, "team", _visibility, _admin?),
+  defp owner_for(_user, "team", _teams, _admin?),
     do:
       {:error,
-       invalid(
-         ~s(owner is "team" only for an artifact published to a team \(visibility team:<name>\); say owner: "team:<name>" or "me")
-       )}
+       invalid(~s(owner is "team" only for an artifact one team reads; say owner: "team:<name>" or "me"))}
 
-  defp owner_for(user, "team:" <> name = owner, _visibility, admin?) do
-    with {:ok, _owner} <- visibility(owner),
-         :ok <- may_publish(user, owner, admin?) do
+  defp owner_for(user, "team:" <> name, _teams, admin?) do
+    with :ok <- team_word(name),
+         :ok <- in_team(user, name, admin?, "give it an artifact") do
       team_named(name)
     end
   end
 
-  defp owner_for(_user, other, _visibility, _admin?),
+  defp owner_for(_user, other, _teams, _admin?),
     do: {:error, invalid("owner is me, team or team:<name>, not #{inspect(other)}")}
+
+  defp team_word(name) do
+    if name =~ ~r/\A[a-z0-9]([a-z0-9-]*[a-z0-9])?\z/,
+      do: :ok,
+      else: {:error, invalid("#{inspect(name)} is not a team's name")}
+  end
 
   defp team_named(name) do
     case Identity.get_team(name) do
@@ -449,26 +481,58 @@ defmodule Troupe.Plane.Artifacts do
         {:error,
          Error.new(:forbidden, %{
            reason:
-             "only platform administrators publish to the whole organisation here; publish to a team (team:<name>) or a profile's people (profile:<name>) instead"
+             "only platform administrators publish to the whole organisation here; keep it private and give it to teams instead"
          })},
       else: covered(user)
   end
 
-  # A team's: one its publisher is in. A platform administrator publishes to any team there
-  # is; for anybody else, one that is not there is refused as one they are not in.
-  defp may_publish(user, "team:" <> name, admin?), do: in_team(user, name, admin?, "publish to its people")
-
-  # Its owner's alone, until they share it with a link.
+  # Its readers' alone: its owners and whoever they give it to.
   defp may_publish(user, "private", _admin?), do: covered(user)
 
-  defp may_publish(user, "profile:" <> name, _admin?) do
-    if name in profiles_of(user),
-      do: :ok,
-      else:
-        {:error,
-         Error.new(:forbidden, %{
-           reason: "you are not among profile #{name}'s people, so you cannot publish to them"
-         })}
+  @doc """
+  The names of the teams granted `profile`, sorted: those an artifact from a session on it
+  may be given to by its owner, in them or not, since their people could already run that
+  profile. None for no profile.
+  """
+  @spec profile_teams(String.t() | nil) :: [String.t()]
+  def profile_teams(profile) when is_binary(profile),
+    do: profile |> Identity.grants_for_profile() |> Enum.map(& &1.team.name) |> Enum.uniq() |> Enum.sort()
+
+  def profile_teams(_none), do: []
+
+  # The teams `names` are, each one `user` may give an artifact to: a team they are in, or
+  # one granted the profile its session ran on (`profile`); a platform administrator any
+  # team there is. A team that is not there is refused to anybody else as one they may not
+  # give it to: whether it exists is not theirs to learn.
+  defp may_give(_user, [], _profile, _admin?), do: {:ok, []}
+
+  defp may_give(user, names, profile, admin?) do
+    mine = teams_of(user)
+    granted = profile_teams(profile)
+
+    case Enum.reject(names, &(&1 in mine or &1 in granted)) do
+      refused when refused == [] or admin? ->
+        names |> Enum.map(&{&1, Identity.get_team(&1)}) |> found_teams()
+
+      refused ->
+        {:error, Error.new(:forbidden, %{teams: refused, reason: not_givable(refused, mine, granted, profile)})}
+    end
+  end
+
+  defp found_teams(pairs) do
+    case for({name, nil} <- pairs, do: name) do
+      [] -> {:ok, Enum.map(pairs, &elem(&1, 1))}
+      [name | _] -> {:error, Error.new(:not_found, %{team: name, reason: "there is no team #{name}"})}
+    end
+  end
+
+  defp not_givable(refused, mine, granted, profile) do
+    which = Words.and_list(Enum.map(refused, &"team #{&1}"))
+    may = Enum.uniq(mine ++ granted)
+
+    "you may not give it to #{which}: an artifact goes to teams you are in" <>
+      if(profile, do: " and teams granted profile #{profile}, which its session ran on", else: "") <>
+      if(may == [], do: ", and there are none", else: "; you may give it to #{Words.and_list(Enum.map(may, &"team #{&1}"))}")
   end
 
   # Whether `user` may do `what` with team `name`: in it, or a platform administrator for
@@ -508,17 +572,14 @@ defmodule Troupe.Plane.Artifacts do
   defp administered_teams(%User{kind: "service"}), do: []
   defp administered_teams(%User{} = user), do: Identity.teams_administered_by(user)
 
-  defp administered_by(user), do: user |> administered_teams() |> Enum.map(& &1.name)
-
   # Who `user` is to the teams, read once for a list: the names of those they are in and
-  # administer, which visibilities and takedowns go by, and the ids, which ownership goes
-  # by; and the profiles they are granted.
+  # administer, which the gallery's tabs go by, and the ids, which readers, takedowns and
+  # ownership go by.
   defp audience_of(user) do
     teams = Identity.teams_for(user)
     administered = administered_teams(user)
 
     %{
-      profiles: profiles_of(user),
       teams: Enum.map(teams, & &1.name),
       team_ids: Enum.map(teams, & &1.id),
       administered: Enum.map(administered, & &1.name),
@@ -551,14 +612,12 @@ defmodule Troupe.Plane.Artifacts do
   defp may_transfer?(%Artifact{owner_team_id: team_id}, _user, _admin?, audience),
     do: team_id in audience.administered_ids
 
-  # Whether `user` administers the team an artifact is for, from `administered` where a
-  # list read it once.
-  defp administers?(artifact, user, administered \\ nil)
-
-  defp administers?(%Artifact{visibility: "team:" <> name}, user, administered),
-    do: name in (administered || administered_by(user))
-
-  defp administers?(_artifact, _user, _administered), do: false
+  # Whether `user` administers a team that reads `artifact`, from `administered` (the ids)
+  # where a list read them once.
+  defp administers?(artifact, user, administered \\ nil) do
+    administered = administered || Enum.map(administered_teams(user), & &1.id)
+    administered != [] and Enum.any?(Teams.ids(artifact), &(&1 in administered))
+  end
 
   # A person, or a principal of a team: somebody the organisation's artifacts are for.
   defp covered(%User{kind: "service"}), do: :ok
@@ -773,30 +832,16 @@ defmodule Troupe.Plane.Artifacts do
   defp only(paths, extensions),
     do: Enum.filter(paths, &(String.downcase(Path.extname(&1)) in extensions))
 
-  # Which team's quota the bytes count against: the team it is for; else the pod session's
-  # team; else the team that grants the profile it is for; else the publisher's first team.
-  # Nobody in no team publishes.
-  defp team_for(_user, "team:" <> name, _session) do
-    case Identity.get_team(name) do
-      %Identity.Team{id: id} -> {:ok, id}
-      nil -> {:error, Error.new(:not_found, %{team: name, reason: "there is no team #{name}"})}
-    end
-  end
+  # Which team's quota the bytes count against: the team that owns it; else the pod
+  # session's team; else the publisher's first team. Who reads it is not whose bytes they
+  # are. Nobody in no team publishes.
+  defp team_for(_user, %Identity.Team{id: id}, _session), do: {:ok, id}
 
-  defp team_for(_user, _visibility, %Session{team_id: team_id}) when is_binary(team_id),
+  defp team_for(_user, _owner_team, %Session{team_id: team_id}) when is_binary(team_id),
     do: {:ok, team_id}
 
-  defp team_for(user, visibility, _session) do
-    granting =
-      case visibility do
-        "profile:" <> name ->
-          user |> Identity.profiles_for() |> Enum.find_value(&(&1.profile == name && &1.team.id))
-
-        _organisation ->
-          nil
-      end
-
-    case granting || first_team(user) do
+  defp team_for(user, _owner_team, _session) do
+    case first_team(user) do
       nil ->
         {:error,
          Error.new(:forbidden, %{
@@ -1027,15 +1072,12 @@ defmodule Troupe.Plane.Artifacts do
 
   defp incoming_over(_base, params, user), do: incoming(params, user)
 
-  # The team a new version counts against: the team it is for, where it is a team's, which
-  # takes every byte of it there; else the artifact's, while there is one.
-  defp team_of(_artifact, user, "team:" <> _ = visibility, session),
-    do: team_for(user, visibility, session)
-
-  defp team_of(%Artifact{team_id: team_id}, _user, _visibility, _session) when is_binary(team_id),
+  # The team a new version counts against: the artifact's, while there is one; else as a
+  # new one's would be.
+  defp team_of(%Artifact{team_id: team_id}, _user, _session) when is_binary(team_id),
     do: {:ok, team_id}
 
-  defp team_of(_artifact, user, visibility, session), do: team_for(user, visibility, session)
+  defp team_of(_artifact, user, session), do: team_for(user, nil, session)
 
   defp origin(opts) do
     case opts[:session] do
@@ -1074,6 +1116,8 @@ defmodule Troupe.Plane.Artifacts do
     Repo.transaction(fn ->
       artifact = lock(existing) || new_artifact(user, attrs, now)
       n = (existing && artifact.version + 1) || 1
+      # A new one's readers, given with it; a version's are the artifact's, kept as they are.
+      :ok = Teams.add(artifact.id, (existing == nil && attrs[:teams]) || [], user.subject)
 
       with :ok <- republishable(existing, attrs),
            :ok <- within_version(bytes),
@@ -1291,6 +1335,8 @@ defmodule Troupe.Plane.Artifacts do
         "visibility" => artifact.visibility,
         # The team it belongs to, where one does.
         "owner_team" => team_name(artifact.owner_team),
+        # The teams a new one was given to; a version's readers are not its to change.
+        "teams" => if(existing == nil and attrs[:teams] not in [nil, []], do: Enum.map(attrs.teams, & &1.name)),
         "bytes" => bytes,
         "hash" => hash,
         "note" => attrs[:note],
@@ -1340,10 +1386,13 @@ defmodule Troupe.Plane.Artifacts do
 
   # -- reading --------------------------------------------------------------------
 
+
   @doc """
   What `user` may see, newest published first, narrowed by `mine`, `shared` (the ones a link
-  gave them), `teams` (the teams' own) or `visibility`. Each row says its `scope`, the
-  gallery tab it is under.
+  or a grant by name gave them), `teams` (those a team of theirs reads), `team` (those one
+  team reads) or `visibility`. Each row says its `scope`, the gallery tab it is under, and
+  who reads it (`teams`, `organisation`). `teams` beside them is the caller's own;
+  `profiles` is always empty, kept for the clients that still read it.
   """
   @spec list(User.t(), map(), keyword()) :: {:ok, map()}
   def list(%User{} = user, params, opts \\ []) do
@@ -1362,7 +1411,7 @@ defmodule Troupe.Plane.Artifacts do
         |> narrow(params, user, audience, admin?)
         |> order_by([a], desc: a.id in ^kept, desc: a.updated_at)
         |> limit(500)
-        |> preload([:owner, :owner_team, :team])
+        |> preload([:owner, :owner_team, :team, team_grants: :team])
         |> Repo.all()
         |> Enum.sort_by(& &1.updated_at, {:desc, DateTime})
         |> with_roles(user, admin?, audience)
@@ -1374,7 +1423,7 @@ defmodule Troupe.Plane.Artifacts do
     {:ok,
      %{
        "enabled" => enabled?(),
-       "profiles" => audience.profiles,
+       "profiles" => [],
        "teams" => audience.teams,
        "publish_organisation" =>
          to_string(Settings.get("artifacts_publish_organisation") || :everyone),
@@ -1384,23 +1433,20 @@ defmodule Troupe.Plane.Artifacts do
      }}
   end
 
-  # A platform administrator sees every one but another person's private ones; anybody else
-  # their own (their person's, or their teams'), those a link gave them, and those for
-  # somebody they are: the organisation, a profile they are granted, a team they are in or
-  # administer.
+  # A platform administrator sees every one but a person's own that only they and whoever
+  # they named read; anybody else their own (their person's, or their teams'), those a link
+  # or a grant gave them, and those read by somebody they are: the organisation, or a team
+  # they are in or administer.
   defp visible_query(user, audience, true) do
     from(a in Artifact, where: a.visibility != "private")
+    |> or_where([a], a.id in subquery(Teams.any()))
     |> or_where([a], a.id in subquery(owned_query(user, audience)))
     |> or_where([a], a.id in subquery(Shares.shared_with(user)))
   end
 
   defp visible_query(user, audience, false) do
-    visibilities =
-      ["organisation"] ++
-        Enum.map(audience.profiles, &"profile:#{&1}") ++
-        Enum.map(Enum.uniq(audience.teams ++ audience.administered), &"team:#{&1}")
-
-    from(a in Artifact, where: a.visibility in ^visibilities)
+    from(a in Artifact, where: a.visibility == "organisation")
+    |> or_where([a], a.id in subquery(Teams.reading(audience.team_ids ++ audience.administered_ids)))
     |> or_where([a], a.id in subquery(owned_query(user, audience)))
     |> or_where([a], a.id in subquery(Shares.shared_with(user)))
   end
@@ -1415,22 +1461,23 @@ defmodule Troupe.Plane.Artifacts do
       else: query
   end
 
-  # The teams' own, by who they are for: every team's for a platform administrator, else
-  # those of the teams the caller is in or administers, and not one a link alone reached,
-  # which is shared.
+  # Those teams read: any team's for a platform administrator, else those a team the caller
+  # is in or administers reads, and not one a link alone reached, which is shared.
   defp narrow(query, %{"teams" => true}, _user, _audience, true),
-    do: where(query, [a], like(a.visibility, "team:%"))
+    do: where(query, [a], a.id in subquery(Teams.any()))
 
-  defp narrow(query, %{"teams" => true}, _user, audience, _admin?) do
-    teams = Enum.map(Enum.uniq(audience.teams ++ audience.administered), &"team:#{&1}")
-    where(query, [a], a.visibility in ^teams)
-  end
+  defp narrow(query, %{"teams" => true}, _user, audience, _admin?),
+    do: where(query, [a], a.id in subquery(Teams.reading(audience.team_ids ++ audience.administered_ids)))
+
+  # Those one team reads, by its name.
+  defp narrow(query, %{"team" => name}, _user, _audience, _admin?) when is_binary(name),
+    do: where(query, [a], a.id in subquery(Teams.read_by([name])))
 
   # Their own: their person's, and their teams'.
   defp narrow(query, %{"mine" => true}, user, audience, _admin?),
     do: where(query, [a], a.id in subquery(owned_query(user, audience)))
 
-  # What a link alone gave them: not one they own, however the link reached them.
+  # What a link or a grant alone gave them: not one they own, however it reached them.
   defp narrow(query, %{"shared" => true}, %User{id: id} = user, audience, _admin?) when is_binary(id) do
     shared = Shares.shared_with(user)
     owned = owned_query(user, audience)
@@ -1444,22 +1491,25 @@ defmodule Troupe.Plane.Artifacts do
 
   defp narrow(query, _params, _user, _audience, _admin?), do: query
 
-  @doc "One artifact with its versions, if `user` may see it."
+  @doc """
+  One artifact with its versions, if `user` may see it; for an owner, who reads it
+  (`access`, as `access/3` answers it), who holds a link to it, who it is shared with by
+  name, and whether a public link may be made.
+  """
   @spec get(String.t(), User.t(), keyword()) :: {:ok, map()} | {:error, Error.t()}
   def get(id, %User{} = user, opts \\ []) do
     admin? = Keyword.get(opts, :platform_admin?, false)
 
     with {:ok, artifact} <- visible(id, user, admin?) do
-      artifact = artifact |> Repo.preload([:owner, :owner_team, :team, :versions])
+      artifact = artifact |> Repo.preload([:owner, :owner_team, :team, :versions, team_grants: :team])
       # How long it and its old versions are kept, which its page says beside the dates.
       json = artifact |> to_json(user, admin?) |> Map.put("retention", retention())
 
-      # Who holds a link to it, and who it is shared with by name, is an owner's to read, and
-      # whether a public one may be made.
       if json["role"] == "owner",
         do:
           {:ok,
            Map.merge(json, %{
+             "access" => access_json(artifact),
              "shares" => Shares.list(artifact),
              "people" => People.list(artifact),
              "public_links_allowed" => Shares.public_links?()
@@ -1471,15 +1521,16 @@ defmodule Troupe.Plane.Artifacts do
   @doc """
   The artifact `id` if `user` may see it, read now. `not_found` for one they may not, as for
   one that is not there, and for every one while artifacts are off. A platform administrator
-  sees every one but another person's private ones, and a team's administrator their team's.
+  sees every one but a person's own that no team or the organisation reads, and a team's
+  administrator those their teams read.
   """
   @spec visible(term(), User.t(), boolean()) :: {:ok, Artifact.t()} | {:error, Error.t()}
   def visible(id, %User{} = user, admin?) when is_binary(id) do
     with true <- enabled?(),
          %Artifact{} = artifact <- Repo.get(Artifact, id),
          true <-
-           (admin? and artifact.visibility != "private") or sees?(artifact, user) or
-             administers?(artifact, user) do
+           (admin? and (artifact.visibility != "private" or Teams.ids(artifact) != [])) or
+             sees?(artifact, user) or administers?(artifact, user) do
       {:ok, artifact}
     else
       _no -> {:error, Error.new(:not_found, %{id: id})}
@@ -1507,8 +1558,9 @@ defmodule Troupe.Plane.Artifacts do
 
   @doc """
   What `user` is to `artifact` now: `owner` (its person, or in the team that owns it);
-  `edit` or `view` through a link of an owner's they were signed in through, while it
-  lasts; `view` through who it is for; or `nil`.
+  `edit`, `comment` or `view` through a link of an owner's they were signed in through, or
+  a grant by name, while it lasts; `view` through a team of theirs that reads it, or the
+  organisation; or `nil`.
   """
   @spec role(Artifact.t(), User.t()) :: String.t() | nil
   def role(%Artifact{} = artifact, %User{} = user),
@@ -1521,18 +1573,29 @@ defmodule Troupe.Plane.Artifacts do
     end
   end
 
-  # Whether an artifact is for somebody `user` is, from `audience` where a list read what
-  # they are in once. A private one is for nobody but its owner.
-  defp for?(artifact, user, audience \\ nil)
-  defp for?(%Artifact{visibility: "organisation"}, user, _audience), do: covered(user) == :ok
+  # Whether `artifact` is read by somebody `user` is, from `audience` where a list read what
+  # they are in once: the organisation, or a team of theirs.
+  defp for?(artifact, user, audience \\ nil), do: reached(artifact, user, audience) != nil
 
-  defp for?(%Artifact{visibility: "profile:" <> name}, user, audience),
-    do: name in ((audience && audience.profiles) || profiles_of(user))
+  # How it reaches them: through a team of theirs that reads it (`{:team, name}`, the first
+  # by name), else the organisation; `nil` where neither does.
+  defp reached(artifact, user, audience) do
+    team_ids = (audience && audience.team_ids) || Enum.map(Identity.teams_for(user), & &1.id)
 
-  defp for?(%Artifact{visibility: "team:" <> name}, user, audience),
-    do: name in ((audience && audience.teams) || teams_of(user))
+    cond do
+      team = Enum.find(teams_named(artifact), &(&1.id in team_ids)) -> {:team, team.name}
+      artifact.visibility == "organisation" and covered(user) == :ok -> :organisation
+      true -> nil
+    end
+  end
 
-  defp for?(_artifact, _user, _audience), do: false
+  # The teams that read it, sorted by name, from its preloaded grants where it has them.
+  defp teams_named(%Artifact{team_grants: grants}) when is_list(grants) do
+    grants |> Repo.preload(:team) |> Enum.map(& &1.team) |> Enum.sort_by(& &1.name)
+  end
+
+  defp teams_named(artifact),
+    do: artifact |> Repo.preload(team_grants: :team) |> teams_named()
 
   # A list's roles in one query for its links, rather than one per artifact.
   defp with_roles(artifacts, user, admin?, audience) do
@@ -1543,14 +1606,14 @@ defmodule Troupe.Plane.Artifacts do
     kept = Keeps.among(ids, user)
 
     Enum.map(artifacts, fn artifact ->
-      for? = for?(artifact, user, audience)
+      reached = reached(artifact, user, audience)
       link = linked[artifact.id]
 
       role =
         cond do
           owns?(artifact, user, audience) -> "owner"
           link in ["edit", "comment"] -> link
-          link == "view" or for? -> "view"
+          link == "view" or reached != nil -> "view"
           true -> nil
         end
 
@@ -1560,8 +1623,8 @@ defmodule Troupe.Plane.Artifacts do
          comments: Map.get(comments, artifact.id, {0, nil}),
          kept: MapSet.member?(kept, artifact.id),
          public: MapSet.member?(public, artifact.id),
-         scope: scope(artifact, role, for?, link),
-         administers: administers?(artifact, user, audience.administered),
+         scope: scope(artifact, role, reached, link),
+         administers: administers?(artifact, user, audience.administered_ids),
          may_transfer: may_transfer?(artifact, user, admin?, audience)
        }}
     end)
@@ -1573,17 +1636,261 @@ defmodule Troupe.Plane.Artifacts do
     meta
   end
 
-  # The gallery tab a row is under: the caller's own (`private` for the ones only they
-  # open); who it is for, where that takes the caller in; `shared` where only a link does;
-  # else who it is for, as an administrator sees it.
-  defp scope(%Artifact{visibility: "private"}, "owner", _for?, _link), do: "private"
-  defp scope(_artifact, "owner", _for?, _link), do: "mine"
-  defp scope(artifact, _role, true, _link), do: artifact.visibility
-  defp scope(_artifact, _role, false, link) when link in ["view", "comment", "edit"], do: "shared"
-  defp scope(artifact, _role, _for?, _link), do: artifact.visibility
+  # The gallery tab a row is under: the caller's own (`private` for one nobody else reads
+  # by team or as the organisation); the team of theirs that reads it, or `organisation`;
+  # `shared` where only a link or a grant does; else who reads it, as an administrator sees
+  # it: the organisation, the first team, or `private`.
+  defp scope(artifact, "owner", _reached, _link) do
+    if artifact.visibility == "private" and Teams.ids(artifact) == [], do: "private", else: "mine"
+  end
 
-  defp profiles_of(user),
-    do: user |> Identity.profiles_for() |> Enum.map(& &1.profile) |> Enum.uniq() |> Enum.sort()
+  defp scope(_artifact, _role, {:team, name}, _link), do: "team:" <> name
+  defp scope(_artifact, _role, :organisation, _link), do: "organisation"
+  defp scope(_artifact, _role, nil, link) when link in ["view", "comment", "edit"], do: "shared"
+
+  defp scope(artifact, _role, nil, _link) do
+    case {artifact.visibility, teams_named(artifact)} do
+      {"organisation", _teams} -> "organisation"
+      {_private, [team | _]} -> "team:" <> team.name
+      {visibility, []} -> visibility
+    end
+  end
+
+  # -- who reads it ------------------------------------------------------------------
+
+  @doc """
+  Who reads artifact `id`, for its owner or a platform administrator: its owner (`owner`, the
+  person, and `owner_team`), the teams that read it (`teams`, each `{name, granted_by, at}`),
+  the people it is shared with by name at their roles (`people`), whether every signed-in
+  person reads it (`organisation`), its links (`links`), and the teams the owner may add
+  (`may_add`): theirs, and those granted the profile its session ran on.
+  """
+  @spec access(String.t(), User.t(), keyword()) :: {:ok, map()} | {:error, Error.t()}
+  def access(id, %User{} = user, opts \\ []) do
+    admin? = Keyword.get(opts, :platform_admin?, false)
+
+    with :ok <- on(),
+         {:ok, artifact} <- reader_keeper(id, user, admin?) do
+      artifact = Repo.preload(artifact, [:owner, :owner_team])
+
+      {:ok,
+       artifact
+       |> access_json()
+       |> Map.merge(%{
+         "id" => artifact.id,
+         "may_add" => Enum.uniq(teams_of(user) ++ profile_teams(artifact.profile)) |> Enum.sort()
+       })}
+    end
+  end
+
+  # Its owner's to read, and a platform administrator's, whose takedowns are read from it.
+  defp reader_keeper(id, user, true) do
+    with {:ok, artifact} <- findable(id, user, true), do: {:ok, artifact}
+  end
+
+  defp reader_keeper(id, user, false), do: owned(id, user, false, "reads who reads")
+
+  # Who reads it, in the shape `access/3` answers and `get/3` carries for an owner.
+  defp access_json(artifact) do
+    artifact = Repo.preload(artifact, [:owner, :owner_team])
+
+    %{
+      "owner" => person(artifact.owner),
+      "owner_team" => team_name(artifact.owner_team),
+      "teams" => Teams.list(artifact),
+      "people" => Enum.map(People.list(artifact), &Map.take(&1, ["subject", "display_name", "role"])),
+      "organisation" => artifact.visibility == "organisation",
+      "links" => Shares.list(artifact),
+      "words" => readers_words(artifact)
+    }
+  end
+
+  @doc """
+  Who reads `artifact` beside its owners, in words, for the gate that asks about a new
+  version of it: "the Clinics and Billing teams and 3 people; a view link", "the whole
+  organisation", or "nobody else" where no team, person, organisation or live link does.
+  """
+  @spec readers_words(Artifact.t()) :: String.t()
+  def readers_words(%Artifact{} = artifact) do
+    teams = Teams.names(artifact)
+    people = length(People.list(artifact))
+    links = artifact |> Shares.list() |> Enum.filter(&(&1["state"] == "live")) |> Enum.map(& &1["role"])
+
+    readers =
+      [
+        if(artifact.visibility == "organisation", do: "the whole organisation"),
+        case teams do
+          [] -> nil
+          [one] -> "the #{one} team"
+          many -> "the #{Words.and_list(many)} teams"
+        end,
+        if(people > 0, do: Words.count(people, "person", "people"))
+      ]
+      |> Enum.reject(&is_nil/1)
+
+    linked =
+      links
+      |> Enum.frequencies()
+      |> Enum.sort()
+      |> Enum.map(fn {role, n} -> if(n == 1, do: "a #{role} link", else: "#{n} #{role} links") end)
+
+    case {readers, linked} do
+      {[], []} -> "nobody else"
+      {readers, []} -> Words.and_list(readers)
+      {[], linked} -> Words.and_list(linked)
+      {readers, linked} -> Words.and_list(readers) <> "; " <> Words.and_list(linked)
+    end
+  end
+
+  @doc """
+  Change who reads artifact `id`, its owner's alone: `teams`, the names of every team that
+  should read it; `people`, every person it should be shared with by name, each
+  `{subject, role}`; `organisation`, whether every signed-in person reads it. Each is the
+  whole of that part and is applied as the difference from what is there: each team or
+  person added or taken off is one `artifact.share` or `artifact.unshare` row in the audit
+  (`team` or `person` in its detail), and the organisation switch one `artifact.visibility`
+  row with what it moved from. A part not named is left as it is; nothing here makes a
+  version. A team added is one the owner is in or one granted the profile the artifact's
+  session ran on; any other is refused, and nothing is changed. Answers `access/3`'s.
+  """
+  @spec set_access(String.t(), User.t(), map(), keyword()) :: {:ok, map()} | {:error, Error.t()}
+  def set_access(id, %User{} = user, params, opts \\ []) when is_map(params) do
+    admin? = Keyword.get(opts, :platform_admin?, false)
+
+    with :ok <- on(),
+         {:ok, artifact} <- owned(id, user, admin?, "changes who reads"),
+         {:ok, team_change} <- team_change(artifact, user, params["teams"], admin?),
+         {:ok, people_change} <- people_change(artifact, params["people"]),
+         {:ok, visibility} <- organisation_change(artifact, user, params["organisation"], admin?),
+         :ok <- widening(artifact, user) do
+      Repo.transaction(fn ->
+        :ok = apply_teams(artifact, user, team_change)
+        :ok = apply_visibility(artifact, user, visibility)
+
+        case apply_people(artifact, user, people_change) do
+          :ok -> :ok
+          {:error, error} -> Repo.rollback(error)
+        end
+      end)
+      |> case do
+        {:ok, :ok} ->
+          People.told(artifact, user, Enum.map(elem(people_change, 0), &elem(&1, 0)))
+          access(artifact.id, user, opts)
+
+        {:error, %Error{} = error} ->
+          {:error, error}
+      end
+    end
+  end
+
+  # The teams to add and to take off, by the names `names` says should read it.
+  defp team_change(_artifact, _user, nil, _admin?), do: {:ok, {[], []}}
+
+  defp team_change(artifact, user, names, admin?) do
+    with {:ok, names} <- team_names(names) do
+      there = teams_named(artifact)
+      added = names -- Enum.map(there, & &1.name)
+
+      with {:ok, added} <- may_give(user, added, artifact.profile, admin?),
+           do: {:ok, {added, Enum.reject(there, &(&1.name in names))}}
+    end
+  end
+
+  defp apply_teams(artifact, user, {added, removed}) do
+    :ok = Teams.add(artifact.id, added, user.subject)
+    :ok = Teams.remove(artifact.id, removed)
+
+    Enum.each(added, &audit_readers(user, "artifact.share", artifact, %{"team" => &1.name}))
+    Enum.each(removed, &audit_readers(user, "artifact.unshare", artifact, %{"team" => &1.name}))
+  end
+
+  # The people to grant (new, or at another role) and to take off, by `people`.
+  defp people_change(_artifact, nil), do: {:ok, {[], []}}
+
+  defp people_change(artifact, people) when is_list(people) do
+    if Enum.all?(people, &match?(%{"subject" => subject} when is_binary(subject), &1)) do
+      there = Map.new(People.list(artifact), &{&1["subject"], &1["role"]})
+      wanted = Map.new(people, &{&1["subject"], &1["role"]})
+      granted = Enum.reject(wanted, fn {subject, role} -> there[subject] == role end)
+      {:ok, {granted, Map.keys(there) -- Map.keys(wanted)}}
+    else
+      {:error, invalid("people is a list of {subject, role}, not #{inspect(people)}")}
+    end
+  end
+
+  defp people_change(_artifact, other),
+    do: {:error, invalid("people is a list of {subject, role}, not #{inspect(other)}")}
+
+  # Each grant as `artifact.share {person}` makes it, stopping at the first refused, and each
+  # one taken off as its revoke.
+  defp apply_people(artifact, user, {granted, removed}) do
+    Enum.each(removed, fn subject ->
+      if People.revoke(artifact, subject) > 0,
+        do: audit_readers(user, "artifact.unshare", artifact, %{"person" => subject})
+    end)
+
+    Enum.reduce_while(granted, :ok, fn {subject, role}, :ok ->
+      case People.grant(artifact, user, subject, role) do
+        {:ok, _granted} -> {:cont, :ok}
+        {:error, _} = error -> {:halt, error}
+      end
+    end)
+  end
+
+  # The organisation switch, as `visibility` keeps it: unsaid or unchanged, nothing to do.
+  defp organisation_change(_artifact, _user, nil, _admin?), do: {:ok, nil}
+
+  defp organisation_change(artifact, user, on, admin?) when is_boolean(on) do
+    visibility = if on, do: "organisation", else: "private"
+
+    cond do
+      visibility == artifact.visibility -> {:ok, nil}
+      on -> with :ok <- may_publish(user, visibility, admin?), do: {:ok, visibility}
+      true -> {:ok, visibility}
+    end
+  end
+
+  defp organisation_change(_artifact, _user, other, _admin?),
+    do: {:error, invalid("organisation is true or false, not #{inspect(other)}")}
+
+  defp apply_visibility(_artifact, _user, nil), do: :ok
+
+  defp apply_visibility(artifact, user, visibility) do
+    artifact |> Ecto.Changeset.change(visibility: visibility) |> Repo.update!()
+
+    audit_readers(user, "artifact.visibility", artifact, %{
+      "visibility" => visibility,
+      "visibility_from" => artifact.visibility,
+      "title" => artifact.title
+    })
+  end
+
+  defp audit_readers(user, action, artifact, detail) do
+    {:ok, _event} = Audit.record(user.subject, action, artifact.id, detail)
+    :ok
+  end
+
+  # Whether readers may be added to `artifact` by `user`, beside who they are: every owner
+  # may, of every artifact.
+  defp widening(_artifact, _user), do: :ok
+
+  @doc """
+  The profile artifact `id` came from, for the people search of its owner's sharing menu:
+  `{:ok, nil}` for one no pod session published; `not_found` for one `user` does not own.
+  """
+  @spec profile_of(String.t(), User.t(), keyword()) :: {:ok, String.t() | nil} | {:error, Error.t()}
+  def profile_of(id, %User{} = user, opts \\ []) do
+    with {:ok, artifact} <- owned(id, user, Keyword.get(opts, :platform_admin?, false), "shares") do
+      {:ok, artifact.profile}
+    end
+  end
+
+  @doc "Whether `user` owns an artifact published from a session on `profile`."
+  @spec owns_from?(User.t(), String.t()) :: boolean()
+  def owns_from?(%User{} = user, profile) when is_binary(profile) do
+    owned = owned_query(user, audience_of(user))
+    Repo.exists?(from(a in Artifact, where: a.profile == ^profile and a.id in subquery(owned)))
+  end
 
   @doc """
   One file of one version for the artifacts host: `version` is a number or `:current`, and
@@ -1688,7 +1995,7 @@ defmodule Troupe.Plane.Artifacts do
          Error.new(:forbidden, %{
            id: artifact.id,
            reason:
-             "only its owner, a platform administrator, or the administrator of the team it is for deletes an artifact"
+             "only its owner, a platform administrator, or an administrator of a team that reads it deletes an artifact"
          })}
     end
   end
@@ -1731,8 +2038,8 @@ defmodule Troupe.Plane.Artifacts do
 
   defp destination("me"), do: {:ok, :me}
 
-  defp destination("team:" <> name = to) do
-    with {:ok, _to} <- visibility(to), do: {:ok, {:team, name}}
+  defp destination("team:" <> name) do
+    with :ok <- team_word(name), do: {:ok, {:team, name}}
   end
 
   defp destination(other), do: {:error, invalid("to is me or team:<name>, not #{inspect(other)}")}
@@ -1801,11 +2108,11 @@ defmodule Troupe.Plane.Artifacts do
           from(a in Artifact)
 
         names ->
-          # Those for the teams, and those the teams own, whoever they are for.
+          # Those the teams read, and those the teams own, whoever reads them.
           owned = from(t in Identity.Team, where: t.name in ^names, select: t.id)
 
           from(a in Artifact,
-            where: a.visibility in ^Enum.map(names, &"team:#{&1}") or a.owner_team_id in subquery(owned)
+            where: a.id in subquery(Teams.read_by(names)) or a.owner_team_id in subquery(owned)
           )
       end
 
@@ -1813,7 +2120,7 @@ defmodule Troupe.Plane.Artifacts do
       query
       |> order_by([a], desc: a.updated_at)
       |> limit(500)
-      |> preload([:owner, :owner_team, :team])
+      |> preload([:owner, :owner_team, :team, team_grants: :team])
       |> Repo.all()
       |> Enum.map(&admin_row/1)
     else
@@ -1883,6 +2190,7 @@ defmodule Troupe.Plane.Artifacts do
       "title" => artifact.title,
       "kind" => artifact.kind,
       "visibility" => artifact.visibility,
+      "teams" => Teams.names(artifact),
       "owner" => person(artifact.owner),
       "owner_team" => team_name(artifact.owner_team),
       "team" => team_name(artifact.team),
@@ -2130,16 +2438,27 @@ defmodule Troupe.Plane.Artifacts do
   @doc """
   A link to artifact `id` (`Shares.share/3`): the owner's, with `role` `view` or `edit`,
   `expires`, and `public` for one that needs no sign-in, where an administrator allows them.
+  With `person`, no link: the artifact shared with that person by name at `role`, who is
+  told. With `team`, the team added to who reads it, as `set_access/4` adds one.
   """
   @spec share(String.t(), User.t(), map(), keyword()) :: {:ok, map()} | {:error, Error.t()}
   def share(id, user, params, opts \\ [])
 
-  # With `person`, no link: the artifact shared with that one person by name, at `role`.
   def share(id, %User{} = user, %{"person" => subject} = params, opts) do
     with :ok <- on(),
-         {:ok, artifact} <- owned(id, user, Keyword.get(opts, :platform_admin?, false), "shares") do
-      People.grant(artifact, user, subject, params["role"])
+         {:ok, artifact} <- owned(id, user, Keyword.get(opts, :platform_admin?, false), "shares"),
+         :ok <- widening(artifact, user),
+         {:ok, granted} <- People.grant(artifact, user, subject, params["role"]) do
+      People.told(artifact, user, [subject])
+      {:ok, granted}
     end
+  end
+
+  def share(id, %User{} = user, %{"team" => name}, opts) when is_binary(name) do
+    with :ok <- on(),
+         {:ok, artifact} <- owned(id, user, Keyword.get(opts, :platform_admin?, false), "shares"),
+         {:ok, _access} <- set_access(id, user, %{"teams" => Enum.uniq(Teams.names(artifact) ++ [name])}, opts),
+         do: {:ok, %{"id" => artifact.id, "team" => name}}
   end
 
   def share(id, %User{} = user, params, opts) do
@@ -2150,14 +2469,29 @@ defmodule Troupe.Plane.Artifacts do
     end
   end
 
-  @doc "Revoke a link (`share`, its id) or one person's use of every link (`person`, a subject)."
+  @doc """
+  Revoke a link (`share`, its id) or one person's use of every link and their grant
+  (`person`, a subject), or take a team off who reads it (`team`, its name).
+  """
   @spec unshare(String.t(), User.t(), map(), keyword()) :: {:ok, map()} | {:error, Error.t()}
-  def unshare(id, %User{} = user, params, opts \\ []) do
+  def unshare(id, user, params, opts \\ [])
+
+  def unshare(id, %User{} = user, %{"team" => name}, opts) when is_binary(name) do
+    with :ok <- on(),
+         {:ok, artifact} <- owned(id, user, Keyword.get(opts, :platform_admin?, false), "revokes a link to"),
+         names = Teams.names(artifact),
+         true <- name in names || {:error, Error.new(:not_found, %{team: name})},
+         {:ok, _access} <- set_access(id, user, %{"teams" => names -- [name]}, opts),
+         do: {:ok, %{"revoked" => true, "id" => artifact.id, "team" => name}}
+  end
+
+  def unshare(id, %User{} = user, params, opts) do
     with :ok <- on(),
          {:ok, artifact} <- owned(id, user, Keyword.get(opts, :platform_admin?, false), "revokes a link to") do
       Shares.unshare(artifact, user, params)
     end
   end
+
 
   # -- comments ---------------------------------------------------------------------
 
@@ -2496,8 +2830,12 @@ defmodule Troupe.Plane.Artifacts do
       "title" => artifact.title,
       "kind" => artifact.kind,
       "visibility" => artifact.visibility,
-      # The gallery tab it is under: mine, private, organisation, team:<name>,
-      # profile:<name> or shared.
+      # Who reads it beside its owners and the people and links it is shared through: the
+      # teams, by name, and whether every signed-in person does.
+      "teams" => Teams.names(artifact),
+      "organisation" => artifact.visibility == "organisation",
+      # The gallery tab it is under: mine, private, organisation, team:<name> (a team of
+      # the caller's that reads it) or shared.
       "scope" => meta.scope,
       # The person who published it, and the team it belongs to, if one does: then its
       # owners are that team's people, and `role`, `mine` and `may_delete` say so.
