@@ -27,9 +27,10 @@ type LimitRow = { what: string; value: string; from: string };
  * The limits the answer states, a row each; none from a plane before them. The session's
  * allowance is Troupe's own every time, since a pod reads no organisation layer and a
  * profile sets none of it; how long a session rests before it sleeps is its team's, and
- * asked as the administrator, for no team, the answer has none to say.
+ * asked as the administrator, for no team, the platform's. Only a plane from before that
+ * answers `null` for no team, and the row says so rather than a number it was not given.
  */
-function limitRows(limits: ProfileView["limits"]): LimitRow[] {
+function limitRows(limits: ProfileView["limits"], team: string | null): LimitRow[] {
   const rows: LimitRow[] = [];
   if (limits.max_tokens !== undefined) {
     rows.push({
@@ -72,7 +73,7 @@ function limitRows(limits: ProfileView["limits"]): LimitRow[] {
     rows.push({
       what: "Rest before a session sleeps",
       value: limits.idle_seconds === null ? "each team's own; asked for no team, so not said" : durationWords(limits.idle_seconds * 1000, "long"),
-      from: "the team",
+      from: team ? "the team" : "the platform",
     });
   }
   return rows;
@@ -91,8 +92,8 @@ const capWords = (n: number | null, one: string, many?: string): string => (n ==
 /** Whether any agent sets a number of its own: the agents' column of them is there only then. */
 const ownLimits = (view: ProfileView): boolean => view.agents.some((a) => a.max_turns !== undefined || a.max_tokens !== undefined);
 
-function LimitsTable({ limits }: { limits: ProfileView["limits"] }): JSX.Element | null {
-  const rows = limitRows(limits);
+function LimitsTable({ limits, team }: { limits: ProfileView["limits"]; team: string | null }): JSX.Element | null {
+  const rows = limitRows(limits, team);
   if (rows.length === 0) return null;
   return (
     <div className="scroll">
@@ -373,7 +374,7 @@ export function MemberView({ name }: { name: string }): JSX.Element {
                 </tbody>
               </table>
             </div>
-            <LimitsTable limits={view.limits} />
+            <LimitsTable limits={view.limits} team={view.team} />
             {view.github && <GitHubTable github={view.github} />}
             <SwitchesTable view={view} />
           </div>
