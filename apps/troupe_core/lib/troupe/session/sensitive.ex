@@ -120,7 +120,9 @@ defmodule Troupe.Session.Sensitive do
     data =
       data
       |> Map.new(fn {k, v} -> {to_string(k), v} end)
-      |> Map.put_new_lazy("at", fn -> DateTime.utc_now() |> DateTime.truncate(:second) |> DateTime.to_iso8601() end)
+      |> Map.put_new_lazy("at", fn ->
+        DateTime.utc_now() |> DateTime.truncate(:second) |> DateTime.to_iso8601()
+      end)
       |> then(fn data -> if path == @root, do: data, else: Map.put(data, "agent", path) end)
       |> Map.reject(fn {_k, v} -> is_nil(v) end)
 

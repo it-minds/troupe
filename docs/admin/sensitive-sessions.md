@@ -55,3 +55,70 @@ erased. A person may also mark a session by hand (`session.sensitive.set`, or
 `session.create` with `sensitive: true`), which is one-way as well.
 
 ## Sharing a sensitive session
+
+`sharing` covers what takes a sensitive session beyond the people who read it now: giving it
+to the team (`session.visibility.set`), inviting a person (`session.invite`), granting one a
+role (`session.grant`), minting a link to it (`session.share`), and moving or sharing an
+artifact it published wider (`artifact.put` with another visibility, `artifact.share`,
+switching its public links on). Taking it back is never refused, and the people who read it
+now go on reading it.
+
+- **`allow`** (the default): as for any session.
+- **`deny`**: each is refused, naming the profile and who reads the session now: *This
+  session is sensitive and records does not allow sharing it outside the team that already
+  reads it, ward-7*.
+- **`ask`**: each is held for a team administrator of the session's team, and the owner is
+  told it is *waiting on a team administrator*; nothing is applied. The administrator lists
+  what waits with `session.share_requests` and answers with `session.share_request.decide`
+  (`approve` or `decline`); a yes applies the share as the owner asked it. The request, the
+  answer and the share are each audited (`session.share_request`,
+  `session.share_request.decide`, and the share's own action under the owner). A link cannot
+  wait, since it is a secret handed back at once, so under `ask` it is refused with a sentence
+  that says to invite the person by name instead. A team administrator's own share is not
+  held: it is the yes it would have waited for.
+
+## What the plane refuses on its own side
+
+The pods refuse at their gate; the plane refuses what it owns as well, so a session marked on
+a pod is held there even if something on the pod were to let a call through:
+
+- every proposal for a team's or the organisation's memory from a sensitive session, with a
+  sentence its agent relays (as it refuses a throwaway session's);
+- `artifact.publish`, the pod's publication and a new version from a sensitive session whose
+  profile's `deny` names `publish_artifact`;
+- a trigger proposal (Decision 1111): a sensitive session proposes none.
+
+Every session row says `sensitive` (`{at, by, how}`, or `null`), and the audit has
+`session.sensitive` for each mark: actor `system:harness` with the `tool` and `rule` for a
+call, or the person for a mark by hand.
+
+## A worked example
+
+A team works with a patients' records system the bundle reaches as the MCP server `records`.
+Reading from it must keep the session from publishing, fetching, pushing or posting to chat,
+and the session from being shared without a ward administrator's yes:
+
+```yaml
+apiVersion: troupe.dev/v1alpha1
+kind: WorkerProfile
+metadata:
+  name: ward
+spec:
+  extends: standard
+  sensitive:
+    markedBy: ["mcp(records.*)"]
+    deny: ["publish_artifact", "web_fetch", "git_push", "pr_open", "pr_comment",
+           "mcp(chat.*)", "shell(curl)", "remember"]
+    sharing: ask
+```
+
+An agent on `ward` calls `mcp.records.lookup`. Before the call runs, the session's log has
+`session_marked_sensitive` (`by: mcp.records.lookup`, `rule: mcp(records.*)`), the pod's next
+status marks the row, and the audit has `session.sensitive`. The lookup's result reaches the
+agent, whose next model call is told in its configuration that the session is sensitive and
+what is refused. When it then calls `publish_artifact`, the call is refused with the sentence
+above, the transcript shows the refusal, and nothing is published; the same holds for a
+subagent it delegates to, after the session sleeps and wakes, and whatever the prompt tells
+the agent to try. When the owner gives the session to the team (`session.visibility.set`),
+the share waits for an administrator of the session's team, who sees it with
+`session.share_requests` and answers it with `session.share_request.decide`.

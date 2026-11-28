@@ -88,7 +88,9 @@ defmodule Troupe.Plane.Sessions.Sensitive do
   defp write(session_id, at, by) do
     {count, _} =
       from(s in Session, where: s.id == ^session_id and is_nil(s.sensitive_at))
-      |> Repo.update_all(set: [sensitive_at: at, sensitive_by: by, updated_at: DateTime.utc_now()])
+      |> Repo.update_all(
+        set: [sensitive_at: at, sensitive_by: by, updated_at: DateTime.utc_now()]
+      )
 
     count == 1
   end
@@ -177,7 +179,12 @@ defmodule Troupe.Plane.Sessions.Sensitive do
     session = Repo.get(Session, session_id)
 
     if denies?(session, "publish_artifact"),
-      do: {:error, Error.new(:forbidden, %{reason: Words.no_publication(session.profile), setting: "sensitive"})},
+      do:
+        {:error,
+         Error.new(:forbidden, %{
+           reason: Words.no_publication(session.profile),
+           setting: "sensitive"
+         })},
       else: :ok
   end
 
@@ -210,7 +217,8 @@ defmodule Troupe.Plane.Sessions.Sensitive do
   `check/4` for an artifact: the session it came from (its `origin.session_id`) decides,
   and an artifact from no session, or from one that is not sensitive, is anybody's to share.
   """
-  @spec check_artifact(map(), String.t(), map(), User.t()) :: :ok | {:ok, map()} | {:error, Error.t()}
+  @spec check_artifact(map(), String.t(), map(), User.t()) ::
+          :ok | {:ok, map()} | {:error, Error.t()}
   def check_artifact(%{origin: %{"session_id" => session_id}} = artifact, kind, params, user)
       when is_binary(session_id) do
     {files?, params} = Map.pop(params, "with_files", false)
@@ -223,9 +231,10 @@ defmodule Troupe.Plane.Sessions.Sensitive do
       session ->
         # A move that would wait is the move alone: a new version sent with it is refused
         # with it, so nothing is half applied when the yes comes.
-        if files? and sensitive?(session) and sharing(session) == "ask" and not administers?(user, session),
-          do: {:error, files_refused(session)},
-          else: check(session, kind, params, user)
+        if files? and sensitive?(session) and sharing(session) == "ask" and
+             not administers?(user, session),
+           do: {:error, files_refused(session)},
+           else: check(session, kind, params, user)
     end
   end
 
@@ -295,7 +304,12 @@ defmodule Troupe.Plane.Sessions.Sensitive do
         "params" => params
       })
 
-    {:ok, %{"waiting" => true, "reason" => Words.waiting(), "share_request" => ShareRequest.json(request)}}
+    {:ok,
+     %{
+       "waiting" => true,
+       "reason" => Words.waiting(),
+       "share_request" => ShareRequest.json(request)
+     }}
   end
 
   # -- a team administrator's answer ------------------------------------------------
@@ -329,14 +343,22 @@ defmodule Troupe.Plane.Sessions.Sensitive do
             {:error, Error.new(:not_found, %{share_request: id})}
 
           request.state != "pending" ->
-            {:error, Error.new(:conflict, %{reason: "this request was answered already", state: request.state})}
+            {:error,
+             Error.new(:conflict, %{
+               reason: "this request was answered already",
+               state: request.state
+             })}
 
           true ->
             state = if decision == "approve", do: "approved", else: "declined"
 
             decided =
               request
-              |> Ecto.Changeset.change(state: state, decided_by: user.subject, decided_at: DateTime.utc_now())
+              |> Ecto.Changeset.change(
+                state: state,
+                decided_by: user.subject,
+                decided_at: DateTime.utc_now()
+              )
               |> Repo.update!()
 
             {:ok, _audit} =

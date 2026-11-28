@@ -894,7 +894,9 @@ defmodule Troupe.Protocol.Schema do
         "private" => optional(:boolean),
         "title" => optional(:string),
         # How long it lasts: `throwaway`, `normal` (absent) or `persistent`.
-        "lifespan" => optional(:string)
+        "lifespan" => optional(:string),
+        # Sensitive from its first call, a mark nothing clears: a pod session's, at the plane.
+        "sensitive" => optional(:boolean)
       },
       "session.archive" => %{
         "command_id" => required(:string),
@@ -965,6 +967,19 @@ defmodule Troupe.Protocol.Schema do
         "command_id" => optional(:string),
         "session_id" => required(:string),
         "lifespan" => required(:string)
+      },
+      # A pod session marked sensitive by its owner, once and for good: the plane's, which the
+      # clients ask directly. `sensitive` is `true`; `false` is refused, since nothing clears it.
+      "session.sensitive.set" => %{
+        "session_id" => required(:string),
+        "sensitive" => required(:boolean)
+      },
+      # The shares of sensitive sessions a team administrator is asked to say yes to, and
+      # their answer (`approve` or `decline`): the plane's.
+      "session.share_requests" => %{},
+      "session.share_request.decide" => %{
+        "id" => required(:string),
+        "decision" => required(:string)
       },
       # A pod session raised to its channel's current bundle version by its owner: the
       # plane's, which the clients ask directly.

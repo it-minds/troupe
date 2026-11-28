@@ -65,7 +65,8 @@ defmodule Troupe.Protocol.Sensitive do
 
   def problems(sensitive) when is_map(sensitive) do
     unknown =
-      for key <- Map.keys(sensitive), key not in @keys,
+      for key <- Map.keys(sensitive),
+          key not in @keys,
           do: "sensitive takes markedBy, deny and sharing, not #{key}"
 
     unknown ++
@@ -88,7 +89,9 @@ defmodule Troupe.Protocol.Sensitive do
         else: []
 
     count ++
-      for text <- rules, {:error, why} <- [PermissionRule.parse(text)], do: "sensitive.#{key}: #{why}"
+      for text <- rules,
+          {:error, why} <- [PermissionRule.parse(text)],
+          do: "sensitive.#{key}: #{why}"
   end
 
   defp list_problems(key, _rules),

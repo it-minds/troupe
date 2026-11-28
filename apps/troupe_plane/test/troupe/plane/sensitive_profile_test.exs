@@ -26,7 +26,10 @@ defmodule Troupe.Plane.SensitiveProfileTest do
   defp put(actor, name, sensitive, extra \\ %{}) do
     Admin.profile_put(
       actor,
-      Map.merge(%{"name" => name, "image" => @image, "spec" => %{"sensitive" => sensitive}}, extra)
+      Map.merge(
+        %{"name" => name, "image" => @image, "spec" => %{"sensitive" => sensitive}},
+        extra
+      )
     )
   end
 
@@ -58,10 +61,14 @@ defmodule Troupe.Plane.SensitiveProfileTest do
 
   test "a rule the pods could not read, a sharing they do not know and a key nobody reads are refused",
        context do
-    assert reason(put(context.actor, "r", %{"markedBy" => ["mcp.records.x"], "deny" => ["web_fetch"]})) =~
+    assert reason(
+             put(context.actor, "r", %{"markedBy" => ["mcp.records.x"], "deny" => ["web_fetch"]})
+           ) =~
              "sensitive.markedBy:"
 
-    assert reason(put(context.actor, "r", %{"markedBy" => ["mcp(r.*)"], "deny" => ["web_fetch(x)"]})) =~
+    assert reason(
+             put(context.actor, "r", %{"markedBy" => ["mcp(r.*)"], "deny" => ["web_fetch(x)"]})
+           ) =~
              "sensitive.deny:"
 
     assert reason(put(context.actor, "r", %{"deny" => ["web_fetch"], "sharing" => "Ask"})) =~
@@ -81,7 +88,12 @@ defmodule Troupe.Plane.SensitiveProfileTest do
 
   describe "along extends" do
     setup context do
-      parent = %{"markedBy" => ["mcp(records.*)"], "deny" => ["publish_artifact"], "sharing" => "ask"}
+      parent = %{
+        "markedBy" => ["mcp(records.*)"],
+        "deny" => ["publish_artifact"],
+        "sharing" => "ask"
+      }
+
       assert {:ok, _} = put(context.actor, "records", parent)
       :ok
     end
@@ -133,8 +145,7 @@ defmodule Troupe.Plane.SensitiveProfileTest do
       assert Fleet.get_profile("loose").spec["sensitive"]["sharing"] == "ask"
       assert {:ok, effective} = Fleet.Extends.resolve("loose")
 
-      assert "loose sets sensitive.sharing to allow, and records's ask holds: a profile can only tighten it" in
-               effective.problems
+      assert "loose sets sensitive.sharing to allow, and records's ask holds: a profile can only tighten it" in effective.problems
 
       assert Fleet.get_profile("loose").own["spec"]["sensitive"]["sharing"] == "allow"
     end

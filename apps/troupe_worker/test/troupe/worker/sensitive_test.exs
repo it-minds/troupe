@@ -88,9 +88,17 @@ defmodule Troupe.Worker.SensitiveTest do
     push = Map.put(push(context), "sensitive_rules", @rules)
     assert {:ok, %{"activated" => true}} = Commands.handle("session.activate", push)
 
-    told = %{"session_id" => context.session_id, "by" => @ada, "by_name" => "Ada", "at" => "2026-11-28T10:14:00Z"}
+    told = %{
+      "session_id" => context.session_id,
+      "by" => @ada,
+      "by_name" => "Ada",
+      "at" => "2026-11-28T10:14:00Z"
+    }
+
     assert {:ok, %{"recorded" => true}} = Commands.handle("sensitive.changed", told)
-    assert %{"how" => "person", "by" => @ada, "display_name" => "Ada"} = Sensitive.mark_of(context.session_id)
+
+    assert %{"how" => "person", "by" => @ada, "display_name" => "Ada"} =
+             Sensitive.mark_of(context.session_id)
 
     assert {:error, %Error{data: %{setting: "sensitive"}}} = shell(context.session_id, "curl x")
 
@@ -107,7 +115,9 @@ defmodule Troupe.Worker.SensitiveTest do
 
     assert Sensitive.mark_of(context.session_id)["by"] == @ada
 
-    marks = Enum.filter(Troupe.events(context.session_id), &(&1.type == "session_marked_sensitive"))
+    marks =
+      Enum.filter(Troupe.events(context.session_id), &(&1.type == "session_marked_sensitive"))
+
     assert length(marks) == 1
 
     assert {:error, %Error{message: "invalid_params"}} =
@@ -115,10 +125,16 @@ defmodule Troupe.Worker.SensitiveTest do
   end
 
   test "a wake that carries the mark holds the gate before the log is read", context do
-    Application.put_env(:troupe_worker, :session_defaults, activation(context, steps: [
-      {:tools, [{"web_fetch", %{"url" => "https://example.test/"}}]},
-      {:text, "done"}
-    ]))
+    Application.put_env(
+      :troupe_worker,
+      :session_defaults,
+      activation(context,
+        steps: [
+          {:tools, [{"web_fetch", %{"url" => "https://example.test/"}}]},
+          {:text, "done"}
+        ]
+      )
+    )
 
     mark = %{"at" => "2026-11-28T10:14:00Z", "by" => @ada, "how" => "person"}
 
@@ -140,7 +156,12 @@ defmodule Troupe.Worker.SensitiveTest do
 
   defp sensitive_status_reported? do
     receive do
-      {:report, %{"type" => "session.status", "sensitive_by" => "read_file", "sensitive_rule" => "read_file(records/**)"}} ->
+      {:report,
+       %{
+         "type" => "session.status",
+         "sensitive_by" => "read_file",
+         "sensitive_rule" => "read_file(records/**)"
+       }} ->
         true
 
       {:report, _other} ->

