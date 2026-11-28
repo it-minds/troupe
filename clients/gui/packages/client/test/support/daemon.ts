@@ -748,6 +748,16 @@ evoked where nothing is set and there was a sign-in. */
   readonly artifactComments = new Map<string, Array<{ id: string; author: { subject: string; display_name: string }; body: string; created_at: string; edited_at?: string | null }>>();
   /** Who the share picker's search (`people.search`, forwarded to the plane) finds. */
   people: Array<{ subject: string; display_name: string; email: string }> = [];
+  /** Who it finds besides with `artifact`: the people the profile the artifact's session ran on covers. */
+  coveredPeople: Array<{ subject: string; display_name: string; email: string }> = [];
+  /** Every `people.search` asked, with what it was asked with. */
+  readonly peopleSearches: Array<Record<string, unknown>> = [];
+  /** The teams the person is in, as `artifact.list` names them. */
+  myTeams: string[] = ["core"];
+  /** The teams granted each profile (`profile.teams`), which an artifact from a session on it may be given to. */
+  profileTeams: Record<string, string[]> = {};
+  /** Every `artifact.access.set` that changed something, in order. */
+  readonly accessSets: Array<Record<string, unknown>> = [];
   /**
    * The person's own artifacts on the plane, as this daemon lists them through its sign-in
    * (`artifact.list`, troupe #62); null for a daemon signed in to none.
@@ -939,11 +949,27 @@ evoked where nothing is set and there was a sign-in. */
    * `me`, a named team, or nobody's team.
    */
   private ownerTeamOf(params: Record<string, unknown>): string | null {
-    const visibility = String(params["visibility"] ?? "private");
-    const owner = params["owner"] ?? (visibility.startsWith("team:") ? "team" : "me");
-    if (owner === "team") return visibility.startsWith("team:") ? visibility.slice("team:".length) : null;
+    const teams = Array.isArray(params["teams"]) ? params["teams"].map(String) : [];
+    const owner = params["owner"] ?? "me";
+    if (owner === "team") return teams.length === 1 ? teams[0]! : null;
     if (typeof owner === "string" && owner.startsWith("team:")) return owner.slice("team:".length);
     return null;
+  }
+
+  /** Who reads one of the person's artifacts, as `artifact.access.get` answers it, from its row. */
+  private accessOf(row: Record<string, unknown>): { id: string; owner: unknown; owner_team: unknown; teams: Array<{ name: string; granted_by: string; at: string }>; people: Array<{ subject: string; display_name: string; role: string }>; organisation: boolean; links: Array<Record<string, unknown>>; words: string } {
+    const teams = ((row["teams"] as string[] | undefined) ?? []).map((name) => ({ name, granted_by: "alice@example.com", at: "2026-10-26T09:00:00Z" }));
+    const people = this.artifactPeople.filter((p) => p.artifact === row["id"]).map((p) => ({ subject: p.subject, display_name: p.display_name, role: p.role }));
+    const links = this.artifactShares.filter((s) => s["artifact"] === row["id"]);
+    const organisation = row["visibility"] === "organisation";
+    const words = [organisation ? "the whole organisation" : null, teams.length > 0 ? `the ${teams.map((t) => t.name).join(" and ")} team${teams.length > 1 ? "s" : ""}` : null, people.length > 0 ? `${people.length} ${people.length === 1 ? "person" : "people"}` : null].filter(Boolean).join(" and ") || "nobody else";
+    return { id: String(row["id"]), owner: row["owner"] ?? null, owner_team: row["owner_team"] ?? null, teams, people, organisation, links, words };
+  }
+
+  /** The teams the person may give one of theirs to: theirs, and those granted the profile its session ran on. */
+  private mayAddOf(row: Record<string, unknown>): string[] {
+    const profile = (row["origin"] as { profile?: string | null } | undefined)?.profile;
+    return [...new Set([...this.myTeams, ...(profile ? (this.profileTeams[profile] ?? []) : [])])].sort();
   }
 
   /**
@@ -954,7 +980,7 @@ evoked where nothing is set and there was a sign-in. */
   askPublish(sessionId: string, publication: Record<string, unknown>): LoggedEvent {
     const session = this.sessions.get(sessionId)!;
     const callId = `publish-${this.publications.size + 1}`;
-    const shown = { title: "Untitled", kind: "html", files: 1, visibility: null, owner: null, id: null, note: null, ...publication };
+    const shown = { title: "Untitled", kind: "html", files: 1, visibility: null, teams: null, owner: null, id: null, access: null, note: null, ...publication };
     this.publications.set(callId, { sessionId, publication: shown, answer: null });
     session.pendingApprovals += 1;
     return session.log.append("approval_requested", { call_id: callId, tool: "publish_artifact", args: { title: shown.title, kind: shown.kind }, agent_path: ["root"], publication: shown });
@@ -1758,11 +1784,13 @@ evoked where nothing is set and there was a sign-in. */
         return reply(ws, id, { accepted: true });
       }
 
-      // A publication's gate, answered as the harness answers it: `visibility` and `owner`
-      // are keys beside `decision`, as a delegation's `agent` and `brief` are, and a nested
-      // object is ignored; a word back goes with a denial alone; an owner on a new version
-      // is dropped; an allow for the session where the agent proposed nobody is acted on
-      // as an allow. The decision says what the person chose and what they changed.
+      // A publication's gate, answered as the harness answers it: `visibility`, `teams` and
+      // `owner` are keys beside `decision`, as a delegation's `agent` and `brief` are, and a
+      // nested object is ignored; a word back goes with a denial alone; a new version keeps
+      // who reads it and whose it is, so an audience or an owner answered for one is
+      // dropped; a `team:<name>` visibility is that one team; an allow for the session where
+      // the agent proposed nobody is acted on as an allow. The decision says what the person
+      // chose and what they changed.
       case "approval.respond": {
         if (!session) return reply(ws, id, null, { code: -32005, message: "not_found" });
         const callId = String(params["call_id"] ?? "");
@@ -1780,22 +1808,29 @@ evoked where nothing is set and there was a sign-in. */
           if (typeof params["reason"] === "string" && params["reason"] !== "") decided["reason"] = params["reason"];
         } else {
           if (params["reason"] !== undefined && params["reason"] !== null) return invalid("a word back goes with a denial");
-          const sent = params["visibility"];
-          if (sent === undefined || sent === null) {
-            if (proposed["visibility"] === null) return invalid("say whom it is for: visibility is private, organisation, team:<name> or profile:<name>");
-          } else if (typeof sent !== "string" || !/^(private|organisation|team:.+|profile:.+)$/.test(sent)) {
-            return invalid(`visibility is private, organisation, team:<name> or profile:<name>, not ${JSON.stringify(sent)}`);
-          }
-          const visibility = typeof sent === "string" ? sent : String(proposed["visibility"]);
           const republish = typeof proposed["id"] === "string";
-          const sentOwner = params["owner"];
-          if (!republish && sentOwner !== undefined && sentOwner !== null && sentOwner !== "me" && sentOwner !== "team") return invalid(`owner is me or team, not ${JSON.stringify(sentOwner)}`);
-          const proposedOwner = proposed["owner"] ?? (visibility.startsWith("team:") ? "team" : "me");
-          const owner = sentOwner === "me" || sentOwner === "team" ? sentOwner : proposedOwner;
-          const edited = [...(visibility !== proposed["visibility"] ? ["visibility"] : []), ...(!republish && owner !== proposedOwner ? ["owner"] : [])];
+          if (republish) {
+            decided = { ...decided, edited: [] };
+          } else {
+            const sent = params["visibility"];
+            const sentTeams = params["teams"];
+            const proposedTeams = Array.isArray(proposed["teams"]) ? (proposed["teams"] as string[]) : [];
+            if ((sent === undefined || sent === null) && sentTeams === undefined && proposed["visibility"] === null && proposedTeams.length === 0) return invalid("say whom it is for: visibility is private or organisation, and teams the names of the teams that read it");
+            if (sent !== undefined && sent !== null && (typeof sent !== "string" || !/^(private|organisation|team:.+)$/.test(sent))) return invalid(`visibility is private or organisation, and teams the names of the teams that read it, not visibility ${JSON.stringify(sent)}`);
+            if (sentTeams !== undefined && (!Array.isArray(sentTeams) || sentTeams.some((t) => typeof t !== "string" || t === ""))) return invalid(`visibility is private or organisation, and teams the names of the teams that read it, not teams ${JSON.stringify(sentTeams)}`);
+            const old = typeof sent === "string" && sent.startsWith("team:") ? sent.slice("team:".length) : null;
+            const visibility = old !== null ? "private" : typeof sent === "string" ? sent : String(proposed["visibility"] ?? "private");
+            const teams = [...new Set([...(Array.isArray(sentTeams) ? (sentTeams as string[]) : sent === undefined || sent === null ? proposedTeams : []), ...(old !== null ? [old] : [])])];
+            const sentOwner = params["owner"];
+            if (sentOwner !== undefined && sentOwner !== null && sentOwner !== "me" && sentOwner !== "team") return invalid(`owner is me or team, not ${JSON.stringify(sentOwner)}`);
+            const proposedOwner = proposed["owner"] ?? "me";
+            const owner = sentOwner === "me" || sentOwner === "team" ? sentOwner : proposedOwner;
+            const sameTeams = teams.length === proposedTeams.length && teams.every((t) => proposedTeams.includes(t));
+            const edited = [...(visibility !== (proposed["visibility"] ?? "private") ? ["visibility"] : []), ...(!sameTeams ? ["teams"] : []), ...(owner !== proposedOwner ? ["owner"] : [])];
+            decided = { ...decided, visibility, teams, owner, edited };
+          }
           // An allow for the session where the agent proposed nobody is an allow of this one.
-          if (decision === "allow_session" && proposed["visibility"] === null) decided["decision"] = "allow";
-          decided = republish ? { ...decided, visibility, edited } : { ...decided, visibility, owner, edited };
+          if (decision === "allow_session" && proposed["visibility"] === null && !republish) decided["decision"] = "allow";
         }
         asked.answer = { ...decided };
         session.pendingApprovals = Math.max(0, session.pendingApprovals - 1);
@@ -2211,11 +2246,22 @@ evoked where nothing is set and there was a sign-in. */
 
       // An artifact published on the plane through this daemon's sign-in, and the person's
       // own listed there (troupe #62); signed out, a sentence.
-      // The share picker's search, forwarded to the plane as the person.
+      // The share picker's search, forwarded to the plane as the person; with `artifact`, the
+      // people its session's profile covers are found too.
       case "people.search": {
         if (client.localOnly) return reply(ws, id, null, { code: -32004, message: "forbidden", data: { local_only: true, reason: "Local only is on for this client or this session, so nothing is published on the plane or listed from it (people.search)" } });
         const q = String(params["query"] ?? "").toLowerCase();
-        return reply(ws, id, { people: this.people.filter((p) => [p.display_name, p.email, p.subject].some((s) => s.toLowerCase().startsWith(q))), plane_url: "https://plane.example.test" });
+        this.peopleSearches.push({ ...params });
+        const pool = typeof params["artifact"] === "string" ? [...this.people, ...this.coveredPeople.filter((c) => !this.people.some((p) => p.subject === c.subject))] : this.people;
+        return reply(ws, id, { people: pool.filter((p) => [p.display_name, p.email, p.subject].some((s) => s.toLowerCase().startsWith(q))), plane_url: "https://plane.example.test" });
+      }
+
+      // The teams granted a profile, forwarded to the plane as the person.
+      case "profile.teams": {
+        const wanted = String(params["profile"] ?? "");
+        const teams = this.profileTeams[wanted];
+        if (!teams) return reply(ws, id, null, { code: -32005, message: "not_found", data: { profile: wanted } });
+        return reply(ws, id, { profile: wanted, teams });
       }
 
       case "artifact.list":
@@ -2233,6 +2279,8 @@ evoked where nothing is set and there was a sign-in. */
       case "artifact.comment":
       case "artifact.comment.delete":
       case "artifact.comment.edit":
+      case "artifact.access.get":
+      case "artifact.access.set":
       case "artifact.put": {
         const mine = this.artifacts;
         // Refused under Local only as the daemon refuses every one of them: an artifact is
@@ -2247,8 +2295,8 @@ evoked where nothing is set and there was a sign-in. */
           // Each row says which gallery tab it is under, as the plane does where a row does not.
           const rows = mine
             .filter((a) => (params["mine"] === true ? a["mine"] === true : params["shared"] === true ? a["shared"] === true : true))
-            .map((a) => ({ scope: a["mine"] === true ? "mine" : a["shared"] === true ? "shared" : a["visibility"], ...a, kept: a["kept"] === true }));
-          return reply(ws, id, { enabled: true, profiles: ["dev"], teams: ["core"], publish_organisation: "everyone", public_links: false, gallery_url: "https://plane.example.test/console#/artifacts", plane_url: "https://plane.example.test", artifacts: rows });
+            .map((a) => ({ scope: a["mine"] === true ? "mine" : a["shared"] === true ? "shared" : a["visibility"], teams: [], organisation: a["visibility"] === "organisation", ...a, kept: a["kept"] === true }));
+          return reply(ws, id, { enabled: true, profiles: [], teams: this.myTeams, publish_organisation: "everyone", public_links: false, gallery_url: "https://plane.example.test/console#/artifacts", plane_url: "https://plane.example.test", artifacts: rows });
         }
         if (method !== "artifact.publish") {
           this.artifactCalls.push({ method, params });
@@ -2264,7 +2312,37 @@ evoked where nothing is set and there was a sign-in. */
               return reply(ws, id, { id: found["id"], version: Number(params["version"] ?? found["version"]), path: file.path, content_type: "text/markdown", text: file.text });
             }
             case "artifact.get":
-              return reply(ws, id, { ...found, versions, ...(owner ? { shares: this.artifactShares.filter((s) => s["artifact"] === found["id"]), people: this.artifactPeople.filter((p) => p.artifact === found["id"]).map(({ artifact: _a, ...p }) => p) } : {}) });
+              return reply(ws, id, { ...found, versions, ...(owner ? { shares: this.artifactShares.filter((s) => s["artifact"] === found["id"]), people: this.artifactPeople.filter((p) => p.artifact === found["id"]).map(({ artifact: _a, ...p }) => p), access: this.accessOf(found) } : {}) });
+            // Who reads it, its owner's to read and to change: no version is made. A team the
+            // owner may not give it to refuses the whole change; one from a sensitive session
+            // that adds readers waits on a team administrator, or is refused, by its rule.
+            case "artifact.access.get":
+              if (!owner) return reply(ws, id, null, { code: -32004, message: "forbidden", data: { reason: "only its owner reads who reads an artifact" } });
+              return reply(ws, id, { ...this.accessOf(found), may_add: this.mayAddOf(found) });
+            case "artifact.access.set": {
+              if (!owner) return reply(ws, id, null, { code: -32004, message: "forbidden", data: { reason: "only its owner changes who reads an artifact" } });
+              const before = this.accessOf(found);
+              const had = (found["teams"] as string[] | undefined) ?? [];
+              const teams = Array.isArray(params["teams"]) ? (params["teams"] as string[]) : had;
+              const may = this.mayAddOf(found);
+              const refused = teams.filter((t) => !had.includes(t) && !may.includes(t));
+              if (refused.length > 0) return reply(ws, id, null, { code: -32004, message: "forbidden", data: { teams: refused, reason: `you may not give it to ${refused.map((t) => `team ${t}`).join(" and ")}: an artifact goes to teams you are in and teams granted its session's profile; you may give it to ${may.join(", ")}` } });
+              const people = Array.isArray(params["people"]) ? (params["people"] as Array<{ subject: string; role: string }>) : null;
+              const organisation = typeof params["organisation"] === "boolean" ? params["organisation"] : null;
+              const widens = teams.some((t) => !had.includes(t)) || (organisation === true && !before.organisation) || (people ?? []).some((p) => before.people.find((x) => x.subject === p.subject)?.role !== p.role);
+              if (widens && found["sharing"] === "deny") return reply(ws, id, null, { code: -32004, message: "forbidden", data: { setting: "sensitive.sharing", reason: "This session is sensitive and its profile does not allow sharing it beyond the people who already read it" } });
+              if (widens && found["sharing"] === "ask") return reply(ws, id, { waiting: true, reason: "This session is sensitive, so sharing it wider is waiting on a team administrator: the people who read it now go on reading it", share_request: { id: "share-1", state: "pending" } });
+              this.accessSets.push({ id: String(found["id"]), ...Object.fromEntries(Object.entries(params).filter(([k]) => ["teams", "people", "organisation"].includes(k))) });
+              found["teams"] = teams;
+              if (organisation !== null) found["visibility"] = organisation ? "organisation" : "private";
+              found["organisation"] = found["visibility"] === "organisation";
+              if (people) {
+                const kept = this.artifactPeople.filter((p) => p.artifact !== found["id"]);
+                const known = [...this.people, ...this.coveredPeople];
+                this.artifactPeople = [...kept, ...people.map((p) => ({ artifact: String(found["id"]), subject: p.subject, display_name: known.find((k) => k.subject === p.subject)?.display_name ?? p.subject, email: known.find((k) => k.subject === p.subject)?.email ?? "", role: p.role, granted_by: "alice@example.com", granted_at: "2026-10-26T09:00:00Z" }))];
+              }
+              return reply(ws, id, { ...this.accessOf(found), may_add: may });
+            }
             // Its thread: read by whoever sees it, written by an owner or a role that comments.
             // Each comment says what this person may do with it: their own they edit while they
             // may write and delete; an owner deletes any.
@@ -2381,7 +2459,7 @@ evoked where nothing is set and there was a sign-in. */
         }
         const published = existing
           ? Object.assign(existing, { version: Number(existing["version"]) + 1 })
-          : { id: `art-fake${mine.length + 1}`, title: params["title"], kind: params["kind"], visibility: params["visibility"], version: 1, mine: true, owner_team: this.ownerTeamOf(params) };
+          : { id: `art-fake${mine.length + 1}`, title: params["title"], kind: params["kind"], visibility: params["visibility"] ?? "private", teams: Array.isArray(params["teams"]) ? params["teams"] : [], version: 1, mine: true, owner_team: this.ownerTeamOf(params) };
         if (!existing) mine.push(published);
         const sent = ((params["files"] as Array<{ path: string; bytes: string }> | undefined) ?? []).map((f) => ({ path: f.path, content: Buffer.from(f.bytes, "base64").toString("utf8") }));
         const blocked = fakeBlocked(sent);

@@ -8,6 +8,10 @@
 // and its preview is an address on the artifacts host (`artifact.preview`) that the client
 // frames, sandboxed, as it frames nothing else.
 
+import { andList } from "./newSession.js";
+import type { Person } from "./invites.js";
+import type { GateAnswer, PublicationGate } from "./transcript.js";
+
 type Rpc = <T = unknown>(method: string, params?: unknown) => Promise<T>;
 
 export type ArtifactKind = "html" | "markdown" | "file";
@@ -37,17 +41,16 @@ export interface ArtifactOrigin {
 }
 
 /**
- * The gallery tab an artifact is under for this caller, as the plane says it: `mine`,
- * `private` (theirs, which only they open), `organisation`, `team:<name>`,
- * `profile:<name>`, or `shared` (a link gave it them). A client tabs by it and works out
- * nobody's membership itself.
+ * The gallery tab an artifact is under for this caller, as the plane says it: `mine` (theirs,
+ * which others read too), `private` (theirs, which only they open), `organisation`,
+ * `team:<name>` (a team of theirs reads it), or `shared` (a link or a grant by name gave it
+ * them). A client tabs by it and works out nobody's membership itself.
  */
 export type ArtifactScope = string;
 
 /**
- * Whose a new artifact is: the publisher's own, the team it is published for, or a named
- * team of theirs. A publication for `team:<name>` is that team's unless the publisher says
- * `me`; any other is the publisher's.
+ * Whose a new artifact is: the publisher's own (the default), `team`, the one team in its
+ * `teams`, or a named team of theirs. The teams that read one do not own it.
  */
 export type ArtifactOwner = "me" | "team" | `team:${string}`;
 
@@ -59,9 +62,13 @@ export interface Artifact {
   id: string;
   title: string;
   kind: ArtifactKind;
-  /** `organisation`, `team:<name>`, `profile:<name>`, or `private` for its owner alone. */
+  /** `organisation` while every signed-in person reads it, else `private`: its readers alone. */
   visibility: string;
-  /** Which part of a gallery it is in for this caller: `mine`, `private`, `organisation`, `team:<name>`, `profile:<name>` or `shared`. */
+  /** The teams that read it, by name, beside its owner and the people and links it is shared through. Absent from a plane from before the set. */
+  teams?: string[];
+  /** Whether every signed-in person reads it. Absent from a plane from before the set. */
+  organisation?: boolean;
+  /** Which part of a gallery it is in for this caller: `mine`, `private`, `organisation`, `team:<name>` or `shared`. */
   scope?: ArtifactScope;
   /** The person who first published it, which a team's keeps. */
   owner: ArtifactPerson;
@@ -271,9 +278,130 @@ export interface ArtifactThread {
   comments: ArtifactComment[];
 }
 
+/** A team that reads an artifact, as `artifact.access.get` answers it: who added it, and when. */
+export interface ArtifactAccessTeam {
+  name: string;
+  granted_by?: string | null;
+  at?: string | null;
+}
+
+/** Somebody an artifact is shared with by name, as `artifact.access.get` answers it. */
+export interface ArtifactAccessPerson {
+  subject: string;
+  display_name?: string | null;
+  role: ArtifactShareRole;
+}
+
+/**
+ * Who reads an artifact, as its owner reads it (`artifact.access.get`): its owner, the teams
+ * that read it, the people it is shared with by name at their roles, whether the whole
+ * organisation does, its links, the plane's sentence for it all, and the teams the owner may
+ * add (theirs, and those granted the profile its session ran on). Kept across its versions.
+ */
+export interface ArtifactAccess {
+  id: string;
+  owner?: ArtifactPerson | null;
+  owner_team?: string | null;
+  teams: ArtifactAccessTeam[];
+  people: ArtifactAccessPerson[];
+  organisation: boolean;
+  links: ArtifactShare[];
+  words: string;
+  may_add: string[];
+}
+
+/** What `artifact.access.set` changes: each part named is the whole of that part; a part left out is left as it is. */
+export interface ArtifactAccessChange {
+  teams?: string[];
+  people?: Array<{ subject: string; role: ArtifactShareRole }>;
+  organisation?: boolean;
+}
+
+/**
+ * What `artifact.access.set` answers where the artifact came from a sensitive session whose
+ * profile asks a team administrator first: nothing is changed yet, the whole change waits for
+ * their yes, and `reason` says so.
+ */
+export interface ArtifactAccessWaiting {
+  waiting: true;
+  reason: string;
+  share_request?: Record<string, unknown>;
+}
+
+/** Whether a change of who reads it waits on a team administrator rather than being made. */
+export function accessWaiting(answer: ArtifactAccess | ArtifactAccessWaiting): answer is ArtifactAccessWaiting {
+  return (answer as ArtifactAccessWaiting).waiting === true;
+}
+
+/** What `artifactAccessWords` reads: the set, its teams by name or by row, and its links. */
+export interface ArtifactReaders {
+  teams?: ReadonlyArray<string | { name: string }>;
+  people?: number | ReadonlyArray<unknown>;
+  organisation?: boolean;
+  links?: ReadonlyArray<Pick<ArtifactShare, "role" | "state">>;
+}
+
+/**
+ * Who reads an artifact beside its owner, in one phrase, as the gate and the Access tab say
+ * it: "read by the Clinics and Billing teams, 3 people and a view link", "read by the whole
+ * organisation", or "read by nobody but its owner". Only live links count.
+ */
+export function artifactAccessWords(access: ArtifactReaders): string {
+  const teams = (access.teams ?? []).map((t) => (typeof t === "string" ? t : t.name));
+  const people = typeof access.people === "number" ? access.people : (access.people?.length ?? 0);
+  const links = new Map<string, number>();
+  for (const l of access.links ?? []) if (l.state === "live") links.set(l.role, (links.get(l.role) ?? 0) + 1);
+  const parts = [
+    access.organisation ? "the whole organisation" : null,
+    teams.length === 1 ? `the ${teams[0]} team` : teams.length > 1 ? `the ${andList(teams)} teams` : null,
+    people > 0 ? (people === 1 ? "1 person" : `${people} people`) : null,
+    ...[...links.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([role, n]) => (n === 1 ? `a ${role} link` : `${n} ${role} links`)),
+  ].filter((p): p is string => p !== null);
+  return parts.length === 0 ? "read by nobody but its owner" : `read by ${andList(parts)}`;
+}
+
+/**
+ * What a change does to who reads it, as the Access tab's Save says it: "added the Billing team
+ * and Grace; took off 1 link's holder". `names` gives a person's name for one being added.
+ * Empty where it changes nothing.
+ */
+export function accessChanges(before: Pick<ArtifactAccess, "teams" | "people" | "organisation">, change: ArtifactAccessChange, names: ReadonlyMap<string, string> = new Map()): string {
+  const name = (subject: string): string => before.people.find((p) => p.subject === subject)?.display_name || names.get(subject) || subject;
+  const had = before.teams.map((t) => t.name);
+  const has = change.teams ?? had;
+  const roles = new Map(before.people.map((p) => [p.subject, p.role] as const));
+  const now = new Map((change.people ?? before.people).map((p) => [p.subject, p.role] as const));
+  const added = [...has.filter((t) => !had.includes(t)).map((t) => `the ${t} team`), ...[...now.keys()].filter((s) => !roles.has(s)).map(name)];
+  const taken = [...had.filter((t) => !has.includes(t)).map((t) => `the ${t} team`), ...[...roles.keys()].filter((s) => !now.has(s)).map(name)];
+  const moved = [...now.entries()].filter(([s, r]) => roles.has(s) && roles.get(s) !== r).map(([s, r]) => `${name(s)} may ${r}`);
+  const organisation = change.organisation === undefined || change.organisation === before.organisation ? null : change.organisation ? "the whole organisation reads it" : "the organisation no longer reads it";
+  return [added.length > 0 ? `added ${andList(added)}` : null, taken.length > 0 ? `took off ${andList(taken)}` : null, moved.length > 0 ? andList(moved) : null, organisation].filter((p): p is string => p !== null).join("; ");
+}
+
+/**
+ * The teams a new artifact's sharing menu at the gate offers, in order: those the publication
+ * names (the agent's, or where it named none the teams granted the session's profile, which
+ * the plane ticks by default), then every other team of the person's, unticked.
+ */
+export function offeredTeams(publication: Pick<PublicationGate, "teams">, mine: readonly string[]): string[] {
+  const named = publication.teams ?? [];
+  return [...named, ...mine.filter((t) => !named.includes(t))];
+}
+
+/**
+ * What a new artifact's sharing menu at the gate answers: who reads it (the organisation
+ * switch as `visibility`, and the ticked `teams`, the whole set) and whose it is: the team's
+ * only where exactly one team is ticked, since `team` names the one team in `teams`.
+ */
+export function publishAnswer(choice: { organisation: boolean; teams: string[]; owner: "me" | "team" }): GateAnswer {
+  return { visibility: choice.organisation ? "organisation" : "private", teams: choice.teams, owner: choice.owner === "team" && choice.teams.length === 1 ? "team" : "me" };
+}
+
 /** What `artifact.get` answers: the artifact, its versions newest first, and its links and people for its owner. */
 export interface ArtifactDetail extends Artifact {
   versions: ArtifactVersion[];
+  /** For its owner: who reads it, as `artifact.access.get` answers it. Absent from a plane from before the set. */
+  access?: Omit<ArtifactAccess, "id" | "may_add">;
   shares?: ArtifactShare[];
   /** For its owner: who it is shared with by name. */
   people?: ArtifactPersonShare[];
@@ -287,9 +415,7 @@ export interface ArtifactDetail extends Artifact {
 export interface ArtifactList {
   /** `false` where an administrator switched artifacts off; the list is then empty. */
   enabled: boolean;
-  /** The profiles the caller is covered by. */
-  profiles: string[];
-  /** The teams the caller is in, which they may publish to as `team:<name>`. */
+  /** The teams the caller is in, which may read what they publish. */
   teams?: string[];
   /** Who may publish to the whole organisation. */
   publish_organisation: "everyone" | "platform_admins";
@@ -303,8 +429,10 @@ export interface ArtifactList {
 
 /** Which artifacts a list asks for: none given is everything the caller may see. */
 export interface ArtifactFilter {
-  /** `private`, `organisation`, `team:<name>` or `profile:<name>`. */
+  /** `private` or `organisation`. */
   visibility?: string;
+  /** Only those this team reads, by its name. */
+  team?: string;
   /** Only the caller's own. */
   mine?: boolean;
   /** Only those a link gave the caller. */
@@ -328,12 +456,14 @@ export function ownerWords(artifact: Pick<Artifact, "owner" | "owner_team" | "mi
   return artifact.owner?.display_name || artifact.owner?.subject || "somebody";
 }
 
-/** Who may open an artifact, in words: what every client of a person's says of a visibility. */
+/**
+ * The organisation switch in words: "the whole organisation" for `organisation`, "only you"
+ * for `private`. A `team:<name>` from a record written before the set is that one team.
+ */
 export function visibilityWords(visibility: string): string {
   if (visibility === "private") return "only you";
   if (visibility === "organisation") return "the whole organisation";
   if (visibility.startsWith("team:")) return `the ${visibility.slice("team:".length)} team`;
-  if (visibility.startsWith("profile:")) return `the ${visibility.slice("profile:".length)} profile's people`;
   return visibility;
 }
 
@@ -362,10 +492,12 @@ export interface ArtifactPut {
 export interface ArtifactPublish {
   title: string;
   kind: ArtifactKind;
-  /** `private` (the default), `organisation`, `team:<name>` or `profile:<name>`. */
+  /** `private` (the default) or `organisation`; a new version keeps its own, so none is sent with `id`. */
   visibility?: string;
+  /** A new one's: the teams that read it. A new version keeps who reads it. */
+  teams?: string[];
   files: ArtifactUpload[];
-  /** Whose the new artifact is; left out, a team publication is the team's and any other the publisher's. */
+  /** Whose the new artifact is; left out, the publisher's. */
   owner?: ArtifactOwner;
   id?: string;
   note?: string;
@@ -404,26 +536,28 @@ export function textBytes(text: string): string {
   return btoa(binary);
 }
 
-/** Who an artifact is for, as a gallery groups them: everyone, a team's or a profile's people, a link's, or its owner alone. */
+/** Who an artifact is for, as a gallery groups them: everyone, a team's people, a link's or a name's, or its owner alone. */
 export type ArtifactAudience = "everyone" | "team" | "shared" | "private";
 
 /**
- * Who it is for: its visibility, or a link where that is how the caller has it, which the
- * plane says per row (`scope` `shared`: `mine`, `private`, `organisation`, `team:<name>`,
- * `profile:<name>` or `shared`).
+ * Which gallery group it is under, as the plane's `scope` says per row: `shared`, a team of the
+ * caller's (`team:<name>`), `organisation`, `private`; the caller's own that others read
+ * (`mine`) is under the widest that does: the organisation, else its teams, else only them.
  */
 export function audienceOf(artifact: Artifact): ArtifactAudience {
-  // Shared first: a private one somebody shared with the caller is theirs to open, not "only you".
-  if (artifact.scope === "shared") return "shared";
-  if (artifact.visibility === "private") return "private";
-  if (artifact.visibility === "organisation") return "everyone";
-  return "team";
+  const scope = artifact.scope;
+  if (scope === "shared") return "shared";
+  if (scope === "organisation") return "everyone";
+  if (scope?.startsWith("team:")) return "team";
+  if (scope === "private") return "private";
+  if (artifact.organisation === true || artifact.visibility === "organisation") return "everyone";
+  return (artifact.teams?.length ?? 0) > 0 ? "team" : "private";
 }
 
-/** The team's or the profile's name an artifact is for, or null. */
-export function audienceName(artifact: Artifact): string | null {
-  const m = /^(?:team|profile):(.+)$/.exec(artifact.visibility);
-  return m ? m[1]! : null;
+/** The teams an artifact is under in the gallery's team row: the caller's one its `scope` names, else every team that reads it. */
+export function audienceTeams(artifact: Artifact): string[] {
+  if (artifact.scope?.startsWith("team:")) return [artifact.scope.slice("team:".length)];
+  return artifact.teams ?? [];
 }
 
 /** The person's own calls on artifacts, one per method. */
@@ -475,6 +609,34 @@ export class ArtifactApi {
   /** A link: `view`, `comment` or `edit`, an expiry, and `public` where an administrator allows them. */
   share(id: string, link: { role: ArtifactShareRole; expires?: string; public?: boolean }): Promise<ArtifactNewLink> {
     return this.rpc<ArtifactNewLink>("artifact.share", { id, ...link });
+  }
+
+  /** Who reads it: its owner's to read, and a platform admin's. */
+  getAccess(id: string): Promise<ArtifactAccess> {
+    return this.rpc<ArtifactAccess>("artifact.access.get", { id });
+  }
+
+  /**
+   * Change who reads it, its owner's alone: each part named is the whole of that part, and the
+   * plane applies the difference, auditing each team or person added or taken off; no version
+   * is made. Answers who reads it now, or that the change waits on a team administrator.
+   */
+  setAccess(id: string, change: ArtifactAccessChange): Promise<ArtifactAccess | ArtifactAccessWaiting> {
+    return this.rpc<ArtifactAccess | ArtifactAccessWaiting>("artifact.access.set", { id, ...change });
+  }
+
+  /** The names of every team granted a profile, for an artifact's sharing menu. */
+  profileTeams(profile: string): Promise<{ profile: string; teams: string[] }> {
+    return this.rpc<{ profile: string; teams: string[] }>("profile.teams", { profile });
+  }
+
+  /**
+   * The share picker's search: people whose name, email or subject starts with `query`, among
+   * those who share a team with the caller and, with `artifact` (one of theirs), those the
+   * profile its session ran on covers.
+   */
+  searchPeople(query: string, opts: { artifact?: string; limit?: number } = {}): Promise<{ people: Person[] }> {
+    return this.rpc<{ people: Person[] }>("people.search", { query, ...opts });
   }
 
   /** Share it with one person by name at `role`, no link made; naming them again changes the role. The owner's. */

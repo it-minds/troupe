@@ -68,8 +68,8 @@ beforeEach(async () => {
   await daemon.start();
   daemon.artifacts = [
     row({ id: "art-weekly", title: "Weekly figures", scope: "organisation", published_at: now }),
-    row({ id: "art-core", title: "Core runbook", visibility: "profile:dev", scope: "profile:dev", published_at: lastWeek, version: 3, current: 3 }),
-    row({ id: "art-link", title: "Field interviews", visibility: "profile:research", scope: "shared", shared: true, role: "view", published_at: longAgo }),
+    row({ id: "art-core", title: "Core runbook", visibility: "private", teams: ["core"], scope: "team:core", published_at: lastWeek, version: 3, current: 3 }),
+    row({ id: "art-link", title: "Field interviews", visibility: "private", scope: "shared", shared: true, role: "view", published_at: longAgo }),
     row({ id: "art-mine", title: "My notes", scope: "mine", mine: true, role: "owner", owner: { subject: "alice@example.com", display_name: "Alice" }, version: 2, current: 2, may_delete: true }),
   ];
   location.hash = `#daemon=${daemon.port}:${daemon.token}`;
@@ -294,7 +294,7 @@ describe("the gallery", () => {
     (await seesButton("Revoke", await infoTab(details, "Access"))).click();
     await sees("Revoked: that link opens nothing now.");
 
-    expect(daemon.artifactCalls.filter((c) => c.method !== "artifact.get" && c.method !== "artifact.comments").map((c) => [c.method, c.params["version"] ?? c.params["role"] ?? c.params["share"]])).toEqual([
+    expect(daemon.artifactCalls.filter((c) => !["artifact.get", "artifact.comments", "artifact.access.get"].includes(c.method)).map((c) => [c.method, c.params["version"] ?? c.params["role"] ?? c.params["share"]])).toEqual([
       ["artifact.share", "view"],
       ["artifact.open", 1],
       ["artifact.pin", 1],
@@ -304,63 +304,78 @@ describe("the gallery", () => {
     await seesButton("Publish a new version", await infoTab(details, "Versions"));
   });
 
-  // Who may open it changes here, not in the console: the next version, every file carried,
-  // and the plane's refusal said as it gave it.
-  it("lets its owner change who can see it in the app, as the next version with the same files", async () => {
+  // Who reads it is one menu in the Access tab (troupe #1238): the teams as checkboxes, those
+  // granted the profile its session ran on first; the organisation switch; one Save that
+  // sends the set, makes no version and says what changed.
+  it("lets its owner change who reads it from one menu, saved at once and as no version", async () => {
+    daemon.myTeams = ["core"];
+    daemon.profileTeams = { dev: ["clinics", "billing"] };
     await signedIn();
     await openGallery();
     const details = await infoTab(await artifactInfo("My notes"), "Access");
-    const who = await waitFor(() => [...details.querySelectorAll<HTMLSelectElement>("label select")].find((s) => s.closest("label")?.textContent?.startsWith("Who may open it")) ?? null, "who may open it");
-    expect(who.value).toBe("organisation");
-    expect([...who.options].map((o) => o.value)).toEqual(["private", "organisation", "team:core", "profile:dev"]);
-    await waitFor(() => button("Change who can see it", details)?.disabled === true, "the change offered only once another is chosen");
+    const box = (label: string): HTMLInputElement | null => [...details.querySelectorAll<HTMLLabelElement>(".access-menu label")].find((l) => l.textContent?.trim().startsWith(label))?.querySelector("input") ?? null;
+    await sees("It is read by the whole organisation.", details);
+    await waitFor(() => [...details.querySelectorAll(".access-menu .teams label")].map((l) => l.textContent?.split(" · ")[0]?.trim()).join() === "The clinics team,The billing team,The core team", "the profile's teams first, then the person's");
+    expect(box("The clinics team")?.checked).toBe(false);
+    expect(box("The whole organisation")?.checked).toBe(true);
+    await waitFor(() => button("Save who reads it", details)?.disabled === true, "Save offered once something changed");
 
-    choose(who, "team:core");
-    (await seesButton("Change who can see it", details)).click();
-    await sees("Moved: My notes is for the core team now, as version 3 with the same files.");
-    expect(daemon.artifactCalls.find((c) => c.method === "artifact.put")?.params).toMatchObject({ id: "art-mine", base: 2, visibility: "team:core" });
-    expect(daemon.artifactCalls.find((c) => c.method === "artifact.put")?.params).not.toHaveProperty("files");
-    expect(daemon.artifacts!.find((a) => a["id"] === "art-mine")).toMatchObject({ visibility: "team:core", version: 3 });
+    box("The clinics team")!.click();
+    box("The core team")!.click();
+    box("The whole organisation")!.click();
+    await sees("Not saved yet: added the clinics team and the core team; the organisation no longer reads it.", details);
+    (await seesButton("Save who reads it", details)).click();
+    await sees("Saved: added the clinics team and the core team; the organisation no longer reads it. It is read by the clinics and core teams now.");
+    expect(daemon.accessSets).toEqual([{ id: "art-mine", teams: ["clinics", "core"], organisation: false }]);
+    expect(daemon.artifactCalls.some((c) => c.method === "artifact.put")).toBe(false);
+    expect(daemon.artifacts!.find((a) => a["id"] === "art-mine")).toMatchObject({ teams: ["clinics", "core"], visibility: "private", version: 2 });
+
+    // Taking a team off is the same Save.
+    box("The core team")!.click();
+    (await seesButton("Save who reads it", details)).click();
+    await sees("Saved: took off the core team.");
+    expect(daemon.accessSets.at(-1)).toEqual({ id: "art-mine", teams: ["clinics"] });
     expect(windows).toHaveLength(0); // no console page opened
 
-    // Another's artifact offers no choice at all.
+    // Another's artifact offers no menu at all.
     await closeInfo();
     await infoTab(await artifactInfo("Weekly figures"), "Access");
-    expect(button("Change who can see it", aside()!)).toBeNull();
+    expect(aside()!.querySelector(".access-menu")).toBeNull();
   });
 
-  // Shared with a picked person (troupe #62): the picker finds them by name among those the
-  // plane lets the owner find, the role is chosen, and they are listed and removed in place.
-  it("lets its owner share it with a picked person at a role, and take it back", async () => {
+  // People are part of the same menu: the picker finds them among those the plane lets the
+  // owner find, the artifact's profile's people too; each is added at a role, changed or
+  // removed in the draft, and the one Save sends them all.
+  it("adds a picked person at a role, the artifact's profile's people found too, and takes them off again", async () => {
     await signedIn();
     const cy = { subject: "cy@example.test", display_name: "Cy Example", email: "cy@example.test" };
-    harness!.plane.people = [cy];
+    const gil = { subject: "gil@example.test", display_name: "Gil", email: "gil@example.test" };
     daemon.people = [cy];
+    daemon.coveredPeople = [gil];
     await openGallery();
     const details = await infoTab(await artifactInfo("My notes"), "Access");
     await sees("Nobody by name.", details);
 
-    const input = await waitFor(() => details.querySelector<HTMLInputElement>(".shared-with input"), "the picker");
-    await waitFor(() => button("Share", details)?.disabled === true, "Share offered only once somebody is picked");
-    type(input, "cy");
-    (await seesButton("Cy Example · cy@example.test", details)).click();
-    const role = details.querySelector<HTMLSelectElement>(".shared-with select")!;
+    const input = await waitFor(() => details.querySelector<HTMLInputElement>(".access-menu input:not([type])"), "the picker");
+    const role = [...details.querySelectorAll<HTMLSelectElement>(".access-menu select")].find((s) => s.closest("label")?.textContent?.startsWith("They may"))!;
     expect([...role.options].map((o) => o.value)).toEqual(["view", "comment", "edit"]);
     choose(role, "comment");
-    (await seesButton("Share", details)).click();
-    await sees("Shared: Cy Example finds My notes under Shared with you, and can comment.");
-    expect(daemon.artifactCalls.find((c) => c.method === "artifact.share")?.params).toMatchObject({ id: "art-mine", person: "cy@example.test", role: "comment" });
-    await waitFor(() => details.querySelector('[aria-label="Shared with"]')?.textContent?.includes("Cy Example · Can comment"), "Cy listed at their role");
+    type(input, "gi");
+    (await seesButton("Gil · gil@example.test", details)).click();
+    expect(daemon.peopleSearches.at(-1)).toMatchObject({ query: "gi", artifact: "art-mine" });
+    await waitFor(() => details.querySelector('[aria-label="Shared with"]')?.textContent?.includes("Gil"), "Gil in the draft");
+    (await seesButton("Save who reads it", details)).click();
+    await sees("Saved: added Gil.");
+    expect(daemon.accessSets.at(-1)).toEqual({ id: "art-mine", people: [{ subject: "gil@example.test", role: "comment" }] });
 
-    (await waitFor(() => details.querySelector<HTMLButtonElement>('button[aria-label="Remove Cy Example"]'), "Remove Cy")).click();
-    await sees("Removed: Cy Example cannot open My notes now");
-    expect(daemon.artifactCalls.find((c) => c.method === "artifact.unshare")?.params).toMatchObject({ id: "art-mine", person: "cy@example.test" });
+    // A role changed and a person removed are the same Save.
+    choose(await waitFor(() => details.querySelector<HTMLSelectElement>('select[aria-label="What Gil may do"]'), "Gil's role"), "edit");
+    await sees("Not saved yet: Gil may edit.", details);
+    (await waitFor(() => details.querySelector<HTMLButtonElement>('button[aria-label="Remove Gil"]'), "Remove Gil")).click();
+    (await seesButton("Save who reads it", details)).click();
+    await sees("Saved: took off Gil.");
+    expect(daemon.accessSets.at(-1)).toEqual({ id: "art-mine", people: [] });
     await sees("Nobody by name.");
-
-    // Another's artifact has no share control.
-    await closeInfo();
-    await infoTab(await artifactInfo("Weekly figures"), "Access");
-    expect(aside()!.querySelector(".shared-with")).toBeNull();
   });
 
   // Its thread, beside its details: who wrote each comment and when, a box for whoever may
@@ -485,14 +500,14 @@ describe("the gallery", () => {
 
   it("names the teams in Your teams as chips where there are two, and not with one", async () => {
     await signedIn();
-    daemon.artifacts!.push(row({ id: "art-design", title: "Design review", visibility: "team:design", scope: "team:design", published_at: now }));
+    daemon.artifacts!.push(row({ id: "art-design", title: "Design review", visibility: "private", teams: ["design"], scope: "team:design", published_at: now }));
     await openGallery();
     await waitFor(() => titles().length === 5, "five cards");
     // Only inside Your teams.
     expect(gallery().querySelector('[aria-label="Which of your teams"]')).toBeNull();
     chip("Your teams").click();
     const teams = await waitFor(() => gallery().querySelector<HTMLElement>('[aria-label="Which of your teams"]'), "the team chips");
-    expect([...teams.querySelectorAll("button")].map((b) => b.textContent)).toEqual(["All of them2", "design1", "dev profile1"]);
+    expect([...teams.querySelectorAll("button")].map((b) => b.textContent)).toEqual(["All of them2", "core1", "design1"]);
     [...teams.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent?.startsWith("design"))!.click();
     await waitFor(() => titles().join() === "Design review", "design's alone");
     [...teams.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent?.startsWith("All of them"))!.click();
@@ -526,16 +541,30 @@ describe("the gallery", () => {
     expect(rangeWords("", "2026-11-03")).toBe("until 3 November 2026");
   });
 
-  it("says the plane's refusal of a move in its own words", async () => {
+  it("says the plane's refusal of a team in its own words, in place, and keeps the draft", async () => {
+    daemon.profileTeams = { dev: ["finance"] };
     await signedIn();
     await openGallery();
     const details = await infoTab(await artifactInfo("My notes"), "Access");
-    // Published elsewhere since the gallery was read: the base is no longer the newest.
-    daemon.artifacts!.find((a) => a["id"] === "art-mine")!["version"] = 5;
-    const who = await waitFor(() => [...details.querySelectorAll<HTMLSelectElement>("label select")].find((s) => s.closest("label")?.textContent?.startsWith("Who may open it")) ?? null, "who may open it");
-    choose(who, "private");
-    (await seesButton("Change who can see it", details)).click();
-    await sees("version 5 was published since; reload it and try again");
+    const finance = await waitFor(() => [...details.querySelectorAll<HTMLLabelElement>(".access-menu label")].find((l) => l.textContent?.trim().startsWith("The finance team"))?.querySelector("input") ?? null, "a team granted the profile");
+    // The grant gone since the menu was read: the plane refuses that team, and nothing changes.
+    daemon.profileTeams = {};
+    finance.click();
+    (await seesButton("Save who reads it", details)).click();
+    await sees("Not saved: you may not give it to team finance");
+    expect(finance.checked).toBe(true);
+    expect(daemon.accessSets).toEqual([]);
+  });
+
+  it("says a change from a sensitive session waits on a team administrator, and changes nothing yet", async () => {
+    daemon.artifacts!.find((a) => a["id"] === "art-mine")!["sharing"] = "ask";
+    await signedIn();
+    await openGallery();
+    const details = await infoTab(await artifactInfo("My notes"), "Access");
+    (await waitFor(() => [...details.querySelectorAll<HTMLLabelElement>(".access-menu label")].find((l) => l.textContent?.trim().startsWith("The core team"))?.querySelector("input") ?? null, "the core team")).click();
+    (await seesButton("Save who reads it", details)).click();
+    await sees("Not changed yet: This session is sensitive, so sharing it wider is waiting on a team administrator: the people who read it now go on reading it.");
+    expect(daemon.accessSets).toEqual([]);
   });
 
   // The first run's walk (#930): a person nothing has been published for met a "Show

@@ -10,6 +10,12 @@
 # in to the registry first. Loading into kind is the default because that is the loop a
 # person runs twenty times a day.
 #
+# `TROUPE_BUILD_CACHE=gha` builds through buildx with GitHub Actions' cache as a layer
+# cache, read from one scope per image, `<TROUPE_BUILD_CACHE_SCOPE>-<image>`, and written
+# back only with `TROUPE_BUILD_CACHE_WRITE=1`, and `--load`s each image into the local Docker so that `kind load` finds it as before. That is
+# the cluster jobs' (`.github/workflows/cluster.yml`), which need a buildx builder and the
+# runner's cache token in the environment. Unset, it is plain `docker build`, as on a laptop.
+#
 # These four are everything this repository produces. There is no client binary here and
 # no other artifact: what is deployed is these images and `charts/troupe`.
 set -euo pipefail
@@ -20,6 +26,44 @@ registry="${TROUPE_REGISTRY:-ghcr.io/it-minds}"
 tag="${TROUPE_IMAGE_TAG:-dev}"
 cluster="${TROUPE_KIND_CLUSTER:-troupe-dev}"
 push="${TROUPE_PUSH:-false}"
+cache="${TROUPE_BUILD_CACHE:-}"
+cache_scope="${TROUPE_BUILD_CACHE_SCOPE:-build}"
+cache_write="${TROUPE_BUILD_CACHE_WRITE:-}"
+case "$cache" in
+  "" | gha) ;;
+  *) echo "build-images: TROUPE_BUILD_CACHE is gha or unset, not $cache" >&2; exit 1 ;;
+esac
+if [ "$cache" = gha ]; then
+  if [ "$cache_write" = 1 ]; then
+    echo "build-images: reading and writing the gha cache, scopes ${cache_scope}-<image>"
+  else
+    echo "build-images: reading the gha cache, scopes ${cache_scope}-<image>; writing nothing"
+  fi
+fi
+
+# One image, by `docker build` or, with the cache, by buildx with it. The first argument
+# names the image's cache scope; the rest are `docker build`'s.
+build() {
+  local name="$1"
+  shift
+  if [ "$cache" = gha ]; then
+    local write=()
+    if [ "$cache_write" = 1 ]; then
+      write=(--cache-to "type=gha,mode=max,scope=${cache_scope}-${name}")
+    fi
+    docker buildx build --load \
+      --cache-from "type=gha,scope=${cache_scope}-${name}" \
+      "${write[@]}" \
+      "$@"
+  else
+    docker build "$@"
+  fi
+}
+
+# The time spent building and the time spent loading, each said once at the end, so a slow
+# run shows which it was.
+build_seconds=0
+load_seconds=0
 
 # Which commit and which moment, stamped into every image so the plane's own page can say
 # whether what is running is what was deployed. `git` may not be there — a tarball build,
@@ -31,31 +75,38 @@ releases=("${@:-troupe_operator troupe_plane troupe_worker troupe_a2a troupe_gui
 for release in ${releases[@]}; do
   image="${registry}/${release//_/-}:${tag}"
   echo "build-images: building $image"
+  start=$SECONDS
   # linux/amd64 explicitly: a laptop that is not amd64 would otherwise build an image
   # the node pool cannot run, and the failure arrives as `exec format error` in a
   # CrashLoopBackOff rather than as anything about architecture.
   if [ "$release" = "troupe_gui" ]; then
     # The GUI is built from its own directory, as CI builds it, with the path the chart
     # mounts it at baked into its asset URLs, and the root's licence files beside it.
-    docker build --platform linux/amd64 \
+    build "${release//_/-}" --platform linux/amd64 \
       --file clients/gui/Dockerfile \
       --build-context licences=. \
       --build-arg "TROUPE_GUI_BASE=${TROUPE_GUI_BASE:-/app}" \
       --tag "$image" clients/gui
   else
-    docker build --platform linux/amd64 \
+    build "${release//_/-}" --platform linux/amd64 \
       --file docker/Dockerfile \
       --build-arg "RELEASE=${release}" \
       --build-arg "BUILD_COMMIT=${commit}" \
       --build-arg "BUILD_TIME=${built_at}" \
       --tag "$image" .
   fi
+  build_seconds=$((build_seconds + SECONDS - start))
 
   if [ "$push" = "true" ]; then
     echo "build-images: pushing $image"
     docker push "$image"
   elif kind get clusters 2>/dev/null | grep -qx "$cluster"; then
     echo "build-images: loading $image into kind/$cluster"
+    start=$SECONDS
     kind load docker-image "$image" --name "$cluster"
+    load_seconds=$((load_seconds + SECONDS - start))
   fi
 done
+
+echo "phase time: image build ${build_seconds}s${cache:+ (cache: $cache)}"
+if [ "$push" != "true" ]; then echo "phase time: kind load ${load_seconds}s"; fi

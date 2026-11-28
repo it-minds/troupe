@@ -513,9 +513,10 @@ defmodule Troupe.UI.Headless.Printer do
     state
   end
 
-  # An agent's publication asks whom it is for, which headless mode has nobody to say: the
-  # line says what it is and whom the agent proposed it for, and it is denied like any
-  # other request. One the agent named nobody for, `--auto-approve` could not answer either.
+  # An agent's publication asks who reads a new one, which headless mode has nobody to say:
+  # the line says what it is and who the agent proposed read it (a new version, who reads
+  # it now, which it keeps), and it is denied like any other request. A new one the agent
+  # named no visibility for, `--auto-approve` could not answer either.
   defp print(
          %{type: :approval_requested, agent_path: p, data: %{publication: %{} = publication} = d},
          state
@@ -528,12 +529,16 @@ defmodule Troupe.UI.Headless.Printer do
         else: "files"
 
     proposal =
-      case publication["visibility"] do
-        nil ->
+      case publication do
+        %{"id" => id} when is_binary(id) ->
+          "a new version of #{id}, read by #{publication["access"] || "whoever reads it now"}; " <>
+            "headless mode denies it (use --auto-approve)"
+
+        %{"visibility" => nil} ->
           "the agent named nobody, so --auto-approve would not have answered it either"
 
-        visibility ->
-          "proposed for #{visibility}#{owned_by(publication)}; headless mode denies it (use --auto-approve)"
+        _named ->
+          "proposed for #{readers(publication)}#{owned_by(publication)}; headless mode denies it (use --auto-approve)"
       end
 
     line(
@@ -653,12 +658,19 @@ defmodule Troupe.UI.Headless.Printer do
   # Every line carries the prefix, not just the first: a tool result is routinely
   # several lines long (a command's output leads with its exit code), and a bare
   # continuation line is unattributable when several branches print at once.
-  # Whose a publication would be: nothing for a new version, whose owner is settled.
-  defp owned_by(%{"id" => id}) when is_binary(id), do: ""
+  # Who a new publication would be read by: the organisation switch and its teams.
+  defp readers(publication) do
+    org = if publication["visibility"] == "organisation", do: ["the whole organisation"], else: []
+    teams = Enum.map(List.wrap(publication["teams"]), &"team #{&1}")
 
-  defp owned_by(%{"visibility" => "team:" <> _, "owner" => owner}) when owner != "me",
-    do: ", owned by the team"
+    case org ++ teams do
+      [] -> "only the person"
+      parts -> Words.and_list(parts)
+    end
+  end
 
+  # Whose a new publication would be: the one team's where the agent said so.
+  defp owned_by(%{"owner" => "team", "teams" => [_]}), do: ", owned by the team"
   defp owned_by(_publication), do: ", owned by the person"
 
   defp line(state, path, text) do

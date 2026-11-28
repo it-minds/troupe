@@ -674,31 +674,37 @@ export interface DelegationGate {
 
 /**
  * What the gate shows of an agent's publication before it is published: the title, kind
- * and file count the agent sent, whom it proposed it for (`visibility`, null where it said
- * nobody), whose it proposed it be (`owner`, null for the default: the team's for a team,
- * else the publisher's), the artifact it is a new version of, and its note.
+ * and file count the agent sent; for a new artifact the organisation switch it proposed
+ * (`visibility`, null where it said nothing), the teams that would read it (`teams`, those
+ * it named or, where it named none, those the plane ticks by default: the teams granted the
+ * session's profile), and whose it proposed it be (`owner`, null for the publisher's); for a
+ * new version the artifact (`id`) and who reads it now in the plane's words (`access`),
+ * which the version keeps; and its note.
  */
 export interface PublicationGate {
   title: string;
   kind: string;
   files: number;
   visibility: string | null;
+  teams: string[] | null;
   owner: "me" | "team" | null;
   id: string | null;
+  access: string | null;
   note: string | null;
 }
 
 /**
  * What an answer may carry besides its word, as `approval.respond` sends it, each a key
  * beside `decision`: for a delegation the agent it goes to and the parts of the brief
- * edited; for a publication whom it is for (`visibility`: `private`, `organisation`,
- * `team:<name>` or `profile:<name>`) and, for a new artifact, whose it is (`owner`; a new
- * version keeps whose it is, and the harness drops one sent); a word back with a denial.
+ * edited; for a new artifact's publication who reads it (`visibility`, `private` or
+ * `organisation`, and `teams`, the whole set) and whose it is (`owner`); a new version keeps
+ * both, and the harness drops either sent for one; a word back with a denial.
  */
 export interface GateAnswer {
   agent?: string;
   brief?: Partial<Record<(typeof BRIEF_PARTS)[number], string>>;
   visibility?: string;
+  teams?: string[];
   owner?: "me" | "team";
   reason?: string;
   /** With `allow_always`: where the person's rule is kept, the workspace's own file or their `config.yaml` (troupe #920). */
@@ -709,6 +715,7 @@ export interface GateAnswer {
 export interface GateAnswered {
   agent?: string;
   visibility?: string;
+  teams?: string[];
   owner?: "me" | "team";
   edited?: string[];
   reason?: string;
@@ -719,13 +726,16 @@ function publicationOf(raw: unknown): PublicationGate | undefined {
   const p = raw as Record<string, unknown>;
   const text = (v: unknown): string | null => (typeof v === "string" && v !== "" ? v : null);
   const owner = p["owner"] === "me" || p["owner"] === "team" ? p["owner"] : null;
+  const teams = Array.isArray(p["teams"]) ? p["teams"].filter((t): t is string => typeof t === "string" && t !== "") : null;
   return {
     title: str(p["title"]),
     kind: str(p["kind"], "file"),
     files: num(p["files"]) ?? 0,
     visibility: text(p["visibility"]),
+    teams,
     owner,
     id: text(p["id"]),
+    access: text(p["access"]),
     note: text(p["note"]),
   };
 }
@@ -760,6 +770,7 @@ function answeredOf(data: Record<string, unknown>): GateAnswered | undefined {
   const out: GateAnswered = {};
   if (typeof data["agent"] === "string") out.agent = data["agent"];
   if (typeof data["visibility"] === "string") out.visibility = data["visibility"];
+  if (Array.isArray(data["teams"])) out.teams = data["teams"].filter((t): t is string => typeof t === "string");
   if (data["owner"] === "me" || data["owner"] === "team") out.owner = data["owner"];
   if (Array.isArray(data["edited"])) out.edited = data["edited"].filter((p): p is string => typeof p === "string");
   if (typeof data["reason"] === "string") out.reason = data["reason"];

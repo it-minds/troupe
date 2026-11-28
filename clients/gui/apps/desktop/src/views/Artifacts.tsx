@@ -1,10 +1,12 @@
 // The person's artifacts in their own app (troupe #62): what they and their troupe published
 // that they may open, as the gallery in the console has them: from the plane itself where
 // the app is signed in to one, through this computer's daemon and its sign-in otherwise. A grid of cards grouped by when, filtered by who each is for (everyone,
-// your teams and profiles, a link's, only you) and by a search. The grid has the screen's
+// your teams, a link's or a name's, only you) and by a search. The grid has the screen's
 // width: a click on a card opens the artifact, and its Info opens a modal dialog in four tabs
-// (Overview, Access, Versions, Comments) with where it came from, who can see it, whose it
-// is, its versions, its thread, and for its owner the controls. An artifact a team owns is
+// (Overview, Access, Versions, Comments) with where it came from, who reads it, whose it
+// is, its versions, its thread, and for its owner the controls: who reads it is one menu
+// (teams, people, the organisation switch) saved at once, kept across its versions, beside
+// its links. An artifact a team owns is
 // every member's: each has the owner's controls, and the owning person gives one of theirs
 // to a team, or the team's admin takes it back.
 //
@@ -22,13 +24,13 @@
 
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import type { JSX, KeyboardEvent as ReactKeyboardEvent, ReactNode } from "react";
-import { ago, artifactLinkText, audienceName, audienceOf, blockedKindWords, blockedWords, bytes, errorText, teamOwned, visibilityWords } from "@troupe/client";
-import type { Artifact, ArtifactAudience, ArtifactDetail, ArtifactList, ArtifactShareRole, ArtifactThread, ArtifactVersion, DaemonClient, OwnPlane, Person } from "@troupe/client";
+import { accessChanges, accessWaiting, ago, artifactAccessWords, artifactLinkText, audienceOf, audienceTeams, blockedKindWords, blockedWords, bytes, errorText, teamOwned } from "@troupe/client";
+import type { Artifact, ArtifactAccess, ArtifactAccessChange, ArtifactAudience, ArtifactDetail, ArtifactList, ArtifactShareRole, ArtifactThread, ArtifactVersion, DaemonClient, OwnPlane, Person } from "@troupe/client";
 import { goesLine, goesSentence, versionGoes, versionsSentence } from "@troupe/client";
 import { copyText } from "../clipboard";
 import { shell } from "../shell";
 import { Loading, unreachedWords } from "./bits";
-import { Publish, VisibilityOptions } from "./Publish";
+import { Publish } from "./Publish";
 
 type Filter = "all" | ArtifactAudience;
 
@@ -102,12 +104,6 @@ function inRange(a: Artifact, since: string, until: string): boolean {
   return (!since || day >= since) && (!until || day <= until);
 }
 
-/** Which team or profile an artifact under Your teams is for, as its chip names it. */
-function teamLabel(visibility: string): string {
-  if (visibility.startsWith("profile:")) return `${visibility.slice("profile:".length)} profile`;
-  return visibility.startsWith("team:") ? visibility.slice("team:".length) : visibility;
-}
-
 const KINDS: Record<string, string> = { html: "pages", markdown: "documents", file: "files" };
 
 function who(person: { subject: string; display_name?: string | null } | undefined | null, mine: boolean): string {
@@ -151,15 +147,14 @@ function roleLabel(role: string): string {
 
 /** Who can see it, in a sentence, and what that means. A team's is its members' whatever it is for. */
 function audienceWords(a: Artifact, audience: ArtifactAudience): { long: string; note: string } {
-  const name = audienceName(a);
-  const members = teamOwned(a) ? ` Members of ${a.owner_team}, whose it is, can open it too.` : "";
+  const teams = a.teams ?? audienceTeams(a);
+  const named = teams.length === 1 ? teams[0]! : teams.length > 1 ? `${teams.slice(0, -1).join(", ")} and ${teams[teams.length - 1]}` : "your team";
+  const members = teamOwned(a) && !teams.includes(a.owner_team ?? "") ? ` Members of ${a.owner_team}, whose it is, can open it too.` : "";
   switch (audience) {
     case "everyone":
       return { long: "Everyone in your organisation", note: "Anyone who can sign in to your Troupe plane can open it." };
     case "team":
-      return a.visibility.startsWith("profile:")
-        ? { long: `The ${name} profile's people`, note: `People granted the ${name} profile can open it. Nobody else can find it.${members}` }
-        : { long: `Everyone on ${name}`, note: `Members of ${name} can open it. People outside the team cannot find it.${a.owner_team && a.owner_team !== name ? members : ""}` };
+      return { long: `Everyone on ${named}`, note: `Members of ${named} can open it. People outside ${teams.length > 1 ? "those teams" : "the team"} cannot find it unless it is shared with them.${members}` };
     case "shared":
       return { long: "Shared with you", note: `${whose(a)} shared it with you, by name or by a link you opened. ${mayWords(a.role)} until they take it back.` };
     case "private":
@@ -294,10 +289,10 @@ export function Artifacts({
   const matches = (a: Artifact): boolean => !q || [a.title, whose(a), who(a.owner, a.mine), a.owner?.subject ?? "", a.origin?.session_id ?? ""].join(" ").toLowerCase().includes(q);
   const searched = list.artifacts.filter((a) => matches(a) && (kind === "all" || a.kind === kind) && inRange(a, since, until));
   const audienced = searched.filter((a) => filter === "all" || audienceOf(a) === filter);
-  // The teams (and profiles) of what Your teams shows: a choice only where there are two or more.
-  const teamsShown = filter === "team" ? [...new Set(audienced.map((a) => a.visibility))].sort((x, y) => teamLabel(x).localeCompare(teamLabel(y))) : [];
+  // The teams of what Your teams shows: a choice only where there are two or more.
+  const teamsShown = filter === "team" ? [...new Set(audienced.flatMap(audienceTeams))].sort((x, y) => x.localeCompare(y)) : [];
   const byTeam = teamsShown.length > 1 && teamsShown.includes(team) ? team : "all";
-  const shown = audienced.filter((a) => byTeam === "all" || a.visibility === byTeam);
+  const shown = audienced.filter((a) => byTeam === "all" || audienceTeams(a).includes(byTeam));
   const count = (f: Filter): number => searched.filter((a) => f === "all" || audienceOf(a) === f).length;
   const current = list.artifacts.find((a) => a.id === selected) ?? null;
   // The ones the person keeps at the top form a group above the days; the rest go by when.
@@ -307,7 +302,7 @@ export function Artifacts({
   ].filter((g) => g.items.length > 0);
   const range = rangeWords(since, until);
   // What narrows the list beside the search, in the empty state's one sentence.
-  const narrowedBy = [kind !== "all" ? `among ${KINDS[kind] ?? kind}` : "", byTeam !== "all" ? `for ${teamLabel(byTeam)}` : "", range ? `published ${range}` : ""].filter(Boolean).join(" ");
+  const narrowedBy = [kind !== "all" ? `among ${KINDS[kind] ?? kind}` : "", byTeam !== "all" ? `for ${byTeam}` : "", range ? `published ${range}` : ""].filter(Boolean).join(" ");
   const widen = [range ? "wider dates" : "", kind !== "all" ? "every kind" : "", byTeam !== "all" ? "all of your teams" : ""].filter(Boolean);
 
   return (
@@ -350,8 +345,8 @@ export function Artifacts({
         <nav className="audiences teams-row" aria-label="Which of your teams">
           {["all", ...teamsShown].map((t) => (
             <button key={t} type="button" className="audience is-team" aria-pressed={byTeam === t} onClick={() => setTeam(t)}>
-              <span>{t === "all" ? "All of them" : teamLabel(t)}</span>
-              <span className="n">{audienced.filter((a) => t === "all" || a.visibility === t).length}</span>
+              <span>{t === "all" ? "All of them" : t}</span>
+              <span className="n">{audienced.filter((a) => t === "all" || audienceTeams(a).includes(t)).length}</span>
             </button>
           ))}
         </nav>
@@ -425,7 +420,7 @@ export function Artifacts({
                       </span>
                       <span className="tags">
                         <span className={`audience-pill is-${audience}`}>
-                          {AUDIENCE[audience].glyph} {audience === "team" ? (audienceName(a) ?? "TEAM").toUpperCase() : AUDIENCE[audience].short}
+                          {AUDIENCE[audience].glyph} {audience === "team" ? (audienceTeams(a)[0] ?? "TEAM").toUpperCase() : AUDIENCE[audience].short}
                         </span>
                         <span className="kind micro">{KIND[a.kind] ?? a.kind.toUpperCase()}</span>
                         {(a.comments ?? 0) > 0 && <span className="kind micro">{a.comments === 1 ? "1 COMMENT" : `${a.comments} COMMENTS`}</span>}
@@ -476,7 +471,7 @@ export function Artifacts({
           artifact={current}
           audience={audienceOf(current)}
           teams={list.teams}
-          profiles={list.profiles}
+          publishOrganisation={list.publish_organisation}
           onOpened={(version) => opened(current.id, version)}
           onChanged={reload}
           onClose={() => setSelected(null)}
@@ -614,7 +609,7 @@ function Info({
   artifact,
   audience,
   teams,
-  profiles,
+  publishOrganisation,
   onOpened,
   onChanged,
   onClose,
@@ -632,7 +627,8 @@ function Info({
   artifact: Artifact;
   audience: ArtifactAudience;
   teams: string[] | undefined;
-  profiles: string[] | undefined;
+  /** Who may publish to the whole organisation here, which the organisation switch follows. */
+  publishOrganisation?: ArtifactList["publish_organisation"] | undefined;
   onOpened: (version: number) => void;
   onChanged: () => void;
   onOpenSession?: ((id: string) => Promise<string | null>) | undefined;
@@ -644,7 +640,6 @@ function Info({
   const [busy, setBusy] = useState(false);
   const [publishing, setPublishing] = useState(false);
   const [asked, setAsked] = useState(0);
-  const [moveTo, setMoveTo] = useState(artifact.visibility);
   const [giveTo, setGiveTo] = useState(teams?.[0] ?? "");
   const [tab, setTab] = useState<InfoTab>("overview");
   // The thread's length once it is read (the row's count till then); null for a plane with no threads.
@@ -855,28 +850,16 @@ function Info({
           </p>
           <p className="muted">{words.note}</p>
           {owner && (
-            <div className="move-visibility">
-              <label>
-                Who may open it
-                <select value={moveTo} disabled={busy} onChange={(e) => setMoveTo(e.target.value)}>
-                  <VisibilityOptions teams={teams} profiles={profiles} />
-                </select>
-              </label>
-              <button
-                type="button"
-                disabled={busy || moveTo === artifact.visibility}
-                onClick={() =>
-                  void act(
-                    () => via.moveArtifact(artifact.id, artifact.version, moveTo),
-                    `Moved: ${artifact.title} is for ${visibilityWords(moveTo)} now, as version ${artifact.version + 1} with the same files.`,
-                  )
-                }
-              >
-                Change who can see it
-              </button>
-            </div>
+            <AccessMenu
+              via={via}
+              artifact={artifact}
+              organisationAllowed={publishOrganisation !== "platform_admins" || artifact.visibility === "organisation"}
+              onChanged={() => {
+                setAsked((n) => n + 1);
+                onChanged();
+              }}
+            />
           )}
-          {owner && detail && <SharedWith via={via} artifact={artifact} detail={detail} onChanged={() => setAsked((n) => n + 1)} />}
         </section>
 
         {owner && detail && (
@@ -1016,27 +999,81 @@ function Info({
   );
 }
 
+/** A person in the Access menu's draft: who, and the role they will have once it is saved. */
+interface Reader {
+  subject: string;
+  display_name?: string | null;
+  role: ArtifactShareRole;
+}
+
+/** Whether two lists of names hold the same names, in any order. */
+function sameNames(a: readonly string[], b: readonly string[]): boolean {
+  return a.length === b.length && a.every((x) => b.includes(x));
+}
+
 /**
- * Who its owner shared it with by name, each at a role, and the picker that adds somebody:
- * people whose name starts with what is typed, among those the plane lets the owner find, as
- * the session's invitation picker has them. Naming somebody again changes their role.
+ * Who reads it, as its owner changes it: one menu over the set, saved at once. The teams as
+ * checkboxes, those granted the profile its session ran on first and then the owner's other
+ * teams, and a team that reads it but is neither shown as it is, with why; the people it is
+ * shared with by name at their roles, and the picker that adds somebody (people who share a
+ * team with the owner, and those its session's profile covers); the organisation switch where
+ * the plane allows it. Save sends the whole of each part changed (`artifact.access.set`),
+ * which the plane applies as the difference and makes no version of, and says what changed;
+ * a refusal is said here and the draft kept, and a change from a sensitive session that waits
+ * on a team administrator says so.
  */
-function SharedWith({ via, artifact, detail, onChanged }: { via: OwnPlane; artifact: Artifact; detail: ArtifactDetail; onChanged: () => void }): JSX.Element {
+function AccessMenu({ via, artifact, organisationAllowed, onChanged }: { via: OwnPlane; artifact: Artifact; organisationAllowed: boolean; onChanged: () => void }): JSX.Element {
+  const [access, setAccess] = useState<ArtifactAccess | null>(null);
+  const [granted, setGranted] = useState<string[]>([]);
+  const [teams, setTeams] = useState<string[]>([]);
+  const [people, setPeople] = useState<Reader[]>([]);
+  const [organisation, setOrganisation] = useState(false);
   const [query, setQuery] = useState("");
   const [found, setFound] = useState<Person[]>([]);
-  const [chosen, setChosen] = useState<Person | null>(null);
   const [role, setRole] = useState<ArtifactShareRole>("view");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [said, setSaid] = useState<string | null>(null);
-  const people = detail.people ?? [];
+  const [asked, setAsked] = useState(0);
+  const profile = artifact.origin?.profile ?? null;
+
+  const take = (a: ArtifactAccess): void => {
+    setAccess(a);
+    setTeams(a.teams.map((t) => t.name));
+    setPeople(a.people.map((p) => ({ subject: p.subject, display_name: p.display_name ?? null, role: p.role })));
+    setOrganisation(a.organisation);
+  };
+
+  useEffect(() => {
+    let live = true;
+    via.artifactAccess(artifact.id).then(
+      (a) => live && take(a),
+      (e: unknown) => live && setError(errorText(e)),
+    );
+    return () => {
+      live = false;
+    };
+  }, [via, artifact.id, asked]);
+
+  // The teams granted the profile its session ran on, which come first: none for one no pod session published.
+  useEffect(() => {
+    if (!profile) return;
+    let live = true;
+    via.profileTeams(profile).then(
+      (r) => live && setGranted(r.teams),
+      () => live && setGranted([]),
+    );
+    return () => {
+      live = false;
+    };
+  }, [via, profile]);
 
   useEffect(() => {
     const q = query.trim();
-    if (q === "" || chosen) return setFound([]);
+    if (q === "") return setFound([]);
     let live = true;
     const t = setTimeout(() => {
-      via.searchPeople(q).then(
+      via.searchPeople(q, { artifact: artifact.id }).then(
         (r) => live && setFound(r.people.filter((p) => !people.some((s) => s.subject === p.subject))),
         () => live && setFound([]),
       );
@@ -1045,18 +1082,38 @@ function SharedWith({ via, artifact, detail, onChanged }: { via: OwnPlane; artif
       live = false;
       clearTimeout(t);
     };
-  }, [via, query, chosen, people.length]);
+  }, [via, artifact.id, query, people.length]);
 
-  const act = async (what: () => Promise<unknown>, done: string): Promise<void> => {
+  if (!access) return error ? <p className="note error">{error}</p> : <Loading what="Reading who reads it…" />;
+
+  const mayAdd = access.may_add;
+  const ordered = [...granted.filter((t) => mayAdd.includes(t)), ...mayAdd.filter((t) => !granted.includes(t))];
+  // A team that reads it but that the owner may not give it to (a platform admin's doing, or a team they left).
+  const fixed = access.teams.map((t) => t.name).filter((t) => !mayAdd.includes(t));
+  const had = access.people;
+  const change: ArtifactAccessChange = {
+    ...(sameNames(teams, access.teams.map((t) => t.name)) ? {} : { teams }),
+    ...(people.length === had.length && people.every((p) => had.some((h) => h.subject === p.subject && h.role === p.role)) ? {} : { people: people.map((p) => ({ subject: p.subject, role: p.role })) }),
+    ...(organisation === access.organisation ? {} : { organisation }),
+  };
+  const changed = Object.keys(change).length > 0;
+  const name = (p: { subject: string; display_name?: string | null }): string => p.display_name || p.subject;
+
+  const save = async (): Promise<void> => {
     setBusy(true);
     setError(null);
     setSaid(null);
     try {
-      await what();
-      setSaid(done);
-      setQuery("");
-      setChosen(null);
-      onChanged();
+      const answer = await via.setArtifactAccess(artifact.id, change);
+      if (accessWaiting(answer)) {
+        setSaid(`Not changed yet: ${answer.reason}.`);
+        take(access);
+      } else {
+        const names = new Map(people.map((p) => [p.subject, name(p)] as const));
+        setSaid(`Saved: ${accessChanges(access, change, names)}. It is ${artifactAccessWords(answer)} now.`);
+        take(answer);
+        onChanged();
+      }
     } catch (e) {
       setError(errorText(e));
     } finally {
@@ -1064,65 +1121,58 @@ function SharedWith({ via, artifact, detail, onChanged }: { via: OwnPlane; artif
     }
   };
 
-  const name = (p: { subject: string; display_name?: string | null }): string => p.display_name || p.subject;
-
   return (
-    <div className="shared-with">
-      <h4 className="micro">SHARED WITH</h4>
+    <div className="shared-with access-menu">
+      <h4 className="micro">WHO READS IT</h4>
+      <p className="muted">It is {artifactAccessWords(access)}. A new version keeps who reads it; changing it here makes no version.</p>
+      <fieldset className="teams" disabled={busy}>
+        <legend className="micro">TEAMS</legend>
+        {ordered.map((t) => (
+          <label key={t} className="inline">
+            <input type="checkbox" checked={teams.includes(t)} onChange={(e) => setTeams((now) => (e.target.checked ? [...now, t] : now.filter((x) => x !== t)))} /> The {t} team
+            {granted.includes(t) && profile && <span className="muted micro"> · granted {profile}, which its session ran on</span>}
+          </label>
+        ))}
+        {fixed.map((t) => (
+          <label key={t} className="inline">
+            <input type="checkbox" checked disabled /> The {t} team
+            <span className="muted micro"> · shown as it is: you are not in it and {profile ? `${profile} is not granted to it` : "no session's profile grants it"}, so it is not yours to change here</span>
+          </label>
+        ))}
+        {ordered.length === 0 && fixed.length === 0 && <p className="muted">No team of yours is known here.</p>}
+      </fieldset>
+      {(organisationAllowed || organisation) && (
+        <label className="inline">
+          <input type="checkbox" checked={organisation} disabled={busy} onChange={(e) => setOrganisation(e.target.checked)} /> The whole organisation: anyone who can sign in to your Troupe plane
+        </label>
+      )}
+      <h4 className="micro">PEOPLE</h4>
       {people.length === 0 ? (
         <p className="muted">Nobody by name. Pick somebody below, or make a link.</p>
       ) : (
         <ul className="links" aria-label="Shared with">
           {people.map((p) => (
             <li key={p.subject}>
-              <span>
-                {name(p)} · {roleLabel(p.role)}
-              </span>
-              <button type="button" className="link" disabled={busy} aria-label={`Remove ${name(p)}`} onClick={() => void act(() => via.unshareArtifact(artifact.id, { person: p.subject }), `Removed: ${name(p)} cannot open ${artifact.title} now, unless it is for somebody they are.`)}>
+              <span>{name(p)}</span>
+              <select aria-label={`What ${name(p)} may do`} value={p.role} disabled={busy} onChange={(e) => setPeople((now) => now.map((x) => (x.subject === p.subject ? { ...x, role: e.target.value as ArtifactShareRole } : x)))}>
+                {ROLES.map((r) => (
+                  <option key={r.role} value={r.role}>
+                    {r.label}
+                  </option>
+                ))}
+              </select>
+              <button type="button" className="link" disabled={busy} aria-label={`Remove ${name(p)}`} onClick={() => setPeople((now) => now.filter((x) => x.subject !== p.subject))}>
                 Remove
               </button>
             </li>
           ))}
         </ul>
       )}
-      <form
-        className="move-visibility"
-        onSubmit={(e) => {
-          e.preventDefault();
-          if (chosen) void act(() => via.sharePersonArtifact(artifact.id, chosen.subject, role), `Shared: ${name(chosen)} finds ${artifact.title} under Shared with you, and ${roleLabel(role).toLowerCase()}.`);
-        }}
-      >
+      <div className="move-visibility">
         <label>
-          Share with
-          <input
-            value={query}
-            disabled={busy}
-            onChange={(e) => {
-              setQuery(e.target.value);
-              setChosen(null);
-            }}
-            placeholder="A name or an email"
-          />
+          Add somebody
+          <input value={query} disabled={busy} onChange={(e) => setQuery(e.target.value)} placeholder="A name or an email" />
         </label>
-        {found.length > 0 && (
-          <ul className="people" aria-label="People">
-            {found.map((p) => (
-              <li key={p.subject}>
-                <button
-                  type="button"
-                  className="tab"
-                  onClick={() => {
-                    setChosen(p);
-                    setQuery(name(p));
-                  }}
-                >
-                  {name(p)}
-                  {p.email && p.email !== name(p) ? ` · ${p.email}` : ""}
-                </button>
-              </li>
-            ))}
-          </ul>
-        )}
         <label>
           They may
           <select value={role} disabled={busy} onChange={(e) => setRole(e.target.value as ArtifactShareRole)}>
@@ -1133,13 +1183,53 @@ function SharedWith({ via, artifact, detail, onChanged }: { via: OwnPlane; artif
             ))}
           </select>
         </label>
-        <button type="submit" disabled={busy || !chosen}>
-          Share
+      </div>
+      {found.length > 0 && (
+        <ul className="people" aria-label="People">
+          {found.map((p) => (
+            <li key={p.subject}>
+              <button
+                type="button"
+                className="tab"
+                onClick={() => {
+                  setPeople((now) => [...now, { subject: p.subject, display_name: p.display_name ?? null, role }]);
+                  setQuery("");
+                }}
+              >
+                {name(p)}
+                {p.email && p.email !== name(p) ? ` · ${p.email}` : ""}
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+      {query.trim() !== "" && found.length === 0 && <p className="muted micro">Nobody you can share with has a name that starts with that.</p>}
+      <div className="actions">
+        <button type="button" className="primary" disabled={busy || !changed} onClick={() => void save()}>
+          {busy ? "Saving…" : "Save who reads it"}
         </button>
-      </form>
-      {query.trim() !== "" && !chosen && found.length === 0 && <p className="muted micro">Nobody you can share with has a name that starts with that.</p>}
-      {error && <p className="note error">{error}</p>}
-      {said && <p className="note" role="status">{said}</p>}
+        {changed && (
+          <button type="button" className="link" disabled={busy} onClick={() => take(access)}>
+            Undo changes
+          </button>
+        )}
+      </div>
+      {changed && <p className="muted micro">Not saved yet: {accessChanges(access, change, new Map(people.map((p) => [p.subject, name(p)] as const)))}.</p>}
+      {error && (
+        <p className="note error" role="alert">
+          Not saved: {error}
+        </p>
+      )}
+      {said && (
+        <p className="note" role="status">
+          {said}
+        </p>
+      )}
+      {said?.startsWith("Not changed yet") && (
+        <button type="button" className="link" onClick={() => setAsked((n) => n + 1)}>
+          Read it again
+        </button>
+      )}
     </div>
   );
 }

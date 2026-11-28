@@ -633,11 +633,11 @@ defmodule Troupe.UI.TUI.View do
   defp pending_summary(%{kind: :approval, delegation: %{"agent" => agent}}, once?, _where),
     do: "delegation to #{agent} (y / e / s / n#{if once?, do: "", else: " / a"} in the window)"
 
-  # An agent's publication is answered with whom it is for, picked by digit in the window.
+  # An agent's publication: a new one's readers ticked by digit in the window, a new version asked nothing.
   defp pending_summary(%{kind: :approval, publication: %{} = publication}, once?, _where),
     do:
       "publication: #{Model.one_line(publication["title"] || "untitled")} " <>
-        "(a digit picks whom for, y / n#{if once? or publication["visibility"] == nil, do: "", else: " / a"} in the window)"
+        "(#{if is_binary(publication["id"]), do: "", else: "a digit ticks who reads it, "}y / n#{if once? or (publication["id"] == nil and publication["visibility"] == nil), do: "", else: " / a"} in the window)"
 
   defp pending_summary(%{kind: :approval, name: name}, once?, where),
     do: "approval: #{name} (#{if once?, do: "y / n", else: "y / n / a"}#{where})"
@@ -2725,8 +2725,8 @@ defmodule Troupe.UI.TUI.View do
       # A delegation at the gate (TUI Decision 157): run, edit, switch, deny, always.
       {delegation? and once?, ["y/e/s/n delegation", "y/e/s/n", "y/e/s/n"]},
       {delegation? and not once?, ["y/e/s/n/a delegation", "y/e/s/n/a", "y/e/s/n/a"]},
-      # An agent's publication: a digit picks whom it is for, then y publishes.
-      {publication?, ["1-9 whom for · y/n publish", "1-9 · y/n publish", "1-9 y/n"]},
+      # An agent's publication: a digit ticks who reads a new one, then y or Enter publishes.
+      {publication?, ["1-9 who reads · y/n publish", "1-9 · y/n publish", "1-9 y/n"]},
       {armed?(state, w.path, "x"), ["x again cancels & removes", "x again cancels", "x again"]},
       {armed?(state, w.path, "d"), ["d again dismisses", "d again dismisses", "d again"]},
       {not armed?(state, w.path, "x") and w.state in [:running, :needs_input],

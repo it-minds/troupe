@@ -30,7 +30,7 @@ defmodule Troupe.PublishCommandTest do
       eventually(fn -> Enum.find(user_state(pid).commands, &(&1["name"] == "publish")) end)
 
     # Who it is for is offered, a team's among them with whose it is, and need not be said.
-    assert publish["usage"] =~ "[private | organisation]"
+    assert publish["usage"] =~ "[private | organisation] [--team <name>]..."
 
     # Saying nothing of who it is for is the person's alone, and is sent as it is.
     type(pid, "/publish #{Path.join(ws, "report.html")}")
@@ -41,11 +41,19 @@ defmodule Troupe.PublishCommandTest do
 
     assert refused =~ "not signed in to a Troupe plane"
 
-    type(pid, "/publish #{Path.join(ws, "plan.md")} team:core")
+    type(pid, "/publish #{Path.join(ws, "plan.md")} --team core")
     press(pid, "enter")
 
     eventually(fn ->
       Enum.find(user_state(pid).model.notices, &(&1 =~ "plan.md not published"))
+    end)
+
+    # The one team a visibility named before the set is no word /publish takes.
+    type(pid, "/publish #{Path.join(ws, "plan.md")} team:core")
+    press(pid, "enter")
+
+    eventually(fn ->
+      Enum.find(user_state(pid).model.notices, &(&1 =~ ~s(/publish takes "team:core" nowhere)))
     end)
 
     type(pid, "/publish #{Path.join(ws, "missing.html")} organisation")

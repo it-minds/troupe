@@ -25,7 +25,9 @@
 // OFFER_AFTER_MS (15000 by default) later, a second laptop session is offered, which the list
 // shows as it is pushed; OFFER_AFTER_MS=0 for none. Artifacts has four: a page of the person's
 // own in two versions, a Markdown document of theirs to edit and share, somebody else's
-// Markdown for the dev profile's people, and Ada's private page, on Every artifact.
+// Markdown the core team reads, and Ada's private page, on Every artifact. Who reads the
+// person's own is the Who reads it menu on its page (troupe #1238): the dev profile is granted
+// to core and clinics, and its picker finds Dana, whom dev covers.
 
 import { readFileSync } from "node:fs";
 import { exampleAdmin } from "../packages/client/test/support/admin.js";
@@ -76,6 +78,8 @@ const plane = await FakePlane.start({
   worker,
   corsOrigins: origins,
   admin,
+  profileTeams: { dev: ["core", "clinics"] },
+  profilePeople: { dev: [{ subject: "dana@example.com", display_name: "Dana Example", email: "dana@example.com" }] },
   version,
   // The desktop app the plane recommends, which the console's "Open in the app" offers to
   // install where nothing opened (#959).
@@ -112,11 +116,13 @@ const plane = await FakePlane.start({
     // A document of the person's own, to edit, roll back and share.
     artifact("art-fake-plan", { subject: as.subject, display_name: as.displayName }, {
       title: "Quarter plan",
+      origin: { session_id: "s-fake-1", profile: "dev", agent: "agent:build", where: "pod" },
       kind: "markdown",
-      visibility: "profile:dev",
+      visibility: "private",
+      teams: ["core"],
       versions: [{ n: 1, files: [{ path: "index.md", content_type: "text/markdown", content: "# Quarter plan\n\nFirst draft." }], published_by: { subject: as.subject, display_name: as.displayName }, published_at: "2026-10-25T08:00:00Z" }],
     }),
-    artifact("art-fake-notes", { subject: "ada@example.com", display_name: "Ada" }, { title: "Release notes draft", kind: "markdown", visibility: "profile:dev", versions: [{ n: 1, files: [{ path: "notes.md", content_type: "text/markdown", content: "# Notes" }], published_by: { subject: "ada@example.com", display_name: "Ada" }, published_at: "2026-10-23T09:00:00Z" }] }),
+    artifact("art-fake-notes", { subject: "ada@example.com", display_name: "Ada" }, { title: "Release notes draft", kind: "markdown", visibility: "private", teams: ["core"], versions: [{ n: 1, files: [{ path: "notes.md", content_type: "text/markdown", content: "# Notes" }], published_by: { subject: "ada@example.com", display_name: "Ada" }, published_at: "2026-10-23T09:00:00Z" }] }),
   ],
 });
 

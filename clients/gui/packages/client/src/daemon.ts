@@ -14,7 +14,7 @@
 import { TroupeConnection, TroupeRpcError } from "./connection.js";
 import { SessionView } from "./session.js";
 import type { CallOptions, ConnectOptions, ConnectionHooks } from "./connection.js";
-import type { Artifact, ArtifactBlocked, ArtifactComment, ArtifactDetail, ArtifactFilter, ArtifactKind, ArtifactList, ArtifactNewLink, ArtifactOwner, ArtifactPersonShare, ArtifactShareRole, ArtifactText, ArtifactThread, ArtifactThumbnail, ArtifactTicket, ArtifactTransferTo, ArtifactUpload } from "./artifacts.js";
+import type { Artifact, ArtifactAccess, ArtifactAccessChange, ArtifactAccessWaiting, ArtifactBlocked, ArtifactComment, ArtifactDetail, ArtifactFilter, ArtifactKind, ArtifactList, ArtifactNewLink, ArtifactOwner, ArtifactPersonShare, ArtifactShareRole, ArtifactText, ArtifactThread, ArtifactThumbnail, ArtifactTicket, ArtifactTransferTo, ArtifactUpload } from "./artifacts.js";
 import type { AgentBroken, AgentCheck, AgentDefinition, AgentDeleted, AgentRow, AgentScope, AgentSkippedFile, AgentsChanged, AgentWritten } from "./agents.js";
 import type { ConfigScope, ConfigSetParams, ModelConfig, ModelDiscovery, ModelsParams } from "./config.js";
 import { remoteOffer, syncState } from "./fleet.js";
@@ -1266,13 +1266,14 @@ export class DaemonClient implements OwnPlane {
 
   /**
    * Publish files as an artifact on the plane (troupe #62), as this daemon's person: a new
-   * one, or with `id` the next version of one of theirs. `owner` says whose a new one is:
-   * left out, one for a team is that team's and any other the person's. The daemon sends a
+   * one, read by `teams` and the organisation switch (`visibility`), or with `id` the next
+   * version of one of theirs, which keeps who reads it. `owner` says whose a new one is:
+   * left out, the person's. The daemon sends a
    * version too large for one call by an upload handle. Refused with a sentence where it is
    * signed in to no plane. The answer names what the artifacts host will block in the
    * version (`blocked`); it is published all the same.
    */
-  publishArtifact(params: { title: string; kind: ArtifactKind; visibility: string; files: ArtifactUpload[]; owner?: ArtifactOwner; id?: string; note?: string; session_id?: string; thumbnail?: ArtifactThumbnail }): Promise<Artifact & { plane_url?: string; blocked?: ArtifactBlocked[] }> {
+  publishArtifact(params: { title: string; kind: ArtifactKind; visibility?: string; teams?: string[]; files: ArtifactUpload[]; owner?: ArtifactOwner; id?: string; note?: string; session_id?: string; thumbnail?: ArtifactThumbnail }): Promise<Artifact & { plane_url?: string; blocked?: ArtifactBlocked[] }> {
     return this.command<Artifact & { plane_url?: string; blocked?: ArtifactBlocked[] }>("artifact.publish", params);
   }
 
@@ -1311,12 +1312,23 @@ export class DaemonClient implements OwnPlane {
     return this.command<ArtifactDetail>("artifact.rollback", { id, version });
   }
 
+  /** Who reads it, the plane's `artifact.access.get` as the person. The owner's. */
+  artifactAccess(id: string): Promise<ArtifactAccess> {
+    return this.call<ArtifactAccess>("artifact.access.get", { id });
+  }
+
   /**
-   * Who may open it, moved: the next version over `base`, the newest, carrying every file as
-   * it is (`artifact.put` with no files). The owner's alone.
+   * Change who reads it, the plane's `artifact.access.set` as the person: each part named the
+   * whole of that part, applied as the difference, no version made; or, from a sensitive
+   * session whose profile asks first, the change waits on a team administrator. The owner's.
    */
-  moveArtifact(id: string, base: number, visibility: string): Promise<ArtifactDetail> {
-    return this.command<ArtifactDetail>("artifact.put", { id, base, visibility });
+  setArtifactAccess(id: string, change: ArtifactAccessChange): Promise<ArtifactAccess | ArtifactAccessWaiting> {
+    return this.command<ArtifactAccess | ArtifactAccessWaiting>("artifact.access.set", { id, ...change });
+  }
+
+  /** The names of every team granted a profile, the plane's `profile.teams` as the person. */
+  profileTeams(profile: string): Promise<{ profile: string; teams: string[] }> {
+    return this.call<{ profile: string; teams: string[] }>("profile.teams", { profile });
   }
 
   /** The version its address serves, or null for the newest. The owner's. */
@@ -1363,9 +1375,9 @@ export class DaemonClient implements OwnPlane {
     return this.command<{ id: string; comment: ArtifactComment }>("artifact.comment.edit", { id, comment, body });
   }
 
-  /** The share picker's search, the plane's `people.search` as the person. */
-  searchPeople(query: string): Promise<{ people: Person[] }> {
-    return this.call<{ people: Person[] }>("people.search", { query });
+  /** The share picker's search, the plane's `people.search` as the person; with `artifact`, among the people its session's profile covers too. */
+  searchPeople(query: string, opts: { artifact?: string } = {}): Promise<{ people: Person[] }> {
+    return this.call<{ people: Person[] }>("people.search", { query, ...opts });
   }
 
   /** Forget one fact of a repository's memory, by its id; `memory.md` is written again without it. */

@@ -11,7 +11,8 @@
 # this one upgraded to this one (`upgrade`), which is what a deployment does with every
 # release and what nothing else tests.
 #
-# About twenty-five minutes, most of it building the five images and the suite itself. So
+# About twenty-five to thirty minutes, most of it the suite (about fourteen) and building the
+# five images (about six with the cache warm, seven with none, eleven filling it). So
 # the CRDs and the admission policy go to the API server first, before anything is built:
 # a rule the API server refuses fails the job in a minute, which is the failure a release
 # once met ten minutes into this job, and no check before it had.
@@ -23,6 +24,15 @@ on:
 env:
   ELIXIR_VERSION: "1.20.4"
   OTP_VERSION: "28.5.0.5"
+  # Both jobs build the five images through `scripts/build-images` with GitHub Actions'
+  # cache as the layer cache, one scope per image under this name, shared between them.
+  # A new name is a cold cache: the way to start from nothing (`docs/developer/ci.md`).
+  # Only a run outside a pull request writes it (the nightly, a push, a release): a pull
+  # request reads what its base and `main` wrote, and its own copy would be 2.4 GiB of a
+  # repository's cache for a minute or two saved on its next run.
+  TROUPE_BUILD_CACHE: gha
+  TROUPE_BUILD_CACHE_SCOPE: cluster-v1
+  TROUPE_BUILD_CACHE_WRITE: ${{ github.event_name != 'pull_request' && '1' || '' }}
 
 jobs:
   kind:
@@ -172,9 +182,15 @@ jobs:
           profile '{endpoint: "https://llm-gw.example.test/v1", provider: gemini, model: gemini-2.5-pro}' \
             | kubectl --context kind-troupe-dev apply --dry-run=server -n default -f -
 
+      # The images' layer cache needs a buildx builder, and the runner's cache token and URL
+      # in the environment, which only an action is given.
+      - uses: docker/setup-buildx-action@v4
+      - uses: crazy-max/ghaction-github-runtime@v4
+
       # The same script a developer runs, so that a cluster failure here is reproducible
       # by one command on a laptop. It builds the five images and `kind load`s them,
-      # which is why nothing is pushed for this job.
+      # which is why nothing is pushed for this job; it prints each step's time, and the
+      # images' build and load apart.
       #
       # The gateway is a public host a runner can reach, and no key: the egress suite dials
       # the dev profile's model endpoint from inside a pod, which needs a host that answers
@@ -297,7 +313,12 @@ jobs:
           # The step above put a stand-in at the metadata address, so the suite fails
           # rather than skips the connection it cannot otherwise make.
           TROUPE_E2E_METADATA_STAND_IN: "1"
-        run: mix troupe.e2e
+        run: |
+          start=$SECONDS
+          status=0
+          mix troupe.e2e || status=$?
+          echo "phase time: the suite $((SECONDS - start))s"
+          exit "$status"
 
       # A cluster failure that produces only an exit code is a failure nobody will
       # diagnose. These are the two logs that say what happened.
@@ -366,8 +387,12 @@ jobs:
       # Compiled before the cluster is, so the seed does not spend the cluster's time on it.
       - run: MIX_ENV=test mix compile
 
+      # This tree's images, built with the same cache as `kind`'s.
+      - uses: docker/setup-buildx-action@v4
+      - uses: crazy-max/ghaction-github-runtime@v4
+
       # The previous release is the newest tag at or below VERSION that is not this commit;
-      # the script says which, and the log names it.
+      # the script says which, and the log names it. Each step's time is printed at the end.
       - name: Upgrade the previous release to this one
         run: scripts/kind-upgrade-check
 

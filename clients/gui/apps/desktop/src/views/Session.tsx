@@ -3190,19 +3190,21 @@ function Stopped({ sentence }: { sentence: string }): JSX.Element {
 }
 
 /**
- * The person's teams and profiles, for a publication's gate: the daemon's `artifact.list`
- * names them as the plane does for its sign-in, and failing that the plane's own `me`.
- * Asked once, when the first publication asks, and null until an answer comes.
+ * The person's teams and whether they may publish to the organisation, for a publication's
+ * gate: the daemon's `artifact.list` names them as the plane does for its sign-in, and
+ * failing that the plane's own `me`. Asked once, when the first publication asks, and null
+ * until an answer comes.
  */
 function useAudiences(daemon: DaemonClient | null, auth: AuthSession | null, wanted: boolean): Audiences | null {
   const [audiences, setAudiences] = useState<Audiences | null>(null);
   useEffect(() => {
     if (!wanted || audiences) return;
     let live = true;
-    const fromMe = (): Audiences | null => (auth?.me ? { teams: auth.me.teams, profiles: auth.me.profiles } : null);
+    const admin = auth?.me?.platform_admin === true;
+    const fromMe = (): Audiences | null => (auth?.me ? { teams: auth.me.teams, organisation: true } : null);
     if (daemon) {
       daemon.artifacts({ mine: true }).then(
-        (l) => live && setAudiences({ teams: l.teams ?? [], profiles: l.profiles ?? [] }),
+        (l) => live && setAudiences({ teams: l.teams ?? [], organisation: l.publish_organisation !== "platform_admins" || admin }),
         () => live && setAudiences(fromMe()),
       );
     } else setAudiences(fromMe());
