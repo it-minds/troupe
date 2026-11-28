@@ -23,7 +23,7 @@ defmodule Troupe.Plane.Memory.Proposals do
   alias Troupe.Plane.Control.Router
   alias Troupe.Plane.Identity.{Team, User}
   alias Troupe.Plane.Memory.Proposal
-  alias Troupe.Protocol.Lifespan
+  alias Troupe.Protocol.{Lifespan, Sensitive}
 
   @pending_per_person 20
   @shown_days 7
@@ -69,9 +69,17 @@ defmodule Troupe.Plane.Memory.Proposals do
   defp lasting(session_id) do
     case Sessions.get(session_id) do
       %{lifespan: "throwaway"} -> {:error, :throwaway}
+      # And a sensitive one proposes nothing either: what it read must not leave it.
+      %{sensitive_at: %DateTime{}} -> {:error, :sensitive}
       _lasting_or_unknown -> :ok
     end
   end
+
+  @doc """
+  The sentence a sensitive session's proposal is refused with, for its agent to relay.
+  """
+  @spec sensitive_reason() :: String.t()
+  def sensitive_reason, do: Sensitive.no_proposals()
 
   # Whether a pod's session on `profile` may propose: no where its profile in effect says
   # `memoryProposals: false`, its own or a profile's it extends, which a child cannot undo.
@@ -94,7 +102,7 @@ defmodule Troupe.Plane.Memory.Proposals do
   """
   @spec propose(User.t(), String.t(), Team.t() | nil, term(), keyword()) ::
           {:ok, Proposal.t()}
-          | {:error, :off | {:off, String.t()} | :throwaway | :no_person | String.t()}
+          | {:error, :off | {:off, String.t()} | :throwaway | :sensitive | :no_person | String.t()}
   def propose(user, scope, team, entry, opts \\ [])
 
   def propose(%User{id: id} = user, scope, team, entry, opts) when is_binary(id) do

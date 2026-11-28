@@ -182,6 +182,12 @@ defmodule Troupe.Config do
             # `spec.personalTools: forbid`, which the worker sets from the activation, so a
             # change reaches a session at its next wake. Never from a file.
             personal_tools_forbidden_by: nil,
+            # What makes the session sensitive and what a sensitive one is refused, the
+            # worker profile's `spec.sensitive` as the worker sets it from the activation:
+            # `%{marked_by: rules, deny: rules, profile: name}`, each rule a per-tool rule
+            # of the `:sensitive` layer, or `nil` where nothing marks a session. Never from
+            # a file.
+            sensitive: nil,
             # The organisation's memory documents a session reads (`Troupe.PlaneMemory`,
             # #55): the organisation's, a team's and a worker profile's, in that order, as
             # instructions before every other file. On a pod the worker sets the list from

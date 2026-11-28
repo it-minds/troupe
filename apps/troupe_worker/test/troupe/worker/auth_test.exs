@@ -82,6 +82,9 @@ defmodule Troupe.Worker.AuthTest do
     "session.title.set",
     "session.lifespan.set",
     "session.erase",
+    # A sensitive session's held shares, which a team administrator answers at the plane.
+    "session.share_requests",
+    "session.share_request.decide",
     "session.fork"
   ]
 

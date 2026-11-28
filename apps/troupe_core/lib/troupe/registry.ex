@@ -79,6 +79,10 @@ defmodule Troupe.Registry do
   @spec client_tools(String.t()) :: GenServer.name()
   def client_tools(session_id), do: via({:client_tools, session_id})
 
+  @doc "Whether the session is sensitive, which its root and every subagent read."
+  @spec sensitive(String.t()) :: GenServer.name()
+  def sensitive(session_id), do: via({:sensitive, session_id})
+
   @doc "The session's compact projection, for fleet and summary subscribers."
   @spec summary(String.t()) :: GenServer.name()
   def summary(session_id), do: via({:summary, session_id})

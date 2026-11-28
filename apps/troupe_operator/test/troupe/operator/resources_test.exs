@@ -510,6 +510,22 @@ defmodule Troupe.Operator.ResourcesTest do
       assert Resources.for_profile(quiet, context.policy, context.settings) == context.resources
     end
 
+    # #1239: what makes a session sensitive and what it is refused then are the plane's to
+    # send at every activation, so a profile that says them renders what one that does not
+    # renders, and no pod is replaced to change them.
+    test "sensitive changes nothing the operator renders", context do
+      marked =
+        profile()
+        |> put_in(["spec", "sensitive"], %{
+          "markedBy" => ["mcp(records.*)"],
+          "deny" => ["publish_artifact"],
+          "sharing" => "deny"
+        })
+        |> Profile.from_resource()
+
+      assert Resources.for_profile(marked, context.policy, context.settings) == context.resources
+    end
+
     test "the container drops every capability", %{resources: resources} do
       security = container(resources)["securityContext"]
       assert security["allowPrivilegeEscalation"] == false

@@ -39,7 +39,7 @@ defmodule Troupe.Worker.Session.Manager do
 
   alias Troupe.ObjectStore
   alias Troupe.Protocol.Event
-  alias Troupe.Session.Log
+  alias Troupe.Session.{Log, Sensitive}
   alias Troupe.Session.Summary
   alias Troupe.Sessions.{Cipher, Storage}
   alias Troupe.Sessions.{Context, Sealer}
@@ -99,7 +99,9 @@ defmodule Troupe.Worker.Session.Manager do
       interrupted: false,
       approvals: %{},
       questions: %{},
-      agent: nil
+      agent: nil,
+      # The session's mark once it is sensitive, `session_marked_sensitive`'s data.
+      sensitive: nil
     }
   ]
 
@@ -432,7 +434,7 @@ defmodule Troupe.Worker.Session.Manager do
            # A session created with a repository, waking to an empty tree, starts from it.
            :ok <- Clone.ensure(context.session_id, root, tree, state.opts),
            {:ok, sealer} <- start_sealer(state, context, log),
-           {:ok, session} <- Restore.start(context, root, state.opts) do
+           {:ok, session} <- start_tree(context, root, state.opts) do
         {:ok, log, sealer, session}
       end
     else
@@ -446,6 +448,23 @@ defmodule Troupe.Worker.Session.Manager do
       kind, reason ->
         forget(context, root, found)
         :erlang.raise(kind, reason, __STACKTRACE__)
+    end
+  end
+
+  # The session's tree, started over the log and the workspace; or, where a tree of it runs
+  # here already, that one: one whose manager went before its activation was answered (a
+  # crash, a kill) leaves the tree up and the session's name taken, and the next activation
+  # is answered with it, as `Troupe.activate/2` answers a session another command woke
+  # first.
+  defp start_tree(context, root, opts) do
+    case Restore.start(context, root, opts) do
+      {:error, {:already_started, pid}} = taken ->
+        if Process.alive?(pid),
+          do: {:ok, %{id: context.session_id, pid: pid, workspace: nil}},
+          else: taken
+
+      started ->
+        started
     end
   end
 
@@ -720,7 +739,8 @@ defmodule Troupe.Worker.Session.Manager do
             questions: questions,
             interrupted: interrupted_on_restore?(root),
             failed_reason: failed_on_restore(root),
-            agent: switched_on_restore(root)
+            agent: switched_on_restore(root),
+            sensitive: Sensitive.mark_of(state.session_id)
         }
     }
   end
@@ -818,6 +838,10 @@ defmodule Troupe.Worker.Session.Manager do
     status_changed(%{state | lifecycle: lifecycle})
   end
 
+  # Sensitive from now on, which the row says and the plane audits; the first mark holds.
+  defp observe(%{lifecycle: %{sensitive: nil}} = state, %Event{type: "session_marked_sensitive", data: data}),
+    do: status_changed(put_in(state.lifecycle.sensitive, data))
+
   defp observe(state, %Event{type: "approval_requested", agent: path, data: %{"call_id" => id}}) do
     open_ask(state, :approvals, id, path)
   end
@@ -909,7 +933,17 @@ defmodule Troupe.Worker.Session.Manager do
       # rest is applied: the plane's pin follows it.
       "bundle_version" => bundle_version(state.opts)
     }
+    |> Map.merge(sensitive_fields(state.lifecycle.sensitive))
   end
+
+  # Since when and by what the session is sensitive, only once it is: the row's columns,
+  # which the plane writes once. A mark by hand is the person's, as `person:<subject>`.
+  defp sensitive_fields(%{"at" => at, "by" => by} = mark) do
+    by = if mark["how"] == "person", do: "person:" <> by, else: by
+    %{"sensitive_at" => at, "sensitive_by" => by, "sensitive_rule" => mark["rule"]}
+  end
+
+  defp sensitive_fields(_none), do: %{}
 
   defp bundle_version(opts) do
     case Keyword.get(opts || [], :bundle) do

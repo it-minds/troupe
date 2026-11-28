@@ -39,8 +39,10 @@ invisible to the API server until you apply them:
 helm show crds "$chart" --version "$version" | kubectl apply --server-side --force-conflicts -f -
 ```
 
-A CRD the API server refuses fails here, before anything else changes, with the rule it
-refused. Fix nothing by hand: a refusal is a defect in the release; stay where you are and
+Until they are applied, the API server does not know a profile field the release adds, such
+as `spec.sensitive` ([sensitive sessions](sensitive-sessions.md)), and prunes it from every
+resource written: a repository's manifest that sets it loses it. A CRD the API server refuses fails here, before anything
+else changes, with the rule it refused. Fix nothing by hand: a refusal is a defect in the release; stay where you are and
 report it.
 
 ## 3. The chart, and the migration before it
@@ -125,7 +127,9 @@ Helm never touched, and it does not undo the migrations: the old plane then runs
 the new schema. Whether it can depends on what the migrations between the two did, and
 **no test rolls a release back**: the suite proves the way forward, and the tested way back
 is the restore (§7). Roll back when the new release fails to start and its migration
-added only what the old one ignores, which its notes say; restore otherwise.
+added only what the old one ignores, which its notes say; restore otherwise. What the old
+plane ignores it also does not enforce: a plane from before `spec.sensitive` marks no session
+and refuses nothing for it, and its pods do not either.
 
 To take the schema back as well, which is for an operator with a problem and not part of a
 deploy: run the plane image with the database URL, `TROUPE_PLANE_AUTOSTART=false` and

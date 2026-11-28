@@ -21,7 +21,7 @@ defmodule Troupe.Plane.Fleet.Profile do
 
   alias Troupe.Plane.Fleet.{Provisioner, SizeClass}
   alias Troupe.Plane.GitHub
-  alias Troupe.Protocol.{AgentRule, PermissionRule, ProviderTypes, Words}
+  alias Troupe.Protocol.{AgentRule, PermissionRule, ProviderTypes, Sensitive, Words}
 
   @primary_key {:name, :string, autogenerate: false}
   @derive {Phoenix.Param, key: :name}
@@ -183,12 +183,18 @@ defmodule Troupe.Plane.Fleet.Profile do
           []
       end
 
+    # `sensitive` says which calls make a session on the pods sensitive and which a
+    # sensitive one is refused: rules the pods read as they read `permissions`, so one they
+    # could not read is refused, and `markedBy` without `deny` is refused with what to add.
+    sensitive = Enum.map(Sensitive.problems(Map.get(spec, "sensitive")), &{:spec, &1})
+
     overrides ++
       personal ++
       proposals ++
       github ++
       llm_problems(Map.get(spec, "llm")) ++
-      rule_problems(Map.get(spec, "permissions")) ++ agents_problems(Map.get(spec, "agents"))
+      rule_problems(Map.get(spec, "permissions")) ++
+      sensitive ++ agents_problems(Map.get(spec, "agents"))
   end
 
   defp spec_switches(:spec, _spec), do: []

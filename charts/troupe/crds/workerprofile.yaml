@@ -86,6 +86,35 @@ spec:
                       type: array
                       maxItems: 200
                       items: {type: string, minLength: 1, maxLength: 500}
+                sensitive:
+                  type: object
+                  description: >-
+                    When a session on this profile's pods becomes sensitive, and what it may
+                    not do then. markedBy and deny are rules as permissions takes them, such
+                    as mcp(records.*), read_file(/mnt/records/**) or shell(psql): a call
+                    matching a markedBy rule marks the session sensitive before it runs, and
+                    from then on every call matching a deny rule is refused, in the root and
+                    every subagent, with a sentence saying since when and by what. Nothing
+                    clears the mark: not the owner, not an administrator; a sensitive session
+                    is sensitive until it is erased. sharing is what a person may do with a
+                    sensitive session beyond the people who read it now (give it to the team,
+                    invite, offer it, share an artifact it published wider): allow (the
+                    default), ask (a team administrator's yes first) or deny. markedBy
+                    without deny is refused. A profile that extends another adds rules to
+                    both lists and may only tighten sharing. The plane reads it at every
+                    activation; no pod restarts.
+                  properties:
+                    markedBy:
+                      type: array
+                      maxItems: 200
+                      items: {type: string, minLength: 1, maxLength: 500}
+                    deny:
+                      type: array
+                      maxItems: 200
+                      items: {type: string, minLength: 1, maxLength: 500}
+                    sharing:
+                      type: string
+                      enum: [allow, ask, deny]
                 agents:
                   type: object
                   description: >-
