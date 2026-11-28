@@ -110,6 +110,32 @@ defmodule Troupe.Plane.Triggers.Cron do
     end
   end
 
+  @doc """
+  The earliest matching minute after `now`, or `nil` if there is none within the same
+  bound `previous/2` keeps. What a person's own list says a schedule fires next.
+  """
+  @spec next(t(), DateTime.t()) :: DateTime.t() | nil
+  def next(cron, %DateTime{} = now) do
+    now |> floor_minute() |> DateTime.add(60, :second) |> walk_on(cron, @max_lookback_minutes)
+  end
+
+  defp walk_on(_at, _cron, budget) when budget <= 0, do: nil
+
+  defp walk_on(at, cron, budget) do
+    cond do
+      matches?(cron, at) ->
+        at
+
+      MapSet.member?(cron.month, at.month) and day_matches?(cron, at) ->
+        walk_on(DateTime.add(at, 60, :second), cron, budget - 1)
+
+      true ->
+        # Nothing left in this day can match, so jump to the first minute of the next.
+        skipped = (23 - at.hour) * 60 + (60 - at.minute)
+        walk_on(DateTime.add(%{at | hour: 0, minute: 0}, 86_400, :second), cron, budget - skipped)
+    end
+  end
+
   # A time with its seconds and smaller dropped, which is the unit cron thinks in.
   @spec floor_minute(DateTime.t()) :: DateTime.t()
   defp floor_minute(%DateTime{} = at), do: %{at | second: 0, microsecond: {0, 0}}

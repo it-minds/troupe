@@ -3,7 +3,8 @@
 //
 // Three groups. The first, with no heading, is the work both kinds of install have:
 // Sessions, Waiting for you, Review where there is a plane, Artifacts and Memory. "On the
-// platform" is Profiles; "On this computer" is This computer, Agents and Tools and skills.
+// platform" is Profiles and Your triggers; "On this computer" is This computer, Agents and
+// Tools and skills.
 // A group whose side the install does not have is not drawn, so the others never move
 // when it comes or goes; a side the install has that is down keeps its group, dimmed, with
 // its state beside the heading, and every item in it still opens, because each page says
@@ -26,6 +27,7 @@ export type RailScreen =
   | "artifacts"
   | "memory"
   | "profiles"
+  | "triggers"
   | "local"
   | "agents"
   | "connect"
@@ -44,7 +46,7 @@ export interface SideState {
 }
 
 /** The screens that belong to one side, which an install without that side does not offer. */
-const PLANE_SCREENS: ReadonlySet<string> = new Set(["review", "profiles"]);
+const PLANE_SCREENS: ReadonlySet<string> = new Set(["review", "profiles", "triggers"]);
 const LOCAL_SCREENS: ReadonlySet<string> = new Set(["local", "agents", "connect"]);
 
 /** Whether `screen` belongs to a side this install does not have, so the app goes to Sessions instead. */
@@ -217,6 +219,10 @@ export function RailBody({ current, go, local, plane, sessions, waiting, here, s
           <SideGroup id="rail-plane" heading="On the platform" side={plane}>
             <Item screen="profiles" current={current} go={go}>
               Profiles
+            </Item>
+            {/* The reruns a yes of yours turned on, which run as you: yours to switch off. */}
+            <Item screen="triggers" current={current} go={go}>
+              Your triggers
             </Item>
           </SideGroup>
         )}

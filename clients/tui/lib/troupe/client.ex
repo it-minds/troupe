@@ -168,6 +168,8 @@ defmodule Troupe.Client do
               {:ok, String.t()} | {:error, String.t()}
   @callback bundle(session_id(), Troupe.Client.Bundle.verb()) ::
               {:ok, String.t()} | {:error, String.t()}
+  @callback own_triggers(session_id(), Troupe.Client.OwnTriggers.verb()) ::
+              {:ok, String.t()} | {:error, String.t()}
   @callback lifespan(session_id(), Troupe.Client.Lifespan.verb()) ::
               {:ok, String.t()} | {:error, String.t()}
   @callback sensitive(session_id(), :status | :mark) :: {:ok, String.t()} | {:error, String.t()}
@@ -668,6 +670,19 @@ defmodule Troupe.Client do
   @doc "What `/proposal` names after the command: nothing, `yes`, `later` or `never`."
   @spec proposal_args(String.t()) :: {:ok, Troupe.Client.Proposal.verb()} | {:error, String.t()}
   defdelegate proposal_args(text), to: Troupe.Client.Proposal, as: :parse
+
+  @doc """
+  The person's own triggers (root #1235), asked of the plane the session is on: `:list`
+  lists them, `{:off | :on | :remove, name}` changes one. Answers the sentence to show.
+  """
+  @spec own_triggers(session_id(), Troupe.Client.OwnTriggers.verb()) ::
+          {:ok, String.t()} | {:error, String.t()}
+  def own_triggers(sid, verb), do: impl(sid).own_triggers(sid, verb)
+
+  @doc "What `/trigger` names after the command: `off`, `on` or `remove`, and the trigger."
+  @spec own_trigger_args(String.t()) ::
+          {:ok, Troupe.Client.OwnTriggers.verb()} | {:error, String.t()}
+  defdelegate own_trigger_args(text), to: Troupe.Client.OwnTriggers, as: :parse
 
   @doc "What `/bundle` names after the command: nothing or `update`."
   @spec bundle_args(String.t()) :: {:ok, Troupe.Client.Bundle.verb()} | {:error, String.t()}

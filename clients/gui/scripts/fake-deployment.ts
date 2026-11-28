@@ -114,6 +114,14 @@ const record = plane.seed("alice@example.com", {
 const numbers = plane.seed("alice@example.com", { title: "Weekly numbers", profile: "dev", visibility: "private" });
 await worker.seedReport(numbers.id, "alice@example.com", "every Monday");
 plane.proposalsGitops = Boolean(process.env["PROPOSALS_GITOPS"]);
+// One a yes turned on before (#1235): on Your triggers, to switch off or remove; the card's
+// yes adds another. OWN_TRIGGERS_GITOPS=1 refuses a change as a gitops plane does.
+plane.seedOwnTrigger("alice@example.com", {
+  name: "rerun-licence-audit",
+  team: "core",
+  last_run: { fired_at: new Date(Date.now() - 2 * 86_400_000).toISOString().replace(/\.\d+Z$/, "Z"), state: "done", session_id: stopped.id },
+});
+plane.ownTriggersGitops = Boolean(process.env["OWN_TRIGGERS_GITOPS"]);
 // The people the identity record names, as SCIM or a sign-in left them (troupe #931).
 plane.names.set("alice@example.com", "Alice Example");
 plane.names.set("bob@example.com", "Bob Example");

@@ -513,6 +513,15 @@ defmodule Troupe.Plane.Triggers do
 
   def for_caller(other, _user), do: {:error, Error.new(:invalid_params, %{trigger: other})}
 
+  @doc """
+  The trigger a reference names within the teams given, by id, `team/name` or `name`, as
+  `for_caller/2` reads one; whether the caller may act on it is the caller's question.
+  """
+  @spec named(term(), [String.t()]) :: {:ok, Trigger.t()} | {:error, Error.t()}
+  def named(ref, team_ids) when is_binary(ref), do: find(ref, team_ids)
+  def named(nil, _team_ids), do: {:error, Error.new(:invalid_params, %{missing: "trigger"})}
+  def named(other, _team_ids), do: {:error, Error.new(:invalid_params, %{trigger: other})}
+
   defp find(ref, team_ids) do
     case candidates(ref, team_ids) do
       [trigger] ->
@@ -1386,6 +1395,9 @@ defmodule Troupe.Plane.Triggers do
       "team" => team_name(trigger),
       "name" => trigger.name,
       "principal" => principal && principal.subject,
+      # The person whose own trigger it is, where it runs as their own sponsored principal
+      # and is so theirs to switch off and remove; null for any other.
+      "own_by" => own_by(principal, team_name(trigger)),
       "profile" => trigger.profile,
       "agent" => trigger.agent,
       "enabled" => trigger.enabled,
@@ -1414,6 +1426,13 @@ defmodule Troupe.Plane.Triggers do
       "copied_generation" => trigger.copied_generation
     }
   end
+
+  defp own_by(%{subject: subject, sponsor_subject: sponsor}, team)
+       when is_binary(sponsor) and is_binary(team) do
+    if subject == Troupe.Plane.Proposals.own_subject(team, sponsor), do: sponsor
+  end
+
+  defp own_by(_principal, _team), do: nil
 
   # -- checks -----------------------------------------------------------------
 

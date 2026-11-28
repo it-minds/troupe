@@ -122,6 +122,14 @@ const plane = await FakePlane.start({
 
 plane.relay("ada@example.com", { id: "s-laptop-billing", ownerName: "Ada", workspace: "billing", shares: [{ subject: as.subject, role: "control" }] });
 plane.seed(as.subject, { title: "Tidy the icons", profile: "ux" });
+// A rerun the person turned on from a session of theirs (#1235): on Sessions' Your triggers,
+// to switch off or remove, and marked as theirs on core's Triggers page.
+plane.seedOwnTrigger(as.subject, {
+  name: "rerun-weekly-report",
+  team: "core",
+  made: { session_id: "s-fake-1", artifact_id: "art-fake-weekly" },
+  last_run: { fired_at: "2026-11-23T06:00:00Z", state: "done", session_id: "s-fake-1" },
+});
 // Sensitive sessions (#1239): one of the person's own a records lookup marked, which Your
 // sessions marks; one of Carol's whose giving to the team waits on the person on the team's
 // Waiting shares; and one on Every session.

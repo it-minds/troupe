@@ -307,6 +307,27 @@ triggers already made keep running. A person holds at most five such triggers pe
 gitops plane Turn on makes nothing: the owner is handed the `Trigger` resource, with no
 principal, to commit. A "never for this report" is kept per person and artifact.
 
+**The person stops their own** (Decision 1123; [reruns](../user/reruns.md#stopping-what-you-turned-on)).
+A trigger whose principal is the caller's own sponsored principal in its team is theirs,
+through member methods that take `trigger` as `trigger.fire` does (an id, `name` or
+`team/name`, within the teams they are in); `initialize` says `own_triggers` where the plane
+has them:
+
+- `trigger.own.list` — the caller's own across their teams, each with `enabled`, `cron`,
+  `next_run_at`, `last_run` `{fired_at, state, reason}`, `budget_micros`, and the
+  `session_id` and `artifact_id` its yes came from; `most_per_team` is the cap.
+- `trigger.own.disable` and `trigger.own.enable` — a put of `enabled` alone, audited
+  `trigger.put` with the person as actor and `via: own`, as `admin.trigger.put` is audited.
+  Switching on is refused where the team no longer lets members schedule.
+- `trigger.own.delete` — audited `trigger.delete` with `via: own`; its runs go, their
+  sessions stay, and the slot is freed: the five count every trigger a yes made, on or off.
+
+Any other trigger of their teams, a team admin's among them, is refused `forbidden` naming
+the principal it runs as; one outside their teams is `not_found`. On a gitops plane a switch
+is refused `managed_by_gitops` as `admin.trigger.put` is, the attempt audited, and a removal
+too except of a row the cluster has no resource for. `admin.triggers.list` marks each such
+trigger with `own_by`, the person whose it is, and the console's Triggers page says so.
+
 ## 3. Unattended session terms
 
 `session.create`, and so every trigger and A2A task, accepts `terms`, validated before the

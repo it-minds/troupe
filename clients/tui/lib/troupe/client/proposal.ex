@@ -69,10 +69,15 @@ defmodule Troupe.Client.Proposal do
   def answered(%{"decision" => "accepted"} = data, title) do
     result = data["result"] || %{}
 
-    where =
-      if result["team"], do: " as the trigger #{result["name"]} of #{result["team"]}", else: ""
+    # The log holds what the yes made, not how it stands since: the line says where to ask.
+    {where, stands} =
+      if result["team"],
+        do:
+          {" as the trigger #{result["name"]} of #{result["team"]}",
+           " /triggers says whether it is on now."},
+        else: {"", ""}
 
-    "#{by(data)}turned on a rerun of #{quoted(title)}#{where}; each run asks to be reviewed."
+    "#{by(data)}turned on a rerun of #{quoted(title)}#{where}; each run asks to be reviewed.#{stands}"
   end
 
   def answered(%{"decision" => "later"} = data, title),
@@ -92,7 +97,7 @@ defmodule Troupe.Client.Proposal do
   def accepted(answer),
     do:
       "Turned on: the trigger #{answer["name"]} of #{answer["team"]} reruns it as you; " <>
-        "a team's administrator changes or stops it on the console's Configure → Triggers."
+        "/trigger off #{answer["name"]} switches it off, and /triggers lists yours."
 
   @doc "Why a session on this computer has nothing proposed."
   @spec not_here() :: String.t()

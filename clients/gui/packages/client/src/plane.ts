@@ -11,6 +11,7 @@ import type { ProfileView } from "./profile.js";
 import type { ProposalResult } from "./proposals.js";
 import type { RemoteListRow } from "./remote.js";
 import type { ShareRequest, ShareWaiting } from "./sensitive.js";
+import type { OwnTrigger, OwnTriggers } from "./ownTriggers.js";
 import type { JsonRpcError, JsonRpcResponse } from "./types.js";
 
 export interface Discovery {
@@ -640,6 +641,25 @@ export class PlaneClient {
    */
   acceptProposal(planeToken: string, sessionId: string, id: string, edits: Record<string, unknown>): Promise<ProposalResult & { edited?: string[] }> {
     return this.rpc<ProposalResult & { edited?: string[] }>(planeToken, "session.proposal.accept", { session_id: sessionId, id, edits });
+  }
+
+  /**
+   * The person's own triggers (troupe #1235): the ones a yes of theirs made under their own
+   * principal, across their teams, each with its next run and its last. Only where the
+   * plane's `initialize` says `own_triggers`.
+   */
+  listOwnTriggers(planeToken: string): Promise<OwnTriggers> {
+    return this.rpc<OwnTriggers>(planeToken, "trigger.own.list");
+  }
+
+  /** Switch one of the person's own triggers off (`false`) or on again (`true`); the answer is it as it now is. Anybody else's is refused `forbidden`. */
+  switchOwnTrigger(planeToken: string, trigger: string, on: boolean): Promise<{ trigger: OwnTrigger }> {
+    return this.rpc<{ trigger: OwnTrigger }>(planeToken, on ? "trigger.own.enable" : "trigger.own.disable", { trigger });
+  }
+
+  /** Remove one of the person's own triggers, for good; its runs' sessions stay. */
+  removeOwnTrigger(planeToken: string, trigger: string): Promise<{ team: string; name: string; deleted: boolean }> {
+    return this.rpc(planeToken, "trigger.own.delete", { trigger });
   }
 
   /**

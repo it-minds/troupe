@@ -433,6 +433,12 @@ export interface FakeTrigger {
   /** On a direct plane, the Trigger resource it was copied from and that resource's generation then. */
   copied_from?: string;
   copied_generation?: number;
+  /** The person whose own trigger it is (troupe #1235), made by their yes under their own principal. */
+  own_by?: string;
+  /** The session and artifact a yes made it from. */
+  made?: { session_id: string; artifact_id: string | null };
+  /** Its last run, as the person's own list says it. */
+  last_run?: { fired_at: string; state: string; session_id: string | null; reason?: string | null };
 }
 
 /**
@@ -3324,7 +3330,8 @@ export class FakeAdmin {
   }
 
   /** The refusal every write to what a repository holds gets on a gitops plane, recorded as the attempt it is. */
-  private heldByRepository(subject: string, action: string, name: string, kind: string): Refusal | null {
+  /** The refusal a write to what a repository holds gets on a gitops plane, the attempt recorded; null on a direct one. */
+  heldByRepository(subject: string, action: string, name: string, kind: string): Refusal | null {
     if (this.mode !== "gitops") return null;
     this.record(subject, action, name, { outcome: "refused", reason: "managed_by_gitops" });
     return refuse(MANAGED_BY_GITOPS, "managed_by_gitops", {
@@ -3502,6 +3509,7 @@ export class FakeAdmin {
       team: row.team,
       name: row.name,
       principal: row.principal,
+      own_by: row.own_by ?? null,
       profile: row.profile,
       agent: row.agent,
       enabled: row.enabled,

@@ -7,7 +7,8 @@
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { WebSocketServer, type WebSocket } from "ws";
-import type { FakeAdmin } from "./admin.js";
+import type { FakeAdmin, FakeTrigger } from "./admin.js";
+import { ownTriggerRow, ownTriggerRpc } from "./ownTriggers.js";
 import { composeProfile, exampleProfiles, specOfAdminProfile } from "./profiles.js";
 import type { FakeProfileSpec } from "./profiles.js";
 import { readBody, subjectOfIdToken, type FakeIdp } from "./idp.js";
@@ -136,6 +137,8 @@ export interface PlaneOptions {
   beforeLifespans?: boolean;
   /** A plane from before sensitive sessions (troupe #1239): its `initialize` says no `sensitive`, its rows carry none, and it has no method for one. */
   beforeSensitive?: boolean;
+  /** A plane from before a person's own triggers (troupe #1235): its `initialize` says no `own_triggers`, and it has no `trigger.own.*`. */
+  beforeOwnTriggers?: boolean;
   /** What every profile's `sensitive.sharing` says of a sensitive session: `allow` where none is given. */
   sensitiveSharing?: "allow" | "ask" | "deny";
   /** The people who administer a team, whom a held share waits on. */
@@ -877,6 +880,30 @@ export class FakePlane {
   /** Each yes to a proposal this plane took: the session, the proposal and the edits sent. */
   readonly proposalsAccepted: Array<{ session: string; id: string; edits: Record<string, unknown> }> = [];
 
+  /**
+   * The people's own triggers (troupe #1235) where there is no administrative half; with one
+   * they are its trigger rows, so the console's Triggers page and the person's list agree.
+   */
+  readonly ownTriggerRows: FakeTrigger[] = [];
+
+  /** Whether a person's own triggers are a repository's here, with no administrative half to say so. */
+  ownTriggersGitops = false;
+
+  /** What the people did to their own triggers, with no administrative half to record it. */
+  readonly ownTriggerAudit: Array<{ actor: string; action: string; subject: string; detail: Record<string, unknown> }> = [];
+
+  /** The rows a person's own triggers are among. */
+  get triggerRows(): FakeTrigger[] {
+    return this.opts.admin?.triggerRows ?? this.ownTriggerRows;
+  }
+
+  /** One of `owner`'s own triggers, as a yes of theirs would have made it. */
+  seedOwnTrigger(owner: string, fields: Partial<FakeTrigger> & { name: string; team?: string; cron?: string }): FakeTrigger {
+    const row = { ...ownTriggerRow({ team: fields.team ?? this.teamsOf(owner)[0] ?? "core", name: fields.name, owner, cron: fields.cron ?? "0 6 * * 1", profile: fields.profile ?? "dev", session_id: fields.made?.session_id ?? `s-${fields.name}`, artifact_id: fields.made?.artifact_id ?? null }), ...fields };
+    this.triggerRows.push(row);
+    return row;
+  }
+
   /** A laptop's session, offered by `owner` and shared as `shares` says, its laptop online. */
   relay(
     owner: string,
@@ -1490,7 +1517,9 @@ export class FakePlane {
             principal: "result" in principal ? principal.result : null,
             client_update: clientUpdate,
             // What this plane takes that one before it did not (troupe #1209, #1239).
-            ...(this.opts.beforeLifespans ? {} : { capabilities: { lifespans: true, ...(this.opts.beforeSensitive ? {} : { sensitive: true }) } }),
+            ...(this.opts.beforeLifespans
+              ? {}
+              : { capabilities: { lifespans: true, ...(this.opts.beforeSensitive ? {} : { sensitive: true }), ...(this.opts.beforeOwnTriggers ? {} : { own_triggers: true }) } }),
           },
         });
         if (!component) return hello(null);
@@ -2217,7 +2246,42 @@ export class FakePlane {
         const nameOf = this.nameOf(subject);
         this.opts.worker.decideProposal(row.id, proposal, result, edited, { kind: "user", subject, ...(nameOf ? { display_name: nameOf } : {}) });
         this.proposalsAccepted.push({ session: row.id, id: proposal, edits });
+        // What a direct plane made is the person's own trigger, theirs to switch off.
+        if (!this.proposalsGitops && !this.triggerRows.some((t) => t.team === team && t.name === name)) {
+          const budget = typeof edits["budget_micros"] === "number" ? edits["budget_micros"] : undefined;
+          const artifact = (draft["artifact"] as Record<string, unknown> | undefined)?.["id"];
+          this.triggerRows.push(
+            ownTriggerRow({ team, name, owner: subject, cron: String(result["cron"] ?? "0 6 * * 1"), profile: row.profile, ...(budget !== undefined ? { budget_micros: budget } : {}), session_id: row.id, artifact_id: typeof artifact === "string" ? artifact : null }),
+          );
+        }
         return { result: { ...result, edited } };
+      }
+
+      // A person's own triggers (troupe #1235): listed, switched off and on, and removed by
+      // them, every other trigger refused as not theirs.
+      case "trigger.own.list":
+      case "trigger.own.disable":
+      case "trigger.own.enable":
+      case "trigger.own.delete": {
+        if (this.opts.beforeOwnTriggers) return { error: { code: -32601, message: "method_not_found", data: { method } } };
+        const admin = this.opts.admin;
+        return ownTriggerRpc(
+          {
+            rows: this.triggerRows,
+            teams: this.teamsOf(subject),
+            held: (who, action, name) =>
+              admin
+                ? admin.heldByRepository(who, action, name, "Trigger")
+                : this.ownTriggersGitops
+                  ? (this.ownTriggerAudit.push({ actor: who, action, subject: name, detail: { outcome: "refused", reason: "managed_by_gitops", via: "own" } }),
+                    { error: { code: -32015, message: "managed_by_gitops", data: { kind: "Trigger", name, reason: "this plane is in gitops mode: a Trigger is a resource a repository holds, and a change to one is a commit there" } } })
+                  : null,
+            record: (actor, action, name, detail) => (admin ? admin.record(actor, action, name, detail) : this.ownTriggerAudit.push({ actor, action, subject: name, detail })),
+          },
+          subject,
+          method,
+          params,
+        );
       }
 
       // Raised to its channel's current version by its owner (troupe #1177): at once when its

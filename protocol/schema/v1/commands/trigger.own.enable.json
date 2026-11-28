@@ -1,0 +1,15 @@
+{
+  "$id": "https://troupe.dev/schema/v1/commands/trigger.own.enable.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "properties": {
+    "trigger": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "trigger"
+  ],
+  "title": "trigger.own.enable",
+  "type": "object"
+}

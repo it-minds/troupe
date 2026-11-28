@@ -774,6 +774,8 @@ export interface Trigger {
   team: string;
   name: string;
   principal: string | null;
+  /** The person whose own trigger it is (troupe #1235): it runs as their own principal, and they may switch it off and remove it; null for any other. */
+  own_by?: string | null;
   profile: string | null;
   agent: string | null;
   enabled: boolean;

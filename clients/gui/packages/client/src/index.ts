@@ -171,6 +171,21 @@ export {
 export type { MarkWords, SensitiveMark, ShareRequest, ShareWaiting } from "./sensitive.js";
 export { SCHEDULE_CHOICES, WEEKDAYS, answeredLine, cronOf, cronProblem, editsOf, othersLine, proposalOf, proposalRefusal, runsLine, scheduleOf, scheduleWords } from "./proposals.js";
 export type { ProposalDecision, ProposalResult, ProposalState, ScheduleChoice, ScheduleEvery, TriggerDraft } from "./proposals.js";
+export {
+  OWN_TRIGGER_ACTIONS,
+  knowsOwnTriggers,
+  ownByLine,
+  lastRunWords,
+  ownBudgetWords,
+  ownTriggerRefusal,
+  ownTriggerState,
+  planeKnowsOwnTriggers,
+  proposalTriggerLine,
+  removeConfirm,
+  triggerOfProposal,
+  utcWords,
+} from "./ownTriggers.js";
+export type { OwnTrigger, OwnTriggerAction, OwnTriggerRun, OwnTriggers } from "./ownTriggers.js";
 export { behind, configurationLine, owedLine, raiseKept, raiseRefusal, updateLine, upgradedText, versionOf } from "./bundle.js";
 export type {
   Entry,

@@ -51,6 +51,7 @@ import { href } from "../route";
 import { Empty, Field, Loaded, Preview, Region, SessionState, Status, TextDiff, count, when } from "./bits";
 import type { StatusKind } from "./bits";
 import { InvitedToYou } from "./Invited";
+import { YourTriggers } from "./OwnTriggers";
 import { RemoteSessions, useOffered } from "./Remote";
 
 const COMPONENT: Record<string, string> = { tui: "terminal", daemon: "daemon", desktop: "desktop app" };
@@ -61,7 +62,7 @@ const STANDING: Record<string, { kind: StatusKind; glyph: string; word: string; 
   refused: { kind: "denied", glyph: "✕", word: "refused", why: () => "at its next start: update it" },
 };
 
-/** Sessions' Mine: the sessions offered to the person and those they were invited into, then their own on the plane. */
+/** Sessions' Mine: the sessions offered to the person and those they were invited into, then their own on the plane, and their own triggers. */
 export function MySessions(): JSX.Element {
   const [offered, reload, invites] = useOffered();
   return (
@@ -69,6 +70,7 @@ export function MySessions(): JSX.Element {
       <RemoteSessions load={offered} reload={reload} />
       <InvitedToYou load={invites} reload={reload} />
       <YourSessions />
+      <YourTriggers />
     </>
   );
 }

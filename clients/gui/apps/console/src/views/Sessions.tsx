@@ -49,8 +49,8 @@ export function SessionsMine(): JSX.Element {
     <div className="page">
       <SessionTabs mine />
       <p className="lead">
-        Yours on {plane.name}, {me.display_name ?? me.subject}: the sessions offered to you from laptops and those you were invited into, to follow and steer from here, and your
-        sessions on the plane.
+        Yours on {plane.name}, {me.display_name ?? me.subject}: the sessions offered to you from laptops and those you were invited into, to follow and steer from here, your
+        sessions on the plane, and the triggers you turned on from them.
       </p>
       <MySessions />
     </div>

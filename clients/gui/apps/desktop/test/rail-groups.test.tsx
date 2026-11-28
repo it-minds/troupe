@@ -69,7 +69,7 @@ describe("the rail's groups", () => {
   it("are the work both have, the platform's and this computer's, each side's state in a row at the foot", async () => {
     const at = await rail();
     expect(heads(at)).toEqual(["On the platform", "On this computer"]);
-    expect(items(at)).toEqual(["Sessions 12", "Waiting for you", "Review", "Artifacts", "Memory", "Profiles", "This computer4", "Agents", "Tools and skills", "Appearance", "Setup✓"]);
+    expect(items(at)).toEqual(["Sessions 12", "Waiting for you", "Review", "Artifacts", "Memory", "Profiles", "Your triggers", "This computer4", "Agents", "Tools and skills", "Appearance", "Setup✓"]);
     expect(rows(at)).toEqual(["This computer: Connected", "Platform: Connected"]);
     expect(at.querySelector(".rail-group.dim")).toBeNull();
   });

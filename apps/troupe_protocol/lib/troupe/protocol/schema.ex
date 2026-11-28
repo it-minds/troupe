@@ -984,6 +984,13 @@ defmodule Troupe.Protocol.Schema do
         "id" => required(:string),
         "decision" => required(:string)
       },
+      # The caller's own triggers, the ones a yes of theirs made under their own sponsored
+      # principal, listed, switched off or on, and removed: the plane's, which the clients ask
+      # directly. `trigger` is an id, a name or `team/name`, as `trigger.fire` takes it.
+      "trigger.own.list" => %{},
+      "trigger.own.disable" => %{"trigger" => required(:string)},
+      "trigger.own.enable" => %{"trigger" => required(:string)},
+      "trigger.own.delete" => %{"trigger" => required(:string)},
       # A pod session raised to its channel's current bundle version by its owner: the
       # plane's, which the clients ask directly.
       "session.bundle.raise" => %{"session_id" => required(:string)},

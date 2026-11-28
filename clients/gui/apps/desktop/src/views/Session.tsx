@@ -86,7 +86,7 @@ import type {
   SessionView,
   TranscriptState,
 } from "@troupe/client";
-import { useLifespans, useSensitive, useSessionView, useStartQuestions, useTeams } from "../hooks";
+import { useLifespans, useOwnTriggerSource, useSensitive, useSessionView, useStartQuestions, useTeams } from "../hooks";
 import { useNarrow } from "../narrow";
 import type { Marks, SessionHandle } from "../hooks";
 import { curtainLine, curtainUp, DEFAULT_DETAIL, isDetail, layout, waitingOn, waitingWords } from "../frames";
@@ -228,6 +228,9 @@ export function Session({
   // drawn anew for it.
   const owner = kind === "team" && self !== undefined && (row?.owner === self || row?.yourRole === "owner");
   const answering = view.view;
+  // The trigger a yes made is the owner's own, switched off or removed from its record line
+  // where the plane lets them (troupe #1235).
+  const ownTriggers = useOwnTriggerSource(owner ? auth : null);
   const proposalActions = useMemo<ProposalActions | undefined>(() => {
     if (!owner || !auth || !answering) return undefined;
     return {
@@ -235,8 +238,9 @@ export function Session({
         await auth.plane.acceptProposal(await auth.token(), sessionId, id, edits);
       },
       answer: (id, decision) => answering.answerProposal(id, decision),
+      ...(ownTriggers.known && ownTriggers.source ? { own: ownTriggers.source } : {}),
     };
-  }, [owner, auth, answering, sessionId]);
+  }, [owner, auth, answering, sessionId, ownTriggers.known, ownTriggers.source]);
   // A root that ended so the harness drops what is sent to it (a spent budget, a refusal):
   // the composer gives way to the sentence that says so. One that finished keeps it, since
   // a message resumes it.

@@ -1099,24 +1099,9 @@ defmodule Troupe.Plane.Admin do
   # a channel's bundle is a repository's only where a ConfigBundle names the channel.
   defp not_held_by_repository(actor, action, name, kind \\ "WorkerProfile", reason \\ nil) do
     if Gitops.enabled?() do
-      source = Gitops.source()
       detail = %{"outcome" => "refused", "reason" => "managed_by_gitops"}
       {:ok, _} = Audit.record(actor.subject, action, name, detail)
-      where = if source, do: " (#{source})", else: ""
-
-      {:error,
-       Error.new(:managed_by_gitops, %{
-         kind: kind,
-         name: name,
-         source: source,
-         reason:
-           if(reason,
-             do: reason.(where),
-             else:
-               "this plane is in gitops mode: a #{kind} is a resource a repository holds" <>
-                 "#{where}, and a change to one is a commit there"
-           )
-       })}
+      {:error, Gitops.held(kind, name, reason)}
     else
       :ok
     end
