@@ -220,5 +220,37 @@ defmodule Troupe.Plane.Artifacts.People do
       "granted_at" => at
     }
 
+  # -- telling the people it is shared with ------------------------------------------
+
+  @topic "artifact_people"
+
+  @doc """
+  Hear who was given an artifact by name: a person's watch subscribes, and is sent
+  `{:artifact_shared, subject, %{id, title, role, by}}`, on every replica.
+  """
+  @spec subscribe() :: :ok | {:error, term()}
+  def subscribe, do: Phoenix.PubSub.subscribe(Troupe.Plane.PubSub, @topic)
+
+  @doc """
+  Tell the watches of `subjects` that `owner` shared `artifact` with them, once their grants
+  are written: what it is called, the role each now holds, and who gave it. A principal has
+  no watch, and is told nothing.
+  """
+  @spec told(Artifact.t(), User.t(), [String.t()]) :: :ok
+  def told(%Artifact{} = artifact, %User{} = owner, subjects) do
+    roles = Map.new(list(artifact), &{&1["subject"], &1["role"]})
+
+    for subject <- Enum.uniq(subjects), not String.starts_with?(subject, "svc:"), role <- List.wrap(roles[subject]) do
+      Phoenix.PubSub.broadcast(
+        Troupe.Plane.PubSub,
+        @topic,
+        {:artifact_shared, subject,
+         %{"id" => artifact.id, "title" => artifact.title, "role" => role, "by" => owner.subject}}
+      )
+    end
+
+    :ok
+  end
+
   defp invalid(reason), do: Error.new(:invalid_params, %{reason: reason})
 end

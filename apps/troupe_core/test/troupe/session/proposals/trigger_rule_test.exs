@@ -50,7 +50,7 @@ defmodule Troupe.Session.Proposals.TriggerRuleTest do
            "title" => "Weekly numbers",
            "kind" => "html",
            "files" => ["index.html"],
-           "visibility" => "team:reports"
+           "teams" => ["reports"]
          }
        ) do
     call(id, "publish_artifact", args, %{
@@ -104,7 +104,8 @@ defmodule Troupe.Session.Proposals.TriggerRuleTest do
     assert String.starts_with?(prompt, "Pull this week's numbers and make the report")
     assert prompt =~ "https://stats.example.test/week"
     assert prompt =~ "the MCP tool crm.list_deals"
-    assert prompt =~ "`id` `art-weekly`, `visibility` `team:reports`"
+    assert prompt =~ "`id` `art-weekly`, which keeps who reads it"
+    refute prompt =~ "visibility"
     # Nothing a trigger's template would read as a placeholder.
     refute prompt =~ "{{"
   end
@@ -229,7 +230,7 @@ defmodule Troupe.Session.Proposals.TriggerRuleTest do
 
     draft = TriggerRule.draft(rule)["draft"]
     assert draft["artifact"]["visibility"] == "private"
-    assert draft["prompt_template"] =~ "`id` `art-deals`, `visibility` `private`"
+    assert draft["prompt_template"] =~ "`id` `art-deals`, which keeps who reads it"
   end
 
   test "the schedule is the person's own words, else Monday at six UTC" do

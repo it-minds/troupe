@@ -45,7 +45,6 @@ defmodule Troupe.Worker.ProposalRunTest do
                 "kind" => "html",
                 "files" => ["index.html"],
                 "id" => "art-weekly",
-                "visibility" => "private",
                 "note" => "the run of 2026-11-30"
               }}
 
@@ -75,7 +74,8 @@ defmodule Troupe.Worker.ProposalRunTest do
   test "a run whose terms allow the publish puts the next version, nobody asked", context do
     events = run(context, approvals: :deny, allow: ["publish_artifact", "shell(curl)"])
 
-    assert_received {:published, %{"id" => "art-weekly", "visibility" => "private"}}
+    assert_received {:published, %{"id" => "art-weekly"} = published}
+    refute Map.has_key?(published, "visibility")
     refute Enum.any?(events, &(&1.type in ["approval_requested", "approval_decided"]))
 
     assert [%{data: %{"ok" => true, "artifact" => %{"id" => "art-weekly", "version" => 2}}}] =
