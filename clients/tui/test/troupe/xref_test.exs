@@ -27,6 +27,15 @@ defmodule Troupe.XrefTest do
              Xref.offending_calls(Offender)
   end
 
+  test "the harness rule holds the modules the binary ships, not the tests' own" do
+    modules = Xref.own_modules()
+
+    assert Troupe.Client in modules
+    assert Troupe.UI.TUI.Server in modules
+    refute Troupe.FakeRemote in modules
+    refute Troupe.XrefFixtures.Offender in modules
+  end
+
   test "pure data modules a renderer needs are allowed" do
     assert Xref.offending_calls(Troupe.XrefFixtures.Renderer) == []
   end
