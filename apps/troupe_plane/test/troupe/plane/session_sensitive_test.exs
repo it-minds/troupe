@@ -44,7 +44,9 @@ defmodule Troupe.Plane.SessionSensitiveTest do
     {:ok, _bundle} =
       Bundles.publish(
         "stable",
-        %{"schema" => 1, "agents" => [], "skills" => [], "mcp_servers" => []}, announce: false)
+        %{"schema" => 1, "agents" => [], "skills" => [], "mcp_servers" => []},
+        announce: false
+      )
 
     profile("allow")
     pod = FakePod.enrol(Listener.port(), "dev-token", "troupe-w-dev-0")
@@ -182,6 +184,29 @@ defmodule Troupe.Plane.SessionSensitiveTest do
       refute Map.has_key?(unmarked, "sensitive")
 
       assert {:error, %{message: "invalid_params"}} = create(ada, %{"sensitive" => "yes"})
+    end
+
+    test "a session spawned from a sensitive one is sensitive as it is", %{
+      ada: ada,
+      team: team,
+      pod: pod
+    } do
+      parent = marked_by_pod(running(ada, team, pod))
+
+      assert {:ok, %{"session_id" => child}} =
+               Harness.call(
+                 "session.spawn",
+                 %{"parent" => parent.id, "prompt" => "go on"},
+                 as(ada)
+               )
+
+      assert Sensitive.json(Sessions.get(child)) == Sensitive.json(parent)
+      assert [row] = audited(Sessions.get(child), "session.sensitive")
+      assert row.detail["from"] == parent.id
+
+      assert_receive {:pushed, "session.activate",
+                      %{"session_id" => ^child, "sensitive" => %{"how" => "call"}}},
+                     5_000
     end
 
     test "initialize says the plane knows it", %{ada: ada} do

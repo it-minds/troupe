@@ -39,7 +39,7 @@ defmodule Troupe.Worker.Session.Manager do
 
   alias Troupe.ObjectStore
   alias Troupe.Protocol.Event
-  alias Troupe.Session.Log
+  alias Troupe.Session.{Log, Sensitive}
   alias Troupe.Session.Summary
   alias Troupe.Sessions.{Cipher, Storage}
   alias Troupe.Sessions.{Context, Sealer}
@@ -723,7 +723,7 @@ defmodule Troupe.Worker.Session.Manager do
             interrupted: interrupted_on_restore?(root),
             failed_reason: failed_on_restore(root),
             agent: switched_on_restore(root),
-            sensitive: Troupe.Session.Sensitive.mark_of(state.session_id)
+            sensitive: Sensitive.mark_of(state.session_id)
         }
     }
   end

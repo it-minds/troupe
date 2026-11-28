@@ -919,7 +919,7 @@ defmodule Troupe.Plane.Harness do
 
   # -- creating ---------------------------------------------------------------
 
-  defp handle("session.create", params, %{user: user}) do
+  defp handle("session.create", params, %{user: user} = context) do
     profile = params["profile"]
 
     # The row comes first because reserving capacity *places* the session, and a
@@ -944,9 +944,9 @@ defmodule Troupe.Plane.Harness do
          params = Map.put(params, "lifespan", lifespan),
          params = Map.put(params, "agent", agent),
          {:ok, session} <- create_row(session_id, user, team, profile, params, terms, origin),
-         # Sensitive from its first call where its creator says so, which its first
-         # activation carries.
-         {:ok, session} <- if(sensitive?, do: Sensitive.mark(session, user), else: {:ok, session}),
+         # Sensitive from its first call where its creator says so, or where it is spawned
+         # or forked from a sensitive session, which its first activation carries.
+         {:ok, session} <- marked(session, sensitive?, context[:sensitive_from], user),
          {:ok, _budget} <- reserve_budget(team, session),
          {:ok, placement} <- place_or_wait(session, prompt) do
       started(placement, session, team, user, agent, prompt)
@@ -998,7 +998,7 @@ defmodule Troupe.Plane.Harness do
             )
         }
         |> Map.reject(fn {_key, value} -> is_nil(value) end),
-        context
+        Map.put(context, :sensitive_from, parent)
       )
     end
   end
@@ -1047,7 +1047,7 @@ defmodule Troupe.Plane.Harness do
           }
         }
         |> Map.reject(fn {_key, value} -> is_nil(value) end),
-        context
+        Map.put(context, :sensitive_from, parent)
       )
     end
   end
@@ -1970,6 +1970,16 @@ defmodule Troupe.Plane.Harness do
     do: Sensitive.check(session, "visibility", %{"visibility" => "team"}, user)
 
   defp widening(_session, _visibility, _user), do: :ok
+
+  # A sibling or a fork of a sensitive session is sensitive as its parent is: a sibling's
+  # prompt is the parent agent's words, and a fork carries its parent's history.
+  defp marked(session, sensitive?, parent, user) do
+    cond do
+      Sensitive.sensitive?(parent) -> Sensitive.inherit(session, parent)
+      sensitive? -> Sensitive.mark(session, user)
+      true -> {:ok, session}
+    end
+  end
 
   defp sensitive_param(nil), do: {:ok, false}
   defp sensitive_param(value) when is_boolean(value), do: {:ok, value}

@@ -52,7 +52,9 @@ next time it wakes.
 There is no method, event or tool that takes the mark away: not the owner, not a team
 administrator, not a platform administrator. A sensitive session is sensitive until it is
 erased. A person may also mark a session by hand (`session.sensitive.set`, or
-`session.create` with `sensitive: true`), which is one-way as well.
+`session.create` with `sensitive: true`), which is one-way as well. A session spawned or
+forked from a sensitive one is sensitive from its start, marked as its parent is: a
+sibling's prompt is the parent agent's words, and a fork carries its parent's history.
 
 ## Sharing a sensitive session
 

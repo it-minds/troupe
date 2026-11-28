@@ -78,7 +78,7 @@ defmodule Troupe.Agent.Server do
   alias Troupe.Protocol.Event
   alias Troupe.Protocol.Principal
   alias Troupe.Protocol.Words
-  alias Troupe.Session.{Approvals, Blobs, Log, Memory, Organisation, Proposals, Questions, Shell}
+  alias Troupe.Session.{Approvals, Blobs, Log, Memory, Organisation, Proposals, Questions, Sensitive, Shell}
   alias Troupe.Session.MCP, as: SessionMCP
   alias Troupe.Sessions.Index
   alias Troupe.Tool.{Ctx, Result}
@@ -2113,7 +2113,7 @@ defmodule Troupe.Agent.Server do
   # A sensitive session (#1239): since when, by what, and what its profile refuses in one,
   # said from the first turn after the mark, which changes the section, and kept after.
   defp sensitive_line(%State{session_id: session_id, config: config}) do
-    case Troupe.Session.Sensitive.mark_of(session_id) do
+    case Sensitive.mark_of(session_id) do
       nil ->
         ""
 
@@ -2128,7 +2128,7 @@ defmodule Troupe.Agent.Server do
                 "is refused and does not run, so say what is left undone instead of looking for " <>
                 "another way to do it."
 
-        "This session is sensitive since #{Troupe.Tool.Result.since(mark, :dated)}, and nothing clears " <>
+        "This session is sensitive since #{Result.since(mark, :dated)}, and nothing clears " <>
           "that: what it read must not leave it. " <> refused
     end
   end

@@ -8,7 +8,9 @@ defmodule Troupe.Session.SensitiveTest do
   use Troupe.SessionCase, async: true
 
   alias Troupe.Config.Permissions
-  alias Troupe.Session.Sensitive
+  alias Troupe.LLM.{Message, Text}
+  alias Troupe.Protocol.Schema
+  alias Troupe.Session.{Checkpoint, Sensitive, Summary}
 
   defp sensitive(marked_by, deny) do
     [
@@ -150,11 +152,10 @@ defmodule Troupe.Session.SensitiveTest do
       run(session)
 
       snapshot =
-        Enum.reduce(Troupe.events(session.id), %{}, &Troupe.Session.Summary.fold(&2, &1))
+        Enum.reduce(Troupe.events(session.id), %{}, &Summary.fold(&2, &1))
 
       assert %{"how" => "call", "by" => "read_file"} = snapshot["sensitive"]
 
-      alias Troupe.Session.Checkpoint
       facts = Checkpoint.facts(Checkpoint.fold_all(Troupe.events(session.id)))
 
       assert %{"how" => "call", "by" => "read_file", "rule" => "read_file(records/**)"} =
@@ -421,8 +422,8 @@ defmodule Troupe.Session.SensitiveTest do
 
       texts =
         for request <- Fake.requests(fake),
-            %Troupe.LLM.Message{role: :user, content: content} <- request.messages,
-            %Troupe.LLM.Text{text: text} <- List.wrap(content),
+            %Message{role: :user, content: content} <- request.messages,
+            %Text{text: text} <- List.wrap(content),
             text =~ "This session is sensitive since",
             uniq: true,
             do: text
@@ -451,7 +452,7 @@ defmodule Troupe.Session.SensitiveTest do
       exports = Sensitive.__info__(:functions) |> Keyword.keys() |> Enum.map(&to_string/1)
       refute Enum.any?(exports, &(&1 =~ ~r/clear|unmark|reset|forget|drop|remove/))
 
-      refute Enum.any?(Map.keys(Troupe.Protocol.Schema.events()), fn type ->
+      refute Enum.any?(Map.keys(Schema.events()), fn type ->
                type =~ "sensitive" and type != "session_marked_sensitive"
              end)
 

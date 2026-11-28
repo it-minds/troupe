@@ -15,7 +15,7 @@ defmodule Troupe.Protocol.Sensitive do
   its parent's.
   """
 
-  alias Troupe.Protocol.PermissionRule
+  alias Troupe.Protocol.{PermissionRule, Words}
 
   @lists ~w(markedBy deny)
   @keys @lists ++ ["sharing"]
@@ -130,7 +130,7 @@ defmodule Troupe.Protocol.Sensitive do
       case teams do
         [] -> "the people who already read it"
         [team] -> "the team that already reads it, #{team}"
-        teams -> "the teams that already read it, " <> Troupe.Protocol.Words.and_list(teams)
+        teams -> "the teams that already read it, " <> Words.and_list(teams)
       end
 
     "This session is sensitive and #{profile || "its profile"} does not allow sharing it " <>

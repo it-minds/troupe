@@ -28,6 +28,7 @@ root and every subagent, folded back from the log, given the plane's mark at a w
 a rule refuses read nothing and marks nothing. A task tool marked and then denied by a person
 leaves the mark: the gate cannot know what a running call returns, so it marks early.
 **Nothing clears it**: no function, event or method; `session.sensitive.set false` is refused.
+A session spawned or forked from a sensitive one is marked as its parent at its creation.
 **The refusal is the same gate's.** Once marked, `deny` joins the rules as the layer
 `:sensitive` above `:profile`, read from the holder at the call in `authorize` and in
 `run_task`, so a call issued before the mark is refused when it reaches its task. The tool

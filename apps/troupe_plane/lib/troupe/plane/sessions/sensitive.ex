@@ -61,28 +61,27 @@ defmodule Troupe.Plane.Sessions.Sensitive do
   @spec reported(String.t() | nil, map()) :: :ok
   def reported(session_id, %{"sensitive_at" => at, "sensitive_by" => by} = params)
       when is_binary(session_id) and is_binary(at) and is_binary(by) do
-    case DateTime.from_iso8601(at) do
-      {:ok, at, _offset} ->
-        if write(session_id, at, by) do
-          {how, who} = split(by)
-          actor = if how == "person", do: who, else: @harness
-
-          detail =
-            %{"how" => how, "by" => who, "at" => DateTime.to_iso8601(at)}
-            |> put_present("tool", if(how == "call", do: who))
-            |> put_present("rule", params["sensitive_rule"])
-
-          {:ok, _audit} = Audit.record(actor, "session.sensitive", session_id, detail)
-        end
-
-        :ok
-
-      _not_a_time ->
-        :ok
+    with {:ok, at, _offset} <- DateTime.from_iso8601(at),
+         true <- write(session_id, at, by) do
+      audit_reported(session_id, at, by, params["sensitive_rule"])
     end
+
+    :ok
   end
 
   def reported(_session_id, _params), do: :ok
+
+  defp audit_reported(session_id, at, by, rule) do
+    {how, who} = split(by)
+    actor = if how == "person", do: who, else: @harness
+
+    detail =
+      %{"how" => how, "by" => who, "at" => DateTime.to_iso8601(at)}
+      |> put_present("tool", if(how == "call", do: who))
+      |> put_present("rule", rule)
+
+    {:ok, _audit} = Audit.record(actor, "session.sensitive", session_id, detail)
+  end
 
   # Written only where the row has none: the first mark holds, from whichever side.
   defp write(session_id, at, by) do
@@ -119,6 +118,31 @@ defmodule Troupe.Plane.Sessions.Sensitive do
       tell_pod(updated, user)
       {:ok, updated}
     end
+  end
+
+  @doc """
+  A new session spawned or forked from a sensitive `parent`, marked as the parent is (its
+  `at` and `by`), audited as the harness with the parent named. It has no pod yet, and its
+  first activation carries the mark.
+  """
+  @spec inherit(Session.t(), Session.t()) :: {:ok, Session.t()}
+  def inherit(
+        %Session{} = session,
+        %Session{sensitive_at: %DateTime{} = at, sensitive_by: by} = parent
+      ) do
+    if write(session.id, at, by) do
+      {how, who} = split(by)
+
+      {:ok, _audit} =
+        Audit.record(@harness, "session.sensitive", session.id, %{
+          "how" => how,
+          "by" => who,
+          "at" => DateTime.to_iso8601(at),
+          "from" => parent.id
+        })
+    end
+
+    {:ok, Repo.get!(Session, session.id)}
   end
 
   # Best effort, as a lifespan's push is: a dormant session has no pod, and its next
@@ -335,6 +359,7 @@ defmodule Troupe.Plane.Sessions.Sensitive do
   @spec decide(String.t(), User.t(), String.t()) :: {:ok, ShareRequest.t()} | {:error, Error.t()}
   def decide(id, %User{} = user, decision) when decision in ["approve", "decline"] do
     teams = user |> Identity.teams_administered_by() |> Enum.map(& &1.name)
+    state = if decision == "approve", do: "approved", else: "declined"
 
     case Repo.get(ShareRequest, id || "") do
       %ShareRequest{team: team} = request when is_binary(team) ->
@@ -350,26 +375,7 @@ defmodule Troupe.Plane.Sessions.Sensitive do
              })}
 
           true ->
-            state = if decision == "approve", do: "approved", else: "declined"
-
-            decided =
-              request
-              |> Ecto.Changeset.change(
-                state: state,
-                decided_by: user.subject,
-                decided_at: DateTime.utc_now()
-              )
-              |> Repo.update!()
-
-            {:ok, _audit} =
-              Audit.record(user.subject, "session.share_request.decide", request.session_id, %{
-                "request" => id,
-                "kind" => request.kind,
-                "decision" => state,
-                "requested_by" => request.requested_by
-              })
-
-            {:ok, decided}
+            answer(request, user, state)
         end
 
       _none ->
@@ -379,6 +385,27 @@ defmodule Troupe.Plane.Sessions.Sensitive do
 
   def decide(_id, _user, _decision),
     do: {:error, Error.new(:invalid_params, %{reason: "decision is approve or decline"})}
+
+  defp answer(request, user, state) do
+    decided =
+      request
+      |> Ecto.Changeset.change(
+        state: state,
+        decided_by: user.subject,
+        decided_at: DateTime.utc_now()
+      )
+      |> Repo.update!()
+
+    {:ok, _audit} =
+      Audit.record(user.subject, "session.share_request.decide", request.session_id, %{
+        "request" => request.id,
+        "kind" => request.kind,
+        "decision" => state,
+        "requested_by" => request.requested_by
+      })
+
+    {:ok, decided}
+  end
 
   defp put_present(map, _key, nil), do: map
   defp put_present(map, key, value), do: Map.put(map, key, value)

@@ -23,7 +23,7 @@ defmodule Troupe.Plane.Memory.Proposals do
   alias Troupe.Plane.Control.Router
   alias Troupe.Plane.Identity.{Team, User}
   alias Troupe.Plane.Memory.Proposal
-  alias Troupe.Protocol.Lifespan
+  alias Troupe.Protocol.{Lifespan, Sensitive}
 
   @pending_per_person 20
   @shown_days 7
@@ -79,7 +79,7 @@ defmodule Troupe.Plane.Memory.Proposals do
   The sentence a sensitive session's proposal is refused with, for its agent to relay.
   """
   @spec sensitive_reason() :: String.t()
-  def sensitive_reason, do: Troupe.Protocol.Sensitive.no_proposals()
+  def sensitive_reason, do: Sensitive.no_proposals()
 
   # Whether a pod's session on `profile` may propose: no where its profile in effect says
   # `memoryProposals: false`, its own or a profile's it extends, which a child cannot undo.

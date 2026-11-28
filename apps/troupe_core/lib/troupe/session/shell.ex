@@ -26,7 +26,8 @@ defmodule Troupe.Session.Shell do
   alias Troupe.{Events, Registry, Session}
   alias Troupe.Protocol.Words
   alias Troupe.Session.{Log, Sensitive}
-  alias Troupe.Tool.Ctx
+  alias Troupe.Tool.{Ctx, Result}
+  alias Troupe.Tools
   alias Troupe.Tools.{Output, Shell}
 
   require Logger
@@ -116,13 +117,13 @@ defmodule Troupe.Session.Shell do
           {String.t(), String.t()} | nil
   def denied(config, command, workspace, session_id \\ nil) do
     profile = Enum.filter(config.permissions, &(&1.layer == :profile))
-    rules = profile ++ Troupe.Tools.sensitive_deny(config, session_id)
+    rules = profile ++ Tools.sensitive_deny(config, session_id)
 
     case Permissions.decide(rules, "shell", %{"command" => command}, workspace) do
       {:deny, %{layer: :sensitive} = rule} ->
         {"sensitive",
          "this command was refused: this session is sensitive since " <>
-           Troupe.Tool.Result.since(Sensitive.mark_of(session_id)) <>
+           Result.since(Sensitive.mark_of(session_id)) <>
            ", and the rule #{Permissions.describe(rule)} refuses it there, for a command typed " <>
            "with ! as for the agent's"}
 

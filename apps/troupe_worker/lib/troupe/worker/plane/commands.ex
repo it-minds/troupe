@@ -18,7 +18,7 @@ defmodule Troupe.Worker.Plane.Commands do
   alias Troupe.Protocol.Lifespan
   alias Troupe.Protocol.SessionId
   alias Troupe.Session.Log
-  alias Troupe.Session.Proposals
+  alias Troupe.Session.{Proposals, Sensitive}
   alias Troupe.Sessions.Fork
   alias Troupe.Sessions.Sealer
   alias Troupe.Sessions.Storage
@@ -438,7 +438,7 @@ defmodule Troupe.Worker.Plane.Commands do
         {:ok, %{"session_id" => session_id, "recorded" => false, "reason" => "dormant"}}
 
       {true, _tree} ->
-        case Troupe.Session.Sensitive.mark(session_id, data) do
+        case Sensitive.mark(session_id, data) do
           {:ok, mark} -> {:ok, %{"session_id" => session_id, "recorded" => true, "sensitive" => mark}}
           {:error, :no_session} -> {:ok, %{"session_id" => session_id, "recorded" => false, "reason" => "dormant"}}
         end
