@@ -120,20 +120,24 @@ defmodule Troupe.Tool.Result do
   read from it at 10:14 UTC", "Ann marked it at 10:14 UTC", with the day where it was not
   today.
   """
-  @spec since(map() | nil) :: String.t()
-  def since(%{"how" => "call", "by" => tool} = mark), do: "#{tool} read from it #{at(mark["at"])}"
+  @spec since(map() | nil, :short | :dated) :: String.t()
+  def since(mark, style \\ :short)
 
-  def since(%{"by" => by} = mark),
-    do: "#{mark["display_name"] || by} marked it #{at(mark["at"])}"
+  def since(%{"how" => "call", "by" => tool} = mark, style),
+    do: "#{tool} read from it #{at(mark["at"], style)}"
 
-  def since(_none), do: "a call its profile names read from it"
+  def since(%{"by" => by} = mark, style),
+    do: "#{mark["display_name"] || by} marked it #{at(mark["at"], style)}"
 
-  defp at(iso) when is_binary(iso) do
+  def since(_none, _style), do: "a call its profile names read from it"
+
+  # `:dated` always names the day, for text that must not change at midnight.
+  defp at(iso, style) when is_binary(iso) do
     case DateTime.from_iso8601(iso) do
       {:ok, at, _offset} ->
         time = Calendar.strftime(at, "%H:%M UTC")
 
-        if DateTime.to_date(at) == Date.utc_today(),
+        if style == :short and DateTime.to_date(at) == Date.utc_today(),
           do: "at #{time}",
           else: "on #{Date.to_iso8601(DateTime.to_date(at))} at #{time}"
 
@@ -142,7 +146,7 @@ defmodule Troupe.Tool.Result do
     end
   end
 
-  defp at(_none), do: "earlier"
+  defp at(_none, _style), do: "earlier"
 
   @doc """
   Turn a failure into prose the model can act on.

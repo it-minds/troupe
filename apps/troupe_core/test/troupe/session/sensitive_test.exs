@@ -366,6 +366,52 @@ defmodule Troupe.Session.SensitiveTest do
     end
   end
 
+  describe "the agent is told" do
+    test "in its configuration, from the first turn after the mark, once, since when, by what and what is refused",
+         context do
+      write_file(context, "records/ann.txt", "Ann")
+
+      %{session: session, fake: fake} =
+        start_session(context,
+          config_overrides: sensitive(["read_file(records/**)"], ["web_fetch", "shell(curl)"]),
+          steps: [
+            {:text, "nothing read yet"},
+            {:tools, [{"read_file", %{"path" => "records/ann.txt"}}]},
+            {:text, "read"},
+            {:text, "second"},
+            {:text, "third"}
+          ]
+        )
+
+      run(session, "first")
+      run(session, "read it")
+      run(session, "and now")
+      run(session, "and again")
+
+      sections = for %{data: data} <- events_of_type(session.id, "llm_request"), do: data["turn_context"] || []
+      told = Enum.filter(sections, &("configuration" in &1))
+      assert length(told) == 1
+
+      texts =
+        for request <- Fake.requests(fake),
+            %Troupe.LLM.Message{role: :user, content: content} <- request.messages,
+            %Troupe.LLM.Text{text: text} <- List.wrap(content),
+            text =~ "This session is sensitive since",
+            uniq: true,
+            do: text
+
+      assert [said] = texts
+      assert said =~ ~r/This session is sensitive since read_file read from it on \d{4}-\d\d-\d\d at \d\d:\d\d UTC/
+      assert said =~ "nothing clears that"
+      assert said =~ "its profile refuses web_fetch and shell(curl)"
+
+      # The first request knew nothing of it, and the last still carries what was said.
+      [first | _] = Fake.requests(fake)
+      refute inspect(first.messages) =~ "This session is sensitive"
+      assert inspect(List.last(Fake.requests(fake)).messages) =~ "This session is sensitive"
+    end
+  end
+
   describe "nothing clears it" do
     test "no function, no event and no second mark takes it away", context do
       given = %{"at" => "2026-11-28T10:14:00Z", "by" => "ann", "how" => "person"}
