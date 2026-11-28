@@ -9,11 +9,11 @@ defmodule Troupe.Session.CheckpointRecordingsTest do
 
   use Troupe.SessionCase, async: true
 
-  alias Troupe.Session.Log
-
-  @into Path.expand(Path.join([File.cwd!(), "..", "..", "test", "fixtures", "checkpoints"]))
-
   if System.get_env("TROUPE_RECORD_CHECKPOINTS") do
+    alias Troupe.Session.Log
+
+    @into Path.expand(Path.join([File.cwd!(), "..", "..", "test", "fixtures", "checkpoints"]))
+
     test "manual: two compactions a person asked for, with a goal and a task list", context do
       todo = %{"items" => [%{"id" => "a", "content" => "read it", "status" => "in_progress"}]}
 
@@ -134,47 +134,47 @@ defmodule Troupe.Session.CheckpointRecordingsTest do
       await_turn_ended(sid, ["root"])
       record(sid, "background_approval")
     end
-  end
 
-  # A turn from what is sent now: what came before it is let go first.
-  defp turn(sid, text) do
-    flush()
-    Troupe.send_input(sid, text)
-    await_turn_ended(sid, ["root"])
-    await_state(sid, [:idle], 10_000)
-  end
-
-  defp await_turn_ended(sid, agent) do
-    case await_event(sid, "turn_ended", 10_000) do
-      %{agent: ^agent} -> :ok
-      _other -> await_turn_ended(sid, agent)
+    # A turn from what is sent now: what came before it is let go first.
+    defp turn(sid, text) do
+      flush()
+      Troupe.send_input(sid, text)
+      await_turn_ended(sid, ["root"])
+      await_state(sid, [:idle], 10_000)
     end
-  end
 
-  # The approval a child asked for, the root's own allowed as they come.
-  defp await_child_approval(sid) do
-    case await_event(sid, :approval_requested, 10_000) do
-      %{agent: ["root"]} = own ->
-        Troupe.approve(sid, own.data["call_id"], :allow)
-        await_child_approval(sid)
-
-      held ->
-        held
+    defp await_turn_ended(sid, agent) do
+      case await_event(sid, "turn_ended", 10_000) do
+        %{agent: ^agent} -> :ok
+        _other -> await_turn_ended(sid, agent)
+      end
     end
-  end
 
-  defp flush do
-    receive do
-      {:troupe_event, _sid, _event} -> flush()
-    after
-      0 -> :ok
+    # The approval a child asked for, the root's own allowed as they come.
+    defp await_child_approval(sid) do
+      case await_event(sid, :approval_requested, 10_000) do
+        %{agent: ["root"]} = own ->
+          Troupe.approve(sid, own.data["call_id"], :allow)
+          await_child_approval(sid)
+
+        held ->
+          held
+      end
     end
-  end
 
-  # The log as the session wrote it, once its writer has seen the last of it.
-  defp record(sid, name) do
-    _ = :sys.get_state(Troupe.Registry.checkpoints(sid))
-    File.mkdir_p!(@into)
-    File.cp!(Log.path(sid), Path.join(@into, name <> ".jsonl"))
+    defp flush do
+      receive do
+        {:troupe_event, _sid, _event} -> flush()
+      after
+        0 -> :ok
+      end
+    end
+
+    # The log as the session wrote it, once its writer has seen the last of it.
+    defp record(sid, name) do
+      _ = :sys.get_state(Troupe.Registry.checkpoints(sid))
+      File.mkdir_p!(@into)
+      File.cp!(Log.path(sid), Path.join(@into, name <> ".jsonl"))
+    end
   end
 end
