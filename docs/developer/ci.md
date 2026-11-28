@@ -121,7 +121,7 @@ profile); a stand-in answering at 169.254.169.254 on the runner, for the metadat
 then the suite, with its Mix build cached under a key of its own.
 
 **What it costs.** About twenty-five minutes of one runner, most of it the image builds
-(nine minutes) and the suite (twelve). On a pull request it starts once the cheaper checks
+(five to twelve minutes, by what the cache below holds) and the suite (about fourteen). On a pull request it starts once the cheaper checks
 of the same change have passed, so it is the last to finish on a change to the chart or the
 operator; a change elsewhere does not run it.
 
