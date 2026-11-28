@@ -8,6 +8,7 @@
 // history before it contributes entries only: every scalar of the head (the profile, the
 // spend, the goal, the tasks) is the checkpoint's and the tail's.
 
+import { sensitiveOf } from "./sensitive.js";
 import { emptyTranscript, fold, foldMany } from "./transcript.js";
 import type { EarlierState, Entry, LoopState, TodoItem, TokenUsage, TranscriptState } from "./transcript.js";
 import type { DurableEvent, ScratchDocument, TroupeEvent } from "./types.js";
@@ -131,6 +132,7 @@ export function fromCheckpoint(checkpoint: DurableEvent, base: TranscriptState =
     scratch: scratchOf(facts["scratch"], checkpoint.ts),
     ...(text(facts["visibility"]) ? { visibility: text(facts["visibility"]) } : {}),
     ...(text(facts["lifespan"]) ? { lifespan: text(facts["lifespan"]) } : {}),
+    ...(sensitiveOf(facts["sensitive"]) ? { sensitive: sensitiveOf(facts["sensitive"])! } : {}),
     earlier: history,
   };
   // The waiting ones are drawn as the events that asked them are, and only here: the

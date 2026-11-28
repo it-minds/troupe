@@ -14,7 +14,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { JSX } from "react";
-import { emptyTranscript, errorText, fold, inviteRefusal, personName, removedSentence, roleWords, webAppOf } from "@troupe/client";
+import { emptyTranscript, errorText, fold, inviteRefusal, personName, removedSentence, roleWords, waitingSentence, webAppOf } from "@troupe/client";
 import type { AuthSession, DaemonClient, FleetRow, Invitee, InviteRole, Person, TranscriptState, TroupeEvent } from "@troupe/client";
 import { copyText } from "../clipboard";
 import { sessionLinkText } from "../links";
@@ -60,10 +60,13 @@ export function InviteControl({
   auth,
   daemon,
   row,
+  onWaiting,
 }: {
   auth: AuthSession | null;
   daemon: DaemonClient | null;
   row: FleetRow;
+  /** Where an invitation a sensitive session holds for a team administrator is said, under the head; in place without it. */
+  onWaiting?: ((sentence: string) => void) | undefined;
 }): JSX.Element | null {
   const reach = inviting(row, auth, daemon);
   // A private session listed by this computer's daemon is this person's own; a pod
@@ -77,6 +80,7 @@ export function InviteControl({
   const [role, setRole] = useState<InviteRole>("observe");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [waiting, setWaiting] = useState<string | null>(null);
 
   const load = useCallback(() => {
     if (!reach) return;
@@ -114,8 +118,13 @@ export function InviteControl({
   const act = async (f: () => Promise<unknown>): Promise<void> => {
     setBusy(true);
     setError(null);
+    setWaiting(null);
     try {
-      await f();
+      // A sensitive session's profile may hold the invitation for a team administrator:
+      // nobody is invited yet, and the head says it waits.
+      const held = waitingSentence(await f());
+      if (held && onWaiting) onWaiting(held);
+      else setWaiting(held);
       setOpen(false);
       setQuery("");
       setChosen("");
@@ -221,6 +230,11 @@ export function InviteControl({
       )}
 
       {!open && refused}
+      {!open && waiting && (
+        <p className="waiting" role="status">
+          {waiting}
+        </p>
+      )}
     </div>
   );
 }

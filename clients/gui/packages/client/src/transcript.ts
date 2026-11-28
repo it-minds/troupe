@@ -12,6 +12,8 @@ import { named } from "./people.js";
 import { type ProposalDecision, type ProposalResult, type ProposalState, proposalOf } from "./proposals.js";
 import { when } from "./remote.js";
 import { foldScratch, scratchDocumentOf } from "./scratch.js";
+import { sensitiveLine, sensitiveOf } from "./sensitive.js";
+import type { SensitiveMark } from "./sensitive.js";
 import type { DurableEvent, LlmDeltaData, LoopInfo, ScratchDocument, TroupeEvent } from "./types.js";
 import { isDurable } from "./types.js";
 import { durationWords, moneyWords } from "./words.js";
@@ -75,6 +77,12 @@ export type Entry =
        * from a report from before the parts.
        */
       changed?: string;
+      /**
+       * Why a call that did not run was refused, where a client shows it apart from a
+       * failure: `sensitive`, a sensitive session's rule (troupe #1239), its `content` the
+       * harness's sentence. Absent from every other result.
+       */
+      refused?: string;
     }
   /**
    * What the model thought before it answered, kept where the reply it came before lands
@@ -400,6 +408,12 @@ export interface TranscriptState {
    * log says, when the session's row is the word.
    */
   lifespan?: string | undefined;
+  /**
+   * Since when, and by what, the session is sensitive (troupe #1239), from
+   * `session_marked_sensitive` or a checkpoint's facts; undefined until the log says, when
+   * the session's row is the word. Nothing clears it.
+   */
+  sensitive?: SensitiveMark | undefined;
   /**
    * A laptop's session steered through the plane, while its laptop is away and once it is
    * back (troupe #932): `offer_paused` says why it went (`stopped`, its daemon said it was
@@ -1548,11 +1562,12 @@ function foldOne(state: TranscriptState, e: TroupeEvent, options: FoldOptions = 
     case "tool_call_completed": {
       const id = str(d.data["call_id"]);
       const ok = Boolean(d.data["ok"]);
+      const refused = str(d.data["refused"]) || undefined;
       return {
         ...next,
         entries: state.entries.map((en) =>
           en.kind === "tool" && en.callId === id
-            ? { ...en, ok, content: contentOf(d.data["content"]), endedAt: writtenAt(d) }
+            ? { ...en, ok, content: contentOf(d.data["content"]), endedAt: writtenAt(d), ...(refused ? { refused } : {}) }
             : en.kind === "scratch" && en.callId === id
               ? { ...en, ok, error: ok ? undefined : errorOf(d.data["content"]) }
               : (en.kind === "approval" || en.kind === "question") && en.callId === id
@@ -1821,6 +1836,14 @@ function foldOne(state: TranscriptState, e: TroupeEvent, options: FoldOptions = 
     case "session_lifespan_changed": {
       const lifespan = str(d.data["to"]) || undefined;
       return { ...next, lifespan, entries: [...state.entries, { kind: "system", ...base, type: d.type, text: lifespanChangedText(d) }] };
+    }
+
+    // The session became sensitive (troupe #1239), once and for good: a durable line, as a
+    // person's tools offered are, and the mark for the head. A second one changes nothing.
+    case "session_marked_sensitive": {
+      const mark = sensitiveOf(d.data);
+      if (!mark || state.sensitive) return next;
+      return { ...next, sensitive: mark, entries: [...state.entries, { kind: "system", ...base, type: d.type, text: sensitiveLine(mark) }] };
     }
 
     // A reply the output cap cut, or one with nothing in it (troupe-remote Decision 659).

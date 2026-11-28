@@ -50,6 +50,11 @@ const plane = await FakePlane.start({
   github: { repositories: ["example-org/widgets", "example-org/gadgets", "example-docs/*"], profiles: { dev: 3 } },
   // UNPRICED=dev: some of the dev profile's calls this month had no price, which its page says.
   ...(process.env["UNPRICED"] ? { profileSpecs: exampleProfiles().map((p) => (p.name === process.env["UNPRICED"] ? { ...p, unpriced: { calls: 14, tokens: 182_400 } } : p)) } : {}),
+  // SENSITIVE_SHARING=ask|deny: what the profiles say of sharing a sensitive session (#1239);
+  // under ask a share waits for Bob, who administers the team.
+  ...(process.env["SENSITIVE_SHARING"] === "ask" || process.env["SENSITIVE_SHARING"] === "deny"
+    ? { sensitiveSharing: process.env["SENSITIVE_SHARING"], teamAdmins: ["bob@example.com"] }
+    : {}),
   // The person's memory and artifacts are the ones the daemon below keeps, so the app shows
   // the same signed in, when it asks the plane, and offline, when it asks the daemon.
   keeper: (method, params) => keptBy(daemon)(method, params),
@@ -80,6 +85,28 @@ plane.seed("alice@example.com", { title: "Draft the pricing memo", profile: "dev
 // offers Erase now and Keep it; either is changed from its ⋯.
 plane.seed("alice@example.com", { title: "Which port does the gateway listen on?", profile: "dev", lifespan: "throwaway" });
 plane.seed("alice@example.com", { title: "Quarterly cost report", profile: "dev", lifespan: "persistent" });
+// A session a records lookup made sensitive (#1239), where a publish was then refused: its row
+// and head are marked, its transcript says when and draws the refusal; giving it to the team
+// is refused or waits as SENSITIVE_SHARING says. Make it sensitive is on any other's ⋯.
+const record = plane.seed("alice@example.com", {
+  title: "Look Ann up in the records",
+  profile: "dev",
+  visibility: "private",
+  sensitive: { at: new Date(Date.now() - 20 * 60_000).toISOString().replace(/\.\d+Z$/, "Z"), by: "mcp.records.lookup", how: "call" },
+});
+{
+  const log = worker.sessions.get(record.id)!.log;
+  log.append("tool_call_started", { call_id: "call_seed", name: "mcp.records.lookup", args: { name: "Ann" } });
+  log.append("tool_call_completed", { call_id: "call_seed", name: "mcp.records.lookup", ok: true, content: "Ann Example, born 1980" });
+  log.append("tool_call_started", { call_id: "call_pub", name: "publish_artifact", args: { title: "Ann" } });
+  log.append("tool_call_completed", {
+    call_id: "call_pub",
+    name: "publish_artifact",
+    ok: false,
+    refused: "sensitive",
+    content: "This session is sensitive since mcp.records.lookup read from it: publish_artifact is refused in a sensitive session by the profile dev (deny publish_artifact). It did not run. Say what is left undone; do not try to get around it.",
+  });
+}
 // A report built from a fetched page and published, which the harness proposes to rerun
 // every Monday (#1208): the card to answer. `report: daily` in any team session makes
 // another; `report: unavailable` one its profile would stop. PROPOSALS_GITOPS=1 plays a

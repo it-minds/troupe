@@ -93,6 +93,10 @@ const plane = await FakePlane.start({
   // RETENTION=<versions days>,<unopened days> sets the artifact retention periods (#981),
   // so the gallery says when each goes; unset, both are off and nothing new is shown.
   ...(process.env["RETENTION"] ? { retention: { versions_days: Number(process.env["RETENTION"].split(",")[0]) || null, unopened_days: Number(process.env["RETENTION"].split(",")[1]) || null } } : {}),
+  // What the profiles say of sharing a sensitive session (#1239): ask unless SENSITIVE_SHARING
+  // says allow or deny, so the team's Waiting shares has Carol's share for the person to answer.
+  sensitiveSharing: process.env["SENSITIVE_SHARING"] === "allow" || process.env["SENSITIVE_SHARING"] === "deny" ? process.env["SENSITIVE_SHARING"] : "ask",
+  teamAdmins: [as.subject],
   memory: [{ scope: "organisation", name: null, version: 2, hash: "sha256:fake", updated_at: "2026-10-22T10:00:00Z", text: "We write British English.\nEvery change has a test." }],
   // People's own memory, which a platform admin's Memory lists and reads, each read audited.
   own: { "ada@example.com": "## Tone\n\nShort answers, no emoji.\n\n## Reviews\n\nSmall pull requests, one concern each.", "carol@example.com": "I write British English." },
@@ -124,6 +128,17 @@ const plane = await FakePlane.start({
 
 plane.relay("ada@example.com", { id: "s-laptop-billing", ownerName: "Ada", workspace: "billing", shares: [{ subject: as.subject, role: "control" }] });
 plane.seed(as.subject, { title: "Tidy the icons", profile: "ux" });
+// Sensitive sessions (#1239): one of the person's own a records lookup marked, which Your
+// sessions marks; one of Carol's whose giving to the team waits on the person on the team's
+// Waiting shares; and one on Every session.
+const sensitiveAt = new Date(Date.now() - 20 * 60_000).toISOString().replace(/\.\d+Z$/, "Z");
+plane.seed(as.subject, { title: "Look Ann up in the records", profile: "dev", visibility: "private", sensitive: { at: sensitiveAt, by: "mcp.records.lookup", how: "call" } });
+if (as.subject !== PEOPLE["carol"]!.subject) {
+  plane.seed(PEOPLE["carol"]!.subject, { id: "s-carol-records", title: "Bea's record", profile: "dev", visibility: "private", sensitive: { at: sensitiveAt, by: "mcp.records.lookup", how: "call" } });
+  plane.rpcAs(PEOPLE["carol"]!.subject, "session.visibility.set", { session_id: "s-carol-records", visibility: "team" });
+}
+const everySession = admin.sessions.find((s) => s.id === "s-7f3a9c21");
+if (everySession) everySession.sensitive = { at: sensitiveAt, by: "mcp.records.lookup", how: "call" };
 const offerAfter = Number(process.env["OFFER_AFTER_MS"] ?? 15_000);
 if (offerAfter > 0) {
   setTimeout(() => plane.relay("ada@example.com", { id: "s-laptop-ledger", ownerName: "Ada", workspace: "ledger", shares: [{ subject: as.subject, role: "observe" }] }), offerAfter).unref?.();

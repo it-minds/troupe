@@ -43,6 +43,8 @@ export interface AdminSessionRow {
   lifespan?: string | null;
   /** When a throwaway one is erased if nothing keeps it; null for any other. */
   erases_at?: string | null;
+  /** Since when, and by what, it is sensitive (troupe #1239), `{at, by, how}`; null while it is not, absent from an older plane. */
+  sensitive?: { at: string; by: string; how: string } | null;
   last_active_at: string | null;
   /** The GitHub repository it was created with, which its pod cloned; null for none. */
   repository?: { owner: string; name: string; ref?: string | null } | null;
