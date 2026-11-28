@@ -54,6 +54,8 @@ defmodule Mix.Tasks.Troupe.Xref do
   one is to put it in the protocol. What the import table cannot see is a module named as
   an atom — `Troupe.Gateway.Daemon` in the child spec that embeds a daemon when none is
   running — which is the one place the TUI hosts the harness rather than calling it.
+  The tests' own modules under `test/support` are not the TUI and are not held to it: the
+  fake plane there pages history by the plane's own rule (`Troupe.Session.History`).
 
   Run it with `mix troupe.xref`; CI runs it alongside `mix test`.
   """
@@ -145,13 +147,28 @@ defmodule Mix.Tasks.Troupe.Xref do
     Mix.raise("#{length(calls)} call(s) #{summary}")
   end
 
-  @doc "This project's own compiled modules."
+  @doc """
+  This project's own compiled modules from `lib/`, the ones the binary ships. The test
+  environment compiles `test/support` beside them, and a fake plane there plays the server,
+  which may page or cut as the server's own code does: the rule is about the TUI, not
+  about what stands in for the far side of it.
+  """
   @spec own_modules() :: [module()]
   def own_modules do
+    lib = Path.expand("lib") <> "/"
+
     Mix.Project.compile_path()
     |> Path.join("Elixir.*.beam")
     |> Path.wildcard()
+    |> Enum.filter(&String.starts_with?(source(&1), lib))
     |> Enum.map(&(&1 |> Path.basename(".beam") |> String.to_atom()))
+  end
+
+  defp source(beam) do
+    case :beam_lib.chunks(String.to_charlist(beam), [:compile_info]) do
+      {:ok, {_module, [compile_info: info]}} -> to_string(Keyword.get(info, :source, ""))
+      _ -> ""
+    end
   end
 
   @doc "Every module of the three harness applications, from their `.app` files."
