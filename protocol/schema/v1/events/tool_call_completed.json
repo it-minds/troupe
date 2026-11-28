@@ -24,6 +24,9 @@
     "ok": {
       "type": "boolean"
     },
+    "refused": {
+      "type": "string"
+    },
     "spent": {
       "type": "object"
     },

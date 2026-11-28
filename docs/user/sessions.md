@@ -59,6 +59,20 @@ by the daemon in the same way, after the same window (`throwaway_erase_after_hou
 [configuration](configuration.md)); a private one is erased by the plane, which
 holds its key.
 
+## A sensitive session
+
+A team session can become **sensitive** by what it read: your administrator's profile names
+the tools whose data must not leave a session (a patients' records server, a folder of
+personnel files), and the first call to one marks the session before it runs. From then on
+the tools the profile refuses in a sensitive session (publishing an artifact, fetching a
+page, pushing, proposing for the team's memory, whatever it lists) are refused when the
+agent calls them, with a line in the transcript saying since when and by what the session is
+sensitive; the agent is told so, and says what it could not do. Nothing clears the mark, not
+you and not an administrator: the session is sensitive until it is erased. Giving it to your
+team, inviting somebody or sharing what it published may be refused, or wait for a team
+administrator's yes, as the profile says; the people who read it now go on reading it
+([sensitive sessions](../admin/sensitive-sessions.md)).
+
 ## Raising a session to the current configuration
 
 A session on the platform runs on the bundle version its profile's channel had when it
