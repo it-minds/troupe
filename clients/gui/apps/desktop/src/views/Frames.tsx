@@ -586,7 +586,8 @@ function Result({ entry, readBlob, full }: { entry: ToolEntry; readBlob: (b: str
 export function ToolFrame({ entry, level, readBlob }: { entry: ToolEntry; level: Detail; readBlob: (b: string) => Promise<string> }): JSX.Element {
   const head = toolHead(entry);
   const full = level === "everything";
-  const state = entry.ok === undefined ? "running" : entry.ok ? "ok" : "failed";
+  // Refused by a rule is not a failure: it did not run, and says why.
+  const state = entry.ok === undefined ? "running" : entry.ok ? "ok" : entry.refused ? "refused" : "failed";
   const shape = entry.name === "delegate" ? BRIEF_PARTS : entry.name === "finish" ? FINISH_PARTS : null;
   const parts = shape ? withCounted(partsOf(entry.args, shape), entry.changed) : [];
   const result = <Result entry={entry} readBlob={readBlob} full={full} />;
@@ -649,6 +650,7 @@ export function StripLine({ strip, onToggle }: { strip: Strip; onToggle: () => v
     <button type="button" className="strip" aria-expanded={strip.open} onClick={onToggle} title={strip.open ? "Shut this turn's working" : "Open this turn's working"}>
       {p.glyph} {p.steps}
       {p.failed && <span className="failed"> · {p.failed}</span>}
+      {p.refused && <span className="refused"> · {p.refused}</span>}
       {p.tools && ` · ${p.tools}`}
       {p.took && ` · ${p.took}`}
     </button>

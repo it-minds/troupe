@@ -99,6 +99,14 @@ export function sensitiveBanner(mark: SensitiveMark, words: MarkWords = {}): str
   return `This session is sensitive since ${clockWords(mark.at, words)}: ${markedBy(mark, words)}. Nothing clears it: its profile refuses what would take what it read out of it, and says who it may be shared with.`;
 }
 
+/**
+ * What a call refused by a rule says in its header in place of an outcome, since it did not
+ * run: "refused: the session is sensitive". The harness's sentence is its content.
+ */
+export function refusedWords(refused: string): string {
+  return refused === "sensitive" ? "refused: the session is sensitive" : `refused (${refused})`;
+}
+
 /** The ⋯ item that marks a session by hand, and what it means. One-way, so it asks again first. */
 export const SENSITIVE_ITEM = { title: "Make it sensitive", line: "One-way: nothing clears it" };
 

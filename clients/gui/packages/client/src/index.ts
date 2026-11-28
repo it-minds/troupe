@@ -157,6 +157,7 @@ export {
   isWaiting,
   knowsSensitive,
   planeKnowsSensitive,
+  refusedWords,
   sensitiveBanner,
   sensitiveLine,
   sensitiveMark,
