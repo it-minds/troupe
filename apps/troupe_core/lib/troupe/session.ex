@@ -114,7 +114,8 @@ defmodule Troupe.Session do
          starts: starts},
         # Whether the session is sensitive: right under the log, above every agent, so the
         # root and each subagent read one mark, and an agent that restarts reads it again.
-        {Troupe.Session.Sensitive, session_id: session_id, given: Keyword.get(opts, :sensitive)},
+        {Troupe.Session.Sensitive,
+         session_id: session_id, given: Keyword.get(opts, :sensitive), config: config.sensitive},
         # A person's own commands (`!cmd`, Decision 813): right under the log, so nothing
         # below that restarts — an agent, an MCP server — kills a command someone is
         # watching, and gone with the session, which takes every command it runs with it.

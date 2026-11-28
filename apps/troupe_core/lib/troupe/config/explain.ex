@@ -116,6 +116,7 @@ defmodule Troupe.Config.Explain do
         workspace: veil.(layers.workspace),
         files: Enum.map(layers.files, &veiled(&1, [:path, :cache], veil)),
         rules: Enum.map(layers.rules, &veiled(&1, [:source], veil)),
+        sensitive: veiled_sensitive(layers.sensitive, veil),
         warnings: Enum.map(layers.warnings, issue),
         refusals: Enum.map(layers.refusals, issue),
         errors: Enum.map(layers.errors, issue)
@@ -188,6 +189,8 @@ defmodule Troupe.Config.Explain do
     # The per-tool rules are every file's together, not one value from the highest: they
     # are listed as rules, each with its file (`rules/1`).
     |> Enum.reject(&match?(["permissions" | _], &1))
+    # So are a sensitive session's: the organisation's and the user's together (`sensitive_text/2`).
+    |> Enum.reject(&match?(["sensitive" | _], &1))
     |> Enum.map(&row(&1, layers))
     |> Enum.reject(&is_nil/1)
     |> order(schema_paths)
@@ -278,6 +281,7 @@ defmodule Troupe.Config.Explain do
 
   defp select(rows, nil), do: {:ok, rows, nil}
   defp select(_rows, "permissions" <> _), do: {:ok, [], nil}
+  defp select(_rows, "sensitive" <> _), do: {:ok, [], nil}
 
   defp select(rows, key) do
     {key, note} = canonical_key(key)
@@ -320,9 +324,10 @@ defmodule Troupe.Config.Explain do
         else: table(rows)
 
     rules = rules_text(layers.rules, key)
+    sensitive = sensitive_text(layers.sensitive, key)
 
     Enum.join(
-      header ++ [if(note, do: note), body, rules, issues_text(layers)] |> Enum.reject(&(&1 in [nil, ""])),
+      header ++ [if(note, do: note), body, rules, sensitive, issues_text(layers)] |> Enum.reject(&(&1 in [nil, ""])),
       "\n\n"
     ) <> "\n"
   end
@@ -354,6 +359,69 @@ defmodule Troupe.Config.Explain do
       ["permission rules (every file's together: deny beats ask beats allow, and inside one file the more specific rule decides)" | lines],
       "\n"
     )
+  end
+
+  # A sensitive session's rules on this computer (#1239): which calls mark one and what one
+  # is refused, each with its file, and the `sharing` in force with whose word it is. With
+  # every key when there are some, and asked for by `sensitive`.
+  defp sensitive_text(sensitive, key) do
+    cond do
+      not (is_nil(key) or String.starts_with?(key, "sensitive")) -> nil
+      is_nil(sensitive) and is_nil(key) -> nil
+      is_nil(sensitive) -> "sensitive sessions: nothing marks a session on this computer sensitive"
+      true -> sensitive_list(sensitive)
+    end
+  end
+
+  defp sensitive_list(sensitive) do
+    line = fn list, rule ->
+      "  #{String.pad_trailing(list, 9)} #{String.pad_trailing(rule.text, 32)}  " <>
+        "#{String.pad_trailing(Atom.to_string(rule.origin), 8)} #{shown(rule.source)}"
+    end
+
+    sharing =
+      case sensitive.sharing_from do
+        %{layer: layer, source: source} -> "  sharing   #{sensitive.sharing}  #{layer} #{shown(source)}"
+        nil -> "  sharing   #{sensitive.sharing} (the default)"
+      end
+
+    Enum.join(
+      ["sensitive sessions (the organisation's enforced and your own together; nothing clears a mark)"] ++
+        Enum.map(sensitive.marked_by, &line.("marked_by", &1)) ++
+        Enum.map(sensitive.deny, &line.("deny", &1)) ++ [sharing],
+      "\n"
+    )
+  end
+
+  @doc """
+  A sensitive session's rules on this computer as a client is sent them (#1239), or `nil`:
+  `marked_by` and `deny`, each rule as `Troupe.Config.Permissions.to_json/1` sends one (its
+  `scope` `enforced` or `user`, its `source` the file), and `sharing` with the `scope` and
+  `source` of the word in force, `null` for the default.
+  """
+  @spec sensitive_json(map() | nil) :: map() | nil
+  def sensitive_json(nil), do: nil
+
+  def sensitive_json(sensitive) do
+    from = sensitive.sharing_from
+
+    %{
+      "marked_by" => Enum.map(sensitive.marked_by, &Permissions.to_json/1),
+      "deny" => Enum.map(sensitive.deny, &Permissions.to_json/1),
+      "sharing" => %{
+        "value" => sensitive.sharing,
+        "scope" => from && Atom.to_string(from.layer),
+        "source" => from && shown(from.source)
+      }
+    }
+  end
+
+  defp veiled_sensitive(nil, _veil), do: nil
+
+  defp veiled_sensitive(sensitive, veil) do
+    rules = fn list -> Enum.map(list, &veiled(&1, [:source], veil)) end
+    from = sensitive.sharing_from && veiled(sensitive.sharing_from, [:source], veil)
+    %{sensitive | marked_by: rules.(sensitive.marked_by), deny: rules.(sensitive.deny), sharing_from: from}
   end
 
   # The organisation's memory documents a session reads as instructions (`Troupe.PlaneMemory`),
@@ -484,7 +552,8 @@ defmodule Troupe.Config.Explain do
         end),
       "warnings" => Enum.map(layers.warnings, &Issue.to_json/1),
       "refusals" => Enum.map(layers.refusals, &Issue.to_json/1),
-      "permissions" => Enum.map(layers.rules, &Permissions.to_json/1)
+      "permissions" => Enum.map(layers.rules, &Permissions.to_json/1),
+      "sensitive" => sensitive_json(layers.sensitive)
     }
     |> Map.merge(session_json(session))
   end

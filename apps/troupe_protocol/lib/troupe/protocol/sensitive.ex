@@ -137,6 +137,24 @@ defmodule Troupe.Protocol.Sensitive do
       "outside #{readers}"
   end
 
+  @doc """
+  The sentence a share of a sensitive session on a person's own computer is refused with
+  (an offer for steering from another device, an invitation into a private one) where its
+  `sharing` is `ask` or `deny`, naming whose word it is. `ask` refuses as `deny` does there:
+  no team administrator answers a laptop's request.
+  """
+  @spec laptop_sharing_refused(String.t(), String.t()) :: String.t()
+  def laptop_sharing_refused("ask", whose),
+    do:
+      "This session is sensitive and #{whose} says sharing it waits on a team administrator's yes, " <>
+        "which no administrator gives a session on a person's own computer: it is not shared beyond " <>
+        "the people who read it now"
+
+  def laptop_sharing_refused(_deny, whose),
+    do:
+      "This session is sensitive and #{whose} does not allow sharing it beyond the people who " <>
+        "read it now"
+
   @doc "What the owner is told while a share of a sensitive session waits."
   @spec waiting() :: String.t()
   def waiting,

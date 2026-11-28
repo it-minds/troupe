@@ -2119,12 +2119,14 @@ defmodule Troupe.Agent.Server do
 
       mark ->
         deny = for rule <- List.wrap(config.sensitive && config.sensitive.deny), do: rule.text
+        # A pod's rules are its profile's; this computer's, the organisation's and the user's.
+        whose = if config.sensitive && config.sensitive.profile, do: "its profile", else: "this computer's configuration"
 
         refused =
           if deny == [],
-            do: "Its profile refuses nothing more in a sensitive session.",
+            do: "#{String.capitalize(whose)} refuses nothing more in a sensitive session.",
             else:
-              "In a sensitive session its profile refuses #{Words.and_list(deny)}: a call to one " <>
+              "In a sensitive session #{whose} refuses #{Words.and_list(deny)}: a call to one " <>
                 "is refused and does not run, so say what is left undone instead of looking for " <>
                 "another way to do it."
 

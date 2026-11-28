@@ -45,7 +45,8 @@ defmodule Troupe.Config.Settings do
 
   `permissions` is every file's per-tool rules (#658), each `action`, `rule`, `tool`,
   `pattern`, `scope` (the layer), `source` and `ignored` (why it does not apply, or
-  null), for a page to show; a rule is not a key, and no page sets one.
+  null), for a page to show; a rule is not a key, and no page sets one. `sensitive` is a
+  sensitive session's rules on this computer (#1239, `Explain.sensitive_json/1`), or null.
   """
   @spec describe(Path.t() | nil) :: %{String.t() => term()}
   def describe(workspace \\ nil) do
@@ -61,6 +62,7 @@ defmodule Troupe.Config.Settings do
           "organisation" => [],
           "keys" => [],
           "permissions" => [],
+          "sensitive" => nil,
           "warnings" => [],
           "errors" => Enum.map(error.issues, &Issue.format/1)
         }
@@ -111,6 +113,8 @@ defmodule Troupe.Config.Settings do
       "keys" => layers |> Explain.rows() |> Enum.map(&key_json(&1, scopes)),
       # Every file's per-tool rules, with where each came from: shown, not set here.
       "permissions" => Enum.map(layers.rules, &Permissions.to_json/1),
+      # A sensitive session's rules here, the organisation's and the user's: shown, not set.
+      "sensitive" => Explain.sensitive_json(layers.sensitive),
       "warnings" => Enum.map(layers.warnings ++ layers.refusals, &Issue.format/1),
       "errors" => []
     }

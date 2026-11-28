@@ -405,6 +405,11 @@ defmodule Troupe.Config.Permissions do
   @spec scope(rule()) :: String.t()
   # A worker profile's rules are its name's, not a file's.
   def scope(%{layer: :profile, source: profile}), do: "the profile #{profile}"
+  # A rule of `sensitive` on this computer: the organisation's file's or the user's own,
+  # said as that file's rules are, in a sensitive session.
+  def scope(%{layer: :sensitive, origin: origin} = rule) when origin in [:enforced, :user],
+    do: scope(%{rule | layer: origin}) <> ", in a sensitive session"
+
   # A worker profile's `sensitive.deny`, which holds only once the session is sensitive.
   def scope(%{layer: :sensitive, source: profile}),
     do: "the profile #{profile}, in a sensitive session"
@@ -424,6 +429,17 @@ defmodule Troupe.Config.Permissions do
     end
   end
 
+  @doc """
+  Whose rule refuses a call in a sensitive session, as its refusal says it: "the profile
+  records" on a pod, "what your organisation enforces (managed.yaml)" or "your own
+  config.yaml (...)" on this computer.
+  """
+  @spec whose(rule()) :: String.t()
+  def whose(%{layer: :sensitive, origin: origin} = rule) when origin in [:enforced, :user],
+    do: scope(%{rule | layer: origin})
+
+  def whose(%{source: profile}), do: "the profile #{profile}"
+
   @doc "A rule as a sentence names it: `deny shell(git push), from what your organisation enforces (...)`."
   @spec describe(rule()) :: String.t()
   def describe(rule), do: "#{rule.action} #{rule.text}, from #{scope(rule)}"
@@ -436,13 +452,14 @@ defmodule Troupe.Config.Permissions do
       "rule" => rule.text,
       "tool" => rule.tool,
       "pattern" => rule.pattern,
-      "scope" => Atom.to_string(rule.layer),
+      "scope" => Atom.to_string(Map.get(rule, :origin) || rule.layer),
       "source" => source(rule),
       "ignored" => rule.ignored
     }
   end
 
   defp source(%{layer: :profile, source: profile}), do: profile
+  defp source(%{layer: :sensitive, origin: _file, source: path}) when is_binary(path), do: Troupe.Paths.display(path)
   defp source(%{layer: :sensitive, source: profile}), do: profile
   defp source(%{layer: :trigger, source: trigger}), do: trigger
   defp source(%{source: nil}), do: nil

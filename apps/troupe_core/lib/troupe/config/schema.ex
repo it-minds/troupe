@@ -464,6 +464,39 @@ defmodule Troupe.Config.Schema do
             "replaced, and of those that match a call `deny` beats `ask` beats `allow`; inside one file the " <>
             "more specific pattern decides. `troupe config --explain` lists them with where each came from.",
           enforce: :rules
+        ),
+        # A sensitive session on this computer (#1239): what the organisation's file
+        # enforces under `enforced:`, and what the user's own file adds. Never a project's.
+        spec(
+          "sensitive",
+          {:object,
+           [
+             spec(
+               "marked_by",
+               {:list, :rule},
+               "Calls that make a session sensitive, before they run: `mcp(records.*)`, `read_file(/srv/hr/**)`, " <>
+                 "`shell(psql)`. Nothing clears the mark."
+             ),
+             spec(
+               "deny",
+               {:list, :rule},
+               "Calls refused once the session is sensitive: `publish_artifact`, `web_fetch`, `mcp(chat.*)`, " <>
+                 "`remember`. Required where `marked_by` is set."
+             ),
+             spec(
+               "sharing",
+               {:enum, ~w(allow ask deny)},
+               "Whether a sensitive session may be offered for steering from another device or invited into: " <>
+                 "`allow`, or `ask` and `deny`, which on this computer both refuse, since no team administrator " <>
+                 "answers a laptop's request.",
+               default: "allow"
+             )
+           ]},
+          "Sensitive sessions on this computer: which calls mark a session sensitive, what a sensitive one is " <>
+            "refused, and whether it may be shared. Read from your own config.yaml and from the organisation's " <>
+            "file, whose `enforced:` section holds it beyond your reach: your file adds rules to both lists and " <>
+            "may tighten `sharing`, never loosen it.",
+          scope: :user
         )
       ]),
       group("Tools", [

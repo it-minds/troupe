@@ -22,6 +22,12 @@ defmodule Troupe.Session.Sensitive do
 
   A crash here restarts what is below it (`rest_for_one`), the agents included, which read
   the mark again from this process as it folds it back from the log.
+
+  **What the session's configuration says of it** (its `sensitive`: which calls mark it,
+  what a sensitive one is refused, and on this computer its `sharing`) is kept here too, as
+  the session started with it, for a host that acts for the session outside its agents'
+  gate: the daemon's publication, its memory proposals, its offers and its `mcp.call`
+  (`config/1`).
   """
 
   use GenServer
@@ -59,6 +65,23 @@ defmodule Troupe.Session.Sensitive do
   end
 
   @doc """
+  The session's configured `sensitive` (`Troupe.Config`'s field: `marked_by`, `deny`,
+  `profile`, and on this computer `sharing`), as the tree started with it, or `nil` where
+  it has none or no tree holds the session here.
+  """
+  @spec config(String.t() | nil) :: map() | nil
+  def config(nil), do: nil
+
+  def config(session_id) do
+    case Registry.whereis({:sensitive, session_id}) do
+      nil -> nil
+      pid -> GenServer.call(pid, :config)
+    end
+  catch
+    :exit, _gone -> nil
+  end
+
+  @doc """
   Mark the session sensitive, once: the first mark appends `session_marked_sensitive` with
   `data` (`how` is `call` or `person`; `by` the tool's name or the person's subject; `rule`
   and `call_id` for a call) and answers `{:ok, mark}`; a later one appends nothing and
@@ -80,11 +103,12 @@ defmodule Troupe.Session.Sensitive do
     session_id = Keyword.fetch!(opts, :session_id)
     folded = fold(Log.replay(session_id, @root))
     mark = folded || given(session_id, Keyword.get(opts, :given))
-    {:ok, %{session_id: session_id, mark: mark}}
+    {:ok, %{session_id: session_id, mark: mark, config: Keyword.get(opts, :config)}}
   end
 
   @impl GenServer
   def handle_call(:mark, _from, state), do: {:reply, state.mark, state}
+  def handle_call(:config, _from, state), do: {:reply, state.config, state}
 
   def handle_call({:mark, _data, _path}, _from, %{mark: %{} = mark} = state),
     do: {:reply, {:ok, mark}, state}

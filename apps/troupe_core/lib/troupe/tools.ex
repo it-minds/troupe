@@ -349,22 +349,64 @@ defmodule Troupe.Tools do
   # the gate has let it through and before it runs: the mark is in the log, and every agent
   # of the session reads it, before the call can return what it is about. A call refused
   # above read nothing and marks nothing.
-  defp mark(name, args, %Ctx{config: %{sensitive: %{marked_by: [_ | _] = rules}}} = ctx) do
+  defp mark(name, args, %Ctx{config: %{sensitive: %{} = sensitive}} = ctx) do
     root = if ctx.workspace, do: ctx.workspace.root_real
-
-    case Permissions.match(rules, name, args, root) do
-      nil ->
-        :ok
-
-      rule ->
-        data = %{"how" => "call", "by" => name, "rule" => rule.text, "call_id" => ctx.call_id}
-        # A call outside any session tree (a tool run alone) has no session to mark.
-        _marked = Sensitive.mark(ctx.session_id, data, ctx.agent_path || ["root"])
-        :ok
-    end
+    _marked = mark_sensitive(sensitive, ctx.session_id, name, args, root: root, call_id: ctx.call_id, agent_path: ctx.agent_path)
+    :ok
   end
 
   defp mark(_name, _args, _ctx), do: :ok
+
+  @doc """
+  Mark `session_id` sensitive where a call to `name` with `args` matches a rule of
+  `sensitive`'s `marked_by` (a configuration's `sensitive`), before the call runs: the
+  gate's own mark, and what a host that makes a call outside the gate for a session asks
+  first (the daemon's `mcp.call`). Answers the session's mark, the first one where it was
+  already sensitive, or `nil` where no rule matches or no tree holds the session. Options:
+  `root`, the workspace the rules' paths are read against; `call_id`; `agent_path`.
+  """
+  @spec mark_sensitive(map() | nil, String.t() | nil, String.t(), map(), keyword()) :: map() | nil
+  def mark_sensitive(sensitive, session_id, name, args, opts \\ [])
+
+  def mark_sensitive(%{marked_by: [_ | _] = rules}, session_id, name, args, opts) do
+    case Permissions.match(rules, name, args, opts[:root]) do
+      nil ->
+        nil
+
+      rule ->
+        data = %{"how" => "call", "by" => name, "rule" => rule.text, "call_id" => opts[:call_id]}
+
+        # A call outside any session tree (a tool run alone) has no session to mark.
+        case Sensitive.mark(session_id, data, opts[:agent_path] || ["root"]) do
+          {:ok, mark} -> mark
+          {:error, :no_session} -> nil
+        end
+    end
+  end
+
+  def mark_sensitive(_sensitive, _session_id, _name, _args, _opts), do: nil
+
+  @doc """
+  How the gate refuses a call to `name` with `args` in a sensitive session where a rule of
+  `sensitive`'s `deny` matches: `{:denied_sensitive, name, rule, mark}`, which
+  `Troupe.Tool.Result.describe/1` says, or `nil` where it is not sensitive or nothing matches.
+  `session` is the session's id, whose mark its tree holds, or the mark itself, for a
+  session that is not running here. What a host asks before it does for a session what a
+  tool would (the daemon's publication, its `mcp.call`), so the rule is read once, here.
+  """
+  @spec sensitive_refusal(map() | nil, String.t() | map() | nil, String.t(), map(), Path.t() | nil) ::
+          {:denied_sensitive, String.t(), Permissions.rule(), map()} | nil
+  def sensitive_refusal(sensitive, session, name, args \\ %{}, root \\ nil) do
+    mark = if is_map(session), do: session, else: Sensitive.mark_of(session)
+
+    with %{} <- mark,
+         %{deny: [_ | _] = deny} <- sensitive,
+         {:deny, rule} <- Permissions.decide(deny, name, args, root) do
+      {:denied_sensitive, name, rule, mark}
+    else
+      _none -> nil
+    end
+  end
 
   # What the configuration's per-tool rules say about this call (#658), or `nil`; in a
   # sensitive session the profile's `sensitive.deny` with them, a layer above the profile's
