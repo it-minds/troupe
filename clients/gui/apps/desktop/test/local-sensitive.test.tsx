@@ -103,9 +103,19 @@ describe("making a session on this computer sensitive", () => {
     await openSession("Ward 7");
     let pop = await menu();
     (await waitFor(() => button("Make it sensitive", pop), "the ⋯'s item")).click();
-    button("Make it sensitive", await waitFor(confirm, "the confirm sheet"))!.click();
+    const sheet = await waitFor(confirm, "the confirm sheet");
+    // Whose rules hold it here: this computer's, never a profile it does not have.
+    expect(sheet.textContent).toContain("the rules this computer runs under refuse");
+    expect(sheet.textContent).not.toContain("profile");
+    button("Make it sensitive", sheet)!.click();
     await waitFor(() => ward.sensitive?.["how"] === "person" || null, "the daemon told");
     await waitFor(() => headTag()?.textContent === "sensitive" || null, "the head's tag");
+    const banner = await waitFor(() => document.querySelector<HTMLElement>(".banner.sensitive"), "the line under the head");
+    expect(banner.textContent).toContain("the rules this computer runs under refuse");
+    expect(banner.textContent).not.toContain("profile");
+    const line = await waitFor(() => document.querySelector<HTMLElement>(".note.sensitive"), "the transcript's line");
+    expect(line.textContent).toContain("the rules this computer runs under refuse");
+    expect(line.textContent).not.toContain("profile");
     pop = await menu();
     await waitFor(() => button("Keep at the top", pop), "the ⋯'s items");
     expect(button("Make it sensitive", pop)).toBeNull();

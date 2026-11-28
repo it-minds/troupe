@@ -2,12 +2,22 @@ defmodule Troupe.Client.Sensitive do
   @moduledoc """
   A sensitive session, in the sentences the terminal says (root #1239) and the words both web
   apps say (`@troupe/client`'s `sensitive.ts`). A session becomes sensitive by a tool call its
-  worker profile names, or by its owner's hand (`/sensitive`, `/new --sensitive`, `troupe run
-  --sensitive`), and nothing clears it: from then on its profile refuses what would take what
-  it read out of it, and sharing it beyond the people who read it now follows the profile's
-  `sensitive.sharing`. The plane's row carries the mark as `sensitive` (`{at, by, how}`), the
-  log as `session_marked_sensitive`, a refused call's `tool_call_completed` as `refused`.
+  rules name, or by its owner's hand (`/sensitive`, `/new --sensitive`, `troupe run
+  --sensitive`), and nothing clears it: from then on its rules refuse what would take what it
+  read out of it, and say whether it may be shared beyond the people who read it now. Whose
+  rules they are depends on where it runs (`rules/1`): a pod session's are its worker
+  profile's, one on this computer's the organisation's enforced file's and the person's own
+  config.yaml's. A row carries the mark as `sensitive` (`{at, by, how}`), the log as
+  `session_marked_sensitive`, a refused call's `tool_call_completed` as `refused`.
   """
+
+  @typedoc "Where a session runs: on the platform (`:plane`) or on this computer (`:here`)."
+  @type where :: :plane | :here
+
+  @doc "Whose rules hold a sensitive session, as a sentence's subject."
+  @spec rules(where()) :: String.t()
+  def rules(:here), do: "the rules this computer runs under"
+  def rules(:plane), do: "the profile's rules"
 
   @doc "The word every client marks a sensitive session with."
   @spec word() :: String.t()
@@ -37,11 +47,11 @@ defmodule Troupe.Client.Sensitive do
 
   @doc """
   The transcript's line where the log says it became sensitive: since when, by what, and that
-  nothing clears it. The log does not say which tools its profile refuses, so the line says
-  what they are for.
+  nothing clears it. The log does not say which tools its rules refuse, so the line says
+  what they are for, and whose they are where it runs.
   """
-  @spec line(map()) :: String.t()
-  def line(data) do
+  @spec line(map(), where()) :: String.t()
+  def line(data, where \\ :plane) do
     mark = of(data) || %{at: nil, by: "something", how: "call", name: nil}
 
     how =
@@ -49,16 +59,19 @@ defmodule Troupe.Client.Sensitive do
         do: "#{mark.name || mark.by} marked it",
         else: "#{mark.by} read from it"
 
-    "This session became sensitive at #{clock(mark.at)}: #{how}. Nothing clears it; its " <>
-      "profile refuses what would take what it read out of it."
+    "This session became sensitive at #{clock(mark.at)}: #{how}. Nothing clears it; " <>
+      "#{rules(where)} refuse what would take what it read out of it."
   end
 
-  @doc "What `/sensitive` asks before it marks a session, since nothing clears the mark."
-  @spec ask() :: String.t()
-  def ask,
+  @doc """
+  What `/sensitive` asks before it marks a session, since nothing clears the mark, naming
+  whose rules will hold it where it runs.
+  """
+  @spec ask(where()) :: String.t()
+  def ask(where),
     do:
-      "Make this session sensitive? From now on its profile refuses what would take what it " <>
-        "read out of it, and sharing it wider follows the profile's rule. Nothing clears it. " <>
+      "Make this session sensitive? From now on #{rules(where)} refuse what would take what " <>
+        "it read out of it, and say whether it may be shared wider. Nothing clears it. " <>
         "Press y to mark it, anything else to leave it."
 
   @doc "The sentence for a session just marked sensitive by hand."

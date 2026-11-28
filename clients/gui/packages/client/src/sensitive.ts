@@ -1,6 +1,6 @@
 // A sensitive session, in the words both web apps say it (troupe #1239). A session becomes
 // sensitive by a tool call its worker profile names, or by its owner's hand, and nothing
-// clears it: from then on its profile refuses what would take what it read out of it, and
+// clears it: from then on its rules refuse what would take what it read out of it, and
 // sharing it beyond the people who read it now follows the profile's `sensitive.sharing`.
 // The plane's row carries the mark as `sensitive` (`{at, by, how}`), the log as
 // `session_marked_sensitive`, and a refused call's `tool_call_completed` as `refused`.
@@ -50,6 +50,17 @@ export interface MarkWords {
   self?: string | null;
   /** A subject's name, where the view knows it: the row's owner, the session's people. */
   nameOf?: (subject: string) => string | null | undefined;
+  /**
+   * A session on this computer, whose daemon holds it: its rules are the ones this computer
+   * runs under (the organisation's enforced file and the person's config.yaml), not a
+   * profile's. Absent, a session on the platform.
+   */
+  here?: boolean;
+}
+
+/** Whose rules a sensitive session's are, as a sentence's subject: a profile's on the platform, this computer's here. */
+export function sensitiveRules(here = false): string {
+  return here ? "the rules this computer runs under" : "the profile's rules";
 }
 
 /** When, as a clock says it: `10:14` on the day it is, `27 Nov 10:14` on another. */
@@ -86,17 +97,17 @@ export function sensitiveMark(row: { sensitive?: SensitiveMark | null }, words: 
 /**
  * The transcript's durable line where the log says it became sensitive: "This session became
  * sensitive at 10:14: mcp.ehr.lookup read from it. Nothing clears it; …". The log does not
- * say which tools its profile refuses, so the line says what they are for rather than
- * naming them.
+ * say which tools its rules refuse, so the line says what they are for rather than naming
+ * them, and whose they are: the profile's, or this computer's (`words.here`).
  */
 export function sensitiveLine(mark: SensitiveMark, words: MarkWords = {}): string {
   const how = mark.how === "person" ? `${whoMarked(mark, words)} marked it` : `${mark.by} read from it`;
-  return `This session became sensitive at ${clockWords(mark.at, words)}: ${how}. Nothing clears it; its profile refuses what would take what it read out of it.`;
+  return `This session became sensitive at ${clockWords(mark.at, words)}: ${how}. Nothing clears it; ${sensitiveRules(words.here)} refuse what would take what it read out of it.`;
 }
 
 /** The head's one-line banner under a sensitive session's tag. */
 export function sensitiveBanner(mark: SensitiveMark, words: MarkWords = {}): string {
-  return `This session is sensitive since ${clockWords(mark.at, words)}: ${markedBy(mark, words)}. Nothing clears it: its profile refuses what would take what it read out of it, and says who it may be shared with.`;
+  return `This session is sensitive since ${clockWords(mark.at, words)}: ${markedBy(mark, words)}. Nothing clears it: ${sensitiveRules(words.here)} refuse what would take what it read out of it, and say who it may be shared with.`;
 }
 
 /**
@@ -110,9 +121,10 @@ export function refusedWords(refused: string): string {
 /** The ⋯ item that marks a session by hand, and what it means. One-way, so it asks again first. */
 export const SENSITIVE_ITEM = { title: "Make it sensitive", line: "One-way: nothing clears it" };
 
-/** What the confirm sheet says before a session is marked by hand. */
-export const SENSITIVE_CONFIRM =
-  "Make this session sensitive? From now on its profile refuses what would take what it read out of it, and sharing it wider follows the profile's rule. Nothing clears it: not you, not an administrator.";
+/** What the confirm sheet says before a session is marked by hand: a session on this computer's rules (`here`), else its profile's. */
+export function sensitiveConfirm(here = false): string {
+  return `Make this session sensitive? From now on ${sensitiveRules(here)} refuse what would take what it read out of it, and say whether it may be shared wider. Nothing clears it: not you, not an administrator.`;
+}
 
 /** The new-session screen's switch: its word, and what it means. */
 export const SENSITIVE_SWITCH = { label: "Sensitive", sentence: "Sensitive from its start: nothing clears it" };

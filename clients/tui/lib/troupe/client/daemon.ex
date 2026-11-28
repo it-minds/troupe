@@ -1025,7 +1025,7 @@ defmodule Troupe.Client.Daemon do
   def sensitive(sid, :status) do
     case Link.call("session.get", %{session_id: sid}) do
       {:ok, %{"sensitive" => %{} = mark}} -> {:ok, Troupe.Client.Sensitive.already(mark)}
-      {:ok, %{} = _row} -> {:ok, Troupe.Client.Sensitive.ask()}
+      {:ok, %{} = _row} -> {:ok, Troupe.Client.Sensitive.ask(:here)}
       {:error, reason} -> {:error, refusal(reason)}
     end
   end

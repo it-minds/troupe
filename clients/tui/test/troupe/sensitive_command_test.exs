@@ -79,7 +79,7 @@ defmodule Troupe.SensitiveCommandTest do
 
       assert line ==
                "This session became sensitive at 01:01 UTC: mcp.records.lookup read from it. " <>
-                 "Nothing clears it; its profile refuses what would take what it read out of it."
+                 "Nothing clears it; the profile's rules refuse what would take what it read out of it."
 
       assert [refused] =
                for(
@@ -143,7 +143,8 @@ defmodule Troupe.SensitiveCommandTest do
       refute screen_text(pid, screen) =~ "· sensitive"
 
       say(pid, "/sensitive")
-      eventually(fn -> Enum.any?(notices(pid), &(&1 =~ "Make this session sensitive?")) end)
+      eventually(fn -> Enum.any?(notices(pid), &(&1 == Sensitive.ask(:plane))) end)
+      assert Sensitive.ask(:plane) =~ "From now on the profile's rules refuse"
       refute Enum.any?(FakeRemote.calls(remote), &match?({"session.sensitive.set", _}, &1))
 
       say(pid, "/sensitive y")
@@ -285,7 +286,10 @@ defmodule Troupe.SensitiveCommandTest do
     {sid, _fake, ws} = start_session!(script: [{:text, "ok"}])
 
     assert {:ok, asked} = Client.sensitive(sid, :status)
-    assert asked == Sensitive.ask()
+    # Whose rules hold it here: this computer's, never a profile it does not have.
+    assert asked == Sensitive.ask(:here)
+    assert asked =~ "From now on the rules this computer runs under refuse"
+    refute asked =~ "profile"
 
     assert {:ok, said} = Client.sensitive(sid, :mark)
     assert said =~ "Sensitive since"
@@ -296,6 +300,21 @@ defmodule Troupe.SensitiveCommandTest do
 
     {:ok, rows} = Client.sessions({:local, ws})
     assert View.kept(Enum.find(rows, &(&1.id == sid))) =~ "sensitive"
+  end
+
+  test "the mark's line of a session on this computer says this computer's rules hold it" do
+    {events, _memory} =
+      @recorded
+      |> Path.join("marked.jsonl")
+      |> File.stream!()
+      |> Enum.map(&Jason.decode!/1)
+      |> Enum.flat_map_reduce(Translate.memory(:shared), &Translate.durable("s-1", &1, &2))
+
+    assert [line] = Enum.filter(notes(events), &(&1 =~ "became sensitive"))
+
+    assert line ==
+             "This session became sensitive at 01:01 UTC: mcp.records.lookup read from it. " <>
+               "Nothing clears it; the rules this computer runs under refuse what would take what it read out of it."
   end
 
   test "the session list marks a sensitive session beside its other marks" do

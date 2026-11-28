@@ -150,7 +150,6 @@ export {
 export type { Lifespan, PlaneAsker } from "./lifespan.js";
 export {
   SENSITIVE,
-  SENSITIVE_CONFIRM,
   SENSITIVE_ITEM,
   SENSITIVE_SWITCH,
   clockWords,
@@ -159,10 +158,12 @@ export {
   planeKnowsSensitive,
   refusedWords,
   sensitiveBanner,
+  sensitiveConfirm,
   sensitiveLine,
   sensitiveMark,
   sensitiveOf,
   sensitiveRefusal,
+  sensitiveRules,
   sensitiveTitle,
   shareRequestLine,
   sharingRefusal,

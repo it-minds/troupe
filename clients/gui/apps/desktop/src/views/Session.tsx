@@ -63,9 +63,10 @@ import {
   lifespanOf,
   lifespanRefusal,
   throwawaySentence,
-  SENSITIVE_CONFIRM,
   SENSITIVE_ITEM,
   sensitiveBanner,
+  sensitiveConfirm,
+  sensitiveLine,
   sensitiveMark,
   sensitiveRefusal,
 } from "@troupe/client";
@@ -359,7 +360,8 @@ export function Session({
     setAskSensitive(false);
   }, [sessionId]);
   const sensitive = view.state.sensitive ?? row?.sensitive ?? null;
-  const markWords = { self: self ?? null, nameOf: (s: string) => (s === row?.owner ? row?.ownerName : null) };
+  // Whose rules hold it: this computer's for a session its daemon holds, else its profile's.
+  const markWords = { self: self ?? null, nameOf: (s: string) => (s === row?.owner ? row?.ownerName : null), here };
   const sensitiveTag = sensitiveMark({ sensitive }, markWords);
   const makeSensitive =
     marking && ((marking.row.kind === "team" && marking.row.yourRole === "owner" && knowsSensitive) || marksHere) && !sensitive
@@ -722,7 +724,7 @@ export function Session({
       {askSensitive && makeSensitive && (
         <Dialog label={SENSITIVE_ITEM.title} role="alertdialog" onClose={() => setAskSensitive(false)} className="sensitive-confirm">
           <h1>{SENSITIVE_ITEM.title}</h1>
-          <p>{SENSITIVE_CONFIRM}</p>
+          <p>{sensitiveConfirm(here)}</p>
           <div className="actions">
             <button type="button" onClick={() => setAskSensitive(false)}>
               Cancel
@@ -2134,7 +2136,11 @@ const StreamEntry = memo(function StreamEntry({
           >
             {/* The start's suggestion is the harness's sentence, written for a terminal in
                 Markdown: in this app's words where it has them, else rendered, never raw. */}
-            {entry.type === "onboarding_suggested" ? (words ?? <InlineMarkdown text={entry.text} />) : entry.text}
+            {entry.type === "onboarding_suggested"
+              ? (words ?? <InlineMarkdown text={entry.text} />)
+              : entry.mark
+                ? sensitiveLine(entry.mark, { here: local })
+                : entry.text}
           </p>
           {step && (
             <p className="note">

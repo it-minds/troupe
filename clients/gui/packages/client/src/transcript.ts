@@ -239,8 +239,12 @@ export type Entry =
    * answers; `localPath` where it already is when the session runs on this machine.
    */
   | { kind: "file"; seq: number; agent: string[]; path: string; size: number; hash: string; title: string | undefined; localPath: string | undefined }
-  /** Lifecycle: started, switched, compacted, done, cancelled, dormant, resumed, errors. */
-  | { kind: "system"; seq: number; agent: string[]; type: string; text: string }
+  /**
+   * Lifecycle: started, switched, compacted, done, cancelled, dormant, resumed, errors.
+   * `mark` on the line that says it became sensitive, for a view that says whose rules hold
+   * it where the session runs (`sensitiveLine` with `here`); `text` says the profile's.
+   */
+  | { kind: "system"; seq: number; agent: string[]; type: string; text: string; mark?: SensitiveMark }
   /**
    * Something the harness offers the session's owner (troupe #1208): a card while it is
    * open, which only the owner answers, and its answer's line once it is not. Nothing waits
@@ -1843,7 +1847,7 @@ function foldOne(state: TranscriptState, e: TroupeEvent, options: FoldOptions = 
     case "session_marked_sensitive": {
       const mark = sensitiveOf(d.data);
       if (!mark || state.sensitive) return next;
-      return { ...next, sensitive: mark, entries: [...state.entries, { kind: "system", ...base, type: d.type, text: sensitiveLine(mark) }] };
+      return { ...next, sensitive: mark, entries: [...state.entries, { kind: "system", ...base, type: d.type, text: sensitiveLine(mark), mark }] };
     }
 
     // A reply the output cap cut, or one with nothing in it (troupe-remote Decision 659).
