@@ -1320,7 +1320,11 @@ defmodule Troupe.FakeRemote do
        when is_integer(before) and before >= 1 do
     events = state.sessions[id][:events] || []
     by_seq = Map.new(events, &{&1["seq"], &1})
-    read = fn from, below -> for e <- events, e["seq"] > from and e["seq"] < below, do: Event.from_json(e) end
+
+    read = fn from, below ->
+      for e <- events, e["seq"] > from and e["seq"] < below, do: Event.from_json(e)
+    end
+
     {page, more} = History.page(read, before, min(params["limit"] || 500, state.events_page))
     {{:ok, %{"events" => Enum.map(page, &by_seq[&1.seq]), "more" => more}}, state}
   end
