@@ -175,7 +175,10 @@ as the session's invitation picker does. They find it under **Shared with you** 
 whatever it is for, and keep that role until you **Remove** them; naming them again changes
 the role. A link and a share by name add up: a person holds the stronger of the two.
 Removing a person ends both. The console lists who an artifact is shared with by name on its
-page, for its owner, and removes them there too.
+page, for its owner, and removes them there too. An artifact a [sensitive
+session](sessions.md#a-sensitive-session) published is shared wider only as its profile
+says: allowed, refused with a sentence, or waiting on a team administrator's yes, in which
+case no link is made, since a link cannot wait.
 
 ## Comments
 
