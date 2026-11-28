@@ -434,7 +434,7 @@ defmodule Troupe.Worker.Session.Manager do
            # A session created with a repository, waking to an empty tree, starts from it.
            :ok <- Clone.ensure(context.session_id, root, tree, state.opts),
            {:ok, sealer} <- start_sealer(state, context, log),
-           {:ok, session} <- Restore.start(context, root, state.opts) do
+           {:ok, session} <- start_tree(context, root, state.opts) do
         {:ok, log, sealer, session}
       end
     else
@@ -448,6 +448,23 @@ defmodule Troupe.Worker.Session.Manager do
       kind, reason ->
         forget(context, root, found)
         :erlang.raise(kind, reason, __STACKTRACE__)
+    end
+  end
+
+  # The session's tree, started over the log and the workspace; or, where a tree of it runs
+  # here already, that one: one whose manager went before its activation was answered (a
+  # crash, a kill) leaves the tree up and the session's name taken, and the next activation
+  # is answered with it, as `Troupe.activate/2` answers a session another command woke
+  # first.
+  defp start_tree(context, root, opts) do
+    case Restore.start(context, root, opts) do
+      {:error, {:already_started, pid}} = taken ->
+        if Process.alive?(pid),
+          do: {:ok, %{id: context.session_id, pid: pid, workspace: nil}},
+          else: taken
+
+      started ->
+        started
     end
   end
 
