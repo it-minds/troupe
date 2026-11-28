@@ -231,7 +231,7 @@ function RelayedPublication({
   const [organisation, setOrganisation] = useState(pub.visibility === "organisation");
   const [owner, setOwner] = useState<"me" | "team">(pub.owner ?? "me");
   const answer: GateAnswer = republish ? {} : publishAnswer({ organisation, teams: ticked, owner });
-  const again = republish || pub.visibility !== null || (pub.teams ?? []).length > 0;
+  const again = republish || pub.visibility !== null;
   return (
     <>
       {republish ? (

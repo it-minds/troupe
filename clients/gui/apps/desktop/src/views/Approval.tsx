@@ -565,7 +565,8 @@ function PublishPanel({
   // A new version's answer carries nothing: it keeps who reads it and whose it is.
   const answerOf: GateAnswer = republish ? {} : publishAnswer({ organisation, teams: ticked, owner });
   const toggle = (team: string): void => setTicked((now) => (now.includes(team) ? now.filter((t) => t !== team) : [...now, team]));
-  const again = republish || publication.visibility !== null || (publication.teams ?? []).length > 0;
+  // The harness allows a new one the agent named no visibility for once, whatever teams the plane ticked.
+  const again = republish || publication.visibility !== null;
 
   return (
     <section className="approval publication" aria-label={`Publish ${publication.title}`}>
