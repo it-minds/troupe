@@ -33,7 +33,7 @@ defmodule Troupe.Config.Layers do
 
   alias Troupe.Config.{Issue, Migrate, Org, Permissions, Schema, Trust}
   alias Troupe.LLM.ProviderType
-  alias Troupe.Protocol.{Organisation, PermissionRule}
+  alias Troupe.Protocol.{Organisation, PermissionRule, Sensitive}
 
   # `:profile` and `:session` are a pod's: what its worker profile set, which is its
   # environment, and the terms the session was created with (`Troupe.Config.resolve/3`'s
@@ -73,6 +73,10 @@ defmodule Troupe.Config.Layers do
               # Every file's per-tool rules, each with its layer and file
               # (`Troupe.Config.Permissions`): kept from every scope, not merged.
               rules: [],
+              # A sensitive session on this computer (#1239): the organisation's enforced
+              # `sensitive` and the user file's, as one, each rule with where it came from,
+              # or `nil` where neither says anything (`sensitive/3`). Never on a pod.
+              sensitive: nil,
               # The organisation's memory documents in force, and where they came from
               # (`Troupe.PlaneMemory`): set as the configuration is resolved.
               memory: nil,
@@ -184,8 +188,111 @@ defmodule Troupe.Config.Layers do
       Enum.flat_map(org.layers ++ [user | workspace_layers], &rules(&1, ctx)) ++
         Enum.flat_map(org.layers, &enforced_rules/1)
 
-    %{result | rules: rules} |> unresolved() |> servers() |> endpoints() |> prices()
+    sensitive = sensitive(ctx, org.layers, user)
+
+    %{
+      result
+      | rules: rules,
+        sensitive: sensitive.spec,
+        warnings: result.warnings ++ sensitive.warnings,
+        errors: result.errors ++ sensitive.errors
+    }
+    |> unresolved()
+    |> servers()
+    |> endpoints()
+    |> prices()
   end
+
+  # -- a sensitive session on this computer ------------------------------------------
+
+  # What marks a session here sensitive and what a sensitive one is refused, from the two
+  # files that may say it: what the organisation enforces, first, and the user's own file,
+  # which adds rules to both lists and may tighten `sharing` and not loosen it. A looser
+  # word is kept as written, does nothing, and is said. `marked_by` with no `deny` in
+  # either is refused, so the choice is explicit, as on a worker profile.
+  defp sensitive(%{pod?: true}, _org_layers, _user), do: %{spec: nil, warnings: [], errors: []}
+
+  defp sensitive(_ctx, org_layers, user) do
+    given =
+      for(%{file: %{path: path}, enforced_sensitive: %{} = value} <- org_layers, do: {:enforced, path, value}) ++
+        case user.values["sensitive"] do
+          %{} = value -> [{:user, user.file.path, value}]
+          _none -> []
+        end
+
+    case given do
+      [] -> %{spec: nil, warnings: [], errors: []}
+      given -> sensitive_spec(given)
+    end
+  end
+
+  defp sensitive_spec(given) do
+    marked_by = Enum.flat_map(given, fn {origin, path, value} -> sensitive_rules(value["marked_by"], origin, path) end)
+    deny = Enum.flat_map(given, fn {origin, path, value} -> sensitive_rules(value["deny"], origin, path) end)
+
+    enforced =
+      for {:enforced, path, %{"sharing" => word}} <- given, is_binary(word), do: %{value: word, layer: :enforced, source: path}
+
+    held = Enum.reduce(enforced, nil, fn entry, held -> tighter_entry(held, entry) end)
+    {sharing, warnings} = user_sharing(Enum.find(given, &user_sharing?/1), held)
+
+    spec = %{
+      marked_by: marked_by,
+      deny: deny,
+      sharing: (sharing && sharing.value) || "allow",
+      sharing_from: sharing && Map.take(sharing, [:layer, :source]),
+      profile: nil
+    }
+
+    %{spec: spec, warnings: warnings, errors: explicit(spec, given)}
+  end
+
+  defp user_sharing?({:user, _path, %{"sharing" => word}}), do: is_binary(word)
+  defp user_sharing?(_given), do: false
+
+  defp user_sharing({:user, path, %{"sharing" => word}}, held) do
+    user = %{value: word, layer: :user, source: path}
+
+    if held && Sensitive.looser?(word, held.value),
+      do: {held, [issue(:warning, path, nil, "sensitive.sharing", looser(word, held))]},
+      else: {tighter_entry(held, user), []}
+  end
+
+  defp user_sharing(nil, held), do: {held, []}
+
+  defp sensitive_rules(texts, origin, path) when is_list(texts),
+    do: %{"deny" => texts} |> Permissions.from(:sensitive, path) |> Enum.map(&Map.put(&1, :origin, origin))
+
+  defp sensitive_rules(_none, _origin, _path), do: []
+
+  # The tighter of two, the first where they are the same: the organisation's.
+  defp tighter_entry(nil, entry), do: entry
+  defp tighter_entry(held, entry), do: if(Sensitive.looser?(held.value, entry.value), do: entry, else: held)
+
+  defp looser(word, held),
+    do:
+      "sensitive.sharing is #{word}, looser than the #{held.value} your organisation enforces " <>
+        "(#{Troupe.Paths.display(held.source)}); #{held.value} holds, and your file may only tighten it"
+
+  defp explicit(%{marked_by: [_ | _], deny: []}, given) do
+    {_origin, path, _value} = Enum.find(Enum.reverse(given), &marks?/1)
+
+    [
+      issue(
+        :error,
+        path,
+        nil,
+        "sensitive.deny",
+        "sensitive.marked_by is set and sensitive.deny is not: say which tools a sensitive session is " <>
+          "refused in sensitive.deny, such as [publish_artifact, web_fetch, remember], or take marked_by out"
+      )
+    ]
+  end
+
+  defp explicit(_spec, _given), do: []
+
+  defp marks?({_origin, _path, %{"marked_by" => [_ | _]}}), do: true
+  defp marks?(_given), do: false
 
   # A file's rules, an `allow` from a workspace's file marked as a key it may not set is:
   # only in a trusted workspace, and never on a pod.
@@ -337,20 +444,57 @@ defmodule Troupe.Config.Layers do
                     "a setting goes under defaults: or enforced:"
                 )
 
-        defaults = defaults_section(map["defaults"], source, text, ctx)
-        enforced = enforced_section(map["enforced"], source, text)
+        {defaults_map, misplaced} = misplaced_sensitive(map["defaults"], source, text)
+        defaults = defaults_section(defaults_map, source, text, ctx)
+        # `sensitive` is a whole block the organisation holds, not a value held to a limit.
+        {sensitive, sensitive_found} = enforced_sensitive(map["enforced"], source, text)
+        enforced = enforced_section(without_sensitive(map["enforced"]), source, text)
         # The rules it enforces are added to every other file's, not held as a limit.
         {rules, set} = Map.pop(enforced.set, ["permissions"])
 
         %{
           defaults
-          | warnings: unknown ++ defaults.warnings ++ enforced.warnings,
-            errors: defaults.errors ++ enforced.errors
+          | warnings: unknown ++ misplaced ++ defaults.warnings ++ enforced.warnings ++ sensitive_found.warnings,
+            errors: defaults.errors ++ enforced.errors ++ sensitive_found.errors
         }
         |> Map.put(:enforced, set)
         |> Map.put(:enforced_rules, rules && rules.value)
+        |> Map.put(:enforced_sensitive, sensitive)
     end
   end
+
+  # A sensitive session's rules are the organisation's to enforce or a person's own to
+  # add: a default a person could take away would be neither.
+  defp misplaced_sensitive(%{"sensitive" => _given} = defaults, source, text) do
+    {Map.delete(defaults, "sensitive"),
+     [
+       issue(
+         :warning,
+         source,
+         line_of(text, ["defaults", "sensitive"]),
+         "defaults.sensitive",
+         "defaults.sensitive is ignored: sensitive goes under enforced:, where people's own files may add to it and not take from it"
+       )
+     ]}
+  end
+
+  defp misplaced_sensitive(defaults, _source, _text), do: {defaults, []}
+
+  defp enforced_sensitive(%{"sensitive" => value}, source, text) when not is_nil(value) do
+    {block, offset} = block(text, "enforced")
+    {checked, found} = check_value(value, Schema.at(["sensitive"]), ["sensitive"], source, block)
+
+    {if(found.errors == [] and is_map(checked), do: checked),
+     %{
+       warnings: Enum.map(found.warnings, &within(&1, "enforced", offset)),
+       errors: Enum.map(found.errors, &within(&1, "enforced", offset))
+     }}
+  end
+
+  defp enforced_sensitive(_enforced, _source, _text), do: {nil, %{warnings: [], errors: []}}
+
+  defp without_sensitive(%{} = enforced), do: Map.delete(enforced, "sensitive")
+  defp without_sensitive(enforced), do: enforced
 
   defp defaults_section(nil, _source, _text, _ctx), do: empty_layer()
 
@@ -799,7 +943,8 @@ defmodule Troupe.Config.Layers do
   defp rule_notes(rule, action, shown, line, path) do
     builtins = Troupe.Tools.builtins()
     # With the two a session adds where it has them: its skills' tool and a loop's verdict.
-    names = Enum.map(builtins, &elem(&1, 0)) ++ ["skill", "goal_complete"]
+    # And `publish_artifact`, which a daemon signed in to a plane adds.
+    names = Enum.map(builtins, &elem(&1, 0)) ++ ["skill", "goal_complete", "publish_artifact"]
 
     cond do
       action in ["ask", "allow"] and {rule.tool, :inline} in builtins ->

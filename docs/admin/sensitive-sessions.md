@@ -94,6 +94,41 @@ Every session row says `sensitive` (`{at, by, how}`, or `null`), and the audit h
 `session.sensitive` for each mark: actor `system:harness` with the `tool` and `rule` for a
 call, or the person for a mark by hand.
 
+## On people's own computers
+
+A session on a person's own computer is marked and refused by the same gate, against rules
+the organisation's managed file enforces ([client configuration](client-config.md)), in the
+config file's spelling (Decision 1124):
+
+```yaml
+version: 1
+enforced:
+  sensitive:
+    marked_by: ["mcp(records.*)", "read_file(/srv/records/**)"]
+    deny: ["publish_artifact", "web_fetch", "mcp(chat.*)", "shell(curl)", "remember"]
+    sharing: deny
+```
+
+- **`marked_by`** and **`deny`** are the profile's `markedBy` and `deny`. A person's own
+  `config.yaml` may add rules to both (a `sensitive:` block at its top level) and cannot take
+  one of these away; a project's file sets none. `marked_by` with no `deny` in either file
+  refuses the configuration, naming the file.
+- **`sharing`** may be tightened by the person's file and not loosened: a looser word is
+  ignored and warned about. On a laptop it holds an offer for steering from another device
+  and an invitation into a private session. `ask` refuses as `deny` does there, with a
+  sentence saying so: no team administrator answers a laptop's request.
+- **The daemon refuses on its own side** what it does for a session outside its agents' gate:
+  a publication where `deny` names `publish_artifact`, every proposal for a team's or the
+  organisation's memory, and a call it makes to one of the person's servers for the session,
+  which marks it where `marked_by` names the call. A session here has no plane row, so the
+  plane's own refusals and its audit of the mark do not reach it.
+
+`sensitive` under `defaults:` is ignored with a warning: a default a person's file could
+replace would be neither the organisation's rule nor theirs. The plane's organisation set
+(`client_enforced`) does not carry `sensitive` yet; the managed file does. People see the
+rules in effect, and where each came from, on *This computer* in the desktop app, in the
+terminal's `/settings` and with `troupe config --explain sensitive`.
+
 ## A worked example
 
 A team works with a patients' records system the bundle reaches as the MCP server `records`.

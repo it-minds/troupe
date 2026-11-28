@@ -19,6 +19,8 @@ import {
   planeKnowsLifespans,
   planeKnowsSensitive,
   rowFromPlane,
+  sensitiveBanner,
+  sensitiveConfirm,
   sensitiveLine,
   sensitiveMark,
   sensitiveOf,
@@ -159,10 +161,24 @@ describe("a sensitive session's log", { skip: noRecordings }, () => {
     const state = foldAll(recorded("by_hand"));
     assert.equal(state.sensitive?.how, "person");
     assert.equal(state.sensitive?.name, "Ada");
-    assert.equal(sensitiveLine(state.sensitive!, UTC), "This session became sensitive at 01:01: Ada marked it. Nothing clears it; its profile refuses what would take what it read out of it.");
+    assert.equal(sensitiveLine(state.sensitive!, UTC), "This session became sensitive at 01:01: Ada marked it. Nothing clears it; the profile's rules refuse what would take what it read out of it.");
     const fetchCall = tools(state).find((t) => t.name === "web_fetch")!;
     assert.equal(fetchCall.refused, "sensitive");
     assert.match(String(fetchCall.content), /^This session is sensitive since Ada marked it/);
+  });
+
+  it("on this computer says whose rules hold it, this computer's and not a profile's", () => {
+    const state = foldAll(recorded("by_hand"));
+    const mark = state.sensitive!;
+    const entry = state.entries.find((e) => e.kind === "system" && e.type === "session_marked_sensitive");
+    assert.deepEqual(entry?.kind === "system" ? entry.mark : null, mark);
+    const here = { ...UTC, here: true };
+    assert.equal(sensitiveLine(mark, here), "This session became sensitive at 01:01: Ada marked it. Nothing clears it; the rules this computer runs under refuse what would take what it read out of it.");
+    assert.match(sensitiveBanner(mark, here), /Nothing clears it: the rules this computer runs under refuse what would take what it read out of it, and say who it may be shared with\.$/);
+    assert.match(sensitiveBanner(mark, UTC), /Nothing clears it: the profile's rules refuse/);
+    assert.match(sensitiveConfirm(true), /^Make this session sensitive\? From now on the rules this computer runs under refuse/);
+    assert.match(sensitiveConfirm(), /^Make this session sensitive\? From now on the profile's rules refuse/);
+    for (const said of [sensitiveLine(mark, here), sensitiveBanner(mark, here), sensitiveConfirm(true)]) assert.doesNotMatch(said, /profile/);
   });
 
   it("a replay folds the mark once", () => {

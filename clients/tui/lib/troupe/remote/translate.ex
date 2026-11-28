@@ -663,7 +663,8 @@ defmodule Troupe.Remote.Translate do
       # The session became sensitive (root #1239), once and for good: a line saying since
       # when and by what; the worker moves the status line's mark.
       "session_marked_sensitive" ->
-        {[emit.(:remote_note, %{text: Troupe.Client.Sensitive.line(data)})], memory}
+        {[emit.(:remote_note, %{text: Troupe.Client.Sensitive.line(data, where_rules(memory))})],
+         memory}
 
       # How long the session lasts, changed by its owner (root #1209): a line.
       "session_lifespan_changed" ->
@@ -1627,6 +1628,11 @@ defmodule Troupe.Remote.Translate do
 
   defp where(%{isolation: :remote, profile: profile}) when is_binary(profile), do: profile
   defp where(_memory), do: nil
+
+  # Whose rules hold a sensitive session: a pod's profile's, or this computer's for a session
+  # its daemon runs (a worktree or the shared checkout).
+  defp where_rules(%{isolation: :remote}), do: :plane
+  defp where_rules(_memory), do: :here
 
   # A comment on an artifact this session published, as one line: who, on which, and what.
   defp commented(data) do

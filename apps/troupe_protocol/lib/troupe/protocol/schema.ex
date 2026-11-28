@@ -971,9 +971,11 @@ defmodule Troupe.Protocol.Schema do
         "session_id" => required(:string),
         "lifespan" => required(:string)
       },
-      # A pod session marked sensitive by its owner, once and for good: the plane's, which the
-      # clients ask directly. `sensitive` is `true`; `false` is refused, since nothing clears it.
+      # A session marked sensitive by its owner, once and for good: a pod session's at the
+      # plane, which the clients ask directly, and one on a person's computer at its daemon.
+      # `sensitive` is `true`; `false` is refused, since nothing clears it.
       "session.sensitive.set" => %{
+        "command_id" => optional(:string),
         "session_id" => required(:string),
         "sensitive" => required(:boolean)
       },

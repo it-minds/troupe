@@ -69,7 +69,7 @@ defmodule Troupe.Worker.Auth do
   # is a new row, key and placement too, so it is the plane's `session.fork`.
   # A person's own triggers are the plane's rows, about no session.
   @plane_methods ~w(session.archive session.unarchive session.pin session.unpin session.erase session.fork
-                    session.title.set session.lifespan.set session.share_requests
+                    session.title.set session.lifespan.set session.sensitive.set session.share_requests
                     session.share_request.decide trigger.own.list trigger.own.disable
                     trigger.own.enable trigger.own.delete)
 

@@ -182,11 +182,13 @@ defmodule Troupe.Config do
             # `spec.personalTools: forbid`, which the worker sets from the activation, so a
             # change reaches a session at its next wake. Never from a file.
             personal_tools_forbidden_by: nil,
-            # What makes the session sensitive and what a sensitive one is refused, the
-            # worker profile's `spec.sensitive` as the worker sets it from the activation:
+            # What makes the session sensitive and what a sensitive one is refused,
             # `%{marked_by: rules, deny: rules, profile: name}`, each rule a per-tool rule
-            # of the `:sensitive` layer, or `nil` where nothing marks a session. Never from
-            # a file.
+            # of the `:sensitive` layer, or `nil` where nothing marks a session. On a pod the
+            # worker profile's `spec.sensitive`, as the worker sets it from the activation,
+            # and never from a file. On this computer built from the organisation's
+            # enforced `sensitive` and the user file's (`Layers`), each rule with its
+            # `origin`, `profile` `nil`, and `sharing` the tighter word of the two.
             sensitive: nil,
             # The organisation's memory documents a session reads (`Troupe.PlaneMemory`,
             # #55): the organisation's, a team's and a worker profile's, in that order, as
@@ -358,6 +360,9 @@ defmodule Troupe.Config do
       {config, layers} = Org.hold(config, layers)
       # Every file's rules, and a caller's beside them, never instead; the caller's are in
       # the layers too, so what explains the configuration lists them with the files'.
+      # A sensitive session's rules here, from the organisation's file and the user's; a
+      # pod's are its profile's, which the worker gives as an override.
+      config = if overrides[:sensitive], do: config, else: %{config | sensitive: layers.sensitive}
       held = Permissions.hold(layers.rules, config)
       given = List.wrap(overrides[:permissions])
       layers = %{layers | rules: held ++ given}

@@ -266,6 +266,10 @@ a key by, in the desktop app and the TUI alike.
 | `permissions.deny` | list of rules |  | any |  | Calls refused, with a sentence naming the rule: `shell(git push)`, `read_file(secrets/**)`. |
 | `permissions.ask` | list of rules |  | any |  | Calls that ask a person first, even under `auto_approve` or an earlier "allow for the session". |
 | `permissions.allow` | list of rules |  | user; project if trusted |  | Calls that run without asking. From a project's file only in a trusted workspace; with `managed_permission_rules_only` on, only the organisation's. |
+| `sensitive` | settings |  | user file only |  | Sensitive sessions on this computer: which calls mark a session sensitive, what a sensitive one is refused, and whether it may be shared. Read from your own config.yaml and from the organisation's file, whose `enforced:` section holds it beyond your reach: your file adds rules to both lists and may tighten `sharing`, never loosen it. |
+| `sensitive.marked_by` | list of rules |  | user file only |  | Calls that make a session sensitive, before they run: `mcp(records.*)`, `read_file(/srv/hr/**)`, `shell(psql)`. Nothing clears the mark. |
+| `sensitive.deny` | list of rules |  | user file only |  | Calls refused once the session is sensitive: `publish_artifact`, `web_fetch`, `mcp(chat.*)`, `remember`. Required where `marked_by` is set. |
+| `sensitive.sharing` | `allow` \| `ask` \| `deny` | `allow` | user file only |  | Whether a sensitive session may be offered for steering from another device or invited into: `allow`, or `ask` and `deny`, which on this computer both refuse, since no team administrator answers a laptop's request. |
 
 ### Tools
 

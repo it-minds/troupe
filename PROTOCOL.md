@@ -206,6 +206,7 @@ The server's `capabilities`:
 | `remote` | this is a worker pod rather than a local daemon |
 | `private_sessions` | this server can seal a session under the caller's own key, so a client may offer to make one |
 | `lifespans` | `session.create` takes `lifespan` (`throwaway`, `normal`, `persistent`), every session row carries it, and `session.lifespan.set` changes it (a daemon; the plane says the same at its `initialize`). A server without it makes every session normal, whatever it is asked, so a client offers the choice only where this is true |
+| `sensitive` | every session row carries `sensitive` (`{at, by, how}` or `null`), `session.sensitive.set` marks a session here by hand and `session.create` takes `sensitive: true` (a daemon; the plane says the same at its `initialize`). A session here is marked by the rules of the organisation's enforced file and the person's own `config.yaml` ([sensitive sessions](docs/admin/sensitive-sessions.md#on-peoples-own-computers)) |
 | `approval_allow_always` | `approval.respond` takes `allow_always`, which writes the person's own rule for the tool (a daemon's; a pod's rules are its worker profile's, and a relayed connection's the laptop's) |
 | `fs_upload_artifact` | `fs.upload` takes `artifact` in place of `content`, and the server fetches the artifact's files from the plane itself (a daemon and a pod) |
 | `checkpoints` | `subscribe` takes `from: "checkpoint"`, and `session.events` pages back through a session's history (a daemon, a pod and a relayed connection) |
@@ -826,6 +827,18 @@ throwaway local session is erased by the daemon once it has been asleep
 no approval or question open and not pinned; a private one is registered with the word and
 the plane erases it. A plane's `session.create` takes the same field. Servers that know it
 say `lifespans: true` at `initialize`, and a client sends it only to one that does.
+
+`sensitive: true`: the session is marked sensitive from its start by its person
+(`session_marked_sensitive`, `how: "person"`), before any turn runs; nothing clears it. A
+daemon's `session.sensitive.set` (`{session_id, sensitive: true}`, `admin`) marks one later,
+waking a dormant one to write the mark, and answers its row; `sensitive: false` is
+`invalid_params` with `field: "sensitive"`. A daemon that says `sensitive: true` at
+`initialize` takes both. Once marked, the daemon refuses `artifact.publish` naming the
+session where its `sensitive.deny` names `publish_artifact`, `remote.offer` and
+`session.invite` where `sensitive.sharing` is `ask` or `deny` (both `forbidden`, `data.sensitive:
+true`), its agent's proposals for a team's or the organisation's memory, and `mcp.call` with
+the session's `session_id` where `deny` names the call; such an `mcp.call` that `marked_by`
+names marks the session before it is made.
 
 #### `session.list`
 ```json
