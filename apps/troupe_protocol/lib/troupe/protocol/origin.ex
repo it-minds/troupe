@@ -52,6 +52,8 @@ defmodule Troupe.Protocol.Origin do
   `:source`, `:idempotency_key`, `:payload_digest` and `:principal` are required, because
   a firing missing any of them is a firing a reader cannot place. `:revision` is required
   here even though the event allows its absence — a trigger always has a document.
+  `:review` is the document's `required` or `none`, written only when given: a run whose
+  origin carries `none` is not one a person is expected to close the loop on.
   """
   @spec trigger(String.t(), keyword()) :: map()
   def trigger(name, opts) do
@@ -64,6 +66,7 @@ defmodule Troupe.Protocol.Origin do
       "payload_digest" => Keyword.fetch!(opts, :payload_digest),
       "principal" => Principal.to_json(Keyword.fetch!(opts, :principal))
     }
+    |> put_present("review", Keyword.get(opts, :review))
   end
 
   @doc """

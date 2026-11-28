@@ -86,6 +86,22 @@ defmodule Troupe.Plane.SessionLifespanSweepTest do
     assert Repo.get_by(Tombstone, session_id: kept[:unreviewed_trigger_run])
   end
 
+  test "a throwaway run of a trigger that asks for no review is erased without one", context do
+    none = %{"kind" => "trigger", "trigger" => "routine", "review" => "none"}
+    required = %{"kind" => "trigger", "trigger" => "careful", "review" => "required"}
+    before_reviews = %{"kind" => "trigger", "trigger" => "old"}
+
+    routine = session(context, lifespan: "throwaway", quiet_hours: 25, origin: none)
+    careful = session(context, lifespan: "throwaway", quiet_hours: 25, origin: required)
+    old = session(context, lifespan: "throwaway", quiet_hours: 25, origin: before_reviews)
+
+    assert %{erased: 1} = Lifespan.sweep(context.now)
+
+    assert Repo.get_by(Tombstone, session_id: routine)
+    refute Repo.get_by(Tombstone, session_id: careful)
+    refute Repo.get_by(Tombstone, session_id: old)
+  end
+
   test "a private throwaway session is erased from its row, its last seal being when it last worked",
        context do
     private = SessionId.generate()

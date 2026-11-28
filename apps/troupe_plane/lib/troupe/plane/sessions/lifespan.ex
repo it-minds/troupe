@@ -110,13 +110,15 @@ defmodule Troupe.Plane.Sessions.Lifespan do
     )
   end
 
-  # Out of the review queue: not a trigger's or an A2A run, or one somebody reviewed. A row
-  # from before origins has none, and was a person's, as the review queue reads it.
+  # Out of the review queue: not a trigger's or an A2A run, a run whose trigger asked for no
+  # review, or one somebody reviewed. A row from before origins has none, and was a person's,
+  # as the review queue reads it.
   defp reviewed(query) do
     where(
       query,
       [s],
       coalesce(fragment("?->>'kind'", s.origin), "user") not in ["trigger", "a2a"] or
+        fragment("?->>'review'", s.origin) == "none" or
         not is_nil(s.reviewed_at)
     )
   end

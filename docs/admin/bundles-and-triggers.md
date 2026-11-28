@@ -218,7 +218,7 @@ repository holds the triggers' definitions as well ([triggers-from-a-repository.
 | `terms` | §3 | `{}` |
 | `visibility` | `private` or `team` | `team` |
 | `lifespan` | how long each run's session lasts: `throwaway` (erased a set time after it goes quiet, never before it is reviewed), `normal` or `persistent` ([How long a session lasts](../user/sessions.md#how-long-a-session-lasts)); a trigger from a repository has no such field yet, and its runs are normal | `normal` |
-| `review` | `required` or `none` | `required` |
+| `review` | `required`: each run waits in the review queue (`admin.runs.list`, `sessions.list` with `needs_review`, the console's count) until somebody reviews it, and a throwaway run is not erased before then. `none`: its runs are never in the queue and a throwaway one is erased when its window has passed; the notification to `notify` is unchanged. Written into each run's origin when it starts, so a run that began before the setting was carried stays queued | `required` |
 | `notify` | subjects granted `collaborator` on every run's session | `[]` |
 | `notify_url` | an absolute `http` or `https` URL posted the run's outcome when it ends, never its content; not loopback (`localhost` included), unspecified, link-local, multicast, a cloud metadata address (`fd00:ec2::254`, `100.100.100.200`) or in `100.64.0.0/10`, by address, in any IPv6 spelling of one, or by a name that resolves there (Decision 866), and a host the policy's egress allows, checked when saved and again at send, and posted to the address the second check passed, following no redirect | none |
 | `concurrency` | cap on live runs, 1–100; a firing over it records a `skipped` run | 1 |

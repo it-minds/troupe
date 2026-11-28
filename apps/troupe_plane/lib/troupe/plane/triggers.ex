@@ -1038,6 +1038,7 @@ defmodule Troupe.Plane.Triggers do
           idempotency_key: run.idempotency_key,
           revision: revision.hash,
           payload_digest: run.payload_digest,
+          review: revision.review,
           # Who fired it, and on whose authority. The principal is the actor; its sponsor
           # is the person answerable for what it does, and a run with no sponsor is a run
           # nobody is — which is why a principal cannot exist without one.

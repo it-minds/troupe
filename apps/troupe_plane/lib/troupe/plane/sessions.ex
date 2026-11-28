@@ -1181,10 +1181,15 @@ defmodule Troupe.Plane.Sessions do
 
   # What a person has not closed the loop on: a session nobody started by hand, that
   # nobody has marked reviewed. A user's own sessions are never in the queue, because
-  # the person who asked for it is the review.
+  # the person who asked for it is the review. A trigger whose review is `none` has said
+  # nobody is expected to; its runs say so in their origin, and one with no `review` there
+  # (from before it was carried) is reviewed as it always was.
   defp needs_review(query) do
     from(s in query,
-      where: fragment("?->>'kind'", s.origin) in ["trigger", "a2a"] and is_nil(s.reviewed_at)
+      where:
+        fragment("?->>'kind'", s.origin) in ["trigger", "a2a"] and
+          coalesce(fragment("?->>'review'", s.origin), "required") != "none" and
+          is_nil(s.reviewed_at)
     )
   end
 
