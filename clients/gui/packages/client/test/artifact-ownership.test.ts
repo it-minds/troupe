@@ -2,7 +2,7 @@
 // tests run against keep them. Every member of the owning team is its owner (publishes,
 // pins, shares, deletes), whatever it is for; the owning person gives one of theirs to a
 // team they are in; an admin of the owning team takes it back and becomes its owner; a
-// publish for a team is the team's unless the publisher says `me`. The fake daemon raises
+// publish is the publisher's whatever teams read it, the one team's where they say `team`. The fake daemon raises
 // the publication gate with what the agent proposed and holds the answer to the wire.
 
 import assert from "node:assert/strict";
@@ -110,13 +110,15 @@ describe("an artifact a team owns, on the fake plane", () => {
     assert.equal(again.owner.subject, "alice@example.com");
   });
 
-  it("is the team's when published for a team unless the publisher says me", async () => {
+  it("is the publisher's though a team reads it, the one team's where they say team, and refuses a visibility of one team", async () => {
     const adaApi = apiOf(await signIn("ada@example.com"));
     const files = [{ path: "index.html", bytes: textBytes("<h1>Hi</h1>") }];
-    const teams = await adaApi.publish({ title: "For core", kind: "html", visibility: "team:core", files });
+    const read = await adaApi.publish({ title: "For core", kind: "html", teams: ["core"], files });
+    assert.equal(read.owner_team, null, "readers are not ownership");
+    assert.deepEqual(read.teams, ["core"]);
+    const teams = await adaApi.publish({ title: "Core's", kind: "html", teams: ["core"], files, owner: "team" });
     assert.equal(teams.owner_team, "core");
-    const own = await adaApi.publish({ title: "Mine for core", kind: "html", visibility: "team:core", files, owner: "me" });
-    assert.equal(own.owner_team, null);
+    assert.equal(await refused(adaApi.publish({ title: "Old form", kind: "html", visibility: "team:core", files })), "invalid_params");
     const named = await adaApi.publish({ title: "Core's, for everyone", kind: "html", visibility: "organisation", files, owner: "team:core" });
     assert.equal(named.owner_team, "core");
     const plain = await adaApi.publish({ title: "Private", kind: "html", files });
@@ -124,6 +126,7 @@ describe("an artifact a team owns, on the fake plane", () => {
     assert.equal(plain.visibility, "private");
     assert.equal(await refused(adaApi.publish({ title: "Nobody's team", kind: "html", files, owner: "team" })), "invalid_params");
     assert.equal(await refused(adaApi.publish({ title: "For core", kind: "html", files, id: teams.id, owner: "me" })), "invalid_params", "a version never changes whose it is");
+    assert.equal(await refused(adaApi.publish({ title: "For core", kind: "html", files, id: teams.id, teams: ["design"] })), "invalid_params", "a version keeps who reads it");
   });
 });
 
@@ -143,42 +146,43 @@ describe("the publication gate, on the fake daemon", () => {
     await daemon.stop();
   });
 
-  it("shows what the agent proposed, holds the answer to the wire, and says what was changed", async () => {
+  it("shows what the agent proposed and the teams the plane ticked, holds the answer to the wire, and says what was changed", async () => {
     const session = daemon.seed("/home/ada/repo");
-    daemon.askPublish(session.id, { title: "Weekly figures", kind: "html", files: 3, visibility: "team:core", owner: "team" });
+    daemon.askPublish(session.id, { title: "Weekly figures", kind: "html", files: 3, teams: ["core"], owner: "team" });
     let state = emptyTranscript;
     const listener = (e: TroupeEvent): void => void (state = fold(state, e));
     const view = await client.open(session.id, {}, listener);
     await until(() => approvals(state).length === 1, "the gate");
     const gate = approvals(state)[0]!;
     assert.equal(gate.tool, "publish_artifact");
-    assert.deepEqual(gate.publication, { title: "Weekly figures", kind: "html", files: 3, visibility: "team:core", owner: "team", id: null, note: null });
+    assert.deepEqual(gate.publication, { title: "Weekly figures", kind: "html", files: 3, visibility: null, teams: ["core"], owner: "team", id: null, access: null, note: null });
 
     assert.equal(await refused(view.respondApproval(gate.callId, "allow", { visibility: "everyone" })), "invalid_params", "no such audience");
-    assert.equal(await refused(view.respondApproval(gate.callId, "allow", { visibility: "team:core", owner: "us" as "me" })), "invalid_params", "no such owner");
-    assert.equal(await refused(view.respondApproval(gate.callId, "allow", { visibility: "team:core", owner: "me", reason: "fine" })), "invalid_params", "a word back goes with a denial");
-    await view.respondApproval(gate.callId, "allow", { visibility: "team:core", owner: "me" });
+    assert.equal(await refused(view.respondApproval(gate.callId, "allow", { teams: ["core"], owner: "us" as "me" })), "invalid_params", "no such owner");
+    assert.equal(await refused(view.respondApproval(gate.callId, "allow", { teams: ["core"], owner: "me", reason: "fine" })), "invalid_params", "a word back goes with a denial");
+    await view.respondApproval(gate.callId, "allow", { visibility: "organisation", teams: ["core", "design"], owner: "me" });
     await until(() => gate.callId in Object.fromEntries(approvals(state).filter((a) => a.decision).map((a) => [a.callId, true])), "the decision");
     const decided = approvals(state)[0]!;
     assert.equal(decided.decision, "allow");
-    assert.deepEqual(decided.answered, { visibility: "team:core", owner: "me", edited: ["owner"] });
-    assert.deepEqual(daemon.publications.get(gate.callId)?.answer?.["edited"], ["owner"]);
+    assert.deepEqual(decided.answered, { visibility: "organisation", teams: ["core", "design"], owner: "me", edited: ["visibility", "teams", "owner"] });
+    assert.deepEqual(daemon.publications.get(gate.callId)?.answer?.["edited"], ["visibility", "teams", "owner"]);
     await client.close(session.id, listener);
   });
 
-  it("asks only whom a new version is for, and refuses an owner on it", async () => {
+  it("asks nothing of a new version's readers or owner: an audience or an owner answered for one is dropped", async () => {
     const session = daemon.seed("/home/ada/repo");
-    daemon.askPublish(session.id, { title: "Weekly figures", kind: "html", files: 1, visibility: "team:core", id: "art-1", note: "Week 44" });
+    daemon.askPublish(session.id, { title: "Weekly figures", kind: "html", files: 1, id: "art-1", access: "the core team", note: "Week 44" });
     let state = emptyTranscript;
     const listener = (e: TroupeEvent): void => void (state = fold(state, e));
     const view = await client.open(session.id, {}, listener);
     await until(() => approvals(state).length === 1, "the gate");
     const gate = approvals(state)[0]!;
     assert.equal(gate.publication?.id, "art-1");
-    // An owner on a new version is dropped, not refused.
+    assert.equal(gate.publication?.access, "the core team");
+    // An audience or an owner on a new version is dropped, not refused.
     await view.respondApproval(gate.callId, "allow", { visibility: "organisation", owner: "team" });
     await until(() => approvals(state)[0]!.decision !== undefined, "the decision");
-    assert.deepEqual(approvals(state)[0]!.answered, { visibility: "organisation", edited: ["visibility"] });
+    assert.deepEqual(approvals(state)[0]!.answered, { edited: [] });
     await client.close(session.id, listener);
   });
 
@@ -200,7 +204,7 @@ describe("the publication gate, on the fake daemon", () => {
     await until(() => approvals(state).every((a) => a.decision !== undefined), "both decided");
     assert.deepEqual(approvals(state)[0]!.answered, { reason: "not yet" });
     assert.equal(approvals(state)[1]!.decision, "allow_session");
-    assert.deepEqual(approvals(state)[1]!.answered, { visibility: "private", owner: "me", edited: [] }, "the proposal, where the answer named nobody");
+    assert.deepEqual(approvals(state)[1]!.answered, { visibility: "private", teams: [], owner: "me", edited: [] }, "the proposal, where the answer named nobody");
 
     const third = daemon.askPublish(session.id, { title: "Third", kind: "file", files: 1 });
     await until(() => approvals(state).length === 3, "the third gate");
