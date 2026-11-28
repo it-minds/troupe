@@ -64,6 +64,19 @@ kept for its log:
 kubectl -n troupe-system logs job/troupe-plane-migrate
 ```
 
+**A migration that rewrites rows.** `artifact_teams` (#1238) makes an artifact's readers a
+set: each artifact that was for one team is that team in the set, and each that was for
+the people of one worker profile is every team granted that profile at the time of the
+upgrade, both then `private`, so nobody who read one stops reading it. A profile no team
+was granted gave nobody access and its artifacts stay private; the Job's log line counts
+each kind (`artifact readers made a set`). The conversions are not in the audit trail: who
+reads each artifact does not change. A desktop app or terminal client from before that
+publishes to a team, or moves an artifact to one, is refused with a sentence naming
+`artifact.access.set` until it is upgraded; one that moves an artifact between private and
+the organisation, and every read, works as before. Rolled back, the old plane reads the
+converted artifacts as private, their owners' and their links' alone, until it is upgraded
+again.
+
 ## 4. What to watch
 
 1. **The rollout.** `kubectl -n troupe-system rollout status deployment/troupe-plane` and

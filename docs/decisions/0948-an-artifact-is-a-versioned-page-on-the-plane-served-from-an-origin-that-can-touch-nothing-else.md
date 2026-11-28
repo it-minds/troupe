@@ -100,3 +100,5 @@ is a document of no site, and its own stylesheets and scripts are fetched as fro
 site, which a `Lax` cookie is not sent with. Not chosen: a capability in the path, which
 needs no cookie but puts a bearer in every URL a page's links copy; it stays the fallback
 if browsers that block third-party cookies turn out to withhold this one.
+
+> Superseded in part by Decision 1121: who reads an artifact is a set of teams, people, the organisation switch and links; the profile audience is gone, migrated to the profile's granted teams.
