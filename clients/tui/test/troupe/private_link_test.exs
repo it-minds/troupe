@@ -102,9 +102,8 @@ defmodule Troupe.PrivateLinkTest do
     :ok = DynamicSupervisor.terminate_child(Troupe.Client.Daemons, daemon)
     eventually(fn -> not Link.up?() end)
 
-    assert {:ok, _identity} = Link.call("identity.get", %{})
-    token = eventually(fn -> daemon_token() end)
-    assert token in FakeRemote.plane_tokens(remote)
+    handed_over(fn -> assert {:ok, _identity} = Link.call("identity.get", %{}) end)
+    assert daemon_token() in FakeRemote.plane_tokens(remote)
   end
 
   test "a daemon linked to somebody else is left as it is" do
@@ -260,12 +259,43 @@ defmodule Troupe.PrivateLinkTest do
   # that starts after `troupe login` makes it the first time. Earlier tests in this VM
   # left it connected before anybody signed in.
   defp reattach do
-    case :sys.get_state(Link) do
-      %{client: client} when is_pid(client) -> Troupe.Protocol.Client.close(client)
-      _ -> :ok
+    handed_over(fn ->
+      case :sys.get_state(Link) do
+        %{client: client} when is_pid(client) -> Troupe.Protocol.Client.close(client)
+        _ -> :ok
+      end
+
+      {:ok, _} = Link.call("identity.get", %{})
+    end)
+  end
+
+  # Runs `connect`, which has `Link` make a new connection to the daemon, and waits until
+  # `Link` has heard how handing the token over on it went. It hands it over from a task of
+  # its own, after the call that made the connection has answered, so a test goes on from
+  # a daemon that has been handed what it will be: otherwise a `troupe logout` next takes
+  # the token back before the hand-over gives it to the daemon again.
+  defp handed_over(connect) do
+    link = Process.whereis(Link)
+    :erlang.trace(link, true, [:receive])
+
+    try do
+      connect.()
+      assert_receive {:trace, ^link, :receive, {:handed, _result}}, 15_000
+    after
+      :erlang.trace(link, false, [:receive])
     end
 
-    {:ok, _} = Link.call("identity.get", %{})
+    # Handled, and not only received.
+    _ = :sys.get_state(Link)
+    flush_trace(link)
+  end
+
+  defp flush_trace(link) do
+    receive do
+      {:trace, ^link, _what, _message} -> flush_trace(link)
+    after
+      0 -> :ok
+    end
   end
 
   defp linked(url) do
