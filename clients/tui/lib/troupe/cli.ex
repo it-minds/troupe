@@ -290,7 +290,7 @@ defmodule Troupe.CLI do
      [["artifacts", "open", "art-1"], ["artifacts", "show", "art-1", "--version", "2"]]},
     {"troupe artifacts publish FILE [--to private|organisation] [--team NAME]... [--title TITLE] [--owner me|team]",
      "publish a file of this machine, as /publish does: read by you alone, each --team named, and with --to organisation everyone; " <>
-       "yours unless --owner team makes it the one team's named, every member its owner; who reads it later is its Access menu's, in the desktop app or the console",
+       "yours unless --owner team makes it the one team's named, every member its owner; who reads it later is changed from its Access tab in the desktop app",
      [
        ["artifacts", "publish", "report.md"],
        ["artifacts", "publish", "report.md", "--to", "organisation", "--title", "Weekly"],

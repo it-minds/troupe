@@ -252,9 +252,7 @@ defmodule Troupe.Client.Artifacts do
           "files" => [%{"path" => name, "bytes" => Base.encode64(content)}]
         }
         |> then(&if(opts[:session_id], do: Map.put(&1, "session_id", opts[:session_id]), else: &1))
-        |> then(
-          &if(opts[:teams] not in [nil, []], do: Map.put(&1, "teams", opts[:teams]), else: &1)
-        )
+        |> then(&if(opts[:teams] in [nil, []], do: &1, else: Map.put(&1, "teams", opts[:teams])))
         |> then(
           &if(opts[:owner] in ["me", "team"], do: Map.put(&1, "owner", opts[:owner]), else: &1)
         )
