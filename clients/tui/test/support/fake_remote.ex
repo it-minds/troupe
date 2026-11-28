@@ -453,6 +453,9 @@ defmodule Troupe.FakeRemote do
       # Markdown one, the organisation's and their teams' memory documents and their own
       # document's versions, newest first, and the invitations to them.
       artifacts: Keyword.get(opts, :artifacts, []),
+      # The triggers `trigger.own.*` answers about (root #1235), `"mine"` marking the caller's
+      # own; unset, a plane from before them, which has no such method.
+      own_triggers: Keyword.get(opts, :own_triggers),
       # Whether the plane's administrator has artifacts on, as `artifact.list` says it.
       artifacts_enabled: Keyword.get(opts, :artifacts_enabled, true),
       artifact_texts: Keyword.get(opts, :artifact_texts, %{}),
@@ -2057,6 +2060,43 @@ defmodule Troupe.FakeRemote do
 
   defp dispatch(state, _kind, "invites.list", _params, _pid),
     do: {{:ok, %{"invites" => state.invites}}, state}
+
+  # A person's own triggers (root #1235), where the plane has them: each row with `"mine"`
+  # true is the caller's own, listed and changed; any other is refused as not theirs.
+  defp dispatch(%{own_triggers: rows} = state, :plane, "trigger.own.list", _params, _pid)
+       when is_list(rows),
+       do:
+         {{:ok,
+           %{
+             "triggers" => for(%{"mine" => true} = t <- rows, do: Map.delete(t, "mine")),
+             "most_per_team" => 5
+           }}, state}
+
+  defp dispatch(%{own_triggers: rows} = state, :plane, method, %{"trigger" => ref}, _pid)
+       when is_list(rows) and
+              method in ["trigger.own.disable", "trigger.own.enable", "trigger.own.delete"] do
+    case Enum.find(rows, &(ref in [&1["id"], &1["name"], "#{&1["team"]}/#{&1["name"]}"])) do
+      nil ->
+        {{:error, -32_005, "not_found", %{"trigger" => ref}}, state}
+
+      %{"mine" => false} = theirs ->
+        reason =
+          "#{theirs["team"]}/#{theirs["name"]} runs as #{theirs["principal"]}, not as your own " <>
+            "principal; a team admin of #{theirs["team"]} switches it off or removes it"
+
+        {{:error, -32_004, "forbidden", %{"reason" => reason}}, state}
+
+      mine when method == "trigger.own.delete" ->
+        {{:ok, %{"team" => mine["team"], "name" => mine["name"], "deleted" => true}},
+         %{state | own_triggers: List.delete(rows, mine)}}
+
+      mine ->
+        on = method == "trigger.own.enable"
+        now = %{mine | "enabled" => on, "next_run_at" => if(on, do: "2026-11-30T06:00:00Z")}
+        rows = Enum.map(rows, &if(&1 == mine, do: now, else: &1))
+        {{:ok, %{"trigger" => Map.delete(now, "mine")}}, %{state | own_triggers: rows}}
+    end
+  end
 
   defp dispatch(state, _kind, _method, _params, _pid),
     do: {{:error, -32_601, "method not found"}, state}

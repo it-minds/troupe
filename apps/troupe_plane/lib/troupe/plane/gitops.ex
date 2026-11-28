@@ -129,6 +129,30 @@ defmodule Troupe.Plane.Gitops do
   @spec enabled?() :: boolean()
   def enabled?, do: Provision.mode() == :gitops
 
+  @doc """
+  The refusal a write to what a repository holds gets on this plane, whoever asked:
+  `managed_by_gitops` naming the kind, the resource and where it comes from. `reason`, given
+  where the source is, says it of one resource where the mode alone does not hold it.
+  """
+  @spec held(String.t(), String.t(), (String.t() -> String.t()) | nil) :: Troupe.Protocol.Error.t()
+  def held(kind, name, reason \\ nil) do
+    source = source()
+    where = if source, do: " (#{source})", else: ""
+
+    Troupe.Protocol.Error.new(:managed_by_gitops, %{
+      kind: kind,
+      name: name,
+      source: source,
+      reason:
+        if(reason,
+          do: reason.(where),
+          else:
+            "this plane is in gitops mode: a #{kind} is a resource a repository holds" <>
+              "#{where}, and a change to one is a commit there"
+        )
+    })
+  end
+
   # -- a pass -----------------------------------------------------------------
 
   @doc "One pass over every kind: what became of each resource and each row, by kind."

@@ -18,6 +18,7 @@ import {
   PlaneSource,
   isWaiting,
   planeKnowsLifespans,
+  planeKnowsOwnTriggers,
   planeKnowsSensitive,
   planeOpener,
   sensitiveOf,
@@ -34,6 +35,8 @@ import {
   withEarlier,
 } from "@troupe/client";
 import { storedLocalOnly } from "./mode";
+import { ownTriggerSource } from "./views/OwnTriggers";
+import type { OwnTriggerSource } from "./views/OwnTriggers";
 import { noticeEvent } from "./notify";
 import { adoptFragment, daemonHint, forgetDaemon, rememberDaemon, shell } from "./shell";
 import type {
@@ -375,6 +378,24 @@ export function useSensitive(auth: AuthSession | null): boolean {
     };
   }, [auth]);
   return plane;
+}
+
+/**
+ * The person's own triggers through their sign-in (troupe #1235), and whether the plane's
+ * `initialize` says it lets them change them; asked once a sign-in. No sign-in, no source.
+ */
+export function useOwnTriggerSource(auth: AuthSession | null): { source: OwnTriggerSource | undefined; known: boolean } {
+  const [known, setKnown] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    setKnown(false);
+    if (auth) void planeKnowsOwnTriggers(auth).then((yes) => alive && setKnown(yes));
+    return () => {
+      alive = false;
+    };
+  }, [auth]);
+  const source = useMemo(() => (auth ? ownTriggerSource(auth) : undefined), [auth]);
+  return { source, known };
 }
 
 /**

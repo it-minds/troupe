@@ -205,6 +205,12 @@ defmodule Troupe.Plane.Harness do
     "people.search" => :observe,
     "session.review" => :control,
     "trigger.fire" => :control,
+    # The caller's own triggers, the ones a yes of theirs made under their own sponsored
+    # principal: listed, switched off and on, and removed, by them as by an administrator.
+    "trigger.own.list" => :observe,
+    "trigger.own.disable" => :control,
+    "trigger.own.enable" => :control,
+    "trigger.own.delete" => :control,
     "session.spawn" => :control,
     "session.fork" => :control,
     "session.share" => :control,
@@ -427,7 +433,8 @@ defmodule Troupe.Plane.Harness do
          # plane from before them makes every session normal, whatever it was asked.
          # `sensitive`: a row's `sensitive`, `session.sensitive.set`, `session.create`'s
          # `sensitive` and the share requests a sensitive session's profile holds.
-         "capabilities" => %{"lifespans" => true, "sensitive" => true}
+         # `own_triggers`: `trigger.own.list`, `.disable`, `.enable` and `.delete`.
+         "capabilities" => %{"lifespans" => true, "sensitive" => true, "own_triggers" => true}
        }}
     end
   end
@@ -1507,6 +1514,19 @@ defmodule Troupe.Plane.Harness do
       {:ok, Triggers.fired_json(fired)}
     end
   end
+
+  # A person's own triggers, named as `trigger.fire` names one (`trigger`: an id, `name` or
+  # `team/name`), within the teams they are in; any other trigger is refused as not theirs.
+  defp handle("trigger.own.list", _params, %{user: user}), do: {:ok, Triggers.Own.list(user)}
+
+  defp handle("trigger.own.disable", params, %{user: user}),
+    do: Triggers.Own.switch(user, params["trigger"], false)
+
+  defp handle("trigger.own.enable", params, %{user: user}),
+    do: Triggers.Own.switch(user, params["trigger"], true)
+
+  defp handle("trigger.own.delete", params, %{user: user}),
+    do: Triggers.Own.delete(user, params["trigger"])
 
   defp handle("session.open", params, %{user: user}) do
     mode = Map.get(params, "mode", "read")

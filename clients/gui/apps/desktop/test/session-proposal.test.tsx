@@ -87,8 +87,40 @@ describe("a proposal in a team session", () => {
 
     await waitFor(() => says("You turned on a rerun of “Weekly numbers”, every Monday at 07:00 UTC."), "the record line");
     expect(card()).toBeNull();
-    await seesButton("Triggers page");
     expect(harness.plane.proposalsAccepted).toEqual([{ session: sketch.id, id: "proposal-1", edits: { cron: "0 7 * * 1" } }]);
+
+    // The trigger it made is hers: the line says it is on and when it runs next, and she
+    // switches it off, on again and removes it from there (troupe #1235).
+    const record = (): HTMLElement => document.querySelector<HTMLElement>(".proposal-record")!;
+    await waitFor(() => /It is on; next run \w{3} \d+ \w{3}, 07:00 UTC\./.test(record().textContent ?? ""), "the trigger's state");
+    expect(button("Triggers page")).toBeNull();
+    button("Switch off", record())!.click();
+    await waitFor(() => record().textContent?.includes("It is switched off."), "switched off");
+    const made = harness.plane.triggerRows.find((t) => t.own_by === "ada@example.com")!;
+    expect(made.enabled).toBe(false);
+    button("Switch on", record())!.click();
+    await waitFor(() => record().textContent?.includes("It is on; next run"), "switched on");
+    button("Remove", record())!.click();
+    const confirm = await waitFor(() => record().querySelector<HTMLElement>('[role="group"]'), "Remove asked once more");
+    expect(confirm.textContent).toContain("This cannot be undone.");
+    button("Remove", confirm)!.click();
+    await waitFor(() => record().textContent?.includes("It has been removed."), "removed");
+    expect(harness.plane.triggerRows.some((t) => t.own_by === "ada@example.com")).toBe(false);
+    expect(harness.plane.ownTriggerAudit.map((a) => a.action)).toEqual(["trigger.put", "trigger.put", "trigger.delete"]);
+  });
+
+  it("on a plane from before own triggers, says a team admin stops it, on the trigger's page", async () => {
+    await harness.stop();
+    harness = await startHarness({ plane: { beforeOwnTriggers: true } });
+    localStorage.setItem("troupe.pref.planeUrl", harness.plane.baseUrl);
+    const sketch = harness.plane.seed("ada@example.com", { title: "Weekly numbers", visibility: "private" });
+    await signIn();
+    await open("Weekly numbers");
+    await report(sketch.id, "every Monday");
+    button("Turn on", await waitFor(card, "the card"))!.click();
+    await waitFor(() => says("You turned on a rerun of “Weekly numbers”, every Monday at 06:00 UTC."), "the record line");
+    await seesButton("Triggers page");
+    expect(button("Switch off")).toBeNull();
   });
 
   it("takes not now and never, each said in a line, once", async () => {

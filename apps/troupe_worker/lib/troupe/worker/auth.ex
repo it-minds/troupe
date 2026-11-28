@@ -66,10 +66,12 @@ defmodule Troupe.Worker.Auth do
   # two disagreeing: the pod's own `session.erase` deletes its copy and leaves the key, the
   # objects and the row. A client asks the plane, whose erasure reaches this pod over the
   # control channel (`Troupe.Worker.Plane.Commands`), which this guard is not on. A fork
-  # is a new row, key and placement too, so it is the plane's `session.fork` (Decision 812).
+  # is a new row, key and placement too, so it is the plane's `session.fork`.
+  # A person's own triggers are the plane's rows, about no session.
   @plane_methods ~w(session.archive session.unarchive session.pin session.unpin session.erase session.fork
                     session.title.set session.lifespan.set session.sensitive.set session.share_requests
-                    session.share_request.decide)
+                    session.share_request.decide trigger.own.list trigger.own.disable
+                    trigger.own.enable trigger.own.delete)
 
   @enforce_keys [:worker_id]
   defstruct [:worker_id, :issuer, jwks: %{"keys" => []}, acl: %{}, revoked: MapSet.new()]

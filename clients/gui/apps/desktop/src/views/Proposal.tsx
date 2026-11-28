@@ -3,7 +3,9 @@
 // the prompt (folded), and what a run is and costs; then Turn on, the one filled button,
 // Not now and Never for this report. Nothing waits on it, so it wears the offer's quiet
 // edge and none of the reserved colour. Only the session's owner answers: anybody else
-// reads that the owner was asked. Once answered, a line in the past tense stands there.
+// reads that the owner was asked. Once answered, a line in the past tense stands there; for
+// the owner, where the plane lets them, it says whether the trigger the yes made is on, with
+// Switch off or Switch on and Remove under it (troupe #1235).
 
 import { useState } from "react";
 import type { JSX } from "react";
@@ -17,13 +19,17 @@ import {
 
   othersLine,
   proposalRefusal,
+  proposalTriggerLine,
   runsLine,
   scheduleOf,
+  triggerOfProposal,
 } from "@troupe/client";
 import type { Entry, ProposalDecision, ScheduleChoice, ScheduleEvery } from "@troupe/client";
 import { copyText } from "../clipboard";
 import { shell } from "../shell";
 import { Mask } from "./brand";
+import { OwnTriggerControls, useOwnTriggers } from "./OwnTriggers";
+import type { OwnTriggerSource } from "./OwnTriggers";
 
 type ProposalEntry = Extract<Entry, { kind: "proposal" }>;
 
@@ -31,6 +37,8 @@ type ProposalEntry = Extract<Entry, { kind: "proposal" }>;
 export interface ProposalActions {
   accept: (id: string, edits: Record<string, unknown>) => Promise<void>;
   answer: (id: string, decision: "later" | "never") => Promise<void>;
+  /** The owner's own triggers, where the plane lets them switch off and remove what a yes made. */
+  own?: OwnTriggerSource;
 }
 
 const HOURS = Array.from({ length: 24 }, (_, h) => h);
@@ -42,7 +50,7 @@ async function openExternal(url: string): Promise<void> {
 }
 
 export function ProposalCard({ entry, mine, actions }: { entry: ProposalEntry; mine: boolean; actions: ProposalActions | undefined }): JSX.Element {
-  if (entry.decision) return <ProposalRecord entry={entry} mine={mine} />;
+  if (entry.decision) return <ProposalRecord entry={entry} mine={mine} own={mine ? actions?.own : undefined} />;
   if (!mine || !actions) return <p className="note proposal-note">{othersLine(entry)}</p>;
   return <OpenProposal entry={entry} actions={actions} />;
 }
@@ -152,10 +160,16 @@ function OpenProposal({ entry, actions }: { entry: ProposalEntry; actions: Propo
   );
 }
 
-function ProposalRecord({ entry, mine }: { entry: ProposalEntry; mine: boolean }): JSX.Element {
+function ProposalRecord({ entry, mine, own }: { entry: ProposalEntry; mine: boolean; own: OwnTriggerSource | undefined }): JSX.Element {
   const [copied, setCopied] = useState<string | null>(null);
   const result = entry.result;
   const yaml = result?.yaml;
+  // What the yes made, as it stands: the owner's own, asked of the plane where it lets them
+  // change it. Not in their list once listed is removed.
+  const made = entry.decision === "accepted" && !yaml && result?.name ? own : undefined;
+  const { triggers, reload } = useOwnTriggers(made);
+  const trigger = triggers ? (triggerOfProposal(entry, triggers) ?? null) : undefined;
+  const state = made ? proposalTriggerLine(trigger) : null;
   return (
     <div className="proposal-record">
       <p className="note">
@@ -164,7 +178,9 @@ function ProposalRecord({ entry, mine }: { entry: ProposalEntry; mine: boolean }
           <>
             {" "}
             Each run asks you to review it.{" "}
-            {result?.url ? (
+            {made ? (
+              state
+            ) : result?.url ? (
               <>
                 A team admin changes or stops it on the console's{" "}
                 <button type="button" className="link" onClick={() => void openExternal(result.url!)}>
@@ -178,6 +194,7 @@ function ProposalRecord({ entry, mine }: { entry: ProposalEntry; mine: boolean }
           </>
         )}
       </p>
+      {made && trigger && <OwnTriggerControls trigger={trigger} source={made} onChanged={reload} />}
       {yaml && mine && (
         <>
           <pre className="proposal-yaml">{yaml}</pre>

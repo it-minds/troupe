@@ -14,7 +14,7 @@ defmodule Troupe.Client.Remote do
 
   @behaviour Troupe.Client
 
-  alias Troupe.Client.{Events, Repositories, Sensitive}
+  alias Troupe.Client.{Events, OwnTriggers, Repositories, Sensitive}
   alias Troupe.Config
   alias Troupe.Protocol.ClientUpdate
   alias Troupe.Remote.{Capability, Credentials, Discovery, Journal, Plane, RPC, Tokens, Worker}
@@ -406,6 +406,7 @@ defmodule Troupe.Client.Remote do
   @impl true
   def proposal(sid, verb) do
     case {verb, Worker.open_proposal(sid)} do
+      {:status, nil} -> {:ok, made_here(sid)}
       {:status, open} -> {:ok, Troupe.Client.Proposal.status(open)}
       {_verb, nil} -> {:error, Troupe.Client.Proposal.status(nil)}
       {:yes, open} -> accept(sid, open)
@@ -432,6 +433,45 @@ defmodule Troupe.Client.Remote do
 
       _ ->
         {:error, message(:not_attached)}
+    end
+  end
+
+  # The person's own triggers (root #1235), at the plane the session is on, as this person.
+  @impl true
+  def own_triggers(sid, verb) do
+    case attachment(sid) do
+      %{plane_url: plane} when is_binary(plane) -> own_triggers_on(plane, verb)
+      _ -> {:error, message(:not_attached)}
+    end
+  end
+
+  defp own_triggers_on(plane, :list) do
+    case call(plane, "trigger.own.list") do
+      {:ok, %{"triggers" => triggers}} -> {:ok, OwnTriggers.list(triggers)}
+      {:error, %{code: -32_601}} -> {:error, OwnTriggers.not_known()}
+      {:error, reason} -> {:error, refusal(reason)}
+    end
+  end
+
+  defp own_triggers_on(plane, {change, name}) do
+    case call(plane, OwnTriggers.method(change), %{trigger: name}) do
+      {:ok, %{} = answer} -> {:ok, OwnTriggers.changed(change, answer)}
+      {:error, %{code: -32_601}} -> {:error, OwnTriggers.refused(change, OwnTriggers.not_known())}
+      {:error, reason} -> {:error, OwnTriggers.refused(change, refusal(reason))}
+    end
+  end
+
+  # With nothing open: what a yes in this session turned on, as it stands now, where the
+  # plane lists the person's own triggers.
+  defp made_here(sid) do
+    none = Troupe.Client.Proposal.status(nil)
+
+    with %{plane_url: plane} when is_binary(plane) <- attachment(sid),
+         {:ok, %{"triggers" => triggers}} <- call(plane, "trigger.own.list"),
+         [_ | _] = here <- Enum.filter(triggers, &(&1["session_id"] == sid)) do
+      Enum.join([none | Enum.map(here, &("turned on here: " <> OwnTriggers.line(&1)))], "; ")
+    else
+      _ -> none
     end
   end
 

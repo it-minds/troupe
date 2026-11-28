@@ -34,6 +34,7 @@
 
 import { useState } from "react";
 import type { JSX } from "react";
+import { ownByLine } from "@troupe/client";
 import type { AdminTeam, Trigger, TriggerCopied, TriggerCopyState, TriggerFired, TriggerKey, TriggerPut, TriggerRepository, TriggerResource } from "@troupe/client";
 import { go, href } from "../route";
 import { recorded, show, useConsole, useLoad } from "../console";
@@ -190,7 +191,10 @@ function TeamTriggers({ team }: { team: AdminTeam }): JSX.Element {
                         </td>
                         <td>{firedBy(t.source)}</td>
                         <td>{show(t.profile)}</td>
-                        <td className="mono">{show(t.principal)}</td>
+                        <td>
+                          <span className="mono">{show(t.principal)}</span>
+                          {t.own_by && <span className="muted"> · {ownByLine(t.own_by)}</span>}
+                        </td>
                         <td>{when(t.last_fired_at)}</td>
                         {copies.size > 0 && <td>{copies.get(t.name) ? <CopyWords copy={copies.get(t.name)!} /> : "—"}</td>}
                       </tr>
@@ -565,6 +569,7 @@ export function TriggerPage({ team, name }: { team: string; name: string }): JSX
                   ["State", <TriggerState trigger={t} />],
                   ["Fired", firedBy(t.source)],
                   ["Runs as", <span className="mono">{show(t.principal)}</span>],
+                  ...(t.own_by ? ([["Whose", ownByLine(t.own_by)]] as Array<[string, string]>) : []),
                   ["Profile", show(t.profile)],
                   ["Agent", t.agent ?? "the profile's default"],
                   ["Its sessions are seen by", t.visibility === "private" ? "the principal alone" : `${team}`],

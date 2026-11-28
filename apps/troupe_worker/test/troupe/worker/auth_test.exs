@@ -87,7 +87,12 @@ defmodule Troupe.Worker.AuthTest do
     # A sensitive session's held shares, which a team administrator answers at the plane.
     "session.share_requests",
     "session.share_request.decide",
-    "session.fork"
+    "session.fork",
+    # A person's own triggers, rows of the plane's about no session.
+    "trigger.own.list",
+    "trigger.own.disable",
+    "trigger.own.enable",
+    "trigger.own.delete"
   ]
 
   # Every method the clients send a worker today, read from their sources: the TUI's

@@ -1305,7 +1305,7 @@ defmodule Troupe.UI.TUI.Server do
   # 698); this is only which of them the TUI implements, and the suite holds the two
   # equal, so a command added to the table without a clause here fails a test rather
   # than being dispatched as an agent.
-  @builtins ~w(new cancel dismiss merge discard compact goal loop steer invite uninvite share lifespan sensitive proposal bundle repo sessions archive
+  @builtins ~w(new cancel dismiss merge discard compact goal loop steer invite uninvite share lifespan sensitive proposal triggers trigger bundle repo sessions archive
                unarchive rename keep back hq observer files
                scratch upload save publish artifacts profiles profile copy memory context watch settings
                models mcp
@@ -1759,6 +1759,18 @@ defmodule Troupe.UI.TUI.Server do
   defp builtin("proposal", args, state, _target) do
     case Client.proposal_args(args) do
       {:ok, verb} -> notice_of(Client.proposal(state.session_id, verb))
+      {:error, sentence} -> {:error, sentence}
+    end
+  end
+
+  # The person's own triggers, the ones a yes of theirs turned on (root #1235): listed, and
+  # one switched off, on again or removed, at the plane as them.
+  defp builtin("triggers", _args, state, _target),
+    do: notice_of(Client.own_triggers(state.session_id, :list))
+
+  defp builtin("trigger", args, state, _target) do
+    case Client.own_trigger_args(args) do
+      {:ok, verb} -> notice_of(Client.own_triggers(state.session_id, verb))
       {:error, sentence} -> {:error, sentence}
     end
   end

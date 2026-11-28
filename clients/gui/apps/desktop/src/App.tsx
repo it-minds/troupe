@@ -14,7 +14,7 @@ import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "rea
 import type { JSX } from "react";
 import { PlaneOwn, appLink, awaitingYou, onThisComputer, planeAddress } from "@troupe/client";
 import type { AuthSession, FleetRow, OwnPlane, SessionKind } from "@troupe/client";
-import { useAdmin, useArchived, useDaemon, useFleet, useLifespans, useMarks } from "./hooks";
+import { useAdmin, useArchived, useDaemon, useFleet, useLifespans, useMarks, useOwnTriggerSource } from "./hooks";
 import { useUpdates } from "./updates";
 import { UpdateBanner } from "./views/Update";
 import { Agents } from "./views/Agents";
@@ -38,6 +38,7 @@ import { FirstRun, SetupScreen, setupProgress, useSetupNeeded } from "./views/On
 import { hasLocalSide, localSide, onAbsentSide, PlaneAway, planeSide, RailBody } from "./views/Rail";
 import type { SetupOutcome } from "./views/Onboarding";
 import { Review } from "./views/Review";
+import { OwnTriggers } from "./views/OwnTriggers";
 import { Sessions } from "./views/Sessions";
 import { Session } from "./views/Session";
 import { Opened } from "./views/Invites";
@@ -57,6 +58,7 @@ type Where =
   | { screen: "memory" }
   | { screen: "review" }
   | { screen: "profiles"; profile?: string }
+  | { screen: "triggers" }
   | { screen: "local" }
   | { screen: "connect"; workspace?: string }
   | { screen: "agents"; workspace?: string; agent?: string }
@@ -171,6 +173,8 @@ function screenTitle(where: Where): string {
       return "Review";
     case "profiles":
       return "Profiles";
+    case "triggers":
+      return "Your triggers";
     case "local":
       return "This computer";
     case "agents":
@@ -254,6 +258,7 @@ export function App(): JSX.Element {
   const archived = useArchived(store, planeAuth, daemon.client);
   const marks = useMarks(store, planeAuth, daemon.client);
   const lifespans = useLifespans(planeAuth, daemon.client);
+  const { source: ownTriggers, known: knowsOwnTriggers } = useOwnTriggerSource(planeAuth);
   // Not known while the daemon is still being found, or has not answered its first list.
   const daemonUnheard = daemon.status === "searching" || (daemon.client !== null && !snapshot.sources["daemon"]);
   rowsNow.current = daemonUnheard ? null : snapshot.rows;
@@ -855,9 +860,13 @@ export function App(): JSX.Element {
             <Review auth={planeAuth} admin={adminApi} daemon={daemon.client} teams={planeAuth.me?.teams ?? []} onOpen={(id) => setWhere({ screen: "session", id })} />
           )}
 
+          {where.screen === "triggers" && planeAuth && ownTriggers && (
+            <OwnTriggers source={ownTriggers} known={knowsOwnTriggers} onOpen={(id) => setWhere({ screen: "session", id })} />
+          )}
+
           {/* The plane's pages still open while it is offline, and say so. */}
-          {(where.screen === "review" || where.screen === "profiles") && !planeAuth && planeState && (
-            <PlaneAway what={where.screen === "review" ? "The runs to review" : "Profiles"} side={planeState} />
+          {(where.screen === "review" || where.screen === "profiles" || where.screen === "triggers") && !planeAuth && planeState && (
+            <PlaneAway what={where.screen === "review" ? "The runs to review" : where.screen === "triggers" ? "Your triggers" : "Profiles"} side={planeState} />
           )}
 
           {where.screen === "profiles" &&

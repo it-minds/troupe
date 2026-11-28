@@ -1073,6 +1073,10 @@ defmodule Troupe.Client.Daemon do
   # Nothing on this computer schedules, so nothing is proposed here (root #1208).
   @impl true
   def proposal(_sid, _verb), do: {:error, Troupe.Client.Proposal.not_here()}
+
+  # A person's own triggers are the plane's, asked from a session there (root #1235).
+  @impl true
+  def own_triggers(_sid, _verb), do: {:error, Troupe.Client.OwnTriggers.not_here()}
   # A session on this computer works in its own folder, not in a plane's clone (root #1207).
   @impl true
   def repositories(_sid, _verb), do: {:error, Troupe.Client.Repositories.not_here()}
