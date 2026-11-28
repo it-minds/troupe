@@ -1,4 +1,4 @@
-// An artifact's thread and, for its owner, who it is shared with by name.
+// An artifact's thread.
 //
 // The thread is one per artifact, kept on the plane, oldest first, each comment with who
 // wrote it and when. Whoever may open the artifact reads it; its owners, and anybody given
@@ -6,17 +6,12 @@
 // whoever steers it can ask its agent to act on it; nothing a reader writes reaches an agent
 // unless that person passes it on. Its author edits a comment, marked edited, and deletes
 // it; an owner, or whoever may take the artifact down, deletes any.
-//
-// Who it is shared with by name is the owner's to read here and to take back; the desktop
-// app's gallery is where a person picks somebody to share their own with.
 
 import { useEffect, useState } from "react";
 import type { JSX } from "react";
 import type { ArtifactApi, ArtifactDetail, ArtifactThread } from "@troupe/client";
-import { describeError, useConsole } from "../console";
+import { describeError } from "../console";
 import { Region, when } from "./bits";
-
-const ROLE: Record<string, string> = { view: "may open it", comment: "may comment on it", edit: "may comment on it and publish new versions" };
 
 export function ArtifactComments({ artifact: a, api }: { artifact: ArtifactDetail; api: ArtifactApi }): JSX.Element | null {
   const [thread, setThread] = useState<ArtifactThread | null>(null);
@@ -190,59 +185,6 @@ export function ArtifactComments({ artifact: a, api }: { artifact: ArtifactDetai
       {error !== null && (
         <p className="field-error" role="alert">
           Could not {!thread ? "read the comments" : failed === "delete" ? "delete the comment" : failed === "edit" ? "save the comment" : "post the comment"}: {describeError(error)}
-        </p>
-      )}
-    </section>
-  );
-}
-
-/** Who its owner shared it with by name, each at a role, and taking somebody back. */
-export function ArtifactPeople({ artifact: a, api, reload }: { artifact: ArtifactDetail; api: ArtifactApi; reload: () => void }): JSX.Element | null {
-  const { notify } = useConsole();
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<unknown>(null);
-  const people = a.people;
-  if (!people) return null;
-
-  const remove = (subject: string, name: string): void => {
-    setBusy(true);
-    setError(null);
-    api.unshare(a.id, { person: subject }).then(
-      () => {
-        setBusy(false);
-        notify(`${name} cannot open ${a.title} now, unless it is for somebody they are.`);
-        reload();
-      },
-      (e: unknown) => {
-        setBusy(false);
-        setError(e);
-      },
-    );
-  };
-
-  return (
-    <section aria-label="Shared with">
-      <Region>Shared with</Region>
-      {people.length === 0 ? (
-        <p className="lead">Nobody by name. You share your own with a picked person from the desktop app's gallery, or with a link below.</p>
-      ) : (
-        <ul className="artifact-people">
-          {people.map((p) => {
-            const name = p.display_name || p.subject;
-            return (
-              <li key={p.subject}>
-                <b>{name}</b> <span className="muted">{ROLE[p.role] ?? p.role} · since {when(p.granted_at)}</span>{" "}
-                <button type="button" disabled={busy} onClick={() => remove(p.subject, name)} aria-label={`Remove ${name}`}>
-                  Remove
-                </button>
-              </li>
-            );
-          })}
-        </ul>
-      )}
-      {error !== null && (
-        <p className="field-error" role="alert">
-          Could not remove them: {describeError(error)}
         </p>
       )}
     </section>

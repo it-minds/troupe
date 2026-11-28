@@ -1,12 +1,11 @@
 // Artifacts: for an administrator, every artifact the plane holds that their role answers
 // for (`admin.artifacts.list`: every one for a platform admin, a person's private ones too,
 // their teams' for a team admin), first, with a takedown on each row; then, as for
-// everybody who signs in, the pages and files a person, their organisation, their teams and
-// their profiles' people have published, as tabs: Mine (the private ones among them), one for
-// those a link gave them, one for the organisation's, one for their teams' (one list, the
-// team named on each card) and one for each profile they are covered by; a card for each,
-// and a page for one with its versions, newest first. Which tab a row is under is the
-// plane's to say (`scope`), not this console's to work out.
+// everybody who signs in, the pages and files a person, their organisation and their teams
+// have published, as tabs: Mine (the private ones among them), one for those a link or a
+// name gave them, one for the organisation's and one for their teams' (one list, the teams
+// named on each card); a card for each, and a page for one with its versions, newest first.
+// Which tab a row is under is the plane's to say (`scope`), not this console's to work out.
 //
 // An administrator who opens an artifact that is not theirs reads its page as its
 // administrator (`admin.artifact.get`): its links, who it is shared with and its comments
@@ -25,8 +24,10 @@
 // Beyond those two, nothing here is an administrative call: `artifact.*` are what any
 // client of the person's asks the plane as that person. Deleting is the owner's, or a takedown of somebody else's
 // by a platform admin or the admin of the team it is for, which the confirm says it is. A new version (an edit, a rollback) is the
-// owner's or an edit link's holder's; pinning the version its address serves, and the links
-// (`ArtifactLinks`), are the owner's. An artifact a team owns is every member's: the plane
+// owner's or an edit link's holder's; pinning the version its address serves, who reads it
+// (`ArtifactAccessMenu`: its teams, people and the organisation switch, kept across its
+// versions) and the links (`ArtifactLinks`), are the owner's, and who reads it a platform
+// admin's too. An artifact a team owns is every member's: the plane
 // says so per row (`mine`, `role`), and the page says the team is whose it is. The owning
 // person gives one of theirs to a team they are in, and an admin of the owning team takes
 // it back (`artifact.transfer`). A link somebody followed lands on `#/artifacts/link/
@@ -34,7 +35,7 @@
 
 import { useEffect, useState } from "react";
 import type { JSX } from "react";
-import { ArtifactApi, TroupeRpcError, appLink, blockedKindWords, blockedWords, bytes, ownerWords, teamOwned, visibilityWords as audienceWords } from "@troupe/client";
+import { ArtifactApi, TroupeRpcError, appLink, artifactAccessWords, blockedKindWords, blockedWords, bytes, ownerWords, teamOwned } from "@troupe/client";
 import { OpenInApp } from "./OpenInApp";
 import type { AdminArtifactPage, Artifact, ArtifactDetail, ArtifactFilter, ArtifactList, ArtifactPerson } from "@troupe/client";
 import { goesLine, goesSentence, versionGoes, versionsSentence } from "@troupe/client";
@@ -42,19 +43,20 @@ import { describeError, useConsole, useLoad } from "../console";
 import { go, href } from "../route";
 import type { Route } from "../route";
 import { ArtifactEditor, editableFiles } from "./ArtifactEditor";
-import { ArtifactComments, ArtifactPeople } from "./ArtifactComments";
-import { ArtifactLinks } from "./ArtifactLinks";
+import { ArtifactComments } from "./ArtifactComments";
+import { ArtifactAccessMenu, ArtifactLinks } from "./ArtifactLinks";
 import { AuditedPeople, AuditedThread } from "./ArtifactAudit";
 import { PublishedArtifacts } from "./PublishedArtifacts";
 import { FromSession } from "./SessionLink";
 import { Empty, Fields, Loaded, Preview, Region, Status, count, when } from "./bits";
 
 /** Which artifacts a tab lists: `every` is every one an administrator answers for, which a member's console shows as their own. */
-export type ArtifactTab = { kind: "every" } | { kind: "mine" } | { kind: "shared" } | { kind: "organisation" } | { kind: "teams" } | { kind: "profile"; name: string };
+export type ArtifactTab = { kind: "every" } | { kind: "mine" } | { kind: "shared" } | { kind: "organisation" } | { kind: "teams" };
 
 /**
  * What an address under `#/artifacts` names: a tab (none for every artifact, `mine`,
- * `shared`, `organisation`, `profile/<name>`), a link somebody followed (`link/<token>`), an
+ * `shared`, `organisation`, `teams`; a `profile/<name>` kept from before sharing by team is
+ * the teams tab), a link somebody followed (`link/<token>`), an
  * artifact to go straight on to once signed in (`open/<id>[/v<n>]`, where the artifacts host
  * sends a signed-out viewer of it), or one artifact by its id, which the plane never makes
  * one of those words.
@@ -66,7 +68,7 @@ export function artifactPlace(path: string[]): { tab: ArtifactTab } | { id: stri
   if (first === "shared") return { tab: { kind: "shared" } };
   if (first === "organisation") return { tab: { kind: "organisation" } };
   if (first === "teams") return { tab: { kind: "teams" } };
-  if (first === "profile" && second) return { tab: { kind: "profile", name: second } };
+  if (first === "profile" && second) return { tab: { kind: "teams" } };
   if (first === "link" && second) return { link: second };
   if (first === "open" && second) {
     const version = third && /^v[1-9]\d*$/.test(third) ? Number(third.slice(1)) : undefined;
@@ -80,22 +82,20 @@ function routeOf(tab: ArtifactTab): Route {
   if (tab.kind === "mine") return { page: "artifacts", path: ["mine"] };
   if (tab.kind === "shared") return { page: "artifacts", path: ["shared"] };
   if (tab.kind === "organisation") return { page: "artifacts", path: ["organisation"] };
-  if (tab.kind === "teams") return { page: "artifacts", path: ["teams"] };
-  return { page: "artifacts", path: ["profile", tab.name] };
+  return { page: "artifacts", path: ["teams"] };
 }
 
 function filterOf(tab: ArtifactTab): ArtifactFilter {
   // Every artifact is the administrators' table; the person's own list is still asked, for
-  // the tabs it names (their profiles) and whether artifacts are on.
+  // whether artifacts are on.
   if (tab.kind === "mine" || tab.kind === "every") return { mine: true };
   if (tab.kind === "shared") return { shared: true };
   if (tab.kind === "organisation") return { visibility: "organisation" };
-  if (tab.kind === "teams") return { teams: true };
-  return { visibility: `profile:${tab.name}` };
+  return { teams: true };
 }
 
 function same(a: ArtifactTab, b: ArtifactTab): boolean {
-  return a.kind === b.kind && (a.kind !== "profile" || (b.kind === "profile" && a.name === b.name));
+  return a.kind === b.kind;
 }
 
 const KIND: Record<string, string> = { html: "HTML page", markdown: "Markdown", file: "File" };
@@ -105,14 +105,21 @@ export function kindWords(kind: string): string {
   return KIND[kind] ?? kind;
 }
 
-/** Who may open it, in words: a private one is its owner's, and whoever a link of theirs reached. */
-function visibilityWords(a: Artifact): string {
-  if (a.visibility === "private") {
-    if (teamOwned(a)) return `the ${a.owner_team} team, whose it is, and whoever ${a.mine ? "you" : "they"} give a link`;
-    return a.mine ? "only you, and whoever you give a link" : "its owner alone, and whoever they gave a link";
+/**
+ * Who reads it beside its owner, in words: its teams and the organisation switch from its
+ * row, and for its owner its people and links too; one nobody else reads is its owner's, and
+ * whoever they share it with.
+ */
+function visibilityWords(a: Artifact | ArtifactDetail): string {
+  const access = "access" in a ? a.access : undefined;
+  const teams = access?.teams ?? a.teams ?? [];
+  const organisation = access?.organisation ?? a.visibility === "organisation";
+  if (teams.length === 0 && !organisation && (access?.people.length ?? 0) === 0) {
+    if (teamOwned(a)) return `the ${a.owner_team} team, whose it is, and whoever ${a.mine ? "you" : "they"} share it with`;
+    return a.mine ? "only you, and whoever you share it with" : "its owner alone, and whoever they shared it with";
   }
-  const words = audienceWords(a.visibility);
-  return teamOwned(a) && a.visibility !== `team:${a.owner_team}` ? `${words}, and the ${a.owner_team} team, whose it is` : words;
+  const words = artifactAccessWords(access ?? { teams, organisation }).replace(/^read by /, "");
+  return teamOwned(a) && !teams.some((t) => (typeof t === "string" ? t : t.name) === a.owner_team) ? `${words}, and the ${a.owner_team} team, whose it is` : words;
 }
 
 function personWords(p: ArtifactPerson | null | undefined): string {
@@ -141,16 +148,16 @@ export function Artifacts({ tab: asked }: { tab: ArtifactTab }): JSX.Element {
   const { auth, role } = useConsole();
   // A member answers for nobody's artifacts but their own, so their first tab is Mine.
   const tab: ArtifactTab = asked.kind === "every" && role === "member" ? { kind: "mine" } : asked;
-  const key = tab.kind === "profile" ? `profile:${tab.name}` : tab.kind;
+  const key = tab.kind;
   const [load, reload] = useLoad(() => new ArtifactApi((m, p) => auth.rpc(m, p)).list(filterOf(tab)), [auth, key]);
   return (
     <div className="page artifacts">
       <p className="lead">
         {role === "member"
-          ? "The pages and files published on this plane that you may open: your own, your organisation's, your teams', and those of each profile you work in."
+          ? "The pages and files published on this plane that you may open: your own, your organisation's, your teams', and those shared with you."
           : role === "platform_admin"
-            ? "Every page and file published on this plane, people's private ones included, with a takedown for each; then, in the tabs, those you may open as anybody may: your own, your organisation's, your teams', and those of each profile you work in."
-            : "Every page and file published for the teams you administer, with a takedown for each; then, in the tabs, those you may open as anybody may: your own, your organisation's, your teams', and those of each profile you work in."}
+            ? "Every page and file published on this plane, people's private ones included, with a takedown for each; then, in the tabs, those you may open as anybody may: your own, your organisation's, your teams', and those shared with you."
+            : "Every page and file read by the teams you administer, with a takedown for each; then, in the tabs, those you may open as anybody may: your own, your organisation's, your teams', and those shared with you."}
       </p>
       <Loaded load={load} what="the artifacts" retry={reload}>
         {(list) => (list.enabled ? <Gallery tab={tab} list={list} /> : <SwitchedOff />)}
@@ -167,7 +174,6 @@ function Gallery({ tab, list }: { tab: ArtifactTab; list: ArtifactList }): JSX.E
     { tab: { kind: "shared" }, label: "Shared with you" },
     { tab: { kind: "organisation" }, label: "Organisation" },
     { tab: { kind: "teams" }, label: "Teams" },
-    ...list.profiles.map((name) => ({ tab: { kind: "profile" as const, name }, label: name })),
   ];
   return (
     <>
@@ -222,7 +228,7 @@ function Card({ artifact: a }: { artifact: Artifact }): JSX.Element {
         {teamOwned(a) ? `the ${a.owner_team} team's` : a.mine ? "yours" : (a.owner.display_name ?? a.owner.subject)} · version {a.version} · {bytes(a.bytes)}
       </p>
       <p className="card-meta">
-        {a.mine || a.visibility.startsWith("team:") ? `for ${visibilityWords(a)} · ` : ""}published {when(a.published_at)}
+        {a.mine || (a.teams?.length ?? 0) > 0 ? `for ${visibilityWords(a)} · ` : ""}published {when(a.published_at)}
       </p>
       {(a.public || a.pinned || a.role === "edit") && (
         <p className="card-meta">
@@ -310,7 +316,7 @@ function Blocked({ artifact: a, current }: { artifact: ArtifactDetail; current: 
  * anybody may (another person's private one), nothing on the page asks the plane as them.
  */
 function Detail({ artifact: a, audit, reload }: { artifact: ArtifactDetail; audit: AdminArtifactPage | null; reload: () => void }): JSX.Element {
-  const { me, notify, reserveTab, plane } = useConsole();
+  const { me, notify, reserveTab, plane, role } = useConsole();
   const reach = audit === null || audit.may_open;
   const api = useArtifacts();
   const [opening, setOpening] = useState<string | null>(null);
@@ -380,7 +386,7 @@ function Detail({ artifact: a, audit, reload }: { artifact: ArtifactDetail; audi
       <Fields
         rows={[
           ["Kind", kindWords(a.kind)],
-          ["Who may open it", visibilityWords(a)],
+          ["Who reads it", visibilityWords(a)],
           ["Owner", ofTeam ? `${ownerWords(a)}; ${personWords(a.owner)} first published it` : a.mine ? `you, ${personWords(a.owner)}` : personWords(a.owner)],
           ["Team", a.team ?? "—"],
           ["Version", a.pinned ? `${current}, pinned by its owner; the newest is ${a.version}` : `${a.version} of ${count(versions.length, "version")}`],
@@ -578,7 +584,7 @@ function Detail({ artifact: a, audit, reload }: { artifact: ArtifactDetail; audi
         </ol>
       </section>
       {reach ? <ArtifactComments artifact={a} api={api} /> : <AuditedThread comments={audit?.thread ?? []} />}
-      {a.mine && <ArtifactPeople artifact={a} api={api} reload={reload} />}
+      {(a.mine || role === "platform_admin") && <ArtifactAccessMenu artifact={a} api={api} organisationAllowed reload={reload} />}
       {a.mine && <ArtifactLinks artifact={a} api={api} reload={reload} />}
       {!a.mine && audit && <AuditedPeople artifact={audit} />}
     </>
