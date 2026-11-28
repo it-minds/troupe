@@ -751,7 +751,11 @@ function Shares({ team }: { team: AdminTeam }): JSX.Element {
     setRefused(null);
     try {
       await auth.withToken((plane, token) => plane.decideShareRequest(token, request.id, decision));
-      notify(decision === "approve" ? `Allowed: ${shareRequestLine(request).toLowerCase()}.` : `Refused: ${shareRequestLine(request).toLowerCase()}.`);
+      notify(
+        decision === "approve"
+          ? `Allowed: ${request.session_id} is shared as ${request.requested_by} asked.`
+          : `Refused: nothing of ${request.session_id} was shared.`,
+      );
       reload();
     } catch (e) {
       setRefused(errorText(e));

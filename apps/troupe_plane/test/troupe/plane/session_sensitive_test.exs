@@ -13,7 +13,7 @@ defmodule Troupe.Plane.SessionSensitiveTest do
   use Troupe.Plane.DataCase, async: false
 
   alias Troupe.ObjectStore
-  alias Troupe.Plane.{Audit, Bundles, FakePod, Fleet, Harness, Identity, Memory, Sessions}
+  alias Troupe.Plane.{Admin, Audit, Bundles, FakePod, Fleet, Harness, Identity, Memory, Sessions}
   alias Troupe.Plane.Control.{Connections, Listener}
   alias Troupe.Plane.Sessions.Sensitive
   alias Troupe.Protocol.SessionId
@@ -124,7 +124,7 @@ defmodule Troupe.Plane.SessionSensitiveTest do
                Harness.call("sessions.list", %{}, as(ada))
 
       # The team administrator's list of its sessions says it as the session's own row does.
-      assert {:ok, listed} = Troupe.Plane.Admin.sessions_list(Troupe.Plane.Admin.actor_for(lead))
+      assert {:ok, listed} = Admin.sessions_list(Admin.actor_for(lead))
 
       assert %{sensitive: %{"how" => "call", "by" => "mcp.records.lookup"}} =
                Enum.find(listed, &(&1.id == session.id))

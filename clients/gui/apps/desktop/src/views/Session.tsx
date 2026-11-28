@@ -1136,6 +1136,13 @@ function Header({
         </h1>
       )}
       <div className="crumbs">
+        {/* First, so a narrow head, which leaves tags out from the end, keeps it longest:
+            it limits what the session may do. */}
+        {sensitive && (
+          <span className="tag sensitive" title={sensitive.title}>
+            {sensitive.word}
+          </span>
+        )}
         {row && (
           <>
             <Where kind={row.kind} row={row} />
@@ -1144,15 +1151,10 @@ function Header({
           </>
         )}
         {/* Before the profile and the agent, which the composer says too, so a narrow head
-            clips those and not this. */}
+            leaves those out and not this. */}
         {lasts && (
           <span className="tag lasts" title={lasts === "persistent" ? "Kept until its owner erases it" : "Erased a while after it goes quiet, unless somebody keeps it"}>
             {lasts}
-          </span>
-        )}
-        {sensitive && (
-          <span className="tag sensitive" title={sensitive.title}>
-            {sensitive.word}
           </span>
         )}
         {row?.kind === "team" && row.profile && (

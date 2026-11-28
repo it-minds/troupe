@@ -1314,17 +1314,24 @@ main {
   flex: 0 1 auto;
   min-width: 0;
   display: flex;
-  flex-wrap: nowrap;
+  /* One line of tags: what does not fit wraps below it, out of sight (see .tag). */
+  flex-wrap: wrap;
+  max-height: calc(1lh + 8px);
   overflow: hidden;
   align-items: center;
-  gap: 6px;
+  gap: 4px 6px;
   font: var(--t-micro);
 }
-/* A tag the head has no room for ends in an ellipsis, never cut bare, its whole word in its
-   title; the agent's, which the composer says too, gives way first. `sensitive` never gives
-   way: it is a fact that limits what the session may do. */
+/* A tag the head has no room for is left out whole, from the end, never cut mid-word: the
+   row wraps onto a second line the head does not show. The order is deliberate, so the
+   agent's, which the composer says too, goes first and `sensitive`, a fact that limits what
+   the session may do and so drawn first, stays longest. A tag wider than the whole row ends
+   in an ellipsis, its whole word in its title. */
+.session-head .crumbs > * {
+  flex: none;
+  max-width: 100%;
+}
 .session-head .tag {
-  flex: 0 1 auto;
   min-width: 0;
   padding: 3px 7px;
   border: var(--bw-hairline) solid var(--border-strong);
@@ -1334,11 +1341,7 @@ main {
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.session-head .tag.sensitive {
-  flex: none;
-}
 .session-head .tag.profile {
-  flex-shrink: 8;
   border-color: var(--running-bd);
   color: var(--running-fg);
 }
