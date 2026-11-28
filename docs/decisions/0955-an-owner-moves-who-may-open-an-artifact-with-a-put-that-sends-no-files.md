@@ -38,3 +38,5 @@ gist: artifact.put with base and no files carries every file (visibility moves i
   plane's object-store endpoint publishes only what fits inline.
 - **A path part is at most 255 bytes**, the object store's own limit, refused with the
   publish's other path rules before anything is written.
+
+> Superseded in part by Decision 1121: the teams and people that read an artifact change with no version (`artifact.access.set`); a put moving only between private and organisation is still a version.

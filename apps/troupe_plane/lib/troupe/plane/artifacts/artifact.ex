@@ -1,6 +1,6 @@
 defmodule Troupe.Plane.Artifacts.Artifact do
   @moduledoc """
-  One artifact (`Troupe.Plane.Artifacts`): whose it is, who may see it, where it came from,
+  One artifact (`Troupe.Plane.Artifacts`): whose it is, who reads it, where it came from,
   and the version its address serves. Its versions are `Troupe.Plane.Artifacts.Version`s.
 
   Whose it is is `owner`, the person who published it first, unless `owner_team` names a
@@ -21,9 +21,11 @@ defmodule Troupe.Plane.Artifacts.Artifact do
     belongs_to(:team, Troupe.Plane.Identity.Team)
     field(:title, :string)
     field(:kind, :string)
-    # `organisation`, or `profile:<name>` for the people a profile's grants cover.
+    # `organisation`, every signed-in person; or `private`, its readers alone: its owners,
+    # the teams in `team_grants`, the people it is shared with by name and its links.
     field(:visibility, :string)
-    # The profile of the session it came from, where that was a pod's.
+    # The profile of the session it came from, where that was a pod's: the teams granted it
+    # are those its owner may give it to without being in them.
     field(:profile, :string)
     # `session_id`, `agent` and `where` (`pod`, `laptop` or `person`).
     field(:origin, :map, default: %{})
@@ -51,6 +53,9 @@ defmodule Troupe.Plane.Artifacts.Artifact do
     )
 
     has_many(:shares, Troupe.Plane.Artifacts.Share, references: :id, foreign_key: :artifact_id)
+
+    # The teams that read it, whatever its visibility, kept across its versions.
+    has_many(:team_grants, Troupe.Plane.Artifacts.TeamGrant, references: :id, foreign_key: :artifact_id)
 
     timestamps(type: :utc_datetime_usec)
   end

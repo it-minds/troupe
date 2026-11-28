@@ -105,9 +105,8 @@ defmodule Troupe.Gateway.ArtifactsTest do
     refute Map.has_key?(sent, "owner")
     assert [%{"path" => "index.html"}] = sent["files"]
 
-    # Whose a team publication is goes through as said: the plane makes it the team's
-    # unless told `me`.
-    assert {:ok, _artifact} = publish(ctx, %{"visibility" => "team:engineering", "owner" => "me"})
+    # Who reads a new one and whose it is go through as said.
+    assert {:ok, _artifact} = publish(ctx, %{"teams" => ["engineering"], "owner" => "me"})
 
     {"artifact.publish", sent} =
       ctx.plane.state
@@ -115,7 +114,7 @@ defmodule Troupe.Gateway.ArtifactsTest do
       |> Enum.filter(&match?({"artifact.publish", _}, &1))
       |> List.last()
 
-    assert sent["visibility"] == "team:engineering"
+    assert sent["teams"] == ["engineering"]
     assert sent["owner"] == "me"
 
     # A new version keeps its owner: an `owner` sent with `id` is dropped, since the plane
@@ -123,7 +122,6 @@ defmodule Troupe.Gateway.ArtifactsTest do
     assert {:ok, %{"version" => 2}} =
              publish(ctx, %{
                "id" => "art-fakefakefakefake",
-               "visibility" => "team:engineering",
                "owner" => "me"
              })
 
@@ -145,9 +143,26 @@ defmodule Troupe.Gateway.ArtifactsTest do
     # with the teams they are in for a client to offer.
     assert {:error,
             %{message: "forbidden", data: %{"reason" => reason, "teams" => ["engineering"]}}} =
-             publish(ctx, %{"visibility" => "team:research"})
+             publish(ctx, %{"teams" => ["research"]})
 
-    assert reason =~ "not in team research"
+    assert reason =~ "may not give it to team research"
+  end
+
+  test "the gate of a new version from a session here is told who reads it, in the plane's words",
+       ctx do
+    session_ctx = %{session_id: "20261025T120000-abcdef"}
+
+    # Signed out there is nobody to ask, and a new one from this machine has no profile to
+    # give it teams by default.
+    assert {:ok, %{}} = Troupe.Gateway.Artifacts.about(%{"id" => "art-fakefakefakefake"}, session_ctx)
+
+    assert {:ok, %{"linked" => true}} = link(ctx)
+
+    assert {:ok, %{"access" => "the engineering team"}} =
+             Troupe.Gateway.Artifacts.about(%{"id" => "art-fakefakefakefake"}, session_ctx)
+
+    assert {:ok, %{}} = Troupe.Gateway.Artifacts.about(%{"id" => nil}, session_ctx)
+    assert Enum.any?(FakePlane.calls(ctx.plane.state), &match?({"artifact.access.get", %{"id" => "art-fakefakefakefake"}}, &1))
   end
 
   test "a version too large for one call goes by an upload handle, straight to the object store",
@@ -412,7 +427,7 @@ defmodule Troupe.Gateway.ArtifactsTest do
                  %{
                    "title" => "Findings",
                    "kind" => "markdown",
-                   "visibility" => "team:engineering",
+                   "teams" => ["engineering"],
                    "owner" => "team",
                    "files" => ["report.md"]
                  }}
@@ -440,7 +455,7 @@ defmodule Troupe.Gateway.ArtifactsTest do
 
     assert sent["session_id"] == session.id
     assert sent["agent"] =~ "agent:"
-    assert sent["visibility"] == "team:engineering"
+    assert sent["teams"] == ["engineering"]
     assert sent["owner"] == "team"
     assert [%{"path" => "report.md", "bytes" => bytes}] = sent["files"]
     assert Base.decode64!(bytes) == "# Findings"

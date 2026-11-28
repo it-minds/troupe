@@ -536,7 +536,7 @@ defmodule Troupe.Tools do
       }
       |> put_cwd(ctx, args)
       |> put_rule(rule)
-      |> put_publication(name, args)
+      |> put_publication(name, args, ctx)
 
     Server.waiting_on_person(ctx.agent_pid, ctx.call_id, fn -> Approvals.request(ctx.session_id, req) end)
   end
@@ -556,11 +556,12 @@ defmodule Troupe.Tools do
   defp put_rule(req, rule), do: Map.put(req, :rule, Permissions.to_json(rule))
 
   # A publication asks with what the gate shows and the person aims: the title, the kind,
-  # the files' count, and the audience and owner the model proposed, or none.
-  defp put_publication(req, "publish_artifact", args),
-    do: Map.put(req, :publication, PublishArtifact.publication(args))
+  # the files' count, the audience and owner the model proposed or the teams the plane gives
+  # a new one by default, and for a new version who reads it now.
+  defp put_publication(req, "publish_artifact", args, ctx),
+    do: Map.put(req, :publication, PublishArtifact.publication(args, ctx))
 
-  defp put_publication(req, _name, _args), do: req
+  defp put_publication(req, _name, _args, _ctx), do: req
 
   @doc """
   Run a tool and normalise whatever it returns into a `Result`.

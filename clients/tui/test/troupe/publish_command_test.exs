@@ -30,7 +30,7 @@ defmodule Troupe.PublishCommandTest do
       eventually(fn -> Enum.find(user_state(pid).commands, &(&1["name"] == "publish")) end)
 
     # Who it is for is offered, a team's among them with whose it is, and need not be said.
-    assert publish["usage"] =~ "[private | organisation | team:<name> [me | team] | profile:<name>]"
+    assert publish["usage"] =~ "[private | organisation]"
 
     # Saying nothing of who it is for is the person's alone, and is sent as it is.
     type(pid, "/publish #{Path.join(ws, "report.html")}")

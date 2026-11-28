@@ -70,7 +70,8 @@ defmodule Troupe.Plane.ArtifactThumbnailsTest do
       user,
       "artifact.publish",
       Map.merge(
-        %{"title" => "Report", "kind" => "html", "visibility" => "team:engineering", "files" => page("<h1>Hi</h1>")},
+        %{"title" => "Report", "kind" => "html", "files" => page("<h1>Hi</h1>")}
+        |> Map.merge(if(Map.has_key?(attrs, "id"), do: %{}, else: %{"teams" => ["engineering"]})),
         attrs
       )
     )
@@ -212,9 +213,9 @@ defmodule Troupe.Plane.ArtifactThumbnailsTest do
       assert %{status: 404} = fetch(context, "https://artifacts.example.test/t/#{token}x")
       assert %{status: 404} = fetch(context, "https://artifacts.example.test/t/forged")
 
-      # Moved where Ada is not, her address stops opening at once.
+      # Taken from the team, Bo's address stops opening at once.
       bo_url = row(context.bo, artifact["id"])["thumbnail_url"]
-      {:ok, _} = call(context.ada, "artifact.put", %{"id" => artifact["id"], "base" => 1, "visibility" => "private"})
+      {:ok, _} = call(context.ada, "artifact.access.set", %{"id" => artifact["id"], "teams" => []})
       assert %{status: 200} = fetch(context, url)
       assert %{status: 404} = fetch(context, bo_url)
     end

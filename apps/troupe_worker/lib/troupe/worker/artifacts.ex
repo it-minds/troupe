@@ -19,7 +19,29 @@ defmodule Troupe.Worker.Artifacts do
   @spec install() :: :ok
   def install do
     :ok = Troupe.Artifacts.install_files(&__MODULE__.files/1)
+    :ok = Troupe.Artifacts.install_about(&__MODULE__.about/2)
     Troupe.Artifacts.install(&__MODULE__.publish/2)
+  end
+
+  @doc """
+  What the plane says of a publication before its gate asks (`Troupe.Artifacts.about/2`):
+  `session.artifact.about` over the control link, naming the session and, for a new
+  version, the artifact. The plane answers for the session's owner: who reads that artifact
+  now, in words, or the teams granted the session's profile, which a new one is given by
+  default. A link that is down, or a refusal, is nothing to say.
+  """
+  @spec about(map(), Troupe.Tool.Ctx.t()) :: {:ok, map()} | {:error, term()}
+  def about(ask, ctx) do
+    params =
+      ask
+      |> Map.take(["id"])
+      |> Map.reject(fn {_key, value} -> is_nil(value) end)
+      |> Map.put("session_id", ctx.session_id)
+
+    case request("session.artifact.about", params) do
+      {:ok, about} when is_map(about) -> {:ok, about}
+      {:error, reason} -> {:error, reason}
+    end
   end
 
   @doc """
@@ -52,7 +74,7 @@ defmodule Troupe.Worker.Artifacts do
   def publish(params, ctx) do
     params =
       params
-      |> Map.take(~w(title kind visibility owner files id note thumbnail))
+      |> Map.take(~w(title kind visibility teams owner files id note thumbnail))
       |> Troupe.Gateway.Artifacts.own_only_new()
       |> Map.put("session_id", ctx.session_id)
       |> put_agent(ctx)

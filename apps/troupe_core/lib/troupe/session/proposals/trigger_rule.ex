@@ -198,7 +198,7 @@ defmodule Troupe.Session.Proposals.TriggerRule do
         "name" => name(title),
         "schedule" => schedule,
         "source" => %{"kind" => "schedule", "cron" => cron, "tz" => "UTC"},
-        "prompt_template" => prompt(s, artifact, title, visibility),
+        "prompt_template" => prompt(s, artifact, title),
         "profile" => s.profile,
         "agent" => s.agent,
         "visibility" => if(s.visibility == "team", do: "team", else: "private"),
@@ -313,21 +313,21 @@ defmodule Troupe.Session.Proposals.TriggerRule do
 
   # -- the prompt -----------------------------------------------------------------
 
-  defp prompt(s, artifact, title, visibility) do
+  # The run republishes by `id` alone: a new version keeps who reads the artifact, and one
+  # that named an audience would be refused.
+  defp prompt(s, artifact, title) do
     instruction =
       case Enum.reject(s.words, &(String.trim(&1) == "")) do
         [first | _] -> Text.cut(String.trim(first), @max_instruction_bytes)
         [] -> "Make the report \"#{title}\" again."
       end
 
-    audience = if is_binary(visibility), do: ", `visibility` `#{visibility}`", else: ""
-
     Enum.join(
       [
         instruction,
         sources(s.reads),
         "Publish the result with publish_artifact as the next version of \"#{title}\": `id` " <>
-          "`#{artifact["id"]}`#{audience}, and a `note` naming the date of this run."
+          "`#{artifact["id"]}`, which keeps who reads it, and a `note` naming the date of this run."
       ]
       |> Enum.reject(&(&1 == "")),
       "\n\n"

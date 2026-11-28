@@ -72,3 +72,5 @@ teams' own; `admin.artifact.takedown` is the takedown from it, destructive and c
 id over MCP. Both are placed on a new Operate area, **Published artifacts**, a plain table with
 **Take down** typed by the id. Reading the table is not audited; the takedown is. Nothing there
 opens an artifact.
+
+> Superseded in part by Decision 1121: a team reads an artifact as one of its set, not as its visibility, and an owner may give it to a team granted its session's profile without being in it.

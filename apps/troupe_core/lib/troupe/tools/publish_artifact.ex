@@ -2,8 +2,8 @@ defmodule Troupe.Tools.PublishArtifact do
   @moduledoc """
   Publishes a page, a Markdown document or a file from the workspace as an artifact on the
   plane (#62), for the session's person: theirs alone unless it says otherwise (they share
-  it with a link), or the organisation's, a team's members' or a profile's people's, read in
-  their galleries and served from the plane's artifacts host, where it can touch nothing.
+  it with a link), or read by the teams it names or the whole organisation, in their
+  galleries and served from the plane's artifacts host, where it can touch nothing.
 
   Confined as `remember`'s anchors are: every file a regular file inside the workspace, read
   as it is now. The files keep their paths below the directory they share, so a page's
@@ -12,18 +12,22 @@ defmodule Troupe.Tools.PublishArtifact do
   workspace (a screenshot the agent already took), goes with the version for its gallery
   card; none is none, and the card shows the kind instead.
 
-  Whom it is for is the person's to say, not the model's. A call that names a `visibility`
-  the person asked for is asked about by default, because what it publishes is read by
-  people who were not in this session, and a per-tool rule may allow it. A call that names
-  none must be asked, whatever a rule or `auto_approve` says (`must_ask?/1`): the request
-  carries the publication for the gate to show (`publication/1`), the person chooses the
-  audience and whose it is there, and the call runs with what they chose laid over its
-  arguments (`as_answered/2`), its answer saying so. What it published is on the call's own
-  event, as `artifact` (`id`, `version`, `url`, and `owner_team` for a team's), and in the
-  plane's audit trail with the session. What the artifacts host will block in it (a
+  Whom a new one is for is the person's to say, not the model's. A call that names a
+  `visibility` or `teams` the person asked for is asked about by default, because what it
+  publishes is read by people who were not in this session, and a per-tool rule may allow
+  it. A new one that names neither must be asked, whatever a rule or `auto_approve` says
+  (`must_ask?/1`): the request carries the publication for the gate to show
+  (`publication/2`), with the teams the plane would give it by default ticked, the person
+  chooses the audience and whose it is there, and the call runs with what they chose laid
+  over its arguments (`as_answered/2`), its answer saying so. A new version keeps who reads
+  the artifact and asks nothing about it: the gate shows who that is, in words the plane
+  gives, and a call that names an audience for one is refused, since who reads an artifact
+  is changed in its Access menu, never by the model. What it published is on the call's
+  own event, as `artifact` (`id`, `version`, `url`, and `owner_team` for a team's), and in
+  the plane's audit trail with the session. What the artifacts host will block in it (a
   stylesheet from another site, an inline script, a document's image from another site), as
-  the plane read it from the files, is
-  in the answer by file and reference, so the agent can publish a corrected version.
+  the plane read it from the files, is in the answer by file and reference, so the agent
+  can publish a corrected version.
 
   Offered only where the host installed somewhere for it to go (`Troupe.Artifacts`). There,
   signed out, it is refused with a sentence naming the file, which the person can open or
@@ -33,9 +37,11 @@ defmodule Troupe.Tools.PublishArtifact do
   @behaviour Troupe.Tool
 
   alias Troupe.{Artifacts, Tool, Workspace}
+  alias Troupe.Protocol.Words
 
   @kinds ~w(html markdown file)
   @owners ~w(me team)
+  @visibilities ~w(private organisation)
   @max_file_bytes 16 * 1024 * 1024
   @max_version_bytes 64 * 1024 * 1024
   @max_thumbnail_bytes 256 * 1024
@@ -52,7 +58,7 @@ defmodule Troupe.Tools.PublishArtifact do
 
     `thumbnail`: optional, a workspace PNG, JPEG or WebP of at most 256 KiB shown on the gallery card; send one only if you already have a screenshot of the page. Never required.
 
-    `visibility`: whom it is for, which is the person's to decide, not yours: `private` (the person alone, until they share a link), `organisation`, `team:<name>` for a team's members, or `profile:<name>` for a profile's people. Set it only to what the person asked for; when they did not say, leave it out and they choose at the approval. `owner`: `me` or `team`, whose the artifact is, for a new one; a team publication is the team's unless `owner` is `me`, and a new version keeps its owner. `id`: one of yours, or one you were given an edit link to, to publish as the next version at the same address, with `note` saying what changed; the earlier versions are kept.
+    Whom a new one is for is the person's to decide, not yours: `visibility` `private` (the person and whoever they share it with) or `organisation`, and `teams`, the names of teams whose members read it. Set them only to what the person asked for; when they did not say, leave them out and they choose at the approval. `owner`: `me` (the default) or `team`, whose a new one is; `team` is the one team in `teams`. `id`: one of yours, or one you were given an edit link to, to publish as the next version at the same address, with `note` saying what changed; the earlier versions are kept, and so is who reads it: never name `visibility`, `teams` or `owner` with `id`.
     """
     |> String.trim()
   end
@@ -66,21 +72,26 @@ defmodule Troupe.Tools.PublishArtifact do
         "kind" => %{"type" => "string", "enum" => @kinds},
         "visibility" => %{
           "type" => "string",
+          "enum" => @visibilities,
           "description" =>
-            "private, organisation, team:<name> or profile:<name>: only what the person asked for; " <>
-              "left out, the person chooses at the approval"
+            "A new one's: private or organisation, only what the person asked for; left out, the person chooses at the approval"
+        },
+        "teams" => %{
+          "type" => "array",
+          "items" => %{"type" => "string"},
+          "description" =>
+            "A new one's: the teams whose members read it, only those the person named; left out, the person chooses at the approval"
         },
         "owner" => %{
           "type" => "string",
           "enum" => @owners,
-          "description" =>
-            "whose it is: me, or team for a team:<name> publication (the default there)"
+          "description" => "whose a new one is: me (the default), or team, the one team in teams"
         },
         "files" => %{"type" => "array", "items" => %{"type" => "string"}},
         "id" => %{
           "type" => "string",
           "description" =>
-            "An artifact of yours, or one you hold an edit link to, to publish a new version of."
+            "An artifact of yours, or one you hold an edit link to, to publish a new version of; it keeps who reads it."
         },
         "note" => %{
           "type" => "string",
@@ -99,11 +110,13 @@ defmodule Troupe.Tools.PublishArtifact do
   @impl Troupe.Tool
   def default_permission, do: :ask
 
-  # A call that says whom it is for is asked as any `ask` tool's, and a rule may allow it;
-  # one that says nothing is asked whatever the rules and `auto_approve` say, because the
-  # person has not yet said whom it is for, and nobody else may choose that.
+  # A new one that says whom it is for is asked as any `ask` tool's, and a rule may allow
+  # it; one that says nothing is asked whatever the rules and `auto_approve` say, because
+  # the person has not yet said whom it is for, and nobody else may choose that. A new
+  # version keeps who reads it, so there is nothing about its audience to ask: the person's
+  # rules decide it as any call's.
   @impl Troupe.Tool
-  def must_ask?(args), do: not named?(args["visibility"])
+  def must_ask?(args), do: not named?(args["id"]) and not aimed?(args)
 
   @impl Troupe.Tool
   def available?(_session_id), do: Artifacts.reachable?()
@@ -111,43 +124,76 @@ defmodule Troupe.Tools.PublishArtifact do
   @doc """
   What the gate shows of a call, for the person to aim it: the title, the kind, how many
   files, the audience and the owner as the model proposed them (`nil` where it proposed
-  none, and for a republish, whose owner does not change), the artifact it republishes and
-  its note.
+  none, and for a republish, whose readers and owner do not change), the artifact it
+  republishes and its note.
   """
   @spec publication(map()) :: map()
   def publication(args) do
+    republish? = named?(args["id"])
+
     %{
       "title" => args["title"],
       "kind" => args["kind"],
       "files" => args["files"] |> List.wrap() |> length(),
-      "visibility" => if(named?(args["visibility"]), do: args["visibility"]),
-      "owner" => if(args["owner"] in @owners and not named?(args["id"]), do: args["owner"]),
-      "id" => if(named?(args["id"]), do: args["id"]),
+      "visibility" => if(named?(args["visibility"]) and not republish?, do: args["visibility"]),
+      "teams" => if(teams?(args["teams"]) and not republish?, do: args["teams"]),
+      "owner" => if(args["owner"] in @owners and not republish?, do: args["owner"]),
+      "id" => if(republish?, do: args["id"]),
       "note" => if(named?(args["note"]), do: args["note"])
     }
   end
 
   @doc """
+  `publication/1` with what the plane says of it (`Troupe.Artifacts.about/2`): for a new
+  version, who reads the artifact now, in words (`access`), which it keeps; for a new one
+  whose call named no teams, the teams the plane gives it by default (`teams`, those granted
+  the session's profile on a pod), ticked for the person to keep or change. Where the plane
+  says nothing, the publication is as `publication/1` has it.
+  """
+  @spec publication(map(), Tool.Ctx.t() | map()) :: map()
+  def publication(args, ctx) do
+    publication = publication(args)
+
+    case Artifacts.about(Map.take(publication, ["id"]), ctx) do
+      {:ok, about} -> with_about(publication, about)
+      _none -> publication
+    end
+  end
+
+  defp with_about(%{"id" => id} = publication, %{"access" => access}) when is_binary(id) and is_binary(access),
+    do: Map.put(publication, "access", access)
+
+  defp with_about(%{"id" => nil, "teams" => nil} = publication, %{"teams" => [_ | _] = teams}),
+    do: Map.put(publication, "teams", teams)
+
+  defp with_about(publication, _about), do: publication
+
+  @doc """
   The call's arguments with what the person chose at the gate laid over them: their
-  `visibility` and `owner` replace the model's, so the tool publishes for whom they said.
+  `visibility`, `teams` and `owner` replace the model's, so the tool publishes for whom they
+  said.
   """
   @spec as_answered(map(), map()) :: map()
   def as_answered(args, answer) do
     Map.merge(
       args,
       answer
-      |> Map.take(~w(visibility owner))
+      |> Map.take(~w(visibility teams owner))
       |> Map.reject(fn {_key, value} -> is_nil(value) end)
     )
   end
 
   defp named?(value), do: is_binary(value) and value != ""
+  defp teams?(value), do: is_list(value) and value != []
+  defp aimed?(args), do: named?(args["visibility"]) or teams?(args["teams"])
 
   @impl Troupe.Tool
   def run(args, ctx) do
     with {:ok, title} <- Tool.fetch_string(args, "title"),
          {:ok, kind} <- kind(args),
+         :ok <- readers_kept(args),
          {:ok, visibility} <- visibility(args),
+         {:ok, teams} <- teams(args),
          {:ok, owner} <- owner(args),
          {:ok, paths} <- paths(args),
          {:ok, files} <- read(ctx, paths),
@@ -155,6 +201,7 @@ defmodule Troupe.Tools.PublishArtifact do
       params =
         %{"title" => title, "kind" => kind, "files" => Enum.map(files, &wire/1)}
         |> put_visibility(visibility)
+        |> put_teams(teams)
         |> put_owner(owner, args["id"])
         |> put_id(args["id"])
         |> put_note(args["note"])
@@ -183,14 +230,27 @@ defmodule Troupe.Tools.PublishArtifact do
     end
   end
 
-  # None said is the person alone for a new one, and who it was for already for a new
-  # version of one: reached only by a call nobody was asked about, since the gate lays the
-  # person's choice over a call that said nothing.
-  defp visibility(%{"visibility" => visibility}) when is_binary(visibility) and visibility != "",
-    do: {:ok, visibility}
+  # A new version keeps who reads the artifact: the model does not re-aim one it already
+  # published, and the person changes its readers in its Access menu.
+  defp readers_kept(%{"id" => id} = args) when is_binary(id) and id != "" do
+    if aimed?(args),
+      do:
+        {:error,
+         {:invalid_args,
+          "a new version keeps who reads the artifact, so name no visibility or teams with id; " <>
+            "the person changes who reads it in the artifact's Access menu"}},
+      else: :ok
+  end
+
+  defp readers_kept(_args), do: :ok
+
+  # None said is the person alone for a new one, and who read it already for a new version
+  # of one: reached only by a call nobody was asked about, since the gate lays the person's
+  # choice over a call that said nothing.
+  defp visibility(%{"visibility" => visibility}) when visibility in @visibilities, do: {:ok, visibility}
 
   defp visibility(%{"visibility" => other}) when not is_nil(other) and other != "",
-    do: {:error, {:invalid_args, "visibility is a string, not #{inspect(other)}"}}
+    do: {:error, {:invalid_args, "visibility is private or organisation, not #{inspect(other)}"}}
 
   defp visibility(%{"id" => id}) when is_binary(id) and id != "", do: {:ok, nil}
   defp visibility(_args), do: {:ok, "private"}
@@ -198,8 +258,22 @@ defmodule Troupe.Tools.PublishArtifact do
   defp put_visibility(params, nil), do: params
   defp put_visibility(params, visibility), do: Map.put(params, "visibility", visibility)
 
-  # Whose it is: the plane makes a team publication the team's unless told `me`, so none
-  # said is left to it. Only a new one says: whose an artifact is does not change with a
+  defp teams(%{"teams" => teams}) when is_list(teams) do
+    if Enum.all?(teams, &named?/1),
+      do: {:ok, teams},
+      else: {:error, {:invalid_args, "teams is a list of teams' names, not #{inspect(teams)}"}}
+  end
+
+  defp teams(%{"teams" => other}) when not is_nil(other),
+    do: {:error, {:invalid_args, "teams is a list of teams' names, not #{inspect(other)}"}}
+
+  defp teams(_args), do: {:ok, []}
+
+  defp put_teams(params, []), do: params
+  defp put_teams(params, teams), do: Map.put(params, "teams", teams)
+
+  # Whose it is: the person's unless told `team`, which the plane resolves to the one team
+  # that reads it. Only a new one says: whose an artifact is does not change with a
   # version (the plane refuses an `owner` on a republish; `artifact.transfer` moves one),
   # so a republish sends none, whatever was said.
   defp owner(%{"owner" => owner}) when owner in @owners, do: {:ok, owner}
@@ -345,7 +419,7 @@ defmodule Troupe.Tools.PublishArtifact do
 
   # `owner_team` where the plane answers it: whose the artifact is, when a team's.
   defp fields(artifact),
-    do: Map.take(artifact, ["id", "version", "url", "title", "visibility", "owner_team"])
+    do: Map.take(artifact, ["id", "version", "url", "title", "visibility", "teams", "owner_team"])
 
   # The model is told when the audience is the person's choice rather than its own, so it
   # does not take its proposal for what happened.
@@ -354,7 +428,7 @@ defmodule Troupe.Tools.PublishArtifact do
     chose = if chosen?(ctx), do: ", as the person chose", else: ""
 
     "published #{artifact["kind"] || "artifact"} \"#{artifact["title"]}\" (#{length(files)} file#{if length(files) == 1, do: "", else: "s"}) " <>
-      "as #{artifact["id"]} version #{artifact["version"]}, for #{audience(artifact["visibility"])}#{chose}, at #{where}. " <>
+      "as #{artifact["id"]} version #{artifact["version"]}, for #{audience(artifact)}#{chose}, at #{where}. " <>
       blocked(artifact["blocked"], artifact["id"])
   end
 
@@ -401,9 +475,12 @@ defmodule Troupe.Tools.PublishArtifact do
   defp chosen?(%{answer: %{"edited" => [_ | _]}}), do: true
   defp chosen?(_ctx), do: false
 
-  defp audience("private"), do: "the person alone, until they share a link to it"
-  defp audience("organisation"), do: "the whole organisation"
-  defp audience("team:" <> name), do: "team #{name}'s members"
-  defp audience("profile:" <> name), do: "profile #{name}'s people"
-  defp audience(other), do: to_string(other)
+  # Whom it is for, as the plane answered it: a new version is for whoever read it before.
+  defp audience(%{"version" => n}) when is_integer(n) and n > 1, do: "the readers it already had"
+  defp audience(%{"visibility" => "organisation"}), do: "the whole organisation"
+
+  defp audience(%{"teams" => [_ | _] = teams}),
+    do: "the members of " <> Words.and_list(Enum.map(teams, &"team #{&1}"))
+
+  defp audience(_private), do: "the person alone, until they share a link to it"
 end
