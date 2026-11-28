@@ -97,7 +97,8 @@ describe("a sensitive session's marks", () => {
     expect(document.querySelector(".session-head .crumbs .tag[title^='dev: ']")).not.toBeNull();
     await waitFor(() => banner()?.textContent?.includes("mcp.records.lookup read from it. Nothing clears it"), "the line under the head");
     await waitFor(() => says("This session became sensitive at"), "the transcript's line");
-    expect(document.querySelector(".note.sensitive")?.textContent).toMatch(/mcp\.records\.lookup read from it\. Nothing clears it;/);
+    expect(document.querySelector(".note.sensitive")?.textContent).toMatch(/mcp\.records\.lookup read from it\. Nothing clears it; the profile's rules refuse/);
+    expect(banner()?.textContent).toContain("Nothing clears it: the profile's rules refuse");
   });
 
   it("draws a call its rule refused as a refusal with the harness's sentence, not as a failure", async () => {

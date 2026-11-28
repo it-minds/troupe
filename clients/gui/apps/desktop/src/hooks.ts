@@ -194,7 +194,10 @@ export interface Marks {
    * administrator answers the sentence saying it waits, and nothing changed.
    */
   share: (row: FleetRow, visibility: "team" | "private") => Promise<string | null>;
-  /** Mark a pod session sensitive, at the plane (troupe #1239): one-way, its owner's alone. Rejects with the refusal. */
+  /**
+   * Mark a session sensitive by hand (troupe #1239): a pod session at the plane, its owner's
+   * alone; one on this computer at its daemon. One-way. Rejects with the refusal.
+   */
   sensitive: (row: FleetRow) => Promise<void>;
   /**
    * Raise a pod session to its channel's current bundle version, at the plane (troupe
@@ -271,16 +274,24 @@ export function useMarks(store: FleetStore, auth: AuthSession | null, daemon: Da
     },
     [store, auth],
   );
-  // Sensitive by hand: the plane's alone, and the answer's mark goes on the row at once.
+  // Sensitive by hand: a pod session's at the plane, one on this computer at its daemon; the
+  // answer's mark goes on the row at once.
   const sensitive = useCallback(
     async (row: FleetRow) => {
-      if (row.kind !== "team" || !auth) throw new Error("Only a session on the platform is marked sensitive here");
-      const answered = await auth.plane.setSessionSensitive(await auth.token(), row.id);
+      const answered =
+        row.kind === "team"
+          ? auth
+            ? await auth.plane.setSessionSensitive(await auth.token(), row.id)
+            : null
+          : daemon
+            ? await daemon.setSessionSensitive(row.id)
+            : null;
+      if (!answered) throw new Error(row.kind === "team" ? "Sign in to mark a session on the platform" : "This computer's daemon is not running");
       const raw = (row.raw && typeof row.raw === "object" ? row.raw : {}) as Record<string, unknown>;
       store.patch(row.id, { sensitive: sensitiveOf(answered.sensitive), raw: { ...raw, sensitive: answered.sensitive ?? null } });
       await store.refreshAfterChange();
     },
-    [store, auth],
+    [store, auth, daemon],
   );
   // Which configuration a pod session runs on: the plane's alone. The answer's versions go
   // on the list's row at once, as a name does; a raise kept for the agent's rest says so too.

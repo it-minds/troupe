@@ -350,7 +350,7 @@ defmodule Troupe.Client.Remote do
         {:ok, "This session is not sensitive."}
 
       {:ok, %{} = _row} ->
-        {:ok, Sensitive.ask()}
+        {:ok, Sensitive.ask(:plane)}
 
       {:error, reason} ->
         {:error, refusal(reason)}

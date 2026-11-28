@@ -377,7 +377,8 @@ defmodule Troupe.Gateway.Memory do
   machine (`Troupe.UserMemory.propose/4`): the plane's `me.memory.propose`, as this daemon's
   person, naming the session and the agent so the decision can be told to it, and the team
   where the agent named one. A session under Local only sends nothing, and says so; nor does a
-  throwaway one, which says why (#1209).
+  throwaway one, which says why (#1209), nor a sensitive one (#1239), whatever its `deny`
+  says, as the plane refuses a sensitive pod session's.
   """
   @spec propose(String.t(), Troupe.Tool.Ctx.t(), String.t(), map()) ::
           {:ok, map()} | {:error, :signed_out | String.t()}
@@ -390,6 +391,9 @@ defmodule Troupe.Gateway.Memory do
       # at the plane says so too, and the plane refuses it in the same words.
       Troupe.Sessions.Lifespan.of(ctx.session_id) == "throwaway" ->
         {:error, Troupe.Protocol.Lifespan.no_proposals()}
+
+      Troupe.Gateway.Sensitive.mark_of(ctx.session_id) ->
+        {:error, Troupe.Protocol.Sensitive.no_proposals()}
 
       true ->
         send_proposal(entry, ctx, level, opts)

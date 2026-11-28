@@ -49,7 +49,8 @@ defmodule Troupe.Settings do
   `scopes`, by name, and each scope's file. `served?` is false for a daemon too old to
   answer every key, whose values the page then reads from the config struct, and which is
   not asked to set one. `rules` is every file's per-tool permission rules as the daemon
-  answers them (root #658), which the page shows and never edits.
+  answers them (root #658), which the page shows and never edits; `sensitive` the rules of a
+  sensitive session on this computer (root #1239), the same, or nil.
   """
   @type view :: %{
           served?: boolean(),
@@ -58,7 +59,8 @@ defmodule Troupe.Settings do
           pod?: boolean(),
           keys: %{String.t() => %{String.t() => term()}},
           files: %{String.t() => String.t()},
-          rules: [map()]
+          rules: [map()],
+          sensitive: map() | nil
         }
 
   # The one setting a running session takes at once, and the three the TUI takes itself.
@@ -110,11 +112,13 @@ defmodule Troupe.Settings do
       pod?: answer["pod"] == true,
       keys: Map.new(keys, &{&1["key"], &1}),
       files: Map.new(List.wrap(answer["files"]), &{&1["scope"], &1["path"]}),
-      rules: Enum.filter(List.wrap(answer["permissions"]), &is_map/1)
+      rules: Enum.filter(List.wrap(answer["permissions"]), &is_map/1),
+      sensitive: if(is_map(answer["sensitive"]), do: answer["sensitive"])
     }
   end
 
-  def view(_answer), do: %{served?: false, pod?: false, keys: %{}, files: %{}, rules: []}
+  def view(_answer),
+    do: %{served?: false, pod?: false, keys: %{}, files: %{}, rules: [], sensitive: nil}
 
   @doc """
   What the page says of a session on a worker pod when a setting is to be changed: what is
@@ -369,14 +373,15 @@ defmodule Troupe.Settings do
   among them for the rest, so they say what the palette says; a table not yet received
   leaves the section out.
   """
-  @spec help_sections([map()], [map()]) :: [{String.t(), [String.t()]}]
-  def help_sections(commands, rules \\ []) do
+  @spec help_sections([map()], [map()], map() | nil) :: [{String.t(), [String.t()]}]
+  def help_sections(commands, rules \\ [], sensitive \\ nil) do
     setup =
       for %{"section" => "setup", "name" => name, "summary" => summary} <- commands,
           do: String.pad_trailing("/" <> name, 16) <> " " <> summary
 
     [
       {"Permission rules", rule_lines(rules)},
+      {"Sensitive sessions", sensitive_lines(sensitive)},
       {"Keys",
        [
          "Tab / Shift-Tab  next / previous window",
@@ -430,9 +435,9 @@ defmodule Troupe.Settings do
   def daemon_log, do: Troupe.Paths.display(Path.join(Troupe.Paths.state_dir(), "daemon.log"))
 
   @doc "The help as flat lines, for a narrow screen."
-  @spec help_lines([map()], [map()]) :: [String.t()]
-  def help_lines(commands, rules \\ []) do
-    Enum.flat_map(help_sections(commands, rules), fn {heading, lines} ->
+  @spec help_lines([map()], [map()], map() | nil) :: [String.t()]
+  def help_lines(commands, rules \\ [], sensitive \\ nil) do
+    Enum.flat_map(help_sections(commands, rules, sensitive), fn {heading, lines} ->
       [heading | Enum.map(lines, &("  " <> &1))] ++ [""]
     end)
   end
@@ -457,6 +462,38 @@ defmodule Troupe.Settings do
 
     lines ++ ["deny beats ask beats allow; `troupe config --explain permissions` says more"]
   end
+
+  # A sensitive session's rules on this computer (root #1239), shown, never edited here:
+  # which calls mark one, what one is refused, and whether it may be shared, each with
+  # where it came from, the organisation's beyond the person's reach. None leaves the
+  # section out.
+  defp sensitive_lines(nil), do: []
+
+  defp sensitive_lines(sensitive) do
+    listed = fn list, word ->
+      for rule <- List.wrap(sensitive[list]),
+          do:
+            String.pad_trailing(word, 10) <>
+              " " <> to_string(rule["rule"]) <> "  · " <> rule_scope(rule)
+    end
+
+    sharing = sensitive["sharing"] || %{}
+
+    shared =
+      String.pad_trailing("sharing", 10) <>
+        " " <> to_string(sharing["value"] || "allow") <> "  · " <> sharing_scope(sharing)
+
+    listed.("marked_by", "marks") ++
+      listed.("deny", "refuses") ++
+      [
+        shared,
+        "nothing clears a mark; your config.yaml may add rules and tighten sharing, not undo your organisation's"
+      ]
+  end
+
+  defp sharing_scope(%{"scope" => nil}), do: "the default"
+  defp sharing_scope(%{"scope" => _} = sharing), do: rule_scope(sharing)
+  defp sharing_scope(_none), do: "the default"
 
   defp rule_scope(%{"scope" => "enforced"} = rule), do: "set by your organisation" <> from(rule)
   defp rule_scope(%{"scope" => "org"} = rule), do: "organisation" <> from(rule)

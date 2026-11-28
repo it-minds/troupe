@@ -34,6 +34,7 @@ defmodule Troupe.Gateway.Dispatch do
     Presence,
     Private,
     Remote,
+    Sensitive,
     Session,
     Setup,
     Worktrees
@@ -174,6 +175,8 @@ defmodule Troupe.Gateway.Dispatch do
     "session.title.set" => :admin,
     # How long a session lasts, the person's say as archiving or erasing it is.
     "session.lifespan.set" => :admin,
+    # Marking a session sensitive, one-way (#1239): the person's say, as its lifespan is.
+    "session.sensitive.set" => :admin,
     "session.unpin" => :admin,
     "session.erase" => :admin,
     # Taking a private session over from another device, which then stops sealing it, is
@@ -1326,6 +1329,7 @@ defmodule Troupe.Gateway.Dispatch do
     with {:ok, workspace} <- fetch(params, "workspace"),
          {:ok, title} <- title_of(params),
          {:ok, lifespan} <- lifespan_of(params["lifespan"], :create),
+         :ok <- sensitive_at_create(params["sensitive"]),
          {:ok, parent} <- parent_of(params),
          {:ok, resolved} <- where(workspace, params) do
       private? = Map.get(params, "private", false) == true
@@ -1357,6 +1361,7 @@ defmodule Troupe.Gateway.Dispatch do
           named(session.id, title)
           # Before sealing starts, whose first registration tells the plane the word.
           lasting(session.id, lifespan)
+          :ok = sensitive_from_start(session.id, params["sensitive"], context)
 
           {:ok,
            %{
@@ -1501,6 +1506,22 @@ defmodule Troupe.Gateway.Dispatch do
     end
   end
 
+  # Marked sensitive by its person, once and for good (#1239): no `false`. The mark is a line
+  # of the session's log, which only its running tree writes, so a dormant one is woken for
+  # it. A pod's guard refuses it: there a session is marked at its plane, which tells the pod.
+  defp handle("session.sensitive.set", params, context) do
+    with {:ok, session_id} <- fetch(params, "session_id"),
+         :ok <- Sensitive.one_way(params["sensitive"]),
+         {:ok, _session} <- lookup(session_id),
+         :ok <- activate(session_id, context),
+         {:ok, _mark} <- Sensitive.mark_by_hand(session_id, subject(context), name_of(context.principal)) do
+      {:ok, session_json(Troupe.get_session(session_id))}
+    else
+      {:error, :no_session} -> {:error, Error.new(:unavailable, %{reason: "the session is not running"})}
+      {:error, _refused} = refused -> refused
+    end
+  end
+
   # A person invited by name into a private session sealed here (#765): its key is put in
   # their own slot at the key manager from this machine, which the plane cannot read, and
   # the plane told where. A pod session is invited at the plane, and one on this machine
@@ -1509,7 +1530,9 @@ defmodule Troupe.Gateway.Dispatch do
     with {:ok, session_id} <- fetch(params, "session_id"),
          {:ok, person} <- fetch(params, "person"),
          {:ok, session} <- lookup(session_id),
-         :ok <- invitable(session) do
+         :ok <- invitable(session),
+         # A sensitive session's sharing rule holds an invitation as it holds an offer.
+         :ok <- Sensitive.sharing(session_id) do
       case Invites.invite(session, person, Map.get(params, "role", "observe")) do
         {:ok, invited} -> {:ok, invited}
         {:error, reason} -> {:error, invite_error(session_id, reason)}
@@ -1740,6 +1763,10 @@ defmodule Troupe.Gateway.Dispatch do
                "publish it; troupe login signs it in, or send the file itself"
          })}
 
+      # A sensitive session's rule refuses it (#1239): the gate's sentence.
+      {:error, {:sensitive, sentence}} ->
+        {:error, Error.new(:forbidden, %{reason: sentence, sensitive: true})}
+
       # What this machine could not read or send of it is the client's to fix.
       {:error, reason} when is_binary(reason) ->
         {:error, Error.new(:invalid_params, %{reason: reason})}
@@ -1886,6 +1913,8 @@ defmodule Troupe.Gateway.Dispatch do
   # client asks with.
   defp handle("remote.offer", params, context) do
     with {:ok, session_id} <- fetch(params, "session_id"),
+         # Offered, it is read and steered beyond the people who read it now (#1239).
+         :ok <- Sensitive.sharing(session_id),
          {:ok, remote} <-
            Remote.offer(session_id, Map.get(params, "share"), subject(context), params["consent"]) do
       {:ok, %{"session_id" => session_id, "remote" => remote}}
@@ -2602,6 +2631,22 @@ defmodule Troupe.Gateway.Dispatch do
   end
 
   # Checked before the session exists, so a word that is not one costs nothing. Absent at a
+  # Sensitive from its start, by its person's hand (#1239), before any turn runs.
+  defp sensitive_from_start(session_id, true, context) do
+    {:ok, _mark} = Sensitive.mark_by_hand(session_id, subject(context), name_of(context.principal))
+    :ok
+  end
+
+  defp sensitive_from_start(_session_id, _not_asked, _context), do: :ok
+
+  # `session.create`'s `sensitive`: true marks it from its start, and nothing else is a word.
+  defp sensitive_at_create(nil), do: :ok
+  defp sensitive_at_create(false), do: :ok
+  defp sensitive_at_create(true), do: :ok
+
+  defp sensitive_at_create(_other),
+    do: {:error, Error.new(:invalid_params, %{field: "sensitive", reason: "sensitive is true or false"})}
+
   # create is normal; `session.lifespan.set` names one.
   defp lifespan_of(nil, :create), do: {:ok, "normal"}
 
@@ -3353,7 +3398,9 @@ defmodule Troupe.Gateway.Dispatch do
       "title" => Map.get(session, :title),
       # Offered to the plane for steering from another device: to whom, whether the plane
       # has it now, and who is steering it from where (`Troupe.Gateway.Remote`).
-      "remote" => Remote.describe(session.id)
+      "remote" => Remote.describe(session.id),
+      # Sensitive since when and by what (#1239), `{at, by, how}`, or nil: as a plane's row.
+      "sensitive" => Map.get(session, :sensitive)
     }
     |> Map.merge(kept_json(session))
     # How long it lasts (#1209): `throwaway`, `normal` or `persistent`, and `erases_at` for a

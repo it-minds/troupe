@@ -26,6 +26,7 @@ import type { MemoryEntry, MemoryInEffect } from "./entries.js";
 import type { Invitee, InviteRole, Person, SealedRead } from "./invites.js";
 import { knowsLifespans, lifespanOf } from "./lifespan.js";
 import type { Lifespan } from "./lifespan.js";
+import { knowsSensitive, sensitiveOf } from "./sensitive.js";
 import type { MemoryBrief } from "./memory.js";
 import type { OwnPlane } from "./own.js";
 import type { OnboardApplied, OnboardPlan } from "./onboard.js";
@@ -838,6 +839,19 @@ export class DaemonClient implements OwnPlane {
     return knowsLifespans(this.capabilities);
   }
 
+  /**
+   * Mark a session on this computer sensitive by hand (`session.sensitive.set`, troupe
+   * #1239): one-way, nothing clears it. The answer is the session's row, its mark on it.
+   */
+  setSessionSensitive(sessionId: string): Promise<DaemonSessionRow> {
+    return this.command("session.sensitive.set", { session_id: sessionId, sensitive: true });
+  }
+
+  /** Whether this daemon marks its sessions sensitive (`session.sensitive.set`, a row's `sensitive`), from its own `initialize`. */
+  get supportsSensitive(): boolean {
+    return knowsSensitive(this.capabilities);
+  }
+
   /** Keep a session at the top of the session list (`session.pin`), or let it go; the mark outlives the session's sleep. */
   pinSession(sessionId: string, pinned: boolean): Promise<{ session_id: string; pinned: boolean }> {
     return this.command(pinned ? "session.pin" : "session.unpin", { session_id: sessionId });
@@ -1468,6 +1482,8 @@ export function rowFromDaemon(row: DaemonSessionRow, source = "daemon"): FleetRo
     archived: row.archived === true,
     lifespan: lifespanOf(row.lifespan),
     erasesAt: row.erases_at ?? null,
+    // Since when and by what it is sensitive (troupe #1239); null from a daemon from before.
+    sensitive: sensitiveOf(row["sensitive"]),
     // Everything on this machine is the user's own; there is no ACL to be a viewer on.
     yourRole: "owner",
     origin: null,

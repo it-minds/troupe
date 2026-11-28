@@ -220,7 +220,7 @@ defmodule Troupe.Tool.Result do
   def describe({:denied_sensitive, tool, rule, mark}),
     do:
       "This session is sensitive since #{since(mark)}: #{tool} is refused in a sensitive " <>
-        "session by the profile #{rule.source} (#{rule.action} #{rule.text}). It did not run. " <>
+        "session by #{Permissions.whose(rule)} (#{rule.action} #{rule.text}). It did not run. " <>
         "Say what is left undone; do not try to get around it."
 
   def describe({:enoent, path}), do: "No such file: #{path}"

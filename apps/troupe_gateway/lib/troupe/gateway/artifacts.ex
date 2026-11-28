@@ -26,7 +26,7 @@ defmodule Troupe.Gateway.Artifacts do
   here and is not under Local only. A line whoever steers the session reads, never input.
   """
 
-  alias Troupe.Gateway.{LocalOnly, Memory, Plane}
+  alias Troupe.Gateway.{LocalOnly, Memory, Plane, Sensitive}
   alias Troupe.Session.Log
 
   # `owner`, `me` or `team`, is whose a new team publication is; the plane makes it the
@@ -131,6 +131,7 @@ defmodule Troupe.Gateway.Artifacts do
     |> case do
       {:ok, artifact} -> {:ok, artifact}
       {:error, :signed_out} -> {:error, :signed_out}
+      {:error, {:sensitive, sentence}} -> {:error, sentence}
       {:error, reason} -> {:error, Memory.sentence(reason)}
     end
   end
@@ -138,7 +139,8 @@ defmodule Troupe.Gateway.Artifacts do
   @doc "Publish `params` on the linked plane as this daemon's person: the plane's answer."
   @spec put(map()) :: {:ok, map()} | {:error, :signed_out | term()}
   def put(params) do
-    with url when is_binary(url) <- Plane.url(),
+    with :ok <- unless_sensitive(params["session_id"]),
+         url when is_binary(url) <- Plane.url(),
          true <- Plane.linked?(),
          {:ok, params} <-
            carried(
@@ -151,6 +153,16 @@ defmodule Troupe.Gateway.Artifacts do
       {:error, :unlinked} -> {:error, :signed_out}
       {:error, reason} -> {:error, reason}
       _signed_out -> {:error, :signed_out}
+    end
+  end
+
+  # A sensitive session here whose configuration's `deny` names `publish_artifact` (#1239)
+  # publishes nothing, whoever asks for it: its agent's tool, past its gate, or a client's
+  # "Publish…" naming it. The gate's own sentence.
+  defp unless_sensitive(session_id) do
+    case Sensitive.refusal(session_id, "publish_artifact") do
+      nil -> :ok
+      sentence -> {:error, {:sensitive, sentence}}
     end
   end
 

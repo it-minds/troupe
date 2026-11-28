@@ -24,7 +24,7 @@ import {
   lifespanRefusal,
   planeKnowsLifespans,
   planeKnowsSensitive,
-  SENSITIVE_CONFIRM,
+  sensitiveConfirm,
   SENSITIVE_ITEM,
   sensitiveMark,
   sensitiveOf,
@@ -153,7 +153,7 @@ function Sensitive({ session, knows, onChanged }: { session: SessionRow; knows: 
   };
   return asking ? (
     <span role="group" aria-label="Make it sensitive?">
-      {SENSITIVE_CONFIRM}{" "}
+      {sensitiveConfirm()}{" "}
       <button type="button" className="link" disabled={busy} onClick={() => void make()}>
         {SENSITIVE_ITEM.title}
       </button>
