@@ -482,6 +482,8 @@ defmodule Troupe.Plane.Control.Connection do
   defp dispatch("session.status", params, state) do
     case Sessions.put_status(params["session_id"], params) do
       {:ok, _count} ->
+        # Sensitive from now on, where the pod says so: written once and audited.
+        :ok = Sessions.Sensitive.reported(params["session_id"], params)
         announce(params)
         {:ok, %{"ok" => true}, state}
 
@@ -796,6 +798,9 @@ defmodule Troupe.Plane.Control.Connection do
 
         {:error, :throwaway} ->
           {:error, Error.new(:forbidden, %{reason: Memory.Proposals.throwaway_reason()}), state}
+
+        {:error, :sensitive} ->
+          {:error, Error.new(:forbidden, %{reason: Memory.Proposals.sensitive_reason()}), state}
 
         {:error, reason} ->
           {:error, Error.new(:invalid_params, %{reason: own_reason(reason)}), state}

@@ -43,8 +43,11 @@ defmodule Troupe.Worker.SensitiveTest do
     File.mkdir_p!(Path.join(context.workspace, "records"))
     File.write!(Path.join(context.workspace, "records/ann.txt"), "Ann")
 
+    test = self()
+
     defaults =
       activation(context,
+        report: fn report -> send(test, {:report, report}) end,
         steps: [
           {:tools, [{"read_file", %{"path" => "records/ann.txt"}}]},
           {:tools, [{"web_fetch", %{"url" => "https://example.test/"}}]},
@@ -66,6 +69,9 @@ defmodule Troupe.Worker.SensitiveTest do
     assert fetch.data["refused"] == "sensitive"
     assert fetch.data["content"] =~ "by the profile records (deny web_fetch)"
     assert %{"how" => "call", "by" => "read_file"} = Sensitive.mark_of(context.session_id)
+
+    # The plane hears it in the session's status, which its row is written from.
+    assert eventually(fn -> sensitive_status_reported?() end, 10_000)
 
     # A person's own command is refused by the sensitive deny as the agent's call is.
     assert {:error, %Error{message: "forbidden", data: data}} =
@@ -130,6 +136,18 @@ defmodule Troupe.Worker.SensitiveTest do
     assert fetch.data["refused"] == "sensitive"
     assert fetch.data["content"] =~ "since #{@ada} marked it"
     assert fetch.data["content"] =~ "10:14 UTC"
+  end
+
+  defp sensitive_status_reported? do
+    receive do
+      {:report, %{"type" => "session.status", "sensitive_by" => "read_file", "sensitive_rule" => "read_file(records/**)"}} ->
+        true
+
+      {:report, _other} ->
+        sensitive_status_reported?()
+    after
+      0 -> false
+    end
   end
 
   defp completed(session_id),

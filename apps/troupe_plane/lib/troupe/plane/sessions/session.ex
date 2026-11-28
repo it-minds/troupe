@@ -96,6 +96,11 @@ defmodule Troupe.Plane.Sessions.Session do
     # cleared away only by its owner or an administrator; `persistent` is never cleared away
     # by any sweep, and sleeps as any session does. Its owner's alone to change.
     field(:lifespan, :string, default: "normal")
+    # Since when the session is sensitive, and by what: the tool whose call matched its
+    # profile's `sensitive.markedBy`, or `person:<subject>` for a mark by hand. Null while it
+    # is not; written once and never cleared (`Troupe.Plane.Sessions.Sensitive`).
+    field(:sensitive_at, :utc_datetime_usec)
+    field(:sensitive_by, :string)
     field(:pinned, :boolean, default: false)
     field(:pinned_by, :string)
     field(:pinned_at, :utc_datetime_usec)
