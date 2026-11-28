@@ -27,7 +27,7 @@ defmodule Troupe.Plane.Triggers do
   alias Troupe.Plane.Audit
   alias Troupe.Plane.GitHub.Issue
   alias Troupe.Plane.GitHub.Policy, as: GitHubPolicy
-  alias Troupe.Plane.{Harness, Identity, Principals, Repo, Sessions}
+  alias Troupe.Plane.{Harness, Identity, Principals, Proposals, Repo, Sessions}
   alias Troupe.Plane.Identity.{Team, User}
   alias Troupe.Plane.Sessions.Session
   alias Troupe.Plane.Triggers.{Notify, Revision, Run, Template, Trigger}
@@ -1429,7 +1429,7 @@ defmodule Troupe.Plane.Triggers do
 
   defp own_by(%{subject: subject, sponsor_subject: sponsor}, team)
        when is_binary(sponsor) and is_binary(team) do
-    if subject == Troupe.Plane.Proposals.own_subject(team, sponsor), do: sponsor
+    if subject == Proposals.own_subject(team, sponsor), do: sponsor
   end
 
   defp own_by(_principal, _team), do: nil

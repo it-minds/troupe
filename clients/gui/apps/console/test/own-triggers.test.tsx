@@ -55,7 +55,7 @@ describe("Your triggers", () => {
     button("Remove", asked)!.click();
     await sees("No triggers of yours", section);
     expect(fake.admin.triggerRows.some((t) => t.name === "rerun-icons-report")).toBe(false);
-    expect(fake.admin.audit.filter((a) => a.detail["via"] === "own").map((a) => [a.actor, a.action, a.subject_id])).toEqual([
+    expect(fake.admin.audit.filter((a) => a.detail?.["via"] === "own").map((a) => [a.actor, a.action, a.subject_id])).toEqual([
       [PEOPLE.carol.subject, "trigger.put", "core/rerun-icons-report"],
       [PEOPLE.carol.subject, "trigger.delete", "core/rerun-icons-report"],
     ]);

@@ -33,7 +33,7 @@ function OwnTriggerControls({ trigger, onChanged }: { trigger: OwnTrigger; onCha
     setBusy(true);
     setRefused(null);
     try {
-      await auth.withToken((plane, token) => (action === "remove" ? plane.removeOwnTrigger(token, trigger.id) : plane.switchOwnTrigger(token, trigger.id, action === "on")));
+      await auth.withToken<unknown>((plane, token) => (action === "remove" ? plane.removeOwnTrigger(token, trigger.id) : plane.switchOwnTrigger(token, trigger.id, action === "on")));
       notify(action === "remove" ? `${trigger.name} is removed.` : action === "off" ? `${trigger.name} is switched off.` : `${trigger.name} is switched on.`);
       setAsking(false);
       onChanged();

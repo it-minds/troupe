@@ -9,7 +9,7 @@ import { WebSocket as NodeWebSocket } from "ws";
 import { App } from "../src/App";
 import { startHarness } from "../../../packages/client/test/support/harness.js";
 import type { Harness } from "../../../packages/client/test/support/harness.js";
-import { button, nav, render, says, startOnTheList, waitFor } from "./support";
+import { button, nav, render, says, seesButton, startOnTheList, waitFor } from "./support";
 
 Element.prototype.scrollIntoView = function scrollIntoView() {};
 globalThis.WebSocket = NodeWebSocket as unknown as typeof WebSocket;
@@ -61,7 +61,7 @@ describe("Your triggers", () => {
     expect(row.textContent).toMatch(/On, every Monday at 06:00 UTC; next \w{3} \d+ \w{3}, 06:00 UTC\./);
     expect(row.textContent).toContain("Last ran Mon 23 Nov, 06:00 UTC: finished");
     expect(row.textContent).toContain("It runs as you, up to $1.00 a run.");
-    expect(button("Open the run", row)).not.toBeNull();
+    await seesButton("Open the run", row);
 
     button("Switch off", row)!.click();
     await waitFor(() => rowOf("rerun-weekly-numbers")?.textContent?.includes("Off: it does not run until you switch it on"), "switched off");
