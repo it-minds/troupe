@@ -16,6 +16,8 @@ defmodule Troupe.Plane.ProfileViewTest do
 
   alias Troupe.Plane.{Admin, Bundles, Fleet, Harness, Identity, Ledger, Sessions}
   alias Troupe.Plane.Fleet.Worker
+  alias Troupe.Plane.Settings
+  alias Troupe.Plane.Settings.Ladder
   alias Troupe.Protocol.{AgentCheck, AgentDefinition}
 
   setup do
@@ -447,21 +449,20 @@ defmodule Troupe.Plane.ProfileViewTest do
 
     # The number a pod is given for a session with no team, so the view and the pod agree.
     test "says the platform's idle timeout where it is asked for no team" do
-      on_exit(&Troupe.Plane.Settings.invalidate/0)
+      on_exit(&Settings.invalidate/0)
       {:ok, _} = Fleet.put_profile(%{name: "bare", replicas: 1, spec: %{}})
       context = %{user: person("root@example.test", ["platform-admins"]), platform_admin?: true}
 
-      {:ok, _} =
-        Troupe.Plane.Settings.put("default_idle_timeout_seconds", "420", "root@example.test")
+      {:ok, _} = Settings.put("default_idle_timeout_seconds", "420", "root@example.test")
 
-      Troupe.Plane.Settings.invalidate()
+      Settings.invalidate()
 
       assert {:ok, view} = Harness.call("profile.get", %{"name" => "bare"}, context)
       assert view["team"] == nil
       assert view["limits"]["idle_seconds"] == 420
 
       assert view["limits"]["idle_seconds"] ==
-               Troupe.Plane.Settings.Ladder.idle_timeout_seconds(nil)
+               Ladder.idle_timeout_seconds(nil)
     end
   end
 
