@@ -256,6 +256,9 @@ defmodule Troupe.Gateway.Dispatch do
     "artifact.read" => :observe,
     "artifact.share" => :control,
     "artifact.unshare" => :control,
+    "artifact.access.get" => :observe,
+    "artifact.access.set" => :control,
+    "profile.teams" => :observe,
     # The thread: read as the artifact is, written as a share is.
     "artifact.comments" => :observe,
     "artifact.comment" => :control,
@@ -344,7 +347,7 @@ defmodule Troupe.Gateway.Dispatch do
   # and after a create, whose session there was no id for before.
   @work ~w(input.send commands.run session.goal.set session.loop.start session.compact)
   @invites ~w(session.invite session.uninvite session.invites session.read_sealed)
-  @forwarded_artifacts ~w(artifact.get artifact.open artifact.read artifact.share artifact.unshare artifact.comments artifact.comment artifact.comment.delete artifact.comment.edit people.search artifact.rollback artifact.pin artifact.put artifact.transfer)
+  @forwarded_artifacts ~w(artifact.get artifact.open artifact.read artifact.share artifact.unshare artifact.access.get artifact.access.set profile.teams artifact.comments artifact.comment artifact.comment.delete artifact.comment.edit people.search artifact.rollback artifact.pin artifact.put artifact.transfer)
 
   defp local_only("remote.offer", params, context) do
     cond do
@@ -395,7 +398,7 @@ defmodule Troupe.Gateway.Dispatch do
   # An artifact is published on the plane and listed from it, so a client in Local only, or
   # a session under it, publishes and lists nothing.
   defp local_only(method, params, context)
-       when binary_part(method, 0, 9) == "artifact." or method == "people.search" do
+       when binary_part(method, 0, 9) == "artifact." or method in ["people.search", "profile.teams"] do
     if context.local_only or LocalOnly.session?(params["session_id"]),
       do:
         refuse_local_only(

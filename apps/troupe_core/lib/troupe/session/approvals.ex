@@ -37,15 +37,16 @@ defmodule Troupe.Session.Approvals do
 
   A publication (`tool: "publish_artifact"`) is the other request whose answer carries
   more than a word, with what the gate shows under `publication`: the title, the kind, the
-  files' count, and the `visibility` and `owner` the model proposed, `nil` where it proposed
-  none. Whom an artifact is for is the person's to say: the answer takes `visibility`
-  (`private`, `organisation`, `team:<name>` or `profile:<name>`, its shape alone, since
-  membership is the plane's to refuse) and `owner` (`me` or `team`; dropped on a republish,
-  whose owner does not change with a version), and an `allow` that
-  names no visibility where the model named none is refused, in a sentence, with the
-  request still waiting. `allow_session` on one of those is this call's `allow`: a standing
+  files' count, the `visibility`, `teams` and `owner` the model proposed (`nil` where it
+  proposed none; `teams` may be those the plane ticks by default), and for a new version
+  `access`, who reads it now in words. Whom a new artifact is for is the person's to say:
+  the answer takes `visibility` (`private` or `organisation`) and `teams` (names, their
+  shape alone, since who may give it to a team is the plane's to refuse), together the
+  whole audience, and `owner` (`me` or `team`). A new version keeps who reads it and whose
+  it is, so all three are dropped on a republish. An `allow` that names no audience where
+  nothing was proposed is refused, in a sentence, with the request still waiting. `allow_session` on one of those is this call's `allow`: a standing
   permission to publish for an audience not yet chosen would be nobody's choice. The
-  decision names the `visibility` and `owner` the call ran with and which of them the
+  decision names the `visibility`, `teams` and `owner` the call ran with and which of them the
   person `edited`, and the caller hears `{:allow, answer}` with them, to run the call as
   the person aimed it.
 
@@ -278,7 +279,7 @@ defmodule Troupe.Session.Approvals do
 
   # A publication's likewise: whom it is for and whose it is, as the person aimed it.
   defp decided_answer(%{"tool" => "publish_artifact"} = data) do
-    {answer_for(data["decision"]), Map.take(data, ~w(visibility owner edited))}
+    {answer_for(data["decision"]), Map.take(data, ~w(visibility teams owner edited))}
   end
 
   defp decided_answer(data), do: answer_for(data["decision"])
@@ -430,10 +431,11 @@ defmodule Troupe.Session.Approvals do
     end
   end
 
-  # A publication the model aimed at nobody takes no standing permission: the person chose
-  # an audience for this call, and "always" would let the next call publish for one not
-  # yet chosen. It is this call's allow.
-  defp for_this_call(%{publication: %{"visibility" => nil}}, :allow_session), do: :allow
+  # A new publication the model aimed at nobody takes no standing permission: the person
+  # chose an audience for this call, and "always" would let the next call publish for one
+  # not yet chosen. It is this call's allow. A new version's readers are kept, so its
+  # standing allow is the tool's as any call's.
+  defp for_this_call(%{publication: %{"visibility" => nil, "id" => nil}}, :allow_session), do: :allow
   defp for_this_call(_req, decision), do: decision
 
   defp answer_request(state, call_id, decision, actor, answer) do
@@ -532,11 +534,11 @@ defmodule Troupe.Session.Approvals do
   # said nothing, and is refused where neither did: an artifact is published for somebody.
   defp check_answer(%{publication: publication}, decision, answer) do
     with :ok <- publication_keys(answer),
-         {:ok, visibility} <- check_visibility(publication, decision, answer["visibility"]),
+         {:ok, visibility, teams} <- check_audience(publication, decision, answer["visibility"], answer["teams"]),
          {:ok, owner} <- check_owner(publication, decision, answer["owner"]),
          {:ok, reason} <- check_reason(decision, answer["reason"]) do
       {:ok,
-       %{"visibility" => visibility, "owner" => owner, "reason" => reason}
+       %{"visibility" => visibility, "teams" => teams, "owner" => owner, "reason" => reason}
        |> Map.reject(fn {_key, value} -> is_nil(value) end)
        |> with_aimed(publication, decision)}
     end
@@ -545,45 +547,57 @@ defmodule Troupe.Session.Approvals do
   defp check_answer(_req, _decision, answer) when map_size(answer) == 0, do: {:ok, %{}}
 
   defp check_answer(req, _decision, answer) do
-    if Map.keys(answer) -- ~w(visibility owner reason) == [],
+    if Map.keys(answer) -- ~w(visibility teams owner reason) == [],
       do:
         {:error,
-         "visibility, owner and reason answer a publication, and this asks about #{req.tool}"},
+         "visibility, teams, owner and reason answer a publication, and this asks about #{req.tool}"},
       else:
         {:error, "agent, brief and reason answer a delegation, and this asks about #{req.tool}"}
   end
 
   defp publication_keys(answer) do
-    case Map.keys(answer) -- ~w(visibility owner reason) do
+    case Map.keys(answer) -- ~w(visibility teams owner reason) do
       [] ->
         :ok
 
       keys ->
         {:error,
-         "a publication's answer takes visibility, owner and reason, not #{Enum.join(keys, ", ")}"}
+         "a publication's answer takes visibility, teams, owner and reason, not #{Enum.join(keys, ", ")}"}
     end
   end
 
-  @audiences "private, organisation, team:<name> or profile:<name>"
+  @audiences "visibility is private or organisation, and teams the names of the teams that read it"
 
-  defp check_visibility(_publication, :deny, _visibility), do: {:ok, nil}
+  # Whom a new one is for: the answer's audience where it names one, whole (no teams
+  # answered is none), else the proposal, the model's or the teams the plane ticked. A
+  # new version keeps who reads it, so an audience answered for one is dropped rather than
+  # sent for the plane to refuse. `team:<name>`, the shape of before, is that one team.
+  defp check_audience(_publication, :deny, _visibility, _teams), do: {:ok, nil, nil}
+  defp check_audience(%{"id" => id}, _decision, _visibility, _teams) when is_binary(id), do: {:ok, nil, nil}
 
-  defp check_visibility(%{"visibility" => proposed}, _decision, nil) when is_binary(proposed),
-    do: {:ok, proposed}
-
-  defp check_visibility(_publication, _decision, nil),
-    do: {:error, "say whom it is for: visibility is #{@audiences}"}
-
-  defp check_visibility(_publication, _decision, visibility) do
-    if audience?(visibility),
-      do: {:ok, visibility},
-      else: {:error, "visibility is #{@audiences}, not #{inspect(visibility)}"}
+  defp check_audience(publication, _decision, nil, nil) do
+    case {publication["visibility"], publication["teams"]} do
+      {nil, teams} when teams in [nil, []] -> {:error, "say whom it is for: #{@audiences}"}
+      {visibility, teams} -> {:ok, visibility, teams}
+    end
   end
 
-  defp audience?(visibility) when visibility in ~w(private organisation), do: true
-  defp audience?("team:" <> name), do: name != ""
-  defp audience?("profile:" <> name), do: name != ""
-  defp audience?(_other), do: false
+  defp check_audience(publication, decision, "team:" <> name, teams) when name != "",
+    do: check_audience(publication, decision, "private", Enum.uniq(List.wrap(teams) ++ [name]))
+
+  defp check_audience(_publication, _decision, visibility, teams) do
+    cond do
+      visibility not in [nil, "private", "organisation"] ->
+        {:error, "#{@audiences}, not visibility #{inspect(visibility)}"}
+
+      not (is_nil(teams) or (is_list(teams) and Enum.all?(teams, &(is_binary(&1) and &1 != "")))) ->
+        {:error, "#{@audiences}, not teams #{inspect(teams)}"}
+
+      true ->
+        {:ok, visibility || "private", teams}
+    end
+  end
+
 
   defp check_owner(_publication, :deny, _owner), do: {:ok, nil}
 
@@ -602,7 +616,7 @@ defmodule Troupe.Session.Approvals do
 
   defp with_aimed(answer, publication, _decision) do
     edited =
-      for key <- ~w(visibility owner),
+      for key <- ~w(visibility teams owner),
           Map.has_key?(answer, key),
           answer[key] != publication[key],
           do: key

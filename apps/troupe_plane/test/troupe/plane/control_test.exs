@@ -390,7 +390,7 @@ defmodule Troupe.Plane.ControlTest do
       assert row.actor == "ada@example.test"
       assert row.detail["session"] == "s-ada-a"
 
-      # Another pod's session, a stale epoch, and a profile its owner is not covered by.
+      # Another pod's session, a stale epoch, and a team its owner may not give it to.
       assert {:error, %{"message" => "not_found"}} =
                call(mine, "session.artifact.publish", Map.put(page, "session_id", "s-bo-a"))
 
@@ -399,6 +399,40 @@ defmodule Troupe.Plane.ControlTest do
 
       assert {:error, %{"message" => "forbidden"}} =
                call(mine, "session.artifact.publish", Map.merge(page, %{"session_id" => "s-ada-a", "teams" => ["research"]}))
+    end
+
+    test "tells a publication's gate the teams its session's profile gives a new one, and who reads a published one",
+         %{port: port} do
+      mine = enrolled(port, "dev-token", "troupe-w-dev-0")
+      answer_index(mine, [])
+      [here] = Fleet.list_workers("dev")
+
+      team = team_with_grant("engineering", "dev", name: "engineering")
+      _ops = team_with_grant("ops", "dev", name: "ops")
+      ada = person("ada@example.test", ["engineering"])
+      {:ok, _} = Sessions.create(%{id: "s-ada-a", owner_subject: ada.subject, profile: "dev", team_id: team.id})
+      {:ok, _} = Sessions.place("s-ada-a", here)
+
+      # A new one: the teams granted dev, which Ada may give it to though she is not in ops.
+      assert {:ok, %{"teams" => ["engineering", "ops"]}} =
+               call(mine, "session.artifact.about", %{"session_id" => "s-ada-a"})
+
+      page = %{
+        "title" => "Pod report",
+        "kind" => "html",
+        "teams" => ["engineering", "ops"],
+        "files" => [%{"path" => "index.html", "bytes" => Base.encode64("<h1>From a pod</h1>")}]
+      }
+
+      assert {:ok, %{"id" => id, "teams" => ["engineering", "ops"]}} =
+               call(mine, "session.artifact.publish", Map.put(page, "session_id", "s-ada-a"))
+
+      # A new version of it: who reads it now, in words.
+      assert {:ok, %{"access" => "the engineering and ops teams"}} =
+               call(mine, "session.artifact.about", %{"session_id" => "s-ada-a", "id" => id})
+
+      assert {:error, %{"message" => "not_found"}} =
+               call(mine, "session.artifact.about", %{"session_id" => "s-elsewhere"})
     end
 
     # Issue #920: a person attaching one of their artifacts to a message in a pod's session.

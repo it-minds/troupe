@@ -10,7 +10,7 @@ defmodule Troupe.Artifacts do
   tool: a host that installs nothing (a test's, the offline bench's) offers no tool that
   could only be refused. A host with no sign-in says so, and the agent says where the file is.
 
-  What is sent is the artifact: its title, kind, visibility and files, each `{path,
+  What is sent is the artifact: its title, kind, visibility, teams and files, each `{path,
   content_type, bytes}` with the bytes in base64, and `id` to republish one.
   """
 
@@ -97,6 +97,26 @@ defmodule Troupe.Artifacts do
     end
   end
 
+  @doc """
+  What the plane says of a publication before the person is asked about it, for the gate
+  (`Troupe.Tools.PublishArtifact.publication/2`): `ask` is `{id}` for a new version of one,
+  `{}` for a new one. The answer is the plane's: `access`, who reads that one now in words,
+  and for a new one `teams`, the teams it would be given by default. Through the host, as
+  `publish/2` is; `{:error, :signed_out}` where this host installed no way to ask.
+  """
+  @spec about(map(), Troupe.Tool.Ctx.t() | map()) :: {:ok, map()} | {:error, term()}
+  def about(ask, ctx) when is_map(ask) do
+    case Application.get_env(:troupe_core, :artifact_about) do
+      fun when is_function(fun, 2) -> fun.(ask, ctx)
+      _none -> {:error, :signed_out}
+    end
+  end
+
+  @doc "Install `fun` as where `about/2` asks."
+  @spec install_about((map(), Troupe.Tool.Ctx.t() -> {:ok, map()} | {:error, term()})) :: :ok
+  def install_about(fun) when is_function(fun, 2),
+    do: Application.put_env(:troupe_core, :artifact_about, fun)
+
   @doc "Install `fun` as where `files/1` asks."
   @spec install_files((map() -> {:ok, map()} | {:error, term()})) :: :ok
   def install_files(fun) when is_function(fun, 1),
@@ -108,6 +128,7 @@ defmodule Troupe.Artifacts do
     Application.delete_env(:troupe_core, :artifacts)
     Application.delete_env(:troupe_core, :artifacts_ready)
     Application.delete_env(:troupe_core, :artifact_files)
+    Application.delete_env(:troupe_core, :artifact_about)
 
     Application.put_env(
       :troupe_core,
